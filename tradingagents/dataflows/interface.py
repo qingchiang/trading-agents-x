@@ -19,6 +19,10 @@ from .errors import (
 )
 from .fred import get_macro_data as get_fred_macro_data
 from .jquants import (
+    get_balance_sheet as get_jquants_balance_sheet,
+    get_cashflow as get_jquants_cashflow,
+    get_fundamentals as get_jquants_fundamentals,
+    get_income_statement as get_jquants_income_statement,
     get_indicator as get_jquants_indicator,
     get_stock as get_jquants_stock,
 )
@@ -115,18 +119,22 @@ VENDOR_METHODS = {
     "get_fundamentals": {
         "alpha_vantage": get_alpha_vantage_fundamentals,
         "yfinance": get_yfinance_fundamentals,
+        "jquants": get_jquants_fundamentals,
     },
     "get_balance_sheet": {
         "alpha_vantage": get_alpha_vantage_balance_sheet,
         "yfinance": get_yfinance_balance_sheet,
+        "jquants": get_jquants_balance_sheet,
     },
     "get_cashflow": {
         "alpha_vantage": get_alpha_vantage_cashflow,
         "yfinance": get_yfinance_cashflow,
+        "jquants": get_jquants_cashflow,
     },
     "get_income_statement": {
         "alpha_vantage": get_alpha_vantage_income_statement,
         "yfinance": get_yfinance_income_statement,
+        "jquants": get_jquants_income_statement,
     },
     # news_data
     "get_news": {
