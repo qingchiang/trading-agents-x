@@ -82,7 +82,7 @@ class StockFetchTests(unittest.TestCase):
 
     def _patch_records(self, records):
         return mock.patch(
-            "tradingagents.dataflows.jquants_stock.fetch_records",
+            "tradingagents.dataflows.jquants_common.fetch_records",
             return_value=records,
         )
 
@@ -112,7 +112,7 @@ class StockFetchTests(unittest.TestCase):
         # The get_indicators tool calls the vendor once per indicator over the
         # same window; only the first should hit the API.
         mock_fetch = mock.Mock(return_value=[_quote("2026-06-23", 100.0)])
-        with mock.patch("tradingagents.dataflows.jquants_stock.fetch_records", mock_fetch):
+        with mock.patch("tradingagents.dataflows.jquants_common.fetch_records", mock_fetch):
             jquants_stock._fetch_ohlcv_frame("9984.T", "2026-06-20", "2026-06-23")
             jquants_stock._fetch_ohlcv_frame("9984.T", "2026-06-20", "2026-06-23")
         mock_fetch.assert_called_once()

@@ -7,7 +7,7 @@ from datetime import datetime
 
 import pandas as pd
 
-from .jquants_common import fetch_records, from_jquants_code, to_jquants_code
+from .jquants_common import from_jquants_code, memoized_fetch, to_jquants_code
 from .stockstats_utils import _assert_ohlcv_not_stale, _clean_dataframe
 from .symbol_utils import NoMarketDataError
 
@@ -21,17 +21,11 @@ _records_cache: dict[tuple[str, str, str], list[dict]] = {}
 
 def _fetch_daily_bars(code: str, start_date: str, end_date: str) -> list[dict]:
     """Fetch daily bars for ``code`` over the range, memoized per (code, from, to)."""
-    key = (code, start_date, end_date)
-    cached = _records_cache.get(key)
-    if cached is not None:
-        return cached
-    records = fetch_records(
+    return memoized_fetch(
+        _records_cache, (code, start_date, end_date),
         "/equities/bars/daily",
-        {"code": code, "from": start_date, "to": end_date},
-        "data",
+        {"code": code, "from": start_date, "to": end_date}, "data",
     )
-    _records_cache[key] = records
-    return records
 
 # J-Quants v2 /equities/bars/daily carries both raw (O/H/L/C/Vo) and
 # split/dividend-adjusted (AdjO/AdjH/AdjL/AdjC/AdjVo) prices. Prefer adjusted

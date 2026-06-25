@@ -100,3 +100,20 @@ def fetch_records(path: str, params: dict, data_key: str) -> list[dict]:
         if not key:
             return records
         page_params = {**params, "pagination_key": key}
+
+
+def memoized_fetch(cache: dict, key, path: str, params: dict, data_key: str) -> list[dict]:
+    """``fetch_records`` for ``path``, memoized in the caller-owned ``cache``.
+
+    The analyst tools fetch the same J-Quants window repeatedly within one run
+    (the indicators tool loops over indicators; the four fundamental tools share
+    one summary), so memoizing collapses those into a single rate-limited API
+    call. The caller owns ``cache`` (a module-level dict) so each endpoint stays
+    isolated and tests can clear it.
+    """
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+    records = fetch_records(path, params, data_key)
+    cache[key] = records
+    return records
