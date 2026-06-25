@@ -18,6 +18,10 @@ from .errors import (
     VendorRateLimitError,
 )
 from .fred import get_macro_data as get_fred_macro_data
+from .jquants import (
+    get_indicator as get_jquants_indicator,
+    get_stock as get_jquants_stock,
+)
 from .market_context import infer_market
 from .polymarket import get_prediction_markets as get_polymarket_prediction_markets
 from .y_finance import (
@@ -83,6 +87,7 @@ VENDOR_LIST = [
     "fred",
     "polymarket",
     "alpha_vantage",
+    "jquants",
 ]
 
 # Optional enrichment categories. These add macro/event context to the news
@@ -98,11 +103,13 @@ VENDOR_METHODS = {
     "get_stock_data": {
         "alpha_vantage": get_alpha_vantage_stock,
         "yfinance": get_YFin_data_online,
+        "jquants": get_jquants_stock,
     },
     # technical_indicators
     "get_indicators": {
         "alpha_vantage": get_alpha_vantage_indicator,
         "yfinance": get_stock_stats_indicators_window,
+        "jquants": get_jquants_indicator,
     },
     # fundamental_data
     "get_fundamentals": {
