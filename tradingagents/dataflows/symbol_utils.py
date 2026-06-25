@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Iterable
 
 # NoMarketDataError lives in the vendor-error taxonomy (errors.py); re-exported
 # here for the many call sites that import it alongside normalize_symbol.
@@ -136,3 +137,24 @@ def normalize_symbol(raw: str) -> str:
 def is_yahoo_safe(symbol: str) -> bool:
     """True when ``symbol`` only contains characters Yahoo symbols use."""
     return bool(symbol) and _YAHOO_SAFE.fullmatch(symbol) is not None
+
+
+def match_exchange_suffix(symbol: str, suffixes: Iterable[str]) -> str:
+    """Return the longest exchange suffix from ``suffixes`` that ``symbol`` ends
+    with (case-insensitive), or "" if none match.
+
+    ``suffixes`` is any iterable of suffix strings — typically the keys of
+    ``benchmark_map`` or ``data_vendors_by_market``. The empty-string entry some
+    maps carry as a default is ignored; callers handle the no-suffix fallback.
+    Longest-match makes the result deterministic if two configured suffixes ever
+    overlap. Single source of truth for exchange-suffix detection so new markets
+    (Japan ``.T``, China ``.SS``/``.SZ``) are recognized in one place by both
+    vendor routing and benchmark resolution.
+    """
+    if not isinstance(symbol, str) or not symbol:
+        return ""
+    upper = symbol.upper()
+    for suffix in sorted((s for s in suffixes if s), key=len, reverse=True):
+        if upper.endswith(suffix.upper()):
+            return suffix
+    return ""

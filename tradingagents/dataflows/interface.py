@@ -18,6 +18,7 @@ from .errors import (
     VendorRateLimitError,
 )
 from .fred import get_macro_data as get_fred_macro_data
+from .market_context import infer_market
 from .polymarket import get_prediction_markets as get_polymarket_prediction_markets
 from .y_finance import (
     get_balance_sheet as get_yfinance_balance_sheet,
@@ -150,11 +151,21 @@ def get_category_for_method(method: str) -> str:
             return category
     raise ValueError(f"Method '{method}' not found in any category")
 
-def get_vendor(category: str, method: str = None) -> str:
+def get_vendor(category: str, method: str = None, market: str = "", config: dict = None) -> str:
     """Get the configured vendor for a data category or specific tool method.
-    Tool-level configuration takes precedence over category-level.
+
+    Resolution order (first match wins):
+      1. Tool-level config (``tool_vendors[method]``).
+      2. Market-specific category config (``data_vendors_by_market[market][category]``),
+         e.g. ``.T`` routes Japanese tickers to JP vendors.
+      3. Default category config (``data_vendors[category]``).
+
+    ``market=""`` skips step 2, reproducing the original behavior exactly, so
+    US / unsuffixed tickers are unaffected. ``config`` may be passed to reuse a
+    snapshot the caller already loaded (``get_config()`` deep-copies).
     """
-    config = get_config()
+    if config is None:
+        config = get_config()
 
     # Check tool-level configuration first (if method provided)
     if method:
@@ -162,13 +173,24 @@ def get_vendor(category: str, method: str = None) -> str:
         if method in tool_vendors:
             return tool_vendors[method]
 
+    # Market-specific override, keyed by ticker exchange suffix.
+    if market:
+        by_market = config.get("data_vendors_by_market", {}).get(market, {})
+        if category in by_market:
+            return by_market[category]
+
     # Fall back to category-level configuration
     return config.get("data_vendors", {}).get(category, "default")
 
 def route_to_vendor(method: str, *args, **kwargs):
     """Route method calls to appropriate vendor implementation with fallback support."""
     category = get_category_for_method(method)
-    vendor_config = get_vendor(category, method)
+    # Suffix-based routing: ticker-bearing methods infer the market from their
+    # first arg; ticker-less ones are market-agnostic (market=""). Read config
+    # once and thread it through so the per-call deep-copy happens a single time.
+    config = get_config()
+    market = infer_market(method, args, config.get("data_vendors_by_market", {}))
+    vendor_config = get_vendor(category, method, market, config)
     primary_vendors = [v.strip() for v in vendor_config.split(',')]
 
     if method not in VENDOR_METHODS:

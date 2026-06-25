@@ -137,6 +137,16 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "tool_vendors": {
         # Example: "get_stock_data": "alpha_vantage",  # Override category default
     },
+    # Market-specific vendor overrides, keyed by ticker exchange suffix (e.g.
+    # ".T" for Tokyo, ".SS"/".SZ" for China). When a ticker carries a configured
+    # suffix, that category's vendor comes from here instead of ``data_vendors``.
+    # Only per-instrument (ticker-bearing) tools are routed; macro and global
+    # news stay market-agnostic (cross-border context analyzed across all markets
+    # at once) and always use ``data_vendors``. Empty leaves US / all routing
+    # unchanged. Japanese-market vendors are wired in as they land, e.g.
+    #   ".T": {"core_stock_apis": "jquants", "technical_indicators": "jquants",
+    #          "fundamental_data": "jquants,edinet", "news_data": "jquants_news"}
+    "data_vendors_by_market": {},
     # Benchmark for alpha calculation in the reflection layer.
     # ``benchmark_ticker`` (when set) overrides the suffix map for all
     # tickers; leave it None to use ``benchmark_map`` for auto-detection
