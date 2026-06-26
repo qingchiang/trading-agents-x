@@ -139,6 +139,21 @@ def is_yahoo_safe(symbol: str) -> bool:
     return bool(symbol) and _YAHOO_SAFE.fullmatch(symbol) is not None
 
 
+def tokyo_securities_base(code: str) -> str:
+    """Reduce a Tokyo securities code to its 4-digit base.
+
+    J-Quants and EDINET both carry the 5-digit listing code (``99840``), while
+    the canonical Yahoo ticker uses the 4-digit base (``9984``). Stripping the
+    trailing share-class/check digit in one place keeps J-Quants'
+    ``from_jquants_code`` and EDINET's secCode matching on the same key, so the
+    two never drift out of lockstep. Returns "" for a missing code.
+    """
+    c = str(code or "").strip()
+    if len(c) == 5 and c.endswith("0"):
+        c = c[:-1]
+    return c
+
+
 def match_exchange_suffix(symbol: str, suffixes: Iterable[str]) -> str:
     """Return the longest exchange suffix from ``suffixes`` that ``symbol`` ends
     with (case-insensitive), or "" if none match.

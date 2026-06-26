@@ -14,6 +14,7 @@ import os
 import requests
 
 from .errors import VendorNotConfiguredError, VendorRateLimitError
+from .symbol_utils import tokyo_securities_base
 
 JQUANTS_API_BASE = "https://api.jquants.com/v2"
 
@@ -64,10 +65,7 @@ def from_jquants_code(code: str) -> str:
     v2 responses carry the 5-digit code (``99840``); the display ticker uses the
     4-digit form (``9984.T``).
     """
-    c = str(code).strip()
-    if len(c) == 5 and c.endswith("0"):
-        c = c[:-1]
-    return f"{c}.T"
+    return f"{tokyo_securities_base(code)}.T"
 
 
 def _request(path: str, params: dict) -> dict:

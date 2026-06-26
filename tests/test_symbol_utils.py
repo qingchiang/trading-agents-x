@@ -8,6 +8,7 @@ from tradingagents.dataflows.symbol_utils import (
     NoMarketDataError,
     is_yahoo_safe,
     normalize_symbol,
+    tokyo_securities_base,
 )
 
 
@@ -75,6 +76,22 @@ class TestIsYahooSafe(unittest.TestCase):
     def test_rejects_slash_and_space(self):
         for sym in ("a/b", "AA PL", ""):
             self.assertFalse(is_yahoo_safe(sym))
+
+
+@pytest.mark.unit
+class TestTokyoSecuritiesBase(unittest.TestCase):
+    """Shared 5-digit→4-digit reduction used by both J-Quants (from_jquants_code)
+    and EDINET secCode matching, so they stay on the same key."""
+
+    def test_strips_5digit_trailing_zero(self):
+        self.assertEqual(tokyo_securities_base("99840"), "9984")
+
+    def test_passes_through_4digit(self):
+        self.assertEqual(tokyo_securities_base("7203"), "7203")
+
+    def test_missing_code_is_empty(self):
+        self.assertEqual(tokyo_securities_base(None), "")
+        self.assertEqual(tokyo_securities_base(""), "")
 
 
 if __name__ == "__main__":
