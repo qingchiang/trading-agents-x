@@ -12,6 +12,7 @@ from .alpha_vantage import (
     get_stock as get_alpha_vantage_stock,
 )
 from .config import get_config
+from .edinet_news import get_news as get_edinet_news
 from .errors import (
     NoMarketDataError,
     VendorNotConfiguredError,
@@ -92,6 +93,7 @@ VENDOR_LIST = [
     "polymarket",
     "alpha_vantage",
     "jquants",
+    "edinet_news",
 ]
 
 # Optional enrichment categories. These add macro/event context to the news
@@ -140,6 +142,7 @@ VENDOR_METHODS = {
     "get_news": {
         "alpha_vantage": get_alpha_vantage_news,
         "yfinance": get_news_yfinance,
+        "edinet_news": get_edinet_news,
     },
     "get_global_news": {
         "yfinance": get_global_news_yfinance,

@@ -24,6 +24,7 @@ See: https://github.com/TauricResearch/TradingAgents/issues/557
 See: https://github.com/TauricResearch/TradingAgents/issues/796
 """
 
+import logging
 from datetime import datetime, timedelta
 
 from langchain_core.messages import AIMessage
@@ -39,8 +40,11 @@ from tradingagents.agents.utils.structured import (
     bind_structured,
     invoke_structured_or_freetext,
 )
+from tradingagents.dataflows.market_context import market_suffix_of
 from tradingagents.dataflows.reddit import fetch_reddit_posts
 from tradingagents.dataflows.stocktwits import fetch_stocktwits_messages
+
+logger = logging.getLogger(__name__)
 
 
 def _seven_days_back(trade_date: str) -> str:
@@ -63,12 +67,28 @@ def create_sentiment_analyst(llm):
         start_date = _seven_days_back(end_date)
         instrument_context = get_instrument_context_from_state(state)
 
-        # Pre-fetch all three sources. Each fetcher degrades gracefully and
-        # returns a string (no exceptions surface from here), so the LLM
-        # always sees something — either real data or a clear placeholder.
-        news_block = get_news.func(ticker, start_date, end_date)
-        stocktwits_block = fetch_stocktwits_messages(ticker, limit=30)
-        reddit_block = fetch_reddit_posts(ticker)
+        # Pre-fetch all three sources. Each must degrade to a string so the LLM
+        # always sees something — either real data or a clear placeholder — and
+        # no exception escapes this node. News auto-routes by ticker suffix
+        # (e.g. EDINET for .T); unlike the two social fetchers, get_news goes
+        # through route_to_vendor, which re-raises for a misconfigured/unset
+        # vendor (news_data isn't optional), so we catch and degrade here.
+        try:
+            news_block = get_news.func(ticker, start_date, end_date)
+        except Exception as exc:
+            logger.warning("News fetch failed for %s: %s", ticker, exc)
+            news_block = f"<news unavailable: {type(exc).__name__}>"
+        # StockTwits and Reddit are US-retail platforms with no coverage of
+        # other markets, so for a routed market (e.g. .T, future .SS) skip the
+        # pointless network calls and hand the LLM a clear placeholder — prompt
+        # rule 6 then lowers confidence rather than reading noise as signal.
+        if market_suffix_of(ticker):
+            placeholder = "<unavailable: no coverage for this market>"
+            stocktwits_block = placeholder
+            reddit_block = placeholder
+        else:
+            stocktwits_block = fetch_stocktwits_messages(ticker, limit=30)
+            reddit_block = fetch_reddit_posts(ticker)
 
         system_message = _build_system_message(
             ticker=ticker,
