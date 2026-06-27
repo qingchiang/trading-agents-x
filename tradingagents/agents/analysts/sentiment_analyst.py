@@ -5,13 +5,18 @@ the old version had a prompt that demanded social-media analysis but the
 only tool available was Yahoo Finance news — which led LLMs to fabricate
 Reddit/X/StockTwits content under prompt pressure (verified live).
 
-The redesigned agent pre-fetches three complementary data sources before
-the LLM is invoked and injects them into the prompt as structured blocks:
+The redesigned agent pre-fetches complementary data sources before the LLM
+is invoked and injects them into the prompt as structured blocks:
 
-  1. News headlines     — Yahoo Finance (institutional framing)
+  1. News headlines     — routed by ticker (Yahoo Finance; EDINET for .T)
   2. StockTwits messages — retail-trader posts indexed by cashtag, with
                            user-labeled Bullish/Bearish sentiment tags
   3. Reddit posts        — r/wallstreetbets, r/stocks, r/investing
+
+StockTwits and Reddit are US-retail platforms, so for a routed non-US market
+they are replaced by an official market-wide flow signal where one exists (a
+4th block — e.g. J-Quants investor-type flows for Tokyo names; see
+:mod:`tradingagents.dataflows.jquants_sentiment`).
 
 The agent does not use tool-calling; the data is in the prompt from
 turn 0. Output uses the structured-output pattern (json_schema for
@@ -40,6 +45,7 @@ from tradingagents.agents.utils.structured import (
     bind_structured,
     invoke_structured_or_freetext,
 )
+from tradingagents.dataflows.jquants_sentiment import get_investor_flows
 from tradingagents.dataflows.market_context import market_suffix_of
 from tradingagents.dataflows.reddit import fetch_reddit_posts
 from tradingagents.dataflows.stocktwits import fetch_stocktwits_messages
@@ -81,14 +87,19 @@ def create_sentiment_analyst(llm):
         # StockTwits and Reddit are US-retail platforms with no coverage of
         # other markets, so for a routed market (e.g. .T, future .SS) skip the
         # pointless network calls and hand the LLM a clear placeholder — prompt
-        # rule 6 then lowers confidence rather than reading noise as signal.
+        # rule 6 then lowers confidence rather than reading noise as signal. In
+        # their place we inject an official market-wide flow signal where one
+        # exists; get_investor_flows self-selects (Tokyo-only) and returns "" for
+        # markets it does not cover, so US prompts are unchanged.
         if market_suffix_of(ticker):
             placeholder = "<unavailable: no coverage for this market>"
             stocktwits_block = placeholder
             reddit_block = placeholder
+            market_flows_block = get_investor_flows(ticker, end_date)
         else:
             stocktwits_block = fetch_stocktwits_messages(ticker, limit=30)
             reddit_block = fetch_reddit_posts(ticker)
+            market_flows_block = ""
 
         system_message = _build_system_message(
             ticker=ticker,
@@ -97,6 +108,7 @@ def create_sentiment_analyst(llm):
             news_block=news_block,
             stocktwits_block=stocktwits_block,
             reddit_block=reddit_block,
+            market_flows_block=market_flows_block,
         )
 
         prompt = ChatPromptTemplate.from_messages(
@@ -146,9 +158,29 @@ def _build_system_message(
     news_block: str,
     stocktwits_block: str,
     reddit_block: str,
+    market_flows_block: str = "",
 ) -> str:
-    """Assemble the sentiment-analyst system message with structured data blocks."""
-    return f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} covering the period from {start_date} to {end_date}, drawing on three complementary data sources that have already been collected for you.
+    """Assemble the sentiment-analyst system message with structured data blocks.
+
+    ``market_flows_block`` is an optional market-wide investor-flow signal (e.g.
+    J-Quants investor-type flows for Tokyo names); when empty the section is
+    omitted entirely, leaving the US prompt unchanged.
+    """
+    market_flows_section = (
+        f"""
+### Market-wide investor flows — official exchange data
+Quantitative "who is buying" signal for the ticker's home market, standing in
+for retail social platforms that do not cover it. Institutional/foreign vs
+retail net flows, not opinion.
+
+<start_of_market_flows>
+{market_flows_block}
+<end_of_market_flows>
+"""
+        if market_flows_block
+        else ""
+    )
+    return f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} covering the period from {start_date} to {end_date}, drawing on the complementary data sources that have already been collected for you.
 
 ## Data sources (pre-fetched, in this prompt)
 
@@ -172,7 +204,7 @@ Community discussion. Engagement signal via upvote score and comment count. Subr
 <start_of_reddit>
 {reddit_block}
 <end_of_reddit>
-
+{market_flows_section}
 ## How to analyze this data (best practices)
 
 1. **Read the StockTwits Bullish/Bearish ratio as a leading retail-sentiment signal.** A 70/30 bullish/bearish split is moderately bullish; ≥90/10 may indicate over-extension and contrarian risk; 50/50 is uncertainty. Sample size matters — base rates on the actual message count, not percentages alone.
@@ -185,11 +217,13 @@ Community discussion. Engagement signal via upvote score and comment count. Subr
 
 5. **Identify recurring narrative themes.** What topic keeps coming up across sources? That's the dominant narrative driving current sentiment.
 
-6. **Be honest about data limits.** If StockTwits returned only a handful of messages, or one or more sources returned an "<unavailable>" placeholder, the sentiment read is less robust — flag this explicitly in the `confidence` field and the narrative. If the sources are silent on a given subreddit, say so.
+6. **Be honest about data limits, and never invent data for an unavailable source.** If a block contains an "<unavailable>" / "<no ...>" placeholder (e.g. StockTwits and Reddit have no coverage outside US markets), treat that source as absent: do NOT infer a Bullish/Bearish ratio, divergence, or engagement from it — rules 1–3 simply do not apply to it. Lean on the sources that ARE present and lower the `confidence` field accordingly, stating which sources were missing.
 
-7. **Identify catalysts and risks** that emerge across sources — news of upcoming earnings, product launches, competitive threats, macro headlines, etc.
+7. **When a "Market-wide investor flows" block is present, treat it as the primary sentiment signal.** It is official exchange data on who is net buying/selling (foreigners, individuals, institutions) and stands in for the retail-social blocks that don't cover this market. Sustained net buying by foreigners is bullish, net selling bearish; individuals often lean contrarian. Weight it above any thin or placeholder social blocks.
 
-8. **Past sentiment is not predictive.** Frame your conclusions as signal for the trader to weigh alongside fundamentals and technicals, not as a price call.
+8. **Identify catalysts and risks** that emerge across sources — news of upcoming earnings, product launches, competitive threats, macro headlines, etc.
+
+9. **Past sentiment is not predictive.** Frame your conclusions as signal for the trader to weigh alongside fundamentals and technicals, not as a price call.
 
 ## Output fields
 
