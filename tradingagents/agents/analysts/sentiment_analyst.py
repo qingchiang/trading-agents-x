@@ -45,6 +45,7 @@ from tradingagents.agents.utils.structured import (
     bind_structured,
     invoke_structured_or_freetext,
 )
+from tradingagents.dataflows.edinet_holdings import get_large_holdings
 from tradingagents.dataflows.jquants_sentiment import get_investor_flows
 from tradingagents.dataflows.market_context import market_suffix_of
 from tradingagents.dataflows.reddit import fetch_reddit_posts
@@ -96,10 +97,12 @@ def create_sentiment_analyst(llm):
             stocktwits_block = placeholder
             reddit_block = placeholder
             market_flows_block = get_investor_flows(ticker, end_date)
+            holdings_block = get_large_holdings(ticker, end_date)
         else:
             stocktwits_block = fetch_stocktwits_messages(ticker, limit=30)
             reddit_block = fetch_reddit_posts(ticker)
             market_flows_block = ""
+            holdings_block = ""
 
         system_message = _build_system_message(
             ticker=ticker,
@@ -109,6 +112,7 @@ def create_sentiment_analyst(llm):
             stocktwits_block=stocktwits_block,
             reddit_block=reddit_block,
             market_flows_block=market_flows_block,
+            holdings_block=holdings_block,
         )
 
         prompt = ChatPromptTemplate.from_messages(
@@ -150,6 +154,29 @@ def create_sentiment_analyst(llm):
     return sentiment_analyst_node
 
 
+_FLOWS_INTRO = (
+    'Quantitative "who is buying" signal for the ticker\'s home market, standing in\n'
+    "for retail social platforms that do not cover it. Institutional/foreign vs\n"
+    "retail net flows, not opinion."
+)
+_HOLDINGS_INTRO = (
+    "Per-name filings by investors crossing/adjusting a 5% stake (EDINET 大量保有報告書).\n"
+    'A "who is accumulating" signal; the list shows the filer and report type, not the\n'
+    "exact stake percentage."
+)
+
+
+def _optional_section(title: str, intro: str, tag: str, body: str) -> str:
+    """Render an optional ``### title / intro / <start_of_tag>…<end_of_tag>`` block.
+
+    Returns "" when ``body`` is empty, so a market lacking the signal (e.g. US)
+    leaves the prompt byte-for-byte unchanged.
+    """
+    if not body:
+        return ""
+    return f"\n### {title}\n{intro}\n\n<start_of_{tag}>\n{body}\n<end_of_{tag}>\n"
+
+
 def _build_system_message(
     *,
     ticker: str,
@@ -159,26 +186,25 @@ def _build_system_message(
     stocktwits_block: str,
     reddit_block: str,
     market_flows_block: str = "",
+    holdings_block: str = "",
 ) -> str:
     """Assemble the sentiment-analyst system message with structured data blocks.
 
-    ``market_flows_block`` is an optional market-wide investor-flow signal (e.g.
-    J-Quants investor-type flows for Tokyo names); when empty the section is
-    omitted entirely, leaving the US prompt unchanged.
+    ``market_flows_block`` (market-wide investor-flow signal) and ``holdings_block``
+    (per-name large-shareholding filings) are optional Tokyo-market signals; when
+    empty their sections are omitted entirely, leaving the US prompt unchanged.
     """
-    market_flows_section = (
-        f"""
-### Market-wide investor flows — official exchange data
-Quantitative "who is buying" signal for the ticker's home market, standing in
-for retail social platforms that do not cover it. Institutional/foreign vs
-retail net flows, not opinion.
-
-<start_of_market_flows>
-{market_flows_block}
-<end_of_market_flows>
-"""
-        if market_flows_block
-        else ""
+    market_flows_section = _optional_section(
+        "Market-wide investor flows — official exchange data",
+        _FLOWS_INTRO,
+        "market_flows",
+        market_flows_block,
+    )
+    holdings_section = _optional_section(
+        "Large-shareholding activity — official 5%+ disclosures",
+        _HOLDINGS_INTRO,
+        "large_holdings",
+        holdings_block,
     )
     return f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} covering the period from {start_date} to {end_date}, drawing on the complementary data sources that have already been collected for you.
 
@@ -204,7 +230,7 @@ Community discussion. Engagement signal via upvote score and comment count. Subr
 <start_of_reddit>
 {reddit_block}
 <end_of_reddit>
-{market_flows_section}
+{market_flows_section}{holdings_section}
 ## How to analyze this data (best practices)
 
 1. **Read the StockTwits Bullish/Bearish ratio as a leading retail-sentiment signal.** A 70/30 bullish/bearish split is moderately bullish; ≥90/10 may indicate over-extension and contrarian risk; 50/50 is uncertainty. Sample size matters — base rates on the actual message count, not percentages alone.
@@ -219,7 +245,7 @@ Community discussion. Engagement signal via upvote score and comment count. Subr
 
 6. **Be honest about data limits, and never invent data for an unavailable source.** If a block contains an "<unavailable>" / "<no ...>" placeholder (e.g. StockTwits and Reddit have no coverage outside US markets), treat that source as absent: do NOT infer a Bullish/Bearish ratio, divergence, or engagement from it — rules 1–3 simply do not apply to it. Lean on the sources that ARE present and lower the `confidence` field accordingly, stating which sources were missing.
 
-7. **When a "Market-wide investor flows" block is present, treat it as the primary sentiment signal.** It is official exchange data on who is net buying/selling (foreigners, individuals, institutions) and stands in for the retail-social blocks that don't cover this market. Sustained net buying by foreigners is bullish, net selling bearish; individuals often lean contrarian. Weight it above any thin or placeholder social blocks.
+7. **When official exchange/disclosure blocks are present, treat them as the primary sentiment signal.** They stand in for the retail-social blocks that don't cover this market, so weight them above any thin or placeholder social blocks. A "Market-wide investor flows" block is official data on who is net buying/selling (foreigners, individuals, institutions): sustained net buying by foreigners is bullish, net selling bearish; individuals often lean contrarian. A "Large-shareholding activity" block lists investors crossing/adjusting a 5% stake: a cluster of new 5%+ reports suggests institutional accumulation (mildly bullish), while it shows filer and report type, not exact percentages — so read frequency and who is filing, not a precise position.
 
 8. **Identify catalysts and risks** that emerge across sources — news of upcoming earnings, product launches, competitive threats, macro headlines, etc.
 
