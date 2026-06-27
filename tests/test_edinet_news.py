@@ -51,14 +51,14 @@ def _by_date(mapping):
 @pytest.mark.unit
 class NewsRenderTests(unittest.TestCase):
     def setUp(self):
-        edinet_news._documents_cache.clear()
+        edinet_common._documents_cache.clear()
 
     def tearDown(self):
-        edinet_news._documents_cache.clear()
+        edinet_common._documents_cache.clear()
 
     def _patch(self, mapping):
         return mock.patch.object(
-            edinet_news, "fetch_documents", side_effect=_by_date(mapping)
+            edinet_common, "fetch_documents", side_effect=_by_date(mapping)
         )
 
     def test_filters_by_securities_code(self):
@@ -98,7 +98,7 @@ class NewsRenderTests(unittest.TestCase):
             "2026-06-22": [_doc(desc="in window")],
             "2026-06-23": [_doc(desc="future leak")],
         }))
-        with mock.patch.object(edinet_news, "fetch_documents", mock_fetch):
+        with mock.patch.object(edinet_common, "fetch_documents", mock_fetch):
             out = edinet_news.get_news("9984.T", "2026-06-22", "2026-06-22")
         self.assertIn("in window", out)
         self.assertNotIn("future leak", out)
@@ -106,7 +106,7 @@ class NewsRenderTests(unittest.TestCase):
 
     def test_per_date_fetch_is_memoized(self):
         mock_fetch = mock.Mock(side_effect=_by_date({"2026-06-22": [_doc()]}))
-        with mock.patch.object(edinet_news, "fetch_documents", mock_fetch):
+        with mock.patch.object(edinet_common, "fetch_documents", mock_fetch):
             edinet_news.get_news("9984.T", "2026-06-22", "2026-06-22")
             edinet_news.get_news("9984.T", "2026-06-22", "2026-06-22")
         mock_fetch.assert_called_once()  # second call served from cache
@@ -128,10 +128,10 @@ class NewsRenderTests(unittest.TestCase):
 
     def test_long_window_is_capped(self):
         mock_fetch = mock.Mock(side_effect=_by_date({}))
-        with mock.patch.object(edinet_news, "fetch_documents", mock_fetch):
+        with mock.patch.object(edinet_common, "fetch_documents", mock_fetch):
             edinet_news.get_news("9984.T", "2020-01-01", "2026-06-22")
-        # Window is clamped to _MAX_WINDOW_DAYS+1 dates, not thousands.
-        self.assertLessEqual(mock_fetch.call_count, edinet_news._MAX_WINDOW_DAYS + 1)
+        # Window is clamped to MAX_WINDOW_DAYS+1 dates, not thousands.
+        self.assertLessEqual(mock_fetch.call_count, edinet_common.MAX_WINDOW_DAYS + 1)
 
 
 @pytest.mark.unit
