@@ -89,6 +89,12 @@ class FredConfigTests(unittest.TestCase):
 
 @pytest.mark.unit
 class FredFormattingTests(unittest.TestCase):
+    def setUp(self):
+        fred._series_cache.clear()
+
+    def tearDown(self):
+        fred._series_cache.clear()
+
     def test_report_has_header_latest_change_and_table(self):
         with mock.patch.object(fred, "_request", side_effect=_request_stub()):
             out = fred.get_macro_data("unemployment", "2025-09-30", 365)
@@ -149,6 +155,54 @@ class FredFormattingTests(unittest.TestCase):
         obs_params = captured["series/observations"]
         self.assertEqual(obs_params["observation_end"], "2025-09-30")
         self.assertEqual(obs_params["observation_start"], "2025-07-02")  # 90d back
+
+
+@pytest.mark.unit
+class FredCacheTests(unittest.TestCase):
+    def setUp(self):
+        fred._series_cache.clear()
+
+    def tearDown(self):
+        fred._series_cache.clear()
+
+    def test_repeat_fetch_hits_cache(self):
+        calls = []
+
+        def _req(path, params):
+            calls.append(path)
+            return _META if path == "series" else _OBS
+
+        with mock.patch.object(fred, "_request", side_effect=_req):
+            fred.fetch_series("unemployment", "2025-09-30", 365)
+            fred.fetch_series("unemployment", "2025-09-30", 365)
+        # First call hits both endpoints; the second is served from the cache.
+        self.assertEqual(calls, ["series", "series/observations"])
+
+    def test_different_date_misses_cache(self):
+        calls = []
+
+        def _req(path, params):
+            calls.append(path)
+            return _META if path == "series" else _OBS
+
+        with mock.patch.object(fred, "_request", side_effect=_req):
+            fred.fetch_series("unemployment", "2025-09-30", 365)
+            fred.fetch_series("unemployment", "2025-08-30", 365)
+        # A different curr_date is a separate cache entry, so it is fetched again.
+        self.assertEqual(calls.count("series"), 2)
+
+    def test_unknown_series_caches_none(self):
+        calls = []
+
+        def _req(path, params):
+            calls.append(path)
+            return {"seriess": []}
+
+        with mock.patch.object(fred, "_request", side_effect=_req):
+            self.assertIsNone(fred.fetch_series("totally_unknown_xyz", "2025-09-30", 30))
+            self.assertIsNone(fred.fetch_series("totally_unknown_xyz", "2025-09-30", 30))
+        # None is memoized, so the missing series is looked up only once.
+        self.assertEqual(calls, ["series"])
 
 
 @pytest.mark.unit

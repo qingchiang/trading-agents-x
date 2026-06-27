@@ -133,6 +133,76 @@ def _request(path: str, params: dict) -> dict:
     return response.json()
 
 
+# Process-level cache of fetched series, keyed by (series_id, curr_date,
+# look_back_days). A macro series is a point-in-time function of curr_date, so a
+# panel that pulls ten series plus a later microscope tool-call for the same
+# series within one run hits the API once. (Cross-run disk persistence keyed the
+# same way is a planned enhancement, landing with the e-Stat/BOJ official sources.)
+_series_cache: dict = {}
+
+
+def fetch_series(
+    indicator: str,
+    curr_date: str,
+    look_back_days: int | None = None,
+) -> dict | None:
+    """Fetch a FRED series as structured data (metadata + observations).
+
+    Returns a dict with ``series_id``, ``title``, ``units``, ``frequency``,
+    ``seasonal``, ``start_date`` and ``points`` (a look-ahead-safe ascending list
+    of ``(date, value)`` up to ``curr_date``), or ``None`` if the series does not
+    exist. Raises ``ValueError`` for an unusable indicator and
+    ``FredNotConfiguredError`` when no key is set. Shared by :func:`get_macro_data`
+    (the microscope tool) and the cross-region macro panel, memoized per
+    (series, date, window).
+    """
+    if look_back_days is None:
+        look_back_days = DEFAULT_LOOKBACK_DAYS
+    series_id = _resolve_series_id(indicator)
+
+    cache_key = (series_id, curr_date, look_back_days)
+    if cache_key in _series_cache:
+        return _series_cache[cache_key]
+
+    end_dt = datetime.strptime(curr_date, "%Y-%m-%d")
+    start_date = (end_dt - timedelta(days=look_back_days)).strftime("%Y-%m-%d")
+
+    meta = _request("series", {"series_id": series_id}).get("seriess") or []
+    if not meta:
+        _series_cache[cache_key] = None
+        return None
+    info = meta[0]
+
+    observations = _request(
+        "series/observations",
+        {
+            "series_id": series_id,
+            "observation_start": start_date,
+            "observation_end": curr_date,
+            "sort_order": "asc",
+        },
+    ).get("observations", [])
+
+    # FRED encodes a missing observation as ".".
+    points = [
+        (o["date"], o["value"])
+        for o in observations
+        if o.get("value") not in (".", None, "")
+    ]
+
+    data = {
+        "series_id": series_id,
+        "title": info.get("title", series_id),
+        "units": info.get("units_short") or info.get("units", ""),
+        "frequency": info.get("frequency", ""),
+        "seasonal": info.get("seasonal_adjustment_short", ""),
+        "start_date": start_date,
+        "points": points,
+    }
+    _series_cache[cache_key] = data
+    return data
+
+
 def get_macro_data(
     indicator: str,
     curr_date: str,
@@ -151,48 +221,32 @@ def get_macro_data(
         A markdown report with the series title, units, frequency, the latest
         value, the change over the window, and a recent observation table.
     """
-    if look_back_days is None:
-        look_back_days = DEFAULT_LOOKBACK_DAYS
-
-    end_dt = datetime.strptime(curr_date, "%Y-%m-%d")
-    start_date = (end_dt - timedelta(days=look_back_days)).strftime("%Y-%m-%d")
-
     # Invalid LLM-supplied indicator: return guidance rather than raising, so a
     # bad argument doesn't abort the run (the routing layer also degrades macro
-    # data, but a specific message is more useful to the analyst).
+    # data, but a specific message is more useful to the analyst). A missing key
+    # (FredNotConfiguredError, also a ValueError) must still propagate so macro
+    # degrades at the router rather than reading as a bad indicator.
     try:
-        series_id = _resolve_series_id(indicator)
+        data = fetch_series(indicator, curr_date, look_back_days)
+    except FredNotConfiguredError:
+        raise
     except ValueError as e:
         return f"FRED: {e}"
 
-    meta = _request("series", {"series_id": series_id}).get("seriess") or []
-    if not meta:
+    if data is None:
+        series_id = _resolve_series_id(indicator)
         return (
             f"FRED series '{series_id}' not found. Pass a known alias "
             f"(e.g. 'cpi', 'unemployment') or a valid FRED series ID."
         )
-    info = meta[0]
-    title = info.get("title", series_id)
-    units = info.get("units_short") or info.get("units", "")
-    frequency = info.get("frequency", "")
-    seasonal = info.get("seasonal_adjustment_short", "")
 
-    observations = _request(
-        "series/observations",
-        {
-            "series_id": series_id,
-            "observation_start": start_date,
-            "observation_end": curr_date,
-            "sort_order": "asc",
-        },
-    ).get("observations", [])
-
-    # FRED encodes a missing observation as ".".
-    points = [
-        (o["date"], o["value"])
-        for o in observations
-        if o.get("value") not in (".", None, "")
-    ]
+    series_id = data["series_id"]
+    title = data["title"]
+    units = data["units"]
+    frequency = data["frequency"]
+    seasonal = data["seasonal"]
+    start_date = data["start_date"]
+    points = data["points"]
 
     header = (
         f"## FRED: {title} ({series_id})\n"
