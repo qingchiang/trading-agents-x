@@ -11,6 +11,7 @@ the routing layer treats it as "unavailable" rather than a hard crash.
 import logging
 import os
 from datetime import datetime, timedelta
+from typing import NamedTuple
 
 import requests
 
@@ -136,8 +137,13 @@ def _request(path: str, params: dict) -> dict:
 # Process-level cache of fetched series, keyed by (series_id, curr_date,
 # look_back_days). A macro series is a point-in-time function of curr_date, so a
 # panel that pulls ten series plus a later microscope tool-call for the same
-# series within one run hits the API once. (Cross-run disk persistence keyed the
-# same way is a planned enhancement, landing with the e-Stat/BOJ official sources.)
+# series within one run hits the API once — and the news node is re-entered on
+# every tool-call round-trip, so caching (including curr_date == today, which for
+# low-frequency macro is effectively settled) is what keeps a run from hammering
+# FRED's rate limit. Only *successful* results are cached: a "not found"/empty
+# response is NOT memoized, so a transient outage can't poison a series for the
+# life of the process. (Cross-run disk persistence keyed the same way is a planned
+# enhancement, landing with the e-Stat/BOJ official sources.)
 _series_cache: dict = {}
 
 
@@ -169,7 +175,8 @@ def fetch_series(
 
     meta = _request("series", {"series_id": series_id}).get("seriess") or []
     if not meta:
-        _series_cache[cache_key] = None
+        # Don't cache a miss: an empty response may be a transient outage rather
+        # than a genuinely nonexistent series, and we want a later call to retry.
         return None
     info = meta[0]
 
@@ -201,6 +208,43 @@ def fetch_series(
     }
     _series_cache[cache_key] = data
     return data
+
+
+class PointsSummary(NamedTuple):
+    """Latest reading and window change for a series' observation list.
+
+    ``delta``/``pct`` are ``None`` when the window has fewer than two points (so a
+    single point is not rendered as a fabricated "+0.00" change) or a value isn't
+    numeric; ``pct`` is also ``None`` when the base is zero. ``pct`` is the
+    meaningful figure for index series (CPI), where an absolute delta is opaque.
+    """
+    last_val: str
+    last_date: str
+    first_val: str
+    first_date: str
+    delta: float | None
+    pct: float | None
+
+
+def summarize_points(points: list) -> PointsSummary | None:
+    """Summarize an ascending ``[(date, value), ...]`` list, or None if empty.
+
+    Shared by :func:`get_macro_data` and the macro panel so the latest/change
+    computation stays in one place.
+    """
+    if not points:
+        return None
+    first_date, first_val = points[0]
+    last_date, last_val = points[-1]
+    delta = pct = None
+    if len(points) >= 2:
+        try:
+            delta = float(last_val) - float(first_val)
+            base = float(first_val)
+            pct = (delta / base * 100) if base != 0 else None
+        except (TypeError, ValueError):
+            delta = pct = None
+    return PointsSummary(last_val, last_date, first_val, first_date, delta, pct)
 
 
 def get_macro_data(
@@ -262,19 +306,16 @@ def get_macro_data(
             f"report less frequently than the window length; widen look_back_days."
         )
 
-    first_date, first_val = points[0]
-    last_date, last_val = points[-1]
-    try:
-        delta = float(last_val) - float(first_val)
-        base = float(first_val)
-        pct = f" ({delta / base * 100:+.2f}%)" if base != 0 else ""
+    s = summarize_points(points)
+    if s.delta is None:
+        summary = f"\n**Latest:** {s.last_val} ({s.last_date})\n"
+    else:
+        pct = f" ({s.pct:+.2f}%)" if s.pct is not None else ""
         summary = (
-            f"\n**Latest:** {last_val} ({last_date}) | "
-            f"**Change over window:** {delta:+.2f}{pct} "
-            f"from {first_val} ({first_date})\n"
+            f"\n**Latest:** {s.last_val} ({s.last_date}) | "
+            f"**Change over window:** {s.delta:+.2f}{pct} "
+            f"from {s.first_val} ({s.first_date})\n"
         )
-    except ValueError:
-        summary = f"\n**Latest:** {last_val} ({last_date})\n"
 
     shown = points
     note = ""

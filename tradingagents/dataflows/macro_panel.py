@@ -40,14 +40,14 @@ logger = logging.getLogger(__name__)
 # one more column here (plus its series per row) when that branch lands.
 _REGIONS = ("US", "Japan")
 
-# Per-country comparison sections: (dimension label + meaning, rows). Each row
-# maps a region to a FRED alias/series ID, or ``None`` when no free source exists
-# yet (rendered "n/a" without an API call — see the panel footnote). Verified live
-# against FRED (2026-06): all resolve except Japan CPI/core (FRED's OECD mirrors
-# are stale since ~2021 → None here, pending e-Stat). Forward-activity gauges
-# (US ISM PMI — removed from FRED; JP Tankan — BOJ only) have no free FRED series,
-# so they are noted in the footnote rather than shown as all-n/a rows.
-_REGIONAL_SECTIONS: tuple[tuple[str, tuple[tuple[str, dict[str, str | None]], ...]], ...] = (
+# Per-country comparison sections. Structure:
+#   (dimension label + meaning, ((row label, {region: series_id_or_None}), ...))
+# A region maps to a FRED alias/series ID, or None when no free source exists yet
+# (rendered "n/a" without an API call — see the footnote). Japan CPI/core are None:
+# FRED's OECD mirrors are discontinued (~2021), pending e-Stat. Forward-activity
+# gauges (US ISM PMI — removed from FRED; JP Tankan — BOJ only) have no free FRED
+# series, so they live in the footnote rather than as all-n/a rows.
+_REGIONAL_SECTIONS = (
     ("Liquidity / rates — valuation anchor", (
         ("Policy / overnight rate", {"US": "fed_funds_rate", "Japan": "IRSTCI01JPM156N"}),
         ("10Y govt bond yield",     {"US": "10y_treasury",   "Japan": "IRLTLT01JPM156N"}),
@@ -70,33 +70,32 @@ _GLOBAL_RISK: tuple[tuple[str, str], ...] = (
 )
 
 
-def _cell(indicator: str | None, curr_date: str, look_back_days: int | None) -> str:
-    """Render one cell: latest value (date) + change over the window, or "n/a".
+def _cell(indicator: str | None, curr_date: str) -> str:
+    """Render one cell: latest value (date) + change over the ~1y window, or "n/a".
 
     ``None`` indicator (no free source yet) returns "n/a" without an API call.
-    Never raises — any fetch/parse failure or empty series degrades to "n/a" so a
-    single bad cell can't abort the prefetch (the never-raise panel contract).
+    Shows the absolute change and, for interpretability of index series (CPI), the
+    percent change; a single-point window shows just the value (no fabricated zero
+    change). Never raises — any fetch/parse failure or empty series degrades to
+    "n/a" so a single bad cell can't abort the prefetch (never-raise contract).
     """
     if not indicator:
         return "n/a"
     try:
-        data = fred.fetch_series(indicator, curr_date, look_back_days)
+        data = fred.fetch_series(indicator, curr_date)
     except Exception as exc:
         logger.warning("Macro panel cell %s failed: %s", indicator, exc)
         return "n/a"
-    if not data or not data["points"]:
+    summary = fred.summarize_points(data["points"]) if data else None
+    if summary is None:
         return "n/a"
-
-    last_date, last_val = data["points"][-1]
-    first_val = data["points"][0][1]
-    try:
-        delta = float(last_val) - float(first_val)
-        return f"{last_val} ({last_date}, {delta:+.2f}/1y)"
-    except (TypeError, ValueError):
-        return f"{last_val} ({last_date})"
+    if summary.delta is None:
+        return f"{summary.last_val} ({summary.last_date})"
+    pct = f", {summary.pct:+.1f}%" if summary.pct is not None else ""
+    return f"{summary.last_val} ({summary.last_date}, Δ {summary.delta:+.2f}{pct})"
 
 
-def get_global_macro_panel(curr_date: str, look_back_days: int | None = None) -> str:
+def get_global_macro_panel(curr_date: str) -> str:
     """Return a compact cross-region macro panel as of ``curr_date`` (markdown).
 
     A per-country comparison table (liquidity / inflation / activity, US vs Japan)
@@ -105,6 +104,16 @@ def get_global_macro_panel(curr_date: str, look_back_days: int | None = None) ->
     ``curr_date``) and never-raising (failed/absent cells show "n/a"), so it is
     safe to prefetch and inject unconditionally into the news prompt.
     """
+    # One global check for the deterministic "no key" case, so an unconfigured FRED
+    # short-circuits to a clear note instead of 13 raise+log cycles all showing n/a.
+    try:
+        fred.get_api_key()
+    except fred.FredNotConfiguredError:
+        return (
+            f"## Global macro panel (as of {curr_date})\n"
+            "_Macro panel unavailable: FRED_API_KEY is not configured._"
+        )
+
     rows = [
         "| Indicator | " + " | ".join(_REGIONS) + " |",
         "| --- |" + " --- |" * len(_REGIONS),
@@ -112,13 +121,13 @@ def get_global_macro_panel(curr_date: str, look_back_days: int | None = None) ->
     for dimension, section in _REGIONAL_SECTIONS:
         rows.append(f"| **{dimension}** |" + " |" * len(_REGIONS))
         for label, series in section:
-            cells = [_cell(series[region], curr_date, look_back_days) for region in _REGIONS]
+            cells = [_cell(series[region], curr_date) for region in _REGIONS]
             rows.append(f"| {label} | " + " | ".join(cells) + " |")
     regional = "\n".join(rows)
 
     risk_rows = ["| Risk / FX — cross-border capital flow | Latest |", "| --- | --- |"]
     for label, series_id in _GLOBAL_RISK:
-        risk_rows.append(f"| {label} | {_cell(series_id, curr_date, look_back_days)} |")
+        risk_rows.append(f"| {label} | {_cell(series_id, curr_date)} |")
     risk = "\n".join(risk_rows)
 
     return (

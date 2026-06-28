@@ -191,7 +191,7 @@ class FredCacheTests(unittest.TestCase):
         # A different curr_date is a separate cache entry, so it is fetched again.
         self.assertEqual(calls.count("series"), 2)
 
-    def test_unknown_series_caches_none(self):
+    def test_unknown_series_is_not_cached(self):
         calls = []
 
         def _req(path, params):
@@ -201,8 +201,8 @@ class FredCacheTests(unittest.TestCase):
         with mock.patch.object(fred, "_request", side_effect=_req):
             self.assertIsNone(fred.fetch_series("totally_unknown_xyz", "2025-09-30", 30))
             self.assertIsNone(fred.fetch_series("totally_unknown_xyz", "2025-09-30", 30))
-        # None is memoized, so the missing series is looked up only once.
-        self.assertEqual(calls, ["series"])
+        # A miss is NOT memoized (could be a transient outage), so it is retried.
+        self.assertEqual(calls, ["series", "series"])
 
 
 @pytest.mark.unit

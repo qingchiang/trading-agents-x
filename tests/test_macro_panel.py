@@ -22,6 +22,17 @@ def _series(points, series_id="X"):
 
 @pytest.mark.unit
 class MacroPanelTests(unittest.TestCase):
+    def setUp(self):
+        # Make the panel's "is FRED configured?" guard pass so rendering tests run
+        # without a real key (CI has none); fetch_series is mocked per test anyway.
+        fred._series_cache.clear()
+        self._key_patch = mock.patch.object(fred, "get_api_key", return_value="testkey")
+        self._key_patch.start()
+
+    def tearDown(self):
+        self._key_patch.stop()
+        fred._series_cache.clear()
+
     def test_renders_dimensions_rows_and_fx_section(self):
         with mock.patch.object(
             fred, "fetch_series",
@@ -39,8 +50,8 @@ class MacroPanelTests(unittest.TestCase):
         self.assertIn("Risk / FX", out)
         for label, _sid in macro_panel._GLOBAL_RISK:
             self.assertIn(label, out)
-        # cell shows latest value (date) + 1-year change
-        self.assertIn("2.0 (2026-06-01, +1.00/1y)", out)
+        # cell shows latest value (date) + absolute change + percent change
+        self.assertIn("2.0 (2026-06-01, Δ +1.00, +100.0%)", out)
 
     def test_japan_inflation_is_na_without_fetching(self):
         # Japan CPI/core have no free FRED source (None) -> "n/a" with no API call.
@@ -63,15 +74,23 @@ class MacroPanelTests(unittest.TestCase):
         self.assertIn("n/a", out)
         self.assertIn("| Indicator | US | Japan |", out)  # still a full table
 
-    def test_missing_key_degrades_without_raising(self):
+    def test_missing_key_short_circuits(self):
+        # An unconfigured FRED short-circuits to one clear note, not 13 n/a cells.
         with mock.patch.object(
-            fred, "fetch_series",
-            side_effect=fred.FredNotConfiguredError("no key"),
+            fred, "get_api_key", side_effect=fred.FredNotConfiguredError("no key")
         ):
             out = macro_panel.get_global_macro_panel("2026-06-20")
-        # no key crashes nothing; the panel still renders with n/a cells
-        self.assertIn("n/a", out)
-        self.assertIn("USD/JPY", out)
+        self.assertIn("FRED_API_KEY is not configured", out)
+        self.assertNotIn("USD/JPY", out)  # didn't bother building the table
+
+    def test_single_point_shows_value_without_delta(self):
+        # One in-window point must not render a fabricated "+0.00" change.
+        with mock.patch.object(
+            fred, "fetch_series", return_value=_series([("2026-01-01", "5.0")])
+        ):
+            out = macro_panel.get_global_macro_panel("2026-06-20")
+        self.assertIn("5.0 (2026-01-01)", out)
+        self.assertNotIn("+0.00", out)
 
     def test_empty_series_is_na(self):
         with mock.patch.object(fred, "fetch_series", return_value=_series([])):
