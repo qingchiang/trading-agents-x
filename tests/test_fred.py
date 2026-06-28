@@ -11,7 +11,7 @@ import pytest
 
 import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
-from tradingagents.dataflows import fred, interface
+from tradingagents.dataflows import fred, interface, macro_common
 from tradingagents.dataflows.config import set_config
 
 # A small, stable set of observations to format against.
@@ -131,16 +131,16 @@ class FredFormattingTests(unittest.TestCase):
         obs = {
             "observations": [
                 {"date": f"2025-01-{(i % 28) + 1:02d}", "value": str(i)}
-                for i in range(fred.MAX_ROWS + 10)
+                for i in range(macro_common.MAX_ROWS + 10)
             ]
         }
         with mock.patch.object(fred, "_request", side_effect=_request_stub(obs=obs)):
             out = fred.get_macro_data("unemployment", "2025-12-31", 365)
-        self.assertIn(f"most recent {fred.MAX_ROWS}", out)
+        self.assertIn(f"most recent {macro_common.MAX_ROWS}", out)
         # change-over-window must reference the true first (0) and last value
         self.assertIn("from 0 ", out)
         body_rows = [ln for ln in out.splitlines() if ln.startswith("| 2025")]
-        self.assertEqual(len(body_rows), fred.MAX_ROWS)
+        self.assertEqual(len(body_rows), macro_common.MAX_ROWS)
 
     def test_window_is_lookahead_safe(self):
         # observation_end must equal curr_date so a past date never pulls future data.

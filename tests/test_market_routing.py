@@ -93,8 +93,13 @@ class MarketRoutingTests(unittest.TestCase):
 
     def test_macro_is_market_agnostic_even_if_routed(self):
         # Macro is cross-border: it stays on the default chain regardless of any
-        # configured market route (analyzed across all markets at once).
-        set_config({"data_vendors_by_market": {".T": {"macro_data": "boj"}}})
+        # configured market route (analyzed across all markets at once). Pin the
+        # default chain to fred so the assertion targets the market-route bypass,
+        # not the real default chain (which now also lists boj as a macro vendor).
+        set_config({
+            "data_vendors": {"macro_data": "fred"},
+            "data_vendors_by_market": {".T": {"macro_data": "boj"}},
+        })
         boj = mock.Mock(side_effect=_returns("BOJ"))
         with self._route("get_macro_indicators", {"fred": _returns("FRED"), "boj": boj}):
             result = interface.route_to_vendor("get_macro_indicators", "cpi", "2026-01-01")

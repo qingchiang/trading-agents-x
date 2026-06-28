@@ -9,9 +9,10 @@ from tradingagents.dataflows.interface import route_to_vendor
 def get_macro_indicators(
     indicator: Annotated[
         str,
-        "Macro indicator: a friendly alias such as 'cpi', 'core_pce', "
-        "'unemployment', 'fed_funds_rate', '10y_treasury', 'yield_curve', "
-        "'real_gdp', 'vix', or a raw FRED series ID such as 'CPIAUCSL'.",
+        "Macro indicator. US (FRED): 'cpi', 'core_pce', 'unemployment', "
+        "'fed_funds_rate', '10y_treasury', 'yield_curve', 'real_gdp', 'vix', or a "
+        "raw FRED series ID such as 'CPIAUCSL'. Japan (official sources): 'jp_cpi', "
+        "'jp_core_cpi' (e-Stat), 'jp_policy_rate', 'jp_tankan' (BOJ).",
     ],
     curr_date: Annotated[str, "Current date in yyyy-mm-dd format; the end of the window"],
     look_back_days: Annotated[
@@ -19,14 +20,15 @@ def get_macro_indicators(
     ] = None,
 ) -> str:
     """
-    Retrieve a macroeconomic indicator time series from FRED (Federal Reserve
-    Economic Data): policy rates, Treasury yields, inflation, labor, and growth.
-    Returns the series title, units, frequency, the latest value, the change
-    over the window, and a recent observation table. Uses the configured
-    macro_data vendor.
+    Retrieve a macroeconomic indicator time series: US series from FRED (policy
+    rates, Treasury yields, inflation, labor, growth) and Japanese series from the
+    official sources (e-Stat CPI, BOJ policy rate / Tankan). The indicator is
+    routed to whichever vendor serves it. Returns the series title, units,
+    frequency, the latest value, the change over the window, and a recent
+    observation table.
 
     Args:
-        indicator (str): Friendly alias or raw FRED series ID
+        indicator (str): Friendly alias (US or Japan) or raw FRED series ID
         curr_date (str): Current date in yyyy-mm-dd format
         look_back_days (int): Trailing window length; omit for a 1-year window
 

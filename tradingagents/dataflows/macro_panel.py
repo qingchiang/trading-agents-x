@@ -35,6 +35,7 @@ from __future__ import annotations
 import logging
 
 from . import boj, estat, fred
+from .macro_common import summarize_points
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +112,7 @@ def _cell(spec: tuple[str, str] | None, curr_date: str) -> str:
     except Exception as exc:
         logger.warning("Macro panel cell %s/%s failed: %s", source, indicator, exc)
         return "n/a"
-    summary = fred.summarize_points(data["points"]) if data else None
+    summary = summarize_points(data["points"]) if data else None
     if summary is None:
         return "n/a"
     if summary.delta is None:

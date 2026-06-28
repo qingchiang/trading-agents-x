@@ -11,6 +11,7 @@ from .alpha_vantage import (
     get_news as get_alpha_vantage_news,
     get_stock as get_alpha_vantage_stock,
 )
+from .boj import get_macro_data as get_boj_macro_data
 from .config import get_config
 from .edinet_news import get_news as get_edinet_news
 from .errors import (
@@ -18,6 +19,7 @@ from .errors import (
     VendorNotConfiguredError,
     VendorRateLimitError,
 )
+from .estat import get_macro_data as get_estat_macro_data
 from .fred import get_macro_data as get_fred_macro_data
 from .jquants import (
     get_balance_sheet as get_jquants_balance_sheet,
@@ -90,6 +92,8 @@ TOOLS_CATEGORIES = {
 VENDOR_LIST = [
     "yfinance",
     "fred",
+    "estat",
+    "boj",
     "polymarket",
     "alpha_vantage",
     "jquants",
@@ -152,8 +156,13 @@ VENDOR_METHODS = {
         "alpha_vantage": get_alpha_vantage_insider_transactions,
         "yfinance": get_yfinance_insider_transactions,
     },
-    # macro_data
+    # macro_data — content dispatch by indicator via the router's chain: estat/boj
+    # raise NoMarketDataError for an indicator they don't serve, so the chain falls
+    # through to fred (the catch-all). Each Japanese alias is owned by exactly one
+    # vendor, so the resolution agrees with the panel's per-cell source.
     "get_macro_indicators": {
+        "estat": get_estat_macro_data,
+        "boj": get_boj_macro_data,
         "fred": get_fred_macro_data,
     },
     # prediction_markets

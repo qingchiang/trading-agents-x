@@ -22,8 +22,8 @@ from datetime import datetime, timedelta
 
 import requests
 
-from .errors import VendorNotConfiguredError
-from .macro_common import SeriesCache
+from .errors import NoMarketDataError, VendorNotConfiguredError
+from .macro_common import SeriesCache, render_macro_report
 
 logger = logging.getLogger(__name__)
 
@@ -200,3 +200,24 @@ def fetch_series(
     }
     _series_cache.put(cache_key, data)
     return data
+
+
+def get_macro_data(
+    indicator: str,
+    curr_date: str,
+    look_back_days: int | None = None,
+) -> str:
+    """Render a Japan CPI series as a markdown report (the microscope path).
+
+    Raises ``NoMarketDataError`` for an indicator e-Stat does not serve, so the
+    macro router chain falls through to the next vendor (fred is the catch-all).
+    For an owned alias it renders via the shared formatter, or returns a "no data"
+    note when the window is empty. ``EstatNotConfiguredError`` propagates so the
+    router degrades macro gracefully when ``ESTAT_APP_ID`` is unset.
+    """
+    if indicator.strip().lower() not in ESTAT_SERIES:
+        raise NoMarketDataError(indicator, detail="not an e-Stat series")
+    data = fetch_series(indicator, curr_date, look_back_days)
+    if data is None:
+        return f"e-Stat: no data for '{indicator}' in this window."
+    return render_macro_report("e-Stat", data, curr_date)

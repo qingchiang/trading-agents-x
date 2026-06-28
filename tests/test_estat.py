@@ -9,6 +9,7 @@ from unittest import mock
 import pytest
 
 from tradingagents.dataflows import estat
+from tradingagents.dataflows.errors import NoMarketDataError
 
 
 def _root(values):
@@ -142,6 +143,33 @@ class EstatFetchSeriesTests(unittest.TestCase):
             estat.fetch_series("jp_cpi", "2026-06-20")
             estat.fetch_series("jp_cpi", "2026-06-20")
         self.assertEqual(calls, ["getStatsData"])  # second call served from cache
+
+
+@pytest.mark.unit
+class EstatGetMacroDataTests(unittest.TestCase):
+    def setUp(self):
+        estat._series_cache.clear()
+
+    def tearDown(self):
+        estat._series_cache.clear()
+
+    def test_foreign_alias_raises_no_market_data(self):
+        # An indicator e-Stat doesn't own must raise so the router chain falls
+        # through to the next vendor — without any API call (no app id needed).
+        with self.assertRaises(NoMarketDataError):
+            estat.get_macro_data("cpi", "2026-06-20")
+
+    def test_owned_alias_renders_markdown(self):
+        values = [_val("2025000505", "112.0"), _val("2026000505", "113.5")]
+        with mock.patch.object(estat, "_request", return_value=_root(values)):
+            out = estat.get_macro_data("jp_cpi", "2026-06-20")
+        self.assertIn("## e-Stat: Japan CPI (all items)", out)
+        self.assertIn("**Latest:** 113.5 (2026-05-01)", out)
+
+    def test_owned_alias_empty_window_returns_note(self):
+        with mock.patch.object(estat, "_request", return_value=_root([])):
+            out = estat.get_macro_data("jp_cpi", "2026-06-20")
+        self.assertIn("e-Stat: no data", out)
 
 
 if __name__ == "__main__":

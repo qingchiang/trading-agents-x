@@ -10,6 +10,7 @@ from unittest import mock
 import pytest
 
 from tradingagents.dataflows import boj
+from tradingagents.dataflows.errors import NoMarketDataError
 
 
 def _body(survey_dates, values, unit="percent per annum", freq="DAILY"):
@@ -127,6 +128,32 @@ class BojFetchSeriesTests(unittest.TestCase):
             boj.fetch_series("jp_policy_rate", "2026-06-20")
             boj.fetch_series("jp_policy_rate", "2026-06-20")
         self.assertEqual(calls, ["getDataCode"])  # second served from cache
+
+
+@pytest.mark.unit
+class BojGetMacroDataTests(unittest.TestCase):
+    def setUp(self):
+        boj._series_cache.clear()
+
+    def tearDown(self):
+        boj._series_cache.clear()
+
+    def test_foreign_alias_raises_no_market_data(self):
+        # An indicator BOJ doesn't own must raise so the router chain falls through.
+        with self.assertRaises(NoMarketDataError):
+            boj.get_macro_data("cpi", "2026-06-20")
+
+    def test_owned_alias_renders_markdown(self):
+        body = _body([20260618, 20260619], [0.97, 0.977])
+        with mock.patch.object(boj, "_request", return_value=body):
+            out = boj.get_macro_data("jp_policy_rate", "2026-06-20")
+        self.assertIn("## BOJ: Japan policy rate (overnight call, avg)", out)
+        self.assertIn("**Latest:** 0.977 (2026-06-19)", out)
+
+    def test_owned_alias_empty_window_returns_note(self):
+        with mock.patch.object(boj, "_request", return_value={"STATUS": 200, "RESULTSET": []}):
+            out = boj.get_macro_data("jp_tankan", "2026-06-20")
+        self.assertIn("BOJ: no data", out)
 
 
 if __name__ == "__main__":

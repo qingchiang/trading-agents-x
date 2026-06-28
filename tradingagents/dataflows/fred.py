@@ -11,12 +11,11 @@ the routing layer treats it as "unavailable" rather than a hard crash.
 import logging
 import os
 from datetime import datetime, timedelta
-from typing import NamedTuple
 
 import requests
 
 from .errors import VendorNotConfiguredError
-from .macro_common import SeriesCache
+from .macro_common import SeriesCache, render_macro_report
 
 logger = logging.getLogger(__name__)
 
@@ -29,10 +28,6 @@ REQUEST_TIMEOUT = 30
 # Default trailing window when the caller does not specify one. A year captures
 # the trend and the year-over-year base for most monthly/quarterly series.
 DEFAULT_LOOKBACK_DAYS = 365
-
-# Rows cap for the rendered table: recent values matter most for a decision, and
-# daily series (yields, VIX) over a long window would otherwise flood context.
-MAX_ROWS = 40
 
 # Curated human-friendly aliases -> FRED series IDs. Anything not listed is used
 # verbatim as a raw FRED series ID, so power users are never limited to this set.
@@ -209,43 +204,6 @@ def fetch_series(
     return data
 
 
-class PointsSummary(NamedTuple):
-    """Latest reading and window change for a series' observation list.
-
-    ``delta``/``pct`` are ``None`` when the window has fewer than two points (so a
-    single point is not rendered as a fabricated "+0.00" change) or a value isn't
-    numeric; ``pct`` is also ``None`` when the base is zero. ``pct`` is the
-    meaningful figure for index series (CPI), where an absolute delta is opaque.
-    """
-    last_val: str
-    last_date: str
-    first_val: str
-    first_date: str
-    delta: float | None
-    pct: float | None
-
-
-def summarize_points(points: list) -> PointsSummary | None:
-    """Summarize an ascending ``[(date, value), ...]`` list, or None if empty.
-
-    Shared by :func:`get_macro_data` and the macro panel so the latest/change
-    computation stays in one place.
-    """
-    if not points:
-        return None
-    first_date, first_val = points[0]
-    last_date, last_val = points[-1]
-    delta = pct = None
-    if len(points) >= 2:
-        try:
-            delta = float(last_val) - float(first_val)
-            base = float(first_val)
-            pct = (delta / base * 100) if base != 0 else None
-        except (TypeError, ValueError):
-            delta = pct = None
-    return PointsSummary(last_val, last_date, first_val, first_date, delta, pct)
-
-
 def get_macro_data(
     indicator: str,
     curr_date: str,
@@ -283,49 +241,4 @@ def get_macro_data(
             f"(e.g. 'cpi', 'unemployment') or a valid FRED series ID."
         )
 
-    series_id = data["series_id"]
-    title = data["title"]
-    units = data["units"]
-    frequency = data["frequency"]
-    seasonal = data["seasonal"]
-    start_date = data["start_date"]
-    points = data["points"]
-
-    header = (
-        f"## FRED: {title} ({series_id})\n"
-        f"- Units: {units}\n"
-        f"- Frequency: {frequency}"
-        f"{f' ({seasonal})' if seasonal else ''}\n"
-        f"- Window: {start_date} to {curr_date}\n"
-    )
-
-    if not points:
-        return header + (
-            f"\nNo observations for {series_id} in this window. The series may "
-            f"report less frequently than the window length; widen look_back_days."
-        )
-
-    s = summarize_points(points)
-    if s.delta is None:
-        summary = f"\n**Latest:** {s.last_val} ({s.last_date})\n"
-    else:
-        pct = f" ({s.pct:+.2f}%)" if s.pct is not None else ""
-        summary = (
-            f"\n**Latest:** {s.last_val} ({s.last_date}) | "
-            f"**Change over window:** {s.delta:+.2f}{pct} "
-            f"from {s.first_val} ({s.first_date})\n"
-        )
-
-    shown = points
-    note = ""
-    if len(points) > MAX_ROWS:
-        shown = points[-MAX_ROWS:]
-        note = f"\n_(showing the most recent {MAX_ROWS} of {len(points)} observations)_\n"
-
-    table = (
-        "\n| Date | Value |\n| --- | --- |\n"
-        + "\n".join(f"| {d} | {v} |" for d, v in shown)
-        + "\n"
-    )
-
-    return header + summary + note + table
+    return render_macro_report("FRED", data, curr_date)
