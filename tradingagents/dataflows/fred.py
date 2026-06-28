@@ -16,6 +16,7 @@ from typing import NamedTuple
 import requests
 
 from .errors import VendorNotConfiguredError
+from .macro_common import SeriesCache
 
 logger = logging.getLogger(__name__)
 
@@ -140,11 +141,8 @@ def _request(path: str, params: dict) -> dict:
 # series within one run hits the API once — and the news node is re-entered on
 # every tool-call round-trip, so caching (including curr_date == today, which for
 # low-frequency macro is effectively settled) is what keeps a run from hammering
-# FRED's rate limit. Only *successful* results are cached: a "not found"/empty
-# response is NOT memoized, so a transient outage can't poison a series for the
-# life of the process. (Cross-run disk persistence keyed the same way is a planned
-# enhancement, landing with the e-Stat/BOJ official sources.)
-_series_cache: dict = {}
+# FRED's rate limit. Only *successful* results are cached (see SeriesCache).
+_series_cache = SeriesCache()
 
 
 def fetch_series(
@@ -167,8 +165,9 @@ def fetch_series(
     series_id = _resolve_series_id(indicator)
 
     cache_key = (series_id, curr_date, look_back_days)
-    if cache_key in _series_cache:
-        return _series_cache[cache_key]
+    cached = _series_cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     end_dt = datetime.strptime(curr_date, "%Y-%m-%d")
     start_date = (end_dt - timedelta(days=look_back_days)).strftime("%Y-%m-%d")
@@ -206,7 +205,7 @@ def fetch_series(
         "start_date": start_date,
         "points": points,
     }
-    _series_cache[cache_key] = data
+    _series_cache.put(cache_key, data)
     return data
 
 

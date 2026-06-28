@@ -26,6 +26,8 @@ from typing import NamedTuple
 
 import requests
 
+from .macro_common import SeriesCache
+
 logger = logging.getLogger(__name__)
 
 BOJ_API_BASE = "https://www.stat-search.boj.or.jp/api/v1"
@@ -110,11 +112,11 @@ def _parse_point(freq: str, survey_date: int) -> tuple[str, str]:
     return iso, iso
 
 
-# Process-level cache, keyed by (alias, curr_date, look_back_days). Mirrors fred's
-# cache: one HTTP call per series for the life of the process. Only successful
-# results are cached — a "no data"/empty response is not memoized, so a transient
-# outage can't poison a series.
-_series_cache: dict = {}
+# Process-level cache, keyed by (alias, curr_date, look_back_days). Mirrors fred:
+# one HTTP call per series for the life of the process. Only successful results
+# are cached (see SeriesCache); a miss is not memoized so a transient outage can't
+# poison a series.
+_series_cache = SeriesCache()
 
 
 def fetch_series(
@@ -141,8 +143,9 @@ def fetch_series(
     spec = BOJ_SERIES[key]
 
     cache_key = (key, curr_date, look_back_days)
-    if cache_key in _series_cache:
-        return _series_cache[cache_key]
+    cached = _series_cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     end_dt = datetime.strptime(curr_date, "%Y-%m-%d")
     start_dt = end_dt - timedelta(days=look_back_days)
@@ -191,5 +194,5 @@ def fetch_series(
         "start_date": start_dt.strftime("%Y-%m-%d"),
         "points": points,
     }
-    _series_cache[cache_key] = data
+    _series_cache.put(cache_key, data)
     return data

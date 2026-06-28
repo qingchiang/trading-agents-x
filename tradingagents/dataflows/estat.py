@@ -23,6 +23,7 @@ from datetime import datetime, timedelta
 import requests
 
 from .errors import VendorNotConfiguredError
+from .macro_common import SeriesCache
 
 logger = logging.getLogger(__name__)
 
@@ -117,12 +118,11 @@ def _date_from_time_code(code: str) -> str:
     return f"{code[:4]}-{code[6:8]}-01"
 
 
-# Process-level cache, keyed by (alias, curr_date, look_back_days). Mirrors fred's
-# cache: a macro series is a point-in-time function of curr_date, so the panel and
-# a same-run re-entry hit the API once. Only *successful* results are cached — a
-# "no data"/empty response is not memoized, so a transient outage can't poison a
-# series for the life of the process.
-_series_cache: dict = {}
+# Process-level cache, keyed by (alias, curr_date, look_back_days). Mirrors fred:
+# a macro series is a point-in-time function of curr_date, so the panel and a
+# same-run re-entry hit the API once. Only successful results are cached (see
+# SeriesCache); a miss is not memoized so a transient outage can't poison a series.
+_series_cache = SeriesCache()
 
 
 def fetch_series(
@@ -149,8 +149,9 @@ def fetch_series(
     cat01, title = ESTAT_SERIES[key]
 
     cache_key = (key, curr_date, look_back_days)
-    if cache_key in _series_cache:
-        return _series_cache[cache_key]
+    cached = _series_cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     end_dt = datetime.strptime(curr_date, "%Y-%m-%d")
     start_dt = end_dt - timedelta(days=look_back_days)
@@ -197,5 +198,5 @@ def fetch_series(
         "start_date": start_dt.strftime("%Y-%m-%d"),
         "points": points,
     }
-    _series_cache[cache_key] = data
+    _series_cache.put(cache_key, data)
     return data
