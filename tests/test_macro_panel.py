@@ -10,7 +10,7 @@ from langchain_core.runnables import RunnableLambda
 
 from tradingagents.agents.analysts import news_analyst
 from tradingagents.agents.analysts.news_analyst import create_news_analyst
-from tradingagents.dataflows import estat, fred, macro_panel
+from tradingagents.dataflows import boj, estat, fred, macro_panel
 
 
 def _series(points, series_id="X"):
@@ -27,20 +27,28 @@ class MacroPanelTests(unittest.TestCase):
         # without a real key (CI has none); fetch_series is mocked per test anyway.
         fred._series_cache.clear()
         estat._series_cache.clear()
+        boj._series_cache.clear()
         self._key_patch = mock.patch.object(fred, "get_api_key", return_value="testkey")
         self._key_patch.start()
-        # Stub e-Stat too so the Japan CPI cells never touch the network (a local
-        # .env may carry a real ESTAT_APP_ID); per-test patches override as needed.
+        # Stub the JP vendors too so their cells never touch the network (a local
+        # .env may carry a real ESTAT_APP_ID; BOJ is keyless); per-test patches
+        # override as needed.
         self._estat_patch = mock.patch.object(
             estat, "fetch_series", return_value=_series([("2025-06-01", "100.0")])
         )
         self._estat_patch.start()
+        self._boj_patch = mock.patch.object(
+            boj, "fetch_series", return_value=_series([("2025-06-01", "0.5")])
+        )
+        self._boj_patch.start()
 
     def tearDown(self):
+        self._boj_patch.stop()
         self._estat_patch.stop()
         self._key_patch.stop()
         fred._series_cache.clear()
         estat._series_cache.clear()
+        boj._series_cache.clear()
 
     def test_renders_dimensions_rows_and_fx_section(self):
         with mock.patch.object(
@@ -63,31 +71,33 @@ class MacroPanelTests(unittest.TestCase):
         self.assertIn("2.0 (2026-06-01, Δ +1.00, +100.0%)", out)
 
     def test_cells_dispatch_to_their_declared_source(self):
-        # Japan CPI/core are served by e-Stat; everything else (incl. the JP rate
-        # mirrors and FX) by FRED. The two sources must not be cross-wired.
-        fred_seen, estat_seen = [], []
+        # Japan CPI/core -> e-Stat; Japan policy rate / Tankan -> BOJ; everything
+        # else (US series, the JP 10Y mirror, FX) -> FRED. No cross-wiring.
+        fred_seen, estat_seen, boj_seen = [], [], []
 
-        def fred_fake(indicator, curr_date, look_back_days=None):
-            fred_seen.append(indicator)
-            return _series([("2025-01-01", "1.0")])
+        def _spy(seen, val):
+            def fake(indicator, curr_date, look_back_days=None):
+                seen.append(indicator)
+                return _series([("2025-01-01", val)])
+            return fake
 
-        def estat_fake(indicator, curr_date, look_back_days=None):
-            estat_seen.append(indicator)
-            return _series([("2025-01-01", "100.0")])
-
-        with mock.patch.object(fred, "fetch_series", side_effect=fred_fake), \
-                mock.patch.object(estat, "fetch_series", side_effect=estat_fake):
+        with mock.patch.object(fred, "fetch_series", side_effect=_spy(fred_seen, "1.0")), \
+                mock.patch.object(estat, "fetch_series", side_effect=_spy(estat_seen, "100.0")), \
+                mock.patch.object(boj, "fetch_series", side_effect=_spy(boj_seen, "0.5")):
             macro_panel.get_global_macro_panel("2026-06-20")
         self.assertEqual(set(estat_seen), {"jp_cpi", "jp_core_cpi"})
+        self.assertEqual(set(boj_seen), {"jp_policy_rate", "jp_tankan"})
         self.assertIn("fed_funds_rate", fred_seen)  # US rate via FRED
         self.assertIn("DEXJPUS", fred_seen)         # FX via FRED
         self.assertNotIn("jp_cpi", fred_seen)       # CPI is never asked of FRED
+        self.assertNotIn("jp_policy_rate", fred_seen)  # nor the policy rate
 
     def test_none_spec_renders_na_without_fetching(self):
         # A cell with no free source yet (None, e.g. a future China column) must
         # render "n/a" without calling any fetcher.
         with mock.patch.object(fred, "fetch_series", side_effect=AssertionError("fetched")), \
-                mock.patch.object(estat, "fetch_series", side_effect=AssertionError("fetched")):
+                mock.patch.object(estat, "fetch_series", side_effect=AssertionError("fetched")), \
+                mock.patch.object(boj, "fetch_series", side_effect=AssertionError("fetched")):
             self.assertEqual(macro_panel._cell(None, "2026-06-20"), "n/a")
 
     def test_cell_failure_degrades_without_raising(self):

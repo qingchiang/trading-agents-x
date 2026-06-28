@@ -17,13 +17,13 @@ The panel is organised on four investment-meaning dimensions:
     in their own section rather than a US/Japan column split.
 
 **Source is per-cell**, so an indicator can be served by whichever provider has
-the timely free series: most cells use **FRED** (it mirrors Japanese OECD rate /
-activity series and quotes USD/JPY, DXY, VIX), while **Japan CPI / core
-inflation** come from **e-Stat** (FRED's OECD mirror was discontinued ~2021).
-Making the source explicit per cell keeps the panel and any router-served
-microscope tool from diverging on the same indicator. Remaining gaps (Tankan,
-daily BOJ rates) move to **BOJ** later with the layout unchanged; China becomes a
-fourth column when that branch lands.
+the timely free series: most cells use **FRED** (US series plus the Japanese OECD
+10Y mirror, and USD/JPY, DXY, VIX); **Japan CPI / core inflation** come from
+**e-Stat** (FRED's OECD mirror was discontinued ~2021); and **Japan's policy rate
+(daily) and Tankan DI (quarterly)** come from the **BOJ** API. Making the source
+explicit per cell keeps the panel and any router-served microscope tool from
+diverging on the same indicator. China becomes a fourth column when that branch
+lands.
 
 Prefetched like the sentiment sources, so it **must never raise**: any per-cell
 fetch failure degrades to "n/a". Look-ahead is inherited from
@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import logging
 
-from . import estat, fred
+from . import boj, estat, fred
 
 logger = logging.getLogger(__name__)
 
@@ -50,19 +50,21 @@ _REGIONS = ("US", "Japan")
 _SOURCES = {
     "fred": fred,
     "estat": estat,
+    "boj": boj,
 }
 
 # Per-country comparison sections. Structure:
 #   (dimension label + meaning, ((row label, {region: (source, indicator)_or_None}), ...))
 # Each region maps to a (source, indicator) pair, or None when no free source
-# exists yet (rendered "n/a" without an API call — see the footnote). Japan CPI /
-# core inflation use e-Stat (FRED's OECD mirror is discontinued ~2021); the rest
-# use FRED. Forward-activity gauges (US ISM PMI — removed from FRED; JP Tankan —
-# BOJ only) have no free source yet, so they live in the footnote, not as n/a rows.
+# exists yet (rendered "n/a" without an API call — see the footnote). Sources by
+# cell: Japan policy rate / Tankan from BOJ (daily / quarterly official), Japan
+# CPI / core inflation from e-Stat (FRED's OECD mirror is discontinued ~2021),
+# everything else from FRED. The one remaining gap (US ISM PMI — removed from
+# FRED, no free series) stays None rather than dropping the comparison row.
 _REGIONAL_SECTIONS = (
     ("Liquidity / rates — valuation anchor", (
         ("Policy / overnight rate", {"US": ("fred", "fed_funds_rate"),
-                                      "Japan": ("fred", "IRSTCI01JPM156N")}),
+                                      "Japan": ("boj", "jp_policy_rate")}),
         ("10Y govt bond yield",     {"US": ("fred", "10y_treasury"),
                                       "Japan": ("fred", "IRLTLT01JPM156N")}),
     )),
@@ -77,6 +79,9 @@ _REGIONAL_SECTIONS = (
                           "Japan": ("fred", "JPNRGDPEXP")}),
         ("Unemployment", {"US": ("fred", "unemployment_rate"),
                           "Japan": ("fred", "LRHUTTTTJPM156S")}),
+        ("Business sentiment (ISM PMI / Tankan DI)",
+                         {"US": None,
+                          "Japan": ("boj", "jp_tankan")}),
     )),
 )
 
@@ -156,7 +161,7 @@ def get_global_macro_panel(curr_date: str) -> str:
         "change over ~1 year. Read the regions together — e.g. the US–Japan rate gap "
         "drives USD/JPY, which flows straight into Japanese exporters' earnings.\n\n"
         f"{regional}\n\n{risk}\n\n"
-        "_Japan CPI / core inflation are from e-Stat (官) and the rest from FRED. "
-        "Gaps pending official sources: forward activity — US ISM PMI (no free "
-        "series) and Japan Tankan (BOJ). China joins as a column with its own branch._"
+        "_Sources: Japan policy rate / Tankan from BOJ (官), Japan CPI / core "
+        "inflation from e-Stat (官), the rest from FRED. Remaining gap: US ISM PMI "
+        "(no free series). China joins as a column with its own branch._"
     )
