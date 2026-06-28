@@ -23,7 +23,8 @@ class SeriesCache:
     miss — so :meth:`get` returning ``None`` means "not cached", never "cached
     empty" (a transient outage must be retryable). Bounded so a long-running
     process (e.g. a multi-date backtest, which creates a distinct key per date)
-    cannot grow it without limit.
+    cannot grow it without limit; the default holds ~tens of dates' worth of the
+    panel's dozen-odd series, and an evicted entry is simply re-fetched.
     """
 
     def __init__(self, max_entries: int = 512):

@@ -130,11 +130,10 @@ DEFAULT_CONFIG = _apply_env_overrides({
         "technical_indicators": "yfinance",  # Options: alpha_vantage, yfinance
         "fundamental_data": "yfinance",      # Options: alpha_vantage, yfinance
         "news_data": "yfinance",             # Options: alpha_vantage, yfinance
-        # Macro is a by-indicator content-dispatch chain: estat (Japan CPI) and
-        # boj (Japan policy rate / Tankan, keyless) raise NoMarketDataError for
-        # indicators they don't serve, falling through to fred (catch-all; needs
-        # FRED_API_KEY). Order = JP official sources first, fred last.
-        "macro_data": "estat,boj,fred",
+        # "macro" dispatches each indicator to its owning source: fred (US series
+        # + raw FRED IDs; needs FRED_API_KEY), e-Stat (Japan CPI), BOJ (Japan
+        # policy rate / Tankan, keyless). Set "fred" to force US-only. See macro.py.
+        "macro_data": "macro",
 
         "prediction_markets": "polymarket",  # Options: polymarket (keyless)
     },

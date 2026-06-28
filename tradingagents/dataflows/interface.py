@@ -11,7 +11,6 @@ from .alpha_vantage import (
     get_news as get_alpha_vantage_news,
     get_stock as get_alpha_vantage_stock,
 )
-from .boj import get_macro_data as get_boj_macro_data
 from .config import get_config
 from .edinet_news import get_news as get_edinet_news
 from .errors import (
@@ -19,7 +18,6 @@ from .errors import (
     VendorNotConfiguredError,
     VendorRateLimitError,
 )
-from .estat import get_macro_data as get_estat_macro_data
 from .fred import get_macro_data as get_fred_macro_data
 from .jquants import (
     get_balance_sheet as get_jquants_balance_sheet,
@@ -29,6 +27,7 @@ from .jquants import (
     get_indicator as get_jquants_indicator,
     get_stock as get_jquants_stock,
 )
+from .macro import get_macro_indicators as get_macro_dispatch
 from .market_context import infer_market
 from .polymarket import get_prediction_markets as get_polymarket_prediction_markets
 from .y_finance import (
@@ -92,8 +91,7 @@ TOOLS_CATEGORIES = {
 VENDOR_LIST = [
     "yfinance",
     "fred",
-    "estat",
-    "boj",
+    "macro",
     "polymarket",
     "alpha_vantage",
     "jquants",
@@ -156,13 +154,12 @@ VENDOR_METHODS = {
         "alpha_vantage": get_alpha_vantage_insider_transactions,
         "yfinance": get_yfinance_insider_transactions,
     },
-    # macro_data — content dispatch by indicator via the router's chain: estat/boj
-    # raise NoMarketDataError for an indicator they don't serve, so the chain falls
-    # through to fred (the catch-all). Each Japanese alias is owned by exactly one
-    # vendor, so the resolution agrees with the panel's per-cell source.
+    # macro_data — the "macro" vendor dispatches by indicator to the owning source
+    # (fred / e-Stat / boj); see macro.py. ("fred" stays selectable to force
+    # US-only.) Dispatch (one owner per indicator), not a fallback chain, so the
+    # owning vendor's typed error degrades with the right reason.
     "get_macro_indicators": {
-        "estat": get_estat_macro_data,
-        "boj": get_boj_macro_data,
+        "macro": get_macro_dispatch,
         "fred": get_fred_macro_data,
     },
     # prediction_markets

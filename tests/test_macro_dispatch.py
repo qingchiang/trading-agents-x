@@ -1,9 +1,10 @@
 """Macro microscope dispatch: get_macro_indicators routes an indicator to the
-vendor that owns it via the router's NoMarketDataError fall-through chain.
+vendor that owns it.
 
-The default chain is "estat,boj,fred": estat/boj raise NoMarketDataError for an
-indicator they don't serve, so the chain falls through to fred (the catch-all).
-Each vendor's fetch_series is mocked, so these run without network or keys.
+The default macro_data vendor is "macro" (macro.py), which dispatches by indicator
+to a single owning source (e-Stat for Japan CPI, BOJ for Japan policy rate /
+Tankan, fred otherwise). Each vendor's fetch_series is mocked, so these run
+without network or keys.
 """
 import copy
 import unittest
@@ -34,10 +35,18 @@ class MacroDispatchTests(unittest.TestCase):
     def tearDown(self):
         config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
 
-    def test_default_chain_is_estat_boj_fred(self):
+    def test_default_macro_vendor_is_the_dispatcher(self):
         self.assertEqual(
-            default_config.DEFAULT_CONFIG["data_vendors"]["macro_data"], "estat,boj,fred"
+            default_config.DEFAULT_CONFIG["data_vendors"]["macro_data"], "macro"
         )
+
+    def test_owned_but_empty_japan_series_does_not_fall_through_to_fred(self):
+        # An owned alias with an empty window returns e-Stat's "no data" note; the
+        # dispatcher must NOT fall through to fred (fred can't serve jp_cpi).
+        with mock.patch.object(estat, "fetch_series", return_value=None), \
+                mock.patch.object(fred, "fetch_series", side_effect=AssertionError("fred called")):
+            out = route_to_vendor("get_macro_indicators", "jp_cpi", "2026-06-20")
+        self.assertIn("e-Stat: no data", out)
 
     def test_japan_cpi_routes_to_estat(self):
         with mock.patch.object(estat, "fetch_series",
@@ -55,12 +64,23 @@ class MacroDispatchTests(unittest.TestCase):
             out = route_to_vendor("get_macro_indicators", "jp_policy_rate", "2026-06-20")
         self.assertIn("## BOJ: Japan policy rate", out)
 
-    def test_us_indicator_falls_through_to_fred(self):
-        # Neither estat nor boj owns "cpi"; both raise NoMarketDataError -> fred.
+    def test_us_indicator_routes_to_fred(self):
         with mock.patch.object(fred, "fetch_series",
                                return_value=_data("CPIAUCSL", "US CPI", [("2026-05-01", "333.9")])):
             out = route_to_vendor("get_macro_indicators", "cpi", "2026-06-20")
         self.assertIn("## FRED: US CPI", out)
+
+    def test_missing_fred_key_degrades_with_the_fred_reason_not_a_jp_one(self):
+        # Regression guard: a US indicator with no FRED key must degrade naming the
+        # real cause (FRED unavailable), NOT a misleading "not a BOJ series" no-data
+        # verdict (the old fall-through-chain leaked the last vendor's rejection).
+        with mock.patch.object(fred, "fetch_series",
+                               side_effect=fred.FredNotConfiguredError("FRED_API_KEY not set")):
+            out = route_to_vendor("get_macro_indicators", "cpi", "2026-06-20")
+        self.assertIn("DATA_UNAVAILABLE", out)
+        self.assertIn("FRED_API_KEY", out)
+        self.assertNotIn("not a BOJ series", out)
+        self.assertNotIn("NO_DATA_AVAILABLE", out)
 
 
 if __name__ == "__main__":

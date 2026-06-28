@@ -206,10 +206,10 @@ def get_macro_data(
 ) -> str:
     """Render a BOJ series as a markdown report (the microscope path).
 
-    Raises ``NoMarketDataError`` for an indicator the BOJ vendor does not serve,
-    so the macro router chain falls through to the next vendor (fred is the
-    catch-all). For an owned alias it renders via the shared formatter, or returns
-    a "no data" note when the window is empty.
+    Normally reached only for an owned alias (the macro dispatcher routes by
+    indicator); it renders via the shared formatter, or returns a "no data" note
+    when the window is empty. Raises ``NoMarketDataError`` if called directly with
+    an indicator the BOJ vendor doesn't serve.
     """
     if indicator.strip().lower() not in BOJ_SERIES:
         raise NoMarketDataError(indicator, detail="not a BOJ series")

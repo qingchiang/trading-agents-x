@@ -209,11 +209,11 @@ def get_macro_data(
 ) -> str:
     """Render a Japan CPI series as a markdown report (the microscope path).
 
-    Raises ``NoMarketDataError`` for an indicator e-Stat does not serve, so the
-    macro router chain falls through to the next vendor (fred is the catch-all).
-    For an owned alias it renders via the shared formatter, or returns a "no data"
-    note when the window is empty. ``EstatNotConfiguredError`` propagates so the
-    router degrades macro gracefully when ``ESTAT_APP_ID`` is unset.
+    Normally reached only for an owned alias (the macro dispatcher routes by
+    indicator); it renders via the shared formatter, or returns a "no data" note
+    when the window is empty. ``EstatNotConfiguredError`` propagates so the router
+    degrades macro gracefully when ``ESTAT_APP_ID`` is unset. Raises
+    ``NoMarketDataError`` if called directly with an indicator e-Stat doesn't serve.
     """
     if indicator.strip().lower() not in ESTAT_SERIES:
         raise NoMarketDataError(indicator, detail="not an e-Stat series")
