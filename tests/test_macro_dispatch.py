@@ -14,7 +14,7 @@ import pytest
 
 import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
-from tradingagents.dataflows import boj, estat, fred
+from tradingagents.dataflows import boj, estat, fred, macro_panel
 from tradingagents.dataflows.interface import route_to_vendor
 
 
@@ -81,6 +81,40 @@ class MacroDispatchTests(unittest.TestCase):
         self.assertIn("FRED_API_KEY", out)
         self.assertNotIn("not a BOJ series", out)
         self.assertNotIn("NO_DATA_AVAILABLE", out)
+
+
+@pytest.mark.unit
+class PanelDispatchConsistencyTests(unittest.TestCase):
+    """The panel's per-cell source must agree with where the dispatcher would
+    route that indicator, so panel and microscope never diverge on a source.
+
+    Ownership lives in two encodings — the dispatcher's ESTAT_SERIES/BOJ_SERIES
+    membership and the panel's hardcoded (source, indicator) tuples — so this
+    guards against silent drift (a rename/move would otherwise make a panel cell
+    render "n/a" while the microscope still works). FRED cells use raw series IDs
+    that are intentionally in no SERIES dict, so they must resolve to fred."""
+
+    def _panel_specs(self):
+        specs = []
+        for _dim, section in macro_panel._REGIONAL_SECTIONS:
+            for _label, by_region in section:
+                specs.extend(spec for spec in by_region.values() if spec)
+        specs.extend(spec for _label, spec in macro_panel._GLOBAL_RISK)
+        return specs
+
+    def test_every_panel_cell_source_matches_dispatch_ownership(self):
+        for source, indicator in self._panel_specs():
+            key = indicator.strip().lower()
+            in_estat, in_boj = key in estat.ESTAT_SERIES, key in boj.BOJ_SERIES
+            if source == "estat":
+                self.assertTrue(in_estat, f"{indicator!r} not owned by e-Stat")
+                self.assertFalse(in_boj)
+            elif source == "boj":
+                self.assertTrue(in_boj, f"{indicator!r} not owned by BOJ")
+                self.assertFalse(in_estat)
+            else:  # fred: a raw FRED id/alias, must be in no JP SERIES dict
+                self.assertEqual(source, "fred")
+                self.assertFalse(in_estat or in_boj, f"{indicator!r} is JP-owned, not fred")
 
 
 if __name__ == "__main__":
