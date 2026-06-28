@@ -10,7 +10,7 @@ from langchain_core.runnables import RunnableLambda
 
 from tradingagents.agents.analysts import news_analyst
 from tradingagents.agents.analysts.news_analyst import create_news_analyst
-from tradingagents.dataflows import fred, macro_panel
+from tradingagents.dataflows import estat, fred, macro_panel
 
 
 def _series(points, series_id="X"):
@@ -26,12 +26,21 @@ class MacroPanelTests(unittest.TestCase):
         # Make the panel's "is FRED configured?" guard pass so rendering tests run
         # without a real key (CI has none); fetch_series is mocked per test anyway.
         fred._series_cache.clear()
+        estat._series_cache.clear()
         self._key_patch = mock.patch.object(fred, "get_api_key", return_value="testkey")
         self._key_patch.start()
+        # Stub e-Stat too so the Japan CPI cells never touch the network (a local
+        # .env may carry a real ESTAT_APP_ID); per-test patches override as needed.
+        self._estat_patch = mock.patch.object(
+            estat, "fetch_series", return_value=_series([("2025-06-01", "100.0")])
+        )
+        self._estat_patch.start()
 
     def tearDown(self):
+        self._estat_patch.stop()
         self._key_patch.stop()
         fred._series_cache.clear()
+        estat._series_cache.clear()
 
     def test_renders_dimensions_rows_and_fx_section(self):
         with mock.patch.object(
@@ -53,20 +62,33 @@ class MacroPanelTests(unittest.TestCase):
         # cell shows latest value (date) + absolute change + percent change
         self.assertIn("2.0 (2026-06-01, Δ +1.00, +100.0%)", out)
 
-    def test_japan_inflation_is_na_without_fetching(self):
-        # Japan CPI/core have no free FRED source (None) -> "n/a" with no API call.
-        seen = []
+    def test_cells_dispatch_to_their_declared_source(self):
+        # Japan CPI/core are served by e-Stat; everything else (incl. the JP rate
+        # mirrors and FX) by FRED. The two sources must not be cross-wired.
+        fred_seen, estat_seen = [], []
 
-        def fake(indicator, curr_date, look_back_days=None):
-            seen.append(indicator)
+        def fred_fake(indicator, curr_date, look_back_days=None):
+            fred_seen.append(indicator)
             return _series([("2025-01-01", "1.0")])
 
-        with mock.patch.object(fred, "fetch_series", side_effect=fake):
-            out = macro_panel.get_global_macro_panel("2026-06-20")
-        self.assertNotIn(None, seen)            # None indicators never hit the API
-        self.assertIn("fed_funds_rate", seen)   # real ones do
-        self.assertIn("DEXJPUS", seen)          # FX row is fetched
-        self.assertIn("n/a", out)               # the None cells render n/a
+        def estat_fake(indicator, curr_date, look_back_days=None):
+            estat_seen.append(indicator)
+            return _series([("2025-01-01", "100.0")])
+
+        with mock.patch.object(fred, "fetch_series", side_effect=fred_fake), \
+                mock.patch.object(estat, "fetch_series", side_effect=estat_fake):
+            macro_panel.get_global_macro_panel("2026-06-20")
+        self.assertEqual(set(estat_seen), {"jp_cpi", "jp_core_cpi"})
+        self.assertIn("fed_funds_rate", fred_seen)  # US rate via FRED
+        self.assertIn("DEXJPUS", fred_seen)         # FX via FRED
+        self.assertNotIn("jp_cpi", fred_seen)       # CPI is never asked of FRED
+
+    def test_none_spec_renders_na_without_fetching(self):
+        # A cell with no free source yet (None, e.g. a future China column) must
+        # render "n/a" without calling any fetcher.
+        with mock.patch.object(fred, "fetch_series", side_effect=AssertionError("fetched")), \
+                mock.patch.object(estat, "fetch_series", side_effect=AssertionError("fetched")):
+            self.assertEqual(macro_panel._cell(None, "2026-06-20"), "n/a")
 
     def test_cell_failure_degrades_without_raising(self):
         with mock.patch.object(fred, "fetch_series", side_effect=RuntimeError("boom")):
