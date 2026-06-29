@@ -146,11 +146,24 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # suffix, that category's vendor comes from here instead of ``data_vendors``.
     # Only per-instrument (ticker-bearing) tools are routed; macro and global
     # news stay market-agnostic (cross-border context analyzed across all markets
-    # at once) and always use ``data_vendors``. Empty leaves US / all routing
-    # unchanged. Japanese-market vendors are wired in as they land, e.g.
-    #   ".T": {"core_stock_apis": "jquants", "technical_indicators": "jquants",
-    #          "fundamental_data": "jquants,edinet", "news_data": "jquants_news"}
-    "data_vendors_by_market": {},
+    # at once) and always use ``data_vendors``. Japanese-market vendors are wired
+    # in for ".T" (Tokyo); add ".SS" / ".SZ" / ".HK" for China-market support.
+    # Each chain is "<JP vendor>,yfinance" — a true ordered fallback (try the JP
+    # vendor, then Yahoo), distinct from macro_data's per-owner dispatch; don't
+    # "fix" one into the other. For prices/indicators/fundamentals yfinance is
+    # OPTIONAL keyless degradation: jquants serves every method when a key is set,
+    # and Yahoo (which covers Tokyo) keeps a keyless ".T" run working instead of
+    # hard-erroring. For news_data yfinance is also the SOLE server of
+    # get_insider_transactions (edinet_news has no insider source), so it is
+    # load-bearing even with keys present — don't drop it.
+    "data_vendors_by_market": {
+        ".T": {
+            "core_stock_apis": "jquants,yfinance",
+            "technical_indicators": "jquants,yfinance",
+            "fundamental_data": "jquants,yfinance",
+            "news_data": "edinet_news,yfinance",
+        },
+    },
     # Benchmark for alpha calculation in the reflection layer.
     # ``benchmark_ticker`` (when set) overrides the suffix map for all
     # tickers; leave it None to use ``benchmark_map`` for auto-detection
