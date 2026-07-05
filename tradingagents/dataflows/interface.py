@@ -19,6 +19,7 @@ from .errors import (
     VendorRateLimitError,
 )
 from .fred import get_macro_data as get_fred_macro_data
+from .jp_fundamentals import get_fundamentals as get_jp_fundamentals
 from .jquants import (
     get_balance_sheet as get_jquants_balance_sheet,
     get_cashflow as get_jquants_cashflow,
@@ -95,6 +96,7 @@ VENDOR_LIST = [
     "polymarket",
     "alpha_vantage",
     "jquants",
+    "jp_fundamentals",
     "edinet_news",
 ]
 
@@ -124,6 +126,7 @@ VENDOR_METHODS = {
         "alpha_vantage": get_alpha_vantage_fundamentals,
         "yfinance": get_yfinance_fundamentals,
         "jquants": get_jquants_fundamentals,
+        "jp_fundamentals": get_jp_fundamentals,
     },
     "get_balance_sheet": {
         "alpha_vantage": get_alpha_vantage_balance_sheet,

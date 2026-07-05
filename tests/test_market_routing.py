@@ -132,7 +132,10 @@ class MarketRoutingTests(unittest.TestCase):
         routes = default_config.DEFAULT_CONFIG["data_vendors_by_market"][".T"]
         self.assertEqual(routes["core_stock_apis"], "jquants,yfinance")
         self.assertEqual(routes["technical_indicators"], "jquants,yfinance")
-        self.assertEqual(routes["fundamental_data"], "jquants,yfinance")
+        # get_fundamentals goes to the JP assembler first; statement methods in
+        # the same category skip it (unregistered) and use jquants — guarded by
+        # test_dot_t_chains_serve_every_ticker_bearing_method.
+        self.assertEqual(routes["fundamental_data"], "jp_fundamentals,jquants,yfinance")
         self.assertEqual(routes["news_data"], "edinet_news,yfinance")
         # Macro stays market-agnostic — must not appear in the per-market block.
         self.assertNotIn("macro_data", routes)

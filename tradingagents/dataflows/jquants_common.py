@@ -22,6 +22,18 @@ JQUANTS_API_BASE = "https://api.jquants.com/v2"
 REQUEST_TIMEOUT = 30
 
 
+def parse_number(value):
+    """Parse a J-Quants numeric string to float, or None if missing/blank.
+
+    J-Quants returns numbers as strings and uses ``""`` for absent fields, so the
+    fundamentals modules parse defensively; shared here to keep one definition.
+    """
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 class JQuantsNotConfiguredError(VendorNotConfiguredError):
     """Raised when J-Quants is selected but ``JQUANTS_API_KEY`` is unset/rejected.
 

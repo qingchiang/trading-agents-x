@@ -8,19 +8,16 @@ possible later enhancement for that detail.
 
 from __future__ import annotations
 
-from .jquants_common import from_jquants_code, memoized_fetch, to_jquants_code
+from .jquants_common import (
+    from_jquants_code,
+    memoized_fetch,
+    parse_number as _num,
+    to_jquants_code,
+)
 from .symbol_utils import NoMarketDataError
 
 # How many recent disclosed periods to show in each statement.
 _PERIOD_LIMIT = 4
-
-
-def _num(value):
-    """Parse a J-Quants numeric string to float, or None if missing/blank."""
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
 
 
 def _fmt(value) -> str:
@@ -81,6 +78,20 @@ def _fetch_summary_periods(symbol: str, curr_date: str | None):
         key=lambda r: (r.get("DiscDate") or "", r.get("DiscTime") or ""),
         reverse=True,
     )
+
+
+def fetch_periods(ticker: str, curr_date: str | None = None):
+    """Public accessor: ``(canonical, records)`` for ``ticker``, newest disclosure
+    first, already look-ahead filtered (``DiscDate <= curr_date``).
+
+    Exposed for the JP fundamentals assembler (``jp_fundamentals``), which reads
+    the raw summary fields (shares, dividends, forecasts, quarterly cumulatives)
+    to compute valuation ratios. Keeping the fetch/filter/sort here — and the
+    ratio math in the assembler — leaves this vendor responsible only for
+    official data, not derived metrics. Raises ``NoMarketDataError`` when nothing
+    is disclosed on/before ``curr_date``.
+    """
+    return _fetch_summary_periods(ticker, curr_date)
 
 
 def _select(records: list[dict], freq: str) -> list[dict]:
