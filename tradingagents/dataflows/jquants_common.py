@@ -91,6 +91,18 @@ def _request(path: str, params: dict) -> dict:
     if resp.status_code == 429:
         raise JQuantsRateLimitError(f"J-Quants rate limit exceeded for {path}.")
     if resp.status_code in (401, 403):
+        # J-Quants answers 403 both for a rejected key AND for an unknown
+        # endpoint (wrong path/version), the latter with a body saying the
+        # endpoint "does not exist". Only the former is a config problem; a bad
+        # path is a programming error, so surface it loudly instead of
+        # mislabelling it "check JQUANTS_API_KEY" (which also degrades it as an
+        # unconfigured vendor in the router).
+        body = resp.text or ""
+        if resp.status_code == 403 and "does not exist" in body:
+            raise RuntimeError(
+                f"J-Quants endpoint {path} does not exist "
+                f"(check the URL/HTTP method/API version): {body[:200]}"
+            )
         raise JQuantsNotConfiguredError(
             f"J-Quants rejected the API key ({resp.status_code}) for {path}. "
             "Check JQUANTS_API_KEY."

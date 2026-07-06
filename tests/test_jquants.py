@@ -31,9 +31,10 @@ from tradingagents.dataflows.jquants_stock import get_stock
 
 
 class FakeResp:
-    def __init__(self, status_code=200, json_data=None):
+    def __init__(self, status_code=200, json_data=None, text=""):
         self.status_code = status_code
         self._json = json_data if json_data is not None else {}
+        self.text = text
 
     def json(self):
         return self._json
@@ -174,6 +175,21 @@ class AuthTests(unittest.TestCase):
                 mock.patch.object(jquants_common.requests, "get", return_value=FakeResp(403)), \
                 self.assertRaises(JQuantsNotConfiguredError):
             jquants_common._request("/equities/bars/daily", {})
+
+    def test_unknown_endpoint_403_is_not_mislabelled_as_auth(self):
+        # J-Quants returns 403 for an unknown path too; its body says the
+        # endpoint doesn't exist. That's a wrong-path programming error, not a
+        # key problem — it must NOT surface as JQuantsNotConfiguredError (which
+        # the router would degrade as an unconfigured vendor).
+        body = ('{"message": "The requested endpoint does not exist. Please '
+                'check the URL, HTTP method, and API version"}')
+        with mock.patch.dict(os.environ, {"JQUANTS_API_KEY": "KEY"}, clear=True), \
+                mock.patch.object(jquants_common.requests, "get",
+                                  return_value=FakeResp(403, text=body)):
+            with self.assertRaises(RuntimeError) as ctx:
+                jquants_common._request("/indices/topix", {})
+            self.assertNotIsInstance(ctx.exception, JQuantsNotConfiguredError)
+            self.assertIn("does not exist", str(ctx.exception))
 
 
 @pytest.mark.unit
