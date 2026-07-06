@@ -80,6 +80,38 @@ def _fetch_ohlcv_frame(symbol: str, start_date: str, end_date: str) -> pd.DataFr
     return df
 
 
+# TOPIX index daily OHLC (/indices/bars/daily/topix): the market-portfolio proxy
+# for Japanese beta. Available on the Light plan; carries O/H/L/C only (an index
+# has no volume and no securities code). Cached per (from, to).
+_topix_cache: dict[tuple[str, str], list[dict]] = {}
+
+
+def fetch_topix_closes(start_date: str, end_date: str) -> pd.DataFrame:
+    """Return a ``Date``/``Close`` frame of the TOPIX index over the range.
+
+    TOPIX (cap-weighted, whole-market) is the market portfolio used for Japanese
+    beta, versus the price-weighted Nikkei 225. The range is caller-bounded, so
+    passing ``end_date = curr_date`` keeps it look-ahead safe. Raises
+    NoMarketDataError when J-Quants returns no usable rows for the range.
+    """
+    records = memoized_fetch(
+        _topix_cache, (start_date, end_date),
+        "/indices/bars/daily/topix", {"from": start_date, "to": end_date}, "data",
+    )
+    if not records:
+        raise NoMarketDataError(
+            "TOPIX", "TOPIX", f"no index rows between {start_date} and {end_date}"
+        )
+    # Reuse the shared OHLCV cleaner (parse Date, coerce numerics, drop NaN-Close)
+    # so index and equity frames clean identically; it only touches the columns
+    # present, so a Date/Close frame is fine.
+    df = pd.DataFrame([{"Date": r.get("Date"), "Close": r.get("C")} for r in records])
+    df = _clean_dataframe(df).sort_values("Date").reset_index(drop=True)
+    if df.empty:
+        raise NoMarketDataError("TOPIX", "TOPIX", "no usable index rows after parsing")
+    return df
+
+
 def get_stock(symbol: str, start_date: str, end_date: str) -> str:
     """Return daily OHLCV for ``symbol`` over the range as a CSV string."""
     df = _fetch_ohlcv_frame(symbol, start_date, end_date)

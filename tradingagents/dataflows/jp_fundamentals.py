@@ -21,6 +21,9 @@ Basis conventions (labelled in the output so nothing is silently cross-compared)
 - Forward (PE/PEG) → the company's own guidance (会社予想, ``NxFEPS``), which is
   disclosed with the report and therefore date-safe. The analyst-consensus
   forward (yfinance, live) is a separate live-only overlay (Phase 3), not here.
+- Beta → trailing 3-year WEEKLY regression of the stock's returns on TOPIX's
+  (the cap-weighted market portfolio, per Japanese valuation practice), both
+  J-Quants closes filtered to ``<= curr_date`` (date-safe).
 """
 
 from __future__ import annotations
@@ -28,16 +31,30 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
+import pandas as pd
 from dateutil.relativedelta import relativedelta
 
 from . import jquants_fundamentals as jqf
 from .jquants_common import parse_number as _num
-from .jquants_stock import _fetch_ohlcv_frame
+from .jquants_stock import _fetch_ohlcv_frame, fetch_topix_closes
 
 logger = logging.getLogger(__name__)
 
-# 52-week window (calendar days) fetched for the high/low range and latest price.
+# One J-Quants OHLCV fetch (trailing 3 years) backs everything price-derived: the
+# latest price, the 52-week high/low (sliced from the last year), and the beta
+# regression (which needs the full window).
+_HISTORY_WINDOW_DAYS = 3 * 365 + 30
 _PRICE_WINDOW_DAYS = 365
+
+# Beta follows Japanese valuation practice: a trailing-3-year WEEKLY regression
+# against TOPIX (the cap-weighted market portfolio, not the price-weighted Nikkei
+# 225). This intentionally differs from benchmark_map[".T"] = "^N225", which the
+# reflection layer uses for the *alpha* headline — beta wants the broad market
+# portfolio, alpha wants the recognizable index. Require ~1 year of weekly
+# returns before reporting it — below that the regression is too noisy (e.g. a
+# recent IPO), so it degrades to N/A.
+_MARKET_INDEX = "TOPIX"
+_BETA_MIN_OBS = 52  # ~1yr of weekly returns
 
 
 def _minus_one_year(date_str) -> str | None:
@@ -165,22 +182,69 @@ def _pos(value: float | None) -> float | None:
     return value if value is not None and value > 0 else None
 
 
-def _latest_price(ticker: str, curr_date: str) -> tuple[float | None, str, float | None, float | None]:
-    """Return ``(close, price_date, wk52_high, wk52_low)`` as of ``curr_date``.
+def _history_frame(ticker: str, curr_date: str):
+    """Return the date-safe trailing-3-year J-Quants OHLCV frame, or None.
 
-    Reuses the date-safe J-Quants OHLCV frame (rows only within the window). Any
-    fetch failure (no coverage, stale, halted) degrades to all-None rather than
+    One fetch backs the price, the 52-week high/low, and the beta regression. Any
+    fetch failure (no coverage, stale, halted) degrades to None rather than
     breaking the whole overview — the official summary must still render.
     """
-    start = (datetime.strptime(curr_date, "%Y-%m-%d") - relativedelta(days=_PRICE_WINDOW_DAYS)).strftime("%Y-%m-%d")
+    start = (datetime.strptime(curr_date, "%Y-%m-%d") - relativedelta(days=_HISTORY_WINDOW_DAYS)).strftime("%Y-%m-%d")
     try:
-        df = _fetch_ohlcv_frame(ticker, start, curr_date)
+        return _fetch_ohlcv_frame(ticker, start, curr_date)
     except Exception as exc:
         logger.warning("JP fundamentals: price fetch failed for %s: %s", ticker, exc)
+        return None
+
+
+def _price_stats(df, curr_date: str) -> tuple[float | None, str, float | None, float | None]:
+    """``(close, price_date, wk52_high, wk52_low)`` from the history frame.
+
+    The high/low use only the trailing 52 weeks (sliced from the 3-year frame);
+    the price is the latest row. All-None when the frame is missing/empty.
+    """
+    if df is None or df.empty:
         return None, "", None, None
     last = df.iloc[-1]
     price_date = last["Date"].strftime("%Y-%m-%d") if hasattr(last["Date"], "strftime") else str(last["Date"])
-    return float(last["Close"]), price_date, float(df["High"].max()), float(df["Low"].min())
+    year = df[df["Date"] >= pd.Timestamp(curr_date) - pd.Timedelta(days=_PRICE_WINDOW_DAYS)]
+    return float(last["Close"]), price_date, float(year["High"].max()), float(year["Low"].min())
+
+
+def _beta(hist, curr_date: str) -> float | None:
+    """Trailing 3-year WEEKLY beta of the stock vs TOPIX, date-safe.
+
+    Both series are J-Quants closes (same session, same ``<= curr_date`` filter,
+    so no look-ahead and no cross-vendor drift): the stock's from ``hist``, TOPIX
+    from its index endpoint. Each is resampled to weekly (Friday) closes and
+    aligned; ``beta = Cov(stock, TOPIX) / Var(TOPIX)`` over the weekly returns.
+    Weekly-vs-TOPIX follows Japanese valuation practice. Returns None when TOPIX
+    is unavailable, the overlap is too short to be stable, or TOPIX has no
+    variance.
+    """
+    if hist is None:
+        return None
+    # TOPIX over exactly the stock's fetched window — derive the start from the
+    # frame itself so the two series can never drift onto different ranges.
+    try:
+        topix = fetch_topix_closes(hist["Date"].min().strftime("%Y-%m-%d"), curr_date)
+    except Exception as exc:  # index unavailable / no coverage
+        logger.warning("JP fundamentals: TOPIX fetch failed: %s", exc)
+        return None
+    # Resample each to weekly (Friday) closes on a continuous grid, THEN take
+    # returns and align — so a missing week (halt, thin trading) becomes a NaN
+    # return that drops out, rather than collapsing two weeks into one spanning
+    # return that would bias the regression.
+    stk_w = hist.set_index("Date")["Close"].resample("W-FRI").last()
+    idx_w = topix.set_index("Date")["Close"].resample("W-FRI").last()
+    returns = pd.concat({"stk": stk_w.pct_change(), "idx": idx_w.pct_change()}, axis=1).dropna()
+    if len(returns) < _BETA_MIN_OBS:
+        return None
+    var_idx = returns["idx"].var()
+    if not var_idx or pd.isna(var_idx):  # 0 or NaN variance → beta undefined
+        return None
+    beta = returns["stk"].cov(returns["idx"]) / var_idx
+    return beta if pd.notna(beta) else None  # never emit a NaN/inf beta
 
 
 def _valuation_block(ticker: str, curr_date: str) -> str:
@@ -207,7 +271,9 @@ def _valuation_block(ticker: str, curr_date: str) -> str:
     eqar = _num(fy.get("EqAR"))
     fwd_eps = _forward_eps(statements)
 
-    price, price_date, wk_high, wk_low = _latest_price(ticker, curr_date)
+    hist = _history_frame(ticker, curr_date)
+    price, price_date, wk_high, wk_low = _price_stats(hist, curr_date)
+    beta = _beta(hist, curr_date)
 
     # Derived ratios (all date-safe: jquants summary + as-of price). Owners'-basis
     # ROE = EPS/BPS keeps numerator (parent profit) and denominator (owners' equity
@@ -238,7 +304,8 @@ def _valuation_block(ticker: str, curr_date: str) -> str:
         f"    PEG: {_ratio(peg)} (company-guidance{growth_note})",
         f"- Net margin: {_pct(net_margin)} ({flow_basis})    ROE: {_pct(roe)}    ROA: {_pct(roa)}"
         f"    Equity ratio: {_ratio(eqar)}",
-        f"- 52-week range: {_ratio(wk_low)} – {_ratio(wk_high)}",
+        f"- 52-week range: {_ratio(wk_low)} – {_ratio(wk_high)}"
+        f"    Beta (vs {_MARKET_INDEX}, 3yr weekly): {_ratio(beta)}",
     ])
 
 
