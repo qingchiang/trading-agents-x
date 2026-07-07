@@ -6,6 +6,7 @@ from unittest import mock
 
 import pandas as pd
 import pytest
+import requests
 
 from tradingagents.dataflows import jp_fundamentals
 
@@ -106,6 +107,21 @@ class JPFundamentalsTests(unittest.TestCase):
             out = jp_fundamentals.get_fundamentals("7011.T", "2026-06-26")
         self.assertIn("Beta (vs TOPIX, 3yr weekly): N/A", out)
         self.assertIn("PE: 36.08 (TTM)", out)   # rest of the block intact
+
+    def test_transient_topix_error_only_drops_beta(self):
+        # TOPIX is additive: a network/server blip must degrade only beta to N/A,
+        # never discard the already-computable PE/PB/dividend/ROE ratios.
+        with mock.patch.object(jp_fundamentals.jqf, "get_fundamentals", return_value="BASE-OVERVIEW"), \
+                mock.patch.object(jp_fundamentals.jqf, "fetch_periods", return_value=("7011.T", [_FY])), \
+                mock.patch.object(jp_fundamentals, "_fetch_ohlcv_frame",
+                                  return_value=_price_df(3567.0, 5208.0, 3171.0)), \
+                mock.patch.object(jp_fundamentals, "fetch_topix_closes",
+                                  side_effect=requests.ConnectionError("reset")):
+            out = jp_fundamentals.get_fundamentals("7011.T", "2026-06-26")
+        self.assertIn("BASE-OVERVIEW", out)
+        self.assertIn("PE: 36.08 (TTM)", out)
+        self.assertIn("Beta (vs TOPIX, 3yr weekly): N/A", out)
+        self.assertNotIn("ratio computation failed", out)
 
     def test_ttm_rolls_cumulative_quarters(self):
         # Mid-year: latest disclosure is a cumulative 3Q. TTM = 3Q_cum + prior_FY
