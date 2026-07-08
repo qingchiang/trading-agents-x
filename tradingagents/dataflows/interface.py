@@ -20,6 +20,11 @@ from .errors import (
 )
 from .fred import get_macro_data as get_fred_macro_data
 from .jp_fundamentals import get_fundamentals as get_jp_fundamentals
+from .jp_statements import (
+    get_balance_sheet as get_jp_balance_sheet,
+    get_cashflow as get_jp_cashflow,
+    get_income_statement as get_jp_income_statement,
+)
 from .jquants import (
     get_balance_sheet as get_jquants_balance_sheet,
     get_cashflow as get_jquants_cashflow,
@@ -97,6 +102,7 @@ VENDOR_LIST = [
     "alpha_vantage",
     "jquants",
     "jp_fundamentals",
+    "jp_statements",
     "edinet_news",
 ]
 
@@ -132,16 +138,19 @@ VENDOR_METHODS = {
         "alpha_vantage": get_alpha_vantage_balance_sheet,
         "yfinance": get_yfinance_balance_sheet,
         "jquants": get_jquants_balance_sheet,
+        "jp_statements": get_jp_balance_sheet,
     },
     "get_cashflow": {
         "alpha_vantage": get_alpha_vantage_cashflow,
         "yfinance": get_yfinance_cashflow,
         "jquants": get_jquants_cashflow,
+        "jp_statements": get_jp_cashflow,
     },
     "get_income_statement": {
         "alpha_vantage": get_alpha_vantage_income_statement,
         "yfinance": get_yfinance_income_statement,
         "jquants": get_jquants_income_statement,
+        "jp_statements": get_jp_income_statement,
     },
     # news_data
     "get_news": {

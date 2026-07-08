@@ -228,6 +228,53 @@ def get_analyst_forward(ticker: Annotated[str, "ticker symbol of the company"]):
     return info.get("forwardEps"), info.get("numberOfAnalystOpinions")
 
 
+# yfinance statement attribute per (kind, freq); the raw line-item frame has
+# line items as rows and fiscal-period-end timestamps as columns.
+_STATEMENT_ATTRS = {
+    ("income", "quarterly"): "quarterly_income_stmt",
+    ("income", "annual"): "income_stmt",
+    ("balance", "quarterly"): "quarterly_balance_sheet",
+    ("balance", "annual"): "balance_sheet",
+    ("cashflow", "quarterly"): "quarterly_cashflow",
+    ("cashflow", "annual"): "cashflow",
+}
+
+
+def get_statement_frame(
+    ticker: Annotated[str, "ticker symbol of the company"],
+    kind: Annotated[str, "'income' | 'balance' | 'cashflow'"],
+    freq: Annotated[str, "'annual' or 'quarterly'"] = "quarterly",
+    curr_date: Annotated[str, "current date YYYY-MM-DD"] = None,
+):
+    """Return the date-filtered yfinance statement DataFrame, or None.
+
+    Rows are line items, columns are fiscal-period ends filtered to on/before
+    ``curr_date`` (look-ahead safe). Best-effort: any fetch failure or empty
+    result returns None. Exposed for the JP statement assembler, which picks the
+    curated line items the J-Quants summary lacks; keeping the raw frame here
+    leaves yfinance access in the yfinance module. (The three ``get_*`` wrappers
+    below duplicate this attr-select, deliberately left untouched to avoid churn
+    on upstream-shared code.)
+
+    ``freq`` is compared exactly to ``"annual"`` (matching the J-Quants summary's
+    own check) so the two halves of a JP statement report never disagree on
+    annual-vs-quarterly periods.
+    """
+    attr = _STATEMENT_ATTRS.get((kind, "annual" if freq == "annual" else "quarterly"))
+    if attr is None:
+        return None
+    canonical = normalize_symbol(ticker)
+    try:
+        obj = yf.Ticker(canonical)
+        data = yf_retry(lambda: getattr(obj, attr))
+    except Exception:
+        return None
+    if data is None or getattr(data, "empty", True):
+        return None
+    data = filter_financials_by_date(data, curr_date)
+    return data if not data.empty else None
+
+
 def get_balance_sheet(
     ticker: Annotated[str, "ticker symbol of the company"],
     freq: Annotated[str, "frequency of data: 'annual' or 'quarterly'"] = "quarterly",

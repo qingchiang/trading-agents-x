@@ -161,10 +161,11 @@ DEFAULT_CONFIG = _apply_env_overrides({
             "core_stock_apis": "jquants,yfinance",
             "technical_indicators": "jquants,yfinance",
             # get_fundamentals goes to jp_fundamentals (J-Quants summary + date-safe
-            # computed valuation ratios); the three statement methods aren't served
-            # by jp_fundamentals, so the chain skips it for them and they use
-            # jquants (freshest official filing), then yfinance as keyless fallback.
-            "fundamental_data": "jp_fundamentals,jquants,yfinance",
+            # computed valuation ratios); the three statement methods go to
+            # jp_statements (J-Quants summary + curated yfinance line items). Each
+            # JP assembler serves only its own methods, so the router picks the
+            # right one per method; jquants then yfinance remain keyless fallbacks.
+            "fundamental_data": "jp_fundamentals,jp_statements,jquants,yfinance",
             "news_data": "edinet_news,yfinance",
         },
     },
