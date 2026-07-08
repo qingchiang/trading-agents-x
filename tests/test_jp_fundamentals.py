@@ -53,6 +53,16 @@ _FY = {
 
 @pytest.mark.unit
 class JPFundamentalsTests(unittest.TestCase):
+    def setUp(self):
+        # The live analyst overlay is gated on curr_date ≈ today, so a test whose
+        # run date happens to fall within the live window would otherwise fire a
+        # real yfinance fetch. Default it to "no analyst data" for every test so
+        # the suite stays hermetic regardless of the wall clock; the live-overlay
+        # tests below re-patch it with their own return value.
+        patcher = mock.patch.object(jp_fundamentals, "get_analyst_forward", return_value=(None, None))
+        self.addCleanup(patcher.stop)
+        patcher.start()
+
     def _run(self, records, price_df, bench_df=None):
         # Beta needs the TOPIX frame; default to the same short frame so the
         # regression can't meet its minimum overlap (beta N/A) unless a test
@@ -122,6 +132,62 @@ class JPFundamentalsTests(unittest.TestCase):
         self.assertIn("PE: 36.08 (TTM)", out)
         self.assertIn("Beta (vs TOPIX, 3yr weekly): N/A", out)
         self.assertNotIn("ratio computation failed", out)
+
+    def _run_live(self, analyst, curr_date, records=None):
+        # analyst is the (forward_eps, num_analysts) tuple the yfinance overlay
+        # would return; pass a near-today curr_date to open the live gate.
+        with mock.patch.object(jp_fundamentals.jqf, "get_fundamentals", return_value="BASE-OVERVIEW"), \
+                mock.patch.object(jp_fundamentals.jqf, "fetch_periods",
+                                  return_value=("7011.T", records or [_FY])), \
+                mock.patch.object(jp_fundamentals, "_fetch_ohlcv_frame",
+                                  return_value=_price_df(3567.0, 5208.0, 3171.0)), \
+                mock.patch.object(jp_fundamentals, "fetch_topix_closes",
+                                  return_value=_price_df(3567.0, 5208.0, 3171.0)), \
+                mock.patch.object(jp_fundamentals, "get_analyst_forward", return_value=analyst) as gaf:
+            out = jp_fundamentals.get_fundamentals("7011.T", curr_date)
+        return out, gaf
+
+    def test_live_mode_adds_analyst_forward_overlay(self):
+        # Near-live run (curr_date == today): the live-only analyst line appears
+        # BELOW the always-shown company guidance, with forward PE from our own
+        # as-of price and a divergence note (company +14.4% vs analyst -6.3%).
+        today = pd.Timestamp.now().strftime("%Y-%m-%d")
+        out, _ = self._run_live((92.67, 16), today)
+        self.assertIn("company guidance / 会社予想, EPS 113.09", out)  # date-safe, still there
+        self.assertIn("Forward PE: 38.49 (analyst consensus, live only, 16 analysts, EPS 92.67)", out)
+        self.assertIn("company guidance +14.4% vs analyst -6.3% (divergent)", out)
+
+    def test_flat_company_guidance_vs_decline_reads_divergent(self):
+        # Sign boundary: flat company guidance (NxFEPS == EPS → 0% growth) vs an
+        # analyst decline must read "divergent", not "aligned" (0 is its own
+        # direction, not lumped with a decline).
+        today = pd.Timestamp.now().strftime("%Y-%m-%d")
+        flat = {**_FY, "NxFEPS": "98.86"}   # == EPS → company growth 0.0%
+        out, _ = self._run_live((90.0, 12), today, records=[flat])
+        self.assertIn("company guidance +0.0% vs analyst -9.0% (divergent)", out)
+
+    def test_backtest_mode_hides_analyst_forward(self):
+        # A past curr_date is a backtest: the live snapshot would leak the future,
+        # so the overlay is gated off BEFORE any yfinance fetch.
+        out, gaf = self._run_live((92.67, 16), "2024-03-15")
+        self.assertIn("company guidance / 会社予想", out)   # date-safe forward stays
+        self.assertNotIn("analyst consensus, live only", out)
+        gaf.assert_not_called()
+
+    def test_live_mode_omits_overlay_when_analyst_data_absent(self):
+        # Live, but yfinance has no analyst forward for the name → omit the line
+        # (best-effort), keep everything else.
+        today = pd.Timestamp.now().strftime("%Y-%m-%d")
+        out, _ = self._run_live((None, None), today)
+        self.assertIn("company guidance / 会社予想", out)
+        self.assertNotIn("analyst consensus, live only", out)
+
+    def test_is_live_gates_on_recency(self):
+        d5 = (pd.Timestamp.now() - pd.Timedelta(days=5)).strftime("%Y-%m-%d")
+        d6 = (pd.Timestamp.now() - pd.Timedelta(days=6)).strftime("%Y-%m-%d")
+        self.assertTrue(jp_fundamentals._is_live(d5))
+        self.assertFalse(jp_fundamentals._is_live(d6))
+        self.assertFalse(jp_fundamentals._is_live("not-a-date"))  # malformed → not live
 
     def test_ttm_rolls_cumulative_quarters(self):
         # Mid-year: latest disclosure is a cumulative 3Q. TTM = 3Q_cum + prior_FY

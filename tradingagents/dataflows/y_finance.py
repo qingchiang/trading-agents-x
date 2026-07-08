@@ -210,6 +210,24 @@ def get_fundamentals(
         return f"Error retrieving fundamentals for {ticker}: {str(e)}"
 
 
+def get_analyst_forward(ticker: Annotated[str, "ticker symbol of the company"]):
+    """Return ``(forward_eps, num_analysts)`` from yfinance ``.info``, else ``(None, None)``.
+
+    The analyst-consensus forward EPS and the number of contributing analysts.
+    This is a LIVE snapshot — yfinance exposes no as-of history for ``.info`` — so
+    callers must gate it on look-ahead (it is used only for the JP assembler's
+    live-only analyst-forward overlay). Any fetch failure degrades to ``(None, None)``.
+    """
+    canonical = normalize_symbol(ticker)
+    try:
+        info = yf_retry(lambda: yf.Ticker(canonical).info)
+    except Exception:
+        return None, None
+    if not info:
+        return None, None
+    return info.get("forwardEps"), info.get("numberOfAnalystOpinions")
+
+
 def get_balance_sheet(
     ticker: Annotated[str, "ticker symbol of the company"],
     freq: Annotated[str, "frequency of data: 'annual' or 'quarterly'"] = "quarterly",

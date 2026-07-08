@@ -19,8 +19,9 @@ Basis conventions (labelled in the output so nothing is silently cross-compared)
   inputs aren't all available on/before ``curr_date``.
 - Balance items (equity, assets, BPS, shares) → latest full-year point.
 - Forward (PE/PEG) → the company's own guidance (会社予想, ``NxFEPS``), which is
-  disclosed with the report and therefore date-safe. The analyst-consensus
-  forward (yfinance, live) is a separate live-only overlay (Phase 3), not here.
+  disclosed with the report and therefore date-safe, shown in every mode. The
+  analyst-consensus forward (yfinance ``.info``, a live snapshot) is added as a
+  separate **live-only** line, gated by ``_is_live`` so a backtest never sees it.
 - Beta → trailing 3-year WEEKLY regression of the stock's returns on TOPIX's
   (the cap-weighted market portfolio, per Japanese valuation practice), both
   J-Quants closes filtered to ``<= curr_date`` (date-safe).
@@ -37,8 +38,16 @@ from dateutil.relativedelta import relativedelta
 from . import jquants_fundamentals as jqf
 from .jquants_common import parse_number as _num
 from .jquants_stock import _fetch_ohlcv_frame, fetch_topix_closes
+from .y_finance import get_analyst_forward
 
 logger = logging.getLogger(__name__)
+
+# The company-guidance forward (jquants NxFEPS) is date-safe and always shown.
+# The analyst-consensus forward (yfinance .info) is a LIVE snapshot with no as-of
+# history, so it is emitted ONLY when curr_date is within this many days of today
+# (a live/near-live run); a backtest date is always far from today, so it stays
+# hidden there — keeping backtests look-ahead safe. See tmp/…plan.md §3.3.
+_LIVE_FORECAST_MAX_AGE_DAYS = 5
 
 # One J-Quants OHLCV fetch (trailing 3 years) backs everything price-derived: the
 # latest price, the 52-week high/low (sliced from the last year), and the beta
@@ -182,6 +191,72 @@ def _pos(value: float | None) -> float | None:
     return value if value is not None and value > 0 else None
 
 
+def _growth(future_eps: float | None, ttm_eps: float | None) -> float | None:
+    """YoY growth of a forward EPS over trailing EPS, or None on a missing /
+    non-positive base (keeps PEG and the company-vs-analyst comparison
+    well-defined, and keeps both growth figures on identical math)."""
+    if future_eps is None or not _pos(ttm_eps):
+        return None
+    return (future_eps - ttm_eps) / ttm_eps
+
+
+def _sign(value: float) -> int:
+    """-1 / 0 / +1 — so a flat forecast (0) is its own direction, not lumped
+    with a decline when comparing company vs analyst growth."""
+    return (value > 0) - (value < 0)
+
+
+def _is_live(curr_date: str) -> bool:
+    """True when ``curr_date`` is within ``_LIVE_FORECAST_MAX_AGE_DAYS`` of today.
+
+    Gate for the live-only analyst forward (see the module constant). Uses the
+    wall clock deliberately: the live overlay is not meant to be reproducible,
+    while a backtest date is always far from today, so backtests stay
+    deterministic and look-ahead safe. A malformed date is treated as not-live.
+    """
+    try:
+        age = (datetime.now() - datetime.strptime(curr_date, "%Y-%m-%d")).days
+    except (TypeError, ValueError):
+        return False
+    # abs(): within N days EITHER side of today counts as live — a small negative
+    # age (curr_date resolved in JST while the host clock lags) is still live,
+    # while a far-future date is correctly rejected.
+    return abs(age) <= _LIVE_FORECAST_MAX_AGE_DAYS
+
+
+def _analyst_forward_line(
+    ticker: str, price: float | None, ttm_eps: float | None,
+    company_growth: float | None, curr_date: str,
+) -> str | None:
+    """Live-only analyst-consensus forward line, or None in backtest / when absent.
+
+    Only rendered on a (near-)live run (``_is_live``): yfinance's ``.info`` forward
+    is a live snapshot that would leak the future in a backtest. Forward PE is
+    computed from our own as-of price for single-price consistency; the note
+    contrasts the company guidance vs the street to surface a divergence.
+    """
+    if not _is_live(curr_date):
+        return None
+    eps, n_analysts = get_analyst_forward(ticker)
+    eps = _num(eps)
+    if eps is None:
+        return None
+    fwd_pe = _div(price, _pos(eps))
+    analyst_growth = _growth(eps, ttm_eps)
+    count = f", {int(n_analysts)} analysts" if n_analysts else ""
+    note = ""
+    if company_growth is not None and analyst_growth is not None:
+        agree = "aligned" if _sign(company_growth) == _sign(analyst_growth) else "divergent"
+        note = (
+            f"; company guidance {company_growth * 100:+.1f}% vs "
+            f"analyst {analyst_growth * 100:+.1f}% ({agree})"
+        )
+    return (
+        f"- Forward PE: {_ratio(fwd_pe)} (analyst consensus, live only{count}, "
+        f"EPS {_ratio(eps)}){note}"
+    )
+
+
 def _history_frame(ticker: str, curr_date: str):
     """Return the date-safe trailing-3-year J-Quants OHLCV frame, or None.
 
@@ -284,7 +359,7 @@ def _valuation_block(ticker: str, curr_date: str) -> str:
     pb = _div(price, bps)
     div_yield = _div(div_ann, price)
     fwd_pe = _div(price, _pos(fwd_eps))
-    growth = _div(fwd_eps - ttm_eps, ttm_eps) if fwd_eps is not None and _pos(ttm_eps) else None
+    growth = _growth(fwd_eps, ttm_eps)
     peg = _div(fwd_pe, growth * 100) if _pos(growth) else None
     net_margin = _div(ttm_np, ttm_sales)
     roe = _div(ttm_eps, bps)
@@ -292,7 +367,7 @@ def _valuation_block(ticker: str, curr_date: str) -> str:
 
     price_line = f"{_ratio(price)} (as of {price_date})" if price is not None else "N/A"
     growth_note = f", 1yr growth {growth * 100:+.1f}%" if growth is not None else ""
-    return "\n".join([
+    lines = [
         "",
         f"\n## Valuation (computed from J-Quants summary + price, date-safe as of {curr_date})",
         f"- Price: {price_line}",
@@ -302,11 +377,15 @@ def _valuation_block(ticker: str, curr_date: str) -> str:
         f"- Dividend yield: {_pct(div_yield)} (DivAnn {_ratio(div_ann)})    Payout: {_pct(payout)}",
         f"- Forward PE: {_ratio(fwd_pe)} (company guidance / 会社予想, EPS {_ratio(fwd_eps)})"
         f"    PEG: {_ratio(peg)} (company-guidance{growth_note})",
+        # Live-only analyst-consensus forward, right below the (date-safe) company
+        # guidance; None → dropped by the join filter in a backtest / when absent.
+        _analyst_forward_line(ticker, price, ttm_eps, growth, curr_date),
         f"- Net margin: {_pct(net_margin)} ({flow_basis})    ROE: {_pct(roe)}    ROA: {_pct(roa)}"
         f"    Equity ratio: {_ratio(eqar)}",
         f"- 52-week range: {_ratio(wk_low)} – {_ratio(wk_high)}"
         f"    Beta (vs {_MARKET_INDEX}, 3yr weekly): {_ratio(beta)}",
-    ])
+    ]
+    return "\n".join(line for line in lines if line is not None)
 
 
 def get_fundamentals(ticker: str, curr_date: str | None = None) -> str:
