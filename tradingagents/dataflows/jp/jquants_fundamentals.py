@@ -8,13 +8,13 @@ possible later enhancement for that detail.
 
 from __future__ import annotations
 
+from ..symbol_utils import NoMarketDataError
 from .jquants_common import (
     from_jquants_code,
     memoized_fetch,
     parse_number as _num,
     to_jquants_code,
 )
-from .symbol_utils import NoMarketDataError
 
 # How many recent disclosed periods to show in each statement.
 _PERIOD_LIMIT = 4

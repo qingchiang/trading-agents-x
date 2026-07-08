@@ -20,8 +20,8 @@ from datetime import datetime, timedelta
 
 import requests
 
-from .errors import VendorNotConfiguredError, VendorRateLimitError
-from .utils import get_current_date
+from ..errors import VendorNotConfiguredError, VendorRateLimitError
+from ..utils import get_current_date
 
 logger = logging.getLogger(__name__)
 

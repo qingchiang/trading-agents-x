@@ -30,9 +30,9 @@ import os
 import threading
 from importlib import resources
 
-from .config import get_config
+from ..config import get_config
+from ..symbol_utils import tokyo_securities_base
 from .jquants_common import to_jquants_code
-from .symbol_utils import tokyo_securities_base
 
 logger = logging.getLogger(__name__)
 

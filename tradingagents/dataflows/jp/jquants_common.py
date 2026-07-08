@@ -13,8 +13,8 @@ import os
 
 import requests
 
-from .errors import VendorNotConfiguredError, VendorRateLimitError
-from .symbol_utils import tokyo_securities_base
+from ..errors import VendorNotConfiguredError, VendorRateLimitError
+from ..symbol_utils import tokyo_securities_base
 
 JQUANTS_API_BASE = "https://api.jquants.com/v2"
 

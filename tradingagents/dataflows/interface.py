@@ -12,20 +12,20 @@ from .alpha_vantage import (
     get_stock as get_alpha_vantage_stock,
 )
 from .config import get_config
-from .edinet_news import get_news as get_edinet_news
 from .errors import (
     NoMarketDataError,
     VendorNotConfiguredError,
     VendorRateLimitError,
 )
 from .fred import get_macro_data as get_fred_macro_data
-from .jp_fundamentals import get_fundamentals as get_jp_fundamentals
-from .jp_statements import (
+from .jp.edinet_news import get_news as get_edinet_news
+from .jp.jp_fundamentals import get_fundamentals as get_jp_fundamentals
+from .jp.jp_statements import (
     get_balance_sheet as get_jp_balance_sheet,
     get_cashflow as get_jp_cashflow,
     get_income_statement as get_jp_income_statement,
 )
-from .jquants import (
+from .jp.jquants import (
     get_balance_sheet as get_jquants_balance_sheet,
     get_cashflow as get_jquants_cashflow,
     get_fundamentals as get_jquants_fundamentals,

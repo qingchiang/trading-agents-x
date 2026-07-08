@@ -35,10 +35,10 @@ from datetime import datetime
 import pandas as pd
 from dateutil.relativedelta import relativedelta
 
+from ..y_finance import get_analyst_forward
 from . import jquants_fundamentals as jqf
 from .jquants_common import parse_number as _num
 from .jquants_stock import _fetch_ohlcv_frame, fetch_topix_closes
-from .y_finance import get_analyst_forward
 
 logger = logging.getLogger(__name__)
 

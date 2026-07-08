@@ -26,7 +26,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta
 
-from .config import get_config
+from ..config import get_config
 from .edinet_code_map import learn_many, resolve_edinet_code
 from .edinet_common import (
     documents_on,

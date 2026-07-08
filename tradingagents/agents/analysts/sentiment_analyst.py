@@ -16,7 +16,7 @@ is invoked and injects them into the prompt as structured blocks:
 StockTwits and Reddit are US-retail platforms, so for a routed non-US market
 they are replaced by an official market-wide flow signal where one exists (a
 4th block — e.g. J-Quants investor-type flows for Tokyo names; see
-:mod:`tradingagents.dataflows.jquants_sentiment`).
+:mod:`tradingagents.dataflows.jp.jquants_sentiment`).
 
 The agent does not use tool-calling; the data is in the prompt from
 turn 0. Output uses the structured-output pattern (json_schema for
@@ -45,8 +45,8 @@ from tradingagents.agents.utils.structured import (
     bind_structured,
     invoke_structured_or_freetext,
 )
-from tradingagents.dataflows.edinet_holdings import get_large_holdings
-from tradingagents.dataflows.jquants_sentiment import get_investor_flows
+from tradingagents.dataflows.jp.edinet_holdings import get_large_holdings
+from tradingagents.dataflows.jp.jquants_sentiment import get_investor_flows
 from tradingagents.dataflows.market_context import market_suffix_of
 from tradingagents.dataflows.reddit import fetch_reddit_posts
 from tradingagents.dataflows.stocktwits import fetch_stocktwits_messages

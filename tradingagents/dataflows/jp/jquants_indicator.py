@@ -8,8 +8,8 @@ from datetime import datetime
 
 from dateutil.relativedelta import relativedelta
 
+from ..stockstats_utils import render_indicator_window
 from .jquants_stock import _fetch_ohlcv_frame
-from .stockstats_utils import render_indicator_window
 
 # Warm-up history fetched before the requested window so long indicators (e.g.
 # the 200 SMA) have enough lookback. 200 trading days ~ 290 calendar days; pad

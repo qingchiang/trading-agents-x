@@ -7,9 +7,10 @@ import pytest
 
 import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
-from tradingagents.dataflows import interface, jquants_fundamentals as jf
+from tradingagents.dataflows import interface
 from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.errors import NoMarketDataError
+from tradingagents.dataflows.jp import jquants_fundamentals as jf
 
 
 def _summary(disc_date, *, per_type="FY", per_end="2023-03-31", ta="1000", eq="400",
@@ -26,7 +27,7 @@ def _summary(disc_date, *, per_type="FY", per_end="2023-03-31", ta="1000", eq="4
 
 def _patch(records):
     return mock.patch(
-        "tradingagents.dataflows.jquants_common.fetch_records",
+        "tradingagents.dataflows.jp.jquants_common.fetch_records",
         return_value=records,
     )
 
@@ -42,7 +43,7 @@ class FundamentalsTests(unittest.TestCase):
     def test_summary_fetch_is_memoized_across_tools(self):
         # The four fundamental tools share one /fins/summary fetch per ticker.
         mock_fetch = mock.Mock(return_value=[_summary("2023-05-10")])
-        with mock.patch("tradingagents.dataflows.jquants_common.fetch_records", mock_fetch):
+        with mock.patch("tradingagents.dataflows.jp.jquants_common.fetch_records", mock_fetch):
             jf.get_fundamentals("9984.T")
             jf.get_balance_sheet("9984.T")
             jf.get_cashflow("9984.T")

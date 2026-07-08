@@ -20,8 +20,8 @@ from __future__ import annotations
 
 import logging
 
+from ..y_finance import get_statement_frame
 from . import jquants_fundamentals as jqf
-from .y_finance import get_statement_frame
 
 logger = logging.getLogger(__name__)
 

@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 import requests
 
-from tradingagents.dataflows import jp_fundamentals
+from tradingagents.dataflows.jp import jp_fundamentals
 
 
 def _price_df(close, high, low, date="2026-06-26"):

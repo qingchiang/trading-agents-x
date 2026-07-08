@@ -4,8 +4,8 @@ from unittest import mock
 
 import pytest
 
-from tradingagents.dataflows import jquants_sentiment as js
-from tradingagents.dataflows.jquants_sentiment import get_investor_flows
+from tradingagents.dataflows.jp import jquants_sentiment as js
+from tradingagents.dataflows.jp.jquants_sentiment import get_investor_flows
 
 
 def _week(pub, st, en, *, frgn="1000", ind="-500", invtr="200",

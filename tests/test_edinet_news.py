@@ -10,15 +10,16 @@ import requests
 
 import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
-from tradingagents.dataflows import edinet_common, edinet_news, interface
+from tradingagents.dataflows import interface
 from tradingagents.dataflows.config import set_config
-from tradingagents.dataflows.edinet_common import (
-    EDINETNotConfiguredError,
-    EDINETRateLimitError,
-)
 from tradingagents.dataflows.errors import (
     VendorNotConfiguredError,
     VendorRateLimitError,
+)
+from tradingagents.dataflows.jp import edinet_common, edinet_news
+from tradingagents.dataflows.jp.edinet_common import (
+    EDINETNotConfiguredError,
+    EDINETRateLimitError,
 )
 
 

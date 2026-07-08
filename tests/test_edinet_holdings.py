@@ -8,8 +8,8 @@ import pytest
 
 import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
-from tradingagents.dataflows import edinet_code_map as cm, edinet_common, edinet_holdings
 from tradingagents.dataflows.config import set_config
+from tradingagents.dataflows.jp import edinet_code_map as cm, edinet_common, edinet_holdings
 
 
 def _holding(subject="E02778", *, doc_type="350", filer="ブラックロック・ジャパン株式会社",

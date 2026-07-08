@@ -12,8 +12,8 @@ import pytest
 
 import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
-from tradingagents.dataflows import edinet_code_map as cm
 from tradingagents.dataflows.config import set_config
+from tradingagents.dataflows.jp import edinet_code_map as cm
 
 
 @pytest.mark.unit
