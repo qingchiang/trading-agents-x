@@ -34,6 +34,7 @@ from .edinet_common import (
     iter_window_dates,
     render_filings,
 )
+from .market import is_tokyo_ticker
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,7 @@ def get_large_holdings(ticker: str, curr_date: str, look_back_days: int = _LOOK_
     whose ``subjectEdinetCode`` is this ticker. Degrades to a placeholder string on
     any error or when the ticker's EDINET code is unknown; never raises.
     """
-    if not str(ticker).upper().endswith(".T"):
+    if not is_tokyo_ticker(ticker):
         return ""
 
     try:

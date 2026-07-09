@@ -185,9 +185,9 @@ class JPFundamentalsTests(unittest.TestCase):
     def test_is_live_gates_on_recency(self):
         d5 = (pd.Timestamp.now() - pd.Timedelta(days=5)).strftime("%Y-%m-%d")
         d6 = (pd.Timestamp.now() - pd.Timedelta(days=6)).strftime("%Y-%m-%d")
-        self.assertTrue(jp_fundamentals._is_live(d5))
-        self.assertFalse(jp_fundamentals._is_live(d6))
-        self.assertFalse(jp_fundamentals._is_live("not-a-date"))  # malformed → not live
+        self.assertTrue(jp_fundamentals.is_live(d5))
+        self.assertFalse(jp_fundamentals.is_live(d6))
+        self.assertFalse(jp_fundamentals.is_live("not-a-date"))  # malformed → not live
 
     def test_ttm_rolls_cumulative_quarters(self):
         # Mid-year: latest disclosure is a cumulative 3Q. TTM = 3Q_cum + prior_FY

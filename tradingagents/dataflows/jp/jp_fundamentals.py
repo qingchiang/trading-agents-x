@@ -21,7 +21,7 @@ Basis conventions (labelled in the output so nothing is silently cross-compared)
 - Forward (PE/PEG) → the company's own guidance (会社予想, ``NxFEPS``), which is
   disclosed with the report and therefore date-safe, shown in every mode. The
   analyst-consensus forward (yfinance ``.info``, a live snapshot) is added as a
-  separate **live-only** line, gated by ``_is_live`` so a backtest never sees it.
+  separate **live-only** line, gated by ``is_live`` so a backtest never sees it.
 - Beta → trailing 3-year WEEKLY regression of the stock's returns on TOPIX's
   (the cap-weighted market portfolio, per Japanese valuation practice), both
   J-Quants closes filtered to ``<= curr_date`` (date-safe).
@@ -39,15 +39,9 @@ from ..y_finance import get_analyst_forward
 from . import jquants_fundamentals as jqf
 from .jquants_common import parse_number as _num
 from .jquants_stock import _fetch_ohlcv_frame, fetch_topix_closes
+from .lookahead import is_live
 
 logger = logging.getLogger(__name__)
-
-# The company-guidance forward (jquants NxFEPS) is date-safe and always shown.
-# The analyst-consensus forward (yfinance .info) is a LIVE snapshot with no as-of
-# history, so it is emitted ONLY when curr_date is within this many days of today
-# (a live/near-live run); a backtest date is always far from today, so it stays
-# hidden there — keeping backtests look-ahead safe. See tmp/…plan.md §3.3.
-_LIVE_FORECAST_MAX_AGE_DAYS = 5
 
 # One J-Quants OHLCV fetch (trailing 3 years) backs everything price-derived: the
 # latest price, the 52-week high/low (sliced from the last year), and the beta
@@ -206,36 +200,18 @@ def _sign(value: float) -> int:
     return (value > 0) - (value < 0)
 
 
-def _is_live(curr_date: str) -> bool:
-    """True when ``curr_date`` is within ``_LIVE_FORECAST_MAX_AGE_DAYS`` of today.
-
-    Gate for the live-only analyst forward (see the module constant). Uses the
-    wall clock deliberately: the live overlay is not meant to be reproducible,
-    while a backtest date is always far from today, so backtests stay
-    deterministic and look-ahead safe. A malformed date is treated as not-live.
-    """
-    try:
-        age = (datetime.now() - datetime.strptime(curr_date, "%Y-%m-%d")).days
-    except (TypeError, ValueError):
-        return False
-    # abs(): within N days EITHER side of today counts as live — a small negative
-    # age (curr_date resolved in JST while the host clock lags) is still live,
-    # while a far-future date is correctly rejected.
-    return abs(age) <= _LIVE_FORECAST_MAX_AGE_DAYS
-
-
 def _analyst_forward_line(
     ticker: str, price: float | None, ttm_eps: float | None,
     company_growth: float | None, curr_date: str,
 ) -> str | None:
     """Live-only analyst-consensus forward line, or None in backtest / when absent.
 
-    Only rendered on a (near-)live run (``_is_live``): yfinance's ``.info`` forward
+    Only rendered on a (near-)live run (``is_live``): yfinance's ``.info`` forward
     is a live snapshot that would leak the future in a backtest. Forward PE is
     computed from our own as-of price for single-price consistency; the note
     contrasts the company guidance vs the street to surface a divergence.
     """
-    if not _is_live(curr_date):
+    if not is_live(curr_date):
         return None
     eps, n_analysts = get_analyst_forward(ticker)
     eps = _num(eps)
@@ -243,6 +219,7 @@ def _analyst_forward_line(
         return None
     fwd_pe = _div(price, _pos(eps))
     analyst_growth = _growth(eps, ttm_eps)
+    n_analysts = _num(n_analysts)  # raw yfinance value → float|None so int() can't raise
     count = f", {int(n_analysts)} analysts" if n_analysts else ""
     note = ""
     if company_growth is not None and analyst_growth is not None:

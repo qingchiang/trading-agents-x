@@ -24,6 +24,7 @@ import logging
 from datetime import datetime, timedelta
 
 from .jquants_common import fetch_records
+from .market import is_tokyo_ticker
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +67,7 @@ def get_investor_flows(
     than inheriting Japan's numbers. Degrades to a placeholder string on any
     fetch error (the sentiment prefetch contract); never raises.
     """
-    if not str(ticker).upper().endswith(".T"):
+    if not is_tokyo_ticker(ticker):
         return ""
 
     try:
