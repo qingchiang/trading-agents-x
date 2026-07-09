@@ -434,41 +434,46 @@ class TestSentimentMarketGating:
                 mock.patch(f"{_SENTIMENT_MOD}.fetch_reddit_posts") as rd, \
                 mock.patch(f"{_SENTIMENT_MOD}.get_investor_flows") as flows, \
                 mock.patch(f"{_SENTIMENT_MOD}.get_large_holdings") as holdings, \
+                mock.patch(f"{_SENTIMENT_MOD}.get_analyst_ratings_block") as ratings, \
                 mock.patch(f"{_SENTIMENT_MOD}.get_news") as news:
             st.return_value = "STOCKTWITS_DATA"
             rd.return_value = "REDDIT_DATA"
             flows.return_value = "INVESTOR_FLOWS_DATA"
             holdings.return_value = "LARGE_HOLDINGS_DATA"
+            ratings.return_value = "ANALYST_RATINGS_DATA"
             if news_side_effect is not None:
                 news.func.side_effect = news_side_effect
             else:
                 news.func.return_value = "NEWS_DATA"
             state = {**_make_sentiment_state(), "company_of_interest": ticker}
             result = create_sentiment_analyst(_structured_sentiment_llm(captured))(state)
-        return captured, st, rd, flows, holdings, result
+        return captured, st, rd, flows, holdings, ratings, result
 
     def test_us_ticker_calls_social_fetchers(self):
-        _captured, st, rd, flows, holdings, _ = self._run("NVDA")
+        _captured, st, rd, flows, holdings, ratings, _ = self._run("NVDA")
         st.assert_called_once()
         rd.assert_called_once()
         flows.assert_not_called()  # market-flow proxy is for routed markets only
         holdings.assert_not_called()  # large-holding signal is for routed markets only
+        ratings.assert_not_called()  # analyst-rating overlay is for routed markets only
 
     def test_routed_market_skips_social_and_injects_flows(self):
-        captured, st, rd, flows, holdings, _ = self._run(
+        captured, st, rd, flows, holdings, ratings, _ = self._run(
             "9984.T", routes={".T": {"news_data": "edinet_news"}}
         )
         st.assert_not_called()
         rd.assert_not_called()
         flows.assert_called_once()
         holdings.assert_called_once()
+        ratings.assert_called_once()
         prompt_text = "".join(str(m) for m in captured["prompt"])
         assert "unavailable: no coverage for this market" in prompt_text
         assert "INVESTOR_FLOWS_DATA" in prompt_text
         assert "LARGE_HOLDINGS_DATA" in prompt_text
+        assert "ANALYST_RATINGS_DATA" in prompt_text
 
     def test_news_fetch_error_degrades_instead_of_crashing(self):
-        captured, _st, _rd, _flows, _holdings, result = self._run(
+        captured, _st, _rd, _flows, _holdings, _ratings, result = self._run(
             "9984.T",
             routes={".T": {"news_data": "edinet_news"}},
             news_side_effect=VendorNotConfiguredError("EDINET_API_KEY unset"),

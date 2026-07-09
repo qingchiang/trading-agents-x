@@ -4,6 +4,7 @@ from typing import Annotated
 import yfinance as yf
 from dateutil.relativedelta import relativedelta
 
+from .macro_common import SeriesCache
 from .stockstats_utils import (
     INDICATOR_DESCRIPTIONS,
     StockstatsUtils,
@@ -210,6 +211,30 @@ def get_fundamentals(
         return f"Error retrieving fundamentals for {ticker}: {str(e)}"
 
 
+# yfinance ``.info`` is one HTTP round-trip returning ALL fields, and both
+# live-only JP overlays (analyst forward + analyst ratings) read it for the same
+# ticker in the same run. Cache successful fetches (bounded LRU) so the run pays
+# a single round-trip; a failure is NOT cached so a transient outage stays
+# retryable. Only live/near-today runs reach here (callers gate on look-ahead),
+# so a process-lifetime snapshot is acceptable.
+_INFO_CACHE = SeriesCache(max_entries=256)
+
+
+def _yf_info(canonical: str) -> dict:
+    """Fetch (and memoize) yfinance ``.info`` for a canonical symbol; ``{}`` on failure."""
+    info = _INFO_CACHE.get(canonical)
+    if info is not None:
+        return info
+    try:
+        info = yf_retry(lambda: yf.Ticker(canonical).info)
+    except Exception:
+        return {}
+    if not info:
+        return {}
+    _INFO_CACHE.put(canonical, info)
+    return info
+
+
 def get_analyst_forward(ticker: Annotated[str, "ticker symbol of the company"]):
     """Return ``(forward_eps, num_analysts)`` from yfinance ``.info``, else ``(None, None)``.
 
@@ -218,14 +243,36 @@ def get_analyst_forward(ticker: Annotated[str, "ticker symbol of the company"]):
     callers must gate it on look-ahead (it is used only for the JP assembler's
     live-only analyst-forward overlay). Any fetch failure degrades to ``(None, None)``.
     """
-    canonical = normalize_symbol(ticker)
-    try:
-        info = yf_retry(lambda: yf.Ticker(canonical).info)
-    except Exception:
-        return None, None
-    if not info:
-        return None, None
+    info = _yf_info(normalize_symbol(ticker))
     return info.get("forwardEps"), info.get("numberOfAnalystOpinions")
+
+
+# Analyst-consensus rating fields from yfinance ``.info``, in the order a caller
+# would present them: the rating, its 1–5 mean, the analyst count, and the
+# 12-month price-target band plus the live price the target is measured against.
+_RATING_FIELDS = (
+    "recommendationKey",
+    "recommendationMean",
+    "numberOfAnalystOpinions",
+    "targetMeanPrice",
+    "targetHighPrice",
+    "targetLowPrice",
+    "currentPrice",
+    "regularMarketPrice",  # fallback when .info omits currentPrice for some .T names
+)
+
+
+def get_analyst_ratings(ticker: Annotated[str, "ticker symbol of the company"]) -> dict:
+    """Return yfinance analyst-consensus rating fields as a dict, else ``{}``.
+
+    Sell-side rating (buy/hold/sell), its 1–5 mean, the contributing analyst
+    count, and the 12-month price-target band. Like :func:`get_analyst_forward`
+    this is a LIVE ``.info`` snapshot with no as-of history, so callers must gate
+    it on look-ahead (it feeds the JP sentiment analyst's live-only rating
+    overlay). Any fetch failure degrades to ``{}``.
+    """
+    info = _yf_info(normalize_symbol(ticker))
+    return {k: info.get(k) for k in _RATING_FIELDS} if info else {}
 
 
 # yfinance statement attribute per (kind, freq); the raw line-item frame has
