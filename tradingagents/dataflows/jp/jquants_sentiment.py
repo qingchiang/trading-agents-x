@@ -50,16 +50,22 @@ _FLOW_FIELDS = (
 )
 
 
-def _net(value) -> str:
-    """Format a net-balance value with sign and thousands separators, or N/A."""
-    try:
-        return f"{float(value):+,.0f}"
-    except (TypeError, ValueError):
+def _fmt_num(value, *, signed: bool = False) -> str:
+    """Format a J-Quants numeric (raw or pre-parsed) with thousands separators, or N/A.
+
+    ``signed`` prefixes ``+`` on positives, for net-balance figures where direction
+    is the point.
+    """
+    n = parse_number(value)
+    if n is None:
         return "N/A"
+    return f"{n:+,.0f}" if signed else f"{n:,.0f}"
 
 
 def _format_week(record: dict) -> str:
-    flows = " · ".join(f"{label} {_net(record.get(key))}" for label, key in _FLOW_FIELDS)
+    flows = " · ".join(
+        f"{label} {_fmt_num(record.get(key), signed=True)}" for label, key in _FLOW_FIELDS
+    )
     span = f"{record.get('StDate', '?')}..{record.get('EnDate', '?')}"
     return f"- Week {span} (published {record.get('PubDate', '?')}): {flows}"
 
@@ -136,11 +142,6 @@ def _margin_published_by(record_date: str, curr: date) -> bool:
     return add_business_days(rec, _MARGIN_PUBLICATION_BUSINESS_DAYS) <= curr
 
 
-def _shares(value) -> str:
-    """Format a parsed share count with thousands separators, or N/A."""
-    return f"{value:,.0f}" if value is not None else "N/A"
-
-
 def _margin_week(record: dict) -> str:
     long_bal = parse_number(record.get("LongVol"))  # 信用買残 (margin longs)
     short_bal = parse_number(record.get("ShrtVol"))  # 信用売残 (margin shorts)
@@ -150,8 +151,8 @@ def _margin_week(record: dict) -> str:
         else "N/A"
     )
     return (
-        f"- Week {record.get('Date', '?')}: 買残(long) {_shares(long_bal)} · "
-        f"売残(short) {_shares(short_bal)} · credit ratio {ratio}"
+        f"- Week {record.get('Date', '?')}: 買残(long) {_fmt_num(long_bal)} · "
+        f"売残(short) {_fmt_num(short_bal)} · credit ratio {ratio}"
     )
 
 

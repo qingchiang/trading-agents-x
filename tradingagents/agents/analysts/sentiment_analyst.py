@@ -163,30 +163,37 @@ def create_sentiment_analyst(llm):
     return sentiment_analyst_node
 
 
+# Each intro owns its block's interpretation (rendered directly above the data);
+# prompt rule 7 stays block-agnostic so a new signal is one intro, not two edits.
 _FLOWS_INTRO = (
     'Quantitative "who is buying" signal for the ticker\'s home market, standing in\n'
     "for retail social platforms that do not cover it. Institutional/foreign vs\n"
-    "retail net flows, not opinion."
+    "retail net flows, not opinion. Sustained net buying by foreigners is bullish and\n"
+    "net selling bearish; individuals often lean contrarian."
 )
 _HOLDINGS_INTRO = (
     "Per-name filings by investors crossing/adjusting a 5% stake (EDINET 大量保有報告書).\n"
     'A "who is accumulating" signal; the list shows the filer and report type, not the\n'
-    "exact stake percentage."
+    "exact stake percentage — so read frequency and who is filing, not a precise\n"
+    "position. A cluster of new 5%+ reports suggests institutional accumulation (mildly\n"
+    "bullish)."
 )
 _MARGIN_INTRO = (
     "Per-name weekly margin-trading balances (信用取引): 信用買残 are shares bought on\n"
     "margin (latent future selling), 信用売残 shares sold short on margin. A rising\n"
-    "credit ratio (買残/売残) means growing long overhang — a contrarian/bearish tilt."
+    "credit ratio (買残/売残) means growing long overhang — a contrarian/bearish tilt,\n"
+    "a falling one is supportive. Read the trend across weeks, not a single week."
 )
 _SHORT_INTRO = (
     "Per-name disclosed large short positions (空売り残高報告, ≥0.5% of shares out),\n"
     "each naming the short seller. New or rising positions are professional bearish\n"
-    "positioning; falling/covered ones are bullish."
+    "positioning; falling/covered ones are bullish. Weigh by how large and how many."
 )
 _RATINGS_INTRO = (
-    "Per-name sell-side view: the analyst-consensus rating and 12-month price target.\n"
-    "A professional-opinion signal (distinct from the flow/accumulation blocks, which\n"
-    "are positioning). LIVE snapshot — present only on live runs, absent in backtests."
+    "Per-name sell-side view: the analyst-consensus rating (its mean is a 1–5 scale\n"
+    "where 1 is most bullish) and the 12-month price-target implied upside. A\n"
+    "professional-opinion signal, distinct from the flow/accumulation blocks, which are\n"
+    "positioning. LIVE snapshot — present only on live runs, absent in backtests."
 )
 
 
@@ -275,7 +282,7 @@ Community discussion. Engagement signal via upvote score and comment count. Subr
 
 6. **Be honest about data limits, and never invent data for an unavailable source.** If a block contains an "<unavailable>" / "<no ...>" placeholder (e.g. StockTwits and Reddit have no coverage outside US markets), treat that source as absent: do NOT infer a Bullish/Bearish ratio, divergence, or engagement from it — rules 1–3 simply do not apply to it. Lean on the sources that ARE present and lower the `confidence` field accordingly, stating which sources were missing.
 
-7. **When official exchange/disclosure blocks are present, treat them as the primary sentiment signal.** They stand in for the retail-social blocks that don't cover this market, so weight them above any thin or placeholder social blocks. A "Market-wide investor flows" block is official data on who is net buying/selling (foreigners, individuals, institutions): sustained net buying by foreigners is bullish, net selling bearish; individuals often lean contrarian. A "Large-shareholding activity" block lists investors crossing/adjusting a 5% stake: a cluster of new 5%+ reports suggests institutional accumulation (mildly bullish), while it shows filer and report type, not exact percentages — so read frequency and who is filing, not a precise position. A "Margin-trading balances" block is weekly 信用取引 positioning: 信用買残 (margin longs) are latent future selling and 信用売残 (margin shorts) latent future buying, so a rising credit ratio (買残/売残) is a contrarian/bearish overhang while a falling one is supportive — read the trend across weeks, not one week alone. A "Short-position disclosures" block lists named investors holding ≥0.5% short: new or rising positions are professional bearish conviction, falling/covered ones bullish; weigh by how large and how many. An "Analyst consensus" block is the sell-side view: read the rating (its mean is a 1–5 scale where 1 is most bullish) and the price-target implied upside as a professional-opinion signal — distinct from the flow/accumulation blocks, which are positioning, not opinion. It is a live snapshot, so its absence is normal (backtests) and not itself bearish.
+7. **When official exchange/disclosure blocks are present, treat them as the primary sentiment signal.** They stand in for the retail-social blocks that don't cover this market, so weight them above any thin or placeholder social block, and read each one exactly as the one-line note printed directly above its data explains. These are positioning and professional opinion, not retail chatter — do not force the StockTwits/Reddit Bullish/Bearish-ratio framing (rules 1–3) onto them. A live-snapshot block (analyst consensus) is often absent in backtests; that absence is normal and not itself bearish.
 
 8. **Identify catalysts and risks** that emerge across sources — news of upcoming earnings, product launches, competitive threats, macro headlines, etc.
 
