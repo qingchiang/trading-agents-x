@@ -46,7 +46,11 @@ from tradingagents.agents.utils.structured import (
     invoke_structured_or_freetext,
 )
 from tradingagents.dataflows.jp.edinet_holdings import get_large_holdings
-from tradingagents.dataflows.jp.jquants_sentiment import get_investor_flows
+from tradingagents.dataflows.jp.jquants_sentiment import (
+    get_investor_flows,
+    get_margin_balance,
+    get_short_positions,
+)
 from tradingagents.dataflows.jp.yfinance_sentiment import get_analyst_ratings_block
 from tradingagents.dataflows.market_context import market_suffix_of
 from tradingagents.dataflows.reddit import fetch_reddit_posts
@@ -101,6 +105,8 @@ def create_sentiment_analyst(llm):
             optional_blocks = {
                 "market_flows": get_investor_flows(ticker, end_date),
                 "large_holdings": get_large_holdings(ticker, end_date),
+                "margin_balances": get_margin_balance(ticker, end_date),
+                "short_positions": get_short_positions(ticker, end_date),
                 "analyst_ratings": get_analyst_ratings_block(ticker, end_date),
             }
         else:
@@ -167,6 +173,16 @@ _HOLDINGS_INTRO = (
     'A "who is accumulating" signal; the list shows the filer and report type, not the\n'
     "exact stake percentage."
 )
+_MARGIN_INTRO = (
+    "Per-name weekly margin-trading balances (信用取引): 信用買残 are shares bought on\n"
+    "margin (latent future selling), 信用売残 shares sold short on margin. A rising\n"
+    "credit ratio (買残/売残) means growing long overhang — a contrarian/bearish tilt."
+)
+_SHORT_INTRO = (
+    "Per-name disclosed large short positions (空売り残高報告, ≥0.5% of shares out),\n"
+    "each naming the short seller. New or rising positions are professional bearish\n"
+    "positioning; falling/covered ones are bullish."
+)
 _RATINGS_INTRO = (
     "Per-name sell-side view: the analyst-consensus rating and 12-month price target.\n"
     "A professional-opinion signal (distinct from the flow/accumulation blocks, which\n"
@@ -192,6 +208,8 @@ def _optional_section(title: str, intro: str, tag: str, body: str) -> str:
 _OPTIONAL_SECTIONS = (
     ("Market-wide investor flows — official exchange data", _FLOWS_INTRO, "market_flows"),
     ("Large-shareholding activity — official 5%+ disclosures", _HOLDINGS_INTRO, "large_holdings"),
+    ("Margin-trading balances — official weekly 信用取引", _MARGIN_INTRO, "margin_balances"),
+    ("Short-position disclosures — official 空売り残高報告", _SHORT_INTRO, "short_positions"),
     ("Analyst consensus — sell-side rating & price target", _RATINGS_INTRO, "analyst_ratings"),
 )
 
@@ -257,7 +275,7 @@ Community discussion. Engagement signal via upvote score and comment count. Subr
 
 6. **Be honest about data limits, and never invent data for an unavailable source.** If a block contains an "<unavailable>" / "<no ...>" placeholder (e.g. StockTwits and Reddit have no coverage outside US markets), treat that source as absent: do NOT infer a Bullish/Bearish ratio, divergence, or engagement from it — rules 1–3 simply do not apply to it. Lean on the sources that ARE present and lower the `confidence` field accordingly, stating which sources were missing.
 
-7. **When official exchange/disclosure blocks are present, treat them as the primary sentiment signal.** They stand in for the retail-social blocks that don't cover this market, so weight them above any thin or placeholder social blocks. A "Market-wide investor flows" block is official data on who is net buying/selling (foreigners, individuals, institutions): sustained net buying by foreigners is bullish, net selling bearish; individuals often lean contrarian. A "Large-shareholding activity" block lists investors crossing/adjusting a 5% stake: a cluster of new 5%+ reports suggests institutional accumulation (mildly bullish), while it shows filer and report type, not exact percentages — so read frequency and who is filing, not a precise position. An "Analyst consensus" block is the sell-side view: read the rating (its mean is a 1–5 scale where 1 is most bullish) and the price-target implied upside as a professional-opinion signal — distinct from the flow/accumulation blocks, which are positioning, not opinion. It is a live snapshot, so its absence is normal (backtests) and not itself bearish.
+7. **When official exchange/disclosure blocks are present, treat them as the primary sentiment signal.** They stand in for the retail-social blocks that don't cover this market, so weight them above any thin or placeholder social blocks. A "Market-wide investor flows" block is official data on who is net buying/selling (foreigners, individuals, institutions): sustained net buying by foreigners is bullish, net selling bearish; individuals often lean contrarian. A "Large-shareholding activity" block lists investors crossing/adjusting a 5% stake: a cluster of new 5%+ reports suggests institutional accumulation (mildly bullish), while it shows filer and report type, not exact percentages — so read frequency and who is filing, not a precise position. A "Margin-trading balances" block is weekly 信用取引 positioning: 信用買残 (margin longs) are latent future selling and 信用売残 (margin shorts) latent future buying, so a rising credit ratio (買残/売残) is a contrarian/bearish overhang while a falling one is supportive — read the trend across weeks, not one week alone. A "Short-position disclosures" block lists named investors holding ≥0.5% short: new or rising positions are professional bearish conviction, falling/covered ones bullish; weigh by how large and how many. An "Analyst consensus" block is the sell-side view: read the rating (its mean is a 1–5 scale where 1 is most bullish) and the price-target implied upside as a professional-opinion signal — distinct from the flow/accumulation blocks, which are positioning, not opinion. It is a live snapshot, so its absence is normal (backtests) and not itself bearish.
 
 8. **Identify catalysts and risks** that emerge across sources — news of upcoming earnings, product launches, competitive threats, macro headlines, etc.
 

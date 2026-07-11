@@ -1070,6 +1070,15 @@ wheels = [
 ]
 
 [[package]]
+name = "jpholiday"
+version = "1.0.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/5c/0c/1178e0d55e66362c6f2e715aa1665b032be71bf9b9c80a9fe83238d33c81/jpholiday-1.0.3.tar.gz", hash = "sha256:d5a56592fd6a7ceb76d49e1c5f1af806223e0d5d6b9e3bc5477860e6605f4cab", size = 12575, upload-time = "2025-12-26T05:28:11.767Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/11/e9/af0b8cda67530d7ff3d937b785c7901041e38a955b6b66e3c9a23a0d2027/jpholiday-1.0.3-py3-none-any.whl", hash = "sha256:abe5f0191f27a88623a33aaaa7cd04035886b5d7adb41a42eaeba0e721dc1982", size = 16257, upload-time = "2025-12-26T05:28:10.489Z" },
+]
+
+[[package]]
 name = "jsonpatch"
 version = "1.33"
 source = { registry = "https://pypi.org/simple" }
@@ -3149,6 +3158,7 @@ version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "backtrader" },
+    { name = "jpholiday" },
     { name = "langchain-anthropic" },
     { name = "langchain-core" },
     { name = "langchain-experimental" },
@@ -3186,6 +3196,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "backtrader", specifier = ">=1.9.78.123" },
+    { name = "jpholiday", specifier = ">=1.0.3" },
     { name = "langchain-anthropic", specifier = ">=0.3.15" },
     { name = "langchain-aws", marker = "extra == 'bedrock'", specifier = ">=1.5.0" },
     { name = "langchain-core", specifier = ">=0.3.81" },
