@@ -77,8 +77,6 @@ def _parse_pubdate(raw: str | None) -> datetime | None:
         dt = parsedate_to_datetime(raw)
     except (TypeError, ValueError):
         return None
-    if dt is None:
-        return None
     if dt.tzinfo is None:  # RFC-822 without a zone — treat as UTC
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(_JST).replace(tzinfo=None)
@@ -139,10 +137,6 @@ def _in_window(pub_date, start_dt, end_dt) -> bool:
     return start_dt <= pub_date < end_dt + timedelta(days=1)
 
 
-def _is_boilerplate(title: str) -> bool:
-    return _BOILERPLATE_MARKER in title
-
-
 def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0) -> str:
     """Return Google-News media headlines for a Tokyo ticker in ``[start, end]``.
 
@@ -167,18 +161,16 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0)
         for it in _fetch_items(query, timeout)
         if it["title"]
         and _in_window(it["pub_date"], start_dt, end_dt)
-        and not _is_boilerplate(it["title"])
+        and _BOILERPLATE_MARKER not in it["title"]
     ]
-    # Most recent first, then dedupe repeated headlines (same event, many outlets).
+    # Most recent first, then dedupe repeated headlines (same event, many outlets);
+    # setdefault keeps the newest per title and the dict preserves that order.
     candidates.sort(key=lambda it: it["pub_date"], reverse=True)
-    kept, seen = [], set()
+    by_title: dict = {}
     for it in candidates:
-        if it["title"] in seen:
-            continue
-        seen.add(it["title"])
-        kept.append(it)
+        by_title.setdefault(it["title"], it)
 
-    kept = kept[: get_config()["news_article_limit"]]
+    kept = list(by_title.values())[: get_config()["news_article_limit"]]
     if not kept:
         return f"No Google News found for {ticker} between {start_date} and {end_date}"
 
