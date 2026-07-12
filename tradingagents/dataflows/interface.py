@@ -35,6 +35,7 @@ from .jp.jquants import (
     get_indicator as get_jquants_indicator,
     get_stock as get_jquants_stock,
 )
+from .jp.tdnet_news import get_news as get_tdnet_news
 from .macro import get_macro_indicators as get_macro_dispatch
 from .market_context import infer_market
 from .polymarket import get_prediction_markets as get_polymarket_prediction_markets
@@ -106,6 +107,9 @@ VENDOR_LIST = [
     "jp_fundamentals",
     "jp_statements",
     "edinet_news",
+    "tdnet_news",
+    "google_news",
+    "jp_news",
 ]
 
 # Optional enrichment categories. These add macro/event context to the news
@@ -159,6 +163,7 @@ VENDOR_METHODS = {
         "alpha_vantage": get_alpha_vantage_news,
         "yfinance": get_news_yfinance,
         "edinet_news": get_edinet_news,
+        "tdnet_news": get_tdnet_news,
         "google_news": get_google_news,
         "jp_news": get_jp_news,
     },

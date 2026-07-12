@@ -2,27 +2,10 @@
 import unittest
 from datetime import datetime
 from unittest import mock
-from urllib.error import HTTPError
 
 import pytest
 
 from tradingagents.dataflows.jp import google_news as gn
-
-
-class _Resp:
-    """Minimal context-manager stand-in for urlopen()."""
-
-    def __init__(self, data: bytes):
-        self._data = data
-
-    def read(self):
-        return self._data
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *a):
-        return False
 
 
 def _rss(*items: str) -> bytes:
@@ -43,9 +26,11 @@ def _parsed(title, source="日本経済新聞", y=2026, m=7, d=10):
 
 @pytest.mark.unit
 class FetchItemsTests(unittest.TestCase):
+    """Parsing only; the fetch/backoff lives in http_util (see test_http_util)."""
+
     def test_parses_and_strips_source_suffix(self):
         xml = _rss(_item("大事件が起きた - 日本経済新聞"))
-        with mock.patch.object(gn, "urlopen", return_value=_Resp(xml)):
+        with mock.patch.object(gn, "fetch_bytes", return_value=xml):
             items = gn._fetch_items("第一三共", timeout=5)
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]["title"], "大事件が起きた")   # " - source" stripped
@@ -53,18 +38,12 @@ class FetchItemsTests(unittest.TestCase):
         # 06:54:42 GMT -> 15:54:42 JST (naive).
         self.assertEqual(items[0]["pub_date"], datetime(2026, 7, 10, 15, 54, 42))
 
-    def test_429_backs_off_once_then_succeeds(self):
-        err = HTTPError("u", 429, "Too Many", {}, None)
-        ok = _Resp(_rss(_item("記事")))
-        with mock.patch.object(gn, "urlopen", side_effect=[err, ok]) as uo, \
-                mock.patch.object(gn.time, "sleep") as slept:
-            items = gn._fetch_items("第一三共", timeout=5)
-        self.assertEqual(len(items), 1)
-        self.assertEqual(uo.call_count, 2)
-        slept.assert_called_once()
+    def test_failed_fetch_degrades_to_empty(self):
+        with mock.patch.object(gn, "fetch_bytes", return_value=None):
+            self.assertEqual(gn._fetch_items("第一三共", timeout=5), [])
 
-    def test_network_error_degrades_to_empty(self):
-        with mock.patch.object(gn, "urlopen", side_effect=OSError("boom")):
+    def test_malformed_xml_degrades_to_empty(self):
+        with mock.patch.object(gn, "fetch_bytes", return_value=b"<rss><broken"):
             self.assertEqual(gn._fetch_items("第一三共", timeout=5), [])
 
 

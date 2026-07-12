@@ -2,16 +2,17 @@
 
 The vendor router is an ordered fallback (first success wins), so a plain
 ``edinet_news,yfinance`` chain can only ever return ONE source — EDINET always
-answers (even "no disclosures"), so the media side never runs. This assembler
-composes both instead: EDINET disclosures (statutory events) *and* Google-News
-media reporting (journalism/analyst coverage), the two complementary halves of
-"per-stock news" for a Tokyo name.
+answers (even "no disclosures"), so the other feeds never run. This assembler
+composes them instead: EDINET statutory filings, TDnet timely disclosures
+(適時開示: earnings/guidance/M&A), *and* Google-News media reporting
+(journalism/analyst coverage) — the complementary halves of "per-stock news" for
+a Tokyo name.
 
 Each sub-feed is called defensively: EDINET needs a key and can raise (missing
-key, rate limit, network), while Google News needs none — so one source failing
-must not suppress the other. We combine whichever sub-feeds returned data and
-raise ``NoMarketDataError`` only when neither did, letting the router fall through
-to yfinance (English media) as a last resort.
+key, rate limit, network), while TDnet and Google News need none — so one source
+failing must not suppress the others. We combine whichever sub-feeds returned
+data and raise ``NoMarketDataError`` only when none did, letting the router fall
+through to yfinance (English media) as a last resort.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ import logging
 from ..errors import NoMarketDataError
 from .edinet_news import get_news as _edinet_news
 from .google_news import get_news as _google_news
+from .tdnet_news import get_news as _tdnet_news
 
 logger = logging.getLogger(__name__)
 
@@ -48,14 +50,15 @@ def _safe_feed(fetch, ticker: str, start_date: str, end_date: str) -> str:
 
 
 def get_news(ticker: str, start_date: str, end_date: str) -> str:
-    """Return EDINET disclosures + Google-News media for ``ticker`` in the window.
+    """Return EDINET + TDnet disclosures + Google-News media for ``ticker``.
 
-    Combines whichever sub-feeds have data (statutory filings first, then media);
-    an empty or failed sub-feed contributes nothing. Raises ``NoMarketDataError``
-    when neither has data so the router can fall through to yfinance.
+    Combines whichever sub-feeds have data (statutory filings, then timely
+    disclosures, then media); an empty or failed sub-feed contributes nothing.
+    Raises ``NoMarketDataError`` when none has data so the router can fall through
+    to yfinance.
     """
     blocks = []
-    for fetch in (_edinet_news, _google_news):
+    for fetch in (_edinet_news, _tdnet_news, _google_news):
         block = _safe_feed(fetch, ticker, start_date, end_date)
         if block.startswith(_DATA_PREFIX):
             blocks.append(block)

@@ -23,25 +23,21 @@ acceptable under the fork's live-first stance.
 
 from __future__ import annotations
 
-import http.client
 import logging
-import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
-from urllib.error import HTTPError
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import Request
 
 from ..config import get_config
 from .company_info import get_company_name
+from .http_util import USER_AGENT, fetch_bytes
 from .jquants_common import to_jquants_code
 
 logger = logging.getLogger(__name__)
 
 _RSS = "https://news.google.com/rss/search?{qs}"
-# Identified UA (Google serves the RSS to a plain descriptive token, like Reddit).
-_UA = "tradingagents/0.2 (+https://github.com/TauricResearch/TradingAgents)"
 
 # The feed dates in GMT but a Tokyo ticker's window is in JST calendar days;
 # converting before the window filter avoids a ~9h skew that would otherwise admit
@@ -54,15 +50,6 @@ _JST = timezone(timedelta(hours=9))
 # contains a word like 決算情報, nor the 【アナリスト評価】… analyst items (no colon
 # after the bracket) or the 日経 "[CODE]：" disclosure mirrors (ASCII brackets).
 _BOILERPLATE_MARKER = "】："
-
-
-def _retry_after_seconds(exc: HTTPError) -> float | None:
-    """Seconds to wait from a 429 ``Retry-After`` header, capped at 30s."""
-    try:
-        val = exc.headers.get("Retry-After") if getattr(exc, "headers", None) else None
-        return min(float(val), 30.0) if val else None
-    except (ValueError, TypeError, AttributeError):
-        return None
 
 
 def _parse_pubdate(raw: str | None) -> datetime | None:
@@ -82,29 +69,22 @@ def _parse_pubdate(raw: str | None) -> datetime | None:
     return dt.astimezone(_JST).replace(tzinfo=None)
 
 
-def _fetch_items(query: str, timeout: float, _retry: bool = True) -> list[dict]:
+def _fetch_items(query: str, timeout: float) -> list[dict]:
     """Fetch + parse the Google News JP RSS search feed for ``query``.
 
     Returns dicts with ``title`` (source suffix stripped), ``source``, ``pub_date``.
-    Degrades to [] on any network/parse error; backs off once on a 429.
+    Degrades to [] on any network/parse error; the shared fetch backs off once on
+    a 429.
     """
     qs = urlencode({"hl": "ja", "gl": "JP", "ceid": "JP:ja", "q": query})
-    req = Request(_RSS.format(qs=qs), headers={"User-Agent": _UA})
-    try:
-        with urlopen(req, timeout=timeout) as resp:
-            root = ET.fromstring(resp.read())
-    except HTTPError as exc:
-        if exc.code == 429 and _retry:
-            wait = _retry_after_seconds(exc) or 5.0
-            logger.warning(
-                "Google News 429 for %r — backing off %.1fs then retrying once", query, wait
-            )
-            time.sleep(wait)
-            return _fetch_items(query, timeout, _retry=False)
-        logger.warning("Google News fetch failed for %r: %s", query, exc)
+    req = Request(_RSS.format(qs=qs), headers={"User-Agent": USER_AGENT})
+    raw = fetch_bytes(req, timeout, f"Google News {query!r}")
+    if raw is None:
         return []
-    except (OSError, http.client.HTTPException, ET.ParseError) as exc:
-        logger.warning("Google News fetch failed for %r: %s", query, exc)
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError as exc:
+        logger.warning("Google News parse failed for %r: %s", query, exc)
         return []
 
     items = []

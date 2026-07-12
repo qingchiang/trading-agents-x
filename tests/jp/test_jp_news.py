@@ -8,8 +8,10 @@ from tradingagents.dataflows.errors import NoMarketDataError, VendorNotConfigure
 from tradingagents.dataflows.jp import jp_news
 
 _EDINET_DATA = "## 4568.T EDINET disclosures, from a to b:\n\n### 有価証券報告書"
+_TDNET_DATA = "## 4568.T timely disclosures (TDnet 適時開示), from a to b:\n\n### 自己株式の取得"
 _MEDIA_DATA = "## 4568.T News (media, Google News), from a to b:\n\n### 決算を発表"
 _EDINET_EMPTY = "No EDINET disclosures found for 4568.T between a and b"
+_TDNET_EMPTY = "No TDnet disclosures found for 4568.T between a and b"
 _MEDIA_EMPTY = "No Google News found for 4568.T between a and b"
 
 
@@ -21,19 +23,33 @@ def _spec(value):
     return {"side_effect": value} if is_exc else {"return_value": value}
 
 
-def _run(edinet, media):
+def _run(edinet, media, tdnet=_TDNET_EMPTY):
     with mock.patch.object(jp_news, "_edinet_news", **_spec(edinet)), \
+            mock.patch.object(jp_news, "_tdnet_news", **_spec(tdnet)), \
             mock.patch.object(jp_news, "_google_news", **_spec(media)):
         return jp_news.get_news("4568.T", "a", "b")
 
 
 @pytest.mark.unit
 class JpNewsAssemblerTests(unittest.TestCase):
-    def test_both_present_are_combined(self):
-        out = _run(_EDINET_DATA, _MEDIA_DATA)
+    def test_all_present_are_combined_in_order(self):
+        out = _run(_EDINET_DATA, _MEDIA_DATA, tdnet=_TDNET_DATA)
+        self.assertIn("有価証券報告書", out)
+        self.assertIn("自己株式の取得", out)
+        self.assertIn("決算を発表", out)
+        # statutory filings, then timely disclosures, then media
+        self.assertLess(out.index("EDINET"), out.index("TDnet"))
+        self.assertLess(out.index("TDnet"), out.index("media"))
+
+    def test_tdnet_only_present(self):
+        out = _run(_EDINET_EMPTY, _MEDIA_EMPTY, tdnet=_TDNET_DATA)
+        self.assertIn("自己株式の取得", out)
+        self.assertNotIn("No TDnet disclosures found", out)
+
+    def test_tdnet_error_does_not_suppress_others(self):
+        out = _run(_EDINET_DATA, _MEDIA_DATA, tdnet=RuntimeError("boom"))
         self.assertIn("有価証券報告書", out)
         self.assertIn("決算を発表", out)
-        self.assertLess(out.index("EDINET"), out.index("media"))  # disclosures first
 
     def test_only_edinet_present_drops_empty_media_line(self):
         out = _run(_EDINET_DATA, _MEDIA_EMPTY)
