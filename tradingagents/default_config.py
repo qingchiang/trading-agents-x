@@ -166,7 +166,10 @@ DEFAULT_CONFIG = _apply_env_overrides({
             # JP assembler serves only its own methods, so the router picks the
             # right one per method; jquants then yfinance remain keyless fallbacks.
             "fundamental_data": "jp_fundamentals,jp_statements,jquants,yfinance",
-            "news_data": "edinet_news,yfinance",
+            # jp_news assembles EDINET statutory filings + Google-News media
+            # headlines (edinet alone would win the fallback and hide the media
+            # side); yfinance (English media) stays a keyless last resort.
+            "news_data": "jp_news,yfinance",
         },
     },
     # Benchmark for alpha calculation in the reflection layer.

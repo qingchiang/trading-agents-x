@@ -19,7 +19,9 @@ from .errors import (
 )
 from .fred import get_macro_data as get_fred_macro_data
 from .jp.edinet_news import get_news as get_edinet_news
+from .jp.google_news import get_news as get_google_news
 from .jp.jp_fundamentals import get_fundamentals as get_jp_fundamentals
+from .jp.jp_news import get_news as get_jp_news
 from .jp.jp_statements import (
     get_balance_sheet as get_jp_balance_sheet,
     get_cashflow as get_jp_cashflow,
@@ -157,6 +159,8 @@ VENDOR_METHODS = {
         "alpha_vantage": get_alpha_vantage_news,
         "yfinance": get_news_yfinance,
         "edinet_news": get_edinet_news,
+        "google_news": get_google_news,
+        "jp_news": get_jp_news,
     },
     "get_global_news": {
         "yfinance": get_global_news_yfinance,

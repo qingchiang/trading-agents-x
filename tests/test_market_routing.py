@@ -136,7 +136,7 @@ class MarketRoutingTests(unittest.TestCase):
         # to jp_statements (each serves only its own methods, so the router picks
         # per method) — guarded by test_dot_t_chains_serve_every_ticker_bearing_method.
         self.assertEqual(routes["fundamental_data"], "jp_fundamentals,jp_statements,jquants,yfinance")
-        self.assertEqual(routes["news_data"], "edinet_news,yfinance")
+        self.assertEqual(routes["news_data"], "jp_news,yfinance")
         # Macro stays market-agnostic — must not appear in the per-market block.
         self.assertNotIn("macro_data", routes)
 
