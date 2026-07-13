@@ -1,17 +1,25 @@
-"""Per-ticker large-shareholding (大量保有) signal from EDINET for .T sentiment.
+"""Per-ticker ownership & control signal from EDINET for .T sentiment.
 
-When an investor's stake in a listed company crosses 5% (and on subsequent ≥1%
-moves), Japanese law requires a large-shareholding report. These are filed *about*
-the company by the *shareholder*, so EDINET tags the target in ``subjectEdinetCode``
-rather than the filing's ``secCode`` — which is why :mod:`edinet_news` (matching on
-``secCode``) does not surface them and we resolve the ticker's EDINET code via
-:mod:`edinet_code_map` instead.
+Two filing families name their *subject* company in ``subjectEdinetCode`` (not the
+filing's own ``secCode``), so :mod:`edinet_news` — which matches on ``secCode`` —
+never surfaces them; we resolve the ticker's EDINET code via
+:mod:`edinet_code_map` and match on the subject instead:
 
-This is a sentiment signal: a cluster of new 5%+ positions hints at institutional
-accumulation; change reports flag a known holder adjusting. We surface the filing
-list (who / type / when) — the actual stake percentage and direction live in the
-XBRL body, a possible later enhancement, so the LLM is told to read frequency and
-filer identity, not a precise position.
+  * **大量保有 (large-shareholding)** — when an investor's stake crosses 5% (and on
+    subsequent ≥1% moves) it files a report *about* the company. A cluster of new
+    5%+ positions hints at institutional accumulation; change reports flag a known
+    holder adjusting.
+  * **公開買付 (tender offer / TOB)** — a takeover bid for the company: a launch
+    (公開買付届出書), the target board's opinion (意見表明報告書), a withdrawal
+    (公開買付撤回届出書), the result (公開買付報告書), or a 訂正 amendment to any of
+    these (a TOB amendment routinely changes the bid price or terms). Highly
+    material — a bid is usually a premium offer — and, like 大量保有, tagged against
+    the target in ``subjectEdinetCode`` (verified live).
+
+This is a sentiment signal: we surface the filing list (who / type / when). The
+precise stake percentage and direction live in the XBRL body (a possible later
+enhancement), so the LLM is told to read frequency, filing type, and filer
+identity, not an exact position.
 
 EDINET's document list is date-keyed, so we iterate the window via the shared
 :mod:`edinet_common` helpers (one process-wide per-date cache, shared with the
@@ -43,24 +51,44 @@ logger = logging.getLogger(__name__)
 # MAX_WINDOW_DAYS. Each calendar day is one (cached) documents.json fetch.
 _LOOK_BACK_DAYS = 30
 
-# 大量保有 report family (提出書類種別コード). Both carry subjectEdinetCode.
+# Filing families (提出書類種別コード) that tag their subject in subjectEdinetCode,
+# so matching a ticker's EDINET code surfaces filings *about* it. Codes verified
+# against live EDINET (240 = launch, 270 = result — not the reverse). Rare codes
+# unseen in live sampling (260, 280) are added on the authority of EDINET's docType
+# registry, and are safe either way (one lacking subjectEdinetCode just won't match).
 _DOC_TYPE_LABELS = {
+    # 大量保有 (large-shareholding)
     "350": "Large-shareholding report (5%+ position)",
     "360": "Large-shareholding change report",
+    # 公開買付 (tender offer / TOB), including the 訂正 amendments: unlike a clerical
+    # holding correction, a TOB 訂正 routinely changes the bid price / offer period /
+    # result, so dropping it would leave an outdated bid state (and vanish entirely
+    # if the original filing has aged out of the window). Kept and labelled "amended".
+    "240": "Takeover bid launched (TOB, 公開買付届出書)",
+    "250": "Takeover bid amended (TOB, 訂正公開買付届出書)",
+    "290": "Target board opinion on TOB (意見表明報告書)",
+    "300": "Target board opinion amended (訂正意見表明報告書)",
+    "260": "Takeover bid withdrawn (TOB, 公開買付撤回届出書)",
+    "270": "Takeover bid result (TOB, 公開買付報告書)",
+    "280": "Takeover bid result amended (TOB, 訂正公開買付報告書)",
 }
 
 
 def _format_filing(record: dict) -> str:
-    """Render one large-holding filing as a markdown item (filer = the holder)."""
-    label = _DOC_TYPE_LABELS.get(str(record.get("docTypeCode")), "Large-shareholding filing")
-    holder = record.get("filerName") or "Unknown filer"
-    line = f"### {label} — filed by {holder}"
+    """Render one ownership/control filing as a markdown item.
+
+    The filer is whoever filed: the shareholder (大量保有), the bidder (a TOB
+    launch/result), or the target itself (its opinion on a bid).
+    """
+    label = _DOC_TYPE_LABELS.get(str(record.get("docTypeCode")), "Ownership/control filing")
+    filer = record.get("filerName") or "Unknown filer"
+    line = f"### {label} — filed by {filer}"
     detail = filing_detail_line(record)
     return f"{line}\n{detail}" if detail else line
 
 
 def get_large_holdings(ticker: str, curr_date: str, look_back_days: int = _LOOK_BACK_DAYS) -> str:
-    """Return recent EDINET large-shareholding filings about ``ticker``.
+    """Return recent EDINET large-shareholding & tender-offer (TOB) filings about ``ticker``.
 
     Tokyo-only (returns "" for non-``.T`` tickers, like the investor-flow proxy —
     a future market supplies its own source). Scans ``[curr_date - look_back_days,
@@ -107,13 +135,14 @@ def get_large_holdings(ticker: str, curr_date: str, look_back_days: int = _LOOK_
 
     if not matches:
         return (
-            f"No EDINET large-shareholding reports about {ticker} "
+            f"No EDINET large-shareholding or tender-offer filings about {ticker} "
             f"between {scanned_start} and {curr_date}"
         )
 
     items = render_filings(matches, _format_filing, get_config()["news_article_limit"])
     return (
-        f"EDINET 大量保有報告書 about {ticker}, {scanned_start} to {curr_date} "
-        "(5%+ stakes filed by shareholders; counts/identities below, not precise %):"
+        f"EDINET ownership & control filings about {ticker}, {scanned_start} to {curr_date} "
+        "(大量保有 5%+ stakes and 公開買付 takeover bids; type/filer/date below, "
+        "stake % not parsed):"
         f"\n\n{items}"
     )

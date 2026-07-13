@@ -90,7 +90,34 @@ class HoldingsTests(unittest.TestCase):
     def test_no_reports_returns_informative_line(self):
         with self._patch({"2026-06-22": [_holding(subject="E99999")]}):
             out = edinet_holdings.get_large_holdings("9984.T", "2026-06-22", look_back_days=0)
-        self.assertIn("No EDINET large-shareholding reports", out)
+        self.assertIn("No EDINET large-shareholding or tender-offer filings", out)
+
+    def test_surfaces_tender_offer_family_with_correct_labels(self):
+        # TOB filings tag the target in subjectEdinetCode too (verified live), so
+        # they surface alongside 大量保有. Lock the code→label mapping (240 = launch,
+        # 270 = result) and confirm a 訂正 amendment (250) is kept — a TOB correction
+        # can change price/terms — while an unmapped docType is still dropped.
+        mapping = {"2026-06-22": [
+            _holding(subject="E02778", doc_type="240", filer="BIDDER", doc_id="LAUNCH"),
+            _holding(subject="E02778", doc_type="290", filer="TARGET", doc_id="OPINION",
+                     when="2026-06-22 15:30"),
+            _holding(subject="E02778", doc_type="260", filer="BIDDER", doc_id="WITHDRAW",
+                     when="2026-06-22 15:45"),
+            _holding(subject="E02778", doc_type="270", filer="BIDDER", doc_id="RESULT",
+                     when="2026-06-22 16:00"),
+            _holding(subject="E02778", doc_type="250", filer="BIDDER", doc_id="AMEND",
+                     when="2026-06-22 17:00"),
+            _holding(subject="E02778", doc_type="030", filer="UNRELATED", doc_id="OTHER",
+                     when="2026-06-22 18:00"),  # not an ownership/control docType
+        ]}
+        with self._patch(mapping):
+            out = edinet_holdings.get_large_holdings("9984.T", "2026-06-22", look_back_days=0)
+        self.assertIn("Takeover bid launched", out)
+        self.assertIn("Target board opinion on TOB", out)
+        self.assertIn("Takeover bid withdrawn", out)  # 260 is material, not noise
+        self.assertIn("Takeover bid result", out)
+        self.assertIn("Takeover bid amended", out)  # 訂正 250 kept (price/terms may change)
+        self.assertNotIn("UNRELATED", out)  # unmapped docType still filtered out
 
     def test_self_heal_learns_issuer_codes_while_scanning(self):
         # Scanning to find holdings about 9984 also learns other issuers' own

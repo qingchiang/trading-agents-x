@@ -172,11 +172,14 @@ _FLOWS_INTRO = (
     "net selling bearish; individuals often lean contrarian."
 )
 _HOLDINGS_INTRO = (
-    "Per-name filings by investors crossing/adjusting a 5% stake (EDINET 大量保有報告書).\n"
-    'A "who is accumulating" signal; the list shows the filer and report type, not the\n'
-    "exact stake percentage — so read frequency and who is filing, not a precise\n"
-    "position. A cluster of new 5%+ reports suggests institutional accumulation (mildly\n"
-    "bullish)."
+    "Per-name EDINET filings about the company, of two kinds — read each row's label.\n"
+    "大量保有 (5%+ stakes): an investor crossing/adjusting a 5% stake; the row shows the\n"
+    "filer and report type, not the exact %, so read frequency and who is filing — a\n"
+    "cluster of new 5%+ reports suggests institutional accumulation (mildly bullish).\n"
+    "公開買付 (TOB / tender offer): a takeover event that dominates routine accumulation —\n"
+    "a launch is a premium bid (strongly bullish for the target), a withdrawal cancels it\n"
+    "(bearish), a result concludes it, and a target-board opinion signals support or\n"
+    "opposition. Weigh a takeover by its label, not as a 5% stake."
 )
 _MARGIN_INTRO = (
     "Per-name weekly margin-trading balances (信用取引): 信用買残 are shares bought on\n"
@@ -214,7 +217,7 @@ def _optional_section(title: str, intro: str, tag: str, body: str) -> str:
 # signal is one row here plus one entry at the call site — no concat to forget.
 _OPTIONAL_SECTIONS = (
     ("Market-wide investor flows — official exchange data", _FLOWS_INTRO, "market_flows"),
-    ("Large-shareholding activity — official 5%+ disclosures", _HOLDINGS_INTRO, "large_holdings"),
+    ("Ownership & control — official 大量保有 / 公開買付 (TOB)", _HOLDINGS_INTRO, "large_holdings"),
     ("Margin-trading balances — official weekly 信用取引", _MARGIN_INTRO, "margin_balances"),
     ("Short-position disclosures — official 空売り残高報告", _SHORT_INTRO, "short_positions"),
     ("Analyst consensus — sell-side rating & price target", _RATINGS_INTRO, "analyst_ratings"),
