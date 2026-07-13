@@ -13,11 +13,17 @@ key, rate limit, network), while TDnet and Google News need none — so one sour
 failing must not suppress the others. We combine whichever sub-feeds returned
 data and raise ``NoMarketDataError`` only when none did, letting the router fall
 through to yfinance (English media) as a last resort.
+
+The three sub-feeds are independent, blocking network calls, so we fetch them
+concurrently (their wall time becomes the slowest one, not the sum). They share
+no mutable state — each touches only its own module cache — so the fan-out is
+safe. Output order (statutory → timely → media) is preserved regardless.
 """
 
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 from ..errors import NoMarketDataError
 from .edinet_news import get_news as _edinet_news
@@ -57,11 +63,16 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
     Raises ``NoMarketDataError`` when none has data so the router can fall through
     to yfinance.
     """
-    blocks = []
-    for fetch in (_edinet_news, _tdnet_news, _google_news):
-        block = _safe_feed(fetch, ticker, start_date, end_date)
-        if block.startswith(_DATA_PREFIX):
-            blocks.append(block)
+    # Sub-feeds in output order (statutory → timely → media); resolved here (not
+    # module scope) so tests patching these names take effect.
+    feeds = (_edinet_news, _tdnet_news, _google_news)
+    # Fan out the independent network fetches; ``map`` yields results in feed
+    # order, so the rendered blocks keep that statutory → timely → media order.
+    with ThreadPoolExecutor(max_workers=len(feeds)) as pool:
+        rendered = pool.map(
+            lambda fetch: _safe_feed(fetch, ticker, start_date, end_date), feeds
+        )
+    blocks = [block for block in rendered if block.startswith(_DATA_PREFIX)]
 
     if not blocks:
         raise NoMarketDataError(
