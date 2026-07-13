@@ -45,15 +45,27 @@ def _isolate_config():
     test that sets e.g. ``tool_vendors`` would otherwise leak into later tests
     and make routing behavior order-dependent. Replace the global outright so
     every test starts from a clean DEFAULT_CONFIG.
+
+    Also point ``data_cache_dir`` at a throwaway dir so any on-disk cache a test
+    exercises (the macro SeriesCache disk layer, the EDINET learned code map, …)
+    never reads, writes, or deletes the user's real cache. Tests that need to
+    inspect the cache still override it with their own tmp dir.
     """
     import copy
+    import tempfile
 
     import tradingagents.dataflows.config as config_module
     import tradingagents.default_config as default_config
 
-    config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
-    yield
-    config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+    def _fresh():
+        cfg = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        cfg["data_cache_dir"] = cache_dir
+        return cfg
+
+    with tempfile.TemporaryDirectory() as cache_dir:
+        config_module._config = _fresh()
+        yield
+        config_module._config = _fresh()
 
 
 @pytest.fixture()

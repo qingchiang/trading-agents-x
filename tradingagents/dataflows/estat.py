@@ -122,7 +122,9 @@ def _date_from_time_code(code: str) -> str:
 # a macro series is a point-in-time function of curr_date, so the panel and a
 # same-run re-entry hit the API once. Only successful results are cached (see
 # SeriesCache); a miss is not memoized so a transient outage can't poison a series.
-_series_cache = SeriesCache()
+# The "estat" namespace also persists settled (past-date) series to disk for reuse
+# across runs (e.g. a multi-date backtest).
+_series_cache = SeriesCache(namespace="estat")
 
 
 def fetch_series(

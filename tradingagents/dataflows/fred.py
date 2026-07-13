@@ -136,8 +136,10 @@ def _request(path: str, params: dict) -> dict:
 # series within one run hits the API once — and the news node is re-entered on
 # every tool-call round-trip, so caching (including curr_date == today, which for
 # low-frequency macro is effectively settled) is what keeps a run from hammering
-# FRED's rate limit. Only *successful* results are cached (see SeriesCache).
-_series_cache = SeriesCache()
+# FRED's rate limit. Only *successful* results are cached (see SeriesCache). The
+# "fred" namespace also persists settled (past-date) series to disk, so a backtest
+# re-reading the same dates across runs skips the API entirely.
+_series_cache = SeriesCache(namespace="fred")
 
 
 def fetch_series(

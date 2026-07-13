@@ -90,6 +90,8 @@ class FredConfigTests(unittest.TestCase):
 @pytest.mark.unit
 class FredFormattingTests(unittest.TestCase):
     def setUp(self):
+        # conftest points data_cache_dir at a per-test tmp dir, so the disk layer's
+        # settled-date writes never touch the user's real cache.
         fred._series_cache.clear()
 
     def tearDown(self):
@@ -160,6 +162,8 @@ class FredFormattingTests(unittest.TestCase):
 @pytest.mark.unit
 class FredCacheTests(unittest.TestCase):
     def setUp(self):
+        # conftest gives each test a fresh tmp data_cache_dir, so the disk layer is
+        # isolated per test and never writes to the user's real cache.
         fred._series_cache.clear()
 
     def tearDown(self):

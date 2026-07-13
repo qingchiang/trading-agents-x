@@ -116,8 +116,9 @@ def _parse_point(freq: str, survey_date: int) -> tuple[str, str]:
 # Process-level cache, keyed by (alias, curr_date, look_back_days). Mirrors fred:
 # one HTTP call per series for the life of the process. Only successful results
 # are cached (see SeriesCache); a miss is not memoized so a transient outage can't
-# poison a series.
-_series_cache = SeriesCache()
+# poison a series. The "boj" namespace also persists settled (past-date) series to
+# disk for reuse across runs (e.g. a multi-date backtest).
+_series_cache = SeriesCache(namespace="boj")
 
 
 def fetch_series(
