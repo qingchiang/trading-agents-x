@@ -11,7 +11,7 @@ import pytest
 
 import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
-from tradingagents.dataflows import fred, interface
+from tradingagents.dataflows import fred, interface, macro_common
 from tradingagents.dataflows.config import set_config
 
 # A small, stable set of observations to format against.
@@ -89,6 +89,14 @@ class FredConfigTests(unittest.TestCase):
 
 @pytest.mark.unit
 class FredFormattingTests(unittest.TestCase):
+    def setUp(self):
+        # conftest points data_cache_dir at a per-test tmp dir, so the disk layer's
+        # settled-date writes never touch the user's real cache.
+        fred._series_cache.clear()
+
+    def tearDown(self):
+        fred._series_cache.clear()
+
     def test_report_has_header_latest_change_and_table(self):
         with mock.patch.object(fred, "_request", side_effect=_request_stub()):
             out = fred.get_macro_data("unemployment", "2025-09-30", 365)
@@ -125,16 +133,16 @@ class FredFormattingTests(unittest.TestCase):
         obs = {
             "observations": [
                 {"date": f"2025-01-{(i % 28) + 1:02d}", "value": str(i)}
-                for i in range(fred.MAX_ROWS + 10)
+                for i in range(macro_common.MAX_ROWS + 10)
             ]
         }
         with mock.patch.object(fred, "_request", side_effect=_request_stub(obs=obs)):
             out = fred.get_macro_data("unemployment", "2025-12-31", 365)
-        self.assertIn(f"most recent {fred.MAX_ROWS}", out)
+        self.assertIn(f"most recent {macro_common.MAX_ROWS}", out)
         # change-over-window must reference the true first (0) and last value
         self.assertIn("from 0 ", out)
         body_rows = [ln for ln in out.splitlines() if ln.startswith("| 2025")]
-        self.assertEqual(len(body_rows), fred.MAX_ROWS)
+        self.assertEqual(len(body_rows), macro_common.MAX_ROWS)
 
     def test_window_is_lookahead_safe(self):
         # observation_end must equal curr_date so a past date never pulls future data.
@@ -149,6 +157,56 @@ class FredFormattingTests(unittest.TestCase):
         obs_params = captured["series/observations"]
         self.assertEqual(obs_params["observation_end"], "2025-09-30")
         self.assertEqual(obs_params["observation_start"], "2025-07-02")  # 90d back
+
+
+@pytest.mark.unit
+class FredCacheTests(unittest.TestCase):
+    def setUp(self):
+        # conftest gives each test a fresh tmp data_cache_dir, so the disk layer is
+        # isolated per test and never writes to the user's real cache.
+        fred._series_cache.clear()
+
+    def tearDown(self):
+        fred._series_cache.clear()
+
+    def test_repeat_fetch_hits_cache(self):
+        calls = []
+
+        def _req(path, params):
+            calls.append(path)
+            return _META if path == "series" else _OBS
+
+        with mock.patch.object(fred, "_request", side_effect=_req):
+            fred.fetch_series("unemployment", "2025-09-30", 365)
+            fred.fetch_series("unemployment", "2025-09-30", 365)
+        # First call hits both endpoints; the second is served from the cache.
+        self.assertEqual(calls, ["series", "series/observations"])
+
+    def test_different_date_misses_cache(self):
+        calls = []
+
+        def _req(path, params):
+            calls.append(path)
+            return _META if path == "series" else _OBS
+
+        with mock.patch.object(fred, "_request", side_effect=_req):
+            fred.fetch_series("unemployment", "2025-09-30", 365)
+            fred.fetch_series("unemployment", "2025-08-30", 365)
+        # A different curr_date is a separate cache entry, so it is fetched again.
+        self.assertEqual(calls.count("series"), 2)
+
+    def test_unknown_series_is_not_cached(self):
+        calls = []
+
+        def _req(path, params):
+            calls.append(path)
+            return {"seriess": []}
+
+        with mock.patch.object(fred, "_request", side_effect=_req):
+            self.assertIsNone(fred.fetch_series("totally_unknown_xyz", "2025-09-30", 30))
+            self.assertIsNone(fred.fetch_series("totally_unknown_xyz", "2025-09-30", 30))
+        # A miss is NOT memoized (could be a transient outage), so it is retried.
+        self.assertEqual(calls, ["series", "series"])
 
 
 @pytest.mark.unit

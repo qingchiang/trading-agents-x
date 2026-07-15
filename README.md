@@ -1,59 +1,17 @@
-<p align="center">
-  <img src="assets/TauricResearch.png" style="width: 60%; height: auto;">
-</p>
+# trading-agents-x
 
 <div align="center" style="line-height: 1;">
   <a href="https://arxiv.org/abs/2412.20138" target="_blank"><img alt="arXiv" src="https://img.shields.io/badge/arXiv-2412.20138-B31B1B?logo=arxiv"/></a>
-  <a href="https://discord.com/invite/hk9PGKShPK" target="_blank"><img alt="Discord" src="https://img.shields.io/badge/Discord-TradingResearch-7289da?logo=discord&logoColor=white&color=7289da"/></a>
-  <a href="./assets/wechat.png" target="_blank"><img alt="WeChat" src="https://img.shields.io/badge/WeChat-TauricResearch-brightgreen?logo=wechat&logoColor=white"/></a>
-  <a href="https://x.com/TauricResearch" target="_blank"><img alt="X Follow" src="https://img.shields.io/badge/X-TauricResearch-white?logo=x&logoColor=white"/></a>
-  <br>
-  <a href="https://github.com/TauricResearch/" target="_blank"><img alt="Community" src="https://img.shields.io/badge/Join_GitHub_Community-TauricResearch-14C290?logo=discourse"/></a>
+  <img alt="License" src="https://img.shields.io/badge/License-Apache_2.0-blue.svg"/>
 </div>
 
-<div align="center">
-  <!-- Keep these links. Translations will automatically update with the README. -->
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=de">Deutsch</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=es">Español</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=fr">français</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=ja">日本語</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=ko">한국어</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=pt">Português</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=ru">Русский</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=zh">中文</a>
-</div>
+A multi-agent LLM trading framework with first-class **Japanese-market (`.T`) data support** — J-Quants, EDINET, TDnet, and multi-region macro (FRED / e-Stat / BOJ) vendors wired through a generic suffix-based market-routing layer.
 
----
-
-# TradingAgents: Multi-Agents LLM Financial Trading Framework
-
-## News
-- [2026-07] **TradingAgents v0.3.1** released with correctness and stability fixes: Alpha Vantage look-ahead filtering, graph-router crash-safety, graph-shape-aware checkpoint resume, working crypto sentiment sources, a configurable LLM retry budget, Bedrock API-key auth, and Claude Sonnet 5 / Fable 5 support. See [CHANGELOG.md](CHANGELOG.md) for the full list.
-- [2026-06] **TradingAgents v0.3.0** released with a verified data-access contract, an expanded provider registry (NVIDIA, Kimi, Groq, Mistral, Bedrock, and any OpenAI-compatible endpoint), FRED and Polymarket data vendors, a current-generation model catalog, and a CI gate.
-- [2026-05] **TradingAgents v0.2.5** released with the grounded Sentiment Analyst, GPT-5.5 etc. model coverage, Qwen/GLM/MiniMax dual-region support, `TRADINGAGENTS_*` env-var configurability with API-key auto-detection, remote Ollama support, non-US alpha benchmarks, and ticker path-traversal hardening.
-- [2026-04] **TradingAgents v0.2.4** released with structured-output agents (Research Manager, Trader, Portfolio Manager), LangGraph checkpoint resume, persistent decision log, DeepSeek/Qwen/GLM/Azure provider support, Docker, and a Windows UTF-8 encoding fix.
-- [2026-03] **TradingAgents v0.2.3** released with multi-language support, GPT-5.4 family models, unified model catalog, backtesting date fidelity, and proxy support.
-- [2026-03] **TradingAgents v0.2.2** released with GPT-5.4/Gemini 3.1/Claude 4.6 model coverage, five-tier rating scale, OpenAI Responses API, Anthropic effort control, and cross-platform stability.
-- [2026-02] **TradingAgents v0.2.0** released with multi-provider LLM support (GPT-5.x, Gemini 3.x, Claude 4.x, Grok 4.x) and improved system architecture.
-- [2026-01] **Trading-R1** [Technical Report](https://arxiv.org/abs/2509.11420) released, with [Terminal](https://github.com/TauricResearch/Trading-R1) expected to land soon.
-
-<div align="center">
-<a href="https://www.star-history.com/#TauricResearch/TradingAgents&Date">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=TauricResearch/TradingAgents&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=TauricResearch/TradingAgents&type=Date" />
-   <img alt="TradingAgents Star History" src="https://api.star-history.com/svg?repos=TauricResearch/TradingAgents&type=Date" style="width: 80%; height: auto;" />
- </picture>
-</a>
-</div>
-
-> 🎉 **TradingAgents** officially released! We have received numerous inquiries about the work, and we would like to express our thanks for the enthusiasm in our community.
->
-> So we decided to fully open-source the framework. Looking forward to building impactful projects with you!
+> **Fork notice.** This is an independently maintained fork of [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) (Apache-2.0). It adds Japanese-market data vendors and market-aware routing on top of the upstream framework and does not track upstream releases one-to-one. For upstream release news and community, see the [upstream repository](https://github.com/TauricResearch/TradingAgents). Original attribution and license are retained — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 <div align="center">
 
-🚀 [TradingAgents](#tradingagents-framework) | ⚡ [Installation & CLI](#installation-and-cli) | 🎬 [Demo](https://www.youtube.com/watch?v=90gr5lwjIho) | 📦 [Package Usage](#tradingagents-package) | 🤝 [Contributing](#contributing) | 📄 [Citation](#citation)
+🚀 [Framework](#tradingagents-framework) | ⚡ [Installation & CLI](#installation-and-cli) | 🇯🇵 [Japanese Market](#japanese-market-support-this-fork) | 📦 [Package Usage](#tradingagents-package) | 📄 [Citation](#citation)
 
 </div>
 
@@ -105,10 +63,10 @@ Our framework decomposes complex trading tasks into specialized roles.
 
 ### Installation
 
-Clone TradingAgents:
+Clone the repository:
 ```bash
-git clone https://github.com/TauricResearch/TradingAgents.git
-cd TradingAgents
+git clone https://github.com/qingchiang/trading-agents-x.git
+cd trading-agents-x
 ```
 
 Create a virtual environment in any of your favorite environment managers:
@@ -154,6 +112,8 @@ export MINIMAX_CN_API_KEY=...      # MiniMax — China (api.minimaxi.com)
 export OPENROUTER_API_KEY=...      # OpenRouter
 export ALPHA_VANTAGE_API_KEY=...   # Alpha Vantage
 ```
+
+Japanese-market (`.T`) data uses its own keys (J-Quants, EDINET, e-Stat) — see [Japanese Market Support](#japanese-market-support-this-fork) below. All are optional; without them `.T` tickers fall back to yfinance.
 
 For Azure OpenAI, copy `.env.enterprise.example` to `.env.enterprise` and fill in your credentials.
 
@@ -201,6 +161,42 @@ An interface will appear showing results as they load, letting you track the age
   <img src="assets/cli/cli_transaction.png" width="100%" style="display: inline-block; margin: 0 2%;">
 </p>
 
+## Japanese Market Support (this fork)
+
+Yahoo Finance covers `.T` tickers only thinly (adjusted OHLC, sparse fundamentals, English-only news). This fork routes Tokyo tickers to **native Japanese data sources** across all four analysts, wired through the generic suffix-based routing layer:
+
+| Analyst | Source | What it adds over the Yahoo baseline |
+|---|---|---|
+| Market / technicals | **J-Quants** `/equities/bars/daily` | Official TSE prices & indicators |
+| Fundamentals | **J-Quants** `/fins/summary` + assemblers | Date-safe computed valuation ratios, TOPIX-weekly beta, curated statement line items |
+| News | **EDINET** + **TDnet 適時開示** + **Google News (ja)** | Statutory filings, timely disclosures (決算/業績修正/M&A), and Japanese-language media — resolved by company *name*, not noisy codes |
+| Sentiment | **J-Quants** investor flows / margin / short-sale + **EDINET** 大量保有 & 公開買付 (TOB) | Official quantitative positioning in place of the US-retail social feeds that don't cover Japan |
+| Macro | **FRED** + **e-Stat** + **BOJ** | Cross-region backdrop (JP equities move on the Fed, China, and the BOJ), disk-cached across runs |
+
+**Configuration.** Add the free keys to `.env` (see `.env.example`):
+
+```bash
+export JQUANTS_API_KEY=...   # J-Quants v2 — prices, fundamentals, sentiment signals (https://jpx-jquants.com/)
+export EDINET_API_KEY=...    # EDINET — statutory disclosures + large-shareholding / TOB (https://api.edinet-fsa.go.jp/)
+export ESTAT_APP_ID=...      # e-Stat — Japanese CPI for the macro panel (https://www.e-stat.go.jp/api/)
+export FRED_API_KEY=...      # FRED — US/global macro (https://fred.stlouisfed.org/docs/api/api_key.html)
+```
+
+J-Quants plan tiers: the **Light** plan covers prices, `/fins/summary`, and investor flows — enough for market, fundamentals, and news. The **Standard** plan additionally unlocks the per-ticker margin-balance and short-position sentiment signals. The **Premium** plan is *not* required (line-item `/fins/details` is intentionally unused).
+
+**Graceful fallback — nothing is mandatory.** The JP vendors are *additive*: each degrades to the configured fallback rather than crashing.
+- No `JQUANTS_API_KEY` → prices/fundamentals fall back to **yfinance** (Yahoo data, English), exactly like upstream.
+- No `EDINET_API_KEY` → the news assembler drops the filings segment but still returns Google-News media (which needs no key); if every source is empty it falls back to yfinance.
+- On the **Light** plan → the Standard-only margin/short signals are simply omitted; the remaining sentiment signals still populate.
+- Missing macro keys → the macro panel degrades to a sentinel (macro is an optional category), never blocking a run.
+
+**What this fork optimizes.**
+- **Backtest-correct by construction.** Every JP source is *look-ahead-safe*: news and filings are filtered by disclosure date ≤ the as-of date, and macro series are settle-gated with a grace window, so a run pinned to a historical date never sees data published after it.
+- **More accurate data.** Official J-Quants prices and `/fins/summary` fundamentals replace Yahoo's thin `.T` coverage; the fundamentals assembler computes valuation ratios and a TOPIX-weekly beta on a proper Japanese benchmark.
+- **Signal, not noise.** Per-stock news is resolved by clean company name (so `4568` doesn't drag in galaxy NGC 4568 or index levels), and sentiment uses official positioning data instead of scrape-only, ToS-grey retail boards.
+
+See [CLAUDE.md](CLAUDE.md) for the full vendor architecture.
+
 ## TradingAgents Package
 
 ### Implementation Details
@@ -247,7 +243,7 @@ TradingAgents persists two kinds of state across runs.
 
 ### Decision log
 
-The decision log is always on. Each completed run appends its decision to `~/.tradingagents/memory/trading_memory.md`. On the next run for the same ticker, TradingAgents fetches the realised return (raw and alpha vs SPY), generates a one-paragraph reflection, and injects the most recent same-ticker decisions plus recent cross-ticker lessons into the Portfolio Manager prompt, so each analysis carries forward what worked and what didn't.
+The decision log is always on. Each completed run appends its decision to `~/.tradingagents/memory/trading_memory.md`. On the next run for the same ticker, TradingAgents fetches the realised return (raw and alpha vs the ticker's market benchmark — SPY for US, the Nikkei 225 for `.T`, resolved per market via `benchmark_map`), generates a one-paragraph reflection, and injects the most recent same-ticker decisions plus recent cross-ticker lessons into the Portfolio Manager prompt, so each analysis carries forward what worked and what didn't.
 
 Override the path with `TRADINGAGENTS_MEMORY_LOG_PATH`.
 

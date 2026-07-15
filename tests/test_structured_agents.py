@@ -7,11 +7,15 @@ behavior we added for the Trader, Research Manager, and Sentiment Analyst
 so they share the same deterministic output shape.
 """
 
+import copy
+from unittest import mock
 from unittest.mock import MagicMock
 
 import pytest
 from pydantic import ValidationError
 
+import tradingagents.dataflows.config as config_module
+import tradingagents.default_config as default_config
 from tradingagents.agents.analysts.sentiment_analyst import create_sentiment_analyst
 from tradingagents.agents.managers.research_manager import create_research_manager
 from tradingagents.agents.schemas import (
@@ -27,6 +31,8 @@ from tradingagents.agents.schemas import (
     render_trader_proposal,
 )
 from tradingagents.agents.trader.trader import create_trader
+from tradingagents.dataflows.config import set_config
+from tradingagents.dataflows.errors import VendorNotConfiguredError
 
 # ---------------------------------------------------------------------------
 # Render functions
@@ -406,3 +412,82 @@ class TestSentimentAnalystAgent:
         llm.with_structured_output.return_value = structured
         llm.invoke.return_value = MagicMock(content=plain)
         assert create_sentiment_analyst(llm)(_make_sentiment_state())["sentiment_report"] == plain
+
+
+_SENTIMENT_MOD = "tradingagents.agents.analysts.sentiment_analyst"
+
+
+@pytest.mark.unit
+class TestSentimentMarketGating:
+    """The sentiment node skips US-only social fetchers for routed markets and
+    never lets a news-fetch error escape (both new in the EDINET/JP change)."""
+
+    def teardown_method(self):
+        config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+
+    def _run(self, ticker, routes=None, news_side_effect=None):
+        captured = {}
+        config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        if routes:
+            set_config({"data_vendors_by_market": routes})
+        with mock.patch(f"{_SENTIMENT_MOD}.fetch_stocktwits_messages") as st, \
+                mock.patch(f"{_SENTIMENT_MOD}.fetch_reddit_posts") as rd, \
+                mock.patch(f"{_SENTIMENT_MOD}.get_investor_flows") as flows, \
+                mock.patch(f"{_SENTIMENT_MOD}.get_large_holdings") as holdings, \
+                mock.patch(f"{_SENTIMENT_MOD}.get_margin_balance") as margin, \
+                mock.patch(f"{_SENTIMENT_MOD}.get_short_positions") as shorts, \
+                mock.patch(f"{_SENTIMENT_MOD}.get_analyst_ratings_block") as ratings, \
+                mock.patch(f"{_SENTIMENT_MOD}.get_news") as news:
+            st.return_value = "STOCKTWITS_DATA"
+            rd.return_value = "REDDIT_DATA"
+            flows.return_value = "INVESTOR_FLOWS_DATA"
+            holdings.return_value = "LARGE_HOLDINGS_DATA"
+            margin.return_value = "MARGIN_BALANCE_DATA"
+            shorts.return_value = "SHORT_POSITION_DATA"
+            ratings.return_value = "ANALYST_RATINGS_DATA"
+            if news_side_effect is not None:
+                news.func.side_effect = news_side_effect
+            else:
+                news.func.return_value = "NEWS_DATA"
+            state = {**_make_sentiment_state(), "company_of_interest": ticker}
+            result = create_sentiment_analyst(_structured_sentiment_llm(captured))(state)
+        return captured, st, rd, flows, holdings, margin, shorts, ratings, result
+
+    def test_us_ticker_calls_social_fetchers(self):
+        _c, st, rd, flows, holdings, margin, shorts, ratings, _ = self._run("NVDA")
+        st.assert_called_once()
+        rd.assert_called_once()
+        flows.assert_not_called()  # market-flow proxy is for routed markets only
+        holdings.assert_not_called()  # large-holding signal is for routed markets only
+        margin.assert_not_called()  # margin-balance signal is for routed markets only
+        shorts.assert_not_called()  # short-position signal is for routed markets only
+        ratings.assert_not_called()  # analyst-rating overlay is for routed markets only
+
+    def test_routed_market_skips_social_and_injects_flows(self):
+        captured, st, rd, flows, holdings, margin, shorts, ratings, _ = self._run(
+            "9984.T", routes={".T": {"news_data": "edinet_news"}}
+        )
+        st.assert_not_called()
+        rd.assert_not_called()
+        flows.assert_called_once()
+        holdings.assert_called_once()
+        margin.assert_called_once()
+        shorts.assert_called_once()
+        ratings.assert_called_once()
+        prompt_text = "".join(str(m) for m in captured["prompt"])
+        assert "unavailable: no coverage for this market" in prompt_text
+        assert "INVESTOR_FLOWS_DATA" in prompt_text
+        assert "LARGE_HOLDINGS_DATA" in prompt_text
+        assert "MARGIN_BALANCE_DATA" in prompt_text
+        assert "SHORT_POSITION_DATA" in prompt_text
+        assert "ANALYST_RATINGS_DATA" in prompt_text
+
+    def test_news_fetch_error_degrades_instead_of_crashing(self):
+        captured, *_rest, result = self._run(
+            "9984.T",
+            routes={".T": {"news_data": "edinet_news"}},
+            news_side_effect=VendorNotConfiguredError("EDINET_API_KEY unset"),
+        )
+        # Node returns a report rather than propagating the vendor error.
+        assert result["sentiment_report"]
+        assert "news unavailable" in "".join(str(m) for m in captured["prompt"])

@@ -3,9 +3,12 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "tradingagents"
-version = "0.3.1"
-description = "TradingAgents: Multi-Agents LLM Financial Trading Framework"
+name = "trading-agents-x"
+# Fork versioning: <upstream base>+jp.<fork iteration>. The base tracks the
+# upstream release this fork is synced to (0.3.1); +jp.N marks fork builds on
+# that base. Bump the base on the next upstream sync, .N on fork-only changes.
+version = "0.3.1+jp.1"
+description = "Multi-agent LLM trading framework with Japanese-market (J-Quants/EDINET/TDnet) data support — a fork of TradingAgents"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -31,6 +34,7 @@ dependencies = [
     "tqdm>=4.67.1",
     "typing-extensions>=4.14.0",
     "yfinance>=1.4.1",
+    "jpholiday>=1.0.3",
 ]
 
 [project.optional-dependencies]
@@ -53,6 +57,7 @@ include = ["tradingagents*", "cli*"]
 
 [tool.setuptools.package-data]
 cli = ["static/*"]
+"tradingagents.dataflows" = ["data/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -18,6 +18,26 @@ from .errors import (
     VendorRateLimitError,
 )
 from .fred import get_macro_data as get_fred_macro_data
+from .jp.edinet_news import get_news as get_edinet_news
+from .jp.google_news import get_news as get_google_news
+from .jp.jp_fundamentals import get_fundamentals as get_jp_fundamentals
+from .jp.jp_news import get_news as get_jp_news
+from .jp.jp_statements import (
+    get_balance_sheet as get_jp_balance_sheet,
+    get_cashflow as get_jp_cashflow,
+    get_income_statement as get_jp_income_statement,
+)
+from .jp.jquants import (
+    get_balance_sheet as get_jquants_balance_sheet,
+    get_cashflow as get_jquants_cashflow,
+    get_fundamentals as get_jquants_fundamentals,
+    get_income_statement as get_jquants_income_statement,
+    get_indicator as get_jquants_indicator,
+    get_stock as get_jquants_stock,
+)
+from .jp.tdnet_news import get_news as get_tdnet_news
+from .macro import get_macro_indicators as get_macro_dispatch
+from .market_context import infer_market
 from .polymarket import get_prediction_markets as get_polymarket_prediction_markets
 from .y_finance import (
     get_balance_sheet as get_yfinance_balance_sheet,
@@ -80,8 +100,16 @@ TOOLS_CATEGORIES = {
 VENDOR_LIST = [
     "yfinance",
     "fred",
+    "macro",
     "polymarket",
     "alpha_vantage",
+    "jquants",
+    "jp_fundamentals",
+    "jp_statements",
+    "edinet_news",
+    "tdnet_news",
+    "google_news",
+    "jp_news",
 ]
 
 # Optional enrichment categories. These add macro/event context to the news
@@ -97,33 +125,47 @@ VENDOR_METHODS = {
     "get_stock_data": {
         "alpha_vantage": get_alpha_vantage_stock,
         "yfinance": get_YFin_data_online,
+        "jquants": get_jquants_stock,
     },
     # technical_indicators
     "get_indicators": {
         "alpha_vantage": get_alpha_vantage_indicator,
         "yfinance": get_stock_stats_indicators_window,
+        "jquants": get_jquants_indicator,
     },
     # fundamental_data
     "get_fundamentals": {
         "alpha_vantage": get_alpha_vantage_fundamentals,
         "yfinance": get_yfinance_fundamentals,
+        "jquants": get_jquants_fundamentals,
+        "jp_fundamentals": get_jp_fundamentals,
     },
     "get_balance_sheet": {
         "alpha_vantage": get_alpha_vantage_balance_sheet,
         "yfinance": get_yfinance_balance_sheet,
+        "jquants": get_jquants_balance_sheet,
+        "jp_statements": get_jp_balance_sheet,
     },
     "get_cashflow": {
         "alpha_vantage": get_alpha_vantage_cashflow,
         "yfinance": get_yfinance_cashflow,
+        "jquants": get_jquants_cashflow,
+        "jp_statements": get_jp_cashflow,
     },
     "get_income_statement": {
         "alpha_vantage": get_alpha_vantage_income_statement,
         "yfinance": get_yfinance_income_statement,
+        "jquants": get_jquants_income_statement,
+        "jp_statements": get_jp_income_statement,
     },
     # news_data
     "get_news": {
         "alpha_vantage": get_alpha_vantage_news,
         "yfinance": get_news_yfinance,
+        "edinet_news": get_edinet_news,
+        "tdnet_news": get_tdnet_news,
+        "google_news": get_google_news,
+        "jp_news": get_jp_news,
     },
     "get_global_news": {
         "yfinance": get_global_news_yfinance,
@@ -133,8 +175,12 @@ VENDOR_METHODS = {
         "alpha_vantage": get_alpha_vantage_insider_transactions,
         "yfinance": get_yfinance_insider_transactions,
     },
-    # macro_data
+    # macro_data — the "macro" vendor dispatches by indicator to the owning source
+    # (fred / e-Stat / boj); see macro.py. ("fred" stays selectable to force
+    # US-only.) Dispatch (one owner per indicator), not a fallback chain, so the
+    # owning vendor's typed error degrades with the right reason.
     "get_macro_indicators": {
+        "macro": get_macro_dispatch,
         "fred": get_fred_macro_data,
     },
     # prediction_markets
@@ -150,11 +196,21 @@ def get_category_for_method(method: str) -> str:
             return category
     raise ValueError(f"Method '{method}' not found in any category")
 
-def get_vendor(category: str, method: str = None) -> str:
+def get_vendor(category: str, method: str = None, market: str = "", config: dict = None) -> str:
     """Get the configured vendor for a data category or specific tool method.
-    Tool-level configuration takes precedence over category-level.
+
+    Resolution order (first match wins):
+      1. Tool-level config (``tool_vendors[method]``).
+      2. Market-specific category config (``data_vendors_by_market[market][category]``),
+         e.g. ``.T`` routes Japanese tickers to JP vendors.
+      3. Default category config (``data_vendors[category]``).
+
+    ``market=""`` skips step 2, reproducing the original behavior exactly, so
+    US / unsuffixed tickers are unaffected. ``config`` may be passed to reuse a
+    snapshot the caller already loaded (``get_config()`` deep-copies).
     """
-    config = get_config()
+    if config is None:
+        config = get_config()
 
     # Check tool-level configuration first (if method provided)
     if method:
@@ -162,13 +218,24 @@ def get_vendor(category: str, method: str = None) -> str:
         if method in tool_vendors:
             return tool_vendors[method]
 
+    # Market-specific override, keyed by ticker exchange suffix.
+    if market:
+        by_market = config.get("data_vendors_by_market", {}).get(market, {})
+        if category in by_market:
+            return by_market[category]
+
     # Fall back to category-level configuration
     return config.get("data_vendors", {}).get(category, "default")
 
 def route_to_vendor(method: str, *args, **kwargs):
     """Route method calls to appropriate vendor implementation with fallback support."""
     category = get_category_for_method(method)
-    vendor_config = get_vendor(category, method)
+    # Suffix-based routing: ticker-bearing methods infer the market from their
+    # first arg; ticker-less ones are market-agnostic (market=""). Read config
+    # once and thread it through so the per-call deep-copy happens a single time.
+    config = get_config()
+    market = infer_market(method, args, config.get("data_vendors_by_market", {}))
+    vendor_config = get_vendor(category, method, market, config)
     primary_vendors = [v.strip() for v in vendor_config.split(',')]
 
     if method not in VENDOR_METHODS:

@@ -1,15 +1,17 @@
 from datetime import datetime
 from typing import Annotated
 
-import pandas as pd
 import yfinance as yf
 from dateutil.relativedelta import relativedelta
 
+from .macro_common import SeriesCache
 from .stockstats_utils import (
+    INDICATOR_DESCRIPTIONS,
     StockstatsUtils,
     _assert_ohlcv_not_stale,
     filter_financials_by_date,
     load_ohlcv,
+    render_indicator_window,
     yf_retry,
 )
 from .symbol_utils import NoMarketDataError, normalize_symbol
@@ -78,169 +80,40 @@ def get_stock_stats_indicators_window(
     look_back_days: Annotated[int, "how many days to look back"],
 ) -> str:
 
-    best_ind_params = {
-        # Moving Averages
-        "close_50_sma": (
-            "50 SMA: A medium-term trend indicator. "
-            "Usage: Identify trend direction and serve as dynamic support/resistance. "
-            "Tips: It lags price; combine with faster indicators for timely signals."
-        ),
-        "close_200_sma": (
-            "200 SMA: A long-term trend benchmark. "
-            "Usage: Confirm overall market trend and identify golden/death cross setups. "
-            "Tips: It reacts slowly; best for strategic trend confirmation rather than frequent trading entries."
-        ),
-        "close_10_ema": (
-            "10 EMA: A responsive short-term average. "
-            "Usage: Capture quick shifts in momentum and potential entry points. "
-            "Tips: Prone to noise in choppy markets; use alongside longer averages for filtering false signals."
-        ),
-        # MACD Related
-        "macd": (
-            "MACD: Computes momentum via differences of EMAs. "
-            "Usage: Look for crossovers and divergence as signals of trend changes. "
-            "Tips: Confirm with other indicators in low-volatility or sideways markets."
-        ),
-        "macds": (
-            "MACD Signal: An EMA smoothing of the MACD line. "
-            "Usage: Use crossovers with the MACD line to trigger trades. "
-            "Tips: Should be part of a broader strategy to avoid false positives."
-        ),
-        "macdh": (
-            "MACD Histogram: Shows the gap between the MACD line and its signal. "
-            "Usage: Visualize momentum strength and spot divergence early. "
-            "Tips: Can be volatile; complement with additional filters in fast-moving markets."
-        ),
-        # Momentum Indicators
-        "rsi": (
-            "RSI: Measures momentum to flag overbought/oversold conditions. "
-            "Usage: Apply 70/30 thresholds and watch for divergence to signal reversals. "
-            "Tips: In strong trends, RSI may remain extreme; always cross-check with trend analysis."
-        ),
-        # Volatility Indicators
-        "boll": (
-            "Bollinger Middle: A 20 SMA serving as the basis for Bollinger Bands. "
-            "Usage: Acts as a dynamic benchmark for price movement. "
-            "Tips: Combine with the upper and lower bands to effectively spot breakouts or reversals."
-        ),
-        "boll_ub": (
-            "Bollinger Upper Band: Typically 2 standard deviations above the middle line. "
-            "Usage: Signals potential overbought conditions and breakout zones. "
-            "Tips: Confirm signals with other tools; prices may ride the band in strong trends."
-        ),
-        "boll_lb": (
-            "Bollinger Lower Band: Typically 2 standard deviations below the middle line. "
-            "Usage: Indicates potential oversold conditions. "
-            "Tips: Use additional analysis to avoid false reversal signals."
-        ),
-        "atr": (
-            "ATR: Averages true range to measure volatility. "
-            "Usage: Set stop-loss levels and adjust position sizes based on current market volatility. "
-            "Tips: It's a reactive measure, so use it as part of a broader risk management strategy."
-        ),
-        # Volume-Based Indicators
-        "vwma": (
-            "VWMA: A moving average weighted by volume. "
-            "Usage: Confirm trends by integrating price action with volume data. "
-            "Tips: Watch for skewed results from volume spikes; use in combination with other volume analyses."
-        ),
-        "mfi": (
-            "MFI: The Money Flow Index is a momentum indicator that uses both price and volume to measure buying and selling pressure. "
-            "Usage: Identify overbought (>80) or oversold (<20) conditions and confirm the strength of trends or reversals. "
-            "Tips: Use alongside RSI or MACD to confirm signals; divergence between price and MFI can indicate potential reversals."
-        ),
-    }
-
-    if indicator not in best_ind_params:
+    if indicator not in INDICATOR_DESCRIPTIONS:
         raise ValueError(
-            f"Indicator {indicator} is not supported. Please choose from: {list(best_ind_params.keys())}"
+            f"Indicator {indicator} is not supported. Please choose from: {list(INDICATOR_DESCRIPTIONS.keys())}"
         )
 
-    end_date = curr_date
-    curr_date_dt = datetime.strptime(curr_date, "%Y-%m-%d")
-    before = curr_date_dt - relativedelta(days=look_back_days)
-
-    # Optimized: Get stock data once and calculate indicators for all dates
+    # Fetch OHLCV once and render the indicator window via the shared,
+    # vendor-neutral helper (also used by the J-Quants path) so every vendor's
+    # report has an identical shape.
     try:
-        indicator_data = _get_stock_stats_bulk(symbol, indicator, curr_date)
-
-        # Generate the date range we need
-        current_dt = curr_date_dt
-        date_values = []
-
-        while current_dt >= before:
-            date_str = current_dt.strftime('%Y-%m-%d')
-
-            # Look up the indicator value for this date
-            if date_str in indicator_data:
-                indicator_value = indicator_data[date_str]
-            else:
-                indicator_value = "N/A: Not a trading day (weekend or holiday)"
-
-            date_values.append((date_str, indicator_value))
-            current_dt = current_dt - relativedelta(days=1)
-
-        # Build the result string
-        ind_string = ""
-        for date_str, value in date_values:
-            ind_string += f"{date_str}: {value}\n"
-
+        data = load_ohlcv(symbol, curr_date)
+        return render_indicator_window(data, indicator, curr_date, look_back_days)
     except NoMarketDataError:
         raise  # Unknown/delisted symbol — let the router emit the sentinel
     except Exception as e:
         print(f"Error getting bulk stockstats data: {e}")
-        # Fallback to original implementation if bulk method fails
-        ind_string = ""
-        curr_date_dt = datetime.strptime(curr_date, "%Y-%m-%d")
-        while curr_date_dt >= before:
-            indicator_value = get_stockstats_indicator(
-                symbol, indicator, curr_date_dt.strftime("%Y-%m-%d")
-            )
-            ind_string += f"{curr_date_dt.strftime('%Y-%m-%d')}: {indicator_value}\n"
-            curr_date_dt = curr_date_dt - relativedelta(days=1)
 
-    result_str = (
-        f"## {indicator} values from {before.strftime('%Y-%m-%d')} to {end_date}:\n\n"
+    # Fallback to per-day computation if the bulk path failed.
+    curr_date_dt = datetime.strptime(curr_date, "%Y-%m-%d")
+    before = curr_date_dt - relativedelta(days=look_back_days)
+    ind_string = ""
+    day = curr_date_dt
+    while day >= before:
+        indicator_value = get_stockstats_indicator(
+            symbol, indicator, day.strftime("%Y-%m-%d")
+        )
+        ind_string += f"{day.strftime('%Y-%m-%d')}: {indicator_value}\n"
+        day = day - relativedelta(days=1)
+
+    return (
+        f"## {indicator} values from {before.strftime('%Y-%m-%d')} to {curr_date}:\n\n"
         + ind_string
         + "\n\n"
-        + best_ind_params.get(indicator, "No description available.")
+        + INDICATOR_DESCRIPTIONS.get(indicator, "No description available.")
     )
-
-    return result_str
-
-
-def _get_stock_stats_bulk(
-    symbol: Annotated[str, "ticker symbol of the company"],
-    indicator: Annotated[str, "technical indicator to calculate"],
-    curr_date: Annotated[str, "current date for reference"]
-) -> dict:
-    """
-    Optimized bulk calculation of stock stats indicators.
-    Fetches data once and calculates indicator for all available dates.
-    Returns dict mapping date strings to indicator values.
-    """
-    from stockstats import wrap
-
-    data = load_ohlcv(symbol, curr_date)
-    df = wrap(data)
-    df["Date"] = df["Date"].dt.strftime("%Y-%m-%d")
-
-    # Calculate the indicator for all rows at once
-    df[indicator]  # This triggers stockstats to calculate the indicator
-
-    # Create a dictionary mapping date strings to indicator values
-    result_dict = {}
-    for _, row in df.iterrows():
-        date_str = row["Date"]
-        indicator_value = row[indicator]
-
-        # Handle NaN/None values
-        if pd.isna(indicator_value):
-            result_dict[date_str] = "N/A"
-        else:
-            result_dict[date_str] = str(indicator_value)
-
-    return result_dict
 
 
 def get_stockstats_indicator(
@@ -336,6 +209,117 @@ def get_fundamentals(
         raise
     except Exception as e:
         return f"Error retrieving fundamentals for {ticker}: {str(e)}"
+
+
+# yfinance ``.info`` is one HTTP round-trip returning ALL fields, and both
+# live-only JP overlays (analyst forward + analyst ratings) read it for the same
+# ticker in the same run. Cache successful fetches (bounded LRU) so the run pays
+# a single round-trip; a failure is NOT cached so a transient outage stays
+# retryable. Only live/near-today runs reach here (callers gate on look-ahead),
+# so a process-lifetime snapshot is acceptable.
+_INFO_CACHE = SeriesCache(max_entries=256)
+
+
+def _yf_info(canonical: str) -> dict:
+    """Fetch (and memoize) yfinance ``.info`` for a canonical symbol; ``{}`` on failure."""
+    info = _INFO_CACHE.get(canonical)
+    if info is not None:
+        return info
+    try:
+        info = yf_retry(lambda: yf.Ticker(canonical).info)
+    except Exception:
+        return {}
+    if not info:
+        return {}
+    _INFO_CACHE.put(canonical, info)
+    return info
+
+
+def get_analyst_forward(ticker: Annotated[str, "ticker symbol of the company"]):
+    """Return ``(forward_eps, num_analysts)`` from yfinance ``.info``, else ``(None, None)``.
+
+    The analyst-consensus forward EPS and the number of contributing analysts.
+    This is a LIVE snapshot — yfinance exposes no as-of history for ``.info`` — so
+    callers must gate it on look-ahead (it is used only for the JP assembler's
+    live-only analyst-forward overlay). Any fetch failure degrades to ``(None, None)``.
+    """
+    info = _yf_info(normalize_symbol(ticker))
+    return info.get("forwardEps"), info.get("numberOfAnalystOpinions")
+
+
+# Analyst-consensus rating fields from yfinance ``.info``, in the order a caller
+# would present them: the rating, its 1–5 mean, the analyst count, and the
+# 12-month price-target band plus the live price the target is measured against.
+_RATING_FIELDS = (
+    "recommendationKey",
+    "recommendationMean",
+    "numberOfAnalystOpinions",
+    "targetMeanPrice",
+    "targetHighPrice",
+    "targetLowPrice",
+    "currentPrice",
+    "regularMarketPrice",  # fallback when .info omits currentPrice for some .T names
+)
+
+
+def get_analyst_ratings(ticker: Annotated[str, "ticker symbol of the company"]) -> dict:
+    """Return yfinance analyst-consensus rating fields as a dict, else ``{}``.
+
+    Sell-side rating (buy/hold/sell), its 1–5 mean, the contributing analyst
+    count, and the 12-month price-target band. Like :func:`get_analyst_forward`
+    this is a LIVE ``.info`` snapshot with no as-of history, so callers must gate
+    it on look-ahead (it feeds the JP sentiment analyst's live-only rating
+    overlay). Any fetch failure degrades to ``{}``.
+    """
+    info = _yf_info(normalize_symbol(ticker))
+    return {k: info.get(k) for k in _RATING_FIELDS} if info else {}
+
+
+# yfinance statement attribute per (kind, freq); the raw line-item frame has
+# line items as rows and fiscal-period-end timestamps as columns.
+_STATEMENT_ATTRS = {
+    ("income", "quarterly"): "quarterly_income_stmt",
+    ("income", "annual"): "income_stmt",
+    ("balance", "quarterly"): "quarterly_balance_sheet",
+    ("balance", "annual"): "balance_sheet",
+    ("cashflow", "quarterly"): "quarterly_cashflow",
+    ("cashflow", "annual"): "cashflow",
+}
+
+
+def get_statement_frame(
+    ticker: Annotated[str, "ticker symbol of the company"],
+    kind: Annotated[str, "'income' | 'balance' | 'cashflow'"],
+    freq: Annotated[str, "'annual' or 'quarterly'"] = "quarterly",
+    curr_date: Annotated[str, "current date YYYY-MM-DD"] = None,
+):
+    """Return the date-filtered yfinance statement DataFrame, or None.
+
+    Rows are line items, columns are fiscal-period ends filtered to on/before
+    ``curr_date`` (look-ahead safe). Best-effort: any fetch failure or empty
+    result returns None. Exposed for the JP statement assembler, which picks the
+    curated line items the J-Quants summary lacks; keeping the raw frame here
+    leaves yfinance access in the yfinance module. (The three ``get_*`` wrappers
+    below duplicate this attr-select, deliberately left untouched to avoid churn
+    on upstream-shared code.)
+
+    ``freq`` is compared exactly to ``"annual"`` (matching the J-Quants summary's
+    own check) so the two halves of a JP statement report never disagree on
+    annual-vs-quarterly periods.
+    """
+    attr = _STATEMENT_ATTRS.get((kind, "annual" if freq == "annual" else "quarterly"))
+    if attr is None:
+        return None
+    canonical = normalize_symbol(ticker)
+    try:
+        obj = yf.Ticker(canonical)
+        data = yf_retry(lambda: getattr(obj, attr))
+    except Exception:
+        return None
+    if data is None or getattr(data, "empty", True):
+        return None
+    data = filter_financials_by_date(data, curr_date)
+    return data if not data.empty else None
 
 
 def get_balance_sheet(

@@ -135,12 +135,47 @@ DEFAULT_CONFIG = _apply_env_overrides({
         "technical_indicators": "yfinance",  # Options: alpha_vantage, yfinance
         "fundamental_data": "yfinance",      # Options: alpha_vantage, yfinance
         "news_data": "yfinance",             # Options: alpha_vantage, yfinance
-        "macro_data": "fred",                # Options: fred (needs FRED_API_KEY)
+        # "macro" dispatches each indicator to its owning source: fred (US series
+        # + raw FRED IDs; needs FRED_API_KEY), e-Stat (Japan CPI), BOJ (Japan
+        # policy rate / Tankan, keyless). Set "fred" to force US-only. See macro.py.
+        "macro_data": "macro",
+
         "prediction_markets": "polymarket",  # Options: polymarket (keyless)
     },
     # Tool-level configuration (takes precedence over category-level)
     "tool_vendors": {
         # Example: "get_stock_data": "alpha_vantage",  # Override category default
+    },
+    # Market-specific vendor overrides, keyed by ticker exchange suffix (e.g.
+    # ".T" for Tokyo, ".SS"/".SZ" for China). When a ticker carries a configured
+    # suffix, that category's vendor comes from here instead of ``data_vendors``.
+    # Only per-instrument (ticker-bearing) tools are routed; macro and global
+    # news stay market-agnostic (cross-border context analyzed across all markets
+    # at once) and always use ``data_vendors``. Japanese-market vendors are wired
+    # in for ".T" (Tokyo); add ".SS" / ".SZ" / ".HK" for China-market support.
+    # Each chain is "<JP vendor>,yfinance" — a true ordered fallback (try the JP
+    # vendor, then Yahoo), distinct from macro_data's per-owner dispatch; don't
+    # "fix" one into the other. For prices/indicators/fundamentals yfinance is
+    # OPTIONAL keyless degradation: jquants serves every method when a key is set,
+    # and Yahoo (which covers Tokyo) keeps a keyless ".T" run working instead of
+    # hard-erroring. For news_data yfinance is also the SOLE server of
+    # get_insider_transactions (edinet_news has no insider source), so it is
+    # load-bearing even with keys present — don't drop it.
+    "data_vendors_by_market": {
+        ".T": {
+            "core_stock_apis": "jquants,yfinance",
+            "technical_indicators": "jquants,yfinance",
+            # get_fundamentals goes to jp_fundamentals (J-Quants summary + date-safe
+            # computed valuation ratios); the three statement methods go to
+            # jp_statements (J-Quants summary + curated yfinance line items). Each
+            # JP assembler serves only its own methods, so the router picks the
+            # right one per method; jquants then yfinance remain keyless fallbacks.
+            "fundamental_data": "jp_fundamentals,jp_statements,jquants,yfinance",
+            # jp_news assembles EDINET statutory filings + Google-News media
+            # headlines (edinet alone would win the fallback and hide the media
+            # side); yfinance (English media) stays a keyless last resort.
+            "news_data": "jp_news,yfinance",
+        },
     },
     # Benchmark for alpha calculation in the reflection layer.
     # ``benchmark_ticker`` (when set) overrides the suffix map for all

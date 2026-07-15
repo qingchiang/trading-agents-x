@@ -1,0 +1,14 @@
+trading-agents-x
+Copyright 2026 qingchiang
+
+This product is a modified derivative work of:
+
+  TradingAgents: Multi-Agents LLM Financial Trading Framework
+  Copyright Tauric Research
+  https://github.com/TauricResearch/TradingAgents
+  Licensed under the Apache License, Version 2.0.
+
+This fork adds Japanese-market data vendors (J-Quants, EDINET, TDnet,
+e-Stat, BOJ) and a suffix-based, market-aware data-routing layer on top
+of the upstream framework. Files modified from the upstream original are
+recorded in this project's Git history.

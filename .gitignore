@@ -221,3 +221,6 @@ __marimo__/
 # Enterprise env file (secrets) and generated run reports
 .env.enterprise
 reports/
+
+# Scratch space for manually downloaded bootstrap inputs (e.g. EdinetcodeDlInfo.csv)
+tmp/

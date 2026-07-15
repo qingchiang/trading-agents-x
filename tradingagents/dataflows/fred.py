@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 import requests
 
 from .errors import VendorNotConfiguredError
+from .macro_common import SeriesCache, render_macro_report
 
 logger = logging.getLogger(__name__)
 
@@ -27,10 +28,6 @@ REQUEST_TIMEOUT = 30
 # Default trailing window when the caller does not specify one. A year captures
 # the trend and the year-over-year base for most monthly/quarterly series.
 DEFAULT_LOOKBACK_DAYS = 365
-
-# Rows cap for the rendered table: recent values matter most for a decision, and
-# daily series (yields, VIX) over a long window would otherwise flood context.
-MAX_ROWS = 40
 
 # Curated human-friendly aliases -> FRED series IDs. Anything not listed is used
 # verbatim as a raw FRED series ID, so power users are never limited to this set.
@@ -133,49 +130,51 @@ def _request(path: str, params: dict) -> dict:
     return response.json()
 
 
-def get_macro_data(
+# Process-level cache of fetched series, keyed by (series_id, curr_date,
+# look_back_days). A macro series is a point-in-time function of curr_date, so a
+# panel that pulls ten series plus a later microscope tool-call for the same
+# series within one run hits the API once — and the news node is re-entered on
+# every tool-call round-trip, so caching (including curr_date == today, which for
+# low-frequency macro is effectively settled) is what keeps a run from hammering
+# FRED's rate limit. Only *successful* results are cached (see SeriesCache). The
+# "fred" namespace also persists settled (past-date) series to disk, so a backtest
+# re-reading the same dates across runs skips the API entirely.
+_series_cache = SeriesCache(namespace="fred")
+
+
+def fetch_series(
     indicator: str,
     curr_date: str,
     look_back_days: int | None = None,
-) -> str:
-    """Fetch a FRED macroeconomic series as a formatted markdown report.
+) -> dict | None:
+    """Fetch a FRED series as structured data (metadata + observations).
 
-    Args:
-        indicator: A friendly alias (e.g. "cpi", "unemployment", "10y_treasury")
-            or a raw FRED series ID (e.g. "CPIAUCSL", "DGS10").
-        curr_date: End of the window (yyyy-mm-dd); no later observations are
-            returned, so a past date never leaks future data.
-        look_back_days: Trailing window length; ``None`` uses DEFAULT_LOOKBACK_DAYS.
-
-    Returns:
-        A markdown report with the series title, units, frequency, the latest
-        value, the change over the window, and a recent observation table.
+    Returns a dict with ``series_id``, ``title``, ``units``, ``frequency``,
+    ``seasonal``, ``start_date`` and ``points`` (a look-ahead-safe ascending list
+    of ``(date, value)`` up to ``curr_date``), or ``None`` if the series does not
+    exist. Raises ``ValueError`` for an unusable indicator and
+    ``FredNotConfiguredError`` when no key is set. Shared by :func:`get_macro_data`
+    (the microscope tool) and the cross-region macro panel, memoized per
+    (series, date, window).
     """
     if look_back_days is None:
         look_back_days = DEFAULT_LOOKBACK_DAYS
+    series_id = _resolve_series_id(indicator)
+
+    cache_key = (series_id, curr_date, look_back_days)
+    cached = _series_cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     end_dt = datetime.strptime(curr_date, "%Y-%m-%d")
     start_date = (end_dt - timedelta(days=look_back_days)).strftime("%Y-%m-%d")
 
-    # Invalid LLM-supplied indicator: return guidance rather than raising, so a
-    # bad argument doesn't abort the run (the routing layer also degrades macro
-    # data, but a specific message is more useful to the analyst).
-    try:
-        series_id = _resolve_series_id(indicator)
-    except ValueError as e:
-        return f"FRED: {e}"
-
     meta = _request("series", {"series_id": series_id}).get("seriess") or []
     if not meta:
-        return (
-            f"FRED series '{series_id}' not found. Pass a known alias "
-            f"(e.g. 'cpi', 'unemployment') or a valid FRED series ID."
-        )
+        # Don't cache a miss: an empty response may be a transient outage rather
+        # than a genuinely nonexistent series, and we want a later call to retry.
+        return None
     info = meta[0]
-    title = info.get("title", series_id)
-    units = info.get("units_short") or info.get("units", "")
-    frequency = info.get("frequency", "")
-    seasonal = info.get("seasonal_adjustment_short", "")
 
     observations = _request(
         "series/observations",
@@ -194,44 +193,54 @@ def get_macro_data(
         if o.get("value") not in (".", None, "")
     ]
 
-    header = (
-        f"## FRED: {title} ({series_id})\n"
-        f"- Units: {units}\n"
-        f"- Frequency: {frequency}"
-        f"{f' ({seasonal})' if seasonal else ''}\n"
-        f"- Window: {start_date} to {curr_date}\n"
-    )
+    data = {
+        "series_id": series_id,
+        "title": info.get("title", series_id),
+        "units": info.get("units_short") or info.get("units", ""),
+        "frequency": info.get("frequency", ""),
+        "seasonal": info.get("seasonal_adjustment_short", ""),
+        "start_date": start_date,
+        "points": points,
+    }
+    _series_cache.put(cache_key, data)
+    return data
 
-    if not points:
-        return header + (
-            f"\nNo observations for {series_id} in this window. The series may "
-            f"report less frequently than the window length; widen look_back_days."
-        )
 
-    first_date, first_val = points[0]
-    last_date, last_val = points[-1]
+def get_macro_data(
+    indicator: str,
+    curr_date: str,
+    look_back_days: int | None = None,
+) -> str:
+    """Fetch a FRED macroeconomic series as a formatted markdown report.
+
+    Args:
+        indicator: A friendly alias (e.g. "cpi", "unemployment", "10y_treasury")
+            or a raw FRED series ID (e.g. "CPIAUCSL", "DGS10").
+        curr_date: End of the window (yyyy-mm-dd); no later observations are
+            returned, so a past date never leaks future data.
+        look_back_days: Trailing window length; ``None`` uses DEFAULT_LOOKBACK_DAYS.
+
+    Returns:
+        A markdown report with the series title, units, frequency, the latest
+        value, the change over the window, and a recent observation table.
+    """
+    # Invalid LLM-supplied indicator: return guidance rather than raising, so a
+    # bad argument doesn't abort the run (the routing layer also degrades macro
+    # data, but a specific message is more useful to the analyst). A missing key
+    # (FredNotConfiguredError, also a ValueError) must still propagate so macro
+    # degrades at the router rather than reading as a bad indicator.
     try:
-        delta = float(last_val) - float(first_val)
-        base = float(first_val)
-        pct = f" ({delta / base * 100:+.2f}%)" if base != 0 else ""
-        summary = (
-            f"\n**Latest:** {last_val} ({last_date}) | "
-            f"**Change over window:** {delta:+.2f}{pct} "
-            f"from {first_val} ({first_date})\n"
+        data = fetch_series(indicator, curr_date, look_back_days)
+    except FredNotConfiguredError:
+        raise
+    except ValueError as e:
+        return f"FRED: {e}"
+
+    if data is None:
+        series_id = _resolve_series_id(indicator)
+        return (
+            f"FRED series '{series_id}' not found. Pass a known alias "
+            f"(e.g. 'cpi', 'unemployment') or a valid FRED series ID."
         )
-    except ValueError:
-        summary = f"\n**Latest:** {last_val} ({last_date})\n"
 
-    shown = points
-    note = ""
-    if len(points) > MAX_ROWS:
-        shown = points[-MAX_ROWS:]
-        note = f"\n_(showing the most recent {MAX_ROWS} of {len(points)} observations)_\n"
-
-    table = (
-        "\n| Date | Value |\n| --- | --- |\n"
-        + "\n".join(f"| {d} | {v} |" for d, v in shown)
-        + "\n"
-    )
-
-    return header + summary + note + table
+    return render_macro_report("FRED", data, curr_date)

@@ -29,6 +29,7 @@ from tradingagents.agents.utils.agent_utils import (
 )
 from tradingagents.agents.utils.memory import TradingMemoryLog
 from tradingagents.dataflows.config import set_config
+from tradingagents.dataflows.symbol_utils import match_exchange_suffix
 from tradingagents.dataflows.utils import safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.llm_clients import create_llm_client
@@ -242,10 +243,9 @@ class TradingAgentsGraph:
         if explicit:
             return explicit
         benchmark_map = self.config.get("benchmark_map", {})
-        ticker_upper = ticker.upper()
-        for suffix, benchmark in benchmark_map.items():
-            if suffix and ticker_upper.endswith(suffix.upper()):
-                return benchmark
+        suffix = match_exchange_suffix(ticker, benchmark_map)
+        if suffix:
+            return benchmark_map[suffix]
         return benchmark_map.get("", "SPY")
 
     def _fetch_returns(
