@@ -1,6 +1,7 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This is the public engineering guide for coding agents working in this repository.
+Claude Code loads it directly; `AGENTS.md` directs Codex to read it in full.
 
 ## Commands
 
