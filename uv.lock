@@ -3154,7 +3154,7 @@ wheels = [
 
 [[package]]
 name = "trading-agents-x"
-version = "0.3.1"
+version = "0.3.1+jp.1"
 source = { editable = "." }
 dependencies = [
     { name = "backtrader" },
