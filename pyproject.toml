@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "tradingagents"
+name = "trading-agents-x"
 version = "0.3.1"
-description = "TradingAgents: Multi-Agents LLM Financial Trading Framework"
+description = "Multi-agent LLM trading framework with Japanese-market (J-Quants/EDINET/TDnet) data support — a fork of TradingAgents"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
