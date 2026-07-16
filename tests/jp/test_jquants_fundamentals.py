@@ -15,10 +15,11 @@ from tradingagents.dataflows.jp import jquants_fundamentals as jf
 
 def _summary(disc_date, *, per_type="FY", per_end="2023-03-31", ta="1000", eq="400",
              sales="500", op="80", odp="85", np_="60", eps="12.3", bps="250",
-             cfo="90", cfi="-30", cff="-20", casheq="200", disc_time="15:00:00"):
+             cfo="90", cfi="-30", cff="-20", casheq="200", disc_time="15:00:00",
+             doc_type=None):
     return {
         "Code": "86970", "DiscDate": disc_date, "DiscTime": disc_time,
-        "DocType": f"{per_type}FinancialStatements_Consolidated_IFRS",
+        "DocType": doc_type or f"{per_type}FinancialStatements_Consolidated_IFRS",
         "CurPerType": per_type, "CurPerEn": per_end, "CurFYEn": "2023-03-31",
         "TA": ta, "Eq": eq, "Sales": sales, "OP": op, "OdP": odp, "NP": np_,
         "EPS": eps, "BPS": bps, "CFO": cfo, "CFI": cfi, "CFF": cff, "CashEq": casheq,
@@ -68,6 +69,35 @@ class FundamentalsTests(unittest.TestCase):
         self.assertIn("EPS: 12.3", out)
         self.assertIn("operating: 90", out)
 
+    def test_duplicate_period_keeps_latest_visible_disclosure(self):
+        recs = [
+            _summary("2023-05-10", sales="400"),
+            _summary("2023-05-12", sales="500"),
+        ]
+        with _patch(recs):
+            before = jf.get_income_statement("9984.T", "annual", "2023-05-11")
+            after = jf.get_income_statement("9984.T", "annual", "2023-05-13")
+        self.assertIn("NetSales=400", before)
+        self.assertIn("disclosed 2023-05-10", before)
+        self.assertIn("NetSales=500", after)
+        self.assertNotIn("NetSales=400", after)
+        self.assertEqual(after.count("FY end 2023-03-31"), 1)
+
+    def test_dedupe_retains_distinct_doc_types_and_incomplete_keys(self):
+        consolidated = _summary("2023-05-12", sales="500")
+        standalone = _summary(
+            "2023-05-11",
+            sales="300",
+            doc_type="FYFinancialStatements_NonConsolidated_JP",
+        )
+        incomplete_a = _summary("2023-05-09", sales="200")
+        incomplete_b = _summary("2023-05-08", sales="100")
+        incomplete_a["DocType"] = None
+        incomplete_b["DocType"] = None
+        with _patch([consolidated, standalone, incomplete_a, incomplete_b]):
+            _, periods = jf.fetch_periods("9984.T", "2023-05-13")
+        self.assertEqual([r["Sales"] for r in periods], ["500", "300", "200", "100"])
+
     def test_balance_sheet_derives_liabilities(self):
         with _patch([_summary("2023-05-10", ta="1000", eq="400")]):
             out = jf.get_balance_sheet("9984.T")
@@ -90,6 +120,26 @@ class FundamentalsTests(unittest.TestCase):
         self.assertIn("OperatingProfit=80", out)
         self.assertIn("NetProfit=60", out)
         self.assertIn("EPS=12.3", out)
+
+    def test_income_statement_explains_ifrs_missing_fields(self):
+        with _patch([_summary("2023-05-10", op="", odp="")]):
+            out = jf.get_income_statement("9984.T")
+        self.assertIn("Consolidated, IFRS", out)
+        self.assertIn("OperatingProfit=not provided in J-Quants summary", out)
+        self.assertIn("OrdinaryProfit=not applicable (IFRS)", out)
+
+    def test_japanese_gaap_missing_ordinary_profit_is_not_called_ifrs_na(self):
+        record = _summary(
+            "2023-05-10",
+            op="",
+            odp="",
+            doc_type="FYFinancialStatements_NonConsolidated_JP",
+        )
+        with _patch([record]):
+            out = jf.get_income_statement("9984.T")
+        self.assertIn("Non-consolidated, Japanese GAAP", out)
+        self.assertIn("OrdinaryProfit=not provided in J-Quants summary", out)
+        self.assertNotIn("not applicable (IFRS)", out)
 
     def test_lookahead_excludes_future_disclosures(self):
         recs = [_summary("2023-05-10", sales="500"), _summary("2024-05-10", sales="999")]

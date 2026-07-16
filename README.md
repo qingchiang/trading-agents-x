@@ -168,7 +168,7 @@ Yahoo Finance covers `.T` tickers only thinly (adjusted OHLC, sparse fundamental
 | Analyst | Source | What it adds over the Yahoo baseline |
 |---|---|---|
 | Market / technicals | **J-Quants** `/equities/bars/daily` | Official TSE prices, indicators, and vendor-routed verified snapshots with explicit source labels |
-| Fundamentals | **J-Quants** `/fins/summary` + assemblers | Date-safe computed valuation ratios, TOPIX-weekly beta, curated statement line items |
+| Fundamentals | **J-Quants** `/fins/summary` + assemblers | Disclosure-date-safe ratios, deduplicated/accounting-labelled summaries, and live-only curated statement detail |
 | News | **EDINET** + **TDnet 適時開示** + **Google News (ja)** + **J-Quants** section flows | Statutory filings, timely disclosures, Japanese-language media, and clearly labelled Prime/Standard/Growth market context that is never attributed to the ticker |
 | Sentiment | **J-Quants** per-stock margin / short-sale + **EDINET** 大量保有 & 公開買付 (TOB) | Per-company positioning and filings in place of US-retail social feeds; exchange-wide investor flows are intentionally excluded |
 | Macro | **FRED** + **e-Stat** + **BOJ** | Cross-region backdrop (JP equities move on the Fed, China, and the BOJ), disk-cached across runs |
@@ -185,14 +185,14 @@ export FRED_API_KEY=...      # FRED — US/global macro (https://fred.stlouisfed
 J-Quants plan tiers: the **Light** plan covers prices, `/fins/summary`, and exchange-section investor flows — enough for market, fundamentals, and News regional context. The **Standard** plan additionally unlocks the per-ticker margin-balance and short-position sentiment signals. The **Premium** plan is *not* required (line-item `/fins/details` is intentionally unused).
 
 **Graceful fallback — nothing is mandatory.** The JP vendors are *additive*: each degrades to the configured fallback rather than crashing.
-- No `JQUANTS_API_KEY` → prices/fundamentals fall back to **yfinance** (Yahoo data, English), exactly like upstream.
+- No `JQUANTS_API_KEY` → prices and near-live fundamentals can fall back to **yfinance** (Yahoo data, English); historical `.T` statements fail closed because Yahoo does not expose filing timestamps.
 - No `EDINET_API_KEY` → the news assembler drops the filings segment but still returns Google-News media (which needs no key); if every source is empty it falls back to yfinance.
 - On the **Light** plan → the Standard-only margin/short signals are simply omitted; the remaining sentiment signals still populate.
 - Missing macro keys → the macro panel degrades to a sentinel (macro is an optional category), never blocking a run.
 
 **What this fork optimizes.**
-- **Historical runs fail closed for live-only data.** JP official sources remain look-ahead-safe, and historical runs do not query current StockTwits, Reddit, or yfinance `.info`. Near-live social messages are filtered to the requested market-calendar date window.
-- **More accurate data.** Official J-Quants prices and `/fins/summary` fundamentals replace Yahoo's thin `.T` coverage; the fundamentals assembler computes valuation ratios and a TOPIX-weekly beta on a proper Japanese benchmark.
+- **Historical runs fail closed for live-only data.** JP official sources remain look-ahead-safe, and historical runs do not query current StockTwits, Reddit, yfinance `.info`, or yfinance `.T` statement frames without filing timestamps. Near-live social messages are filtered to the requested market-calendar date window.
+- **More accurate data.** Official J-Quants prices and `/fins/summary` fundamentals replace Yahoo's thin `.T` coverage; the fundamentals assembler computes valuation ratios and a TOPIX-weekly beta on a proper Japanese benchmark, deduplicates repeated period disclosures, and labels IFRS/GAAP scope explicitly.
 - **Signal, not noise.** Yahoo ticker news and Google News JP use a configurable 14-day company-news window and a hybrid evidence boundary: explicit ticker/full-name evidence is `[direct]`, ambiguous names/tickers and summary-only mentions are `[candidate]` for the analyst to verify, and `[context]` remains external background. Dates, duplicates, known template/disclosure mirrors, blocked junk sources, and items with no entity evidence are handled deterministically. Fast-decaying StockTwits/Reddit sentiment and global macro news stay at 7 days. Sentiment uses official positioning data instead of scrape-only, ToS-grey retail boards.
 - **Point-in-time-safe identity.** Live analysis can use rich yfinance `.info` identity fields. Historical graph startup and news alias resolution use exact-symbol `yf.Search` metadata instead, so current sector/industry cannot leak into a backtest.
 

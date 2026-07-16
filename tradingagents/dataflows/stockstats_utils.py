@@ -198,8 +198,10 @@ def filter_financials_by_date(data: pd.DataFrame, curr_date: str) -> pd.DataFram
     """Drop financial statement columns (fiscal period timestamps) after curr_date.
 
     yfinance financial statements use fiscal period end dates as columns.
-    Columns after curr_date represent future data and are removed to
-    prevent look-ahead bias.
+    Columns after curr_date represent future periods and are removed. This is
+    only a period-end boundary: yfinance does not expose the historical filing
+    timestamp for the retrieved frame, so this helper alone does not make the
+    values point-in-time safe for backtesting.
     """
     if not curr_date or data.empty:
         return data

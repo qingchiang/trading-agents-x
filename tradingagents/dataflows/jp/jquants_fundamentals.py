@@ -25,6 +25,39 @@ def _fmt(value) -> str:
     return "N/A" if value in (None, "") else str(value)
 
 
+def _reporting_basis(record: dict) -> str:
+    """Return a readable consolidation/accounting basis from ``DocType``."""
+    doc_type = str(record.get("DocType") or "")
+    if "NonConsolidated" in doc_type:
+        scope = "Non-consolidated"
+    elif "Consolidated" in doc_type:
+        scope = "Consolidated"
+    else:
+        scope = "Scope unspecified"
+
+    if doc_type.endswith("_IFRS"):
+        standard = "IFRS"
+    elif doc_type.endswith("_JP"):
+        standard = "Japanese GAAP"
+    elif doc_type.endswith("_US"):
+        standard = "US GAAP"
+    else:
+        standard = "accounting standard unspecified"
+    return f"{scope}, {standard}"
+
+
+def _fmt_field(record: dict, key: str) -> str:
+    """Render statement fields without turning accounting semantics into zeros."""
+    value = record.get(key)
+    if value not in (None, ""):
+        return str(value)
+    if key == "OdP" and str(record.get("DocType") or "").endswith("_IFRS"):
+        return "not applicable (IFRS)"
+    if key in {"OP", "OdP"}:
+        return "not provided in J-Quants summary"
+    return "N/A"
+
+
 def _liabilities(record: dict):
     """Total liabilities = total assets - net assets, when both are present."""
     ta, eq = _num(record.get("TA")), _num(record.get("Eq"))
@@ -34,8 +67,26 @@ def _liabilities(record: dict):
 def _period_label(record: dict) -> str:
     return (
         f"{record.get('CurPerType', '?')} end {record.get('CurPerEn', '?')} "
-        f"(disclosed {record.get('DiscDate', '?')})"
+        f"(disclosed {record.get('DiscDate', '?')}; {_reporting_basis(record)})"
     )
+
+
+def _dedupe_periods(records: list[dict]) -> list[dict]:
+    """Keep the latest visible disclosure for each fully identified period.
+
+    ``records`` must already be sorted newest-first. Incomplete keys are retained
+    because merging them could collapse distinct statement scopes or periods.
+    """
+    seen: set[tuple[str, str, str]] = set()
+    deduped = []
+    for record in records:
+        key = tuple(record.get(field) for field in ("DocType", "CurPerType", "CurPerEn"))
+        if any(value in (None, "") for value in key):
+            deduped.append(record)
+        elif key not in seen:
+            seen.add(key)
+            deduped.append(record)
+    return deduped
 
 
 # Process-local cache of raw /fins/summary records keyed by securities code. The
@@ -73,11 +124,12 @@ def _fetch_summary_periods(symbol: str, curr_date: str | None):
                 symbol, canonical, f"no financial summary disclosed on/before {curr_date}"
             )
 
-    return canonical, sorted(
+    ordered = sorted(
         records,
         key=lambda r: (r.get("DiscDate") or "", r.get("DiscTime") or ""),
         reverse=True,
     )
+    return canonical, _dedupe_periods(ordered)
 
 
 def fetch_periods(ticker: str, curr_date: str | None = None):
@@ -105,10 +157,10 @@ def _render_periods(canonical, records, freq, title, field_specs) -> str:
     rows = _select(records, freq)
     lines = [f"# {title} for {canonical} (J-Quants summary, latest {len(rows)} periods)"]
     for r in rows:
-        parts = [
-            f"{label}={_fmt(spec(r) if callable(spec) else r.get(spec))}"
-            for label, spec in field_specs
-        ]
+        parts = []
+        for label, spec in field_specs:
+            value = _fmt(spec(r)) if callable(spec) else _fmt_field(r, spec)
+            parts.append(f"{label}={value}")
         lines.append(f"- {_period_label(r)}: " + ", ".join(parts))
     return "\n".join(lines)
 
@@ -120,8 +172,10 @@ def get_fundamentals(ticker: str, curr_date: str | None = None) -> str:
     return "\n".join([
         f"# Fundamentals overview for {canonical} (J-Quants summary)",
         f"Latest disclosure: {r.get('DocType', '?')} — {_period_label(r)}",
+        f"Reporting basis: {_reporting_basis(r)}",
         f"Net sales: {_fmt(r.get('Sales'))}",
-        f"Operating profit: {_fmt(r.get('OP'))}    Ordinary profit: {_fmt(r.get('OdP'))}",
+        f"Operating profit: {_fmt_field(r, 'OP')}    "
+        f"Ordinary profit: {_fmt_field(r, 'OdP')}",
         f"Net profit: {_fmt(r.get('NP'))}",
         f"EPS: {_fmt(r.get('EPS'))}    BPS: {_fmt(r.get('BPS'))}",
         f"Total assets: {_fmt(r.get('TA'))}    Net assets: {_fmt(r.get('Eq'))}",
