@@ -4,6 +4,7 @@ from typing import Annotated
 import yfinance as yf
 from dateutil.relativedelta import relativedelta
 
+from .lookahead import is_live
 from .macro_common import SeriesCache
 from .stockstats_utils import (
     INDICATOR_DESCRIPTIONS,
@@ -146,10 +147,18 @@ def get_stockstats_indicator(
 
 def get_fundamentals(
     ticker: Annotated[str, "ticker symbol of the company"],
-    curr_date: Annotated[str, "current date (not used for yfinance)"] = None
+    curr_date: Annotated[str, "requested analysis date; live .info has no history"] = None
 ):
-    """Get company fundamentals overview from yfinance."""
+    """Get a live company overview, refusing to inject it into old backtests."""
     canonical = normalize_symbol(ticker)
+    if curr_date is not None and not is_live(curr_date):
+        return (
+            f"LIVE_DATA_UNAVAILABLE: yfinance .info for {canonical} is a current "
+            f"snapshot, not point-in-time historical data, and was not requested "
+            f"for historical analysis date {curr_date}. Use get_balance_sheet, "
+            "get_cashflow, and get_income_statement for date-filtered statements; "
+            "do not estimate missing overview values."
+        )
     try:
         ticker_obj = yf.Ticker(canonical)
         info = yf_retry(lambda: ticker_obj.info)
@@ -200,8 +209,12 @@ def get_fundamentals(
         if not lines:
             raise NoMarketDataError(ticker, canonical, "no fundamental fields returned")
 
-        header = f"# Company Fundamentals for {canonical}\n"
-        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        retrieved_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        requested = curr_date or retrieved_at[:10]
+        header = f"# Company Fundamentals for {canonical} (live yfinance snapshot)\n"
+        header += f"# Requested analysis date: {requested}\n"
+        header += f"# Retrieved at: {retrieved_at}\n"
+        header += "# Not point-in-time historical data.\n\n"
 
         return header + "\n".join(lines)
 

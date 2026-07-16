@@ -8,12 +8,15 @@ from tradingagents.agents.utils.agent_utils import (
     get_news,
     get_prediction_markets,
 )
+from tradingagents.dataflows.jp.jquants_sentiment import get_market_investor_flows
+from tradingagents.dataflows.jp.market import is_tokyo_ticker
 from tradingagents.dataflows.macro_panel import get_global_macro_panel
 
 
 def create_news_analyst(llm):
     def news_analyst_node(state):
         current_date = state["trade_date"]
+        ticker = state["company_of_interest"]
         asset_type = state.get("asset_type", "stock")
         asset_label = "company" if asset_type == "stock" else "asset"
         instrument_context = get_instrument_context_from_state(state)
@@ -30,11 +33,26 @@ def create_news_analyst(llm):
         # market-agnostic. get_macro_indicators stays available as a microscope
         # for drilling into a specific series beyond the panel. Never raises.
         macro_panel = get_global_macro_panel(current_date)
+        market_flow_context = (
+            get_market_investor_flows(ticker, current_date)
+            if is_tokyo_ticker(ticker)
+            else ""
+        )
+        market_flow_section = ""
+        if market_flow_context:
+            market_flow_section = (
+                "\n\nA target-market capital-flow block is also prefetched below. "
+                "It is aggregate exchange-section context, NOT company order flow. "
+                f"Never claim that any investor category bought or sold {ticker} from "
+                "this block, and do not use it as ticker-specific sentiment:\n\n"
+                f"{market_flow_context}\n"
+            )
 
         system_message = (
             f"You are a news researcher tasked with analyzing recent news and trends over the past week. Please write a comprehensive report of the current state of the world that is relevant for trading and macroeconomics. Use the available tools: get_news(ticker, start_date, end_date) for {asset_label}-specific news by ticker symbol, get_global_news(curr_date, look_back_days, limit) for broader macroeconomic news, get_macro_indicators(indicator, curr_date, look_back_days) to drill into a SPECIFIC macro series beyond the panel below (a US FRED alias such as 'yield_curve', 'initial_claims', 'retail_sales', 'm2', '2y_treasury', a raw FRED series ID like 'CPILFESL', or a Japanese official series 'jp_cpi'/'jp_core_cpi'/'jp_policy_rate'/'jp_tankan'),and get_prediction_markets(topic, limit) for live market-implied probabilities of forward-looking events (e.g. 'Fed rate cut', 'recession 2026', geopolitical or sector events). Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
             "\n\nA cross-region macro panel has already been prefetched for you — use it as the macro backdrop (no tool call needed for these baseline indicators):\n\n"
             f"{macro_panel}\n"
+            f"{market_flow_section}"
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
             + get_language_instruction()
         )

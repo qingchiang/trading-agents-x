@@ -1,6 +1,6 @@
 """Shared market predicate for the JP data sources.
 
-Several JP-only prefetch signals (investor flows, large-shareholding filings,
+Several JP-only prefetch signals (News market-flow context, large-shareholding filings,
 analyst-ratings overlay) self-gate to Tokyo names so a future market (``.SS`` …)
 never inherits Japan's numbers. They gate on the ticker's *nationality* (its
 ``.T`` suffix), deliberately NOT on ``market_context.market_suffix_of`` — that is

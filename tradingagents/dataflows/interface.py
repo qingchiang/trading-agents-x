@@ -10,6 +10,7 @@ from .alpha_vantage import (
     get_insider_transactions as get_alpha_vantage_insider_transactions,
     get_news as get_alpha_vantage_news,
     get_stock as get_alpha_vantage_stock,
+    get_verified_market_snapshot as get_alpha_vantage_verified_snapshot,
 )
 from .config import get_config
 from .errors import (
@@ -34,10 +35,14 @@ from .jp.jquants import (
     get_income_statement as get_jquants_income_statement,
     get_indicator as get_jquants_indicator,
     get_stock as get_jquants_stock,
+    get_verified_market_snapshot as get_jquants_verified_snapshot,
 )
 from .jp.tdnet_news import get_news as get_tdnet_news
 from .macro import get_macro_indicators as get_macro_dispatch
 from .market_context import infer_market
+from .market_data_validator import (
+    build_verified_market_snapshot as get_yfinance_verified_snapshot,
+)
 from .polymarket import get_prediction_markets as get_polymarket_prediction_markets
 from .y_finance import (
     get_balance_sheet as get_yfinance_balance_sheet,
@@ -63,7 +68,8 @@ TOOLS_CATEGORIES = {
     "technical_indicators": {
         "description": "Technical analysis indicators",
         "tools": [
-            "get_indicators"
+            "get_indicators",
+            "get_verified_market_snapshot",
         ]
     },
     "fundamental_data": {
@@ -132,6 +138,11 @@ VENDOR_METHODS = {
         "alpha_vantage": get_alpha_vantage_indicator,
         "yfinance": get_stock_stats_indicators_window,
         "jquants": get_jquants_indicator,
+    },
+    "get_verified_market_snapshot": {
+        "alpha_vantage": get_alpha_vantage_verified_snapshot,
+        "yfinance": get_yfinance_verified_snapshot,
+        "jquants": get_jquants_verified_snapshot,
     },
     # fundamental_data
     "get_fundamentals": {

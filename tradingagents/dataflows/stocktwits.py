@@ -17,7 +17,9 @@ from __future__ import annotations
 import http.client
 import json
 import logging
+from datetime import datetime, timezone
 from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo
 
 from .symbol_utils import crypto_base
 
@@ -38,7 +40,39 @@ def _stocktwits_symbol(ticker: str) -> str:
     return f"{base}.X" if base else ticker.strip().upper()
 
 
-def fetch_stocktwits_messages(ticker: str, limit: int = 30, timeout: float = 10.0) -> str:
+def _market_datetime(created_at: str, ticker: str) -> datetime | None:
+    """Convert a StockTwits timestamp to the ticker's market timezone."""
+    try:
+        normalized = created_at[:-1] + "+00:00" if created_at.endswith("Z") else created_at
+        created = datetime.fromisoformat(normalized)
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        market_tz = timezone.utc if crypto_base(ticker) else ZoneInfo("America/New_York")
+        return created.astimezone(market_tz)
+    except (TypeError, ValueError):
+        return None
+
+
+def _in_window(created_at: str, ticker: str, start_date: str, end_date: str) -> bool:
+    """Whether a UTC StockTwits timestamp falls in the target market-date window."""
+    try:
+        local = _market_datetime(created_at, ticker)
+        if local is None:
+            return False
+        start = datetime.strptime(start_date, "%Y-%m-%d").date()
+        end = datetime.strptime(end_date, "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return False
+    return start <= local.date() <= end
+
+
+def fetch_stocktwits_messages(
+    ticker: str,
+    limit: int = 30,
+    timeout: float = 10.0,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> str:
     """Fetch recent StockTwits messages for ``ticker`` and return them as a
     formatted plaintext block ready for prompt injection.
 
@@ -61,10 +95,30 @@ def fetch_stocktwits_messages(ticker: str, limit: int = 30, timeout: float = 10.
     if not messages:
         return f"<no StockTwits messages found for ${ticker.upper()}>"
 
+    if start_date is not None or end_date is not None:
+        if not start_date or not end_date:
+            return "<stocktwits unavailable: both start_date and end_date are required>"
+        messages = [
+            message
+            for message in messages
+            if _in_window(str(message.get("created_at") or ""), ticker, start_date, end_date)
+        ]
+        if not messages:
+            return (
+                f"<no StockTwits messages for ${ticker.upper()} in requested window "
+                f"{start_date}..{end_date} among the current public feed sample; "
+                "this is not evidence of no historical discussion>"
+            )
+
     lines = []
     bullish = bearish = unlabeled = 0
     for m in messages[:limit]:
         created = m.get("created_at", "")
+        displayed_at = created
+        if start_date:
+            local = _market_datetime(str(created), ticker)
+            if local is not None:
+                displayed_at = local.strftime("%Y-%m-%d %H:%M:%S %Z")
         user = (m.get("user") or {}).get("username", "?")
         entities = m.get("entities") or {}
         sentiment_obj = entities.get("sentiment") or {}
@@ -82,7 +136,7 @@ def fetch_stocktwits_messages(ticker: str, limit: int = 30, timeout: float = 10.
         else:
             unlabeled += 1
             tag = "no-label"
-        lines.append(f"[{created} · @{user} · {tag}] {body}")
+        lines.append(f"[{displayed_at} · @{user} · {tag}] {body}")
 
     total = bullish + bearish + unlabeled
     bull_pct = round(100 * bullish / total) if total else 0
@@ -91,6 +145,7 @@ def fetch_stocktwits_messages(ticker: str, limit: int = 30, timeout: float = 10.
         f"Bullish: {bullish} ({bull_pct}%) · "
         f"Bearish: {bearish} ({bear_pct}%) · "
         f"Unlabeled: {unlabeled} · "
-        f"Total: {total} most-recent messages"
+        f"Total: {total} "
+        + (f"messages in {start_date}..{end_date}" if start_date else "most-recent messages")
     )
     return summary + "\n\n" + "\n".join(lines)

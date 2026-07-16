@@ -25,10 +25,11 @@ import re
 import time
 import xml.etree.ElementTree as ET
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo
 
 from .symbol_utils import crypto_base
 
@@ -96,7 +97,7 @@ def _fetch_subreddit_rss(
     limit: int,
     timeout: float,
     _retry: bool = True,
-) -> list[dict]:
+) -> list[dict] | None:
     """Default path: parse the public Atom search feed for a subreddit.
 
     Carries no score / comment counts, so those fields are left None and the
@@ -119,12 +120,12 @@ def _fetch_subreddit_rss(
             time.sleep(wait)
             return _fetch_subreddit_rss(ticker, sub, limit, timeout, _retry=False)
         logger.warning("Reddit RSS fetch failed for r/%s · %s: %s", sub, ticker, exc)
-        return []
+        return None
     except (OSError, http.client.HTTPException, ET.ParseError) as exc:
         # OSError covers URLError/TimeoutError/connection resets; HTTPException
         # covers chunked-transfer errors (IncompleteRead/BadStatusLine, #1024).
         logger.warning("Reddit RSS fetch failed for r/%s · %s: %s", sub, ticker, exc)
-        return []
+        return None
 
     posts = []
     for entry in root.findall("atom:entry", _ATOM_NS)[:limit]:
@@ -149,7 +150,7 @@ def _fetch_subreddit_json(
     sub: str,
     limit: int,
     timeout: float,
-) -> list[dict]:
+) -> list[dict] | None:
     """Richer JSON search path (carries score / comment counts).
 
     Reddit's WAF currently returns ``403 Blocked`` on this endpoint for
@@ -178,7 +179,7 @@ def _fetch_subreddit(
     sub: str,
     limit: int,
     timeout: float,
-) -> list[dict]:
+) -> list[dict] | None:
     """Fetch one subreddit, RSS-first.
 
     The JSON search endpoint is reliably WAF-blocked (403) for public clients,
@@ -194,6 +195,8 @@ def fetch_reddit_posts(
     limit_per_sub: int = 5,
     timeout: float = 10.0,
     inter_request_delay: float = 1.0,
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> str:
     """Fetch recent Reddit posts mentioning ``ticker`` across finance
     subreddits and return them as a formatted plaintext block.
@@ -204,16 +207,40 @@ def fetch_reddit_posts(
     """
     # Crypto reaches us as a Yahoo pair (BTC-USD); search Reddit for the base
     # ("BTC") so the query actually matches discussion instead of near-nothing.
+    is_crypto = crypto_base(ticker) is not None
     ticker = crypto_base(ticker) or ticker
+    if (start_date is None) != (end_date is None):
+        return "<reddit unavailable: both start_date and end_date are required>"
     blocks = []
-    total_posts = 0
     for i, sub in enumerate(subreddits):
         if i > 0:
             time.sleep(inter_request_delay)
         posts = _fetch_subreddit(ticker, sub, limit_per_sub, timeout)
-        total_posts += len(posts)
+        if posts is None:
+            blocks.append(f"r/{sub}: <unavailable: Reddit feed request failed>")
+            continue
+        if start_date is not None and end_date is not None:
+            posts = [
+                post
+                for post in posts
+                if _post_in_window(
+                    post.get("created_utc"),
+                    is_crypto,
+                    start_date,
+                    end_date,
+                )
+            ]
         if not posts:
-            blocks.append(f"r/{sub}: <no posts found mentioning {ticker.upper()} in the past 7 days>")
+            if start_date is not None:
+                blocks.append(
+                    f"r/{sub}: <no posts found mentioning {ticker.upper()} in requested "
+                    f"window {start_date}..{end_date} among the current public feed; "
+                    "this is not evidence of no historical discussion>"
+                )
+            else:
+                blocks.append(
+                    f"r/{sub}: <no posts found mentioning {ticker.upper()} in the past 7 days>"
+                )
             continue
 
         via_rss = any(p.get("source") == "rss" for p in posts)
@@ -225,9 +252,13 @@ def fetch_reddit_posts(
             score = p.get("score")
             comments = p.get("num_comments")
             created = p.get("created_utc")
-            created_str = (
-                time.strftime("%Y-%m-%d", time.gmtime(created)) if created else "?"
-            )
+            if created is None:
+                created_str = "?"
+            elif start_date is not None:
+                local = _post_market_datetime(created, is_crypto)
+                created_str = local.strftime("%Y-%m-%d") if local else "?"
+            else:
+                created_str = time.strftime("%Y-%m-%d", time.gmtime(created))
             # Score / comment counts are absent on the RSS fallback path —
             # show them only when present rather than printing fake zeros.
             meta = created_str
@@ -242,9 +273,36 @@ def fetch_reddit_posts(
             )
         blocks.append("\n".join(lines))
 
-    if total_posts == 0:
-        return (
-            f"<no Reddit posts found mentioning {ticker.upper()} across "
-            f"{', '.join(f'r/{s}' for s in subreddits)} in the past 7 days>"
-        )
     return "\n\n".join(blocks)
+
+
+def _post_in_window(
+    created_utc: float | None,
+    is_crypto: bool,
+    start_date: str,
+    end_date: str,
+) -> bool:
+    """Whether a Reddit epoch timestamp falls in the target market-date window."""
+    if created_utc is None:
+        return False
+    try:
+        local = _post_market_datetime(created_utc, is_crypto)
+        if local is None:
+            return False
+        start = datetime.strptime(start_date, "%Y-%m-%d").date()
+        end = datetime.strptime(end_date, "%Y-%m-%d").date()
+    except (OSError, TypeError, ValueError):
+        return False
+    return start <= local.date() <= end
+
+
+def _post_market_datetime(
+    created_utc: float,
+    is_crypto: bool,
+) -> datetime | None:
+    """Convert a Reddit epoch to the asset's market timezone."""
+    try:
+        market_tz = timezone.utc if is_crypto else ZoneInfo("America/New_York")
+        return datetime.fromtimestamp(created_utc, tz=timezone.utc).astimezone(market_tz)
+    except (OSError, TypeError, ValueError):
+        return None

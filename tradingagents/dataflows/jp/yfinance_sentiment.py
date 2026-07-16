@@ -1,9 +1,9 @@
 """Analyst-consensus rating overlay for the Japanese sentiment proxy.
 
 yfinance covers Japanese large/mid caps with sell-side analyst ratings and a
-12-month price-target band — a per-name *opinion* signal that the market-wide
-J-Quants investor flows (投資部門別) structurally can't give. Unlike those
-official flows, ``.info`` is a LIVE snapshot with no as-of history, so this
+12-month price-target band — a per-name *opinion* signal. Exchange-section
+J-Quants investor flows (投資部門別) are market context in the News Analyst, not a
+substitute for this signal. ``.info`` is a LIVE snapshot with no as-of history, so this
 overlay is gated to live / near-live runs (see :mod:`.lookahead`): a backtest
 simply omits it rather than leaking today's ratings onto a past date.
 
@@ -15,10 +15,11 @@ raise.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 
+from ..lookahead import is_live
 from ..y_finance import get_analyst_ratings
 from .jquants_common import parse_number as _num
-from .lookahead import is_live
 from .market import is_tokyo_ticker
 
 logger = logging.getLogger(__name__)
@@ -71,11 +72,21 @@ def get_analyst_ratings_block(ticker: str, curr_date: str) -> str:
         current = _num(ratings.get("currentPrice")) or _num(ratings.get("regularMarketPrice"))
         upside = ""
         if current and current > 0:
-            upside = f" — implied {(tgt_mean / current - 1) * 100:+.1f}% vs current {current:,.0f}"
+            upside = (
+                f" — implied {(tgt_mean / current - 1) * 100:+.1f}% vs "
+                f"retrieval-time current price {current:,.0f}"
+            )
         lines.append(f"- 12-month price target (mean): {tgt_mean:,.0f}{band}{upside}")
 
     if not lines:
         return ""
     # Data + legend only; the prompt wrapper owns the section framing and the
     # sentiment rules own how to weight it (kept out of here so they don't drift).
-    return "yfinance analyst consensus (sell-side; live snapshot):\n\n" + "\n".join(lines)
+    retrieved_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return (
+        "yfinance analyst consensus (sell-side; LIVE snapshot)\n"
+        f"Requested analysis date: {curr_date}\n"
+        f"Retrieved at: {retrieved_at}\n"
+        "Not point-in-time historical data; price comparisons use the retrieval-time price.\n\n"
+        + "\n".join(lines)
+    )

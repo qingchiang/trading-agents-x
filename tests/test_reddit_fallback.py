@@ -87,7 +87,7 @@ class TestRssParsing:
 
     def test_malformed_xml_fails_open(self):
         with patch.object(reddit, "urlopen", return_value=_resp(lambda: b"<<not xml>>")):
-            assert reddit._fetch_subreddit_rss("NVDA", "stocks", 5, 5.0) == []
+            assert reddit._fetch_subreddit_rss("NVDA", "stocks", 5, 5.0) is None
 
 
 @pytest.mark.unit
@@ -138,7 +138,7 @@ class TestRss429Backoff:
              patch.object(reddit.time, "sleep"):
             posts = reddit._fetch_subreddit_rss("NVDA", "stocks", 5, 5.0)
         assert op.call_count == 2          # one retry, then gives up cleanly
-        assert posts == []
+        assert posts is None
 
     def test_retry_after_header_is_honoured(self):
         err = HTTPError("url", 429, "Too Many Requests", {"Retry-After": "12"}, None)
@@ -153,9 +153,9 @@ class TestChunkedTransferErrorsHandled:
     """IncompleteRead/RemoteDisconnected come from http.client and are NOT
     OSErrors, so they were previously uncaught and crashed the pipeline (#1024)."""
 
-    def test_rss_incomplete_read_degrades_to_empty(self):
+    def test_rss_incomplete_read_degrades_to_unavailable(self):
         with patch.object(reddit, "urlopen", return_value=_raise(http.client.IncompleteRead(b""))):
-            assert reddit._fetch_subreddit_rss("NVDA", "stocks", 5, 5.0) == []
+            assert reddit._fetch_subreddit_rss("NVDA", "stocks", 5, 5.0) is None
 
     def test_json_incomplete_read_falls_back_to_rss(self):
         with patch.object(reddit, "urlopen", return_value=_raise(http.client.IncompleteRead(b""))), \
@@ -190,6 +190,54 @@ class TestFormatterHandlesRssPosts:
         assert "1234↑" in out
         assert "56c" in out
         assert "via RSS" not in out
+
+    def test_transport_failure_is_not_rendered_as_no_posts(self):
+        with patch.object(reddit, "_fetch_subreddit", return_value=None):
+            out = reddit.fetch_reddit_posts(
+                "NVDA", subreddits=("stocks",), inter_request_delay=0
+            )
+        assert "unavailable: Reddit feed request failed" in out
+        assert "no posts found" not in out
+
+    def test_successful_empty_feed_is_rendered_as_no_posts(self):
+        with patch.object(reddit, "_fetch_subreddit", return_value=[]):
+            out = reddit.fetch_reddit_posts(
+                "NVDA", subreddits=("stocks",), inter_request_delay=0
+            )
+        assert "no posts found" in out
+        assert "unavailable" not in out
+
+    def test_requested_window_excludes_future_market_date(self):
+        posts = [
+            {
+                "title": "in window",
+                "score": None,
+                "num_comments": None,
+                "created_utc": reddit._iso_to_timestamp("2026-07-16T02:00:00Z"),
+                "selftext": "",
+                "source": "rss",
+            },
+            {
+                "title": "future",
+                "score": None,
+                "num_comments": None,
+                "created_utc": reddit._iso_to_timestamp("2026-07-16T14:00:00Z"),
+                "selftext": "",
+                "source": "rss",
+            },
+        ]
+        with patch.object(reddit, "_fetch_subreddit", return_value=posts):
+            out = reddit.fetch_reddit_posts(
+                "NVDA",
+                subreddits=("stocks",),
+                inter_request_delay=0,
+                start_date="2026-07-15",
+                end_date="2026-07-15",
+            )
+        assert "in window" in out  # 02:00Z is still Jul 15 in New York
+        assert "future" not in out
+        assert "[2026-07-15]" in out
+        assert "[2026-07-16]" not in out
 
 
 @pytest.mark.unit

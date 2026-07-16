@@ -35,11 +35,11 @@ from datetime import datetime
 import pandas as pd
 from dateutil.relativedelta import relativedelta
 
+from ..lookahead import is_live
 from ..y_finance import get_analyst_forward
 from . import jquants_fundamentals as jqf
 from .jquants_common import parse_number as _num
 from .jquants_stock import _fetch_ohlcv_frame, fetch_topix_closes
-from .lookahead import is_live
 
 logger = logging.getLogger(__name__)
 
@@ -229,8 +229,9 @@ def _analyst_forward_line(
             f"analyst {analyst_growth * 100:+.1f}% ({agree})"
         )
     return (
-        f"- Forward PE: {_ratio(fwd_pe)} (analyst consensus, live only{count}, "
-        f"EPS {_ratio(eps)}){note}"
+        f"- Forward PE: {_ratio(fwd_pe)} (analyst consensus, live only; requested "
+        f"{curr_date}, retrieved {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}{count}, "
+        f"not point-in-time historical data, EPS {_ratio(eps)}){note}"
     )
 
 

@@ -9,7 +9,7 @@ from .jquants_fundamentals import (
     get_fundamentals,
     get_income_statement,
 )
-from .jquants_indicator import get_indicator
+from .jquants_indicator import get_indicator, get_verified_market_snapshot
 from .jquants_stock import get_stock
 
 __all__ = [
@@ -18,5 +18,6 @@ __all__ = [
     "get_fundamentals",
     "get_income_statement",
     "get_indicator",
+    "get_verified_market_snapshot",
     "get_stock",
 ]
