@@ -27,7 +27,8 @@ class TestEffortGate:
         [
             "claude-haiku-4-5", "claude-haiku-5-0", "claude-haiku-4-7-preview",
             # Sonnet 4.5 (and earlier) 400 on effort — only Sonnet 4.6+ supports it.
-            "claude-sonnet-4-5", "claude-sonnet-4-0",
+            "claude-sonnet-4-5", "claude-sonnet-4-5-20250929",
+            "claude-sonnet-4-0", "claude-3-7-sonnet-20250219",
         ],
     )
     def test_unsupported_models_do_not_receive_effort(self, monkeypatch, model):
@@ -39,7 +40,8 @@ class TestEffortGate:
         "model",
         [
             "claude-opus-4-5", "claude-opus-4-6", "claude-opus-4-7",
-            "claude-sonnet-4-6",
+            "claude-opus-4-5-latest", "claude-sonnet-4-6",
+            "claude-sonnet-4-6-20260115",
         ],
     )
     def test_current_opus_and_sonnet_receive_effort(self, monkeypatch, model):
@@ -74,13 +76,13 @@ class TestEffortGate:
         ).get_llm()
         assert captured["kwargs"]["effort"] == "medium"
 
-    def test_unknown_anthropic_model_does_not_receive_effort(self, monkeypatch):
-        """Default is conservative — unknown models don't get effort to avoid 400s."""
+    def test_unknown_anthropic_model_warns_and_passes_effort(self, monkeypatch):
         captured = _capture_kwargs(monkeypatch)
-        mod.AnthropicClient(
-            model="claude-experimental-x", effort="medium", api_key="x"
-        ).get_llm()
-        assert "effort" not in captured["kwargs"]
+        with pytest.warns(RuntimeWarning, match="not in the anthropic"):
+            mod.AnthropicClient(
+                model="claude-experimental-x", effort="medium", api_key="x"
+            ).get_llm()
+        assert captured["kwargs"]["effort"] == "medium"
 
     def test_other_kwargs_still_forwarded_when_effort_skipped(self, monkeypatch):
         """Skipping effort must not break other passthrough kwargs."""

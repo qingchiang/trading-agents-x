@@ -8,6 +8,12 @@ from rich.console import Console
 from cli.models import AnalystType, AssetType
 from tradingagents.llm_clients.api_key_env import get_api_key_env
 from tradingagents.llm_clients.model_catalog import get_model_options
+from tradingagents.llm_clients.reasoning_effort import (
+    PROVIDER_DEFAULT,
+    model_effort_levels,
+    provider_effort_levels,
+    resolve_reasoning_effort,
+)
 
 console = Console()
 
@@ -488,6 +494,136 @@ def ask_gemini_thinking_config() -> str | None:
             ("pointer", "fg:green noinherit"),
         ]),
     ).ask()
+
+
+def _ask_role_reasoning_level(
+    provider: str, role: str, model: str, levels: tuple[str, ...]
+) -> str:
+    """Ask for one role's native level, always offering provider omission."""
+    choices = [questionary.Choice("Provider default (omit parameter)", PROVIDER_DEFAULT)]
+    choices.extend(questionary.Choice(level, level) for level in levels)
+    value = questionary.select(
+        f"Select {role} reasoning effort for {model} ({provider}):",
+        choices=choices,
+        style=questionary.Style([
+            ("selected", "fg:cyan noinherit"),
+            ("highlighted", "fg:cyan noinherit"),
+            ("pointer", "fg:cyan noinherit"),
+        ]),
+    ).ask()
+    return value or PROVIDER_DEFAULT
+
+
+def _print_reasoning_summary(config: dict, quick_value, deep_value) -> None:
+    resolved_config = {
+        **config,
+        "quick_reasoning_effort": quick_value,
+        "deep_reasoning_effort": deep_value,
+    }
+    console.print("[bold]Reasoning effort resolution:[/bold]")
+    for role in ("quick", "deep"):
+        resolution = resolve_reasoning_effort(resolved_config, role)
+        native = resolution.native_parameter or "native parameter"
+        console.print(
+            f"  [dim]{role}: source={resolution.source}, "
+            f"value={resolution.display_value}, "
+            f"{native}={resolution.display_value}[/dim]"
+        )
+
+
+def configure_role_reasoning_efforts(
+    provider: str,
+    quick_model: str,
+    deep_model: str,
+    config: dict,
+    *,
+    non_interactive: bool = False,
+) -> dict[str, str | None]:
+    """Collect quick/deep effort values and show their non-secret resolution.
+
+    Role environment variables lock only their own role. A provider selected
+    from the environment, or a provider legacy value supplied by the
+    environment, keeps Step 8 fully non-interactive.
+    """
+    provider = provider.lower()
+    working = {
+        **config,
+        "llm_provider": provider,
+        "quick_think_llm": quick_model,
+        "deep_think_llm": deep_model,
+    }
+    quick_value = config.get("quick_reasoning_effort")
+    deep_value = config.get("deep_reasoning_effort")
+
+    role_env = {
+        "quick": bool(os.environ.get("TRADINGAGENTS_QUICK_REASONING_EFFORT")),
+        "deep": bool(os.environ.get("TRADINGAGENTS_DEEP_REASONING_EFFORT")),
+    }
+    legacy_env = {
+        "openai": "TRADINGAGENTS_OPENAI_REASONING_EFFORT",
+        "openai_compatible": "TRADINGAGENTS_OPENAI_REASONING_EFFORT",
+        "azure": "TRADINGAGENTS_OPENAI_REASONING_EFFORT",
+        "google": "TRADINGAGENTS_GOOGLE_THINKING_LEVEL",
+        "anthropic": "TRADINGAGENTS_ANTHROPIC_EFFORT",
+    }.get(provider)
+    non_interactive = non_interactive or bool(legacy_env and os.environ.get(legacy_env))
+
+    if provider_effort_levels(provider) and not non_interactive:
+        unresolved = [role for role in ("quick", "deep") if not role_env[role]]
+        model_for = {"quick": quick_model, "deep": deep_model}
+        if len(unresolved) == 2:
+            mode = questionary.select(
+                "Configure quick/deep reasoning effort:",
+                choices=[
+                    questionary.Choice("Provider default for both", "default"),
+                    questionary.Choice("Use one shared level", "shared"),
+                    questionary.Choice("Configure roles separately", "separate"),
+                ],
+            ).ask() or "default"
+            if mode == "default":
+                quick_value = deep_value = PROVIDER_DEFAULT
+            elif mode == "shared":
+                quick_levels = set(model_effort_levels(provider, quick_model))
+                deep_levels = set(model_effort_levels(provider, deep_model))
+                common = tuple(
+                    level
+                    for level in provider_effort_levels(provider)
+                    if level in quick_levels and level in deep_levels
+                )
+                shared = _ask_role_reasoning_level(
+                    provider, "shared quick/deep", f"{quick_model} + {deep_model}", common
+                )
+                quick_value = deep_value = shared
+            else:
+                quick_value = _ask_role_reasoning_level(
+                    provider,
+                    "quick",
+                    quick_model,
+                    model_effort_levels(provider, quick_model),
+                )
+                deep_value = _ask_role_reasoning_level(
+                    provider,
+                    "deep",
+                    deep_model,
+                    model_effort_levels(provider, deep_model),
+                )
+        elif unresolved:
+            role = unresolved[0]
+            value = _ask_role_reasoning_level(
+                provider,
+                role,
+                model_for[role],
+                model_effort_levels(provider, model_for[role]),
+            )
+            if role == "quick":
+                quick_value = value
+            else:
+                deep_value = value
+
+    working["quick_reasoning_effort"] = quick_value
+    working["deep_reasoning_effort"] = deep_value
+    _print_reasoning_summary(working, quick_value, deep_value)
+    return {"quick": quick_value, "deep": deep_value}
 
 
 def ask_glm_region() -> tuple[str, str]:

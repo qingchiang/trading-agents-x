@@ -114,6 +114,17 @@ class TestDeepSeekReasoningContent:
         assistant_dicts = [m for m in payload["messages"] if m.get("role") == "assistant"]
         assert assistant_dicts[0]["reasoning_content"] == "weighed bull case"
 
+    def test_reasoning_effort_is_sent_as_top_level_parameter(self):
+        client = DeepSeekChatOpenAI(
+            model="deepseek-v4-pro",
+            api_key="placeholder",
+            base_url="https://api.deepseek.com",
+            reasoning_effort="max",
+        )
+        payload = client._get_request_payload([HumanMessage(content="Analyze.")])
+        assert payload["reasoning_effort"] == "max"
+        assert "thinking" not in payload.get("extra_body", {})
+
 
 # ---------------------------------------------------------------------------
 # Capability-driven structured output: tool_choice suppressed for V4 + reasoner
@@ -184,16 +195,17 @@ class TestStructuredOutputCapabilityDispatch:
 # ---------------------------------------------------------------------------
 
 
-def _has_real_deepseek_key():
+def _live_deepseek_enabled():
     key = os.environ.get("DEEPSEEK_API_KEY", "")
-    return bool(key) and key != "placeholder"
+    return (
+        os.environ.get("RUN_LIVE_LLM_TESTS") == "1"
+        and bool(key)
+        and key != "placeholder"
+    )
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(
-    not _has_real_deepseek_key(),
-    reason="DEEPSEEK_API_KEY not set (or placeholder); skipping live API call",
-)
+@pytest.mark.live_llm
 class TestDeepSeekLiveStructuredOutput:
     """End-to-end: a real DeepSeek V4-flash call returns a typed instance.
 
@@ -207,6 +219,10 @@ class TestDeepSeekLiveStructuredOutput:
         confidence: float
 
     def test_v4_flash_returns_structured_output(self):
+        if not _live_deepseek_enabled():
+            pytest.skip(
+                "Set RUN_LIVE_LLM_TESTS=1 and export DEEPSEEK_API_KEY to run live"
+            )
         client = DeepSeekChatOpenAI(
             model="deepseek-v4-flash",
             api_key=os.environ["DEEPSEEK_API_KEY"],

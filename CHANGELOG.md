@@ -8,6 +8,23 @@ Fork releases append a PEP 440 local version (`+jp.N`) to the upstream version
 they are based on. Entries without `+jp.N` below are retained from upstream;
 breaking changes within the 0.x line are called out explicitly.
 
+## [Unreleased]
+
+### Added
+
+- **Independent quick/deep reasoning effort.** New
+  `quick_reasoning_effort` / `deep_reasoning_effort` config keys and matching
+  `TRADINGAGENTS_*` environment variables resolve through a centralized model
+  capability adapter for OpenAI, OpenAI-compatible endpoints, Azure OpenAI,
+  DeepSeek, Google, and Anthropic. Existing provider-wide keys remain
+  compatible.
+- **GPT-5.6 role models.** The OpenAI CLI now offers Luna/Terra for quick work
+  and Sol/Terra for deep work, with six-level reasoning capability metadata;
+  existing default models are unchanged.
+- **Explicit live-test gate.** Tests disable dotenv loading and replace real API
+  keys with placeholders by default. DeepSeek wire-level tests additionally
+  require `RUN_LIVE_LLM_TESTS=1` and an explicitly exported key.
+
 ## [0.3.1+jp.1] — 2026-07-15
 
 First fork release based on upstream 0.3.1, adding first-class Japanese-market

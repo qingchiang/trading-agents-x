@@ -1,5 +1,4 @@
 import os
-import re
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
@@ -10,6 +9,7 @@ from langchain_openai import ChatOpenAI
 from .api_key_env import get_api_key_env
 from .base_client import BaseLLMClient, normalize_content
 from .capabilities import get_capabilities
+from .reasoning_effort import RESOLVED_MARKER, resolve_native_reasoning_value
 from .validators import validate_model
 
 
@@ -168,16 +168,12 @@ _PASSTHROUGH_KWARGS = (
     "api_key", "callbacks", "http_client", "http_async_client",
 )
 
-# OpenAI's ``reasoning_effort`` is only accepted by reasoning models — the GPT-5
-# family and the o-series. Non-reasoning models (gpt-4.1, gpt-4o, ...) 400 with
-# "Unsupported parameter: 'reasoning.effort' is not supported with this model".
-# Drop the kwarg for those rather than crash the run.
-_OPENAI_REASONING_MODEL = re.compile(r"^(gpt-5|o[1-9])")
-
-
 def _supports_reasoning_effort(model: str) -> bool:
     """Whether the (native OpenAI) model accepts ``reasoning_effort``."""
-    return bool(_OPENAI_REASONING_MODEL.match(model.lower().strip()))
+    model = model.lower().strip()
+    return model.startswith("gpt-5") or bool(
+        len(model) >= 2 and model[0] == "o" and model[1].isdigit() and model[1] != "0"
+    )
 
 
 @dataclass(frozen=True)
@@ -325,9 +321,14 @@ class OpenAIClient(BaseLLMClient):
         for key in _PASSTHROUGH_KWARGS:
             if key not in self.kwargs:
                 continue
-            if key == "reasoning_effort" and not _supports_reasoning_effort(self.model):
-                continue
-            llm_kwargs[key] = self.kwargs[key]
+            value = self.kwargs[key]
+            if key == "reasoning_effort" and not self.kwargs.get(RESOLVED_MARKER):
+                value = resolve_native_reasoning_value(
+                    self.provider, self.model, value
+                )
+                if value is None:
+                    continue
+            llm_kwargs[key] = value
 
         # The subclass (provider quirks) comes from the registry spec.
         return chat_cls(**llm_kwargs)

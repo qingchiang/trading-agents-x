@@ -21,13 +21,11 @@ from rich.text import Text
 from cli.announcements import display_announcements, fetch_announcements
 from cli.stats_handler import StatsCallbackHandler
 from cli.utils import (
-    ask_anthropic_effort,
-    ask_gemini_thinking_config,
     ask_glm_region,
     ask_minimax_region,
-    ask_openai_reasoning_effort,
     ask_output_language,
     ask_qwen_region,
+    configure_role_reasoning_efforts,
     confirm_ollama_endpoint,
     detect_asset_type,
     ensure_api_key,
@@ -518,20 +516,6 @@ def get_user_selections():
             box_content += f"\n[dim]Default: {default}[/dim]"
         return Panel(box_content, border_style="blue", padding=(1, 2))
 
-    def thinking_value_or_prompt(env_var, config_key, label, box_title, box_body, prompt_fn):
-        """Return the env-configured reasoning/thinking value, or prompt for it.
-
-        When ``env_var`` is set the interactive choice is skipped and the value
-        the env overlay placed on DEFAULT_CONFIG is used — mirroring the
-        env-precedence rule applied to the other selection steps.
-        """
-        if os.environ.get(env_var):
-            value = DEFAULT_CONFIG[config_key]
-            console.print(f"[green]✓ {label} from environment:[/green] {value}")
-            return value
-        console.print(create_question_box(box_title, box_body))
-        return prompt_fn()
-
     # Step 1: Ticker symbol
     console.print(
         create_question_box(
@@ -678,38 +662,21 @@ def get_user_selections():
         selected_shallow_thinker = select_shallow_thinking_agent(selected_llm_provider)
         selected_deep_thinker = select_deep_thinking_agent(selected_llm_provider)
 
-    # Step 8: Provider-specific reasoning/thinking configuration. Each knob is
-    # settable via its TRADINGAGENTS_* env var; when that var is set (or the
-    # provider itself came from env) the prompt is skipped and the configured
-    # value is used — same env-precedence rule as the steps above. None = each
-    # provider's own default.
-    thinking_level = None
-    reasoning_effort = None
-    anthropic_effort = None
-
-    provider_lower = selected_llm_provider.lower()
-    if provider_from_env:
-        thinking_level = DEFAULT_CONFIG["google_thinking_level"]
-        reasoning_effort = DEFAULT_CONFIG["openai_reasoning_effort"]
-        anthropic_effort = DEFAULT_CONFIG["anthropic_effort"]
-    elif provider_lower == "google":
-        thinking_level = thinking_value_or_prompt(
-            "TRADINGAGENTS_GOOGLE_THINKING_LEVEL", "google_thinking_level",
-            "Gemini thinking mode", "Step 8: Thinking Mode",
-            "Configure Gemini thinking mode", ask_gemini_thinking_config,
+    # Step 8: collect role-specific effort. Provider/legacy environment config
+    # stays non-interactive; a role env var locks only that role.
+    console.print(
+        create_question_box(
+            "Step 8: Reasoning Effort",
+            "Use provider defaults, one shared level, or configure quick/deep separately",
         )
-    elif provider_lower == "openai":
-        reasoning_effort = thinking_value_or_prompt(
-            "TRADINGAGENTS_OPENAI_REASONING_EFFORT", "openai_reasoning_effort",
-            "Reasoning effort", "Step 8: Reasoning Effort",
-            "Configure OpenAI reasoning effort level", ask_openai_reasoning_effort,
-        )
-    elif provider_lower == "anthropic":
-        anthropic_effort = thinking_value_or_prompt(
-            "TRADINGAGENTS_ANTHROPIC_EFFORT", "anthropic_effort",
-            "Claude effort", "Step 8: Effort Level",
-            "Configure Claude effort level", ask_anthropic_effort,
-        )
+    )
+    role_efforts = configure_role_reasoning_efforts(
+        selected_llm_provider,
+        selected_shallow_thinker,
+        selected_deep_thinker,
+        DEFAULT_CONFIG,
+        non_interactive=provider_from_env,
+    )
 
     return {
         "ticker": selected_ticker,
@@ -721,9 +688,11 @@ def get_user_selections():
         "backend_url": backend_url,
         "shallow_thinker": selected_shallow_thinker,
         "deep_thinker": selected_deep_thinker,
-        "google_thinking_level": thinking_level,
-        "openai_reasoning_effort": reasoning_effort,
-        "anthropic_effort": anthropic_effort,
+        "quick_reasoning_effort": role_efforts["quick"],
+        "deep_reasoning_effort": role_efforts["deep"],
+        "google_thinking_level": DEFAULT_CONFIG["google_thinking_level"],
+        "openai_reasoning_effort": DEFAULT_CONFIG["openai_reasoning_effort"],
+        "anthropic_effort": DEFAULT_CONFIG["anthropic_effort"],
         "output_language": output_language,
     }
 
@@ -977,6 +946,8 @@ def _build_run_config(selections: dict, checkpoint: bool | None) -> dict:
     config["backend_url"] = selections["backend_url"]
     config["llm_provider"] = selections["llm_provider"].lower()
     # Provider-specific thinking configuration
+    config["quick_reasoning_effort"] = selections.get("quick_reasoning_effort")
+    config["deep_reasoning_effort"] = selections.get("deep_reasoning_effort")
     config["google_thinking_level"] = selections.get("google_thinking_level")
     config["openai_reasoning_effort"] = selections.get("openai_reasoning_effort")
     config["anthropic_effort"] = selections.get("anthropic_effort")
