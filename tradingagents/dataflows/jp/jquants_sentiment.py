@@ -5,11 +5,11 @@ Japanese retail sentiment has no clean free API (X is paid; Yahoo!ファイナ�
 substitute official quantitative J-Quants signals for the US-retail social
 platforms that don't cover Japan. Three complementary signals live here:
 
-  * :func:`get_investor_flows` — weekly *Trading by Type of Investors*
+  * :func:`get_market_investor_flows` — weekly *Trading by Type of Investors*
     (投資部門別売買状況, ``/equities/investor-types``, Light plan). Net buy/sell by
     investor category per TSE section: a **market-section-level** "who is buying"
-    read (foreigners dominate; individuals lean contrarian), injected as
-    market-wide context the way global news contextualises a single name.
+    read with no per-security attribution. It is injected into the news/macro
+    layer as market context, never into per-name sentiment.
   * :func:`get_margin_balance` — weekly margin-trading balances
     (信用取引週末残高, ``/markets/margin-interest``, Standard plan). **Per-ticker**
     信用買残 / 売残 and the credit ratio (買残/売残): retail positioning and latent
@@ -19,9 +19,8 @@ platforms that don't cover Japan. Three complementary signals live here:
     ≥0.5%-of-shares short disclosures, each naming the short seller: professional
     bearish positioning.
 
-All three are pre-fetched by the sentiment analyst (not routed through
-``route_to_vendor``), so like the StockTwits/Reddit fetchers each must always
-return a string and never raise.
+The two per-name signals are prefetched by the sentiment analyst; the market
+flow is prefetched by the news analyst. All three return strings and never raise.
 """
 
 from __future__ import annotations
@@ -30,14 +29,11 @@ import logging
 from datetime import date, datetime, timedelta
 
 from .calendar import add_business_days
+from .company_info import get_company_market_section
 from .jquants_common import fetch_records, parse_number, to_jquants_code
 from .market import is_tokyo_ticker
 
 logger = logging.getLogger(__name__)
-
-# Flagship TSE section: where the large, liquid, foreign-traded names sit, so its
-# foreign-flow figure is the headline "foreigners buying/selling Japan" number.
-_DEFAULT_SECTION = "TSEPrime"
 
 # Net-balance fields worth surfacing, in reading order, with display labels.
 # Bal = purchases − sales for that investor category (positive = net buying).
@@ -70,20 +66,30 @@ def _format_week(record: dict) -> str:
     return f"- Week {span} (published {record.get('PubDate', '?')}): {flows}"
 
 
-def get_investor_flows(
-    ticker: str, curr_date: str, look_back_weeks: int = 4, section: str = _DEFAULT_SECTION
+def get_market_investor_flows(
+    ticker: str,
+    curr_date: str,
+    look_back_weeks: int = 4,
+    section: str | None = None,
 ) -> str:
-    """Return recent weekly investor-type net flows for the ticker's market.
+    """Return aggregate investor-type flows for the ticker's exchange section.
 
-    Investor-type flows are a Tokyo-market (J-Quants) signal, so this returns ""
-    for any non-``.T`` ticker — a future market supplies its own source rather
-    than inheriting Japan's numbers. Degrades to a placeholder string on any
-    fetch error (the sentiment prefetch contract); never raises.
+    The endpoint contains no per-security attribution. ``section`` is normally
+    resolved from the company master as of ``curr_date``; it remains an optional
+    override for compatibility and diagnostics. A lookup failure never defaults
+    to Prime. Non-Tokyo tickers return ``""`` and every failure degrades to a
+    visible placeholder.
     """
     if not is_tokyo_ticker(ticker):
         return ""
 
     try:
+        section = section or get_company_market_section(ticker, curr_date)
+        if section is None:
+            return (
+                f"<market investor flows unavailable: no supported exchange section "
+                f"for {ticker} as of {curr_date}; not defaulting to TSEPrime>"
+            )
         # Reach back a few extra weeks beyond the requested window to absorb the
         # publication lag (the latest week is released several business days
         # late). The strptime stays inside the try so a malformed curr_date
@@ -108,13 +114,26 @@ def get_investor_flows(
     published.sort(key=lambda r: r.get("PubDate") or "", reverse=True)
     weeks = "\n".join(_format_week(r) for r in published[:look_back_weeks])
     # Data only — a neutral source label and unit definition. The prompt wrapper
-    # owns the section header/framing and the sentiment rules own how to weight
-    # the categories, so the interpretation isn't restated here (would drift).
+    # repeats the interpretation, but keep the hard boundary adjacent to the raw
+    # values so it survives copying or prompt restructuring.
     return (
-        f"{section}, weekly net flows — J-Quants 投資部門別売買状況 "
-        "(net = purchases − sales; positive = net buying):\n\n"
+        f"MARKET-LEVEL CONTEXT ONLY — NOT {ticker} ORDER FLOW.\n"
+        f"{section} aggregate weekly net flows — J-Quants 投資部門別売買状況. "
+        "This endpoint has no security-level attribution. Do not infer that "
+        f"foreigners, individuals, or any category bought or sold {ticker}.\n"
+        "Net = purchases − sales; positive = net buying for the whole exchange section:\n\n"
         f"{weeks}"
     )
+
+
+def get_investor_flows(
+    ticker: str,
+    curr_date: str,
+    look_back_weeks: int = 4,
+    section: str | None = None,
+) -> str:
+    """Compatibility alias for :func:`get_market_investor_flows`."""
+    return get_market_investor_flows(ticker, curr_date, look_back_weeks, section)
 
 
 # --- Per-ticker margin-trading balances (信用取引週末残高) --------------------

@@ -1,12 +1,14 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.utils.agent_utils import (
-    get_balance_sheet,
-    get_cashflow,
-    get_fundamentals,
-    get_income_statement,
     get_instrument_context_from_state,
     get_language_instruction,
+)
+from tradingagents.agents.utils.fundamental_data_tools import (
+    get_balance_sheet_for_analysis,
+    get_cashflow_for_analysis,
+    get_fundamentals_for_analysis,
+    get_income_statement_for_analysis,
 )
 
 
@@ -16,16 +18,18 @@ def create_fundamentals_analyst(llm):
         instrument_context = get_instrument_context_from_state(state)
 
         tools = [
-            get_fundamentals,
-            get_balance_sheet,
-            get_cashflow,
-            get_income_statement,
+            get_fundamentals_for_analysis,
+            get_balance_sheet_for_analysis,
+            get_cashflow_for_analysis,
+            get_income_statement_for_analysis,
         ]
 
         system_message = (
             "You are a researcher tasked with analyzing fundamental information over the past week about a company. Please write a comprehensive report of the company's fundamental information such as financial documents, company profile, basic company financials, and company financial history to gain a full view of the company's fundamental information to inform traders. Make sure to include as much detail as possible. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
             + " Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."
             + " Use the available tools: `get_fundamentals` for comprehensive company analysis, `get_balance_sheet`, `get_cashflow`, and `get_income_statement` for specific financial statements."
+            + " The workflow injects the exact analysis date into every fundamental tool call; do not attempt to supply or override `curr_date`."
+            + " Treat missing or unprovided financial fields as unknown, never as zero. Data labelled `not point-in-time historical data` must not be presented as evidence that was available on a historical analysis date; explicitly state that limitation instead. Do not substitute EBIT, pretax income, or another subtotal for operating or ordinary profit unless the source itself defines that mapping."
             + get_language_instruction(),
         )
 

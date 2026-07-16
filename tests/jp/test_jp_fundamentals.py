@@ -154,7 +154,8 @@ class JPFundamentalsTests(unittest.TestCase):
         today = pd.Timestamp.now().strftime("%Y-%m-%d")
         out, _ = self._run_live((92.67, 16), today)
         self.assertIn("company guidance / 会社予想, EPS 113.09", out)  # date-safe, still there
-        self.assertIn("Forward PE: 38.49 (analyst consensus, live only, 16 analysts, EPS 92.67)", out)
+        self.assertIn("Forward PE: 38.49 (analyst consensus, live only; requested", out)
+        self.assertIn("16 analysts, not point-in-time historical data, EPS 92.67", out)
         self.assertIn("company guidance +14.4% vs analyst -6.3% (divergent)", out)
 
     def test_flat_company_guidance_vs_decline_reads_divergent(self):

@@ -167,10 +167,10 @@ Yahoo Finance covers `.T` tickers only thinly (adjusted OHLC, sparse fundamental
 
 | Analyst | Source | What it adds over the Yahoo baseline |
 |---|---|---|
-| Market / technicals | **J-Quants** `/equities/bars/daily` | Official TSE prices & indicators |
-| Fundamentals | **J-Quants** `/fins/summary` + assemblers | Date-safe computed valuation ratios, TOPIX-weekly beta, curated statement line items |
-| News | **EDINET** + **TDnet 適時開示** + **Google News (ja)** | Statutory filings, timely disclosures (決算/業績修正/M&A), and Japanese-language media — resolved by company *name*, not noisy codes |
-| Sentiment | **J-Quants** investor flows / margin / short-sale + **EDINET** 大量保有 & 公開買付 (TOB) | Official quantitative positioning in place of the US-retail social feeds that don't cover Japan |
+| Market / technicals | **J-Quants** `/equities/bars/daily` | Official TSE prices, indicators, and vendor-routed verified snapshots with explicit source labels |
+| Fundamentals | **J-Quants** `/fins/summary` + assemblers | Disclosure-date-safe ratios, deduplicated/accounting-labelled summaries, and live-only curated statement detail |
+| News | **EDINET** + **TDnet 適時開示** + **Google News (ja)** + **J-Quants** section flows | Statutory filings, timely disclosures, Japanese-language media, and clearly labelled Prime/Standard/Growth market context that is never attributed to the ticker |
+| Sentiment | **J-Quants** per-stock margin / short-sale + **EDINET** 大量保有 & 公開買付 (TOB) | Per-company positioning and filings in place of US-retail social feeds; exchange-wide investor flows are intentionally excluded |
 | Macro | **FRED** + **e-Stat** + **BOJ** | Cross-region backdrop (JP equities move on the Fed, China, and the BOJ), disk-cached across runs |
 
 **Configuration.** Add the free keys to `.env` (see `.env.example`):
@@ -182,18 +182,19 @@ export ESTAT_APP_ID=...      # e-Stat — Japanese CPI for the macro panel (http
 export FRED_API_KEY=...      # FRED — US/global macro (https://fred.stlouisfed.org/docs/api/api_key.html)
 ```
 
-J-Quants plan tiers: the **Light** plan covers prices, `/fins/summary`, and investor flows — enough for market, fundamentals, and news. The **Standard** plan additionally unlocks the per-ticker margin-balance and short-position sentiment signals. The **Premium** plan is *not* required (line-item `/fins/details` is intentionally unused).
+J-Quants plan tiers: the **Light** plan covers prices, `/fins/summary`, and exchange-section investor flows — enough for market, fundamentals, and News regional context. The **Standard** plan additionally unlocks the per-ticker margin-balance and short-position sentiment signals. The **Premium** plan is *not* required (line-item `/fins/details` is intentionally unused).
 
 **Graceful fallback — nothing is mandatory.** The JP vendors are *additive*: each degrades to the configured fallback rather than crashing.
-- No `JQUANTS_API_KEY` → prices/fundamentals fall back to **yfinance** (Yahoo data, English), exactly like upstream.
+- No `JQUANTS_API_KEY` → prices and near-live fundamentals can fall back to **yfinance** (Yahoo data, English); historical `.T` statements fail closed because Yahoo does not expose filing timestamps.
 - No `EDINET_API_KEY` → the news assembler drops the filings segment but still returns Google-News media (which needs no key); if every source is empty it falls back to yfinance.
 - On the **Light** plan → the Standard-only margin/short signals are simply omitted; the remaining sentiment signals still populate.
 - Missing macro keys → the macro panel degrades to a sentinel (macro is an optional category), never blocking a run.
 
 **What this fork optimizes.**
-- **Backtest-correct by construction.** Every JP source is *look-ahead-safe*: news and filings are filtered by disclosure date ≤ the as-of date, and macro series are settle-gated with a grace window, so a run pinned to a historical date never sees data published after it.
-- **More accurate data.** Official J-Quants prices and `/fins/summary` fundamentals replace Yahoo's thin `.T` coverage; the fundamentals assembler computes valuation ratios and a TOPIX-weekly beta on a proper Japanese benchmark.
-- **Signal, not noise.** Per-stock news is resolved by clean company name (so `4568` doesn't drag in galaxy NGC 4568 or index levels), and sentiment uses official positioning data instead of scrape-only, ToS-grey retail boards.
+- **Historical runs fail closed for live-only data.** JP official sources remain look-ahead-safe, and historical runs do not query current StockTwits, Reddit, Polymarket, yfinance `.info`, Alpha Vantage `OVERVIEW`, or yfinance `.T` statement frames without filing timestamps. Graph-facing Market, News, and Fundamentals tools inject the analysis date from workflow state, so the LLM cannot omit or override an end/current date; ticker-news start dates are derived from configuration. Direct statement calls that omit a date retain live-retrieval compatibility and are labelled as such. Yahoo ticker news compares publication timestamps in the exchange-local calendar for supported suffixes, New York for unsuffixed US securities, and UTC for crypto; near-live social messages use the same requested-date principle.
+- **More accurate data.** Official J-Quants prices and `/fins/summary` fundamentals replace Yahoo's thin `.T` coverage; the fundamentals assembler computes valuation ratios and a TOPIX-weekly beta on a proper Japanese benchmark, deduplicates repeated period disclosures, and labels IFRS/GAAP scope explicitly.
+- **Signal, not noise.** Yahoo ticker news and Google News JP use a configurable 14-day company-news window and a hybrid evidence boundary: explicit ticker/full-name evidence is `[direct]`, ambiguous names/tickers and summary-only mentions are `[candidate]` for the analyst to verify, and `[context]` remains external background. Dates, duplicates, known template/disclosure mirrors, blocked junk sources, and items with no entity evidence are handled deterministically. Fast-decaying StockTwits/Reddit sentiment and global macro news default to 7 days; if the social window is widened, Reddit selects an encompassing search bucket before exact calendar filtering. Sentiment uses official positioning data instead of scrape-only, ToS-grey retail boards.
+- **Point-in-time-safe identity.** Live analysis can use rich yfinance `.info` identity fields. Historical graph startup and news alias resolution use exact-symbol `yf.Search` metadata instead, so current sector/industry cannot leak into a backtest.
 
 See [CLAUDE.md](CLAUDE.md) for the full vendor architecture.
 
@@ -302,7 +303,7 @@ TradingAgents is LLM-driven, so two runs of the same ticker and date can differ.
 
 Language model sampling is non-deterministic. Even at a fixed temperature, providers do not guarantee byte-identical output across calls, and reasoning models (the default GPT-5.x family, and any thinking-mode model) vary the most because their internal reasoning is itself sampled.
 
-Live data moves. News, StockTwits, and Reddit return different content as time passes, so a run today sees different inputs than a run last week even for the same historical trade date. Pin the analysis date to hold the price and indicator window fixed, but the social and news sources still reflect "now".
+Live data moves. News and other live feeds can return different content as time passes. For historical trade dates the framework now skips StockTwits, Reddit, and yfinance `.info` instead of injecting current data. For dates inside the five-day live window, social messages are filtered to the requested start/end dates, though the public feed sample itself can still change between retrievals.
 
 To reduce variation you can lower the sampling temperature. Set `temperature` in your config (or `TRADINGAGENTS_TEMPERATURE` in `.env`); lower values make models that honor it more repeatable. The current curated models are reasoning-first and largely ignore temperature, so for tighter reproducibility use a non-reasoning model, which you can set explicitly via the Custom model ID option.
 
@@ -314,7 +315,7 @@ config["temperature"] = 0.0
 # non-reasoning deep/quick model explicitly (e.g. via the Custom model ID option).
 ```
 
-What does not vary anymore: the analyzed company identity is resolved deterministically from the ticker before any agent runs, and the market analyst grounds exact price and indicator claims in a verified data snapshot. Earlier reports of "different companies" or fabricated price levels across runs are addressed by these two mechanisms.
+What does not vary anymore: the analyzed company identity is resolved deterministically from the ticker before any agent runs, and the market analyst grounds exact price and indicator claims in a verified data snapshot routed through the configured technical vendor chain. The snapshot always labels the actual source, including fallback.
 
 Backtest results are not guaranteed to match any published figure. Returns depend on the model, the temperature, the date range, data quality, and the sampling above. Treat the framework as a research scaffold for studying multi-agent analysis, not as a strategy with a fixed, replicable return.
 

@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 
 import tradingagents.dataflows.market_data_validator as validator
+from tradingagents.dataflows.errors import NoMarketDataError
 
 
 def _sample_ohlcv() -> pd.DataFrame:
@@ -34,6 +35,7 @@ class TestVerifiedSnapshot:
         snap = validator.build_verified_market_snapshot("COF", "2026-05-13")
         assert "Verified market data snapshot for COF" in snap
         assert "Requested analysis date: 2026-05-13" in snap
+        assert "Data source: yfinance" in snap
         assert "Latest trading row used: 2026-05-13" in snap
         assert "999.00" not in snap          # future row excluded
         assert "boll_lb" in snap             # indicators present
@@ -74,3 +76,22 @@ class TestTool:
             {"symbol": "COF", "curr_date": "2026-05-20"}
         )
         assert "Verified market data snapshot for COF" in out
+        assert "Data source: yfinance" in out
+
+    def test_renderer_labels_supplied_vendor(self):
+        snap = validator.render_verified_market_snapshot(
+            _sample_ohlcv(),
+            "9984.T",
+            "2026-05-20",
+            source="J-Quants",
+        )
+        assert "Data source: J-Quants" in snap
+
+    def test_renderer_rejects_stale_vendor_frame(self):
+        with pytest.raises(NoMarketDataError, match="stale"):
+            validator.render_verified_market_snapshot(
+                _sample_ohlcv(),
+                "OLD",
+                "2026-07-15",
+                source="Alpha Vantage",
+            )

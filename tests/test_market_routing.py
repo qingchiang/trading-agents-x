@@ -15,6 +15,7 @@ import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
 from tradingagents.dataflows import interface, market_context
 from tradingagents.dataflows.config import set_config
+from tradingagents.dataflows.errors import VendorNotConfiguredError
 
 
 def _reset_config():
@@ -61,6 +62,37 @@ class MarketRoutingTests(unittest.TestCase):
             )
         self.assertEqual(result, "YF")
         jp.assert_not_called()
+
+    def test_verified_snapshot_uses_jp_technical_vendor(self):
+        with self._route(
+            "get_verified_market_snapshot",
+            {"yfinance": _returns("YF SNAPSHOT"), "jquants": _returns("JQ SNAPSHOT")},
+        ):
+            result = interface.route_to_vendor(
+                "get_verified_market_snapshot", "9984.T", "2026-07-15", 30
+            )
+        self.assertEqual(result, "JQ SNAPSHOT")
+
+    def test_verified_snapshot_us_uses_default_yfinance(self):
+        with self._route(
+            "get_verified_market_snapshot",
+            {"yfinance": _returns("YF SNAPSHOT"), "jquants": _returns("JQ SNAPSHOT")},
+        ):
+            result = interface.route_to_vendor(
+                "get_verified_market_snapshot", "NVDA", "2026-07-15", 30
+            )
+        self.assertEqual(result, "YF SNAPSHOT")
+
+    def test_verified_snapshot_falls_back_when_jquants_unconfigured(self):
+        jq = mock.Mock(side_effect=VendorNotConfiguredError("missing key"))
+        with self._route(
+            "get_verified_market_snapshot",
+            {"jquants": jq, "yfinance": _returns("YF FALLBACK")},
+        ):
+            result = interface.route_to_vendor(
+                "get_verified_market_snapshot", "9984.T", "2026-07-15", 30
+            )
+        self.assertEqual(result, "YF FALLBACK")
 
     def test_empty_market_map_preserves_default_routing(self):
         # With no configured routes, even a ".T" ticker stays on the default chain

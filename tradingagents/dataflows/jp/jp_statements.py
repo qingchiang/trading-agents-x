@@ -8,18 +8,22 @@ statements we lead with the J-Quants summary (authoritative, latest) and append 
 curated set of yfinance line items the summary lacks (gross profit, SG&A, EBITDA,
 interest, capex, free cash flow, debt, working capital, …).
 
-Both sources are date-safe — J-Quants filters by ``DiscDate <= curr_date`` and the
-yfinance frame is filtered to fiscal columns ``<= curr_date`` (unlike ``.info``,
-statements have real as-of history) — so appending yfinance introduces no
-look-ahead. The J-Quants base is authoritative and non-optional: if it has no
-data the error propagates so the router can fall through; the yfinance detail is
-best-effort and simply omitted on any failure.
+J-Quants is point-in-time safe because it filters by ``DiscDate <= curr_date``.
+yfinance exposes current statement frames with fiscal-period-end columns but no
+historical publication timestamp, so its detail is live-only: historical runs
+receive the official summary plus an explicit unavailable note. The J-Quants
+base is authoritative and non-optional; live yfinance detail is best-effort.
+For direct callers that omit ``curr_date``, the legacy live-retrieval behavior
+is retained and labelled explicitly; graph tools inject the analysis date from
+workflow state rather than accepting an LLM-supplied value.
 """
 
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 
+from ..lookahead import is_live
 from ..y_finance import get_statement_frame
 from . import jquants_fundamentals as jqf
 
@@ -45,16 +49,43 @@ _CURATED = {
 }
 
 
-def _detail_block(ticker: str, kind: str, freq: str, curr_date: str | None) -> str:
-    """Curated yfinance line-item block to append, or '' when unavailable.
+def _historical_detail_note(curr_date: str | None) -> str:
+    requested = curr_date or "not provided"
+    return (
+        "\n\n## Line-item detail unavailable for historical analysis\n"
+        f"Requested analysis date: {requested}. Current yfinance statement frames "
+        "do not expose point-in-time filing timestamps, so they were not requested. "
+        "Use the J-Quants disclosure-date-filtered summary above; do not estimate "
+        "missing line items."
+    )
 
-    Best-effort: any failure or absence of the curated rows returns '' so the
-    official J-Quants summary still renders on its own.
-    """
-    # Look-ahead guard: without a curr_date, filter_financials_by_date can't drop
-    # future fiscal columns, so skip the yfinance append rather than risk a leak.
-    if not curr_date:
+
+def _no_date_live_note(curr_date: str | None) -> str:
+    """Explain the compatibility live mode used only when no date is supplied."""
+    if curr_date is not None:
         return ""
+    return (
+        "\n\n## Retrieval mode\n"
+        "No analysis date was provided; this call is treated as a live retrieval. "
+        "The J-Quants summary above is the latest disclosure available at retrieval "
+        "time and was not filtered to a historical cutoff."
+    )
+
+
+def _requested_date_label(curr_date: str | None) -> str:
+    return curr_date or "not provided (treated as live retrieval)"
+
+
+def _detail_block(ticker: str, kind: str, freq: str, curr_date: str | None) -> str:
+    """Curated live yfinance line-item block, or a safe historical note.
+
+    Historical/malformed dates never trigger yfinance. A missing date preserves
+    the direct-call live compatibility mode and is labelled as such. For a live
+    request, any failure or absence of curated rows returns '' so the official
+    J-Quants summary still renders on its own.
+    """
+    if curr_date is not None and not is_live(curr_date):
+        return _historical_detail_note(curr_date)
     try:
         frame = get_statement_frame(ticker, kind, freq, curr_date)
     except Exception as exc:  # never let the detail append break the summary
@@ -73,8 +104,13 @@ def _detail_block(ticker: str, kind: str, freq: str, curr_date: str | None) -> s
     sub = frame.loc[rows].dropna(axis=1, how="all").dropna(axis=0, how="all")
     if sub.empty:
         return ""
+    retrieved = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     return (
-        f"\n\n## Line-item detail (yfinance, curated, date-safe as of {curr_date}, may lag)\n"
+        "\n\n## Line-item detail (yfinance, curated live snapshot, may lag)\n"
+        f"Requested analysis date: {_requested_date_label(curr_date)}\n"
+        f"Retrieval timestamp: {retrieved}\n"
+        "Not point-in-time historical data; fiscal-period-end filtering does not "
+        "establish when these values were published.\n"
         + sub.to_csv()
     )
 
@@ -82,16 +118,16 @@ def _detail_block(ticker: str, kind: str, freq: str, curr_date: str | None) -> s
 def get_income_statement(ticker: str, freq: str = "quarterly", curr_date: str | None = None) -> str:
     """J-Quants income summary + curated yfinance line items."""
     base = jqf.get_income_statement(ticker, freq, curr_date)
-    return base + _detail_block(ticker, "income", freq, curr_date)
+    return base + _no_date_live_note(curr_date) + _detail_block(ticker, "income", freq, curr_date)
 
 
 def get_balance_sheet(ticker: str, freq: str = "quarterly", curr_date: str | None = None) -> str:
     """J-Quants balance-sheet summary + curated yfinance line items."""
     base = jqf.get_balance_sheet(ticker, freq, curr_date)
-    return base + _detail_block(ticker, "balance", freq, curr_date)
+    return base + _no_date_live_note(curr_date) + _detail_block(ticker, "balance", freq, curr_date)
 
 
 def get_cashflow(ticker: str, freq: str = "quarterly", curr_date: str | None = None) -> str:
     """J-Quants cash-flow summary + curated yfinance line items."""
     base = jqf.get_cashflow(ticker, freq, curr_date)
-    return base + _detail_block(ticker, "cashflow", freq, curr_date)
+    return base + _no_date_live_note(curr_date) + _detail_block(ticker, "cashflow", freq, curr_date)

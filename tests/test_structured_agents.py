@@ -425,22 +425,21 @@ class TestSentimentMarketGating:
     def teardown_method(self):
         config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
 
-    def _run(self, ticker, routes=None, news_side_effect=None):
+    def _run(self, ticker, routes=None, news_side_effect=None, live=True):
         captured = {}
         config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
         if routes:
             set_config({"data_vendors_by_market": routes})
         with mock.patch(f"{_SENTIMENT_MOD}.fetch_stocktwits_messages") as st, \
                 mock.patch(f"{_SENTIMENT_MOD}.fetch_reddit_posts") as rd, \
-                mock.patch(f"{_SENTIMENT_MOD}.get_investor_flows") as flows, \
                 mock.patch(f"{_SENTIMENT_MOD}.get_large_holdings") as holdings, \
                 mock.patch(f"{_SENTIMENT_MOD}.get_margin_balance") as margin, \
                 mock.patch(f"{_SENTIMENT_MOD}.get_short_positions") as shorts, \
                 mock.patch(f"{_SENTIMENT_MOD}.get_analyst_ratings_block") as ratings, \
-                mock.patch(f"{_SENTIMENT_MOD}.get_news") as news:
+                mock.patch(f"{_SENTIMENT_MOD}.get_news") as news, \
+                mock.patch(f"{_SENTIMENT_MOD}.is_live", return_value=live):
             st.return_value = "STOCKTWITS_DATA"
             rd.return_value = "REDDIT_DATA"
-            flows.return_value = "INVESTOR_FLOWS_DATA"
             holdings.return_value = "LARGE_HOLDINGS_DATA"
             margin.return_value = "MARGIN_BALANCE_DATA"
             shorts.return_value = "SHORT_POSITION_DATA"
@@ -449,38 +448,70 @@ class TestSentimentMarketGating:
                 news.func.side_effect = news_side_effect
             else:
                 news.func.return_value = "NEWS_DATA"
+            captured["news_mock"] = news
             state = {**_make_sentiment_state(), "company_of_interest": ticker}
             result = create_sentiment_analyst(_structured_sentiment_llm(captured))(state)
-        return captured, st, rd, flows, holdings, margin, shorts, ratings, result
+        return captured, st, rd, holdings, margin, shorts, ratings, result
 
     def test_us_ticker_calls_social_fetchers(self):
-        _c, st, rd, flows, holdings, margin, shorts, ratings, _ = self._run("NVDA")
+        _c, st, rd, holdings, margin, shorts, ratings, _ = self._run("NVDA")
         st.assert_called_once()
         rd.assert_called_once()
-        flows.assert_not_called()  # market-flow proxy is for routed markets only
         holdings.assert_not_called()  # large-holding signal is for routed markets only
         margin.assert_not_called()  # margin-balance signal is for routed markets only
         shorts.assert_not_called()  # short-position signal is for routed markets only
         ratings.assert_not_called()  # analyst-rating overlay is for routed markets only
 
-    def test_routed_market_skips_social_and_injects_flows(self):
-        captured, st, rd, flows, holdings, margin, shorts, ratings, _ = self._run(
+    def test_ticker_news_uses_14_days_while_social_stays_at_7(self):
+        captured, st, rd, *_ = self._run("NVDA")
+        captured["news_mock"].func.assert_called_once_with(
+            "NVDA", "2026-01-01", "2026-01-15"
+        )
+        st.assert_called_once_with(
+            "NVDA",
+            limit=30,
+            start_date="2026-01-08",
+            end_date="2026-01-15",
+        )
+        rd.assert_called_once_with(
+            "NVDA",
+            start_date="2026-01-08",
+            end_date="2026-01-15",
+        )
+        prompt_text = "".join(str(message) for message in captured["prompt"])
+        assert "requested window 2026-01-01 to 2026-01-15" in prompt_text
+        assert "(2026-01-08 to 2026-01-15)" in prompt_text
+
+    def test_routed_market_skips_social_and_injects_per_name_signals(self):
+        captured, st, rd, holdings, margin, shorts, ratings, _ = self._run(
             "9984.T", routes={".T": {"news_data": "edinet_news"}}
         )
         st.assert_not_called()
         rd.assert_not_called()
-        flows.assert_called_once()
         holdings.assert_called_once()
         margin.assert_called_once()
         shorts.assert_called_once()
         ratings.assert_called_once()
         prompt_text = "".join(str(m) for m in captured["prompt"])
         assert "unavailable: no coverage for this market" in prompt_text
-        assert "INVESTOR_FLOWS_DATA" in prompt_text
+        assert "INVESTOR_FLOWS_DATA" not in prompt_text
+        assert "Market-wide investor flows" not in prompt_text
         assert "LARGE_HOLDINGS_DATA" in prompt_text
         assert "MARGIN_BALANCE_DATA" in prompt_text
         assert "SHORT_POSITION_DATA" in prompt_text
         assert "ANALYST_RATINGS_DATA" in prompt_text
+        assert "Routed ticker news" in prompt_text
+        assert "News headlines — Yahoo Finance" not in prompt_text
+        assert "[direct]` has explicit ticker or full-name evidence" in prompt_text
+        assert "[candidate]` has an ambiguous ticker/name" in prompt_text
+        assert "ticker-endpoint provenance alone is not evidence" in prompt_text
+        assert "[context]` is" in prompt_text
+
+    def test_historical_us_run_skips_live_social_fetchers(self):
+        captured, st, rd, *_ = self._run("NVDA", live=False)
+        st.assert_not_called()
+        rd.assert_not_called()
+        assert "live-only source unavailable for historical trade_date" in str(captured)
 
     def test_news_fetch_error_degrades_instead_of_crashing(self):
         captured, *_rest, result = self._run(

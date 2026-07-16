@@ -8,6 +8,7 @@ from datetime import datetime
 
 from dateutil.relativedelta import relativedelta
 
+from ..market_data_validator import render_verified_market_snapshot
 from ..stockstats_utils import render_indicator_window
 from .jquants_stock import _fetch_ohlcv_frame
 
@@ -27,3 +28,21 @@ def get_indicator(
     ).strftime("%Y-%m-%d")
     df = _fetch_ohlcv_frame(symbol, start, curr_date)
     return render_indicator_window(df, indicator, curr_date, look_back_days)
+
+
+def get_verified_market_snapshot(
+    symbol: str, curr_date: str, look_back_days: int = 30
+) -> str:
+    """Return a J-Quants-backed deterministic market snapshot."""
+    start = (
+        datetime.strptime(curr_date, "%Y-%m-%d")
+        - relativedelta(days=look_back_days + _WARMUP_DAYS)
+    ).strftime("%Y-%m-%d")
+    df = _fetch_ohlcv_frame(symbol, start, curr_date)
+    return render_verified_market_snapshot(
+        df,
+        symbol,
+        curr_date,
+        look_back_days,
+        source="J-Quants",
+    )

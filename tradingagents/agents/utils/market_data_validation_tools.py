@@ -1,8 +1,9 @@
 from typing import Annotated
 
 from langchain_core.tools import tool
+from langgraph.prebuilt import InjectedState
 
-from tradingagents.dataflows.market_data_validator import build_verified_market_snapshot
+from tradingagents.dataflows.interface import route_to_vendor
 
 
 @tool
@@ -20,4 +21,20 @@ def get_verified_market_snapshot(
     price levels, Bollinger bands, RSI, MACD, moving averages, support /
     resistance, or historical comparisons, and treat it as the source of truth.
     """
-    return build_verified_market_snapshot(symbol, curr_date, look_back_days)
+    return route_to_vendor(
+        "get_verified_market_snapshot", symbol, curr_date, look_back_days
+    )
+
+
+@tool("get_verified_market_snapshot")
+def get_verified_market_snapshot_for_analysis(
+    symbol: Annotated[str, "ticker symbol of the company"],
+    curr_date: Annotated[str, InjectedState("trade_date")],
+    look_back_days: Annotated[
+        int, "number of recent trading rows to include for sanity-checking"
+    ] = 30,
+) -> str:
+    """Build a verified snapshot at the workflow's immutable analysis date."""
+    return route_to_vendor(
+        "get_verified_market_snapshot", symbol, curr_date, look_back_days
+    )

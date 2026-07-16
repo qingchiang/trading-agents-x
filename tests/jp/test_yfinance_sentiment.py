@@ -35,7 +35,10 @@ class AnalystRatingsBlockTests(unittest.TestCase):
         self.assertIn("16 analysts", out)
         self.assertIn("12-month price target (mean): 5,323", out)
         self.assertIn("high 6,200 / low 4,100", out)
-        self.assertIn("implied +38.9% vs current 3,832", out)
+        self.assertIn("implied +38.9% vs retrieval-time current price 3,832", out)
+        self.assertIn("Requested analysis date: 2026-06-26", out)
+        self.assertIn("Retrieved at:", out)
+        self.assertIn("Not point-in-time historical data", out)
 
     def test_non_jp_ticker_returns_empty(self):
         # yfinance-sourced but injected as a JP fill; a US name uses StockTwits/Reddit.
@@ -77,7 +80,7 @@ class AnalystRatingsBlockTests(unittest.TestCase):
         # implied-upside so it isn't silently dropped.
         r = dict(_FULL, currentPrice=None, regularMarketPrice=3800.0)
         out, _ = self._block(r)
-        self.assertIn("implied +40.1% vs current 3,800", out)  # 5323/3800 − 1
+        self.assertIn("implied +40.1% vs retrieval-time current price 3,800", out)
 
     def test_single_bound_band_shows_available_bound(self):
         r = dict(_FULL, targetLowPrice=None)  # only the high bound present

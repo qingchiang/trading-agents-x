@@ -19,8 +19,28 @@ from .jquants_common import memoized_fetch, to_jquants_code
 
 logger = logging.getLogger(__name__)
 
-# code -> list[master record]; company master is stable within a run.
+# (code, as_of_date) -> list[master record]. An as-of key prevents today's
+# Prime/Standard/Growth classification from leaking into a historical run.
 _MASTER_CACHE: dict = {}
+
+_MARKET_SECTIONS = {
+    "0111": "TSEPrime",
+    "0112": "TSEStandard",
+    "0113": "TSEGrowth",
+}
+
+
+def _master_records(code: str, as_of_date: str | None = None) -> list[dict]:
+    params = {"code": code}
+    if as_of_date:
+        params["date"] = as_of_date
+    return memoized_fetch(
+        _MASTER_CACHE,
+        (code, as_of_date),
+        "/equities/master",
+        params,
+        "data",
+    )
 
 
 def get_company_name(ticker: str) -> str | None:
@@ -31,9 +51,7 @@ def get_company_name(ticker: str) -> str | None:
     """
     code = to_jquants_code(ticker)
     try:
-        records = memoized_fetch(
-            _MASTER_CACHE, code, "/equities/master", {"code": code}, "data"
-        )
+        records = _master_records(code)
     except Exception as exc:  # never let name resolution abort a news fetch
         logger.warning("Company-name lookup failed for %s: %s", ticker, exc)
         return None
@@ -43,3 +61,22 @@ def get_company_name(ticker: str) -> str | None:
     # by Date — row order isn't guaranteed — so we resolve the current name.
     latest = max(records, key=lambda r: r.get("Date") or "")
     return latest.get("CoName") or None
+
+
+def get_company_market_section(ticker: str, curr_date: str) -> str | None:
+    """Return the ticker's J-Quants exchange section as of ``curr_date``.
+
+    The investor-type endpoint accepts ``TSEPrime``, ``TSEStandard`` or
+    ``TSEGrowth``. Unknown/unsupported classifications and lookup failures return
+    ``None``; callers must never silently substitute Prime.
+    """
+    code = to_jquants_code(ticker)
+    try:
+        records = _master_records(code, curr_date)
+    except Exception as exc:
+        logger.warning("Company-market lookup failed for %s as of %s: %s", ticker, curr_date, exc)
+        return None
+    if not records:
+        return None
+    latest = max(records, key=lambda r: r.get("Date") or "")
+    return _MARKET_SECTIONS.get(str(latest.get("Mkt") or ""))

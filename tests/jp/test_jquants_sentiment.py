@@ -8,6 +8,7 @@ from tradingagents.dataflows.jp import jquants_sentiment as js
 from tradingagents.dataflows.jp.jquants_sentiment import (
     get_investor_flows,
     get_margin_balance,
+    get_market_investor_flows,
     get_short_positions,
 )
 
@@ -29,6 +30,15 @@ def _patch(records=None, side_effect=None):
 
 @pytest.mark.unit
 class InvestorFlowTests(unittest.TestCase):
+    def setUp(self):
+        self.market = mock.patch.object(
+            js, "get_company_market_section", return_value="TSEPrime"
+        )
+        self.market.start()
+
+    def tearDown(self):
+        self.market.stop()
+
     def test_non_tokyo_ticker_returns_empty(self):
         # No network call for a market this signal doesn't cover.
         with mock.patch.object(js, "fetch_records") as fr:
@@ -45,6 +55,8 @@ class InvestorFlowTests(unittest.TestCase):
             out = get_investor_flows("9984.T", "2026-06-25")
         self.assertIn("TSEPrime", out)
         self.assertIn("投資部門別売買状況", out)
+        self.assertIn("MARKET-LEVEL CONTEXT ONLY — NOT 9984.T ORDER FLOW", out)
+        self.assertIn("no security-level attribution", out)
         self.assertIn("Foreigners +1,500", out)   # newest week first
         self.assertIn("Individuals -300", out)
         self.assertLess(out.index("+1,500"), out.index("+2,000"))  # newest on top
@@ -89,6 +101,22 @@ class InvestorFlowTests(unittest.TestCase):
         with _patch([_week("2026-06-19", "2026-06-08", "2026-06-12", frgn=None)]):
             out = get_investor_flows("9984.T", "2026-06-25")
         self.assertIn("Foreigners N/A", out)
+
+    def test_resolved_standard_section_is_used_in_request(self):
+        with mock.patch.object(
+            js, "get_company_market_section", return_value="TSEStandard"
+        ), _patch([_week("2026-06-19", "2026-06-08", "2026-06-12")]) as fr:
+            out = get_market_investor_flows("2702.T", "2026-06-25")
+        self.assertIn("TSEStandard aggregate", out)
+        self.assertEqual(fr.call_args.args[1]["section"], "TSEStandard")
+
+    def test_unknown_section_does_not_fetch_or_default_to_prime(self):
+        with mock.patch.object(
+            js, "get_company_market_section", return_value=None
+        ), mock.patch.object(js, "fetch_records") as fr:
+            out = get_market_investor_flows("9999.T", "2026-06-25")
+        self.assertIn("not defaulting to TSEPrime", out)
+        fr.assert_not_called()
 
 
 def _margin(date, *, long="22000000", short="2000000"):

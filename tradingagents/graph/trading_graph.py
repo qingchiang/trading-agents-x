@@ -13,21 +13,34 @@ from langgraph.prebuilt import ToolNode
 # Import the abstract tool methods from agent_utils
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
-    get_balance_sheet,
-    get_cashflow,
-    get_fundamentals,
-    get_global_news,
-    get_income_statement,
-    get_indicators,
     get_insider_transactions,
-    get_macro_indicators,
     get_news,
-    get_prediction_markets,
-    get_stock_data,
-    get_verified_market_snapshot,
     resolve_instrument_identity,
 )
+from tradingagents.agents.utils.core_stock_tools import get_stock_data_for_analysis
+from tradingagents.agents.utils.fundamental_data_tools import (
+    get_balance_sheet_for_analysis,
+    get_cashflow_for_analysis,
+    get_fundamentals_for_analysis,
+    get_income_statement_for_analysis,
+)
+from tradingagents.agents.utils.macro_data_tools import (
+    get_macro_indicators_for_analysis,
+)
+from tradingagents.agents.utils.market_data_validation_tools import (
+    get_verified_market_snapshot_for_analysis,
+)
 from tradingagents.agents.utils.memory import TradingMemoryLog
+from tradingagents.agents.utils.news_data_tools import (
+    get_global_news_for_analysis,
+    get_news_for_analysis,
+)
+from tradingagents.agents.utils.prediction_markets_tools import (
+    get_prediction_markets_for_analysis,
+)
+from tradingagents.agents.utils.technical_indicators_tools import (
+    get_indicators_for_analysis,
+)
 from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.symbol_utils import match_exchange_suffix
 from tradingagents.dataflows.utils import safe_ticker_component
@@ -198,13 +211,13 @@ class TradingAgentsGraph:
             "market": ToolNode(
                 [
                     # Core stock data tools
-                    get_stock_data,
+                    get_stock_data_for_analysis,
                     # Technical indicators
-                    get_indicators,
+                    get_indicators_for_analysis,
                     # Deterministic verification snapshot (bound to the analyst
                     # LLM and required by its prompt; must be executable here or
                     # the call fails and the model reports it "unavailable").
-                    get_verified_market_snapshot,
+                    get_verified_market_snapshot_for_analysis,
                 ]
             ),
             "social": ToolNode(
@@ -216,20 +229,20 @@ class TradingAgentsGraph:
             "news": ToolNode(
                 [
                     # News and insider information
-                    get_news,
-                    get_global_news,
+                    get_news_for_analysis,
+                    get_global_news_for_analysis,
                     get_insider_transactions,
-                    get_macro_indicators,
-                    get_prediction_markets,
+                    get_macro_indicators_for_analysis,
+                    get_prediction_markets_for_analysis,
                 ]
             ),
             "fundamentals": ToolNode(
                 [
                     # Fundamental analysis tools
-                    get_fundamentals,
-                    get_balance_sheet,
-                    get_cashflow,
-                    get_income_statement,
+                    get_fundamentals_for_analysis,
+                    get_balance_sheet_for_analysis,
+                    get_cashflow_for_analysis,
+                    get_income_statement_for_analysis,
                 ]
             ),
         }
@@ -339,16 +352,20 @@ class TradingAgentsGraph:
         if updates:
             self.memory_log.batch_update_with_outcomes(updates)
 
-    def resolve_instrument_context(self, ticker: str, asset_type: str = "stock") -> str:
+    def resolve_instrument_context(
+        self,
+        ticker: str,
+        asset_type: str = "stock",
+        curr_date: str | None = None,
+    ) -> str:
         """Resolve ticker identity once and return the full instrument context.
 
-        Deterministic yfinance lookup (cached, fail-open) injected into a
+        Point-in-time-safe yfinance lookup (cached, fail-open) injected into a
         context string so every agent anchors to the real company instead of
-        hallucinating one from the price chart (#814). Both the propagate()
-        path and the CLI call this so the resolved identity reaches the whole
-        graph regardless of entry point.
+        hallucinating one from the price chart (#814). Historical dates use
+        exact-symbol Search metadata, never the current ``Ticker.info``.
         """
-        identity = resolve_instrument_identity(ticker)
+        identity = resolve_instrument_identity(ticker, curr_date)
         return build_instrument_context(ticker, asset_type, identity)
 
     def _run_signature(self, asset_type: str) -> str:
@@ -427,7 +444,11 @@ class TradingAgentsGraph:
         # Initialize state — inject memory log context for PM and the
         # deterministically resolved instrument identity for all agents.
         past_context = self.memory_log.get_past_context(company_name)
-        instrument_context = self.resolve_instrument_context(company_name, asset_type)
+        instrument_context = self.resolve_instrument_context(
+            company_name,
+            asset_type,
+            str(trade_date),
+        )
         init_agent_state = self.propagator.create_initial_state(
             company_name,
             trade_date,

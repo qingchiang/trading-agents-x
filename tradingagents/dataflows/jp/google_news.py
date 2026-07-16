@@ -31,6 +31,11 @@ from urllib.parse import urlencode
 from urllib.request import Request
 
 from ..config import get_config
+from ..news_quality import (
+    build_company_aliases,
+    canonical_headline,
+    classify_google_article,
+)
 from .company_info import get_company_name
 from .http_util import USER_AGENT, fetch_bytes
 from .jquants_common import to_jquants_code
@@ -43,14 +48,6 @@ _RSS = "https://news.google.com/rss/search?{qs}"
 # converting before the window filter avoids a ~9h skew that would otherwise admit
 # early-next-JST-day headlines into a backtest (look-ahead safety).
 _JST = timezone(timedelta(hours=9))
-
-# Yahoo!ファイナンス quote/board/chart pages echo into the feed as "news" but carry
-# no reporting. They all use the format "…（株）【CODE】：{page}", so the "】："
-# separator flags them precisely — without dropping a real headline that merely
-# contains a word like 決算情報, nor the 【アナリスト評価】… analyst items (no colon
-# after the bracket) or the 日経 "[CODE]：" disclosure mirrors (ASCII brackets).
-_BOILERPLATE_MARKER = "】："
-
 
 def _parse_pubdate(raw: str | None) -> datetime | None:
     """Parse an RFC-822 ``pubDate`` to a naive **JST** datetime, or None.
@@ -141,21 +138,48 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0)
         for it in _fetch_items(query, timeout)
         if it["title"]
         and _in_window(it["pub_date"], start_dt, end_dt)
-        and _BOILERPLATE_MARKER not in it["title"]
     ]
-    # Most recent first, then dedupe repeated headlines (same event, many outlets);
-    # setdefault keeps the newest per title and the dict preserves that order.
-    candidates.sort(key=lambda it: it["pub_date"], reverse=True)
-    by_title: dict = {}
-    for it in candidates:
-        by_title.setdefault(it["title"], it)
-
-    kept = list(by_title.values())[: get_config()["news_article_limit"]]
-    if not kept:
+    if not candidates:
         return f"No Google News found for {ticker} between {start_date} and {end_date}"
+    aliases = build_company_aliases(ticker, name)
+    candidates.sort(key=lambda it: it["pub_date"], reverse=True)
+    relevant = []
+    seen_titles: set[str] = set()
+    for it in candidates:
+        classification = classify_google_article(
+            it["title"], it["source"], aliases
+        )
+        title_key = canonical_headline(it["title"])
+        if classification.tier == "drop" or not title_key or title_key in seen_titles:
+            continue
+        seen_titles.add(title_key)
+        relevant.append((it, classification.tier))
 
+    kept = relevant[: get_config()["news_article_limit"]]
+    if not kept:
+        return (
+            f"No relevant Google News found for {ticker} between {start_date} and "
+            f"{end_date} after quality filtering ({len(candidates)} in-window "
+            "candidates dropped)"
+        )
+
+    direct_count = sum(tier == "direct" for _, tier in kept)
+    candidate_count = sum(tier == "candidate" for _, tier in kept)
+    context_count = sum(tier == "context" for _, tier in kept)
+    dropped_count = len(candidates) - len(relevant)
+    omitted_count = len(relevant) - len(kept)
     body = "\n".join(
-        f"### {it['title']} (source: {it['source']})\n{it['pub_date'].strftime('%Y-%m-%d')}\n"
-        for it in kept
+        f"### [{tier}] {it['title']} (source: {it['source']})\n"
+        f"{it['pub_date'].strftime('%Y-%m-%d')}\n"
+        for it, tier in kept
     )
-    return f"## {ticker} News (media, Google News), from {start_date} to {end_date}:\n\n{body}"
+    stats = (
+        f"Quality filter: candidates={len(candidates)}; relevant={len(relevant)}; "
+        f"kept={len(kept)} (direct={direct_count}, candidate={candidate_count}, "
+        f"context={context_count}); "
+        f"dropped={dropped_count}; omitted_by_limit={omitted_count}."
+    )
+    return (
+        f"## {ticker} News (media, Google News), from {start_date} to {end_date}:"
+        f"\n\n{stats}\n\n{body}"
+    )

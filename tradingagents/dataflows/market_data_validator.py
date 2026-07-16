@@ -15,7 +15,10 @@ from collections.abc import Iterable
 import pandas as pd
 from stockstats import wrap
 
-from tradingagents.dataflows.stockstats_utils import load_ohlcv
+from tradingagents.dataflows.stockstats_utils import (
+    _assert_ohlcv_not_stale,
+    load_ohlcv,
+)
 
 # A fixed, common indicator set so the snapshot is the same shape every run.
 DEFAULT_SNAPSHOT_INDICATORS: tuple[str, ...] = (
@@ -25,14 +28,12 @@ DEFAULT_SNAPSHOT_INDICATORS: tuple[str, ...] = (
 )
 
 
-def _verified_rows(symbol: str, curr_date: str) -> pd.DataFrame:
+def _verified_rows(data: pd.DataFrame, symbol: str, curr_date: str) -> pd.DataFrame:
     """OHLCV on or before curr_date, date-sorted. Raises if nothing usable.
 
-    ``load_ohlcv`` already normalizes the Date column and filters out
-    look-ahead rows, but we re-apply the cutoff defensively — this is a
-    verification path, so it must not trust its input to be pre-filtered.
+    Vendor loaders normally normalize and filter already, but this verification
+    path defensively re-applies the cutoff to any supplied frame.
     """
-    data = load_ohlcv(symbol, curr_date)
     if data is None or data.empty:
         raise ValueError(f"No OHLCV data available for {symbol}.")
 
@@ -65,11 +66,35 @@ def build_verified_market_snapshot(
     look_back_days: int = 30,
     indicators: Iterable[str] | None = None,
 ) -> str:
-    """Render a ground-truth snapshot: latest OHLCV row, indicators, recent closes."""
+    """Build a yfinance-backed snapshot (the default US vendor implementation)."""
+    return render_verified_market_snapshot(
+        load_ohlcv(symbol, curr_date),
+        symbol,
+        curr_date,
+        look_back_days,
+        indicators,
+        source="yfinance",
+    )
+
+
+def render_verified_market_snapshot(
+    data: pd.DataFrame,
+    symbol: str,
+    curr_date: str,
+    look_back_days: int = 30,
+    indicators: Iterable[str] | None = None,
+    *,
+    source: str,
+) -> str:
+    """Render a deterministic snapshot from a vendor-supplied OHLCV frame."""
     # `df` keeps the original capitalized OHLCV columns (Open/High/Low/Close/
     # Volume); stockstats `wrap()` lowercases columns and adds indicator
     # columns, so read raw prices from `df` and indicators from `stock_df`.
-    df = _verified_rows(symbol, curr_date)
+    df = _verified_rows(data, symbol, curr_date)
+    # Some generic vendor loaders only apply a date range. Enforce freshness at
+    # the shared verification boundary so a stale but non-empty frame triggers
+    # router fallback instead of becoming the numeric source of truth.
+    _assert_ohlcv_not_stale(df, curr_date, symbol)
     stock_df = wrap(df.copy())
 
     selected = tuple(indicators or DEFAULT_SNAPSHOT_INDICATORS)
@@ -89,6 +114,7 @@ def build_verified_market_snapshot(
     lines = [
         f"## Verified market data snapshot for {symbol.upper()}",
         "",
+        f"- Data source: {source}",
         f"- Requested analysis date: {curr_date}",
         f"- Latest trading row used: {latest_date}",
         "- Rows after the requested analysis date are excluded before verification.",

@@ -13,10 +13,10 @@ is invoked and injects them into the prompt as structured blocks:
                            user-labeled Bullish/Bearish sentiment tags
   3. Reddit posts        — r/wallstreetbets, r/stocks, r/investing
 
-StockTwits and Reddit are US-retail platforms, so for a routed non-US market
-they are replaced by an official market-wide flow signal where one exists (a
-4th block — e.g. J-Quants investor-type flows for Tokyo names; see
-:mod:`tradingagents.dataflows.jp.jquants_sentiment`).
+StockTwits and Reddit are US-retail platforms, so routed non-US markets receive
+clear unavailable placeholders plus any supported per-name official signals.
+Exchange-section investor flows are deliberately excluded: they belong to the
+News Analyst as regional context and cannot be attributed to a target ticker.
 
 The agent does not use tool-calling; the data is in the prompt from
 turn 0. Output uses the structured-output pattern (json_schema for
@@ -30,7 +30,6 @@ See: https://github.com/TauricResearch/TradingAgents/issues/796
 """
 
 import logging
-from datetime import datetime, timedelta
 
 from langchain_core.messages import AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -45,22 +44,19 @@ from tradingagents.agents.utils.structured import (
     bind_structured,
     invoke_structured_or_freetext,
 )
+from tradingagents.dataflows.config import get_config
 from tradingagents.dataflows.jp.edinet_holdings import get_large_holdings
 from tradingagents.dataflows.jp.jquants_sentiment import (
-    get_investor_flows,
     get_margin_balance,
     get_short_positions,
 )
 from tradingagents.dataflows.jp.yfinance_sentiment import get_analyst_ratings_block
+from tradingagents.dataflows.lookahead import is_live, lookback_start_date
 from tradingagents.dataflows.market_context import market_suffix_of
 from tradingagents.dataflows.reddit import fetch_reddit_posts
 from tradingagents.dataflows.stocktwits import fetch_stocktwits_messages
 
 logger = logging.getLogger(__name__)
-
-
-def _seven_days_back(trade_date: str) -> str:
-    return (datetime.strptime(trade_date, "%Y-%m-%d") - timedelta(days=7)).strftime("%Y-%m-%d")
 
 
 def create_sentiment_analyst(llm):
@@ -76,7 +72,15 @@ def create_sentiment_analyst(llm):
     def sentiment_analyst_node(state):
         ticker = state["company_of_interest"]
         end_date = state["trade_date"]
-        start_date = _seven_days_back(end_date)
+        config = get_config()
+        news_start_date = lookback_start_date(
+            end_date,
+            config["ticker_news_lookback_days"],
+        )
+        social_start_date = lookback_start_date(
+            end_date,
+            config["social_lookback_days"],
+        )
         instrument_context = get_instrument_context_from_state(state)
 
         # Pre-fetch all three sources. Each must degrade to a string so the LLM
@@ -86,37 +90,53 @@ def create_sentiment_analyst(llm):
         # through route_to_vendor, which re-raises for a misconfigured/unset
         # vendor (news_data isn't optional), so we catch and degrade here.
         try:
-            news_block = get_news.func(ticker, start_date, end_date)
+            news_block = get_news.func(ticker, news_start_date, end_date)
         except Exception as exc:
             logger.warning("News fetch failed for %s: %s", ticker, exc)
             news_block = f"<news unavailable: {type(exc).__name__}>"
         # StockTwits and Reddit are US-retail platforms with no coverage of
         # other markets, so for a routed market (e.g. .T, future .SS) skip the
         # pointless network calls and hand the LLM a clear placeholder — prompt
-        # rule 6 then lowers confidence rather than reading noise as signal. In
-        # their place we inject an official market-wide flow signal where one
-        # exists; get_investor_flows self-selects (Tokyo-only) and returns "" for
-        # markets it does not cover, so US prompts are unchanged.
+        # rule 6 then lowers confidence rather than reading noise as signal.
+        # Per-name official positioning signals replace the unavailable social
+        # sources. Exchange-section investor flows belong to the News Analyst's
+        # market context and must never appear as ticker sentiment here.
         if market_suffix_of(ticker):
             placeholder = "<unavailable: no coverage for this market>"
             stocktwits_block = placeholder
             reddit_block = placeholder
             # Optional market-specific signals keyed by their _OPTIONAL_SECTIONS tag.
             optional_blocks = {
-                "market_flows": get_investor_flows(ticker, end_date),
                 "large_holdings": get_large_holdings(ticker, end_date),
                 "margin_balances": get_margin_balance(ticker, end_date),
                 "short_positions": get_short_positions(ticker, end_date),
                 "analyst_ratings": get_analyst_ratings_block(ticker, end_date),
             }
         else:
-            stocktwits_block = fetch_stocktwits_messages(ticker, limit=30)
-            reddit_block = fetch_reddit_posts(ticker)
+            if is_live(end_date):
+                stocktwits_block = fetch_stocktwits_messages(
+                    ticker,
+                    limit=30,
+                    start_date=social_start_date,
+                    end_date=end_date,
+                )
+                reddit_block = fetch_reddit_posts(
+                    ticker,
+                    start_date=social_start_date,
+                    end_date=end_date,
+                )
+            else:
+                historical = (
+                    f"<live-only source unavailable for historical trade_date {end_date}>"
+                )
+                stocktwits_block = historical
+                reddit_block = historical
             optional_blocks = {}
 
         system_message = _build_system_message(
             ticker=ticker,
-            start_date=start_date,
+            news_start_date=news_start_date,
+            social_start_date=social_start_date,
             end_date=end_date,
             news_block=news_block,
             stocktwits_block=stocktwits_block,
@@ -165,12 +185,6 @@ def create_sentiment_analyst(llm):
 
 # Each intro owns its block's interpretation (rendered directly above the data);
 # prompt rule 7 stays block-agnostic so a new signal is one intro, not two edits.
-_FLOWS_INTRO = (
-    'Quantitative "who is buying" signal for the ticker\'s home market, standing in\n'
-    "for retail social platforms that do not cover it. Institutional/foreign vs\n"
-    "retail net flows, not opinion. Sustained net buying by foreigners is bullish and\n"
-    "net selling bearish; individuals often lean contrarian."
-)
 _HOLDINGS_INTRO = (
     "Per-name EDINET filings about the company, of two kinds — read each row's label.\n"
     "大量保有 (5%+ stakes): an investor crossing/adjusting a 5% stake; the row shows the\n"
@@ -216,7 +230,6 @@ def _optional_section(title: str, intro: str, tag: str, body: str) -> str:
 # block omits its section, so the US prompt is unchanged. Adding another market's
 # signal is one row here plus one entry at the call site — no concat to forget.
 _OPTIONAL_SECTIONS = (
-    ("Market-wide investor flows — official exchange data", _FLOWS_INTRO, "market_flows"),
     ("Ownership & control — official 大量保有 / 公開買付 (TOB)", _HOLDINGS_INTRO, "large_holdings"),
     ("Margin-trading balances — official weekly 信用取引", _MARGIN_INTRO, "margin_balances"),
     ("Short-position disclosures — official 空売り残高報告", _SHORT_INTRO, "short_positions"),
@@ -227,7 +240,8 @@ _OPTIONAL_SECTIONS = (
 def _build_system_message(
     *,
     ticker: str,
-    start_date: str,
+    news_start_date: str,
+    social_start_date: str,
     end_date: str,
     news_block: str,
     stocktwits_block: str,
@@ -236,7 +250,7 @@ def _build_system_message(
 ) -> str:
     """Assemble the sentiment-analyst system message with structured data blocks.
 
-    ``optional_blocks`` maps an ``_OPTIONAL_SECTIONS`` tag (e.g. ``market_flows``,
+    ``optional_blocks`` maps an ``_OPTIONAL_SECTIONS`` tag (e.g.
     ``large_holdings``, ``analyst_ratings``) to its rendered body — optional
     Tokyo-market signals. A missing or empty block omits its section entirely,
     leaving the US prompt unchanged.
@@ -246,25 +260,32 @@ def _build_system_message(
         _optional_section(title, intro, tag, optional_blocks.get(tag, ""))
         for title, intro, tag in _OPTIONAL_SECTIONS
     )
-    return f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} covering the period from {start_date} to {end_date}, drawing on the complementary data sources that have already been collected for you.
+    return f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} ending on {end_date}, drawing on the complementary data sources and source-specific windows that have already been collected for you.
 
 ## Data sources (pre-fetched, in this prompt)
 
-### News headlines — Yahoo Finance, past 7 days
-Institutional framing. Fact-driven, slower-moving signal.
+### Routed ticker news — requested window {news_start_date} to {end_date}
+The inner block header identifies the actual routed source(s). Fact-driven,
+slower-moving signal; do not assume Yahoo Finance when another source is named.
+`[direct]` has explicit ticker or full-name evidence and may be treated as a
+company event. `[candidate]` has an ambiguous ticker/name or summary-only
+mention: verify its concrete relationship from the supplied text and ignore it
+when unclear; ticker-endpoint provenance alone is not evidence. `[context]` is
+only an external driver or industry/market backdrop. Never rewrite candidate or
+context material as an action taken by, or event confirmed for, {ticker}.
 
 <start_of_news>
 {news_block}
 <end_of_news>
 
-### StockTwits messages — retail-trader social platform indexed by cashtag
+### StockTwits messages — retail-trader social platform indexed by cashtag ({social_start_date} to {end_date})
 Fast-moving signal. Each message carries a user-labeled sentiment tag (Bullish / Bearish / no-label) plus the message body.
 
 <start_of_stocktwits>
 {stocktwits_block}
 <end_of_stocktwits>
 
-### Reddit posts — r/wallstreetbets, r/stocks, r/investing (past 7 days)
+### Reddit posts — r/wallstreetbets, r/stocks, r/investing ({social_start_date} to {end_date})
 Community discussion. Engagement signal via upvote score and comment count. Subreddit character matters (r/wallstreetbets is often contrarian/exuberant; r/stocks more measured; r/investing longer-term).
 
 <start_of_reddit>
@@ -277,7 +298,7 @@ Community discussion. Engagement signal via upvote score and comment count. Subr
 
 2. **Look for cross-source divergences.** If news framing is bearish but StockTwits is overwhelmingly bullish, that mismatch is itself a signal — it can mean retail is leaning into a thesis the news flow hasn't caught up to (or vice versa, that retail is chasing while institutions are cautious).
 
-3. **Weight Reddit posts by engagement.** A 400-upvote / 200-comment thread reflects community attention; a 3-upvote post is noise. Read the body excerpts for context — the title alone often misleads.
+3. **Weight Reddit posts by engagement only when those metrics are present.** A 400-upvote / 200-comment thread reflects community attention; a 3-upvote post is noise. RSS results explicitly lack scores/comments, so never invent them. Read the body excerpts for context — the title alone often misleads.
 
 4. **Distinguish opinion from event.** A news headline ("Nvidia announces $500M Corning deal") is an event; a StockTwits post ("buying NVDA, this is going to moon") is opinion. Both are inputs but should be weighted differently in your conclusions.
 
@@ -285,7 +306,7 @@ Community discussion. Engagement signal via upvote score and comment count. Subr
 
 6. **Be honest about data limits, and never invent data for an unavailable source.** If a block contains an "<unavailable>" / "<no ...>" placeholder (e.g. StockTwits and Reddit have no coverage outside US markets), treat that source as absent: do NOT infer a Bullish/Bearish ratio, divergence, or engagement from it — rules 1–3 simply do not apply to it. Lean on the sources that ARE present and lower the `confidence` field accordingly, stating which sources were missing.
 
-7. **When official exchange/disclosure blocks are present, treat them as the primary sentiment signal.** They stand in for the retail-social blocks that don't cover this market, so weight them above any thin or placeholder social block, and read each one exactly as the one-line note printed directly above its data explains. These are positioning and professional opinion, not retail chatter — do not force the StockTwits/Reddit Bullish/Bearish-ratio framing (rules 1–3) onto them. A live-snapshot block (analyst consensus) is often absent in backtests; that absence is normal and not itself bearish.
+7. **When per-name official exchange/disclosure blocks are present, treat them as the primary sentiment signal.** Margin balances, short disclosures, ownership/control filings, and analyst ratings refer to this company; broad exchange-section flows are deliberately excluded because they are not ticker order flow. Weight the per-name blocks above any thin or placeholder social block, and read each one exactly as the one-line note printed directly above its data explains. These are positioning and professional opinion, not retail chatter — do not force the StockTwits/Reddit Bullish/Bearish-ratio framing (rules 1–3) onto them. A live-snapshot block (analyst consensus) is often absent in backtests; that absence is normal and not itself bearish.
 
 8. **Identify catalysts and risks** that emerge across sources — news of upcoming earnings, product launches, competitive threats, macro headlines, etc.
 

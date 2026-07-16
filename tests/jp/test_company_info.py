@@ -49,6 +49,25 @@ class CompanyNameTests(unittest.TestCase):
         with _patch(side_effect=RuntimeError("boom")):
             self.assertIsNone(ci.get_company_name("7203.T"))
 
+    def test_market_section_is_resolved_as_of_date(self):
+        for market_code, expected in (
+            ("0111", "TSEPrime"),
+            ("0112", "TSEStandard"),
+            ("0113", "TSEGrowth"),
+        ):
+            with self.subTest(market_code=market_code):
+                ci._MASTER_CACHE.clear()
+                with _patch([{"Date": "2026-06-01", "Mkt": market_code}]) as fr:
+                    section = ci.get_company_market_section("9984.T", "2026-06-01")
+                self.assertEqual(section, expected)
+                self.assertEqual(
+                    fr.call_args.args[1], {"code": "9984", "date": "2026-06-01"}
+                )
+
+    def test_unknown_market_never_defaults_to_prime(self):
+        with _patch([{"Date": "2026-06-01", "Mkt": "0199"}]):
+            self.assertIsNone(ci.get_company_market_section("9984.T", "2026-06-01"))
+
 
 if __name__ == "__main__":
     unittest.main()

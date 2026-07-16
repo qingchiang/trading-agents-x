@@ -154,7 +154,7 @@ class NewsPanelInjectionTests(unittest.TestCase):
     """The news analyst prefetches the panel into its prompt and keeps the
     get_macro_indicators microscope tool bound."""
 
-    def _run(self, panel_text="PANEL_XYZ"):
+    def _run(self, panel_text="PANEL_XYZ", ticker="NVDA", market_flows=""):
         captured = {}
 
         def _bind(tools):
@@ -169,20 +169,48 @@ class NewsPanelInjectionTests(unittest.TestCase):
         llm = mock.MagicMock()
         llm.bind_tools.side_effect = _bind
         state = {
-            "company_of_interest": "NVDA", "trade_date": "2026-01-15",
+            "company_of_interest": ticker, "trade_date": "2026-01-15",
             "asset_type": "stock", "messages": [],
         }
-        with mock.patch.object(news_analyst, "get_global_macro_panel", return_value=panel_text):
+        with mock.patch.object(news_analyst, "get_global_macro_panel", return_value=panel_text), \
+                mock.patch.object(
+                    news_analyst,
+                    "get_market_investor_flows",
+                    return_value=market_flows,
+                ) as flows:
             result = create_news_analyst(llm)(state)
-        return captured, result
+        return captured, result, flows
 
     def test_panel_is_injected_into_prompt(self):
-        captured, _ = self._run("PANEL_XYZ")
+        captured, _, _ = self._run("PANEL_XYZ")
         self.assertIn("PANEL_XYZ", captured["prompt"])
 
     def test_macro_indicators_tool_still_bound(self):
-        captured, _ = self._run()
+        captured, _, _ = self._run()
         self.assertIn("get_macro_indicators", captured["tools"])
+
+    def test_ticker_news_prompt_uses_configured_14_day_window(self):
+        captured, _, _ = self._run()
+        self.assertIn(
+            "derives ticker news as 2026-01-01 through 2026-01-15",
+            captured["prompt"],
+        )
+        self.assertIn("configured 14-day lookback", captured["prompt"])
+        self.assertIn("do not attempt to supply or override any date", captured["prompt"])
+
+    def test_jp_market_flows_are_injected_as_non_company_context(self):
+        captured, _, flows = self._run(
+            ticker="9984.T",
+            market_flows="MARKET-LEVEL CONTEXT ONLY — NOT 9984.T ORDER FLOW",
+        )
+        flows.assert_called_once_with("9984.T", "2026-01-15")
+        self.assertIn("NOT company order flow", captured["prompt"])
+        self.assertIn("NOT 9984.T ORDER FLOW", captured["prompt"])
+
+    def test_us_prompt_has_no_tse_market_flow_block(self):
+        captured, _, flows = self._run(ticker="NVDA", market_flows="")
+        flows.assert_not_called()
+        self.assertNotIn("target-market capital-flow block", captured["prompt"])
 
 
 if __name__ == "__main__":

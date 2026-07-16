@@ -4,6 +4,7 @@ from typing import Annotated
 import yfinance as yf
 from dateutil.relativedelta import relativedelta
 
+from .lookahead import is_live
 from .macro_common import SeriesCache
 from .stockstats_utils import (
     INDICATOR_DESCRIPTIONS,
@@ -146,10 +147,18 @@ def get_stockstats_indicator(
 
 def get_fundamentals(
     ticker: Annotated[str, "ticker symbol of the company"],
-    curr_date: Annotated[str, "current date (not used for yfinance)"] = None
+    curr_date: Annotated[str, "requested analysis date; live .info has no history"] = None
 ):
-    """Get company fundamentals overview from yfinance."""
+    """Get a live company overview, refusing to inject it into old backtests."""
     canonical = normalize_symbol(ticker)
+    if curr_date is not None and not is_live(curr_date):
+        return (
+            f"LIVE_DATA_UNAVAILABLE: yfinance .info for {canonical} is a current "
+            f"snapshot, not point-in-time historical data, and was not requested "
+            f"for historical analysis date {curr_date}. Use get_balance_sheet, "
+            "get_cashflow, and get_income_statement for date-filtered statements; "
+            "do not estimate missing overview values."
+        )
     try:
         ticker_obj = yf.Ticker(canonical)
         info = yf_retry(lambda: ticker_obj.info)
@@ -200,8 +209,12 @@ def get_fundamentals(
         if not lines:
             raise NoMarketDataError(ticker, canonical, "no fundamental fields returned")
 
-        header = f"# Company Fundamentals for {canonical}\n"
-        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        retrieved_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        requested = curr_date or retrieved_at[:10]
+        header = f"# Company Fundamentals for {canonical} (live yfinance snapshot)\n"
+        header += f"# Requested analysis date: {requested}\n"
+        header += f"# Retrieved at: {retrieved_at}\n"
+        header += "# Not point-in-time historical data.\n\n"
 
         return header + "\n".join(lines)
 
@@ -287,6 +300,38 @@ _STATEMENT_ATTRS = {
 }
 
 
+def _statement_header(title: str, canonical: str, freq: str, curr_date: str | None) -> str:
+    """Label yfinance statements with their actual period-end-only time semantics."""
+    requested = curr_date or "not provided (treated as live retrieval)"
+    retrieved = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return (
+        f"# {title} data for {canonical} ({freq})\n"
+        f"# Requested analysis date: {requested}\n"
+        f"# Data retrieved on: {retrieved}\n"
+        "# Not point-in-time historical data; columns are filtered by fiscal "
+        "period end only, not filing/publication timestamp.\n\n"
+    )
+
+
+def _historical_tokyo_statement_unavailable(
+    ticker: str, curr_date: str | None
+) -> str | None:
+    """Fail closed when a dated historical JP fallback reaches current statements.
+
+    ``curr_date=None`` retains the public dataflow's legacy live-retrieval mode;
+    graph-facing tools inject the analysis date from workflow state.
+    """
+    canonical = normalize_symbol(ticker)
+    if curr_date is None or not canonical.endswith(".T") or is_live(curr_date):
+        return None
+    return (
+        f"HISTORICAL_DATA_UNAVAILABLE: yfinance statements for {canonical} are "
+        f"current retrievals without filing timestamps and were not requested for "
+        f"historical analysis date {curr_date}. J-Quants disclosure-date-filtered "
+        "statements were unavailable; do not estimate missing values."
+    )
+
+
 def get_statement_frame(
     ticker: Annotated[str, "ticker symbol of the company"],
     kind: Annotated[str, "'income' | 'balance' | 'cashflow'"],
@@ -296,12 +341,10 @@ def get_statement_frame(
     """Return the date-filtered yfinance statement DataFrame, or None.
 
     Rows are line items, columns are fiscal-period ends filtered to on/before
-    ``curr_date`` (look-ahead safe). Best-effort: any fetch failure or empty
-    result returns None. Exposed for the JP statement assembler, which picks the
-    curated line items the J-Quants summary lacks; keeping the raw frame here
-    leaves yfinance access in the yfinance module. (The three ``get_*`` wrappers
-    below duplicate this attr-select, deliberately left untouched to avoid churn
-    on upstream-shared code.)
+    ``curr_date``. This does not establish historical publication time and must
+    not be described as point-in-time safe. Best-effort: any fetch failure or
+    empty result returns None. Exposed for the JP statement assembler, which
+    only consumes it for live/near-live analysis.
 
     ``freq`` is compared exactly to ``"annual"`` (matching the J-Quants summary's
     own check) so the two halves of a JP statement report never disagree on
@@ -328,6 +371,9 @@ def get_balance_sheet(
     curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None
 ):
     """Get balance sheet data from yfinance."""
+    unavailable = _historical_tokyo_statement_unavailable(ticker, curr_date)
+    if unavailable:
+        return unavailable
     canonical = normalize_symbol(ticker)
     try:
         ticker_obj = yf.Ticker(canonical)
@@ -345,11 +391,7 @@ def get_balance_sheet(
         # Convert to CSV string for consistency with other functions
         csv_string = data.to_csv()
 
-        # Add header information
-        header = f"# Balance Sheet data for {canonical} ({freq})\n"
-        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-
-        return header + csv_string
+        return _statement_header("Balance Sheet", canonical, freq, curr_date) + csv_string
 
     except NoMarketDataError:
         raise
@@ -363,6 +405,9 @@ def get_cashflow(
     curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None
 ):
     """Get cash flow data from yfinance."""
+    unavailable = _historical_tokyo_statement_unavailable(ticker, curr_date)
+    if unavailable:
+        return unavailable
     canonical = normalize_symbol(ticker)
     try:
         ticker_obj = yf.Ticker(canonical)
@@ -380,11 +425,7 @@ def get_cashflow(
         # Convert to CSV string for consistency with other functions
         csv_string = data.to_csv()
 
-        # Add header information
-        header = f"# Cash Flow data for {canonical} ({freq})\n"
-        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-
-        return header + csv_string
+        return _statement_header("Cash Flow", canonical, freq, curr_date) + csv_string
 
     except NoMarketDataError:
         raise
@@ -398,6 +439,9 @@ def get_income_statement(
     curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None
 ):
     """Get income statement data from yfinance."""
+    unavailable = _historical_tokyo_statement_unavailable(ticker, curr_date)
+    if unavailable:
+        return unavailable
     canonical = normalize_symbol(ticker)
     try:
         ticker_obj = yf.Ticker(canonical)
@@ -415,11 +459,7 @@ def get_income_statement(
         # Convert to CSV string for consistency with other functions
         csv_string = data.to_csv()
 
-        # Add header information
-        header = f"# Income Statement data for {canonical} ({freq})\n"
-        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-
-        return header + csv_string
+        return _statement_header("Income Statement", canonical, freq, curr_date) + csv_string
 
     except NoMarketDataError:
         raise
