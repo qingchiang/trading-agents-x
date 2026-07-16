@@ -75,6 +75,29 @@ def test_provider_default_mode_sets_both_sentinels(monkeypatch):
     assert result == {"quick": "provider_default", "deep": "provider_default"}
 
 
+def test_deepseek_separate_mode_only_offers_native_levels(monkeypatch):
+    monkeypatch.delenv("TRADINGAGENTS_QUICK_REASONING_EFFORT", raising=False)
+    monkeypatch.delenv("TRADINGAGENTS_DEEP_REASONING_EFFORT", raising=False)
+    with mock.patch.object(
+        utils.questionary, "select", return_value=_selection("separate")
+    ), mock.patch.object(
+        utils, "_ask_role_reasoning_level", side_effect=["high", "max"]
+    ) as ask:
+        result = utils.configure_role_reasoning_efforts(
+            "deepseek",
+            "deepseek-v4-flash",
+            "deepseek-v4-pro",
+            _config(
+                llm_provider="deepseek",
+                quick_think_llm="deepseek-v4-flash",
+                deep_think_llm="deepseek-v4-pro",
+            ),
+        )
+    assert result == {"quick": "high", "deep": "max"}
+    assert ask.call_args_list[0].args[-1] == ("high", "max")
+    assert ask.call_args_list[1].args[-1] == ("high", "max")
+
+
 def test_summary_does_not_include_endpoint_or_key(capsys):
     config = _config(
         openai_reasoning_effort="low",

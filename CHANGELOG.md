@@ -16,7 +16,8 @@ breaking changes within the 0.x line are called out explicitly.
   `quick_reasoning_effort` / `deep_reasoning_effort` config keys and matching
   `TRADINGAGENTS_*` environment variables resolve through a centralized model
   capability adapter for OpenAI, OpenAI-compatible endpoints, Azure OpenAI,
-  Google, and Anthropic. Existing provider-wide keys remain compatible.
+  DeepSeek, Google, and Anthropic. Existing provider-wide keys remain
+  compatible.
 - **GPT-5.6 role models.** The OpenAI CLI now offers Luna/Terra for quick work
   and Sol/Terra for deep work, with six-level reasoning capability metadata;
   existing default models are unchanged.

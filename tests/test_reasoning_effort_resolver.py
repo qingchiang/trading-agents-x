@@ -52,6 +52,7 @@ def test_provider_default_blocks_legacy():
         ("openai", "gpt-5.6-sol", "openai_reasoning_effort", "reasoning_effort"),
         ("openai_compatible", "custom-v1", "openai_reasoning_effort", "reasoning_effort"),
         ("azure", "deployment-v1", "openai_reasoning_effort", "reasoning_effort"),
+        ("deepseek", "deepseek-v4-pro", None, "reasoning_effort"),
         ("google", "gemini-3.5-flash", "google_thinking_level", "thinking_level"),
         ("anthropic", "claude-sonnet-5", "anthropic_effort", "effort"),
     ],
@@ -63,7 +64,8 @@ def test_provider_native_mapping(provider, model, legacy_key, native):
         result = resolve_reasoning_effort(config, "quick")
     assert result.native_parameter == native
     assert result.kwargs == {native: "high"}
-    assert legacy_key in config
+    if legacy_key is not None:
+        assert legacy_key in config
 
 
 class _no_warn:
@@ -127,7 +129,41 @@ def test_known_unsupported_model_warns_and_omits():
 
 def test_unsupported_provider_warns_and_omits_explicit_value():
     with pytest.warns(RuntimeWarning, match="does not support"):
-        result = resolve_reasoning_effort(_config("deepseek", quick="high"), "quick")
+        result = resolve_reasoning_effort(_config("xai", quick="high"), "quick")
+    assert result.kwargs == {}
+
+
+@pytest.mark.parametrize(
+    "model", ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-reasoner"]
+)
+def test_deepseek_thinking_models_support_high_and_max(model):
+    assert model_effort_levels("deepseek", model) == ("high", "max")
+    config = _config("deepseek", quick="max")
+    config["quick_think_llm"] = model
+    result = resolve_reasoning_effort(config, "quick")
+    assert result.kwargs == {"reasoning_effort": "max"}
+
+
+def test_deepseek_chat_is_known_non_thinking_alias():
+    config = _config("deepseek", quick="high")
+    config["quick_think_llm"] = "deepseek-chat"
+    with pytest.warns(RuntimeWarning, match="known not to support"):
+        result = resolve_reasoning_effort(config, "quick")
+    assert result.kwargs == {}
+
+
+def test_deepseek_rejects_compatibility_only_effort_levels():
+    config = _config("deepseek", quick="low")
+    config["quick_think_llm"] = "deepseek-v4-flash"
+    with pytest.raises(ValueError, match="expected one of: high, max"):
+        resolve_reasoning_effort(config, "quick")
+
+
+def test_deepseek_does_not_inherit_openai_legacy_effort():
+    config = _config("deepseek", legacy="high")
+    config["quick_think_llm"] = "deepseek-v4-flash"
+    result = resolve_reasoning_effort(config, "quick")
+    assert result.source == "provider_default"
     assert result.kwargs == {}
 
 

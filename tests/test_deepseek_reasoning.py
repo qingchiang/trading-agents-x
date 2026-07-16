@@ -114,6 +114,17 @@ class TestDeepSeekReasoningContent:
         assistant_dicts = [m for m in payload["messages"] if m.get("role") == "assistant"]
         assert assistant_dicts[0]["reasoning_content"] == "weighed bull case"
 
+    def test_reasoning_effort_is_sent_as_top_level_parameter(self):
+        client = DeepSeekChatOpenAI(
+            model="deepseek-v4-pro",
+            api_key="placeholder",
+            base_url="https://api.deepseek.com",
+            reasoning_effort="max",
+        )
+        payload = client._get_request_payload([HumanMessage(content="Analyze.")])
+        assert payload["reasoning_effort"] == "max"
+        assert "thinking" not in payload.get("extra_body", {})
+
 
 # ---------------------------------------------------------------------------
 # Capability-driven structured output: tool_choice suppressed for V4 + reasoner

@@ -255,8 +255,13 @@ provider's legacy shared key (`TRADINGAGENTS_OPENAI_REASONING_EFFORT`,
 `TRADINGAGENTS_GOOGLE_THINKING_LEVEL`, or `TRADINGAGENTS_ANTHROPIC_EFFORT`),
 then the provider default. Use `provider_default` to explicitly omit the native
 SDK parameter and block legacy fallback. Values are provider-native and are not
-translated between providers. OpenAI/OpenAI-compatible/Azure send
+translated between providers. OpenAI/OpenAI-compatible/Azure and DeepSeek send
 `reasoning_effort`, Google sends `thinking_level`, and Anthropic sends `effort`.
+
+DeepSeek V4 accepts the effective levels `high` and `max`. Thinking mode is
+enabled by default for V4; these role settings control its effort only and do
+not toggle thinking mode. The non-thinking alias `deepseek-chat`, scheduled for
+deprecation on 2026-07-24, does not receive `reasoning_effort`.
 
 The OpenAI CLI catalog includes GPT-5.6 Luna and Terra for quick work and
 GPT-5.6 Sol and Terra for deep work. `gpt-5.6` aliases Sol; the four GPT-5.6 IDs

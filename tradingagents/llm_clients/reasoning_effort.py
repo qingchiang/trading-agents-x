@@ -20,6 +20,7 @@ _NATIVE_PARAMETERS = {
     "openai": "reasoning_effort",
     "openai_compatible": "reasoning_effort",
     "azure": "reasoning_effort",
+    "deepseek": "reasoning_effort",
     "google": "thinking_level",
     "anthropic": "effort",
 }
@@ -44,6 +45,7 @@ _PROVIDER_LEVELS = {
         "max",
     ),
     "azure": ("none", "minimal", "low", "medium", "high", "xhigh", "max"),
+    "deepseek": ("high", "max"),
     "google": ("minimal", "low", "medium", "high"),
     "anthropic": ("low", "medium", "high", "xhigh", "max"),
 }
@@ -59,6 +61,12 @@ _OPENAI_MODEL_LEVELS = {
     "gpt-5.4-mini": ("none", "low", "medium", "high", "xhigh"),
     "gpt-5.4-nano": ("none", "low", "medium", "high", "xhigh"),
     "gpt-5.2": ("none", "low", "medium", "high", "xhigh"),
+}
+
+_DEEPSEEK_MODEL_LEVELS = {
+    "deepseek-v4-flash": ("high", "max"),
+    "deepseek-v4-pro": ("high", "max"),
+    "deepseek-reasoner": ("high", "max"),
 }
 
 _GOOGLE_MODEL_LEVELS = {
@@ -156,6 +164,12 @@ def model_effort_levels(provider: str, model: str) -> tuple[str, ...]:
         if model.startswith(("gpt-4", "gpt-3")):
             return ()
         return _PROVIDER_LEVELS.get(provider, ())
+    if provider == "deepseek":
+        if model in _DEEPSEEK_MODEL_LEVELS:
+            return _DEEPSEEK_MODEL_LEVELS[model]
+        if model == "deepseek-chat":
+            return ()
+        return _PROVIDER_LEVELS[provider]
     if provider == "google":
         if model in _GOOGLE_MODEL_LEVELS:
             return _GOOGLE_MODEL_LEVELS[model]
@@ -173,6 +187,12 @@ def _model_status(provider: str, model: str) -> bool | None:
         if model in _OPENAI_MODEL_LEVELS or re.match(r"^o[1-9](?:-|$)", model):
             return True
         if model.startswith(("gpt-4", "gpt-3")):
+            return False
+        return None
+    if provider == "deepseek":
+        if model in _DEEPSEEK_MODEL_LEVELS:
+            return True
+        if model == "deepseek-chat":
             return False
         return None
     if provider == "google":
