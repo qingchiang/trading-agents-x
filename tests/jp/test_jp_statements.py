@@ -73,14 +73,29 @@ class JPStatementsTests(unittest.TestCase):
         self.assertIn("Gross Profit", out)
         self.assertNotIn("EBITDA", out)   # all-blank curated row dropped
 
-    def test_no_date_returns_explicit_historical_unavailable_note(self):
-        with mock.patch.object(jp_statements.jqf, "get_income_statement", return_value="JQ-INCOME"), \
-                mock.patch.object(jp_statements, "get_statement_frame") as gsf:
+    def test_no_date_preserves_labelled_live_retrieval_mode(self):
+        frame = _frame({"Gross Profit": [1000, 900]})
+        with mock.patch.object(
+            jp_statements.jqf,
+            "get_income_statement",
+            return_value="JQ-INCOME",
+        ) as jq, mock.patch.object(
+            jp_statements,
+            "get_statement_frame",
+            return_value=frame,
+        ) as gsf:
             out = jp_statements.get_income_statement("7011.T", "annual", None)
         self.assertTrue(out.startswith("JQ-INCOME"))
-        self.assertIn("Line-item detail unavailable for historical analysis", out)
-        self.assertIn("Requested analysis date: not provided", out)
-        gsf.assert_not_called()
+        self.assertIn("No analysis date was provided", out)
+        self.assertIn("treated as a live retrieval", out)
+        self.assertIn("was not filtered to a historical cutoff", out)
+        self.assertIn(
+            "Requested analysis date: not provided (treated as live retrieval)",
+            out,
+        )
+        self.assertIn("Line-item detail", out)
+        jq.assert_called_once_with("7011.T", "annual", None)
+        gsf.assert_called_once_with("7011.T", "income", "annual", None)
 
     def test_historical_date_does_not_request_yfinance_detail(self):
         with mock.patch.object(jp_statements, "is_live", return_value=False), \

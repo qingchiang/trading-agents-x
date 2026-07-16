@@ -302,7 +302,7 @@ _STATEMENT_ATTRS = {
 
 def _statement_header(title: str, canonical: str, freq: str, curr_date: str | None) -> str:
     """Label yfinance statements with their actual period-end-only time semantics."""
-    requested = curr_date or "not provided"
+    requested = curr_date or "not provided (treated as live retrieval)"
     retrieved = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     return (
         f"# {title} data for {canonical} ({freq})\n"
@@ -316,7 +316,11 @@ def _statement_header(title: str, canonical: str, freq: str, curr_date: str | No
 def _historical_tokyo_statement_unavailable(
     ticker: str, curr_date: str | None
 ) -> str | None:
-    """Fail closed when a JP router fallback reaches current yfinance statements."""
+    """Fail closed when a dated historical JP fallback reaches current statements.
+
+    ``curr_date=None`` retains the public dataflow's legacy live-retrieval mode;
+    graph-facing tools inject the analysis date from workflow state.
+    """
     canonical = normalize_symbol(ticker)
     if curr_date is None or not canonical.endswith(".T") or is_live(curr_date):
         return None

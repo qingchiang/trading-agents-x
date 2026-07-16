@@ -25,7 +25,7 @@ import re
 import time
 import xml.etree.ElementTree as ET
 from collections.abc import Iterable
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -50,14 +50,51 @@ _ATOM_NS = {"atom": "http://www.w3.org/2005/Atom"}
 DEFAULT_SUBREDDITS = ("wallstreetbets", "stocks", "investing")
 
 
-def _search_qs(ticker: str, limit: int) -> str:
+def _search_qs(ticker: str, limit: int, time_filter: str = "week") -> str:
     return urlencode({
         "q": ticker,
         "restrict_sr": "on",
         "sort": "new",
-        "t": "week",  # last 7 days
+        "t": time_filter,
         "limit": limit,
     })
+
+
+def _search_time_filter(
+    start_date: str,
+    end_date: str,
+    *,
+    today: date | None = None,
+) -> str | None:
+    """Choose the smallest Reddit bucket that reaches the requested window.
+
+    Reddit's ``t=day/week/month/year`` buckets are relative to retrieval time,
+    not to ``end_date``.  Account for both the requested span and the age of its
+    oldest day; otherwise a narrow near-historical window (for example, one day
+    ending two days ago) would incorrectly use ``day`` and never fetch any
+    candidates from that window.  The final exact calendar filter still runs
+    after retrieval.
+    """
+    try:
+        start = datetime.strptime(start_date, "%Y-%m-%d").date()
+        end = datetime.strptime(end_date, "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return None
+    window_span = (end - start).days
+    if window_span < 0:
+        return None
+    if today is None:
+        today = datetime.now(timezone.utc).date()
+    coverage_days = max(window_span, (today - start).days)
+    if coverage_days <= 0:
+        return "day"
+    if coverage_days <= 6:
+        return "week"
+    if coverage_days <= 29:
+        return "month"
+    if coverage_days <= 364:
+        return "year"
+    return "all"
 
 
 def _iso_to_timestamp(iso_str: str | None) -> float | None:
@@ -97,6 +134,7 @@ def _fetch_subreddit_rss(
     limit: int,
     timeout: float,
     _retry: bool = True,
+    time_filter: str = "week",
 ) -> list[dict] | None:
     """Default path: parse the public Atom search feed for a subreddit.
 
@@ -105,7 +143,7 @@ def _fetch_subreddit_rss(
     per-IP rate limit) we back off once — honouring ``Retry-After`` when
     present — before giving up, so a transient burst doesn't blank the feed.
     """
-    url = _RSS.format(sub=sub, qs=_search_qs(ticker, limit))
+    url = _RSS.format(sub=sub, qs=_search_qs(ticker, limit, time_filter))
     req = Request(url, headers={"User-Agent": _UA})
     try:
         with urlopen(req, timeout=timeout) as resp:
@@ -118,7 +156,14 @@ def _fetch_subreddit_rss(
                 sub, ticker, wait,
             )
             time.sleep(wait)
-            return _fetch_subreddit_rss(ticker, sub, limit, timeout, _retry=False)
+            return _fetch_subreddit_rss(
+                ticker,
+                sub,
+                limit,
+                timeout,
+                _retry=False,
+                time_filter=time_filter,
+            )
         logger.warning("Reddit RSS fetch failed for r/%s · %s: %s", sub, ticker, exc)
         return None
     except (OSError, http.client.HTTPException, ET.ParseError) as exc:
@@ -150,6 +195,7 @@ def _fetch_subreddit_json(
     sub: str,
     limit: int,
     timeout: float,
+    time_filter: str = "week",
 ) -> list[dict] | None:
     """Richer JSON search path (carries score / comment counts).
 
@@ -159,7 +205,7 @@ def _fetch_subreddit_json(
     triggered 429s on the RSS fallback. Kept for the day the WAF relaxes or an
     OAuth token is wired in; degrades to RSS on failure.
     """
-    url = _API.format(sub=sub, qs=_search_qs(ticker, limit))
+    url = _API.format(sub=sub, qs=_search_qs(ticker, limit, time_filter))
     req = Request(url, headers={"User-Agent": _UA, "Accept": "application/json"})
     try:
         with urlopen(req, timeout=timeout) as resp:
@@ -171,7 +217,13 @@ def _fetch_subreddit_json(
             "Reddit JSON fetch failed for r/%s · %s: %s — falling back to RSS feed.",
             sub, ticker, exc,
         )
-        return _fetch_subreddit_rss(ticker, sub, limit, timeout)
+        return _fetch_subreddit_rss(
+            ticker,
+            sub,
+            limit,
+            timeout,
+            time_filter=time_filter,
+        )
 
 
 def _fetch_subreddit(
@@ -179,6 +231,7 @@ def _fetch_subreddit(
     sub: str,
     limit: int,
     timeout: float,
+    time_filter: str = "week",
 ) -> list[dict] | None:
     """Fetch one subreddit, RSS-first.
 
@@ -186,7 +239,13 @@ def _fetch_subreddit(
     so we go straight to the RSS feed — which serves our identified User-Agent
     reliably — halving our request volume against Reddit's per-IP rate limit.
     """
-    return _fetch_subreddit_rss(ticker, sub, limit, timeout)
+    return _fetch_subreddit_rss(
+        ticker,
+        sub,
+        limit,
+        timeout,
+        time_filter=time_filter,
+    )
 
 
 def fetch_reddit_posts(
@@ -211,11 +270,23 @@ def fetch_reddit_posts(
     ticker = crypto_base(ticker) or ticker
     if (start_date is None) != (end_date is None):
         return "<reddit unavailable: both start_date and end_date are required>"
+    time_filter = "week"
+    if start_date is not None and end_date is not None:
+        time_filter = _search_time_filter(start_date, end_date) or ""
+        if not time_filter:
+            return "<reddit unavailable: invalid start_date/end_date window>"
+    fetch_kwargs = {"time_filter": time_filter} if start_date is not None else {}
     blocks = []
     for i, sub in enumerate(subreddits):
         if i > 0:
             time.sleep(inter_request_delay)
-        posts = _fetch_subreddit(ticker, sub, limit_per_sub, timeout)
+        posts = _fetch_subreddit(
+            ticker,
+            sub,
+            limit_per_sub,
+            timeout,
+            **fetch_kwargs,
+        )
         if posts is None:
             blocks.append(f"r/{sub}: <unavailable: Reddit feed request failed>")
             continue

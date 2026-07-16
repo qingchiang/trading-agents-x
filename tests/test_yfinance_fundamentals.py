@@ -47,6 +47,17 @@ class TestYFinanceFundamentalsLookahead:
         assert "period end only, not filing/publication timestamp" in out
         assert "Total Revenue" in out
 
+    def test_no_date_statement_is_labelled_as_live_retrieval(self):
+        ticker_obj = mock.MagicMock()
+        ticker_obj.income_stmt = pd.DataFrame(
+            {pd.Timestamp("2026-01-31"): [100]},
+            index=["Total Revenue"],
+        )
+        with mock.patch.object(yf_data.yf, "Ticker", return_value=ticker_obj):
+            out = yf_data.get_income_statement("9984.T", "annual", None)
+        assert "not provided (treated as live retrieval)" in out
+        assert "Not point-in-time historical data" in out
+
     @pytest.mark.parametrize(
         "method_name",
         ["get_balance_sheet", "get_cashflow", "get_income_statement"],

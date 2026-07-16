@@ -13,11 +13,7 @@ from langgraph.prebuilt import ToolNode
 # Import the abstract tool methods from agent_utils
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
-    get_balance_sheet,
-    get_cashflow,
-    get_fundamentals,
     get_global_news,
-    get_income_statement,
     get_indicators,
     get_insider_transactions,
     get_macro_indicators,
@@ -26,6 +22,12 @@ from tradingagents.agents.utils.agent_utils import (
     get_stock_data,
     get_verified_market_snapshot,
     resolve_instrument_identity,
+)
+from tradingagents.agents.utils.fundamental_data_tools import (
+    get_balance_sheet_for_analysis,
+    get_cashflow_for_analysis,
+    get_fundamentals_for_analysis,
+    get_income_statement_for_analysis,
 )
 from tradingagents.agents.utils.memory import TradingMemoryLog
 from tradingagents.dataflows.config import set_config
@@ -226,10 +228,10 @@ class TradingAgentsGraph:
             "fundamentals": ToolNode(
                 [
                     # Fundamental analysis tools
-                    get_fundamentals,
-                    get_balance_sheet,
-                    get_cashflow,
-                    get_income_statement,
+                    get_fundamentals_for_analysis,
+                    get_balance_sheet_for_analysis,
+                    get_cashflow_for_analysis,
+                    get_income_statement_for_analysis,
                 ]
             ),
         }

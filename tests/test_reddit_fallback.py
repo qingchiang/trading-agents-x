@@ -4,6 +4,7 @@ path's degradation (#862), and chunked-transfer error handling (#1024)."""
 from __future__ import annotations
 
 import http.client
+from datetime import date
 from unittest.mock import patch
 from urllib.error import HTTPError
 
@@ -166,6 +167,28 @@ class TestChunkedTransferErrorsHandled:
 
 @pytest.mark.unit
 class TestFormatterHandlesRssPosts:
+    def test_wider_requested_window_uses_month_search_bucket(self):
+        with patch.object(
+            reddit,
+            "_search_time_filter",
+            return_value="month",
+        ), patch.object(reddit, "_fetch_subreddit", return_value=[]) as fetch:
+            reddit.fetch_reddit_posts(
+                "NVDA",
+                subreddits=("stocks",),
+                inter_request_delay=0,
+                start_date="2026-07-01",
+                end_date="2026-07-15",
+            )
+        assert fetch.call_args.kwargs["time_filter"] == "month"
+
+    def test_near_historical_single_day_uses_bucket_reaching_that_day(self):
+        assert reddit._search_time_filter(
+            "2026-07-15",
+            "2026-07-15",
+            today=date(2026, 7, 17),
+        ) == "week"
+
     def test_rss_posts_omit_fake_counts_and_note_source(self):
         rss_posts = [{
             "title": "NVDA pops", "score": None, "num_comments": None,
