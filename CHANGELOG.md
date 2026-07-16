@@ -3,8 +3,37 @@
 All notable changes to TradingAgents are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-Breaking changes within the 0.x line are called out explicitly.
+and upstream releases follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Fork releases append a PEP 440 local version (`+jp.N`) to the upstream version
+they are based on. Entries without `+jp.N` below are retained from upstream;
+breaking changes within the 0.x line are called out explicitly.
+
+## [0.3.1+jp.1] — 2026-07-15
+
+First fork release based on upstream 0.3.1, adding first-class Japanese-market
+data while preserving the upstream behavior for markets without a suffix route.
+
+### Added
+
+- **Market-aware data routing.** Exchange-suffix configuration routes `.T`
+  instruments through Japanese vendors with ordered yfinance fallback, without
+  hard-coding Tokyo behavior into the shared dataflow interfaces.
+- **Japanese prices and fundamentals.** J-Quants v2 supplies official TSE
+  prices, indicators, financial summaries, investor flows, and date-safe
+  valuation ratios; TOPIX-based beta and curated statement details enrich the
+  fundamentals view without using future information.
+- **Japanese news and positioning.** EDINET filings, TDnet timely disclosures,
+  Japanese Google News, margin balances, short positions, large-shareholding
+  reports, and tender-offer filings provide per-company news and sentiment
+  signals for Tokyo-listed securities.
+- **Cross-region macro context.** FRED, e-Stat, and BOJ series feed a
+  look-ahead-safe macro panel with owner-based dispatch and reusable disk caches.
+
+### Changed
+
+- **Fork identity and documentation.** Rebranded the package as
+  `trading-agents-x`, documented the Japanese-market architecture and upstream
+  attribution, and adopted the `0.3.1+jp.1` fork-version convention.
 
 ## [0.3.1] — 2026-07-05
 
