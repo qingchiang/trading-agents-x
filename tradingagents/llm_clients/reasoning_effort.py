@@ -77,6 +77,10 @@ _GOOGLE_MODEL_LEVELS = {
 
 _ANTHROPIC_EXACT = {"claude-mythos-preview", "claude-mythos-5"}
 _ANTHROPIC_MODEL = re.compile(r"^claude-(opus|sonnet|fable)-(\d+)(?:-(\d+))?$")
+_ANTHROPIC_LEGACY_MODEL = re.compile(
+    r"^claude-(\d+)(?:-(\d+))?-(opus|sonnet|haiku)$"
+)
+_ANTHROPIC_SNAPSHOT_SUFFIX = re.compile(r"-(?:\d{8}|latest)$")
 _ANTHROPIC_MIN_VERSION = {"opus": (4, 5), "sonnet": (4, 6), "fable": (5, 0)}
 _ANTHROPIC_XHIGH_MIN_VERSION = {
     "opus": (4, 7),
@@ -131,13 +135,17 @@ def _anthropic_levels(model: str) -> tuple[bool | None, tuple[str, ...]]:
         return True, ("low", "medium", "high", "max")
     if "haiku" in model:
         return False, ()
-    match = _ANTHROPIC_MODEL.fullmatch(model)
-    if not match:
-        if model.startswith("claude-"):
+    model_family = _ANTHROPIC_SNAPSHOT_SUFFIX.sub("", model)
+    match = _ANTHROPIC_MODEL.fullmatch(model_family)
+    if match:
+        family = match.group(1)
+        version = (int(match.group(2)), int(match.group(3) or 0))
+    else:
+        legacy_match = _ANTHROPIC_LEGACY_MODEL.fullmatch(model_family)
+        if not legacy_match:
             return None, _PROVIDER_LEVELS["anthropic"]
-        return None, _PROVIDER_LEVELS["anthropic"]
-    family = match.group(1)
-    version = (int(match.group(2)), int(match.group(3) or 0))
+        family = legacy_match.group(3)
+        version = (int(legacy_match.group(1)), int(legacy_match.group(2) or 0))
     if version < _ANTHROPIC_MIN_VERSION[family]:
         return False, ()
     levels = ["low", "medium", "high"]
@@ -156,14 +164,18 @@ def model_effort_levels(provider: str, model: str) -> tuple[str, ...]:
     """
     provider = provider.strip().lower()
     model = model.strip().lower()
-    if provider in {"openai", "openai_compatible", "azure"}:
+    if provider == "openai":
         if model in _OPENAI_MODEL_LEVELS:
             return _OPENAI_MODEL_LEVELS[model]
         if re.match(r"^o[1-9](?:-|$)", model):
             return ("low", "medium", "high")
         if model.startswith(("gpt-4", "gpt-3")):
             return ()
-        return _PROVIDER_LEVELS.get(provider, ())
+        return _PROVIDER_LEVELS[provider]
+    if provider in {"openai_compatible", "azure"}:
+        if model in _OPENAI_MODEL_LEVELS:
+            return _OPENAI_MODEL_LEVELS[model]
+        return _PROVIDER_LEVELS[provider]
     if provider == "deepseek":
         if model in _DEEPSEEK_MODEL_LEVELS:
             return _DEEPSEEK_MODEL_LEVELS[model]
@@ -183,11 +195,15 @@ def model_effort_levels(provider: str, model: str) -> tuple[str, ...]:
 
 def _model_status(provider: str, model: str) -> bool | None:
     """Return True for known support, False for known unsupported, else None."""
-    if provider in {"openai", "openai_compatible", "azure"}:
+    if provider == "openai":
         if model in _OPENAI_MODEL_LEVELS or re.match(r"^o[1-9](?:-|$)", model):
             return True
         if model.startswith(("gpt-4", "gpt-3")):
             return False
+        return None
+    if provider in {"openai_compatible", "azure"}:
+        if model in _OPENAI_MODEL_LEVELS:
+            return True
         return None
     if provider == "deepseek":
         if model in _DEEPSEEK_MODEL_LEVELS:

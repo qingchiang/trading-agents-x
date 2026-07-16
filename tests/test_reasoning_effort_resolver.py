@@ -127,6 +127,21 @@ def test_known_unsupported_model_warns_and_omits():
     assert result.kwargs == {}
 
 
+@pytest.mark.parametrize(
+    "provider,model",
+    [
+        ("openai_compatible", "gpt-4-reasoning-custom"),
+        ("azure", "gpt-4-production-deployment"),
+    ],
+)
+def test_openai_compatible_model_ids_are_opaque(provider, model):
+    config = _config(provider, quick="high")
+    config["quick_think_llm"] = model
+    with pytest.warns(RuntimeWarning, match=f"not in the {provider}"):
+        result = resolve_reasoning_effort(config, "quick")
+    assert result.kwargs == {"reasoning_effort": "high"}
+
+
 def test_unsupported_provider_warns_and_omits_explicit_value():
     with pytest.warns(RuntimeWarning, match="does not support"):
         result = resolve_reasoning_effort(_config("xai", quick="high"), "quick")

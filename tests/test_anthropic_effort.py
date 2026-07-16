@@ -27,7 +27,8 @@ class TestEffortGate:
         [
             "claude-haiku-4-5", "claude-haiku-5-0", "claude-haiku-4-7-preview",
             # Sonnet 4.5 (and earlier) 400 on effort — only Sonnet 4.6+ supports it.
-            "claude-sonnet-4-5", "claude-sonnet-4-0",
+            "claude-sonnet-4-5", "claude-sonnet-4-5-20250929",
+            "claude-sonnet-4-0", "claude-3-7-sonnet-20250219",
         ],
     )
     def test_unsupported_models_do_not_receive_effort(self, monkeypatch, model):
@@ -39,7 +40,8 @@ class TestEffortGate:
         "model",
         [
             "claude-opus-4-5", "claude-opus-4-6", "claude-opus-4-7",
-            "claude-sonnet-4-6",
+            "claude-opus-4-5-latest", "claude-sonnet-4-6",
+            "claude-sonnet-4-6-20260115",
         ],
     )
     def test_current_opus_and_sonnet_receive_effort(self, monkeypatch, model):
