@@ -107,7 +107,11 @@ class TestResearchDepthSkippedFromEnv(unittest.TestCase):
              mock.patch.object(m, "ask_output_language", return_value="English"), \
              mock.patch.object(m, "select_shallow_thinking_agent", return_value="gpt-5.4-mini"), \
              mock.patch.object(m, "select_deep_thinking_agent", return_value="gpt-5.5"), \
-             mock.patch.object(m, "ask_openai_reasoning_effort", return_value=None):
+             mock.patch.object(
+                 m,
+                 "configure_role_reasoning_efforts",
+                 return_value={"quick": None, "deep": None},
+             ):
             sel = m.get_user_selections()
 
         # The research-depth prompt is skipped; the value comes from the env config.
@@ -136,12 +140,10 @@ class TestReasoningEffortSkippedFromEnv(unittest.TestCase):
              mock.patch.object(m, "select_llm_provider", return_value=("openai", None)), \
              mock.patch.object(m, "ask_output_language", return_value="English"), \
              mock.patch.object(m, "select_shallow_thinking_agent", return_value="gpt-5.4-mini"), \
-             mock.patch.object(m, "select_deep_thinking_agent", return_value="gpt-5.5"), \
-             mock.patch.object(m, "ask_openai_reasoning_effort") as prompt_effort:
+             mock.patch.object(m, "select_deep_thinking_agent", return_value="gpt-5.5"):
             sel = m.get_user_selections()
 
         # The reasoning-effort prompt is skipped; the value comes from env config.
-        prompt_effort.assert_not_called()
         self.assertEqual(sel["openai_reasoning_effort"], "high")
 
 

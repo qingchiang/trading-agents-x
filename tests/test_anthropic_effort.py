@@ -74,13 +74,13 @@ class TestEffortGate:
         ).get_llm()
         assert captured["kwargs"]["effort"] == "medium"
 
-    def test_unknown_anthropic_model_does_not_receive_effort(self, monkeypatch):
-        """Default is conservative — unknown models don't get effort to avoid 400s."""
+    def test_unknown_anthropic_model_warns_and_passes_effort(self, monkeypatch):
         captured = _capture_kwargs(monkeypatch)
-        mod.AnthropicClient(
-            model="claude-experimental-x", effort="medium", api_key="x"
-        ).get_llm()
-        assert "effort" not in captured["kwargs"]
+        with pytest.warns(RuntimeWarning, match="not in the anthropic"):
+            mod.AnthropicClient(
+                model="claude-experimental-x", effort="medium", api_key="x"
+            ).get_llm()
+        assert captured["kwargs"]["effort"] == "medium"
 
     def test_other_kwargs_still_forwarded_when_effort_skipped(self, monkeypatch):
         """Skipping effort must not break other passthrough kwargs."""

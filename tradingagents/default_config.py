@@ -19,6 +19,8 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_BENCHMARK_TICKER":     "benchmark_ticker",
     "TRADINGAGENTS_TEMPERATURE":          "temperature",
     "TRADINGAGENTS_LLM_MAX_RETRIES":      "llm_max_retries",
+    "TRADINGAGENTS_QUICK_REASONING_EFFORT": "quick_reasoning_effort",
+    "TRADINGAGENTS_DEEP_REASONING_EFFORT":  "deep_reasoning_effort",
     # Provider-specific reasoning/thinking knobs (None = each provider's own
     # default). Settable here for non-interactive runs; the CLI also offers an
     # interactive choice, which is skipped when the matching var is set.
@@ -88,6 +90,10 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # being forwarded to Gemini, producing malformed request URLs).
     "backend_url": None,
     # Provider-specific thinking configuration
+    # Role-specific values take precedence over the provider's legacy shared
+    # key. "provider_default" explicitly omits the native SDK parameter.
+    "quick_reasoning_effort": None,
+    "deep_reasoning_effort": None,
     "google_thinking_level": None,      # "high", "minimal", etc.
     "openai_reasoning_effort": None,    # "medium", "high", "low"
     "anthropic_effort": None,           # "high", "medium", "low"

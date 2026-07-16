@@ -4,6 +4,7 @@ from typing import Any
 from langchain_openai import AzureChatOpenAI
 
 from .base_client import BaseLLMClient, normalize_content
+from .reasoning_effort import RESOLVED_MARKER, resolve_native_reasoning_value
 
 _PASSTHROUGH_KWARGS = (
     "timeout", "max_retries", "api_key", "reasoning_effort", "temperature",
@@ -41,8 +42,14 @@ class AzureOpenAIClient(BaseLLMClient):
         }
 
         for key in _PASSTHROUGH_KWARGS:
-            if key in self.kwargs:
-                llm_kwargs[key] = self.kwargs[key]
+            if key not in self.kwargs:
+                continue
+            value = self.kwargs[key]
+            if key == "reasoning_effort" and not self.kwargs.get(RESOLVED_MARKER):
+                value = resolve_native_reasoning_value("azure", self.model, value)
+                if value is None:
+                    continue
+            llm_kwargs[key] = value
 
         return NormalizedAzureChatOpenAI(**llm_kwargs)
 

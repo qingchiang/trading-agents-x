@@ -5,14 +5,19 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+# Set this before test modules import application code. python-dotenv honors the
+# flag and therefore cannot pull private credentials from the project .env.
+os.environ["PYTHON_DOTENV_DISABLED"] = "1"
+
 
 def pytest_configure(config):
-    for marker in ("unit", "integration", "smoke"):
+    for marker in ("unit", "integration", "live_llm", "smoke"):
         config.addinivalue_line("markers", f"{marker}: {marker}-level tests")
 
 
-_API_KEY_ENV_VARS = (
+_CREDENTIAL_ENV_VARS = (
     "OPENAI_API_KEY",
+    "OPENAI_COMPATIBLE_API_KEY",
     "GOOGLE_API_KEY",
     "ANTHROPIC_API_KEY",
     "XAI_API_KEY",
@@ -24,17 +29,46 @@ _API_KEY_ENV_VARS = (
     "MINIMAX_API_KEY",
     "MINIMAX_CN_API_KEY",
     "OPENROUTER_API_KEY",
+    "MISTRAL_API_KEY",
+    "MOONSHOT_API_KEY",
+    "GROQ_API_KEY",
+    "NVIDIA_API_KEY",
     "AZURE_OPENAI_API_KEY",
     "ALPHA_VANTAGE_API_KEY",
+    "JQUANTS_API_KEY",
+    "EDINET_API_KEY",
+    "FRED_API_KEY",
+    "ESTAT_APP_ID",
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
 )
+
+# Capture only the credential needed by the currently supported live test.
+# This happens after dotenv loading is disabled and before test modules are
+# collected, so the value can only have come from the launching shell or its
+# secret manager. All process-visible credentials are scrubbed immediately.
+_EXPLICIT_LIVE_LLM_KEYS = {
+    "DEEPSEEK_API_KEY": os.environ.get("DEEPSEEK_API_KEY"),
+}
+for _env_var in _CREDENTIAL_ENV_VARS:
+    os.environ[_env_var] = "placeholder"
 
 
 @pytest.fixture(autouse=True)
-def _dummy_api_keys(monkeypatch):
-    for env_var in _API_KEY_ENV_VARS:
-        # `or` not a .get default: an env var present but empty (e.g. a key left
-        # blank in a .env copied from .env.example) must still get the placeholder.
-        monkeypatch.setenv(env_var, os.environ.get(env_var) or "placeholder")
+def _dummy_api_keys(monkeypatch, request):
+    live_test = (
+        request.node.get_closest_marker("live_llm") is not None
+        and os.environ.get("RUN_LIVE_LLM_TESTS") == "1"
+    )
+    for env_var in _CREDENTIAL_ENV_VARS:
+        # Reset credentials for every test in case another test mutated os.environ.
+        monkeypatch.setenv(env_var, "placeholder")
+    if live_test:
+        for env_var, value in _EXPLICIT_LIVE_LLM_KEYS.items():
+            if value and value != "placeholder":
+                monkeypatch.setenv(env_var, value)
 
 
 @pytest.fixture(autouse=True)

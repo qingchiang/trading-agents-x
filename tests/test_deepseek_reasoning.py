@@ -184,16 +184,17 @@ class TestStructuredOutputCapabilityDispatch:
 # ---------------------------------------------------------------------------
 
 
-def _has_real_deepseek_key():
+def _live_deepseek_enabled():
     key = os.environ.get("DEEPSEEK_API_KEY", "")
-    return bool(key) and key != "placeholder"
+    return (
+        os.environ.get("RUN_LIVE_LLM_TESTS") == "1"
+        and bool(key)
+        and key != "placeholder"
+    )
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(
-    not _has_real_deepseek_key(),
-    reason="DEEPSEEK_API_KEY not set (or placeholder); skipping live API call",
-)
+@pytest.mark.live_llm
 class TestDeepSeekLiveStructuredOutput:
     """End-to-end: a real DeepSeek V4-flash call returns a typed instance.
 
@@ -207,6 +208,10 @@ class TestDeepSeekLiveStructuredOutput:
         confidence: float
 
     def test_v4_flash_returns_structured_output(self):
+        if not _live_deepseek_enabled():
+            pytest.skip(
+                "Set RUN_LIVE_LLM_TESTS=1 and export DEEPSEEK_API_KEY to run live"
+            )
         client = DeepSeekChatOpenAI(
             model="deepseek-v4-flash",
             api_key=os.environ["DEEPSEEK_API_KEY"],

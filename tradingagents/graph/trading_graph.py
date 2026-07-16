@@ -33,6 +33,10 @@ from tradingagents.dataflows.symbol_utils import match_exchange_suffix
 from tradingagents.dataflows.utils import safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.llm_clients import create_llm_client
+from tradingagents.llm_clients.reasoning_effort import (
+    RESOLVED_MARKER,
+    resolve_reasoning_effort,
+)
 from tradingagents.reporting import write_report_tree
 
 from .checkpointer import checkpoint_step, clear_checkpoint, get_checkpointer, thread_id
@@ -92,24 +96,28 @@ class TradingAgentsGraph:
         os.makedirs(self.config["data_cache_dir"], exist_ok=True)
         os.makedirs(self.config["results_dir"], exist_ok=True)
 
-        # Initialize LLMs with provider-specific thinking configuration
-        llm_kwargs = self._get_provider_kwargs()
+        # Common transport settings remain shared; role-specific reasoning is
+        # resolved independently so quick/deep never overwrite each other.
+        common_llm_kwargs = self._get_provider_kwargs()
 
         # Add callbacks to kwargs if provided (passed to LLM constructor)
         if self.callbacks:
-            llm_kwargs["callbacks"] = self.callbacks
+            common_llm_kwargs["callbacks"] = self.callbacks
+
+        deep_kwargs = self._get_role_provider_kwargs("deep", common_llm_kwargs)
+        quick_kwargs = self._get_role_provider_kwargs("quick", common_llm_kwargs)
 
         deep_client = create_llm_client(
             provider=self.config["llm_provider"],
             model=self.config["deep_think_llm"],
             base_url=self.config.get("backend_url"),
-            **llm_kwargs,
+            **deep_kwargs,
         )
         quick_client = create_llm_client(
             provider=self.config["llm_provider"],
             model=self.config["quick_think_llm"],
             base_url=self.config.get("backend_url"),
-            **llm_kwargs,
+            **quick_kwargs,
         )
 
         self.deep_thinking_llm = deep_client.get_llm()
@@ -152,24 +160,8 @@ class TradingAgentsGraph:
         self._checkpointer_ctx = None
 
     def _get_provider_kwargs(self) -> dict[str, Any]:
-        """Get provider-specific kwargs for LLM client creation."""
+        """Get transport kwargs shared by quick and deep LLM clients."""
         kwargs = {}
-        provider = self.config.get("llm_provider", "").lower()
-
-        if provider == "google":
-            thinking_level = self.config.get("google_thinking_level")
-            if thinking_level:
-                kwargs["thinking_level"] = thinking_level
-
-        elif provider == "openai":
-            reasoning_effort = self.config.get("openai_reasoning_effort")
-            if reasoning_effort:
-                kwargs["reasoning_effort"] = reasoning_effort
-
-        elif provider == "anthropic":
-            effort = self.config.get("anthropic_effort")
-            if effort:
-                kwargs["effort"] = effort
 
         # Sampling temperature is cross-provider: forward it whenever set.
         # float() here so a value coming from a TRADINGAGENTS_TEMPERATURE env
@@ -184,6 +176,20 @@ class TradingAgentsGraph:
         if max_retries is not None and max_retries != "":
             kwargs["max_retries"] = _coerce_max_retries(max_retries)
 
+        return kwargs
+
+    def _get_role_provider_kwargs(
+        self, role: str, common_kwargs: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """Add one role's validated native effort to shared transport kwargs."""
+        kwargs = dict(common_kwargs or self._get_provider_kwargs())
+        resolution = resolve_reasoning_effort(self.config, role)
+        kwargs.update(resolution.kwargs)
+        if resolution.kwargs:
+            # Direct client construction still validates native values. Graph
+            # values have already passed the resolver, so avoid duplicate
+            # custom-model warnings and compatibility mappings downstream.
+            kwargs[RESOLVED_MARKER] = True
         return kwargs
 
     def _create_tool_nodes(self) -> dict[str, ToolNode]:

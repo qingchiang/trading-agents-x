@@ -18,6 +18,8 @@ SELECTIONS = {
     "deep_thinker": "gpt-5.5",
     "backend_url": None,
     "llm_provider": "openai",
+    "quick_reasoning_effort": "low",
+    "deep_reasoning_effort": "high",
     "google_thinking_level": None,
     "openai_reasoning_effort": None,
     "anthropic_effort": None,
@@ -31,6 +33,8 @@ def test_research_depth_sets_both_rounds_without_env(monkeypatch):
     cfg = m._build_run_config(SELECTIONS, checkpoint=None)
     assert cfg["max_debate_rounds"] == 5
     assert cfg["max_risk_discuss_rounds"] == 5
+    assert cfg["quick_reasoning_effort"] == "low"
+    assert cfg["deep_reasoning_effort"] == "high"
 
 
 def test_env_round_counts_win_over_selection(monkeypatch):

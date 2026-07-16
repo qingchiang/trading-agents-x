@@ -228,6 +228,8 @@ config = DEFAULT_CONFIG.copy()
 config["llm_provider"] = "openai"        # e.g. openai, google, anthropic, deepseek, groq, ollama; openai_compatible covers any OpenAI-compatible endpoint (vLLM, LM Studio, llama.cpp, ...)
 config["deep_think_llm"] = "gpt-5.5"     # Model for complex reasoning
 config["quick_think_llm"] = "gpt-5.4-mini" # Model for quick tasks
+config["quick_reasoning_effort"] = "low"
+config["deep_reasoning_effort"] = "high"
 config["max_debate_rounds"] = 2
 
 ta = TradingAgentsGraph(debug=True, config=config)
@@ -236,6 +238,30 @@ print(decision)
 ```
 
 See `tradingagents/default_config.py` for all configuration options.
+
+### Reasoning effort by role
+
+The `quick_reasoning_effort` and `deep_reasoning_effort` config keys shown above
+control reasoning depth independently for the two roles. For CLI or unattended
+runs, set their environment-variable equivalents in `.env`:
+
+```dotenv
+TRADINGAGENTS_QUICK_REASONING_EFFORT=low
+TRADINGAGENTS_DEEP_REASONING_EFFORT=high
+```
+
+Each role uses this precedence: role-specific value, then the selected
+provider's legacy shared key (`TRADINGAGENTS_OPENAI_REASONING_EFFORT`,
+`TRADINGAGENTS_GOOGLE_THINKING_LEVEL`, or `TRADINGAGENTS_ANTHROPIC_EFFORT`),
+then the provider default. Use `provider_default` to explicitly omit the native
+SDK parameter and block legacy fallback. Values are provider-native and are not
+translated between providers. OpenAI/OpenAI-compatible/Azure send
+`reasoning_effort`, Google sends `thinking_level`, and Anthropic sends `effort`.
+
+The OpenAI CLI catalog includes GPT-5.6 Luna and Terra for quick work and
+GPT-5.6 Sol and Terra for deep work. `gpt-5.6` aliases Sol; the four GPT-5.6 IDs
+support `none`, `low`, `medium`, `high`, `xhigh`, and `max`. The default models
+remain `gpt-5.4-mini` and `gpt-5.5`.
 
 ## Persistence and Recovery
 
@@ -290,6 +316,25 @@ Backtest results are not guaranteed to match any published figure. Returns depen
 ## Contributing
 
 Contributions are welcome: bug fixes, documentation, and feature ideas; past contributions are credited per release in [`CHANGELOG.md`](CHANGELOG.md).
+
+### Testing
+
+The default test suite disables project dotenv loading and replaces API
+credentials with placeholders before test modules are collected. It never runs
+live LLM calls.
+
+```bash
+PYTHON_DOTENV_DISABLED=1 uv run --extra dev pytest -q
+PYTHON_DOTENV_DISABLED=1 uv run --extra dev ruff check .
+```
+
+The DeepSeek wire-level integration test is opt-in. It runs only when both the
+flag and key are explicitly supplied by the launching shell or secret manager:
+
+```bash
+RUN_LIVE_LLM_TESTS=1 DEEPSEEK_API_KEY=... \
+  uv run --extra dev pytest -q tests/test_deepseek_reasoning.py -m integration
+```
 
 ## Citation
 
