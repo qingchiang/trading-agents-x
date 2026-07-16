@@ -1,7 +1,8 @@
 """yfinance-based news data fetching functions."""
 
 import contextlib
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import yfinance as yf
 from dateutil.relativedelta import relativedelta
@@ -14,7 +15,16 @@ from .news_quality import (
     classify_yahoo_article,
 )
 from .stockstats_utils import yf_retry
-from .symbol_utils import normalize_symbol
+from .symbol_utils import crypto_base, normalize_symbol
+
+
+def _news_timezone(ticker: str | None):
+    """Return the calendar timezone used to judge Yahoo publication dates."""
+    if ticker is None or crypto_base(ticker):
+        return timezone.utc
+    if ticker.upper().endswith(".T"):
+        return ZoneInfo("Asia/Tokyo")
+    return ZoneInfo("America/New_York")
 
 
 def _extract_article_data(article: dict) -> dict:
@@ -53,7 +63,7 @@ def _extract_article_data(article: dict) -> dict:
         ts = article.get("providerPublishTime")
         if ts:
             with contextlib.suppress(ValueError, OSError, TypeError):
-                pub_date = datetime.fromtimestamp(ts)
+                pub_date = datetime.fromtimestamp(ts, tz=timezone.utc)
         return {
             "title": article.get("title", "No title"),
             "summary": article.get("summary", ""),
@@ -63,18 +73,33 @@ def _extract_article_data(article: dict) -> dict:
         }
 
 
-def _in_news_window(pub_date, start_dt, end_dt) -> bool:
+def _in_news_window(
+    pub_date,
+    start_dt,
+    end_dt,
+    *,
+    ticker: str | None = None,
+) -> bool:
     """Whether an article belongs in the [start_dt, end_dt] window.
 
-    Dated articles are kept only if they fall in the window. An undated article
-    is kept only when the window reaches the present (live run) — in a
-    historical/backtest window it's excluded, since we can't prove it isn't
-    future news (look-ahead safety, #992/#1007).
+    Dated articles are converted from their timestamp timezone to the asset's
+    market calendar before the inclusive date comparison. An undated article is
+    kept only when the window reaches the present (live run) — in a historical
+    window it's excluded, since we can't prove it isn't future news
+    (look-ahead safety, #992/#1007).
     """
+    market_tz = _news_timezone(ticker)
     if pub_date is not None:
-        naive = pub_date.replace(tzinfo=None) if hasattr(pub_date, "replace") else pub_date
-        return start_dt <= naive <= end_dt + relativedelta(days=1)
-    return end_dt >= datetime.now() - relativedelta(days=1)
+        if not isinstance(pub_date, datetime):
+            return False
+        if pub_date.tzinfo is None:
+            local_pub_date = pub_date.replace(tzinfo=market_tz)
+        else:
+            local_pub_date = pub_date.astimezone(market_tz)
+        return start_dt.date() <= local_pub_date.date() <= end_dt.date()
+    return end_dt.date() >= (
+        datetime.now(market_tz) - relativedelta(days=1)
+    ).date()
 
 
 def get_news_yfinance(
@@ -120,7 +145,9 @@ def get_news_yfinance(
         candidates = []
         for article in news:
             data = _extract_article_data(article)
-            if _in_news_window(data["pub_date"], start_dt, end_dt):
+            if _in_news_window(
+                data["pub_date"], start_dt, end_dt, ticker=canonical
+            ):
                 candidates.append(data)
 
         if not candidates:

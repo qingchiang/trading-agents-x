@@ -6,6 +6,7 @@ responses mislabeled as rate limits and silently treated as transient), and
 string, not a dict).
 """
 import json
+from unittest import mock
 
 import pytest
 
@@ -94,3 +95,28 @@ def test_fundamentals_no_curr_date_passes_through(monkeypatch):
 def test_fundamentals_non_json_body_unchanged(monkeypatch):
     monkeypatch.setattr(avf, "_make_api_request", lambda fn, params: "not-json")
     assert avf.get_cashflow("AAPL", curr_date="2024-01-01") == "not-json"
+
+
+@pytest.mark.unit
+def test_historical_overview_does_not_query_current_snapshot(monkeypatch):
+    vendor = mock.Mock(return_value="SHOULD NOT BE RETURNED")
+    monkeypatch.setattr(avf, "_make_api_request", vendor)
+
+    out = avf.get_fundamentals("AAPL", curr_date="2020-01-15")
+
+    vendor.assert_not_called()
+    assert "LIVE_DATA_UNAVAILABLE" in out
+    assert "Requested analysis date: 2020-01-15" in out
+
+
+@pytest.mark.unit
+def test_live_overview_labels_retrieval_time_and_non_point_in_time(monkeypatch):
+    monkeypatch.setattr(avf, "is_live", lambda curr_date: True)
+    monkeypatch.setattr(avf, "_make_api_request", lambda fn, params: '{"PERatio":"30"}')
+
+    out = avf.get_fundamentals("AAPL", curr_date="2026-07-17")
+
+    assert "Requested analysis date: 2026-07-17" in out
+    assert "Retrieval timestamp:" in out
+    assert "not point-in-time historical data" in out
+    assert '"PERatio":"30"' in out

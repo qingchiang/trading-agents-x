@@ -1,12 +1,18 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.utils.agent_utils import (
-    get_global_news,
     get_instrument_context_from_state,
     get_language_instruction,
-    get_macro_indicators,
-    get_news,
-    get_prediction_markets,
+)
+from tradingagents.agents.utils.macro_data_tools import (
+    get_macro_indicators_for_analysis,
+)
+from tradingagents.agents.utils.news_data_tools import (
+    get_global_news_for_analysis,
+    get_news_for_analysis,
+)
+from tradingagents.agents.utils.prediction_markets_tools import (
+    get_prediction_markets_for_analysis,
 )
 from tradingagents.dataflows.config import get_config
 from tradingagents.dataflows.jp.jquants_sentiment import get_market_investor_flows
@@ -29,10 +35,10 @@ def create_news_analyst(llm):
         )
 
         tools = [
-            get_news,
-            get_global_news,
-            get_macro_indicators,
-            get_prediction_markets,
+            get_news_for_analysis,
+            get_global_news_for_analysis,
+            get_macro_indicators_for_analysis,
+            get_prediction_markets_for_analysis,
         ]
 
         # Cross-region macro backdrop is prefetched and injected (not left to the
@@ -56,7 +62,7 @@ def create_news_analyst(llm):
             )
 
         system_message = (
-            f"You are a news researcher tasked with analyzing recent news and trends. Please write a comprehensive report of the current state of the world that is relevant for trading and macroeconomics. Use the available tools: get_news(ticker, start_date, end_date) for {asset_label}-specific news by ticker symbol, get_global_news(curr_date, look_back_days, limit) for broader macroeconomic news, get_macro_indicators(indicator, curr_date, look_back_days) to drill into a SPECIFIC macro series beyond the panel below (a US FRED alias such as 'yield_curve', 'initial_claims', 'retail_sales', 'm2', '2y_treasury', a raw FRED series ID like 'CPILFESL', or a Japanese official series 'jp_cpi'/'jp_core_cpi'/'jp_policy_rate'/'jp_tankan'),and get_prediction_markets(topic, limit) for live market-implied probabilities of forward-looking events (e.g. 'Fed rate cut', 'recession 2026', geopolitical or sector events). For ticker-specific news, call get_news with exactly start_date={ticker_news_start_date} and end_date={current_date} (the configured {ticker_news_lookback_days}-day lookback). Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
+            f"You are a news researcher tasked with analyzing recent news and trends. Please write a comprehensive report of the current state of the world that is relevant for trading and macroeconomics. Use the available tools: get_news(ticker) for {asset_label}-specific news by ticker symbol, get_global_news(look_back_days, limit) for broader macroeconomic news, get_macro_indicators(indicator, look_back_days) to drill into a SPECIFIC macro series beyond the panel below (a US FRED alias such as 'yield_curve', 'initial_claims', 'retail_sales', 'm2', '2y_treasury', a raw FRED series ID like 'CPILFESL', or a Japanese official series 'jp_cpi'/'jp_core_cpi'/'jp_policy_rate'/'jp_tankan'), and get_prediction_markets(topic, limit) for current market-implied probabilities of forward-looking events (e.g. 'Fed rate cut', 'recession 2026', geopolitical or sector events). The workflow injects the immutable analysis date into every tool and derives ticker news as {ticker_news_start_date} through {current_date} (the configured {ticker_news_lookback_days}-day lookback); do not attempt to supply or override any date argument. Prediction markets are live-only and return an explicit unavailable result for historical analysis. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
             "\n\nTicker-news relevance labels are evidence boundaries: `[direct]` has explicit ticker or full-name evidence and may be described as a company event. `[candidate]` contains an ambiguous ticker/name or summary-only mention; independently verify the concrete relationship from the supplied title/summary and ignore the item if that relationship is not clear. Never assume relevance merely because Yahoo returned an item for the ticker. `[context]` is only an external driver or industry/market backdrop. Never rewrite `[candidate]` or `[context]` as an action taken by, financing raised by, or event confirmed for the target company without explicit evidence in the item."
             "\n\nA cross-region macro panel has already been prefetched for you — use it as the macro backdrop (no tool call needed for these baseline indicators):\n\n"
             f"{macro_panel}\n"

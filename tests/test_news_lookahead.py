@@ -4,8 +4,7 @@ into a historical window.
 Regressions for #992 (flat articles bypassed the date filter), #1007 (global
 news injected future articles), #993 (empty-after-filter returned a blank body).
 """
-import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 
@@ -13,7 +12,11 @@ import tradingagents.dataflows.yfinance_news as ynews
 
 
 def _epoch(date_str):
-    return int(time.mktime(datetime.strptime(date_str, "%Y-%m-%d").timetuple()))
+    return int(
+        datetime.strptime(date_str, "%Y-%m-%d")
+        .replace(tzinfo=timezone.utc)
+        .timestamp()
+    )
 
 
 @pytest.mark.unit
@@ -23,7 +26,38 @@ def test_flat_article_publish_time_is_parsed():
         {"title": "X", "publisher": "P", "link": "l", "providerPublishTime": _epoch("2025-05-09")}
     )
     assert data["pub_date"] is not None
+    assert data["pub_date"].tzinfo is timezone.utc
     assert data["pub_date"].strftime("%Y-%m-%d") == "2025-05-09"
+
+
+@pytest.mark.unit
+def test_stock_window_uses_new_york_calendar_not_utc_date():
+    start = datetime(2025, 5, 9)
+    end = datetime(2025, 5, 9)
+    late_friday_in_new_york = datetime(2025, 5, 10, 3, 30, tzinfo=timezone.utc)
+    saturday_in_new_york = datetime(2025, 5, 10, 4, 0, tzinfo=timezone.utc)
+
+    assert ynews._in_news_window(
+        late_friday_in_new_york, start, end, ticker="NVDA"
+    )
+    assert not ynews._in_news_window(
+        saturday_in_new_york, start, end, ticker="NVDA"
+    )
+
+
+@pytest.mark.unit
+def test_crypto_and_global_windows_use_utc_calendar():
+    start = datetime(2025, 5, 9)
+    end = datetime(2025, 5, 9)
+    next_utc_day = datetime(2025, 5, 10, tzinfo=timezone.utc)
+
+    assert not ynews._in_news_window(next_utc_day, start, end, ticker="BTC-USD")
+    assert not ynews._in_news_window(next_utc_day, start, end)
+
+    first_hour_of_tokyo_date = datetime(2025, 5, 8, 15, 30, tzinfo=timezone.utc)
+    assert ynews._in_news_window(
+        first_hour_of_tokyo_date, start, end, ticker="9984.T"
+    )
 
 
 @pytest.mark.unit

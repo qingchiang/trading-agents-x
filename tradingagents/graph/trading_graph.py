@@ -13,23 +13,34 @@ from langgraph.prebuilt import ToolNode
 # Import the abstract tool methods from agent_utils
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
-    get_global_news,
-    get_indicators,
     get_insider_transactions,
-    get_macro_indicators,
     get_news,
-    get_prediction_markets,
-    get_stock_data,
-    get_verified_market_snapshot,
     resolve_instrument_identity,
 )
+from tradingagents.agents.utils.core_stock_tools import get_stock_data_for_analysis
 from tradingagents.agents.utils.fundamental_data_tools import (
     get_balance_sheet_for_analysis,
     get_cashflow_for_analysis,
     get_fundamentals_for_analysis,
     get_income_statement_for_analysis,
 )
+from tradingagents.agents.utils.macro_data_tools import (
+    get_macro_indicators_for_analysis,
+)
+from tradingagents.agents.utils.market_data_validation_tools import (
+    get_verified_market_snapshot_for_analysis,
+)
 from tradingagents.agents.utils.memory import TradingMemoryLog
+from tradingagents.agents.utils.news_data_tools import (
+    get_global_news_for_analysis,
+    get_news_for_analysis,
+)
+from tradingagents.agents.utils.prediction_markets_tools import (
+    get_prediction_markets_for_analysis,
+)
+from tradingagents.agents.utils.technical_indicators_tools import (
+    get_indicators_for_analysis,
+)
 from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.symbol_utils import match_exchange_suffix
 from tradingagents.dataflows.utils import safe_ticker_component
@@ -200,13 +211,13 @@ class TradingAgentsGraph:
             "market": ToolNode(
                 [
                     # Core stock data tools
-                    get_stock_data,
+                    get_stock_data_for_analysis,
                     # Technical indicators
-                    get_indicators,
+                    get_indicators_for_analysis,
                     # Deterministic verification snapshot (bound to the analyst
                     # LLM and required by its prompt; must be executable here or
                     # the call fails and the model reports it "unavailable").
-                    get_verified_market_snapshot,
+                    get_verified_market_snapshot_for_analysis,
                 ]
             ),
             "social": ToolNode(
@@ -218,11 +229,11 @@ class TradingAgentsGraph:
             "news": ToolNode(
                 [
                     # News and insider information
-                    get_news,
-                    get_global_news,
+                    get_news_for_analysis,
+                    get_global_news_for_analysis,
                     get_insider_transactions,
-                    get_macro_indicators,
-                    get_prediction_markets,
+                    get_macro_indicators_for_analysis,
+                    get_prediction_markets_for_analysis,
                 ]
             ),
             "fundamentals": ToolNode(
