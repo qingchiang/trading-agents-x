@@ -61,6 +61,22 @@ def test_crypto_and_global_windows_use_utc_calendar():
 
 
 @pytest.mark.unit
+def test_hong_kong_window_uses_local_calendar_not_new_york():
+    start = datetime(2025, 5, 9)
+    end = datetime(2025, 5, 9)
+    first_hour_of_next_hong_kong_date = datetime(
+        2025, 5, 9, 16, 30, tzinfo=timezone.utc
+    )
+
+    assert not ynews._in_news_window(
+        first_hour_of_next_hong_kong_date,
+        start,
+        end,
+        ticker="0700.HK",
+    )
+
+
+@pytest.mark.unit
 def test_window_excludes_future_and_undated_in_backtest():
     start = datetime(2025, 5, 1)
     end = datetime(2025, 5, 9)  # historical window (well in the past)

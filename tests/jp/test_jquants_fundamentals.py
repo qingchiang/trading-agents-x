@@ -83,6 +83,17 @@ class FundamentalsTests(unittest.TestCase):
         self.assertNotIn("NetSales=400", after)
         self.assertEqual(after.count("FY end 2023-03-31"), 1)
 
+    def test_duplicate_period_same_timestamp_keeps_later_api_record(self):
+        recs = [
+            _summary("2023-05-12", sales="400"),
+            _summary("2023-05-12", sales="500"),
+        ]
+        with _patch(recs):
+            out = jf.get_income_statement("9984.T", "annual", "2023-05-13")
+        self.assertIn("NetSales=500", out)
+        self.assertNotIn("NetSales=400", out)
+        self.assertEqual(out.count("FY end 2023-03-31"), 1)
+
     def test_dedupe_retains_distinct_doc_types_and_incomplete_keys(self):
         consolidated = _summary("2023-05-12", sales="500")
         standalone = _summary(

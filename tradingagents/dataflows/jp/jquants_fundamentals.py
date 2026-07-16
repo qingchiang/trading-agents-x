@@ -124,11 +124,23 @@ def _fetch_summary_periods(symbol: str, curr_date: str | None):
                 symbol, canonical, f"no financial summary disclosed on/before {curr_date}"
             )
 
-    ordered = sorted(
-        records,
-        key=lambda r: (r.get("DiscDate") or "", r.get("DiscTime") or ""),
-        reverse=True,
-    )
+    # The API returns records in ascending disclosure-number order. Preserve
+    # that sequence as the final tie-breaker: corrections can share the same
+    # disclosure date/time, and a stable reverse sort alone would otherwise
+    # leave the older record first for deduplication.
+    indexed_records = enumerate(records)
+    ordered = [
+        record
+        for _, record in sorted(
+            indexed_records,
+            key=lambda item: (
+                item[1].get("DiscDate") or "",
+                item[1].get("DiscTime") or "",
+                item[0],
+            ),
+            reverse=True,
+        )
+    ]
     return canonical, _dedupe_periods(ordered)
 
 
