@@ -19,6 +19,8 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_BENCHMARK_TICKER":     "benchmark_ticker",
     "TRADINGAGENTS_TEMPERATURE":          "temperature",
     "TRADINGAGENTS_LLM_MAX_RETRIES":      "llm_max_retries",
+    "TRADINGAGENTS_TICKER_NEWS_LOOKBACK_DAYS": "ticker_news_lookback_days",
+    "TRADINGAGENTS_SOCIAL_LOOKBACK_DAYS":     "social_lookback_days",
     "TRADINGAGENTS_QUICK_REASONING_EFFORT": "quick_reasoning_effort",
     "TRADINGAGENTS_DEEP_REASONING_EFFORT":  "deep_reasoning_effort",
     # Provider-specific reasoning/thinking knobs (None = each provider's own
@@ -120,6 +122,8 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # Increase for longer lookback strategies or to broaden macro coverage;
     # decrease to reduce token usage in agent prompts.
     "news_article_limit": 20,             # max articles per ticker (ticker-news)
+    "ticker_news_lookback_days": 14,      # company news/disclosure request window
+    "social_lookback_days": 7,            # recent StockTwits/Reddit sentiment window
     "global_news_article_limit": 10,      # max articles for global/macro news
     "global_news_lookback_days": 7,       # macro news lookback window
     # Search queries used by get_global_news for macro headlines. Extend or

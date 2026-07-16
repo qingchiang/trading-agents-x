@@ -8,6 +8,7 @@ hit the right instrument instead of failing/mismatching.
 import pandas as pd
 
 import tradingagents.agents.utils.agent_utils as au
+import tradingagents.dataflows.instrument_identity as identity_dataflow
 import tradingagents.dataflows.yfinance_news as ynews
 import tradingagents.graph.trading_graph as tg
 from tradingagents.graph.trading_graph import TradingAgentsGraph
@@ -24,7 +25,7 @@ def test_identity_lookup_normalizes_symbol(monkeypatch):
         def info(self):
             return {"longName": "Gold Futures", "quoteType": "FUTURE"}
 
-    monkeypatch.setattr(au.yf, "Ticker", FakeTicker)
+    monkeypatch.setattr(identity_dataflow.yf, "Ticker", FakeTicker)
     au.resolve_instrument_identity.cache_clear()
 
     identity = au.resolve_instrument_identity("XAUUSD")

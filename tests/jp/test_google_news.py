@@ -63,24 +63,32 @@ class GetNewsTests(unittest.TestCase):
             return gn.get_news("4568.T", start, end)
 
     def test_renders_headlines_with_source_and_date(self):
-        out = self._run([_parsed("決算を発表", "日本経済新聞")])
+        out = self._run([_parsed("第一三共が決算を発表", "日本経済新聞")])
         self.assertIn("## 4568.T News (media, Google News)", out)
-        self.assertIn("### 決算を発表 (source: 日本経済新聞)", out)
+        self.assertIn("### [direct] 第一三共が決算を発表", out)
+        self.assertIn("candidates=1; relevant=1; kept=1", out)
         self.assertIn("2026-07-10", out)
 
     def test_window_filter_excludes_out_of_range(self):
-        items = [_parsed("窓内", d=10), _parsed("古すぎ", m=6, d=1), _parsed("未来", d=20)]
+        items = [
+            _parsed("第一三共の決算は窓内", d=10),
+            _parsed("第一三共の古い決算", m=6, d=1),
+            _parsed("第一三共の未来の決算", d=20),
+        ]
         out = self._run(items)
-        self.assertIn("窓内", out)
-        self.assertNotIn("古すぎ", out)
-        self.assertNotIn("未来", out)
+        self.assertIn("決算は窓内", out)
+        self.assertNotIn("古い決算", out)
+        self.assertNotIn("未来の決算", out)
 
     def test_boilerplate_yahoo_quote_pages_dropped(self):
         # Yahoo quote pages carry the "】：" separator; real headlines don't.
-        items = [_parsed("第一三共(株)【4568】：掲示板"), _parsed("本物の記事")]
+        items = [
+            _parsed("第一三共(株)【4568】：掲示板"),
+            _parsed("第一三共の新薬事業を報道"),
+        ]
         out = self._run(items)
         self.assertNotIn("掲示板", out)
-        self.assertIn("本物の記事", out)
+        self.assertIn("新薬事業を報道", out)
 
     def test_real_headline_with_boilerplate_word_kept(self):
         # A genuine headline containing a word like 決算情報 must NOT be dropped —
@@ -89,19 +97,20 @@ class GetNewsTests(unittest.TestCase):
         self.assertIn("第一三共の2026年決算情報を公開", out)
 
     def test_dedupes_repeated_headline(self):
-        items = [_parsed("同じ見出し", d=10), _parsed("同じ見出し", d=9)]
+        items = [_parsed("第一三共が投資", d=10), _parsed("第一三共が投資", d=9)]
         out = self._run(items)
-        self.assertEqual(out.count("### 同じ見出し"), 1)
+        self.assertEqual(out.count("### [direct] 第一三共が投資"), 1)
 
     def test_sorted_newest_first(self):
-        items = [_parsed("古い記事", d=6), _parsed("新しい記事", d=10)]
+        items = [_parsed("第一三共の古い決算", d=6), _parsed("第一三共の新しい決算", d=10)]
         out = self._run(items)
-        self.assertLess(out.index("新しい記事"), out.index("古い記事"))
+        self.assertLess(out.index("新しい決算"), out.index("古い決算"))
 
     def test_capped_to_article_limit(self):
         with mock.patch.object(gn, "get_config", return_value={"news_article_limit": 2}):
-            out = self._run([_parsed(f"記事{i}", d=10 - i) for i in range(5)])
-        self.assertEqual(out.count("### 記事"), 2)
+            out = self._run([_parsed(f"第一三共の投資記事{i}", d=10 - i) for i in range(5)])
+        self.assertEqual(out.count("### [direct]"), 2)
+        self.assertIn("omitted_by_limit=3", out)
 
     def test_no_items_returns_no_news_line(self):
         out = self._run([])
@@ -110,6 +119,45 @@ class GetNewsTests(unittest.TestCase):
     def test_malformed_date_returns_no_news_line(self):
         out = self._run([_parsed("記事")], start="bad", end="date")
         self.assertIn("No Google News found", out)
+
+    def test_hard_filters_blocked_source_ai_template_and_disclosure_mirror(self):
+        items = [
+            _parsed("第一三共が投資を発表", "Mshale"),
+            _parsed("第一三共(株)【4568】：今の株価の理由は？値動きの背景をAIが解説", "Yahoo!ファイナンス"),
+            _parsed("[4568]第一三共 適時開示情報", "日経会社情報DIGITAL"),
+            _parsed("第一三共が新薬へ投資", "ロイター"),
+        ]
+        out = self._run(items)
+        self.assertNotIn("Mshale", out)
+        self.assertNotIn("今の株価の理由", out)
+        self.assertNotIn("適時開示情報", out)
+        self.assertIn("新薬へ投資", out)
+        self.assertIn("dropped=3", out)
+
+    def test_trusted_business_background_without_company_is_context(self):
+        out = self._run([_parsed("製薬業界で大型買収が相次ぐ", "Reuters")])
+        self.assertIn("### [context] 製薬業界で大型買収が相次ぐ", out)
+
+    def test_unknown_source_requires_entity_and_business_context(self):
+        out = self._run([
+            _parsed("第一三共のファン交流会", "Unknown Blog"),
+            _parsed("第一三共が研究事業へ投資", "Unknown Business Wire"),
+        ])
+        self.assertNotIn("ファン交流会", out)
+        self.assertIn("### [direct] 第一三共が研究事業へ投資", out)
+
+    def test_japanese_group_abbreviation_is_a_company_alias(self):
+        with mock.patch.object(
+            gn, "get_company_name", return_value="ソフトバンクグループ"
+        ), mock.patch.object(
+            gn,
+            "_fetch_items",
+            return_value=[
+                _parsed("ソフトバンクGがAI事業へ投資", "Unknown Wire")
+            ],
+        ):
+            out = gn.get_news("9984.T", "2026-07-04", "2026-07-11")
+        self.assertIn("### [direct] ソフトバンクGがAI事業へ投資", out)
 
     def test_query_is_name_plus_code(self):
         # "{name} {code}" softly biases ranking to the financial context.

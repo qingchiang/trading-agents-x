@@ -23,3 +23,12 @@ def test_news_prompt_matches_get_news_signature():
     src = inspect.getsource(na)
     assert "get_news(ticker, start_date, end_date)" in src
     assert "get_news(query" not in src
+
+
+@pytest.mark.unit
+def test_news_prompt_preserves_evidence_boundaries():
+    src = inspect.getsource(na)
+    assert "`[direct]` has explicit ticker or full-name evidence" in src
+    assert "`[candidate]` contains an ambiguous ticker/name" in src
+    assert "Never assume relevance merely because Yahoo returned" in src
+    assert "`[context]` is only an external driver" in src

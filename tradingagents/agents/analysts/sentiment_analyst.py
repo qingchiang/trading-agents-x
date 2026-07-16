@@ -30,7 +30,6 @@ See: https://github.com/TauricResearch/TradingAgents/issues/796
 """
 
 import logging
-from datetime import datetime, timedelta
 
 from langchain_core.messages import AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -45,22 +44,19 @@ from tradingagents.agents.utils.structured import (
     bind_structured,
     invoke_structured_or_freetext,
 )
+from tradingagents.dataflows.config import get_config
 from tradingagents.dataflows.jp.edinet_holdings import get_large_holdings
 from tradingagents.dataflows.jp.jquants_sentiment import (
     get_margin_balance,
     get_short_positions,
 )
 from tradingagents.dataflows.jp.yfinance_sentiment import get_analyst_ratings_block
-from tradingagents.dataflows.lookahead import is_live
+from tradingagents.dataflows.lookahead import is_live, lookback_start_date
 from tradingagents.dataflows.market_context import market_suffix_of
 from tradingagents.dataflows.reddit import fetch_reddit_posts
 from tradingagents.dataflows.stocktwits import fetch_stocktwits_messages
 
 logger = logging.getLogger(__name__)
-
-
-def _seven_days_back(trade_date: str) -> str:
-    return (datetime.strptime(trade_date, "%Y-%m-%d") - timedelta(days=7)).strftime("%Y-%m-%d")
 
 
 def create_sentiment_analyst(llm):
@@ -76,7 +72,15 @@ def create_sentiment_analyst(llm):
     def sentiment_analyst_node(state):
         ticker = state["company_of_interest"]
         end_date = state["trade_date"]
-        start_date = _seven_days_back(end_date)
+        config = get_config()
+        news_start_date = lookback_start_date(
+            end_date,
+            config["ticker_news_lookback_days"],
+        )
+        social_start_date = lookback_start_date(
+            end_date,
+            config["social_lookback_days"],
+        )
         instrument_context = get_instrument_context_from_state(state)
 
         # Pre-fetch all three sources. Each must degrade to a string so the LLM
@@ -86,7 +90,7 @@ def create_sentiment_analyst(llm):
         # through route_to_vendor, which re-raises for a misconfigured/unset
         # vendor (news_data isn't optional), so we catch and degrade here.
         try:
-            news_block = get_news.func(ticker, start_date, end_date)
+            news_block = get_news.func(ticker, news_start_date, end_date)
         except Exception as exc:
             logger.warning("News fetch failed for %s: %s", ticker, exc)
             news_block = f"<news unavailable: {type(exc).__name__}>"
@@ -113,12 +117,12 @@ def create_sentiment_analyst(llm):
                 stocktwits_block = fetch_stocktwits_messages(
                     ticker,
                     limit=30,
-                    start_date=start_date,
+                    start_date=social_start_date,
                     end_date=end_date,
                 )
                 reddit_block = fetch_reddit_posts(
                     ticker,
-                    start_date=start_date,
+                    start_date=social_start_date,
                     end_date=end_date,
                 )
             else:
@@ -131,7 +135,8 @@ def create_sentiment_analyst(llm):
 
         system_message = _build_system_message(
             ticker=ticker,
-            start_date=start_date,
+            news_start_date=news_start_date,
+            social_start_date=social_start_date,
             end_date=end_date,
             news_block=news_block,
             stocktwits_block=stocktwits_block,
@@ -235,7 +240,8 @@ _OPTIONAL_SECTIONS = (
 def _build_system_message(
     *,
     ticker: str,
-    start_date: str,
+    news_start_date: str,
+    social_start_date: str,
     end_date: str,
     news_block: str,
     stocktwits_block: str,
@@ -254,26 +260,32 @@ def _build_system_message(
         _optional_section(title, intro, tag, optional_blocks.get(tag, ""))
         for title, intro, tag in _OPTIONAL_SECTIONS
     )
-    return f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} covering the period from {start_date} to {end_date}, drawing on the complementary data sources that have already been collected for you.
+    return f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} ending on {end_date}, drawing on the complementary data sources and source-specific windows that have already been collected for you.
 
 ## Data sources (pre-fetched, in this prompt)
 
-### Routed ticker news — requested window {start_date} to {end_date}
+### Routed ticker news — requested window {news_start_date} to {end_date}
 The inner block header identifies the actual routed source(s). Fact-driven,
 slower-moving signal; do not assume Yahoo Finance when another source is named.
+`[direct]` has explicit ticker or full-name evidence and may be treated as a
+company event. `[candidate]` has an ambiguous ticker/name or summary-only
+mention: verify its concrete relationship from the supplied text and ignore it
+when unclear; ticker-endpoint provenance alone is not evidence. `[context]` is
+only an external driver or industry/market backdrop. Never rewrite candidate or
+context material as an action taken by, or event confirmed for, {ticker}.
 
 <start_of_news>
 {news_block}
 <end_of_news>
 
-### StockTwits messages — retail-trader social platform indexed by cashtag ({start_date} to {end_date})
+### StockTwits messages — retail-trader social platform indexed by cashtag ({social_start_date} to {end_date})
 Fast-moving signal. Each message carries a user-labeled sentiment tag (Bullish / Bearish / no-label) plus the message body.
 
 <start_of_stocktwits>
 {stocktwits_block}
 <end_of_stocktwits>
 
-### Reddit posts — r/wallstreetbets, r/stocks, r/investing ({start_date} to {end_date})
+### Reddit posts — r/wallstreetbets, r/stocks, r/investing ({social_start_date} to {end_date})
 Community discussion. Engagement signal via upvote score and comment count. Subreddit character matters (r/wallstreetbets is often contrarian/exuberant; r/stocks more measured; r/investing longer-term).
 
 <start_of_reddit>

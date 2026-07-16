@@ -189,6 +189,14 @@ class NewsPanelInjectionTests(unittest.TestCase):
         captured, _, _ = self._run()
         self.assertIn("get_macro_indicators", captured["tools"])
 
+    def test_ticker_news_prompt_uses_configured_14_day_window(self):
+        captured, _, _ = self._run()
+        self.assertIn(
+            "start_date=2026-01-01 and end_date=2026-01-15",
+            captured["prompt"],
+        )
+        self.assertIn("configured 14-day lookback", captured["prompt"])
+
     def test_jp_market_flows_are_injected_as_non_company_context(self):
         captured, _, flows = self._run(
             ticker="9984.T",

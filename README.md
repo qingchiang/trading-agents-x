@@ -193,7 +193,8 @@ J-Quants plan tiers: the **Light** plan covers prices, `/fins/summary`, and exch
 **What this fork optimizes.**
 - **Historical runs fail closed for live-only data.** JP official sources remain look-ahead-safe, and historical runs do not query current StockTwits, Reddit, or yfinance `.info`. Near-live social messages are filtered to the requested market-calendar date window.
 - **More accurate data.** Official J-Quants prices and `/fins/summary` fundamentals replace Yahoo's thin `.T` coverage; the fundamentals assembler computes valuation ratios and a TOPIX-weekly beta on a proper Japanese benchmark.
-- **Signal, not noise.** Per-stock news is resolved by clean company name (so `4568` doesn't drag in galaxy NGC 4568 or index levels), and sentiment uses official positioning data instead of scrape-only, ToS-grey retail boards.
+- **Signal, not noise.** Yahoo ticker news and Google News JP use a configurable 14-day company-news window and a hybrid evidence boundary: explicit ticker/full-name evidence is `[direct]`, ambiguous names/tickers and summary-only mentions are `[candidate]` for the analyst to verify, and `[context]` remains external background. Dates, duplicates, known template/disclosure mirrors, blocked junk sources, and items with no entity evidence are handled deterministically. Fast-decaying StockTwits/Reddit sentiment and global macro news stay at 7 days. Sentiment uses official positioning data instead of scrape-only, ToS-grey retail boards.
+- **Point-in-time-safe identity.** Live analysis can use rich yfinance `.info` identity fields. Historical graph startup and news alias resolution use exact-symbol `yf.Search` metadata instead, so current sector/industry cannot leak into a backtest.
 
 See [CLAUDE.md](CLAUDE.md) for the full vendor architecture.
 

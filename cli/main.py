@@ -959,6 +959,15 @@ def _build_run_config(selections: dict, checkpoint: bool | None) -> dict:
     return config
 
 
+def _resolve_cli_instrument_context(graph, selections: dict) -> str:
+    """Resolve identity using the CLI's selected point-in-time analysis date."""
+    return graph.resolve_instrument_context(
+        selections["ticker"],
+        selections["asset_type"],
+        selections["analysis_date"],
+    )
+
+
 def run_analysis(checkpoint: bool | None = None):
     # First get all user selections
     selections = get_user_selections()
@@ -1072,9 +1081,7 @@ def run_analysis(checkpoint: bool | None = None):
         # Resolve the instrument identity once here so all agents anchor to
         # the real company (#814); the CLI builds state directly rather than
         # going through propagate(), so this must happen on the CLI path too.
-        instrument_context = graph.resolve_instrument_context(
-            selections["ticker"], selections["asset_type"]
-        )
+        instrument_context = _resolve_cli_instrument_context(graph, selections)
         init_agent_state = graph.propagator.create_initial_state(
             selections["ticker"],
             selections["analysis_date"],

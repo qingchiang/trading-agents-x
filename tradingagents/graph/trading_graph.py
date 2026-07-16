@@ -339,16 +339,20 @@ class TradingAgentsGraph:
         if updates:
             self.memory_log.batch_update_with_outcomes(updates)
 
-    def resolve_instrument_context(self, ticker: str, asset_type: str = "stock") -> str:
+    def resolve_instrument_context(
+        self,
+        ticker: str,
+        asset_type: str = "stock",
+        curr_date: str | None = None,
+    ) -> str:
         """Resolve ticker identity once and return the full instrument context.
 
-        Deterministic yfinance lookup (cached, fail-open) injected into a
+        Point-in-time-safe yfinance lookup (cached, fail-open) injected into a
         context string so every agent anchors to the real company instead of
-        hallucinating one from the price chart (#814). Both the propagate()
-        path and the CLI call this so the resolved identity reaches the whole
-        graph regardless of entry point.
+        hallucinating one from the price chart (#814). Historical dates use
+        exact-symbol Search metadata, never the current ``Ticker.info``.
         """
-        identity = resolve_instrument_identity(ticker)
+        identity = resolve_instrument_identity(ticker, curr_date)
         return build_instrument_context(ticker, asset_type, identity)
 
     def _run_signature(self, asset_type: str) -> str:
@@ -427,7 +431,11 @@ class TradingAgentsGraph:
         # Initialize state — inject memory log context for PM and the
         # deterministically resolved instrument identity for all agents.
         past_context = self.memory_log.get_past_context(company_name)
-        instrument_context = self.resolve_instrument_context(company_name, asset_type)
+        instrument_context = self.resolve_instrument_context(
+            company_name,
+            asset_type,
+            str(trade_date),
+        )
         init_agent_state = self.propagator.create_initial_state(
             company_name,
             trade_date,

@@ -7,6 +7,12 @@ import yfinance as yf
 from dateutil.relativedelta import relativedelta
 
 from .config import get_config
+from .instrument_identity import identity_names, resolve_search_identity
+from .news_quality import (
+    build_company_aliases,
+    canonical_headline,
+    classify_yahoo_article,
+)
 from .stockstats_utils import yf_retry
 from .symbol_utils import normalize_symbol
 
@@ -88,14 +94,21 @@ def get_news_yfinance(
         Formatted string containing news articles
     """
     article_limit = get_config()["news_article_limit"]
+    candidate_limit = min(max(article_limit * 4, 20), 100)
     # Query Yahoo with the canonical symbol, like every other yfinance path —
     # a raw broker/forex/crypto alias (XAUUSD, BTCUSD) otherwise silently
     # returns no news. Keep the user's ticker in the report header.
     canonical = normalize_symbol(ticker)
     resolved = "" if canonical == ticker else f" (resolved to {canonical})"
     try:
+        identity = resolve_search_identity(canonical)
+        aliases = build_company_aliases(
+            ticker,
+            *identity_names(identity),
+            ticker_aliases=(canonical,),
+        )
         stock = yf.Ticker(canonical)
-        news = yf_retry(lambda: stock.get_news(count=article_limit))
+        news = yf_retry(lambda: stock.get_news(count=candidate_limit))
 
         if not news:
             return f"No news found for {ticker}{resolved}"
@@ -104,28 +117,59 @@ def get_news_yfinance(
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
         end_dt = datetime.strptime(end_date, "%Y-%m-%d")
 
-        news_str = ""
-        filtered_count = 0
-
+        candidates = []
         for article in news:
             data = _extract_article_data(article)
+            if _in_news_window(data["pub_date"], start_dt, end_dt):
+                candidates.append(data)
 
-            # Keep only articles within the requested window (look-ahead safe).
-            if not _in_news_window(data["pub_date"], start_dt, end_dt):
+        if not candidates:
+            return f"No news found for {ticker}{resolved} between {start_date} and {end_date}"
+
+        relevant = []
+        seen_titles: set[str] = set()
+        for data in candidates:
+            classification = classify_yahoo_article(
+                data["title"], data["summary"], aliases
+            )
+            title_key = canonical_headline(data["title"])
+            if classification.tier == "drop" or not title_key or title_key in seen_titles:
                 continue
+            seen_titles.add(title_key)
+            relevant.append((data, classification.tier))
 
-            news_str += f"### {data['title']} (source: {data['publisher']})\n"
+        if not relevant:
+            return (
+                f"No relevant news found for {ticker}{resolved} between {start_date} "
+                f"and {end_date} after quality filtering "
+                f"({len(candidates)} in-window candidates dropped)"
+            )
+
+        kept = relevant[:article_limit]
+        direct_count = sum(tier == "direct" for _, tier in kept)
+        candidate_count = sum(tier == "candidate" for _, tier in kept)
+        context_count = sum(tier == "context" for _, tier in kept)
+        dropped_count = len(candidates) - len(relevant)
+        omitted_count = len(relevant) - len(kept)
+        news_str = ""
+        for data, tier in kept:
+            news_str += f"### [{tier}] {data['title']} (source: {data['publisher']})\n"
             if data["summary"]:
                 news_str += f"{data['summary']}\n"
             if data["link"]:
                 news_str += f"Link: {data['link']}\n"
             news_str += "\n"
-            filtered_count += 1
 
-        if filtered_count == 0:
-            return f"No news found for {ticker}{resolved} between {start_date} and {end_date}"
-
-        return f"## {ticker}{resolved} News, from {start_date} to {end_date}:\n\n{news_str}"
+        stats = (
+            f"Quality filter: candidates={len(candidates)}; relevant={len(relevant)}; "
+            f"kept={len(kept)} (direct={direct_count}, candidate={candidate_count}, "
+            f"context={context_count}); "
+            f"dropped={dropped_count}; omitted_by_limit={omitted_count}."
+        )
+        return (
+            f"## {ticker}{resolved} News, from {start_date} to {end_date}:\n\n"
+            f"{stats}\n\n{news_str}"
+        )
 
     except Exception as e:
         return f"Error fetching news for {ticker}: {str(e)}"

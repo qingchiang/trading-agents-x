@@ -448,6 +448,7 @@ class TestSentimentMarketGating:
                 news.func.side_effect = news_side_effect
             else:
                 news.func.return_value = "NEWS_DATA"
+            captured["news_mock"] = news
             state = {**_make_sentiment_state(), "company_of_interest": ticker}
             result = create_sentiment_analyst(_structured_sentiment_llm(captured))(state)
         return captured, st, rd, holdings, margin, shorts, ratings, result
@@ -460,6 +461,26 @@ class TestSentimentMarketGating:
         margin.assert_not_called()  # margin-balance signal is for routed markets only
         shorts.assert_not_called()  # short-position signal is for routed markets only
         ratings.assert_not_called()  # analyst-rating overlay is for routed markets only
+
+    def test_ticker_news_uses_14_days_while_social_stays_at_7(self):
+        captured, st, rd, *_ = self._run("NVDA")
+        captured["news_mock"].func.assert_called_once_with(
+            "NVDA", "2026-01-01", "2026-01-15"
+        )
+        st.assert_called_once_with(
+            "NVDA",
+            limit=30,
+            start_date="2026-01-08",
+            end_date="2026-01-15",
+        )
+        rd.assert_called_once_with(
+            "NVDA",
+            start_date="2026-01-08",
+            end_date="2026-01-15",
+        )
+        prompt_text = "".join(str(message) for message in captured["prompt"])
+        assert "requested window 2026-01-01 to 2026-01-15" in prompt_text
+        assert "(2026-01-08 to 2026-01-15)" in prompt_text
 
     def test_routed_market_skips_social_and_injects_per_name_signals(self):
         captured, st, rd, holdings, margin, shorts, ratings, _ = self._run(
@@ -481,6 +502,10 @@ class TestSentimentMarketGating:
         assert "ANALYST_RATINGS_DATA" in prompt_text
         assert "Routed ticker news" in prompt_text
         assert "News headlines — Yahoo Finance" not in prompt_text
+        assert "[direct]` has explicit ticker or full-name evidence" in prompt_text
+        assert "[candidate]` has an ambiguous ticker/name" in prompt_text
+        assert "ticker-endpoint provenance alone is not evidence" in prompt_text
+        assert "[context]` is" in prompt_text
 
     def test_historical_us_run_skips_live_social_fetchers(self):
         captured, st, rd, *_ = self._run("NVDA", live=False)
