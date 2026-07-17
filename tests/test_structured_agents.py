@@ -397,6 +397,41 @@ class TestSentimentAnalystAgent:
         create_sentiment_analyst(_structured_sentiment_llm(captured))(_make_sentiment_state())
         assert any("NVDA" in str(m) for m in captured["prompt"])
 
+    def test_chinese_language_contract_precedes_japanese_source_data(self):
+        set_config({"output_language": "Chinese"})
+        captured = {}
+        with mock.patch(f"{_SENTIMENT_MOD}.get_news") as news:
+            news.func.return_value = "日立製作所が適時開示を発表"
+            create_sentiment_analyst(_structured_sentiment_llm(captured))(
+                _make_sentiment_state()
+            )
+
+        prompt_text = "\n".join(str(message) for message in captured["prompt"])
+        contract_start = prompt_text.index("## Mandatory output-language contract")
+        source_start = prompt_text.index("<start_of_news>")
+        assert contract_start < source_start
+        assert "prose in the `narrative` field in Chinese" in prompt_text
+        assert "Do not imitate or switch to a source language" in prompt_text
+        assert "日立製作所が適時開示を発表" in prompt_text
+        assert "required English" in prompt_text
+        assert "enum values" in prompt_text
+        assert "entire response in Chinese" not in prompt_text
+
+    def test_english_language_contract_is_explicit(self):
+        set_config({"output_language": "English"})
+        captured = {}
+        create_sentiment_analyst(_structured_sentiment_llm(captured))(
+            _make_sentiment_state()
+        )
+
+        prompt_text = "\n".join(str(message) for message in captured["prompt"])
+        assert (
+            "Write all explanatory prose, including the narrative, in English."
+            in prompt_text
+        )
+        assert "prose in the `narrative` field in English" in prompt_text
+        assert "fixed report headings" in prompt_text
+
     def test_falls_back_to_freetext_when_structured_unavailable(self):
         config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
         plain = "**Overall Sentiment:** **Bearish** (Score: 3.0/10)\n**Confidence:** Low\n\nLimited data."

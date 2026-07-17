@@ -44,7 +44,7 @@ __all__ = [
     "create_msg_delete",
 ]
 
-def get_language_instruction() -> str:
+def get_language_instruction(response_scope: str = "your entire response") -> str:
     """Return a prompt instruction for the configured output language.
 
     Returns empty string when English (default), so no extra tokens are used.
@@ -57,7 +57,7 @@ def get_language_instruction() -> str:
     lang = get_config().get("output_language", "English")
     if lang.strip().lower() == "english":
         return ""
-    return f" Write your entire response in {lang}."
+    return f" Write {response_scope} in {lang}."
 
 
 def build_instrument_context(
@@ -153,5 +153,4 @@ def create_msg_delete():
         return {"messages": removal_operations + [placeholder]}
 
     return delete_messages
-
 

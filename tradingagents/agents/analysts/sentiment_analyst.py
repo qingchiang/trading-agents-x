@@ -164,6 +164,7 @@ def create_sentiment_analyst(llm):
             news_start_date=news_start_date,
             social_start_date=social_start_date,
             end_date=end_date,
+            output_language=config["output_language"],
             news_block=news_block,
             stocktwits_block=stocktwits_block,
             reddit_block=reddit_block,
@@ -394,6 +395,7 @@ def _build_system_message(
     news_start_date: str,
     social_start_date: str,
     end_date: str,
+    output_language: str,
     news_block: str,
     stocktwits_block: str,
     reddit_block: str,
@@ -411,7 +413,33 @@ def _build_system_message(
         _optional_section(title, intro, tag, optional_blocks.get(tag, ""))
         for title, intro, tag in _OPTIONAL_SECTIONS
     )
+    # Unlike tool-calling analysts, Sentiment receives a large body of source
+    # text in its initial prompt. Native-language JP disclosures can therefore
+    # overpower a short language reminder placed after the data. Put an
+    # explicit contract before every source block, including for English (for
+    # which the shared helper intentionally returns an empty string).
+    language_instruction = get_language_instruction(
+        "all explanatory prose, including the narrative"
+    ).strip()
+    if not language_instruction:
+        language_instruction = (
+            f"Write all explanatory prose, including the narrative, "
+            f"in {output_language}."
+        )
     return f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} ending on {end_date}, drawing on the complementary data sources and source-specific windows that have already been collected for you.
+
+## Mandatory output-language contract
+
+{language_instruction}
+Write all explanatory prose in the `narrative` field in {output_language},
+regardless of the language used by EDINET, TDnet, news media, or any other
+source material. Do not imitate or switch to a source language. Translate or
+summarize foreign-language evidence into {output_language}, retaining only
+proper names, tickers, source names, and necessary original-language terms.
+Keep the structured field names, fixed report headings, and required English
+enum values (such as Bullish / Bearish and low / medium / high) unchanged. The
+same rules apply if structured output is unavailable and you must return a
+free-text report.
 
 ## Data sources (pre-fetched, in this prompt)
 
@@ -473,8 +501,7 @@ Fill the following fields:
 - **overall_score**: A number from 0 (maximally bearish) to 10 (maximally bullish); 5 is neutral. Keep it consistent with overall_band.
 - **confidence**: low / medium / high, based on data quality and sample size.
 - **narrative**: Full source-by-source breakdown, divergences, dominant narrative themes, catalysts and risks, and a markdown summary table of key sentiment signals (direction, source, supporting evidence).
-
-{get_language_instruction()}"""
+"""
 
 
 # ---------------------------------------------------------------------------
