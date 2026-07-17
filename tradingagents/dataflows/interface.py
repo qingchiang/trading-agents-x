@@ -436,13 +436,16 @@ def route_to_vendor(method: str, *args, _provenance: bool = False, **kwargs):
 
         try:
             result = impl_func(*args, **kwargs)
-            result = _append_availability_notes(result, availability_notes)
             if _provenance and isinstance(result, str) and not extract_provenance(result):
                 record = _provenance_for_route(
                     method, vendor, args, config, result
                 )
                 if record is not None:
                     result = attach_provenance(result, record)
+            # Availability notes describe failed earlier legs, not items returned
+            # by this successful vendor. Append them only after provenance has
+            # counted/classified the vendor's original result.
+            result = _append_availability_notes(result, availability_notes)
             return result
         except VendorRateLimitError:
             logger.warning("Vendor %r rate-limited for %s; trying next vendor.", vendor, method)
