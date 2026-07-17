@@ -30,10 +30,12 @@ Basis conventions (labelled in the output so nothing is silently cross-compared)
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pandas as pd
 from dateutil.relativedelta import relativedelta
+
+from tradingagents.provenance import ProvenanceRecord, attach_provenance
 
 from ..lookahead import is_live
 from ..y_finance import get_analyst_forward
@@ -228,10 +230,22 @@ def _analyst_forward_line(
             f"; company guidance {company_growth * 100:+.1f}% vs "
             f"analyst {analyst_growth * 100:+.1f}% ({agree})"
         )
-    return (
+    retrieved = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    line = (
         f"- Forward PE: {_ratio(fwd_pe)} (analyst consensus, live only; requested "
-        f"{curr_date}, retrieved {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}{count}, "
+        f"{curr_date}, retrieved {retrieved}{count}, "
         f"not point-in-time historical data, EPS {_ratio(eps)}){note}"
+    )
+    return attach_provenance(
+        line,
+        ProvenanceRecord(
+            evidence="get_fundamentals",
+            source="yfinance analyst consensus",
+            requested=curr_date,
+            effective="retrieval-time analyst snapshot",
+            timing="live non-point-in-time",
+            retrieved_at=retrieved,
+        ),
     )
 
 
@@ -363,7 +377,19 @@ def _valuation_block(ticker: str, curr_date: str) -> str:
         f"- 52-week range: {_ratio(wk_low)} – {_ratio(wk_high)}"
         f"    Beta (vs {_MARKET_INDEX}, 3yr weekly): {_ratio(beta)}",
     ]
-    return "\n".join(line for line in lines if line is not None)
+    result = "\n".join(line for line in lines if line is not None)
+    if price_date:
+        result = attach_provenance(
+            result,
+            ProvenanceRecord(
+                evidence="get_fundamentals",
+                source="J-Quants adjusted OHLCV",
+                requested=curr_date,
+                effective=price_date,
+                timing="market-date filtered",
+            ),
+        )
+    return result
 
 
 def get_fundamentals(ticker: str, curr_date: str | None = None) -> str:
@@ -378,7 +404,25 @@ def get_fundamentals(ticker: str, curr_date: str | None = None) -> str:
     base = jqf.get_fundamentals(ticker, curr_date)
     as_of = curr_date or datetime.now().strftime("%Y-%m-%d")
     try:
-        return base + _valuation_block(ticker, as_of)
+        result = base + _valuation_block(ticker, as_of)
     except Exception as exc:  # never let ratio math break the official overview
         logger.warning("JP fundamentals: valuation block failed for %s: %s", ticker, exc)
-        return base + "\n\n## Valuation (computed)\n(unavailable: ratio computation failed)"
+        result = base + "\n\n## Valuation (computed)\n(unavailable: ratio computation failed)"
+    return attach_provenance(
+        result,
+        ProvenanceRecord(
+            evidence="get_fundamentals",
+            source="J-Quants official summary",
+            requested=curr_date or "live retrieval",
+            effective=(
+                f"disclosures <= {curr_date}"
+                if curr_date
+                else "latest disclosure at retrieval"
+            ),
+            timing=(
+                "disclosure-date filtered"
+                if curr_date
+                else "live retrieval; no historical cutoff supplied"
+            ),
+        ),
+    )

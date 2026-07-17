@@ -51,4 +51,10 @@ def get_macro_indicators_for_analysis(
     ] = None,
 ) -> str:
     """Retrieve a macro series ending on the immutable analysis date."""
-    return route_to_vendor("get_macro_indicators", indicator, curr_date, look_back_days)
+    return route_to_vendor(
+        "get_macro_indicators",
+        indicator,
+        curr_date,
+        look_back_days,
+        _provenance=True,
+    )

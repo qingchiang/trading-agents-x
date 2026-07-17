@@ -60,23 +60,26 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
     """
     code = to_jquants_code(ticker)
     limit = get_config()["news_article_limit"]
+    dates = list(iter_window_dates(start_date, end_date))
+    scanned_start = dates[0] if dates else start_date
 
     # EDINET carries the 5-digit securities code (``99840``); reduce it to the
     # 4-digit base so it compares equal to the ticker's J-Quants code (``9984``).
     matches = [
         record
-        for date_str in iter_window_dates(start_date, end_date)
+        for date_str in dates
         for record in documents_on(date_str)
         if tokyo_securities_base(record.get("secCode")) == code
     ]
 
     if not matches:
         return (
-            f"No EDINET disclosures found for {ticker} between {start_date} and {end_date}"
+            f"No EDINET disclosures found for {ticker} between {scanned_start} and "
+            f"{end_date}"
         )
 
     # Most recent first, capped like the other news vendors.
     items = render_filings(matches, _format_filing, limit)
     return (
-        f"## {ticker} EDINET disclosures, from {start_date} to {end_date}:\n\n{items}"
+        f"## {ticker} EDINET disclosures, from {scanned_start} to {end_date}:\n\n{items}"
     )

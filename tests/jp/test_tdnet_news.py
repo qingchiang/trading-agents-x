@@ -1,6 +1,6 @@
 """TDnet timely-disclosure (適時開示) vendor, via the keyless code/date search."""
 import unittest
-from datetime import datetime
+from datetime import date, datetime
 from unittest import mock
 from urllib.parse import parse_qs
 
@@ -112,6 +112,7 @@ class ParseRowsTests(unittest.TestCase):
 class GetNewsTests(unittest.TestCase):
     def setUp(self):
         mock.patch.object(td, "get_config", return_value={"news_article_limit": 10}).start()
+        mock.patch.object(td, "tokyo_today", return_value=date(2026, 7, 12)).start()
 
     def tearDown(self):
         mock.patch.stopall()
@@ -170,6 +171,17 @@ class GetNewsTests(unittest.TestCase):
     def test_malformed_input_dates_returns_no_disclosures_line(self):
         out = self._run(_page(_row()), start="bad", end="date")
         self.assertIn("No TDnet disclosures found", out)
+
+    def test_historical_window_outside_free_archive_is_unavailable(self):
+        with mock.patch.object(td, "_search") as search:
+            out = td.get_news("7203.T", "2026-05-01", "2026-05-31")
+        search.assert_not_called()
+        self.assertIn("<TDnet unavailable:", out)
+
+    def test_requested_window_is_clamped_to_31_calendar_dates(self):
+        with mock.patch.object(td, "_search", return_value=_page()) as search:
+            td.get_news("7203.T", "2026-01-01", "2026-07-12")
+        search.assert_called_once_with("7203", "20260612", "20260712", 10.0)
 
     def test_warns_when_result_count_exceeds_parsed_rows(self):
         # TDnet reports more matches than the page yielded (possible pagination):

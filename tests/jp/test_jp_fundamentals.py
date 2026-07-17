@@ -9,6 +9,7 @@ import pytest
 import requests
 
 from tradingagents.dataflows.jp import jp_fundamentals
+from tradingagents.provenance import extract_provenance
 
 
 def _price_df(close, high, low, date="2026-06-26"):
@@ -231,6 +232,21 @@ class JPFundamentalsTests(unittest.TestCase):
         self.assertIn("Net margin: 6.68% (TTM)", out)   # price-free ratio still computed
         self.assertIn("ROE: 10.76%", out)
         self.assertIn("Beta (vs TOPIX, 3yr weekly): N/A", out)   # no price frame → no beta
+        sources = {record.source for record in extract_provenance(out)}
+        self.assertIn("J-Quants official summary", sources)
+        self.assertNotIn("J-Quants adjusted OHLCV", sources)
+
+    def test_price_provenance_is_only_emitted_for_an_effective_price(self):
+        out = self._run([_FY], _price_df(3567.0, 5208.0, 3171.0))
+        records = {record.source: record for record in extract_provenance(out)}
+        self.assertEqual(
+            records["J-Quants adjusted OHLCV"].effective,
+            "2026-06-26",
+        )
+        self.assertEqual(
+            records["J-Quants official summary"].effective,
+            "disclosures <= 2026-06-26",
+        )
 
     def test_look_ahead_date_is_propagated_to_both_sources(self):
         # Date-safety is the module's whole point: curr_date must reach BOTH the

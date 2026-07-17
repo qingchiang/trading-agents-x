@@ -46,6 +46,12 @@ class TestLanguageInstruction:
         assert "中文" in out
         assert "entire response" in out
 
+    def test_custom_scope_limits_directive(self):
+        from tradingagents.dataflows.config import set_config
+        set_config({"output_language": "Chinese"})
+        out = get_language_instruction("all explanatory prose")
+        assert out == " Write all explanatory prose in Chinese."
+
 
 @pytest.mark.unit
 @pytest.mark.parametrize("rel", REPORT_AGENTS)
@@ -53,7 +59,7 @@ def test_report_agent_applies_language_instruction(rel):
     path = _AGENTS_DIR / rel
     assert path.exists(), f"missing agent module: {rel}"
     src = path.read_text(encoding="utf-8")
-    assert "get_language_instruction()" in src, (
+    assert "get_language_instruction(" in src, (
         f"{rel} does not apply get_language_instruction(); its output would "
         f"ignore the configured output_language (#740/#801)."
     )

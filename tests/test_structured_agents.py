@@ -397,21 +397,62 @@ class TestSentimentAnalystAgent:
         create_sentiment_analyst(_structured_sentiment_llm(captured))(_make_sentiment_state())
         assert any("NVDA" in str(m) for m in captured["prompt"])
 
+    def test_chinese_language_contract_precedes_japanese_source_data(self):
+        set_config({"output_language": "Chinese"})
+        captured = {}
+        with mock.patch(f"{_SENTIMENT_MOD}.get_news") as news:
+            news.func.return_value = "日立製作所が適時開示を発表"
+            create_sentiment_analyst(_structured_sentiment_llm(captured))(
+                _make_sentiment_state()
+            )
+
+        prompt_text = "\n".join(str(message) for message in captured["prompt"])
+        contract_start = prompt_text.index("## Mandatory output-language contract")
+        source_start = prompt_text.index("<start_of_news>")
+        assert contract_start < source_start
+        assert "prose in the `narrative` field in Chinese" in prompt_text
+        assert "Do not imitate or switch to a source language" in prompt_text
+        assert "日立製作所が適時開示を発表" in prompt_text
+        assert "required English" in prompt_text
+        assert "enum values" in prompt_text
+        assert "entire response in Chinese" not in prompt_text
+
+    def test_english_language_contract_is_explicit(self):
+        set_config({"output_language": "English"})
+        captured = {}
+        create_sentiment_analyst(_structured_sentiment_llm(captured))(
+            _make_sentiment_state()
+        )
+
+        prompt_text = "\n".join(str(message) for message in captured["prompt"])
+        assert (
+            "Write all explanatory prose, including the narrative, in English."
+            in prompt_text
+        )
+        assert "prose in the `narrative` field in English" in prompt_text
+        assert "fixed report headings" in prompt_text
+
     def test_falls_back_to_freetext_when_structured_unavailable(self):
+        config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
         plain = "**Overall Sentiment:** **Bearish** (Score: 3.0/10)\n**Confidence:** Low\n\nLimited data."
         llm = MagicMock()
         llm.with_structured_output.side_effect = NotImplementedError("provider unsupported")
         llm.invoke.return_value = MagicMock(content=plain)
-        assert create_sentiment_analyst(llm)(_make_sentiment_state())["sentiment_report"] == plain
+        result = create_sentiment_analyst(llm)(_make_sentiment_state())["sentiment_report"]
+        assert result.startswith(plain)
+        assert "## Data provenance" not in result
 
     def test_falls_back_to_freetext_when_structured_call_fails(self):
+        config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
         plain = "Fallback free-text sentiment."
         structured = MagicMock()
         structured.invoke.side_effect = ValueError("bad JSON from model")
         llm = MagicMock()
         llm.with_structured_output.return_value = structured
         llm.invoke.return_value = MagicMock(content=plain)
-        assert create_sentiment_analyst(llm)(_make_sentiment_state())["sentiment_report"] == plain
+        result = create_sentiment_analyst(llm)(_make_sentiment_state())["sentiment_report"]
+        assert result.startswith(plain)
+        assert "## Data provenance" not in result
 
 
 _SENTIMENT_MOD = "tradingagents.agents.analysts.sentiment_analyst"
@@ -425,9 +466,18 @@ class TestSentimentMarketGating:
     def teardown_method(self):
         config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
 
-    def _run(self, ticker, routes=None, news_side_effect=None, live=True):
+    def _run(
+        self,
+        ticker,
+        routes=None,
+        news_side_effect=None,
+        live=True,
+        holdings_value="LARGE_HOLDINGS_DATA",
+        llm=None,
+    ):
         captured = {}
         config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        set_config({"provenance_appendix": True})
         if routes:
             set_config({"data_vendors_by_market": routes})
         with mock.patch(f"{_SENTIMENT_MOD}.fetch_stocktwits_messages") as st, \
@@ -440,7 +490,7 @@ class TestSentimentMarketGating:
                 mock.patch(f"{_SENTIMENT_MOD}.is_live", return_value=live):
             st.return_value = "STOCKTWITS_DATA"
             rd.return_value = "REDDIT_DATA"
-            holdings.return_value = "LARGE_HOLDINGS_DATA"
+            holdings.return_value = holdings_value
             margin.return_value = "MARGIN_BALANCE_DATA"
             shorts.return_value = "SHORT_POSITION_DATA"
             ratings.return_value = "ANALYST_RATINGS_DATA"
@@ -450,7 +500,9 @@ class TestSentimentMarketGating:
                 news.func.return_value = "NEWS_DATA"
             captured["news_mock"] = news
             state = {**_make_sentiment_state(), "company_of_interest": ticker}
-            result = create_sentiment_analyst(_structured_sentiment_llm(captured))(state)
+            result = create_sentiment_analyst(
+                llm or _structured_sentiment_llm(captured)
+            )(state)
         return captured, st, rd, holdings, margin, shorts, ratings, result
 
     def test_us_ticker_calls_social_fetchers(self):
@@ -483,7 +535,7 @@ class TestSentimentMarketGating:
         assert "(2026-01-08 to 2026-01-15)" in prompt_text
 
     def test_routed_market_skips_social_and_injects_per_name_signals(self):
-        captured, st, rd, holdings, margin, shorts, ratings, _ = self._run(
+        captured, st, rd, holdings, margin, shorts, ratings, result = self._run(
             "9984.T", routes={".T": {"news_data": "edinet_news"}}
         )
         st.assert_not_called()
@@ -506,12 +558,81 @@ class TestSentimentMarketGating:
         assert "[candidate]` has an ambiguous ticker/name" in prompt_text
         assert "ticker-endpoint provenance alone is not evidence" in prompt_text
         assert "[context]` is" in prompt_text
+        report = result["sentiment_report"]
+        assert "## Data provenance" in report
+        assert "| ownership and control filings | EDINET |" in report
+        assert "| margin balances | J-Quants |" in report
+        assert "| large short positions | J-Quants |" in report
+        assert "| analyst consensus | yfinance |" in report
+        assert "market context only" not in report
+
+    def test_missing_edinet_identity_is_reported_as_not_queried(self):
+        *_rest, result = self._run(
+            "9984.T",
+            routes={".T": {"news_data": "edinet_news"}},
+            holdings_value=(
+                "<no EDINET code on file for 9984.T; "
+                "large-shareholding lookup skipped>"
+            ),
+        )
+        report = result["sentiment_report"]
+        row = next(
+            line
+            for line in report.splitlines()
+            if "| ownership and control filings |" in line
+        )
+        assert "| — | not queried; identifier unavailable |" in row
+
+    def test_non_tokyo_routed_market_does_not_claim_jp_sources(self):
+        _captured, _st, _rd, holdings, margin, shorts, ratings, result = self._run(
+            "0700.HK",
+            routes={".HK": {"news_data": "yfinance"}},
+        )
+        holdings.assert_not_called()
+        margin.assert_not_called()
+        shorts.assert_not_called()
+        ratings.assert_not_called()
+        report = result["sentiment_report"]
+        assert "| EDINET |" not in report
+        assert "| J-Quants |" not in report
+        assert "| analyst consensus | yfinance |" not in report
 
     def test_historical_us_run_skips_live_social_fetchers(self):
-        captured, st, rd, *_ = self._run("NVDA", live=False)
+        captured, st, rd, *_rest, result = self._run("NVDA", live=False)
         st.assert_not_called()
         rd.assert_not_called()
         assert "live-only source unavailable for historical trade_date" in str(captured)
+        assert result["sentiment_report"].count(
+            "unavailable for historical date; vendor not queried"
+        ) == 2
+
+    def test_social_retrieval_times_are_captured_before_llm_completion(self):
+        clock = MagicMock()
+        first = MagicMock()
+        first.isoformat.return_value = "2026-01-15T01:00:00+00:00"
+        second = MagicMock()
+        second.isoformat.return_value = "2026-01-15T01:00:01+00:00"
+        clock.now.side_effect = [first, second]
+
+        structured = MagicMock()
+
+        def invoke(_prompt):
+            assert clock.now.call_count == 2
+            return SentimentReport(
+                overall_band=SentimentBand.NEUTRAL,
+                overall_score=5.0,
+                confidence="medium",
+                narrative="Mixed.",
+            )
+
+        structured.invoke.side_effect = invoke
+        llm = MagicMock()
+        llm.with_structured_output.return_value = structured
+        with mock.patch(f"{_SENTIMENT_MOD}.datetime", clock):
+            *_rest, result = self._run("NVDA", llm=llm)
+        report = result["sentiment_report"]
+        assert "retrieved 2026-01-15T01:00:00+00:00" in report
+        assert "retrieved 2026-01-15T01:00:01+00:00" in report
 
     def test_news_fetch_error_degrades_instead_of_crashing(self):
         captured, *_rest, result = self._run(

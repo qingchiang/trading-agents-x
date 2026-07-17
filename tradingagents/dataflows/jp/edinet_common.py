@@ -6,22 +6,30 @@ header (env ``EDINET_API_KEY``). The document-list endpoint is **date-keyed only
 — ``documents.json?date=YYYY-MM-DD&type=2`` returns every filing submitted that
 day — so per-company queries iterate dates and filter by securities code.
 
-This module backs :mod:`edinet_news` (per-ticker disclosure feed) today; the
-same auth/request layer is intended to back full XBRL statement parsing later
-(the deferred ``/fins/details`` alternative).
+This module backs both :mod:`edinet_news` and :mod:`edinet_holdings`. Their
+all-market per-date lists share a bounded memory LRU and a cross-run gzip disk
+cache; the same auth/request layer may back full XBRL parsing later.
 """
 
 from __future__ import annotations
 
+import contextlib
+import gzip
+import json
 import logging
 import os
+import tempfile
+import threading
+import time
+from collections import OrderedDict
 from collections.abc import Iterator
 from datetime import datetime, timedelta
 
 import requests
 
+from ..config import get_config
 from ..errors import VendorNotConfiguredError, VendorRateLimitError
-from ..utils import get_current_date
+from .calendar import tokyo_today
 
 logger = logging.getLogger(__name__)
 
@@ -30,10 +38,16 @@ EDINET_API_BASE = "https://api.edinet-fsa.go.jp/api/v2"
 # Network timeout (seconds) so a stalled request can't hang the CLI/agents.
 REQUEST_TIMEOUT = 30
 
-# Guard against an unbounded window blowing up into one request per day. EDINET's
-# document list is date-keyed (no company search), so a window query iterates each
-# calendar date; cap the span so a pathological range can't hammer the API.
-MAX_WINDOW_DAYS = 92
+# Guard against an unbounded window blowing up into one request per day. This is
+# an inclusive count: [end - 89 days, end] contains exactly 90 calendar dates.
+MAX_WINDOW_CALENDAR_DAYS = 90
+
+_CACHE_SCHEMA = "edinet-documents/v2"
+_MEMORY_MAX_DATES = 180
+_DISK_MAX_FILES = 400
+_LIVE_MEMORY_TTL_SECONDS = 60.0
+_PRUNE_EVERY_WRITES = 25
+_TMP_ORPHAN_SECONDS = 3600.0
 
 
 class EDINETNotConfiguredError(VendorNotConfiguredError):
@@ -86,46 +100,204 @@ def fetch_documents(date_str: str) -> list[dict]:
     return body.get("results") or []
 
 
-# Process-local cache of EDINET's per-date document list, keyed by "YYYY-MM-DD".
-# EDINET has no per-company search, so every feature that reads filings (per-ticker
-# news, large-shareholding signal) iterates the same dates; a multi-source ``.T``
-# run would otherwise re-fetch each overlapping date once per consumer. Shared here
-# so they all hit a given date at most once. Tests clear it between cases.
-_documents_cache: dict[str, list[dict]] = {}
+# Process-local LRU. Values are ``(records, monotonic_expiry)``; settled dates use
+# ``None`` expiry while today/future gets a short TTL and is never written to disk.
+# The public-ish name is retained because existing tests clear it between cases.
+_documents_cache: OrderedDict[str, tuple[list[dict], float | None]] = OrderedDict()
+_memory_lock = threading.Lock()
+
+# Fixed lock stripes give same-date calls single-flight semantics without an
+# unbounded date->Lock map. Hash collisions merely serialize two unrelated days.
+_date_locks = tuple(threading.Lock() for _ in range(64))
+
+_disk_state_lock = threading.Lock()
+_pruned_dirs: set[str] = set()
+_writes_by_dir: dict[str, int] = {}
+
+
+def _canonical_date(date_str: str) -> str:
+    """Validate a date before using it as an API parameter or path component."""
+    return datetime.strptime(date_str, "%Y-%m-%d").strftime("%Y-%m-%d")
+
+
+def _is_settled(date_str: str) -> bool:
+    return datetime.strptime(date_str, "%Y-%m-%d").date() < tokyo_today()
+
+
+def _memory_get(date_str: str) -> list[dict] | None:
+    with _memory_lock:
+        entry = _documents_cache.get(date_str)
+        if entry is None:
+            return None
+        records, expiry = entry
+        if expiry is not None and time.monotonic() >= expiry:
+            del _documents_cache[date_str]
+            return None
+        _documents_cache.move_to_end(date_str)
+        return records
+
+
+def _memory_put(date_str: str, records: list[dict], *, settled: bool) -> None:
+    expiry = None if settled else time.monotonic() + _LIVE_MEMORY_TTL_SECONDS
+    with _memory_lock:
+        _documents_cache[date_str] = (records, expiry)
+        _documents_cache.move_to_end(date_str)
+        while len(_documents_cache) > _MEMORY_MAX_DATES:
+            _documents_cache.popitem(last=False)
+
+
+def _disk_dir() -> str:
+    return os.path.join(
+        get_config()["data_cache_dir"], "edinet", "documents", "v2"
+    )
+
+
+def _disk_file(date_str: str) -> str:
+    return os.path.join(_disk_dir(), f"{date_str}.json.gz")
+
+
+def _remove(path: str) -> None:
+    with contextlib.suppress(OSError):
+        os.remove(path)
+
+
+def _disk_get(date_str: str) -> list[dict] | None:
+    """Read a settled date from disk; corruption is a safe cache miss."""
+    if not _is_settled(date_str):
+        return None
+    path = _disk_file(date_str)
+    try:
+        with gzip.open(path, "rt", encoding="utf-8") as fh:
+            payload = json.load(fh)
+        if not (
+            isinstance(payload, dict)
+            and payload.get("schema") == _CACHE_SCHEMA
+            and payload.get("date") == date_str
+            and isinstance(payload.get("records"), list)
+        ):
+            raise ValueError("invalid EDINET document cache envelope")
+        # Disk LRU: a hit should make the file recent, but a read-only cache must
+        # still remain usable even if touching its mtime is denied.
+        with contextlib.suppress(OSError):
+            os.utime(path, None)
+        return payload["records"]
+    except FileNotFoundError:
+        return None
+    except (EOFError, OSError, TypeError, ValueError) as exc:
+        logger.warning("EDINET document cache unreadable for %s: %s", date_str, exc)
+        _remove(path)
+        return None
+
+
+def _disk_put(date_str: str, records: list[dict]) -> None:
+    """Persist one settled public document list atomically, best-effort."""
+    if not _is_settled(date_str):
+        return
+    disk_dir = _disk_dir()
+    path = _disk_file(date_str)
+    tmp = ""
+    try:
+        os.makedirs(disk_dir, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=disk_dir, suffix=".tmp")
+        os.close(fd)
+        with gzip.open(tmp, "wt", encoding="utf-8") as fh:
+            json.dump(
+                {"schema": _CACHE_SCHEMA, "date": date_str, "records": records},
+                fh,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        os.replace(tmp, path)
+    except (OSError, TypeError, ValueError) as exc:
+        logger.debug("EDINET document cache write skipped for %s: %s", date_str, exc)
+        if tmp:
+            _remove(tmp)
+        return
+
+    with _disk_state_lock:
+        writes = _writes_by_dir.get(disk_dir, 0) + 1
+        should_prune = disk_dir not in _pruned_dirs or writes >= _PRUNE_EVERY_WRITES
+        _writes_by_dir[disk_dir] = 0 if should_prune else writes
+        if should_prune:
+            _pruned_dirs.add(disk_dir)
+    if should_prune:
+        _prune_disk(disk_dir)
+
+
+def _prune_disk(disk_dir: str) -> None:
+    """Bound persisted dates and reclaim abandoned atomic-write temp files."""
+    try:
+        names = os.listdir(disk_dir)
+    except OSError:
+        return
+    cache_files = [
+        os.path.join(disk_dir, name) for name in names if name.endswith(".json.gz")
+    ]
+    if len(cache_files) > _DISK_MAX_FILES:
+        with contextlib.suppress(OSError):
+            cache_files.sort(key=os.path.getmtime)
+            for path in cache_files[: len(cache_files) - _DISK_MAX_FILES]:
+                _remove(path)
+    cutoff = time.time() - _TMP_ORPHAN_SECONDS
+    for name in names:
+        if not name.endswith(".tmp"):
+            continue
+        path = os.path.join(disk_dir, name)
+        with contextlib.suppress(OSError):
+            if os.path.getmtime(path) < cutoff:
+                _remove(path)
 
 
 def documents_on(date_str: str) -> list[dict]:
-    """Return EDINET filings for ``date_str``, memoizing settled past dates.
+    """Return a date's filings via memory, disk, then one single-flight fetch.
 
-    A past date's filings are immutable, so caching them is safe. We do NOT cache
-    today (or any not-yet-past date): filings keep arriving through the day, so a
-    cached early-morning snapshot would mask same-day disclosures for the rest of a
-    long-running process. The "is this date settled?" rule is the cache's own
-    concern, so the clock is read here rather than threaded through every caller.
+    Settled dates persist across runs. Today's still-changing list is memory-only
+    for 60 seconds, enough for News/Sentiment reuse without pinning an early-day
+    snapshot. Cache failures always degrade to the vendor request.
     """
-    cached = _documents_cache.get(date_str)
+    date_str = _canonical_date(date_str)
+    cached = _memory_get(date_str)
     if cached is not None:
         return cached
-    records = fetch_documents(date_str)
-    if date_str < get_current_date():
-        _documents_cache[date_str] = records
-    return records
+
+    lock = _date_locks[hash(date_str) % len(_date_locks)]
+    with lock:
+        # Another analyst may have completed while this caller waited.
+        cached = _memory_get(date_str)
+        if cached is not None:
+            return cached
+        settled = _is_settled(date_str)
+        if settled:
+            cached = _disk_get(date_str)
+            if cached is not None:
+                _memory_put(date_str, cached, settled=True)
+                return cached
+        records = fetch_documents(date_str)
+        _memory_put(date_str, records, settled=settled)
+        if settled:
+            _disk_put(date_str, records)
+        return records
 
 
 def iter_window_dates(start_date: str, end_date: str) -> Iterator[str]:
     """Yield each ``YYYY-MM-DD`` from start to end inclusive (capped, oldest first).
 
-    The span is clamped to the most recent :data:`MAX_WINDOW_DAYS` so an oversized
-    range degrades to a bounded number of requests rather than thousands.
+    The span is clamped to the most recent
+    :data:`MAX_WINDOW_CALENDAR_DAYS` inclusive dates so an oversized range
+    degrades to a bounded number of requests rather than thousands.
     """
     start = datetime.strptime(start_date, "%Y-%m-%d")
     end = datetime.strptime(end_date, "%Y-%m-%d")
-    if (end - start).days > MAX_WINDOW_DAYS:
+    max_offset = MAX_WINDOW_CALENDAR_DAYS - 1
+    if (end - start).days > max_offset:
         logger.warning(
-            "EDINET window %s..%s exceeds %d days; querying only the last %d.",
-            start_date, end_date, MAX_WINDOW_DAYS, MAX_WINDOW_DAYS,
+            "EDINET window %s..%s exceeds %d calendar dates; querying only the last %d.",
+            start_date,
+            end_date,
+            MAX_WINDOW_CALENDAR_DAYS,
+            MAX_WINDOW_CALENDAR_DAYS,
         )
-        start = end - timedelta(days=MAX_WINDOW_DAYS)
+        start = end - timedelta(days=max_offset)
     day = start
     while day <= end:
         yield day.strftime("%Y-%m-%d")

@@ -11,6 +11,8 @@ def _get_indicators(
     indicator: str,
     curr_date: str,
     look_back_days: int,
+    *,
+    provenance: bool = False,
 ) -> str:
     """Route one or more comma-separated indicators with one trusted date."""
     indicators = [i.strip().lower() for i in indicator.split(",") if i.strip()]
@@ -19,7 +21,12 @@ def _get_indicators(
         try:
             results.append(
                 route_to_vendor(
-                    "get_indicators", symbol, ind, curr_date, look_back_days
+                    "get_indicators",
+                    symbol,
+                    ind,
+                    curr_date,
+                    look_back_days,
+                    _provenance=provenance,
                 )
             )
         except ValueError as exc:
@@ -56,4 +63,6 @@ def get_indicators_for_analysis(
     look_back_days: Annotated[int, "how many days to look back"] = 30,
 ) -> str:
     """Retrieve indicators using the workflow's immutable analysis date."""
-    return _get_indicators(symbol, indicator, curr_date, look_back_days)
+    return _get_indicators(
+        symbol, indicator, curr_date, look_back_days, provenance=True
+    )

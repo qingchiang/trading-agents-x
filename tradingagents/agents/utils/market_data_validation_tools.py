@@ -36,5 +36,9 @@ def get_verified_market_snapshot_for_analysis(
 ) -> str:
     """Build a verified snapshot at the workflow's immutable analysis date."""
     return route_to_vendor(
-        "get_verified_market_snapshot", symbol, curr_date, look_back_days
+        "get_verified_market_snapshot",
+        symbol,
+        curr_date,
+        look_back_days,
+        _provenance=True,
     )

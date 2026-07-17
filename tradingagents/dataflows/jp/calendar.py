@@ -16,9 +16,22 @@ place a publication date safely for the look-ahead guards.
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import jpholiday
+
+_TOKYO = ZoneInfo("Asia/Tokyo")
+
+
+def tokyo_today(now: datetime | None = None) -> date:
+    """Return the current Tokyo calendar date, independent of host timezone."""
+    current = now or datetime.now(_TOKYO)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=_TOKYO)
+    else:
+        current = current.astimezone(_TOKYO)
+    return current.date()
 
 
 def is_tse_open(d: date) -> bool:

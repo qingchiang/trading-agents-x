@@ -26,6 +26,7 @@ def test_no_env_uses_built_in_defaults(monkeypatch):
     assert dc.DEFAULT_CONFIG["backend_url"] is None
     assert dc.DEFAULT_CONFIG["max_debate_rounds"] == 1
     assert dc.DEFAULT_CONFIG["checkpoint_enabled"] is False
+    assert dc.DEFAULT_CONFIG["provenance_appendix"] is False
 
 
 def test_string_overrides(monkeypatch):
@@ -69,8 +70,13 @@ def test_int_coercion(monkeypatch):
     ],
 )
 def test_bool_coercion(monkeypatch, raw, expected):
-    dc = _reload_with_env(monkeypatch, TRADINGAGENTS_CHECKPOINT_ENABLED=raw)
+    dc = _reload_with_env(
+        monkeypatch,
+        TRADINGAGENTS_CHECKPOINT_ENABLED=raw,
+        TRADINGAGENTS_PROVENANCE_APPENDIX=raw,
+    )
     assert dc.DEFAULT_CONFIG["checkpoint_enabled"] is expected
+    assert dc.DEFAULT_CONFIG["provenance_appendix"] is expected
 
 
 def test_reasoning_thinking_overrides(monkeypatch):
@@ -128,6 +134,14 @@ def test_invalid_bool_raises(monkeypatch, bad):
     with pytest.raises(ValueError, match="TRADINGAGENTS_CHECKPOINT_ENABLED"):
         importlib.reload(default_config_module)
     monkeypatch.delenv("TRADINGAGENTS_CHECKPOINT_ENABLED", raising=False)
+    importlib.reload(default_config_module)
+
+
+def test_invalid_provenance_bool_raises(monkeypatch):
+    monkeypatch.setenv("TRADINGAGENTS_PROVENANCE_APPENDIX", "sometimes")
+    with pytest.raises(ValueError, match="TRADINGAGENTS_PROVENANCE_APPENDIX"):
+        importlib.reload(default_config_module)
+    monkeypatch.delenv("TRADINGAGENTS_PROVENANCE_APPENDIX", raising=False)
     importlib.reload(default_config_module)
 
 

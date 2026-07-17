@@ -46,10 +46,10 @@ from .market import is_tokyo_ticker
 
 logger = logging.getLogger(__name__)
 
-# How far back to scan for large-holding filings. They are infrequent per name, so
-# the window is wider than the news block's; it is still capped by edinet_common's
-# MAX_WINDOW_DAYS. Each calendar day is one (cached) documents.json fetch.
-_LOOK_BACK_DAYS = 30
+# Inclusive [curr_date - 89 days, curr_date] window: exactly 90 calendar dates.
+# These filings are sparse and can affect control/positioning for a full quarter;
+# each all-market date list is shared through edinet_common's memory/disk cache.
+_LOOK_BACK_DAYS = 89
 
 # Filing families (提出書類種別コード) that tag their subject in subjectEdinetCode,
 # so matching a ticker's EDINET code surfaces filings *about* it. Codes verified
@@ -113,7 +113,7 @@ def get_large_holdings(ticker: str, curr_date: str, look_back_days: int = _LOOK_
             return f"<no EDINET code on file for {ticker}; large-shareholding lookup skipped>"
 
         # Materialize the (capped) date list so the reported window matches what
-        # was actually scanned — iter_window_dates clamps spans over MAX_WINDOW_DAYS.
+        # was actually scanned — iter_window_dates clamps to 90 inclusive dates.
         dates = list(iter_window_dates(start, curr_date))
         scanned_start = dates[0] if dates else start
 

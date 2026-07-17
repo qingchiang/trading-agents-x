@@ -19,6 +19,7 @@ from tradingagents.dataflows.stockstats_utils import (
     _assert_ohlcv_not_stale,
     load_ohlcv,
 )
+from tradingagents.provenance import ProvenanceRecord, attach_provenance
 
 # A fixed, common indicator set so the snapshot is the same shape every run.
 DEFAULT_SNAPSHOT_INDICATORS: tuple[str, ...] = (
@@ -146,4 +147,13 @@ def render_verified_market_snapshot(
         "percentage moves unless directly supported by tool output with concrete "
         "dates and prices.",
     ]
-    return "\n".join(lines)
+    return attach_provenance(
+        "\n".join(lines),
+        ProvenanceRecord(
+            evidence="get_verified_market_snapshot",
+            source=source,
+            requested=curr_date,
+            effective=latest_date,
+            timing="market-date filtered; rows after cutoff excluded",
+        ),
+    )

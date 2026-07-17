@@ -34,6 +34,8 @@ from __future__ import annotations
 
 import logging
 
+from tradingagents.provenance import ProvenanceRecord, attach_provenance
+
 from . import boj, estat, fred
 from .macro_common import summarize_points
 
@@ -94,7 +96,11 @@ _GLOBAL_RISK: tuple[tuple[str, tuple[str, str]], ...] = (
 )
 
 
-def _cell(spec: tuple[str, str] | None, curr_date: str) -> str:
+def _cell(
+    spec: tuple[str, str] | None,
+    curr_date: str,
+    source_stats: dict[str, dict[str, object]] | None = None,
+) -> str:
     """Render one cell: latest value (date) + change over the ~1y window, or "n/a".
 
     ``spec`` is a ``(source, indicator)`` pair, or ``None`` (no free source yet)
@@ -107,14 +113,26 @@ def _cell(spec: tuple[str, str] | None, curr_date: str) -> str:
     if not spec:
         return "n/a"
     source, indicator = spec
+    stats = None
+    if source_stats is not None:
+        stats = source_stats.setdefault(
+            source,
+            {"attempts": 0, "successes": 0, "dates": []},
+        )
+        stats["attempts"] = int(stats["attempts"]) + 1
     try:
         data = _SOURCES[source].fetch_series(indicator, curr_date)
+        summary = summarize_points(data["points"]) if data else None
     except Exception as exc:
         logger.warning("Macro panel cell %s/%s failed: %s", source, indicator, exc)
         return "n/a"
-    summary = summarize_points(data["points"]) if data else None
     if summary is None:
         return "n/a"
+    if stats is not None:
+        stats["successes"] = int(stats["successes"]) + 1
+        dates = stats["dates"]
+        if isinstance(dates, list):
+            dates.append(summary.last_date)
     if summary.delta is None:
         return f"{summary.last_val} ({summary.last_date})"
     pct = f", {summary.pct:+.1f}%" if summary.pct is not None else ""
@@ -135,11 +153,21 @@ def get_global_macro_panel(curr_date: str) -> str:
     try:
         fred.get_api_key()
     except fred.FredNotConfiguredError:
-        return (
-            f"## Global macro panel (as of {curr_date})\n"
-            "_Macro panel unavailable: FRED_API_KEY is not configured._"
+        return attach_provenance(
+            (
+                f"## Global macro panel (as of {curr_date})\n"
+                "_Macro panel unavailable: FRED_API_KEY is not configured._"
+            ),
+            ProvenanceRecord(
+                evidence="global macro panel",
+                source="FRED",
+                requested=curr_date,
+                effective="—",
+                timing="unavailable: API key is not configured",
+            ),
         )
 
+    source_stats: dict[str, dict[str, object]] = {}
     rows = [
         "| Indicator | " + " | ".join(_REGIONS) + " |",
         "| --- |" + " --- |" * len(_REGIONS),
@@ -147,16 +175,19 @@ def get_global_macro_panel(curr_date: str) -> str:
     for dimension, section in _REGIONAL_SECTIONS:
         rows.append(f"| **{dimension}** |" + " |" * len(_REGIONS))
         for label, specs_by_region in section:
-            cells = [_cell(specs_by_region[region], curr_date) for region in _REGIONS]
+            cells = [
+                _cell(specs_by_region[region], curr_date, source_stats)
+                for region in _REGIONS
+            ]
             rows.append(f"| {label} | " + " | ".join(cells) + " |")
     regional = "\n".join(rows)
 
     risk_rows = ["| Risk / FX — cross-border capital flow | Latest |", "| --- | --- |"]
     for label, spec in _GLOBAL_RISK:
-        risk_rows.append(f"| {label} | {_cell(spec, curr_date)} |")
+        risk_rows.append(f"| {label} | {_cell(spec, curr_date, source_stats)} |")
     risk = "\n".join(risk_rows)
 
-    return (
+    panel = (
         f"## Global macro panel (as of {curr_date})\n"
         "Cross-border backdrop every analysis needs; cells show value (date) and the "
         "change over ~1 year. Read the regions together — e.g. the US–Japan rate gap "
@@ -166,3 +197,30 @@ def get_global_macro_panel(curr_date: str) -> str:
         "inflation from e-Stat (官), the rest from FRED. Remaining gap: US ISM PMI "
         "(no free series). China joins as a column with its own branch._"
     )
+    source_labels = {"fred": "FRED", "estat": "e-Stat", "boj": "BOJ"}
+    records = []
+    for source, stats in source_stats.items():
+        attempts = int(stats["attempts"])
+        successes = int(stats["successes"])
+        dates = stats["dates"] if isinstance(stats["dates"], list) else []
+        effective = max(dates) if dates else "—"
+        if successes:
+            timing = (
+                "observation-date filtered; "
+                f"{successes}/{attempts} cells available"
+            )
+        else:
+            timing = (
+                "retrieval unavailable or no observations; "
+                f"0/{attempts} cells available"
+            )
+        records.append(
+            ProvenanceRecord(
+                evidence="global macro panel",
+                source=source_labels.get(source, source),
+                requested=curr_date,
+                effective=effective,
+                timing=timing,
+            )
+        )
+    return attach_provenance(panel, *records)

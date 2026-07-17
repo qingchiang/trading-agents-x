@@ -16,6 +16,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_MAX_DEBATE_ROUNDS":    "max_debate_rounds",
     "TRADINGAGENTS_MAX_RISK_ROUNDS":      "max_risk_discuss_rounds",
     "TRADINGAGENTS_CHECKPOINT_ENABLED":   "checkpoint_enabled",
+    "TRADINGAGENTS_PROVENANCE_APPENDIX":  "provenance_appendix",
     "TRADINGAGENTS_BENCHMARK_TICKER":     "benchmark_ticker",
     "TRADINGAGENTS_TEMPERATURE":          "temperature",
     "TRADINGAGENTS_LLM_MAX_RETRIES":      "llm_max_retries",
@@ -111,6 +112,10 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # Checkpoint/resume: when True, LangGraph saves state after each node
     # so a crashed run can resume from the last successful step.
     "checkpoint_enabled": False,
+    # Append a deterministic source/timing audit table to analyst reports.
+    # Off by default because this debug output is verbose and is also consumed
+    # by downstream agents; source/date warnings in the report body remain.
+    "provenance_appendix": False,
     # Output language for analyst reports and final decision
     # Internal agent debate stays in English for reasoning quality
     "output_language": "English",
@@ -122,7 +127,9 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # Increase for longer lookback strategies or to broaden macro coverage;
     # decrease to reduce token usage in agent prompts.
     "news_article_limit": 20,             # max articles per ticker (ticker-news)
-    "ticker_news_lookback_days": 14,      # company news/disclosure request window
+    # Offset from the injected analysis date; endpoints are inclusive, so 14
+    # covers 15 calendar dates. News Analyst can explicitly expand to 90 dates.
+    "ticker_news_lookback_days": 14,
     "social_lookback_days": 7,            # recent StockTwits/Reddit sentiment window
     "global_news_article_limit": 10,      # max articles for global/macro news
     "global_news_lookback_days": 7,       # macro news lookback window

@@ -30,6 +30,7 @@ See: https://github.com/TauricResearch/TradingAgents/issues/796
 """
 
 import logging
+from datetime import datetime, timezone
 
 from langchain_core.messages import AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -50,11 +51,17 @@ from tradingagents.dataflows.jp.jquants_sentiment import (
     get_margin_balance,
     get_short_positions,
 )
+from tradingagents.dataflows.jp.market import is_tokyo_ticker
 from tradingagents.dataflows.jp.yfinance_sentiment import get_analyst_ratings_block
 from tradingagents.dataflows.lookahead import is_live, lookback_start_date
 from tradingagents.dataflows.market_context import market_suffix_of
 from tradingagents.dataflows.reddit import fetch_reddit_posts
 from tradingagents.dataflows.stocktwits import fetch_stocktwits_messages
+from tradingagents.provenance import (
+    ProvenanceRecord,
+    append_provenance_appendix,
+    extract_provenance,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +89,10 @@ def create_sentiment_analyst(llm):
             config["social_lookback_days"],
         )
         instrument_context = get_instrument_context_from_state(state)
+        live_run = is_live(end_date)
+        stocktwits_retrieved_at = None
+        reddit_retrieved_at = None
+        ratings_retrieved_at = None
 
         # Pre-fetch all three sources. Each must degrade to a string so the LLM
         # always sees something — either real data or a clear placeholder — and
@@ -105,25 +116,40 @@ def create_sentiment_analyst(llm):
             placeholder = "<unavailable: no coverage for this market>"
             stocktwits_block = placeholder
             reddit_block = placeholder
-            # Optional market-specific signals keyed by their _OPTIONAL_SECTIONS tag.
-            optional_blocks = {
-                "large_holdings": get_large_holdings(ticker, end_date),
-                "margin_balances": get_margin_balance(ticker, end_date),
-                "short_positions": get_short_positions(ticker, end_date),
-                "analyst_ratings": get_analyst_ratings_block(ticker, end_date),
-            }
+            if is_tokyo_ticker(ticker):
+                ratings_block = get_analyst_ratings_block(ticker, end_date)
+                ratings_retrieved_at = (
+                    datetime.now(timezone.utc).isoformat(timespec="seconds")
+                    if ratings_block
+                    else None
+                )
+                # Optional Tokyo-specific signals keyed by _OPTIONAL_SECTIONS tag.
+                optional_blocks = {
+                    "large_holdings": get_large_holdings(ticker, end_date),
+                    "margin_balances": get_margin_balance(ticker, end_date),
+                    "short_positions": get_short_positions(ticker, end_date),
+                    "analyst_ratings": ratings_block,
+                }
+            else:
+                optional_blocks = {}
         else:
-            if is_live(end_date):
+            if live_run:
                 stocktwits_block = fetch_stocktwits_messages(
                     ticker,
                     limit=30,
                     start_date=social_start_date,
                     end_date=end_date,
                 )
+                stocktwits_retrieved_at = datetime.now(timezone.utc).isoformat(
+                    timespec="seconds"
+                )
                 reddit_block = fetch_reddit_posts(
                     ticker,
                     start_date=social_start_date,
                     end_date=end_date,
+                )
+                reddit_retrieved_at = datetime.now(timezone.utc).isoformat(
+                    timespec="seconds"
                 )
             else:
                 historical = (
@@ -138,6 +164,7 @@ def create_sentiment_analyst(llm):
             news_start_date=news_start_date,
             social_start_date=social_start_date,
             end_date=end_date,
+            output_language=config["output_language"],
             news_block=news_block,
             stocktwits_block=stocktwits_block,
             reddit_block=reddit_block,
@@ -173,6 +200,131 @@ def create_sentiment_analyst(llm):
             formatted_messages,
             render_sentiment_report,
             "Sentiment Analyst",
+        )
+
+        records = extract_provenance(news_block)
+        if not records:
+            records.append(
+                ProvenanceRecord(
+                    evidence="routed ticker news",
+                    source="unknown",
+                    requested=f"{news_start_date} to {end_date}",
+                    effective="unknown",
+                    timing=(
+                        "unavailable"
+                        if "unavailable" in news_block.lower()
+                        else "no auditable source metadata captured"
+                    ),
+                )
+            )
+
+        market_suffix = market_suffix_of(ticker)
+
+        def social_status(
+            body: str, retrieved_at: str | None
+        ) -> tuple[str, str, str | None]:
+            if market_suffix:
+                return "—", "unavailable: no coverage for this market", None
+            if not live_run:
+                return "—", "unavailable for historical date; vendor not queried", None
+            lowered = body.casefold()
+            if "unavailable" in lowered:
+                return "—", "retrieval unavailable", retrieved_at
+            if lowered.startswith("<no "):
+                return (
+                    f"{social_start_date} to {end_date}",
+                    "available; no messages in current public-feed window",
+                    retrieved_at,
+                )
+            return (
+                f"{social_start_date} to {end_date}",
+                "live source; market-calendar window filtered",
+                retrieved_at,
+            )
+
+        stocktwits_effective, stocktwits_timing, stocktwits_retrieved = social_status(
+            stocktwits_block, stocktwits_retrieved_at
+        )
+        reddit_effective, reddit_timing, reddit_retrieved = social_status(
+            reddit_block, reddit_retrieved_at
+        )
+        records.extend(
+            (
+                ProvenanceRecord(
+                    evidence="retail social messages",
+                    source="StockTwits",
+                    requested=f"{social_start_date} to {end_date}",
+                    effective=stocktwits_effective,
+                    timing=stocktwits_timing,
+                    retrieved_at=stocktwits_retrieved,
+                ),
+                ProvenanceRecord(
+                    evidence="community discussion",
+                    source="Reddit public feeds",
+                    requested=f"{social_start_date} to {end_date}",
+                    effective=reddit_effective,
+                    timing=reddit_timing,
+                    retrieved_at=reddit_retrieved,
+                ),
+            )
+        )
+        if optional_blocks:
+            holdings_start = lookback_start_date(end_date, 89)
+            shorts_start = lookback_start_date(end_date, 365)
+            optional_specs = (
+                ("ownership and control filings", "EDINET", "large_holdings", f"{holdings_start} to {end_date}", "disclosure-date filtered"),
+                ("margin balances", "J-Quants", "margin_balances", f"published weeks <= {end_date}", "publication-date filtered"),
+                ("large short positions", "J-Quants", "short_positions", f"{shorts_start} to {end_date}", "disclosure-date filtered"),
+            )
+            for evidence, source, key, effective, timing in optional_specs:
+                body = optional_blocks.get(key, "")
+                lowered = body.casefold()
+                if "unavailable" in lowered:
+                    record_timing = "unavailable"
+                    record_effective = "—"
+                elif "skipped" in lowered or "no edinet code" in lowered:
+                    record_timing = "not queried; identifier unavailable"
+                    record_effective = "—"
+                elif body:
+                    record_timing = timing
+                    record_effective = effective
+                else:
+                    record_timing = "available; no qualifying records"
+                    record_effective = effective
+                records.append(
+                    ProvenanceRecord(
+                        evidence=evidence,
+                        source=source,
+                        requested=end_date,
+                        effective=record_effective,
+                        timing=record_timing,
+                    )
+                )
+            ratings = optional_blocks.get("analyst_ratings", "")
+            records.append(
+                ProvenanceRecord(
+                    evidence="analyst consensus",
+                    source="yfinance",
+                    requested=end_date,
+                    effective="retrieval-time snapshot" if ratings else "—",
+                    timing=(
+                        "live non-point-in-time"
+                        if ratings
+                        else (
+                            "unavailable for historical date; vendor not queried"
+                            if not live_run
+                            else "no analyst snapshot returned; retrieval success unknown"
+                        )
+                    ),
+                    retrieved_at=ratings_retrieved_at if ratings else None,
+                )
+            )
+
+        report_text = append_provenance_appendix(
+            report_text,
+            records,
+            requested_date=end_date,
+            enabled=config["provenance_appendix"],
         )
 
         return {
@@ -243,6 +395,7 @@ def _build_system_message(
     news_start_date: str,
     social_start_date: str,
     end_date: str,
+    output_language: str,
     news_block: str,
     stocktwits_block: str,
     reddit_block: str,
@@ -260,7 +413,33 @@ def _build_system_message(
         _optional_section(title, intro, tag, optional_blocks.get(tag, ""))
         for title, intro, tag in _OPTIONAL_SECTIONS
     )
+    # Unlike tool-calling analysts, Sentiment receives a large body of source
+    # text in its initial prompt. Native-language JP disclosures can therefore
+    # overpower a short language reminder placed after the data. Put an
+    # explicit contract before every source block, including for English (for
+    # which the shared helper intentionally returns an empty string).
+    language_instruction = get_language_instruction(
+        "all explanatory prose, including the narrative"
+    ).strip()
+    if not language_instruction:
+        language_instruction = (
+            f"Write all explanatory prose, including the narrative, "
+            f"in {output_language}."
+        )
     return f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} ending on {end_date}, drawing on the complementary data sources and source-specific windows that have already been collected for you.
+
+## Mandatory output-language contract
+
+{language_instruction}
+Write all explanatory prose in the `narrative` field in {output_language},
+regardless of the language used by EDINET, TDnet, news media, or any other
+source material. Do not imitate or switch to a source language. Translate or
+summarize foreign-language evidence into {output_language}, retaining only
+proper names, tickers, source names, and necessary original-language terms.
+Keep the structured field names, fixed report headings, and required English
+enum values (such as Bullish / Bearish and low / medium / high) unchanged. The
+same rules apply if structured output is unavailable and you must return a
+free-text report.
 
 ## Data sources (pre-fetched, in this prompt)
 
@@ -312,6 +491,8 @@ Community discussion. Engagement signal via upvote score and comment count. Subr
 
 9. **Past sentiment is not predictive.** Frame your conclusions as signal for the trader to weigh alongside fundamentals and technicals, not as a price call.
 
+10. **Preserve source and date boundaries.** Keep supplied source/window labels for exact claims. Do not create a data-provenance appendix yourself; the workflow may append one in audit mode.
+
 ## Output fields
 
 Fill the following fields:
@@ -320,8 +501,7 @@ Fill the following fields:
 - **overall_score**: A number from 0 (maximally bearish) to 10 (maximally bullish); 5 is neutral. Keep it consistent with overall_band.
 - **confidence**: low / medium / high, based on data quality and sample size.
 - **narrative**: Full source-by-source breakdown, divergences, dominant narrative themes, catalysts and risks, and a markdown summary table of key sentiment signals (direction, source, supporting evidence).
-
-{get_language_instruction()}"""
+"""
 
 
 # ---------------------------------------------------------------------------

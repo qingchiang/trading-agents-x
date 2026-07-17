@@ -13,7 +13,22 @@ would instead surface the first vendor's rejection, naming the wrong source.
 Registered as the default ``macro_data`` vendor; the panel resolves the same
 owners per cell, so panel and microscope agree on any indicator.
 """
+
+from tradingagents.provenance import ProvenanceRecord, attach_provenance
+
 from . import boj, estat, fred
+
+
+def _provenance_status(result: str, source: str, curr_date: str) -> tuple[str, str]:
+    """Classify the dispatcher's deterministic success/empty/error text."""
+    lowered = result.casefold()
+    if ": no data for " in lowered or (
+        source == "FRED" and lowered.startswith("fred series '") and " not found" in lowered
+    ):
+        return "—", "available; no observations in requested window"
+    if source == "FRED" and lowered.startswith("fred: "):
+        return "—", "invalid indicator or vendor request"
+    return f"observations <= {curr_date}", "observation-date filtered"
 
 
 def get_macro_indicators(
@@ -24,7 +39,19 @@ def get_macro_indicators(
     """Dispatch ``indicator`` to its owning macro vendor and return its report."""
     key = indicator.strip().lower()
     if key in estat.ESTAT_SERIES:
-        return estat.get_macro_data(indicator, curr_date, look_back_days)
-    if key in boj.BOJ_SERIES:
-        return boj.get_macro_data(indicator, curr_date, look_back_days)
-    return fred.get_macro_data(indicator, curr_date, look_back_days)
+        source, result = "e-Stat", estat.get_macro_data(indicator, curr_date, look_back_days)
+    elif key in boj.BOJ_SERIES:
+        source, result = "BOJ", boj.get_macro_data(indicator, curr_date, look_back_days)
+    else:
+        source, result = "FRED", fred.get_macro_data(indicator, curr_date, look_back_days)
+    effective, timing = _provenance_status(result, source, curr_date)
+    return attach_provenance(
+        result,
+        ProvenanceRecord(
+            evidence="get_macro_indicators",
+            source=source,
+            requested=curr_date,
+            effective=effective,
+            timing=timing,
+        ),
+    )

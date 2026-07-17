@@ -17,6 +17,7 @@ import pytest
 from tradingagents.dataflows import interface, stockstats_utils
 from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.symbol_utils import NoMarketDataError
+from tradingagents.provenance import extract_provenance
 
 
 @pytest.mark.unit
@@ -48,6 +49,42 @@ class TestLoadOhlcvNoPoison(unittest.TestCase):
 
 @pytest.mark.unit
 class TestRouteToVendorSentinel(unittest.TestCase):
+    def test_partial_source_note_survives_successful_fallback(self):
+        def composite_no_data(symbol, *a, **k):
+            raise NoMarketDataError(
+                symbol,
+                detail="no composite rows",
+                availability_notes=("<TDnet unavailable: outside rolling archive>",),
+            )
+
+        patched = {
+            "jp_news": composite_no_data,
+            "yfinance": lambda *a, **k: (
+                "## Yahoo fallback news\n\n"
+                "### [direct] One article\nPublished: 2026-05-30"
+            ),
+        }
+        with mock.patch.dict(
+            interface.VENDOR_METHODS, {"get_news": patched}, clear=False
+        ), mock.patch.object(
+            interface, "get_vendor", return_value="jp_news,yfinance"
+        ):
+            result = interface.route_to_vendor(
+                "get_news",
+                "9984.T",
+                "2026-05-01",
+                "2026-05-31",
+                _provenance=True,
+            )
+
+        self.assertIn("## Yahoo fallback news", result)
+        self.assertIn("### Source availability notes", result)
+        self.assertIn("<TDnet unavailable: outside rolling archive>", result)
+        self.assertEqual(
+            extract_provenance(result)[0].timing,
+            "publication/disclosure-date filtered; returned_items=1",
+        )
+
     def test_no_data_from_all_vendors_returns_sentinel(self):
         def raises_no_data(symbol, *a, **k):
             raise NoMarketDataError(symbol, "GC=F", "no rows")

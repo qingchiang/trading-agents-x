@@ -9,6 +9,7 @@ import pytest
 
 from tradingagents.dataflows.jp import jp_statements
 from tradingagents.dataflows.symbol_utils import NoMarketDataError
+from tradingagents.provenance import extract_provenance, strip_provenance_markers
 
 
 def _frame(rowmap, dates=("2026-03-31", "2025-03-31")):
@@ -32,7 +33,11 @@ class JPStatementsTests(unittest.TestCase):
                 mock.patch.object(jp_statements.jqf, "get_income_statement", return_value="JQ-INCOME"), \
                 mock.patch.object(jp_statements, "get_statement_frame", return_value=frame):
             out = jp_statements.get_income_statement("7011.T", "annual", "2026-06-26")
-        self.assertTrue(out.startswith("JQ-INCOME"))              # summary on top, authoritative
+        self.assertTrue(strip_provenance_markers(out).startswith("JQ-INCOME"))
+        self.assertEqual(
+            {record.source for record in extract_provenance(out)},
+            {"J-Quants official summary", "yfinance curated detail"},
+        )
         self.assertIn("Line-item detail (yfinance, curated", out)
         self.assertIn("Gross Profit", out)
         self.assertIn("EBITDA", out)
@@ -60,7 +65,7 @@ class JPStatementsTests(unittest.TestCase):
                 mock.patch.object(jp_statements.jqf, "get_income_statement", return_value="JQ-INCOME"), \
                 mock.patch.object(jp_statements, "get_statement_frame", return_value=frame):
             out = jp_statements.get_income_statement("7011.T", "annual", "2026-06-26")
-        self.assertEqual(out, "JQ-INCOME")
+        self.assertEqual(strip_provenance_markers(out), "JQ-INCOME")
 
     def test_drops_all_blank_curated_row(self):
         # A curated row present but empty for every kept period is dropped, not
@@ -85,7 +90,7 @@ class JPStatementsTests(unittest.TestCase):
             return_value=frame,
         ) as gsf:
             out = jp_statements.get_income_statement("7011.T", "annual", None)
-        self.assertTrue(out.startswith("JQ-INCOME"))
+        self.assertTrue(strip_provenance_markers(out).startswith("JQ-INCOME"))
         self.assertIn("No analysis date was provided", out)
         self.assertIn("treated as a live retrieval", out)
         self.assertIn("was not filtered to a historical cutoff", out)
@@ -112,7 +117,7 @@ class JPStatementsTests(unittest.TestCase):
                 mock.patch.object(jp_statements.jqf, "get_income_statement", return_value="JQ-INCOME"), \
                 mock.patch.object(jp_statements, "get_statement_frame", return_value=None):
             out = jp_statements.get_income_statement("7011.T", "annual", "2026-06-26")
-        self.assertEqual(out, "JQ-INCOME")
+        self.assertEqual(strip_provenance_markers(out), "JQ-INCOME")
 
     def test_omits_detail_when_no_curated_rows_present(self):
         # Frame exists but carries none of the curated labels → no empty block.
@@ -121,7 +126,7 @@ class JPStatementsTests(unittest.TestCase):
                 mock.patch.object(jp_statements.jqf, "get_balance_sheet", return_value="JQ-BS"), \
                 mock.patch.object(jp_statements, "get_statement_frame", return_value=frame):
             out = jp_statements.get_balance_sheet("7011.T", "annual", "2026-06-26")
-        self.assertEqual(out, "JQ-BS")
+        self.assertEqual(strip_provenance_markers(out), "JQ-BS")
         self.assertNotIn("Line-item detail", out)
 
     def test_detail_exception_degrades_to_summary(self):
@@ -130,7 +135,7 @@ class JPStatementsTests(unittest.TestCase):
                 mock.patch.object(jp_statements.jqf, "get_cashflow", return_value="JQ-CF"), \
                 mock.patch.object(jp_statements, "get_statement_frame", side_effect=RuntimeError("boom")):
             out = jp_statements.get_cashflow("7011.T", "quarterly", "2026-06-26")
-        self.assertEqual(out, "JQ-CF")
+        self.assertEqual(strip_provenance_markers(out), "JQ-CF")
 
     def test_jquants_no_data_propagates(self):
         # The J-Quants base is non-optional: NoMarketDataError must propagate so
