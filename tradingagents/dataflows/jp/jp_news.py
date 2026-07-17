@@ -26,6 +26,8 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
+from tradingagents.provenance import ProvenanceRecord, attach_provenance
+
 from ..errors import NoMarketDataError
 from .edinet_news import get_news as _edinet_news
 from .google_news import get_news as _google_news
@@ -112,4 +114,26 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
         )
     if notes:
         blocks.append("### Source availability notes\n" + "\n".join(notes))
-    return "\n\n".join(blocks)
+    records = []
+    for (source, _fetch, effective_start, effective_end), block in zip(
+        feed_requests, rendered, strict=True
+    ):
+        if block.startswith(_DATA_PREFIX):
+            timing = (
+                "publication/disclosure-date filtered; "
+                f"returned_items={block.count(chr(10) + '### ')}"
+            )
+        elif block.startswith(_NOTE_PREFIX):
+            timing = "unavailable"
+        else:
+            timing = "available; no relevant items in window; returned_items=0"
+        records.append(
+            ProvenanceRecord(
+                evidence="get_news",
+                source=source,
+                requested=f"{start_date} to {end_date}",
+                effective=f"{effective_start} to {effective_end}",
+                timing=timing,
+            )
+        )
+    return attach_provenance("\n\n".join(blocks), *records)

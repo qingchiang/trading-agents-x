@@ -29,7 +29,9 @@ def get_news(
     Returns:
         str: A formatted string containing news data
     """
-    return route_to_vendor("get_news", ticker, start_date, end_date)
+    return route_to_vendor(
+        "get_news", ticker, start_date, end_date, _provenance=True
+    )
 
 
 @tool("get_news")
@@ -56,7 +58,9 @@ def get_news_for_analysis(
         if window == "extended"
         else recent_start_date
     )
-    return route_to_vendor("get_news", ticker, start_date, end_date)
+    return route_to_vendor(
+        "get_news", ticker, start_date, end_date, _provenance=True
+    )
 
 @tool
 def get_global_news(
@@ -92,7 +96,13 @@ def get_global_news_for_analysis(
     ] = None,
 ) -> str:
     """Retrieve global news ending on the workflow's immutable analysis date."""
-    return route_to_vendor("get_global_news", curr_date, look_back_days, limit)
+    return route_to_vendor(
+        "get_global_news",
+        curr_date,
+        look_back_days,
+        limit,
+        _provenance=True,
+    )
 
 
 @tool

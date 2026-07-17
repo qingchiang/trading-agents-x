@@ -2,16 +2,20 @@
 
 fred.fetch_series is mocked, so these run without a network connection or key."""
 import unittest
+from copy import deepcopy
 from unittest import mock
 
 import pytest
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableLambda
 
+import tradingagents.dataflows.config as config_module
+import tradingagents.default_config as default_config
 from tradingagents.agents.analysts import news_analyst
 from tradingagents.agents.analysts.news_analyst import create_news_analyst
 from tradingagents.dataflows import boj, estat, fred, macro_panel
 from tradingagents.dataflows.config import set_config
+from tradingagents.provenance import extract_provenance
 
 
 def _series(points, series_id="X"):
@@ -106,6 +110,12 @@ class MacroPanelTests(unittest.TestCase):
             out = macro_panel.get_global_macro_panel("2026-06-20")
         self.assertIn("n/a", out)
         self.assertIn("| Indicator | US | Japan |", out)  # still a full table
+        records = {record.source: record for record in extract_provenance(out)}
+        self.assertEqual(records["FRED"].effective, "—")
+        self.assertIn("0/", records["FRED"].timing)
+        self.assertIn("retrieval unavailable", records["FRED"].timing)
+        self.assertNotIn("unavailable", records["e-Stat"].timing)
+        self.assertNotIn("unavailable", records["BOJ"].timing)
 
     def test_missing_key_short_circuits(self):
         # An unconfigured FRED short-circuits to one clear note, not 13 n/a cells.
@@ -115,6 +125,9 @@ class MacroPanelTests(unittest.TestCase):
             out = macro_panel.get_global_macro_panel("2026-06-20")
         self.assertIn("FRED_API_KEY is not configured", out)
         self.assertNotIn("USD/JPY", out)  # didn't bother building the table
+        records = extract_provenance(out)
+        self.assertEqual([record.source for record in records], ["FRED"])
+        self.assertIn("unavailable", records[0].timing)
 
     def test_single_point_shows_value_without_delta(self):
         # One in-window point must not render a fabricated "+0.00" change.
@@ -155,8 +168,16 @@ class NewsPanelInjectionTests(unittest.TestCase):
     """The news analyst prefetches the panel into its prompt and keeps the
     get_macro_indicators microscope tool bound."""
 
+    def setUp(self):
+        self._previous_config = deepcopy(config_module._config)
+        config_module._config = deepcopy(default_config.DEFAULT_CONFIG)
+
+    def tearDown(self):
+        config_module._config = self._previous_config
+
     def _run(self, panel_text="PANEL_XYZ", ticker="NVDA", market_flows=""):
         captured = {}
+        set_config({"provenance_appendix": True})
 
         def _bind(tools):
             captured["tools"] = [t.name for t in tools]
@@ -183,8 +204,21 @@ class NewsPanelInjectionTests(unittest.TestCase):
         return captured, result, flows
 
     def test_panel_is_injected_into_prompt(self):
-        captured, _, _ = self._run("PANEL_XYZ")
+        captured, result, _ = self._run("PANEL_XYZ")
         self.assertIn("PANEL_XYZ", captured["prompt"])
+        self.assertEqual(result["news_report"], result["messages"][0].content)
+        self.assertIn("## Data provenance", result["news_report"])
+        self.assertIn("| global macro panel | unknown |", result["news_report"])
+        self.assertIn("no auditable source metadata captured", result["news_report"])
+        self.assertIn("| routed ticker news | — |", result["news_report"])
+
+    def test_panel_provenance_is_carried_into_report(self):
+        panel = macro_panel.get_global_macro_panel("2026-01-15")
+        _, result, _ = self._run(panel)
+        report = result["news_report"]
+        self.assertIn("| global macro panel | FRED |", report)
+        self.assertIn("| global macro panel | e-Stat |", report)
+        self.assertIn("| global macro panel | BOJ |", report)
 
     def test_macro_indicators_tool_still_bound(self):
         captured, _, _ = self._run()
@@ -224,6 +258,30 @@ class NewsPanelInjectionTests(unittest.TestCase):
         flows.assert_called_once_with("9984.T", "2026-01-15")
         self.assertIn("NOT company order flow", captured["prompt"])
         self.assertIn("NOT 9984.T ORDER FLOW", captured["prompt"])
+
+    def test_empty_market_flows_do_not_claim_effective_data(self):
+        _, result, _ = self._run(
+            ticker="9984.T",
+            market_flows="<no investor-flow data published on or before 2026-01-15>",
+        )
+        row = next(
+            line
+            for line in result["news_report"].splitlines()
+            if "| regional investor flows |" in line
+        )
+        self.assertIn("| — | available; no published records |", row)
+
+    def test_unavailable_market_flows_do_not_claim_effective_data(self):
+        _, result, _ = self._run(
+            ticker="9984.T",
+            market_flows="<investor flows unavailable: VendorRateLimitError>",
+        )
+        row = next(
+            line
+            for line in result["news_report"].splitlines()
+            if "| regional investor flows |" in line
+        )
+        self.assertIn("| — | unavailable |", row)
 
     def test_us_prompt_has_no_tse_market_flow_block(self):
         captured, _, flows = self._run(ticker="NVDA", market_flows="")

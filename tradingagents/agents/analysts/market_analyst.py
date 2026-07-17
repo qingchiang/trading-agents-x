@@ -11,6 +11,11 @@ from tradingagents.agents.utils.market_data_validation_tools import (
 from tradingagents.agents.utils.technical_indicators_tools import (
     get_indicators_for_analysis,
 )
+from tradingagents.dataflows.config import get_config
+from tradingagents.provenance import (
+    append_provenance_appendix,
+    extract_provenance,
+)
 
 
 def create_market_analyst(llm):
@@ -54,6 +59,8 @@ Volume-Based Indicators:
 
 Before writing the final report, call get_verified_market_snapshot for this ticker and the current date, and treat it as the source of truth for any exact OHLCV, price-level, or indicator-value claim. If another tool's output conflicts with the verified snapshot, flag the discrepancy rather than inventing a reconciled number. Do not claim historical validation, support/resistance bounces, or exact percentage moves unless they are directly supported by tool output with concrete dates and prices.
 
+Preserve source and effective-date labels for exact numeric claims. Do not create a data-provenance appendix yourself; the workflow may append one in audit mode.
+
 The workflow injects the exact analysis date as the end/current date for every market-data tool call. Do not attempt to supply or override `end_date` or `curr_date`; only choose a historical `start_date` for `get_stock_data` and optional look-back lengths for the other tools.
 
 Write a very detailed and nuanced report of the trends you observe. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."""
@@ -91,7 +98,14 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
         report = ""
 
         if len(result.tool_calls) == 0:
-            report = result.content
+            report = append_provenance_appendix(
+                result.content,
+                extract_provenance(state["messages"]),
+                expected=(("get_verified_market_snapshot", "verified market snapshot"),),
+                requested_date=current_date,
+                enabled=get_config()["provenance_appendix"],
+            )
+            result = result.model_copy(update={"content": report})
 
         return {
             "messages": [result],

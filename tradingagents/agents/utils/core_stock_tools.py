@@ -32,4 +32,6 @@ def get_stock_data_for_analysis(
     end_date: Annotated[str, InjectedState("trade_date")],
 ) -> str:
     """Retrieve OHLCV ending at the workflow's immutable analysis date."""
-    return route_to_vendor("get_stock_data", symbol, start_date, end_date)
+    return route_to_vendor(
+        "get_stock_data", symbol, start_date, end_date, _provenance=True
+    )

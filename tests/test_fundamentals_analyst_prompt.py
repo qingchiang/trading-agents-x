@@ -78,5 +78,6 @@ def test_tool_node_injects_trade_date_into_fundamental_vendor_call():
         "9984.T",
         "annual",
         "2020-01-15",
+        _provenance=True,
     )
     assert result["messages"][0].content == "SAFE"

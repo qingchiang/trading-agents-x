@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import Annotated
 
 from langchain_core.tools import tool
@@ -5,6 +6,7 @@ from langgraph.prebuilt import InjectedState
 
 from tradingagents.dataflows.interface import route_to_vendor
 from tradingagents.dataflows.lookahead import is_live
+from tradingagents.provenance import ProvenanceRecord, attach_provenance
 
 
 @tool
@@ -44,9 +46,32 @@ def get_prediction_markets_for_analysis(
 ) -> str:
     """Retrieve a live prediction-market snapshot only for near-live analysis."""
     if not is_live(curr_date):
-        return (
+        return attach_provenance(
             "LIVE_DATA_UNAVAILABLE: prediction markets expose a current snapshot, "
             f"not point-in-time history; historical analysis date {curr_date} was "
-            "not requested from the vendor."
+            "not requested from the vendor.",
+            ProvenanceRecord(
+                evidence="get_prediction_markets",
+                source="Polymarket",
+                requested=curr_date,
+                effective="—",
+                timing="unavailable for historical date; vendor not queried",
+            ),
         )
-    return route_to_vendor("get_prediction_markets", topic, limit)
+    result = route_to_vendor("get_prediction_markets", topic, limit)
+    retrieved_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    unavailable = (
+        "DATA_UNAVAILABLE" in result
+        or "currently unavailable" in result.casefold()
+    )
+    return attach_provenance(
+        result,
+        ProvenanceRecord(
+            evidence="get_prediction_markets",
+            source="Polymarket",
+            requested=curr_date,
+            effective="—" if unavailable else "retrieval-time open markets",
+            timing="retrieval unavailable" if unavailable else "live non-point-in-time",
+            retrieved_at=retrieved_at,
+        ),
+    )

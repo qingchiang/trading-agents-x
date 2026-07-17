@@ -27,6 +27,7 @@ from tradingagents.agents.utils.prediction_markets_tools import (
 from tradingagents.agents.utils.technical_indicators_tools import (
     get_indicators_for_analysis,
 )
+from tradingagents.provenance import extract_provenance, strip_provenance_markers
 
 
 class _ToolState(TypedDict):
@@ -92,7 +93,11 @@ def test_market_tool_node_injects_trade_date_as_end_date():
         )
 
     router.assert_called_once_with(
-        "get_stock_data", "NVDA", "2019-12-01", "2020-01-15"
+        "get_stock_data",
+        "NVDA",
+        "2019-12-01",
+        "2020-01-15",
+        _provenance=True,
     )
     assert result["messages"][0].content == "SAFE"
 
@@ -112,7 +117,11 @@ def test_news_tool_node_derives_window_from_injected_trade_date():
         _invoke_tool(get_news_for_analysis, {"ticker": "9984.T"})
 
     router.assert_called_once_with(
-        "get_news", "9984.T", "2020-01-01", "2020-01-15"
+        "get_news",
+        "9984.T",
+        "2020-01-01",
+        "2020-01-15",
+        _provenance=True,
     )
 
 
@@ -128,7 +137,11 @@ def test_news_tool_node_supports_bounded_extended_window():
         )
 
     router.assert_called_once_with(
-        "get_news", "9984.T", "2019-10-18", "2020-01-15"
+        "get_news",
+        "9984.T",
+        "2019-10-18",
+        "2020-01-15",
+        _provenance=True,
     )
 
 
@@ -150,16 +163,35 @@ def test_news_windows_preserve_a_configured_range_longer_than_90_dates():
             {"ticker": "9984.T", "window": "extended"},
         )
 
-    expected = mock.call("get_news", "9984.T", "2019-09-17", "2020-01-15")
+    expected = mock.call(
+        "get_news",
+        "9984.T",
+        "2019-09-17",
+        "2020-01-15",
+        _provenance=True,
+    )
     assert router.call_args_list == [expected, expected]
 
 
 @pytest.mark.unit
 def test_prediction_market_gate_skips_historical_vendor_call(monkeypatch):
-    router = mock.Mock(return_value="LIVE")
+    clock = mock.Mock()
+    retrieved = mock.Mock()
+    retrieved.isoformat.return_value = "2026-07-17T01:02:03+00:00"
+    clock.now.return_value = retrieved
+
+    def live_result(*_args):
+        assert not clock.now.called
+        return "LIVE"
+
+    router = mock.Mock(side_effect=live_result)
     monkeypatch.setattr(
         "tradingagents.agents.utils.prediction_markets_tools.route_to_vendor",
         router,
+    )
+    monkeypatch.setattr(
+        "tradingagents.agents.utils.prediction_markets_tools.datetime",
+        clock,
     )
 
     historical = _invoke_tool(
@@ -180,4 +212,10 @@ def test_prediction_market_gate_skips_historical_vendor_call(monkeypatch):
         trade_date="2026-07-17",
     )
     router.assert_called_once_with("get_prediction_markets", "Fed rate cut", 3)
-    assert live["messages"][0].content == "LIVE"
+    content = live["messages"][0].content
+    assert strip_provenance_markers(content) == "LIVE"
+    record = extract_provenance(content)[0]
+    assert record.source == "Polymarket"
+    assert record.requested == "2026-07-17"
+    assert record.timing == "live non-point-in-time"
+    assert record.retrieved_at == "2026-07-17T01:02:03+00:00"

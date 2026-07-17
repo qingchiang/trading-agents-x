@@ -16,6 +16,7 @@ import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
 from tradingagents.dataflows import boj, estat, fred, macro_panel
 from tradingagents.dataflows.interface import route_to_vendor
+from tradingagents.provenance import extract_provenance
 
 
 def _data(series_id, title, points):
@@ -47,6 +48,27 @@ class MacroDispatchTests(unittest.TestCase):
                 mock.patch.object(fred, "fetch_series", side_effect=AssertionError("fred called")):
             out = route_to_vendor("get_macro_indicators", "jp_cpi", "2026-06-20")
         self.assertIn("e-Stat: no data", out)
+        record = extract_provenance(out)[0]
+        self.assertEqual(record.effective, "—")
+        self.assertEqual(
+            record.timing,
+            "available; no observations in requested window",
+        )
+
+    def test_invalid_fred_indicator_is_not_marked_as_observation_data(self):
+        with mock.patch.object(
+            fred,
+            "fetch_series",
+            side_effect=ValueError("not a known macro alias"),
+        ):
+            out = route_to_vendor(
+                "get_macro_indicators",
+                "not a valid indicator phrase",
+                "2026-06-20",
+            )
+        record = extract_provenance(out)[0]
+        self.assertEqual(record.effective, "—")
+        self.assertEqual(record.timing, "invalid indicator or vendor request")
 
     def test_japan_cpi_routes_to_estat(self):
         with mock.patch.object(estat, "fetch_series",

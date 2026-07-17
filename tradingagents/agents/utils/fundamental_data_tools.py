@@ -90,7 +90,7 @@ def get_fundamentals_for_analysis(
     curr_date: Annotated[str, InjectedState("trade_date")],
 ) -> str:
     """Retrieve fundamentals using the workflow's immutable analysis date."""
-    return route_to_vendor("get_fundamentals", ticker, curr_date)
+    return route_to_vendor("get_fundamentals", ticker, curr_date, _provenance=True)
 
 
 @tool("get_balance_sheet")
@@ -100,7 +100,9 @@ def get_balance_sheet_for_analysis(
     freq: Annotated[str, "reporting frequency: annual/quarterly"] = "quarterly",
 ) -> str:
     """Retrieve a balance sheet using the workflow's immutable analysis date."""
-    return route_to_vendor("get_balance_sheet", ticker, freq, curr_date)
+    return route_to_vendor(
+        "get_balance_sheet", ticker, freq, curr_date, _provenance=True
+    )
 
 
 @tool("get_cashflow")
@@ -110,7 +112,7 @@ def get_cashflow_for_analysis(
     freq: Annotated[str, "reporting frequency: annual/quarterly"] = "quarterly",
 ) -> str:
     """Retrieve cash flow using the workflow's immutable analysis date."""
-    return route_to_vendor("get_cashflow", ticker, freq, curr_date)
+    return route_to_vendor("get_cashflow", ticker, freq, curr_date, _provenance=True)
 
 
 @tool("get_income_statement")
@@ -120,4 +122,6 @@ def get_income_statement_for_analysis(
     freq: Annotated[str, "reporting frequency: annual/quarterly"] = "quarterly",
 ) -> str:
     """Retrieve an income statement using the workflow's immutable analysis date."""
-    return route_to_vendor("get_income_statement", ticker, freq, curr_date)
+    return route_to_vendor(
+        "get_income_statement", ticker, freq, curr_date, _provenance=True
+    )
