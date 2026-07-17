@@ -122,7 +122,9 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # Increase for longer lookback strategies or to broaden macro coverage;
     # decrease to reduce token usage in agent prompts.
     "news_article_limit": 20,             # max articles per ticker (ticker-news)
-    "ticker_news_lookback_days": 14,      # company news/disclosure request window
+    # Offset from the injected analysis date; endpoints are inclusive, so 14
+    # covers 15 calendar dates. News Analyst can explicitly expand to 90 dates.
+    "ticker_news_lookback_days": 14,
     "social_lookback_days": 7,            # recent StockTwits/Reddit sentiment window
     "global_news_article_limit": 10,      # max articles for global/macro news
     "global_news_lookback_days": 7,       # macro news lookback window

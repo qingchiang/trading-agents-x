@@ -7,8 +7,9 @@ that EDINET's statutory filings and media headlines don't front. The free
 (``POST /onsf/TDJFSearch/TDJFSearch``) that filters **server-side** by code and
 date range, so one request returns just this ticker's disclosures — far lighter
 on TDnet than scraping the market-wide per-date list pages and filtering locally.
-The service retains a rolling ~31 days (no deep archive), so a backtest window is
-naturally thin — acceptable under the fork's live-first stance.
+The service exposes the disclosure date plus the preceding 30 calendar dates
+(weekends and holidays included). Requests are clamped to that rolling archive;
+fully older historical windows render unavailable rather than "no disclosures".
 
 Look-ahead safety is enforced **here**, not delegated to the server: the search
 tolerates loose date args (it even accepts a reversed range), so we re-check each
@@ -28,12 +29,13 @@ from __future__ import annotations
 import html
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import urlencode, urljoin
 from urllib.request import Request
 
 from ..config import get_config
 from ..symbol_utils import tokyo_securities_base
+from .calendar import tokyo_today
 from .http_util import USER_AGENT, fetch_bytes
 from .jquants_common import to_jquants_code
 
@@ -57,6 +59,7 @@ _ANCHOR_RE = re.compile(r'href="(?P<href>[^"]*)"[^>]*>(?P<text>.*?)</a>', re.S)
 _TAG_RE = re.compile(r"<[^>]+>")
 # TDnet renders the timestamp as "YYYY/MM/DD HH:MM"; tolerate an optional :SS tail.
 _TIMESTAMP_FORMATS = ("%Y/%m/%d %H:%M", "%Y/%m/%d %H:%M:%S")
+_MAX_LOOKBACK_DAYS = 30
 
 
 def _clean(text: str) -> str:
@@ -146,8 +149,23 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0)
     try:
         start = datetime.strptime(start_date, "%Y-%m-%d").date()
         end = datetime.strptime(end_date, "%Y-%m-%d").date()
+        today = tokyo_today()
     except (TypeError, ValueError):
         return _no_disclosures(ticker, start_date, end_date)
+
+    retained_start = today - timedelta(days=_MAX_LOOKBACK_DAYS)
+    if end < retained_start:
+        return (
+            "<TDnet unavailable: the free service exposes only 31 calendar dates "
+            f"including today; requested historical window {start_date} to {end_date} "
+            "is outside the rolling archive>"
+        )
+
+    # Clamp both to 31 dates ending on the requested analysis date and to what
+    # remains in today's rolling free archive. Headers below use these effective
+    # dates so a partial historical window is never presented as complete.
+    start = max(start, end - timedelta(days=_MAX_LOOKBACK_DAYS), retained_start)
+    start_date = start.strftime("%Y-%m-%d")
 
     page = _search(code, start_date.replace("-", ""), end_date.replace("-", ""), timeout)
     rows = _parse_rows(page) if page else []

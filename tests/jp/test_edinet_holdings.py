@@ -58,6 +58,13 @@ class HoldingsTests(unittest.TestCase):
             self.assertEqual(edinet_holdings.get_large_holdings("AAPL", "2026-06-25"), "")
         fd.assert_not_called()
 
+    def test_default_window_is_exactly_90_calendar_dates(self):
+        with mock.patch.object(
+            edinet_holdings, "iter_window_dates", return_value=[]
+        ) as window:
+            edinet_holdings.get_large_holdings("9984.T", "2026-06-22")
+        window.assert_called_once_with("2026-03-25", "2026-06-22")
+
     def test_matches_subject_edinet_code(self):
         # 9984.T resolves (seed) to E02778; keep filings about it, drop others.
         mapping = {"2026-06-22": [

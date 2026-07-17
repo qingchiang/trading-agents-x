@@ -67,6 +67,12 @@ class TestNoMarketDataError(unittest.TestCase):
         err = NoMarketDataError("FOOBAR")
         self.assertEqual(err.canonical, "FOOBAR")
 
+    def test_availability_notes_are_preserved(self):
+        err = NoMarketDataError(
+            "FOOBAR", availability_notes=("<source unavailable>", "")
+        )
+        self.assertEqual(err.availability_notes, ("<source unavailable>",))
+
 
 @pytest.mark.unit
 class TestIsYahooSafe(unittest.TestCase):

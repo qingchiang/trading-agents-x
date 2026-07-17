@@ -1,8 +1,14 @@
 """EDINET per-ticker disclosure feed: code matching, windowing, rendering,
 auth, and routing. All network calls are mocked — no key or connectivity."""
 import copy
+import gzip
+import json
 import os
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date
+from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -11,7 +17,7 @@ import requests
 import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
 from tradingagents.dataflows import interface
-from tradingagents.dataflows.config import set_config
+from tradingagents.dataflows.config import get_config, set_config
 from tradingagents.dataflows.errors import (
     VendorNotConfiguredError,
     VendorRateLimitError,
@@ -130,9 +136,126 @@ class NewsRenderTests(unittest.TestCase):
     def test_long_window_is_capped(self):
         mock_fetch = mock.Mock(side_effect=_by_date({}))
         with mock.patch.object(edinet_common, "fetch_documents", mock_fetch):
-            edinet_news.get_news("9984.T", "2020-01-01", "2026-06-22")
-        # Window is clamped to MAX_WINDOW_DAYS+1 dates, not thousands.
-        self.assertLessEqual(mock_fetch.call_count, edinet_common.MAX_WINDOW_DAYS + 1)
+            out = edinet_news.get_news("9984.T", "2020-01-01", "2026-06-22")
+        self.assertEqual(
+            mock_fetch.call_count, edinet_common.MAX_WINDOW_CALENDAR_DAYS
+        )
+        self.assertIn("between 2026-03-25 and 2026-06-22", out)
+
+
+@pytest.mark.unit
+class DocumentCacheTests(unittest.TestCase):
+    def setUp(self):
+        edinet_common._documents_cache.clear()
+        edinet_common._pruned_dirs.clear()
+        edinet_common._writes_by_dir.clear()
+
+    def tearDown(self):
+        edinet_common._documents_cache.clear()
+        edinet_common._pruned_dirs.clear()
+        edinet_common._writes_by_dir.clear()
+
+    def test_settled_date_survives_memory_clear_via_disk(self):
+        records = [_doc()]
+        with mock.patch.object(edinet_common, "tokyo_today", return_value=date(2026, 6, 23)), \
+                mock.patch.object(edinet_common, "fetch_documents", return_value=records) as fetch:
+            self.assertEqual(edinet_common.documents_on("2026-06-22"), records)
+        fetch.assert_called_once_with("2026-06-22")
+
+        edinet_common._documents_cache.clear()
+        with mock.patch.object(edinet_common, "tokyo_today", return_value=date(2026, 6, 23)), \
+                mock.patch.object(edinet_common, "fetch_documents") as fetch:
+            self.assertEqual(edinet_common.documents_on("2026-06-22"), records)
+        fetch.assert_not_called()
+
+    def test_today_is_memory_only_with_short_ttl(self):
+        with mock.patch.object(edinet_common, "tokyo_today", return_value=date(2026, 6, 22)), \
+                mock.patch.object(
+                    edinet_common.time, "monotonic", side_effect=[100.0, 110.0, 161.0, 162.0]
+                ), \
+                mock.patch.object(edinet_common, "fetch_documents", return_value=[]) as fetch:
+            edinet_common.documents_on("2026-06-22")
+            edinet_common.documents_on("2026-06-22")
+            edinet_common.documents_on("2026-06-22")
+
+        self.assertEqual(fetch.call_count, 2)
+        self.assertFalse(Path(edinet_common._disk_file("2026-06-22")).exists())
+
+    def test_corrupt_disk_file_degrades_to_fetch_and_replaces_it(self):
+        path = Path(edinet_common._disk_file("2026-06-22"))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"not gzip")
+        records = [_doc(doc_id="RECOVERED")]
+
+        with mock.patch.object(edinet_common, "tokyo_today", return_value=date(2026, 6, 23)), \
+                mock.patch.object(edinet_common, "fetch_documents", return_value=records) as fetch:
+            self.assertEqual(edinet_common.documents_on("2026-06-22"), records)
+        fetch.assert_called_once()
+
+        edinet_common._documents_cache.clear()
+        with mock.patch.object(edinet_common, "tokyo_today", return_value=date(2026, 6, 23)), \
+                mock.patch.object(edinet_common, "fetch_documents") as fetch:
+            self.assertEqual(edinet_common.documents_on("2026-06-22"), records)
+        fetch.assert_not_called()
+
+    def test_truncated_gzip_degrades_to_fetch_and_replaces_it(self):
+        path = Path(edinet_common._disk_file("2026-06-22"))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        envelope = {
+            "schema": edinet_common._CACHE_SCHEMA,
+            "date": "2026-06-22",
+            "records": [_doc()],
+        }
+        path.write_bytes(gzip.compress(json.dumps(envelope).encode())[:-4])
+        records = [_doc(doc_id="RECOVERED_FROM_TRUNCATION")]
+
+        with mock.patch.object(
+            edinet_common, "tokyo_today", return_value=date(2026, 6, 23)
+        ), mock.patch.object(
+            edinet_common, "fetch_documents", return_value=records
+        ) as fetch:
+            self.assertEqual(edinet_common.documents_on("2026-06-22"), records)
+
+        fetch.assert_called_once_with("2026-06-22")
+
+    def test_same_date_concurrent_calls_are_single_flight(self):
+        started = threading.Event()
+        release = threading.Event()
+
+        def slow_fetch(date_str):
+            started.set()
+            release.wait(timeout=2)
+            return [_doc()]
+
+        with mock.patch.object(edinet_common, "tokyo_today", return_value=date(2026, 6, 23)), \
+                mock.patch.object(edinet_common, "fetch_documents", side_effect=slow_fetch) as fetch, \
+                ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(edinet_common.documents_on, "2026-06-22")
+            self.assertTrue(started.wait(timeout=1))
+            second = pool.submit(edinet_common.documents_on, "2026-06-22")
+            release.set()
+            self.assertEqual(first.result(), second.result())
+
+        fetch.assert_called_once_with("2026-06-22")
+
+    def test_disk_cache_prunes_to_file_limit_without_orphan_temps(self):
+        with mock.patch.object(edinet_common, "tokyo_today", return_value=date(2026, 6, 23)), \
+                mock.patch.object(edinet_common, "_DISK_MAX_FILES", 2), \
+                mock.patch.object(edinet_common, "_PRUNE_EVERY_WRITES", 1):
+            for date_str in ("2026-06-19", "2026-06-20", "2026-06-21"):
+                edinet_common._disk_put(date_str, [])
+
+        disk_dir = Path(get_config()["data_cache_dir"]) / "edinet" / "documents" / "v2"
+        self.assertEqual(len(list(disk_dir.glob("*.json.gz"))), 2)
+        self.assertEqual(list(disk_dir.glob("*.tmp")), [])
+
+    def test_memory_cache_is_lru_bounded(self):
+        with mock.patch.object(edinet_common, "_MEMORY_MAX_DATES", 2), \
+                mock.patch.object(edinet_common, "tokyo_today", return_value=date(2026, 6, 23)), \
+                mock.patch.object(edinet_common, "fetch_documents", return_value=[]):
+            for date_str in ("2026-06-19", "2026-06-20", "2026-06-21"):
+                edinet_common.documents_on(date_str)
+        self.assertEqual(len(edinet_common._documents_cache), 2)
 
 
 @pytest.mark.unit

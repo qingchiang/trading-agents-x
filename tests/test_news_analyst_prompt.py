@@ -25,8 +25,8 @@ def test_get_news_takes_ticker_not_query():
 def test_news_prompt_matches_get_news_signature():
     src = inspect.getsource(na)
     graph_args = set(get_news_for_analysis.tool_call_schema.model_json_schema()["properties"])
-    assert graph_args == {"ticker"}
-    assert "get_news(ticker)" in src
+    assert graph_args == {"ticker", "window"}
+    assert "get_news(ticker, window)" in src
     assert "get_news(ticker, start_date, end_date)" not in src
     assert "get_news(query" not in src
 

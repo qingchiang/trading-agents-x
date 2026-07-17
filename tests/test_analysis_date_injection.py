@@ -77,7 +77,7 @@ def test_market_and_news_tool_schemas_hide_workflow_dates():
         assert "end_date" not in properties
     assert set(
         get_news_for_analysis.tool_call_schema.model_json_schema()["properties"]
-    ) == {"ticker"}
+    ) == {"ticker", "window"}
 
 
 @pytest.mark.unit
@@ -114,6 +114,44 @@ def test_news_tool_node_derives_window_from_injected_trade_date():
     router.assert_called_once_with(
         "get_news", "9984.T", "2020-01-01", "2020-01-15"
     )
+
+
+@pytest.mark.unit
+def test_news_tool_node_supports_bounded_extended_window():
+    with mock.patch(
+        "tradingagents.agents.utils.news_data_tools.route_to_vendor",
+        return_value="SAFE",
+    ) as router:
+        _invoke_tool(
+            get_news_for_analysis,
+            {"ticker": "9984.T", "window": "extended"},
+        )
+
+    router.assert_called_once_with(
+        "get_news", "9984.T", "2019-10-18", "2020-01-15"
+    )
+
+
+@pytest.mark.unit
+def test_news_windows_preserve_a_configured_range_longer_than_90_dates():
+    with (
+        mock.patch(
+            "tradingagents.agents.utils.news_data_tools.get_config",
+            return_value={"ticker_news_lookback_days": 120},
+        ),
+        mock.patch(
+            "tradingagents.agents.utils.news_data_tools.route_to_vendor",
+            return_value="SAFE",
+        ) as router,
+    ):
+        _invoke_tool(get_news_for_analysis, {"ticker": "9984.T"})
+        _invoke_tool(
+            get_news_for_analysis,
+            {"ticker": "9984.T", "window": "extended"},
+        )
+
+    expected = mock.call("get_news", "9984.T", "2019-09-17", "2020-01-15")
+    assert router.call_args_list == [expected, expected]
 
 
 @pytest.mark.unit

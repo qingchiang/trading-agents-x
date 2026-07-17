@@ -70,13 +70,24 @@ class JpNewsAssemblerTests(unittest.TestCase):
         out = _run(_EDINET_DATA, RuntimeError("boom"))
         self.assertIn("有価証券報告書", out)
 
+    def test_extended_window_is_clamped_only_for_tdnet(self):
+        with mock.patch.object(jp_news, "_edinet_news", return_value=_EDINET_DATA) as edinet, \
+                mock.patch.object(jp_news, "_tdnet_news", return_value=_TDNET_DATA) as tdnet, \
+                mock.patch.object(jp_news, "_google_news", return_value=_MEDIA_DATA) as media:
+            jp_news.get_news("4568.T", "2026-04-19", "2026-07-17")
+
+        edinet.assert_called_once_with("4568.T", "2026-04-19", "2026-07-17")
+        tdnet.assert_called_once_with("4568.T", "2026-06-17", "2026-07-17")
+        media.assert_called_once_with("4568.T", "2026-04-19", "2026-07-17")
+
     def test_both_empty_raises_no_market_data(self):
         with self.assertRaises(NoMarketDataError):
             _run(_EDINET_EMPTY, _MEDIA_EMPTY)
 
     def test_edinet_error_and_empty_media_raises(self):
-        with self.assertRaises(NoMarketDataError):
+        with self.assertRaises(NoMarketDataError) as ctx:
             _run(RuntimeError("boom"), _MEDIA_EMPTY)
+        self.assertIn("<EDINET unavailable: RuntimeError>", ctx.exception.availability_notes)
 
 
 if __name__ == "__main__":

@@ -238,6 +238,17 @@ def get_vendor(category: str, method: str = None, market: str = "", config: dict
     # Fall back to category-level configuration
     return config.get("data_vendors", {}).get(category, "default")
 
+
+def _append_availability_notes(result, notes: list[str]):
+    """Attach composite-source warnings to a textual fallback result."""
+    if not notes or not isinstance(result, str):
+        return result
+    unique_notes = list(dict.fromkeys(notes))
+    return (
+        f"{result.rstrip()}\n\n### Source availability notes\n"
+        + "\n".join(unique_notes)
+    )
+
 def route_to_vendor(method: str, *args, **kwargs):
     """Route method calls to appropriate vendor implementation with fallback support."""
     category = get_category_for_method(method)
@@ -272,12 +283,14 @@ def route_to_vendor(method: str, *args, **kwargs):
 
     last_no_data: NoMarketDataError | None = None
     first_error: Exception | None = None
+    availability_notes: list[str] = []
     for vendor in vendor_chain:
         vendor_impl = VENDOR_METHODS[method][vendor]
         impl_func = vendor_impl[0] if isinstance(vendor_impl, list) else vendor_impl
 
         try:
-            return impl_func(*args, **kwargs)
+            result = impl_func(*args, **kwargs)
+            return _append_availability_notes(result, availability_notes)
         except VendorRateLimitError:
             logger.warning("Vendor %r rate-limited for %s; trying next vendor.", vendor, method)
             continue
@@ -288,6 +301,7 @@ def route_to_vendor(method: str, *args, **kwargs):
             continue
         except NoMarketDataError as e:
             last_no_data = e  # No data here; another configured vendor may have it
+            availability_notes.extend(e.availability_notes)
             continue
         except Exception as e:
             # Don't let one vendor's failure crash the call when another can
@@ -317,12 +331,13 @@ def route_to_vendor(method: str, *args, **kwargs):
         # stale") so the agent sees the specific reason — invalid symbol, no
         # coverage, or stale data — not just a generic "unavailable".
         reason = f" ({last_no_data.detail})" if last_no_data.detail else ""
-        return (
+        result = (
             f"NO_DATA_AVAILABLE: No usable market data for '{sym}'{resolved} from "
             f"any configured vendor{reason}. The symbol may be invalid, delisted, "
             f"not covered, or the vendor returned stale data. Do not estimate or "
             f"fabricate values — report that data is unavailable for this symbol."
         )
+        return _append_availability_notes(result, availability_notes)
 
     # No vendor returned data and none reported clean "no data" — surface the
     # first real error (e.g. the primary vendor's network failure). Optional

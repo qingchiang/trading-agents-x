@@ -17,6 +17,8 @@ they share ``NoMarketDataError`` and differ only in the free-text ``detail``.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 
 class VendorError(Exception):
     """Base for any condition where a vendor could not return usable data."""
@@ -31,10 +33,24 @@ class NoMarketDataError(VendorError):
     string into the data channel.
     """
 
-    def __init__(self, symbol: str, canonical: str | None = None, detail: str = ""):
+    def __init__(
+        self,
+        symbol: str,
+        canonical: str | None = None,
+        detail: str = "",
+        *,
+        availability_notes: Iterable[str] = (),
+    ):
         self.symbol = symbol
         self.canonical = canonical or symbol
         self.detail = detail
+        # A composite vendor may have partial-source availability information
+        # even when it has no usable rows itself. Keep that metadata attached to
+        # the typed no-data outcome so the router can preserve it after a
+        # successful fallback instead of silently discarding it.
+        self.availability_notes = tuple(
+            note for note in availability_notes if isinstance(note, str) and note
+        )
         msg = f"No market data for {symbol!r}"
         if canonical and canonical != symbol:
             msg += f" (queried as {canonical!r})"

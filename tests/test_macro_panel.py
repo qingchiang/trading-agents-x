@@ -11,6 +11,7 @@ from langchain_core.runnables import RunnableLambda
 from tradingagents.agents.analysts import news_analyst
 from tradingagents.agents.analysts.news_analyst import create_news_analyst
 from tradingagents.dataflows import boj, estat, fred, macro_panel
+from tradingagents.dataflows.config import set_config
 
 
 def _series(points, series_id="X"):
@@ -192,11 +193,28 @@ class NewsPanelInjectionTests(unittest.TestCase):
     def test_ticker_news_prompt_uses_configured_14_day_window(self):
         captured, _, _ = self._run()
         self.assertIn(
-            "derives ticker news as 2026-01-01 through 2026-01-15",
+            "window='recent' first; it covers 2026-01-01 through 2026-01-15",
             captured["prompt"],
         )
-        self.assertIn("configured 14-day lookback", captured["prompt"])
+        self.assertIn("configured lookback offset 14", captured["prompt"])
+        self.assertIn(
+            "2025-10-18 through 2026-01-15 (90 calendar dates)",
+            captured["prompt"],
+        )
+        self.assertIn("must replace rather than duplicate", captured["prompt"])
         self.assertIn("do not attempt to supply or override any date", captured["prompt"])
+
+    def test_prompt_preserves_configured_recent_window_longer_than_90_dates(self):
+        set_config({"ticker_news_lookback_days": 120})
+        captured, _, _ = self._run()
+        self.assertIn(
+            "window='recent' first; it covers 2025-09-17 through 2026-01-15",
+            captured["prompt"],
+        )
+        self.assertIn(
+            "Extended covers 2025-09-17 through 2026-01-15 (121 calendar dates)",
+            captured["prompt"],
+        )
 
     def test_jp_market_flows_are_injected_as_non_company_context(self):
         captured, _, flows = self._run(
