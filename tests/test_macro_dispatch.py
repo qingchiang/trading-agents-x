@@ -14,7 +14,7 @@ import pytest
 
 import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
-from tradingagents.dataflows import boj, estat, fred, macro_panel
+from tradingagents.dataflows import boj, cn_macro, estat, fred, macro_panel
 from tradingagents.dataflows.interface import route_to_vendor
 from tradingagents.provenance import extract_provenance
 
@@ -30,7 +30,7 @@ def _data(series_id, title, points):
 class MacroDispatchTests(unittest.TestCase):
     def setUp(self):
         config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
-        for vendor in (fred, estat, boj):
+        for vendor in (fred, estat, boj, cn_macro):
             vendor._series_cache.clear()
 
     def tearDown(self):
@@ -92,6 +92,17 @@ class MacroDispatchTests(unittest.TestCase):
             out = route_to_vendor("get_macro_indicators", "cpi", "2026-06-20")
         self.assertIn("## FRED: US CPI", out)
 
+    def test_china_indicator_routes_to_cn_macro(self):
+        with mock.patch.object(
+            cn_macro,
+            "fetch_series",
+            return_value=_data("cn_lpr", "China LPR", [("2026-06-20", "3.0")]),
+        ), mock.patch.object(
+            fred, "fetch_series", side_effect=AssertionError("fred called")
+        ):
+            out = route_to_vendor("get_macro_indicators", "cn_lpr", "2026-06-20")
+        self.assertIn("## China macro: China LPR", out)
+
     def test_missing_fred_key_degrades_with_the_fred_reason_not_a_jp_one(self):
         # Regression guard: a US indicator with no FRED key must degrade naming the
         # real cause (FRED unavailable), NOT a misleading "not a BOJ series" no-data
@@ -127,7 +138,12 @@ class PanelDispatchConsistencyTests(unittest.TestCase):
     def test_every_panel_cell_source_matches_dispatch_ownership(self):
         for source, indicator in self._panel_specs():
             key = indicator.strip().lower()
+            in_cn = key in cn_macro.CN_SERIES
             in_estat, in_boj = key in estat.ESTAT_SERIES, key in boj.BOJ_SERIES
+            if source == "cn":
+                self.assertTrue(in_cn, f"{indicator!r} not owned by China macro")
+                self.assertFalse(in_estat or in_boj)
+                continue
             if source == "estat":
                 self.assertTrue(in_estat, f"{indicator!r} not owned by e-Stat")
                 self.assertFalse(in_boj)
@@ -136,7 +152,10 @@ class PanelDispatchConsistencyTests(unittest.TestCase):
                 self.assertFalse(in_estat)
             else:  # fred: a raw FRED id/alias, must be in no JP SERIES dict
                 self.assertEqual(source, "fred")
-                self.assertFalse(in_estat or in_boj, f"{indicator!r} is JP-owned, not fred")
+                self.assertFalse(
+                    in_cn or in_estat or in_boj,
+                    f"{indicator!r} is non-FRED-owned, not fred",
+                )
 
 
 if __name__ == "__main__":

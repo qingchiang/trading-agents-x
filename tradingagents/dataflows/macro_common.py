@@ -1,4 +1,4 @@
-"""Shared primitives for the macro vendors (fred / estat / boj).
+"""Shared primitives for the macro vendors (fred / estat / boj / cn).
 
 These vendors deliberately share a return shape and rendering, so the cross-region
 panel and the get_macro_indicators microscope tool treat every source uniformly.
@@ -88,7 +88,7 @@ class SeriesCache:
     cannot grow it without limit; the default holds ~tens of dates' worth of the
     panel's dozen-odd series, and an evicted entry is simply re-fetched.
 
-    When built with a ``namespace`` (fred/estat/boj), *settled* entries are also
+    When built with a ``namespace`` (fred/estat/boj/cn), *settled* entries are also
     persisted under ``<data_cache_dir>/macro/<namespace>/`` so a later run — a
     multi-date backtest re-reading the same past dates is the motivating case —
     reads them from disk instead of re-hitting the rate-limited API. "Settled"

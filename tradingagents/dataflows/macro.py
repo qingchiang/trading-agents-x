@@ -3,8 +3,9 @@
 The macro microscope tool (``get_macro_indicators``) accepts a free-form indicator
 and must reach whichever source serves it: US series (and raw FRED IDs) go to
 :mod:`fred`, Japan's CPI to :mod:`estat`, Japan's policy rate / Tankan to
-:mod:`boj`. This is **content dispatch by indicator**, not the router's
-fallback-chain — each Japanese alias is owned by exactly one vendor, and the
+:mod:`boj`, and China aliases to :mod:`cn_macro`. This is **content dispatch by
+indicator**, not the router's fallback-chain — each regional alias is owned by
+exactly one vendor, and the
 owning vendor's typed errors (``VendorNotConfiguredError`` / ``NoMarketDataError``)
 must propagate so the router degrades with the *right* reason (e.g. "FRED_API_KEY
 missing" for a US series, "ESTAT_APP_ID missing" for ``jp_cpi``). A fallback chain
@@ -16,7 +17,7 @@ owners per cell, so panel and microscope agree on any indicator.
 
 from tradingagents.provenance import ProvenanceRecord, attach_provenance
 
-from . import boj, estat, fred
+from . import boj, cn_macro, estat, fred
 
 
 def _provenance_status(result: str, source: str, curr_date: str) -> tuple[str, str]:
@@ -38,13 +39,19 @@ def get_macro_indicators(
 ) -> str:
     """Dispatch ``indicator`` to its owning macro vendor and return its report."""
     key = indicator.strip().lower()
-    if key in estat.ESTAT_SERIES:
+    if key in cn_macro.CN_SERIES:
+        source, result = "China macro", cn_macro.get_macro_data(
+            indicator, curr_date, look_back_days
+        )
+    elif key in estat.ESTAT_SERIES:
         source, result = "e-Stat", estat.get_macro_data(indicator, curr_date, look_back_days)
     elif key in boj.BOJ_SERIES:
         source, result = "BOJ", boj.get_macro_data(indicator, curr_date, look_back_days)
     else:
         source, result = "FRED", fred.get_macro_data(indicator, curr_date, look_back_days)
     effective, timing = _provenance_status(result, source, curr_date)
+    if key in cn_macro.CN_SERIES and effective != "—":
+        timing = cn_macro.timing_for(key)
     return attach_provenance(
         result,
         ProvenanceRecord(

@@ -144,7 +144,7 @@ TradingAgents works with any market Yahoo Finance covers, using the exchange-suf
 - US: `AAPL`, `SPY`
 - Hong Kong: `0700.HK` · Tokyo: `7203.T` · London: `AZN.L`
 - India: `RELIANCE.NS`, `.BO` · Canada: `.TO` · Australia: `.AX`
-- China A-shares: Shanghai `.SS`, Shenzhen `.SZ` (e.g. `600519.SS` for Kweichow Moutai)
+- China A-shares: Shanghai `.SS`, Shenzhen `.SZ` (e.g. `600519.SS` for Kweichow Moutai); supported bare six-digit stock codes are normalized at entry (`600519` → `600519.SS`, `000001` → `000001.SZ`)
 - Crypto: `BTC-USD`, `ETH-USD`
 
 <p align="center">
@@ -199,6 +199,42 @@ J-Quants plan tiers: the **Light** plan covers prices, `/fins/summary`, and exch
 - **Point-in-time-safe identity.** Live analysis can use rich yfinance `.info` identity fields. Historical graph startup and news alias resolution use exact-symbol `yf.Search` metadata instead, so current sector/industry cannot leak into a backtest.
 
 See [CLAUDE.md](CLAUDE.md) for the full vendor architecture.
+
+## China A-share Support (this fork)
+
+The first China-market release supports Shanghai and Shenzhen individual stocks.
+It does not yet cover Beijing `.BJ`, Hong Kong `.HK`, ETFs, funds, options, or
+intraday/high-frequency data. A-share market data uses **AkShare first** and
+**yfinance as the configured fallback**; AkShare is installed with the default
+project dependencies.
+
+- Price history and technical indicators use forward-adjusted (`qfq`) OHLCV so
+  the verified snapshot and derived indicators share one price basis. Results
+  report the actual source and effective trading date, and stale suspended or
+  delisted data is not presented as a current quote.
+- Company profiles, financial abstracts, statements, announcements, research,
+  media news, and A-share-specific sentiment evidence are assembled from Chinese
+  sources with per-source provenance. Historical data without a defensible
+  publication timestamp fails closed or is explicitly labelled non-PIT.
+- The global macro panel adds China 1-year LPR, 10-year government yield, CPI,
+  GDP growth, surveyed urban unemployment, official manufacturing PMI, and
+  USD/CNY central parity. These keyless cells remain available without a
+  `FRED_API_KEY`; only FRED-owned US/global cells become `n/a`.
+
+China macro timing is not uniform. LPR, bond yield, and USD/CNY are filtered by
+trade date. The unemployment value comes from the latest eligible official NBS
+release, so older historical windows may be unavailable. CPI, GDP, and PMI are
+filtered only by observation period and are explicitly marked **non-vintage**:
+upstream revisions or later publication timing can make them unsuitable for
+strict point-in-time backtests. The implementation is optimized for low-frequency
+live analysis and bounds each upstream query to one page; memory/disk caching
+avoids repeated requests for the same settled window.
+
+AkShare and the keyless China assemblers depend on public upstream web endpoints.
+Those sites can change columns, pagination, or anti-bot behavior without notice.
+Such failures are validated and degraded per source/cell rather than globally,
+but production users should monitor provenance and freshness instead of treating
+a successful HTTP response as proof that data is current.
 
 ## TradingAgents Package
 
