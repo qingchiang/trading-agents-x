@@ -204,8 +204,8 @@ class MarketRoutingTests(unittest.TestCase):
     def test_default_config_registers_shanghai_and_shenzhen(self):
         routes = default_config.DEFAULT_CONFIG["data_vendors_by_market"]
         expected = {
-            "core_stock_apis": "yfinance",
-            "technical_indicators": "yfinance",
+            "core_stock_apis": "akshare,yfinance",
+            "technical_indicators": "akshare,yfinance",
             "fundamental_data": "yfinance",
             "news_data": "yfinance",
         }

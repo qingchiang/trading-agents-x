@@ -10,6 +10,8 @@ from .stockstats_utils import (
     INDICATOR_DESCRIPTIONS,
     StockstatsUtils,
     _assert_ohlcv_not_stale,
+    _coerce_ohlcv_dates,
+    _truncate_ohlcv_to_effective_date,
     filter_financials_by_date,
     load_ohlcv,
     render_indicator_window,
@@ -35,7 +37,13 @@ def get_YFin_data_online(
     # end_date row (and the current day when end_date is today). Request one day
     # past end_date so the requested range is actually inclusive (#986/#987).
     end_inclusive = (end_dt + relativedelta(days=1)).strftime("%Y-%m-%d")
-    data = yf_retry(lambda: ticker.history(start=start_date, end=end_inclusive))
+    data = yf_retry(
+        lambda: ticker.history(
+            start=start_date,
+            end=end_inclusive,
+            auto_adjust=True,
+        )
+    )
 
     # Empty result means the symbol is unknown/delisted. Raise a typed error
     # instead of returning prose: the routing layer turns it into a single
@@ -48,6 +56,14 @@ def get_YFin_data_online(
     # Remove timezone info from index for cleaner output
     if data.index.tz is not None:
         data.index = data.index.tz_localize(None)
+
+    data = _truncate_ohlcv_to_effective_date(data, end_date, symbol, canonical)
+    if data.empty:
+        raise NoMarketDataError(
+            symbol,
+            canonical,
+            f"no completed market rows on or before {end_date}",
+        )
 
     # Reject a stale frame (e.g. a year-old partial response) before it is
     # formatted into the report. Raises NoMarketDataError, which the router
@@ -67,6 +83,11 @@ def get_YFin_data_online(
     # agent (and user) can see which instrument was actually priced.
     label = canonical if canonical == symbol.upper() else f"{canonical} (from {symbol})"
     header = f"# Stock data for {label} from {start_date} to {end_date}\n"
+    header += "# Price adjustment: auto-adjusted prices (yfinance auto_adjust=True)\n"
+    header += "# Actual data source: yfinance\n"
+    latest = _coerce_ohlcv_dates(data).max().strftime("%Y-%m-%d")
+    header += f"# Requested end date: {end_date}\n"
+    header += f"# Effective trading date: {latest}\n"
     header += f"# Total records: {len(data)}\n"
     header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
 
@@ -91,7 +112,19 @@ def get_stock_stats_indicators_window(
     # report has an identical shape.
     try:
         data = load_ohlcv(symbol, curr_date)
-        return render_indicator_window(data, indicator, curr_date, look_back_days)
+        rendered = render_indicator_window(data, indicator, curr_date, look_back_days)
+        canonical = normalize_symbol(symbol)
+        if canonical.endswith((".SS", ".SZ")):
+            dates = _coerce_ohlcv_dates(data)
+            effective = dates.max().strftime("%Y-%m-%d") if not dates.empty else "n/a"
+            rendered = (
+                "# Actual data source: yfinance\n"
+                "# Price adjustment: auto-adjusted prices (yfinance auto_adjust=True)\n"
+                f"# Requested analysis date: {curr_date}\n"
+                f"# Effective trading date: {effective}\n\n"
+                + rendered
+            )
+        return rendered
     except NoMarketDataError:
         raise  # Unknown/delisted symbol — let the router emit the sentinel
     except Exception as e:

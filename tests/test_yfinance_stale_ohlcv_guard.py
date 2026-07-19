@@ -73,7 +73,8 @@ class StaleGuardPropagationTests(unittest.TestCase):
             def __init__(self, symbol):
                 pass
 
-            def history(self, start, end):
+            def history(self, start, end, auto_adjust):
+                assert auto_adjust is True
                 return stale
 
         with mock.patch.object(y_finance.yf, "Ticker", DummyTicker), \

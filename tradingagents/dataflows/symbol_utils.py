@@ -87,6 +87,40 @@ _CRYPTO_QUOTES = ("USDT", "USDC", "USD")
 # instead of being routed as an unsuffixed US ticker.
 _SHANGHAI_A_SHARE_PREFIXES = ("600", "601", "603", "605", "688", "689")
 _SHENZHEN_A_SHARE_PREFIXES = ("000", "001", "002", "003", "300", "301")
+_MAINLAND_MARKET_BENCHMARKS = frozenset({"000001.SS", "399001.SZ"})
+
+
+def infer_mainland_equity_suffix(code: str) -> str | None:
+    """Return ``.SS``/``.SZ`` for a supported six-digit A-share equity code."""
+    value = str(code)
+    if not re.fullmatch(r"\d{6}", value):
+        return None
+    if value.startswith(_SHANGHAI_A_SHARE_PREFIXES):
+        return ".SS"
+    if value.startswith(_SHENZHEN_A_SHARE_PREFIXES):
+        return ".SZ"
+    return None
+
+
+def _validate_explicit_mainland_suffix(symbol: str) -> None:
+    """Reject unsupported mainland security types and wrong equity exchanges."""
+    match = re.fullmatch(r"(\d{6})(\.SS|\.SZ)", symbol)
+    if match is None:
+        return
+    if symbol in _MAINLAND_MARKET_BENCHMARKS:
+        return
+    code, suffix = match.groups()
+    expected = infer_mainland_equity_suffix(code)
+    if expected is None:
+        raise ValueError(
+            f"Mainland security {symbol!r} is not supported in the A-share equity "
+            "phase; ETFs, funds, bonds, and non-benchmark indices are out of scope."
+        )
+    if suffix != expected:
+        raise ValueError(
+            f"Exchange suffix mismatch for {symbol!r}: equity code {code} "
+            f"requires {expected}, not {suffix}."
+        )
 
 
 def _normalize_explicit_china_suffix(symbol: str) -> str | None:
@@ -113,10 +147,9 @@ def _normalize_bare_a_share(code: str) -> str | None:
     """
     if not re.fullmatch(r"\d{6}", code):
         return None
-    if code.startswith(_SHANGHAI_A_SHARE_PREFIXES):
-        return f"{code}.SS"
-    if code.startswith(_SHENZHEN_A_SHARE_PREFIXES):
-        return f"{code}.SZ"
+    suffix = infer_mainland_equity_suffix(code)
+    if suffix is not None:
+        return f"{code}{suffix}"
     raise ValueError(
         f"Cannot infer a supported Shanghai/Shenzhen A-share exchange for bare "
         f"code {code!r}. Use an explicit Yahoo-style suffix for a supported "
@@ -185,6 +218,7 @@ def normalize_symbol(raw: str) -> str:
     else:
         canonical = s
 
+    _validate_explicit_mainland_suffix(canonical)
     if canonical != raw.strip().upper():
         logger.info("Resolved symbol %r to Yahoo symbol %r", raw, canonical)
     return canonical

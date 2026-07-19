@@ -169,11 +169,11 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # Only per-instrument (ticker-bearing) tools are routed; macro and global
     # news stay market-agnostic (cross-border context analyzed across all markets
     # at once) and always use ``data_vendors``. Japanese-market vendors are wired
-    # in for ".T" (Tokyo). China phase 1 registers Shanghai/Shenzhen on yfinance;
-    # later gated phases replace the relevant chains with AkShare-first adapters.
-    # Each chain is "<JP vendor>,yfinance" — a true ordered fallback (try the JP
-    # vendor, then Yahoo), distinct from macro_data's per-owner dispatch; don't
-    # "fix" one into the other. For prices/indicators/fundamentals yfinance is
+    # in for ".T" (Tokyo). China phase 2 routes Shanghai/Shenzhen prices and
+    # indicators through AkShare first, with yfinance as the configured fallback.
+    # These are true ordered fallback chains, distinct from macro_data's per-owner
+    # dispatch; don't "fix" one into the other. For JP prices, indicators, and
+    # fundamentals, yfinance is
     # OPTIONAL keyless degradation: jquants serves every method when a key is set,
     # and Yahoo (which covers Tokyo) keeps a keyless ".T" run working instead of
     # hard-erroring. For news_data yfinance is also the SOLE server of
@@ -195,14 +195,14 @@ DEFAULT_CONFIG = _apply_env_overrides({
             "news_data": "jp_news,yfinance",
         },
         ".SS": {
-            "core_stock_apis": "yfinance",
-            "technical_indicators": "yfinance",
+            "core_stock_apis": "akshare,yfinance",
+            "technical_indicators": "akshare,yfinance",
             "fundamental_data": "yfinance",
             "news_data": "yfinance",
         },
         ".SZ": {
-            "core_stock_apis": "yfinance",
-            "technical_indicators": "yfinance",
+            "core_stock_apis": "akshare,yfinance",
+            "technical_indicators": "akshare,yfinance",
             "fundamental_data": "yfinance",
             "news_data": "yfinance",
         },

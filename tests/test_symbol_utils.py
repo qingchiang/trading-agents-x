@@ -7,6 +7,7 @@ import pytest
 from tradingagents.dataflows.symbol_utils import (
     NoMarketDataError,
     crypto_base,
+    infer_mainland_equity_suffix,
     is_yahoo_safe,
     normalize_symbol,
     tokyo_securities_base,
@@ -52,6 +53,29 @@ class TestNormalizeSymbol(unittest.TestCase):
 
     def test_empty_input_passthrough(self):
         self.assertEqual(normalize_symbol(""), "")
+
+    def test_mainland_equity_suffix_inference(self):
+        self.assertEqual(infer_mainland_equity_suffix("600519"), ".SS")
+        self.assertEqual(infer_mainland_equity_suffix("000001"), ".SZ")
+        self.assertIsNone(infer_mainland_equity_suffix("510300"))
+        self.assertIsNone(infer_mainland_equity_suffix("AAPL"))
+
+    def test_explicit_mainland_equity_suffix_mismatch_fails_loud(self):
+        with self.assertRaisesRegex(ValueError, "suffix mismatch"):
+            normalize_symbol("600519.SZ")
+        with self.assertRaisesRegex(ValueError, "suffix mismatch"):
+            normalize_symbol("300750.SS")
+
+    def test_unsupported_mainland_security_types_fail_loud(self):
+        with self.assertRaisesRegex(ValueError, "not supported"):
+            normalize_symbol("510300.SS")
+        with self.assertRaisesRegex(ValueError, "not supported"):
+            normalize_symbol("399006.SZ")
+
+    def test_configured_mainland_benchmarks_remain_valid(self):
+        self.assertEqual(normalize_symbol("000001.SS"), "000001.SS")
+        self.assertEqual(normalize_symbol("000001.SH"), "000001.SS")
+        self.assertEqual(normalize_symbol("399001.SZ"), "399001.SZ")
 
 
 @pytest.mark.unit

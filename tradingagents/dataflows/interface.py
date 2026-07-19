@@ -20,6 +20,11 @@ from .alpha_vantage import (
     get_stock as get_alpha_vantage_stock,
     get_verified_market_snapshot as get_alpha_vantage_verified_snapshot,
 )
+from .cn import (
+    get_indicator as get_akshare_indicator,
+    get_stock as get_akshare_stock,
+    get_verified_market_snapshot as get_akshare_verified_snapshot,
+)
 from .config import get_config
 from .errors import (
     NoMarketDataError,
@@ -125,6 +130,7 @@ VENDOR_LIST = [
     "tdnet_news",
     "google_news",
     "jp_news",
+    "akshare",
 ]
 
 # Optional enrichment categories. These add macro/event context to the news
@@ -138,17 +144,20 @@ OPTIONAL_CATEGORIES = {"macro_data", "prediction_markets"}
 VENDOR_METHODS = {
     # core_stock_apis
     "get_stock_data": {
+        "akshare": get_akshare_stock,
         "alpha_vantage": get_alpha_vantage_stock,
         "yfinance": get_YFin_data_online,
         "jquants": get_jquants_stock,
     },
     # technical_indicators
     "get_indicators": {
+        "akshare": get_akshare_indicator,
         "alpha_vantage": get_alpha_vantage_indicator,
         "yfinance": get_stock_stats_indicators_window,
         "jquants": get_jquants_indicator,
     },
     "get_verified_market_snapshot": {
+        "akshare": get_akshare_verified_snapshot,
         "alpha_vantage": get_alpha_vantage_verified_snapshot,
         "yfinance": get_yfinance_verified_snapshot,
         "jquants": get_jquants_verified_snapshot,
