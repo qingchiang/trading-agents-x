@@ -80,6 +80,56 @@ TRUSTED_GOOGLE_SOURCES = frozenset({
     "東洋経済オンライン",
 })
 
+TRUSTED_CHINESE_GOOGLE_SOURCES = frozenset(
+    {
+        "reuters",
+        "路透",
+        "bloomberg",
+        "彭博",
+        "新华社",
+        "中国证券报",
+        "上海证券报",
+        "证券时报",
+        "证券日报",
+        "第一财经",
+        "财新",
+        "财联社",
+        "界面新闻",
+    }
+)
+
+_CHINESE_BUSINESS_TERMS = (
+    "股票",
+    "股价",
+    "业绩",
+    "营收",
+    "利润",
+    "亏损",
+    "投资",
+    "收购",
+    "并购",
+    "融资",
+    "回购",
+    "增持",
+    "减持",
+    "分红",
+    "上市公司",
+    "证券",
+    "交易所",
+    "监管",
+    "评级",
+    "目标价",
+    "董事长",
+    "总经理",
+    "财报",
+)
+_CHINESE_LEGAL_SUFFIXES = (
+    "股份有限公司",
+    "有限责任公司",
+    "集团股份有限公司",
+    "集团有限公司",
+)
+
 _JAPANESE_BUSINESS_TERMS = (
     "株",
     "株価",
@@ -239,6 +289,40 @@ def build_company_aliases(
     )
 
 
+def build_chinese_company_aliases(
+    ticker: str,
+    full_name: str | None,
+    short_name: str | None,
+) -> CompanyAliases:
+    """Build conservative mainland aliases: full legal name strong, abbreviations review-only.
+
+    Six-digit codes are intentionally not accepted as direct media evidence: in
+    Chinese search results they commonly denote dates, product models, or index
+    levels. Official code-filtered feeds establish identity at the API layer.
+    """
+    direct: set[str] = set()
+    candidate: set[str] = set()
+    if full_name:
+        normalized = _normalize_match_text(full_name)
+        if len(normalized) >= 4:
+            direct.add(normalized)
+        for suffix in _CHINESE_LEGAL_SUFFIXES:
+            if full_name.endswith(suffix):
+                stripped = _normalize_match_text(full_name[: -len(suffix)])
+                if len(stripped) >= 2:
+                    candidate.add(stripped)
+    if short_name:
+        normalized = _normalize_match_text(short_name)
+        if len(normalized) >= 2:
+            candidate.add(normalized)
+    candidate -= direct
+    return CompanyAliases(
+        ticker=frozenset({unicodedata.normalize("NFKC", ticker).casefold()}),
+        direct_names=frozenset(direct),
+        candidate_names=frozenset(candidate),
+    )
+
+
 def _contains_ascii_term(text: str, term: str) -> bool:
     """Match an ASCII term as tokens, never inside another ASCII word."""
     pattern = r"(?<![a-z0-9])" + re.escape(term).replace(r"\ ", r"\s+") + r"(?![a-z0-9])"
@@ -374,3 +458,25 @@ def classify_google_article(
     if entity != "none":
         return NewsClassification("drop", "unknown source without business context")
     return NewsClassification("drop", "no company evidence")
+
+
+def classify_chinese_google_article(
+    title: str,
+    source: str,
+    aliases: CompanyAliases,
+) -> NewsClassification:
+    """Classify Chinese media without promoting abbreviations or bare codes."""
+    entity = _name_evidence(title, aliases)
+    normalized_source = normalize_news_text(source)
+    normalized_title = _normalize_match_text(title)
+    trusted = any(term in normalized_source for term in TRUSTED_CHINESE_GOOGLE_SOURCES)
+    business = any(term in normalized_title for term in _CHINESE_BUSINESS_TERMS)
+    if entity == "direct" and (trusted or business):
+        return NewsClassification("direct", "full company name in business headline")
+    if entity == "candidate" and (trusted or business):
+        return NewsClassification("candidate", "abbreviated company name requires review")
+    if trusted and business:
+        return NewsClassification("context", "trusted business context without exact entity")
+    if entity != "none":
+        return NewsClassification("drop", "entity mention lacks business context")
+    return NewsClassification("drop", "no company-name evidence")

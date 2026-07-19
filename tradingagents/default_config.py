@@ -199,13 +199,13 @@ DEFAULT_CONFIG = _apply_env_overrides({
             "core_stock_apis": "akshare,yfinance",
             "technical_indicators": "akshare,yfinance",
             "fundamental_data": "cn_fundamentals,cn_statements,akshare,yfinance",
-            "news_data": "yfinance",
+            "news_data": "cn_news,yfinance",
         },
         ".SZ": {
             "core_stock_apis": "akshare,yfinance",
             "technical_indicators": "akshare,yfinance",
             "fundamental_data": "cn_fundamentals,cn_statements,akshare,yfinance",
-            "news_data": "yfinance",
+            "news_data": "cn_news,yfinance",
         },
     },
     # Benchmark for alpha calculation in the reflection layer.

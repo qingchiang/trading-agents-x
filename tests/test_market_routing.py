@@ -207,7 +207,7 @@ class MarketRoutingTests(unittest.TestCase):
             "core_stock_apis": "akshare,yfinance",
             "technical_indicators": "akshare,yfinance",
             "fundamental_data": "cn_fundamentals,cn_statements,akshare,yfinance",
-            "news_data": "yfinance",
+            "news_data": "cn_news,yfinance",
         }
         self.assertEqual(routes[".SS"], expected)
         self.assertEqual(routes[".SZ"], expected)
@@ -233,6 +233,31 @@ class MarketRoutingTests(unittest.TestCase):
         self.assertEqual(statement, "CN STATEMENT")
         cn_fundamentals.assert_called_once()
         cn_statements.assert_called_once()
+
+    def test_china_news_route_falls_back_only_after_cn_no_data(self):
+        cn_vendor = mock.Mock(
+            side_effect=NoMarketDataError("600519.SS", detail="empty CN window")
+        )
+        yfinance = mock.Mock(side_effect=_returns("YF NEWS"))
+        with self._route(
+            "get_news", {"cn_news": cn_vendor, "yfinance": yfinance}
+        ):
+            output = interface.route_to_vendor(
+                "get_news", "600519.SS", "2026-01-01", "2026-01-10"
+            )
+
+        self.assertEqual(output, "YF NEWS")
+        cn_vendor.assert_called_once()
+        yfinance.assert_called_once()
+
+    def test_cn_market_route_does_not_change_global_news_vendor(self):
+        set_config({"data_vendors": {"news_data": "yfinance"}})
+        with self._route(
+            "get_global_news", {"yfinance": _returns("GLOBAL NEWS")}
+        ):
+            output = interface.route_to_vendor("get_global_news", "2026-01-10")
+
+        self.assertEqual(output, "GLOBAL NEWS")
 
     def test_china_fundamental_route_rejects_invalid_date_before_vendor(self):
         cn_fundamentals = mock.Mock(side_effect=_returns("CN FUNDAMENTALS"))

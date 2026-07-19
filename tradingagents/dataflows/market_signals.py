@@ -12,6 +12,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from .cn.cn_sentiment import (
+    get_holding_changes as get_cn_holding_changes,
+    get_important_announcements as get_cn_important_announcements,
+    get_margin_signal as get_cn_margin_signal,
+    get_research_signal as get_cn_research_signal,
+)
 from .jp.edinet_holdings import get_large_holdings
 from .jp.jquants_sentiment import get_margin_balance, get_short_positions
 from .jp.yfinance_sentiment import get_analyst_ratings_block
@@ -121,8 +127,73 @@ def _jp_signals() -> tuple[SentimentSignal, ...]:
     )
 
 
+def _cn_signals() -> tuple[SentimentSignal, ...]:
+    """Build mainland specs at lookup time for patchable, never-raise prefetch."""
+    from .lookahead import lookback_start_date
+
+    return (
+        SentimentSignal(
+            tag="cn_margin",
+            fetch=get_cn_margin_signal,
+            evidence="margin financing and securities lending",
+            source="SSE/SZSE",
+            title="Margin positioning — official exchange detail",
+            intro=(
+                "Per-name financing and securities-lending balances. Treat them as "
+                "positioning/overhang, not as a directional verdict; missing coverage "
+                "or a failed exchange request is unknown, never neutral or bearish."
+            ),
+            effective=lambda date: f"latest exchange session <= {date}",
+            timing="trade-date filtered",
+        ),
+        SentimentSignal(
+            tag="cn_holding_changes",
+            fetch=get_cn_holding_changes,
+            evidence="major-shareholder and executive holding changes",
+            source="Eastmoney exchange disclosures",
+            title="Insider & major-shareholder holding changes",
+            intro=(
+                "Records use available disclosure/update dates. When a source exposes "
+                "only the event date, that record is labelled non-strict point-in-time. "
+                "Interpret the named holder, direction and size; no events or unavailable "
+                "coverage does not imply neutral sentiment."
+            ),
+            effective=lambda date: f"{lookback_start_date(date, 89)} to {date}",
+            timing="mixed disclosure/update-date and event-date filtering; see record labels",
+        ),
+        SentimentSignal(
+            tag="cn_research",
+            fetch=get_cn_research_signal,
+            evidence="sell-side ratings and target prices",
+            source="Eastmoney Research",
+            title="Sell-side rating & target-price changes",
+            intro=(
+                "Professional opinions published by the analysis date. Compare rating "
+                "changes and target ranges across institutions; absence of coverage is unknown."
+            ),
+            effective=lambda date: f"{lookback_start_date(date, 89)} to {date}",
+            timing="publication-date filtered",
+        ),
+        SentimentSignal(
+            tag="cn_announcements",
+            fetch=get_cn_important_announcements,
+            evidence="material company announcements",
+            source="CNINFO",
+            title="Important company announcements — official CNINFO",
+            intro=(
+                "Exact-code official disclosures matching material-event terms. Read "
+                "the event itself; an empty or unavailable feed is not a sentiment score."
+            ),
+            effective=lambda date: f"{lookback_start_date(date, 29)} to {date}",
+            timing="disclosure-date filtered",
+        ),
+    )
+
+
 _SIGNAL_FACTORIES: dict[str, Callable[[], tuple[SentimentSignal, ...]]] = {
     ".T": _jp_signals,
+    ".SS": _cn_signals,
+    ".SZ": _cn_signals,
 }
 
 

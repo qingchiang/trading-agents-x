@@ -34,8 +34,31 @@ def test_tokyo_registry_fetches_registered_signals():
 
 
 @pytest.mark.unit
-def test_unregistered_market_has_no_market_specific_signals_yet():
-    assert market_signals.fetch_sentiment_signals("600519.SS", "2026-07-18") == ()
+def test_mainland_registry_fetches_registered_signals():
+    patches = (
+        mock.patch.object(market_signals, "get_cn_margin_signal", return_value="MARGIN"),
+        mock.patch.object(market_signals, "get_cn_holding_changes", return_value="HOLDINGS"),
+        mock.patch.object(market_signals, "get_cn_research_signal", return_value="RESEARCH"),
+        mock.patch.object(
+            market_signals, "get_cn_important_announcements", return_value="ANNOUNCEMENTS"
+        ),
+    )
+    with (
+        patches[0] as margin,
+        patches[1] as holdings,
+        patches[2] as research,
+        patches[3] as announcements,
+    ):
+        results = market_signals.fetch_sentiment_signals("600519.SS", "2026-07-18")
+
+    assert {result.spec.tag for result in results} == {
+        "cn_margin",
+        "cn_holding_changes",
+        "cn_research",
+        "cn_announcements",
+    }
+    for fetch in (margin, holdings, research, announcements):
+        fetch.assert_called_once_with("600519.SS", "2026-07-18")
 
 
 @pytest.mark.unit

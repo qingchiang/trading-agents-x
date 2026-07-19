@@ -26,6 +26,7 @@ from .cn import (
     get_verified_market_snapshot as get_akshare_verified_snapshot,
 )
 from .cn.cn_fundamentals import get_fundamentals as get_cn_fundamentals
+from .cn.cn_news import get_news as get_cn_news
 from .cn.cn_statements import (
     get_balance_sheet as get_cn_balance_sheet,
     get_cashflow as get_cn_cashflow,
@@ -140,6 +141,7 @@ VENDOR_LIST = [
     "akshare",
     "cn_fundamentals",
     "cn_statements",
+    "cn_news",
 ]
 
 # Optional enrichment categories. These add macro/event context to the news
@@ -208,6 +210,7 @@ VENDOR_METHODS = {
         "tdnet_news": get_tdnet_news,
         "google_news": get_google_news,
         "jp_news": get_jp_news,
+        "cn_news": get_cn_news,
     },
     "get_global_news": {
         "yfinance": get_global_news_yfinance,
