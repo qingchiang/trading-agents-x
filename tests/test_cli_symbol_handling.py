@@ -6,7 +6,12 @@ stock), #982 (BTC-USDT accepted but unpriceable on Yahoo).
 import pytest
 
 from cli.models import AssetType
-from cli.utils import detect_asset_type, is_valid_ticker_input, normalize_ticker_symbol
+from cli.utils import (
+    detect_asset_type,
+    is_valid_ticker_input,
+    normalize_ticker_symbol,
+    validate_ticker_input,
+)
 from tradingagents.dataflows.symbol_utils import normalize_symbol
 
 
@@ -20,6 +25,9 @@ from tradingagents.dataflows.symbol_utils import normalize_symbol
     # non-crypto must be untouched
     ("AAPL", "AAPL"),
     ("GC=F", "GC=F"),
+    ("600519", "600519.SS"),
+    ("000001", "000001.SZ"),
+    ("600519.SH", "600519.SS"),
     ("600519.SS", "600519.SS"),
     ("EURUSD", "EURUSD=X"),
 ])
@@ -42,6 +50,18 @@ def test_ticker_input_validation(value, ok):
     assert is_valid_ticker_input(value) is ok
 
 
+@pytest.mark.parametrize("value", ["430001", "430001.BJ"])
+def test_interactive_validation_surfaces_unsupported_china_symbol(value):
+    result = validate_ticker_input(value)
+    assert isinstance(result, str)
+    assert "not supported" in result or "Cannot infer" in result
+
+
+@pytest.mark.parametrize("value", ["", "600519", "600519.SH", "000001.SZ", "AAPL"])
+def test_interactive_validation_accepts_supported_symbols(value):
+    assert validate_ticker_input(value) is True
+
+
 # --- #981/#982: asset-type classified on the canonical symbol ---
 @pytest.mark.parametrize("raw,expected", [
     ("BTCUSD", AssetType.CRYPTO),
@@ -58,5 +78,24 @@ def test_detect_asset_type(raw, expected):
 
 def test_cli_normalize_delegates_to_data_layer():
     # CLI must produce the same canonical symbol the data path will price.
-    for raw in ("XAUUSD", "BTCUSD", "btc-usdt", "AAPL"):
+    for raw in (
+        "XAUUSD",
+        "BTCUSD",
+        "btc-usdt",
+        "600519",
+        "600519.SH",
+        "000001",
+        "AAPL",
+    ):
         assert normalize_ticker_symbol(raw) == normalize_symbol(raw)
+
+
+@pytest.mark.parametrize("raw", ["430001", "900001", "123456"])
+def test_unsupported_bare_six_digit_code_fails_loud(raw):
+    with pytest.raises(ValueError, match="Cannot infer a supported Shanghai/Shenzhen"):
+        normalize_ticker_symbol(raw)
+
+
+def test_beijing_suffix_fails_loud():
+    with pytest.raises(ValueError, match="Beijing Stock Exchange symbol.*not supported"):
+        normalize_ticker_symbol("430001.BJ")

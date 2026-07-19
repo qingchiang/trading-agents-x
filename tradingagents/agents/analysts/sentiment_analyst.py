@@ -46,15 +46,12 @@ from tradingagents.agents.utils.structured import (
     invoke_structured_or_freetext,
 )
 from tradingagents.dataflows.config import get_config
-from tradingagents.dataflows.jp.edinet_holdings import get_large_holdings
-from tradingagents.dataflows.jp.jquants_sentiment import (
-    get_margin_balance,
-    get_short_positions,
-)
-from tradingagents.dataflows.jp.market import is_tokyo_ticker
-from tradingagents.dataflows.jp.yfinance_sentiment import get_analyst_ratings_block
 from tradingagents.dataflows.lookahead import is_live, lookback_start_date
 from tradingagents.dataflows.market_context import market_suffix_of
+from tradingagents.dataflows.market_signals import (
+    FetchedSentimentSignal,
+    fetch_sentiment_signals,
+)
 from tradingagents.dataflows.reddit import fetch_reddit_posts
 from tradingagents.dataflows.stocktwits import fetch_stocktwits_messages
 from tradingagents.provenance import (
@@ -92,7 +89,7 @@ def create_sentiment_analyst(llm):
         live_run = is_live(end_date)
         stocktwits_retrieved_at = None
         reddit_retrieved_at = None
-        ratings_retrieved_at = None
+        fetched_market_signals = ()
 
         # Pre-fetch all three sources. Each must degrade to a string so the LLM
         # always sees something — either real data or a clear placeholder — and
@@ -116,22 +113,7 @@ def create_sentiment_analyst(llm):
             placeholder = "<unavailable: no coverage for this market>"
             stocktwits_block = placeholder
             reddit_block = placeholder
-            if is_tokyo_ticker(ticker):
-                ratings_block = get_analyst_ratings_block(ticker, end_date)
-                ratings_retrieved_at = (
-                    datetime.now(timezone.utc).isoformat(timespec="seconds")
-                    if ratings_block
-                    else None
-                )
-                # Optional Tokyo-specific signals keyed by _OPTIONAL_SECTIONS tag.
-                optional_blocks = {
-                    "large_holdings": get_large_holdings(ticker, end_date),
-                    "margin_balances": get_margin_balance(ticker, end_date),
-                    "short_positions": get_short_positions(ticker, end_date),
-                    "analyst_ratings": ratings_block,
-                }
-            else:
-                optional_blocks = {}
+            fetched_market_signals = fetch_sentiment_signals(ticker, end_date)
         else:
             if live_run:
                 stocktwits_block = fetch_stocktwits_messages(
@@ -157,7 +139,6 @@ def create_sentiment_analyst(llm):
                 )
                 stocktwits_block = historical
                 reddit_block = historical
-            optional_blocks = {}
 
         system_message = _build_system_message(
             ticker=ticker,
@@ -168,7 +149,7 @@ def create_sentiment_analyst(llm):
             news_block=news_block,
             stocktwits_block=stocktwits_block,
             reddit_block=reddit_block,
-            optional_blocks=optional_blocks,
+            market_signals=fetched_market_signals,
         )
 
         prompt = ChatPromptTemplate.from_messages(
@@ -268,16 +249,10 @@ def create_sentiment_analyst(llm):
                 ),
             )
         )
-        if optional_blocks:
-            holdings_start = lookback_start_date(end_date, 89)
-            shorts_start = lookback_start_date(end_date, 365)
-            optional_specs = (
-                ("ownership and control filings", "EDINET", "large_holdings", f"{holdings_start} to {end_date}", "disclosure-date filtered"),
-                ("margin balances", "J-Quants", "margin_balances", f"published weeks <= {end_date}", "publication-date filtered"),
-                ("large short positions", "J-Quants", "short_positions", f"{shorts_start} to {end_date}", "disclosure-date filtered"),
-            )
-            for evidence, source, key, effective, timing in optional_specs:
-                body = optional_blocks.get(key, "")
+        if fetched_market_signals:
+            for result in fetched_market_signals:
+                spec = result.spec
+                body = result.body
                 lowered = body.casefold()
                 if "unavailable" in lowered:
                     record_timing = "unavailable"
@@ -286,39 +261,28 @@ def create_sentiment_analyst(llm):
                     record_timing = "not queried; identifier unavailable"
                     record_effective = "—"
                 elif body:
-                    record_timing = timing
-                    record_effective = effective
+                    record_timing = spec.timing
+                    record_effective = spec.effective(end_date)
+                elif spec.live_only:
+                    record_timing = (
+                        "unavailable for historical date; vendor not queried"
+                        if not live_run
+                        else "no analyst snapshot returned; retrieval success unknown"
+                    )
+                    record_effective = "—"
                 else:
                     record_timing = "available; no qualifying records"
-                    record_effective = effective
+                    record_effective = spec.effective(end_date)
                 records.append(
                     ProvenanceRecord(
-                        evidence=evidence,
-                        source=source,
+                        evidence=spec.evidence,
+                        source=spec.source,
                         requested=end_date,
                         effective=record_effective,
                         timing=record_timing,
+                        retrieved_at=result.retrieved_at,
                     )
                 )
-            ratings = optional_blocks.get("analyst_ratings", "")
-            records.append(
-                ProvenanceRecord(
-                    evidence="analyst consensus",
-                    source="yfinance",
-                    requested=end_date,
-                    effective="retrieval-time snapshot" if ratings else "—",
-                    timing=(
-                        "live non-point-in-time"
-                        if ratings
-                        else (
-                            "unavailable for historical date; vendor not queried"
-                            if not live_run
-                            else "no analyst snapshot returned; retrieval success unknown"
-                        )
-                    ),
-                    retrieved_at=ratings_retrieved_at if ratings else None,
-                )
-            )
 
         report_text = append_provenance_appendix(
             report_text,
@@ -335,37 +299,6 @@ def create_sentiment_analyst(llm):
     return sentiment_analyst_node
 
 
-# Each intro owns its block's interpretation (rendered directly above the data);
-# prompt rule 7 stays block-agnostic so a new signal is one intro, not two edits.
-_HOLDINGS_INTRO = (
-    "Per-name EDINET filings about the company, of two kinds — read each row's label.\n"
-    "大量保有 (5%+ stakes): an investor crossing/adjusting a 5% stake; the row shows the\n"
-    "filer and report type, not the exact %, so read frequency and who is filing — a\n"
-    "cluster of new 5%+ reports suggests institutional accumulation (mildly bullish).\n"
-    "公開買付 (TOB / tender offer): a takeover event that dominates routine accumulation —\n"
-    "a launch is a premium bid (strongly bullish for the target), a withdrawal cancels it\n"
-    "(bearish), a result concludes it, and a target-board opinion signals support or\n"
-    "opposition. Weigh a takeover by its label, not as a 5% stake."
-)
-_MARGIN_INTRO = (
-    "Per-name weekly margin-trading balances (信用取引): 信用買残 are shares bought on\n"
-    "margin (latent future selling), 信用売残 shares sold short on margin. A rising\n"
-    "credit ratio (買残/売残) means growing long overhang — a contrarian/bearish tilt,\n"
-    "a falling one is supportive. Read the trend across weeks, not a single week."
-)
-_SHORT_INTRO = (
-    "Per-name disclosed large short positions (空売り残高報告, ≥0.5% of shares out),\n"
-    "each naming the short seller. New or rising positions are professional bearish\n"
-    "positioning; falling/covered ones are bullish. Weigh by how large and how many."
-)
-_RATINGS_INTRO = (
-    "Per-name sell-side view: the analyst-consensus rating (its mean is a 1–5 scale\n"
-    "where 1 is most bullish) and the 12-month price-target implied upside. A\n"
-    "professional-opinion signal, distinct from the flow/accumulation blocks, which are\n"
-    "positioning. LIVE snapshot — present only on live runs, absent in backtests."
-)
-
-
 def _optional_section(title: str, intro: str, tag: str, body: str) -> str:
     """Render an optional ``### title / intro / <start_of_tag>…<end_of_tag>`` block.
 
@@ -375,18 +308,6 @@ def _optional_section(title: str, intro: str, tag: str, body: str) -> str:
     if not body:
         return ""
     return f"\n### {title}\n{intro}\n\n<start_of_{tag}>\n{body}\n<end_of_{tag}>\n"
-
-
-# Optional market-specific signal sections, in render order: (title, intro, tag).
-# The caller passes an ``optional_blocks`` mapping keyed by tag; an absent/empty
-# block omits its section, so the US prompt is unchanged. Adding another market's
-# signal is one row here plus one entry at the call site — no concat to forget.
-_OPTIONAL_SECTIONS = (
-    ("Ownership & control — official 大量保有 / 公開買付 (TOB)", _HOLDINGS_INTRO, "large_holdings"),
-    ("Margin-trading balances — official weekly 信用取引", _MARGIN_INTRO, "margin_balances"),
-    ("Short-position disclosures — official 空売り残高報告", _SHORT_INTRO, "short_positions"),
-    ("Analyst consensus — sell-side rating & price target", _RATINGS_INTRO, "analyst_ratings"),
-)
 
 
 def _build_system_message(
@@ -399,19 +320,22 @@ def _build_system_message(
     news_block: str,
     stocktwits_block: str,
     reddit_block: str,
-    optional_blocks: dict | None = None,
+    market_signals: tuple[FetchedSentimentSignal, ...] = (),
 ) -> str:
     """Assemble the sentiment-analyst system message with structured data blocks.
 
-    ``optional_blocks`` maps an ``_OPTIONAL_SECTIONS`` tag (e.g.
-    ``large_holdings``, ``analyst_ratings``) to its rendered body — optional
-    Tokyo-market signals. A missing or empty block omits its section entirely,
-    leaving the US prompt unchanged.
+    Market-specific blocks carry their own presentation metadata from the same
+    registry that fetched them. Empty bodies omit their section, leaving the US
+    prompt unchanged.
     """
-    optional_blocks = optional_blocks or {}
     optional_sections = "".join(
-        _optional_section(title, intro, tag, optional_blocks.get(tag, ""))
-        for title, intro, tag in _OPTIONAL_SECTIONS
+        _optional_section(
+            result.spec.title,
+            result.spec.intro,
+            result.spec.tag,
+            result.body,
+        )
+        for result in market_signals
     )
     # Unlike tool-calling analysts, Sentiment receives a large body of source
     # text in its initial prompt. Native-language JP disclosures can therefore

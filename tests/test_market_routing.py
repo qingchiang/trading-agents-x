@@ -63,6 +63,35 @@ class MarketRoutingTests(unittest.TestCase):
         self.assertEqual(result, "YF")
         jp.assert_not_called()
 
+    def test_bare_a_share_is_normalized_before_market_routing(self):
+        cn = mock.Mock(side_effect=_returns("CN"))
+        with self._route("get_stock_data", {"yfinance": cn}):
+            result = interface.route_to_vendor(
+                "get_stock_data", "600519", "2026-01-01", "2026-01-10"
+            )
+        self.assertEqual(result, "CN")
+        self.assertEqual(cn.call_args.args[0], "600519.SS")
+
+    def test_shanghai_alias_is_normalized_before_market_routing(self):
+        cn = mock.Mock(side_effect=_returns("CN"))
+        with self._route("get_stock_data", {"yfinance": cn}):
+            result = interface.route_to_vendor(
+                "get_stock_data", "600519.SH", "2026-01-01", "2026-01-10"
+            )
+        self.assertEqual(result, "CN")
+        self.assertEqual(cn.call_args.args[0], "600519.SS")
+
+    def test_beijing_suffix_is_rejected_before_vendor_routing(self):
+        yf = mock.Mock(side_effect=_returns("YF"))
+        with (
+            self._route("get_stock_data", {"yfinance": yf}),
+            self.assertRaisesRegex(ValueError, "Beijing Stock Exchange symbol"),
+        ):
+            interface.route_to_vendor(
+                "get_stock_data", "430001.BJ", "2026-01-01", "2026-01-10"
+            )
+        yf.assert_not_called()
+
     def test_verified_snapshot_uses_jp_technical_vendor(self):
         with self._route(
             "get_verified_market_snapshot",
@@ -171,6 +200,63 @@ class MarketRoutingTests(unittest.TestCase):
         self.assertEqual(routes["news_data"], "jp_news,yfinance")
         # Macro stays market-agnostic — must not appear in the per-market block.
         self.assertNotIn("macro_data", routes)
+
+    def test_default_config_registers_shanghai_and_shenzhen(self):
+        routes = default_config.DEFAULT_CONFIG["data_vendors_by_market"]
+        expected = {
+            "core_stock_apis": "yfinance",
+            "technical_indicators": "yfinance",
+            "fundamental_data": "yfinance",
+            "news_data": "yfinance",
+        }
+        self.assertEqual(routes[".SS"], expected)
+        self.assertEqual(routes[".SZ"], expected)
+
+    def test_default_market_routes_validate(self):
+        interface.validate_market_routing(default_config.DEFAULT_CONFIG)
+
+    def test_market_route_validation_rejects_unknown_vendor(self):
+        config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        config["data_vendors_by_market"][".SS"]["core_stock_apis"] = (
+            "bogus_vendor,yfinance"
+        )
+        with self.assertRaisesRegex(ValueError, "Unknown vendor.*bogus_vendor"):
+            interface.validate_market_routing(config)
+
+    def test_market_route_validation_rejects_duplicate_vendor(self):
+        config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        config["data_vendors_by_market"][".SS"]["core_stock_apis"] = (
+            "yfinance,yfinance"
+        )
+        with self.assertRaisesRegex(ValueError, "duplicate vendor"):
+            interface.validate_market_routing(config)
+
+    def test_market_route_validation_rejects_unserved_method(self):
+        config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        config["data_vendors_by_market"][".SS"]["news_data"] = "jp_news"
+        with self.assertRaisesRegex(ValueError, "cannot serve 'get_insider_transactions'"):
+            interface.validate_market_routing(config)
+
+    def test_market_route_validation_respects_tool_override(self):
+        config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        config["data_vendors_by_market"][".SS"]["news_data"] = "jp_news"
+        config["tool_vendors"].update({
+            "get_news": "yfinance",
+            "get_insider_transactions": "yfinance",
+        })
+        interface.validate_market_routing(config)
+
+    def test_market_route_validation_checks_default_chains(self):
+        config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        config["data_vendors"]["core_stock_apis"] = "yfinance,yfinance"
+        with self.assertRaisesRegex(ValueError, "duplicate vendor"):
+            interface.validate_market_routing(config)
+
+    def test_market_route_validation_checks_tool_chains(self):
+        config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        config["tool_vendors"]["get_stock_data"] = "bogus_vendor"
+        with self.assertRaisesRegex(ValueError, "Unknown vendor.*bogus_vendor"):
+            interface.validate_market_routing(config)
 
     def test_dot_t_chains_serve_every_ticker_bearing_method(self):
         # Routing a category to a vendor chain applies it to EVERY ticker-bearing

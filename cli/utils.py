@@ -17,7 +17,7 @@ from tradingagents.llm_clients.reasoning_effort import (
 
 console = Console()
 
-TICKER_INPUT_EXAMPLES = "SPY, 0700.HK, BTC-USD"
+TICKER_INPUT_EXAMPLES = "SPY, 600519, 0700.HK, BTC-USD"
 
 ANALYST_ORDER = [
     ("Market Analyst", AnalystType.MARKET),
@@ -40,6 +40,19 @@ def is_valid_ticker_input(value: str) -> bool:
     return not v or (all(ch.isalnum() or ch in "._-^=" for ch in v) and len(v) <= 32)
 
 
+def validate_ticker_input(value: str) -> bool | str:
+    """Return True for a usable ticker, otherwise a questionary error message."""
+    if not is_valid_ticker_input(value):
+        return "Please enter a valid ticker symbol, e.g. AAPL, 600519, 0700.HK, GC=F."
+    if not value.strip():
+        return True
+    try:
+        normalize_ticker_symbol(value)
+    except ValueError as exc:
+        return str(exc)
+    return True
+
+
 def get_ticker() -> str:
     """Prompt the user to enter a ticker symbol, preserving exchange suffixes.
 
@@ -49,10 +62,7 @@ def get_ticker() -> str:
     """
     ticker = questionary.text(
         f"Enter ticker symbol (e.g. {TICKER_INPUT_EXAMPLES}):",
-        validate=lambda x: (
-            is_valid_ticker_input(x)
-            or "Please enter a valid ticker symbol, e.g. AAPL, 000404.SZ, 0700.HK, GC=F."
-        ),
+        validate=validate_ticker_input,
         style=questionary.Style(
             [
                 ("text", "fg:green"),
@@ -73,15 +83,13 @@ def normalize_ticker_symbol(ticker: str) -> str:
 
     Delegates to the data layer's ``normalize_symbol`` so the symbol the CLI
     passes through the pipeline is exactly the one the data path will price
-    (e.g. ``BTCUSD`` -> ``BTC-USD``, ``XAUUSD`` -> ``GC=F``). Falls back to the
-    plain upper-case if the data layer is unavailable.
+    (e.g. ``600519`` -> ``600519.SS``, ``BTCUSD`` -> ``BTC-USD``,
+    ``XAUUSD`` -> ``GC=F``). Invalid ambiguous six-digit securities must remain
+    loud here rather than falling back to an unsuffixed ticker.
     """
-    try:
-        from tradingagents.dataflows.symbol_utils import normalize_symbol
+    from tradingagents.dataflows.symbol_utils import normalize_symbol
 
-        return normalize_symbol(ticker)
-    except Exception:
-        return ticker.strip().upper()
+    return normalize_symbol(ticker)
 
 
 def detect_asset_type(ticker: str) -> AssetType:

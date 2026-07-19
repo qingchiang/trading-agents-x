@@ -169,7 +169,8 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # Only per-instrument (ticker-bearing) tools are routed; macro and global
     # news stay market-agnostic (cross-border context analyzed across all markets
     # at once) and always use ``data_vendors``. Japanese-market vendors are wired
-    # in for ".T" (Tokyo); add ".SS" / ".SZ" / ".HK" for China-market support.
+    # in for ".T" (Tokyo). China phase 1 registers Shanghai/Shenzhen on yfinance;
+    # later gated phases replace the relevant chains with AkShare-first adapters.
     # Each chain is "<JP vendor>,yfinance" — a true ordered fallback (try the JP
     # vendor, then Yahoo), distinct from macro_data's per-owner dispatch; don't
     # "fix" one into the other. For prices/indicators/fundamentals yfinance is
@@ -192,6 +193,18 @@ DEFAULT_CONFIG = _apply_env_overrides({
             # headlines (edinet alone would win the fallback and hide the media
             # side); yfinance (English media) stays a keyless last resort.
             "news_data": "jp_news,yfinance",
+        },
+        ".SS": {
+            "core_stock_apis": "yfinance",
+            "technical_indicators": "yfinance",
+            "fundamental_data": "yfinance",
+            "news_data": "yfinance",
+        },
+        ".SZ": {
+            "core_stock_apis": "yfinance",
+            "technical_indicators": "yfinance",
+            "fundamental_data": "yfinance",
+            "news_data": "yfinance",
         },
     },
     # Benchmark for alpha calculation in the reflection layer.

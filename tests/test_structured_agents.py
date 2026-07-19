@@ -456,6 +456,7 @@ class TestSentimentAnalystAgent:
 
 
 _SENTIMENT_MOD = "tradingagents.agents.analysts.sentiment_analyst"
+_SIGNALS_MOD = "tradingagents.dataflows.market_signals"
 
 
 @pytest.mark.unit
@@ -482,10 +483,10 @@ class TestSentimentMarketGating:
             set_config({"data_vendors_by_market": routes})
         with mock.patch(f"{_SENTIMENT_MOD}.fetch_stocktwits_messages") as st, \
                 mock.patch(f"{_SENTIMENT_MOD}.fetch_reddit_posts") as rd, \
-                mock.patch(f"{_SENTIMENT_MOD}.get_large_holdings") as holdings, \
-                mock.patch(f"{_SENTIMENT_MOD}.get_margin_balance") as margin, \
-                mock.patch(f"{_SENTIMENT_MOD}.get_short_positions") as shorts, \
-                mock.patch(f"{_SENTIMENT_MOD}.get_analyst_ratings_block") as ratings, \
+                mock.patch(f"{_SIGNALS_MOD}.get_large_holdings") as holdings, \
+                mock.patch(f"{_SIGNALS_MOD}.get_margin_balance") as margin, \
+                mock.patch(f"{_SIGNALS_MOD}.get_short_positions") as shorts, \
+                mock.patch(f"{_SIGNALS_MOD}.get_analyst_ratings_block") as ratings, \
                 mock.patch(f"{_SENTIMENT_MOD}.get_news") as news, \
                 mock.patch(f"{_SENTIMENT_MOD}.is_live", return_value=live):
             st.return_value = "STOCKTWITS_DATA"
@@ -596,6 +597,20 @@ class TestSentimentMarketGating:
         assert "| EDINET |" not in report
         assert "| J-Quants |" not in report
         assert "| analyst consensus | yfinance |" not in report
+
+    def test_default_a_share_route_skips_us_social_without_jp_signals(self):
+        _captured, st, rd, holdings, margin, shorts, ratings, result = self._run(
+            "600519.SS"
+        )
+        st.assert_not_called()
+        rd.assert_not_called()
+        holdings.assert_not_called()
+        margin.assert_not_called()
+        shorts.assert_not_called()
+        ratings.assert_not_called()
+        report = result["sentiment_report"]
+        assert "| EDINET |" not in report
+        assert "| J-Quants |" not in report
 
     def test_historical_us_run_skips_live_social_fetchers(self):
         captured, st, rd, *_rest, result = self._run("NVDA", live=False)
