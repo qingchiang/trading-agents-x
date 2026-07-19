@@ -171,6 +171,7 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # at once) and always use ``data_vendors``. Japanese-market vendors are wired
     # in for ".T" (Tokyo). China phase 2 routes Shanghai/Shenzhen prices and
     # indicators through AkShare first, with yfinance as the configured fallback.
+    # China fundamentals assemble CNINFO/Sina data before yfinance degradation.
     # These are true ordered fallback chains, distinct from macro_data's per-owner
     # dispatch; don't "fix" one into the other. For JP prices, indicators, and
     # fundamentals, yfinance is
@@ -197,13 +198,13 @@ DEFAULT_CONFIG = _apply_env_overrides({
         ".SS": {
             "core_stock_apis": "akshare,yfinance",
             "technical_indicators": "akshare,yfinance",
-            "fundamental_data": "yfinance",
+            "fundamental_data": "cn_fundamentals,cn_statements,akshare,yfinance",
             "news_data": "yfinance",
         },
         ".SZ": {
             "core_stock_apis": "akshare,yfinance",
             "technical_indicators": "akshare,yfinance",
-            "fundamental_data": "yfinance",
+            "fundamental_data": "cn_fundamentals,cn_statements,akshare,yfinance",
             "news_data": "yfinance",
         },
     },

@@ -25,6 +25,13 @@ from .cn import (
     get_stock as get_akshare_stock,
     get_verified_market_snapshot as get_akshare_verified_snapshot,
 )
+from .cn.cn_fundamentals import get_fundamentals as get_cn_fundamentals
+from .cn.cn_statements import (
+    get_balance_sheet as get_cn_balance_sheet,
+    get_cashflow as get_cn_cashflow,
+    get_income_statement as get_cn_income_statement,
+)
+from .cn.sina_finance import validate_analysis_date as validate_cn_analysis_date
 from .config import get_config
 from .errors import (
     NoMarketDataError,
@@ -131,6 +138,8 @@ VENDOR_LIST = [
     "google_news",
     "jp_news",
     "akshare",
+    "cn_fundamentals",
+    "cn_statements",
 ]
 
 # Optional enrichment categories. These add macro/event context to the news
@@ -168,24 +177,28 @@ VENDOR_METHODS = {
         "yfinance": get_yfinance_fundamentals,
         "jquants": get_jquants_fundamentals,
         "jp_fundamentals": get_jp_fundamentals,
+        "cn_fundamentals": get_cn_fundamentals,
     },
     "get_balance_sheet": {
         "alpha_vantage": get_alpha_vantage_balance_sheet,
         "yfinance": get_yfinance_balance_sheet,
         "jquants": get_jquants_balance_sheet,
         "jp_statements": get_jp_balance_sheet,
+        "cn_statements": get_cn_balance_sheet,
     },
     "get_cashflow": {
         "alpha_vantage": get_alpha_vantage_cashflow,
         "yfinance": get_yfinance_cashflow,
         "jquants": get_jquants_cashflow,
         "jp_statements": get_jp_cashflow,
+        "cn_statements": get_cn_cashflow,
     },
     "get_income_statement": {
         "alpha_vantage": get_alpha_vantage_income_statement,
         "yfinance": get_yfinance_income_statement,
         "jquants": get_jquants_income_statement,
         "jp_statements": get_jp_income_statement,
+        "cn_statements": get_cn_income_statement,
     },
     # news_data
     "get_news": {
@@ -518,6 +531,13 @@ def route_to_vendor(method: str, *args, _provenance: bool = False, **kwargs):
     # once and thread it through so the per-call deep-copy happens a single time.
     config = get_config()
     market = infer_market(method, args, config.get("data_vendors_by_market", {}))
+    if market in {".SS", ".SZ"}:
+        if method == "get_fundamentals":
+            curr_date = kwargs.get("curr_date", args[1] if len(args) >= 2 else None)
+            validate_cn_analysis_date(curr_date)
+        elif method in {"get_balance_sheet", "get_cashflow", "get_income_statement"}:
+            curr_date = kwargs.get("curr_date", args[2] if len(args) >= 3 else None)
+            validate_cn_analysis_date(curr_date)
     vendor_config = get_vendor(category, method, market, config)
     primary_vendors = parse_vendor_chain(vendor_config)
 

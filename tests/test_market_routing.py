@@ -15,7 +15,7 @@ import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
 from tradingagents.dataflows import interface, market_context
 from tradingagents.dataflows.config import set_config
-from tradingagents.dataflows.errors import VendorNotConfiguredError
+from tradingagents.dataflows.errors import NoMarketDataError, VendorNotConfiguredError
 
 
 def _reset_config():
@@ -206,11 +206,93 @@ class MarketRoutingTests(unittest.TestCase):
         expected = {
             "core_stock_apis": "akshare,yfinance",
             "technical_indicators": "akshare,yfinance",
-            "fundamental_data": "yfinance",
+            "fundamental_data": "cn_fundamentals,cn_statements,akshare,yfinance",
             "news_data": "yfinance",
         }
         self.assertEqual(routes[".SS"], expected)
         self.assertEqual(routes[".SZ"], expected)
+
+    def test_china_fundamental_chain_selects_method_specific_assembler(self):
+        cn_fundamentals = mock.Mock(side_effect=_returns("CN FUNDAMENTALS"))
+        cn_statements = mock.Mock(side_effect=_returns("CN STATEMENT"))
+        with self._route(
+            "get_fundamentals",
+            {"cn_fundamentals": cn_fundamentals, "yfinance": _returns("YF")},
+        ), self._route(
+            "get_income_statement",
+            {"cn_statements": cn_statements, "yfinance": _returns("YF")},
+        ):
+            fundamentals = interface.route_to_vendor(
+                "get_fundamentals", "600519.SS", "2026-04-01"
+            )
+            statement = interface.route_to_vendor(
+                "get_income_statement", "000001.SZ", "annual", "2026-04-01"
+            )
+
+        self.assertEqual(fundamentals, "CN FUNDAMENTALS")
+        self.assertEqual(statement, "CN STATEMENT")
+        cn_fundamentals.assert_called_once()
+        cn_statements.assert_called_once()
+
+    def test_china_fundamental_route_rejects_invalid_date_before_vendor(self):
+        cn_fundamentals = mock.Mock(side_effect=_returns("CN FUNDAMENTALS"))
+        yfinance = mock.Mock(side_effect=_returns("YF"))
+        with self._route(
+            "get_fundamentals",
+            {"cn_fundamentals": cn_fundamentals, "yfinance": yfinance},
+        ), self.assertRaisesRegex(ValueError, "expected YYYY-MM-DD"):
+            interface.route_to_vendor("get_fundamentals", "600519.SS", "bad-date")
+
+        cn_fundamentals.assert_not_called()
+        yfinance.assert_not_called()
+
+    def test_china_routes_validate_keyword_date_before_vendor(self):
+        cn_fundamentals = mock.Mock(side_effect=_returns("CN FUNDAMENTALS"))
+        cn_statements = mock.Mock(side_effect=_returns("CN STATEMENT"))
+        yfinance = mock.Mock(side_effect=_returns("YF"))
+        with self._route(
+            "get_fundamentals",
+            {"cn_fundamentals": cn_fundamentals, "yfinance": yfinance},
+        ), self.assertRaisesRegex(ValueError, "expected YYYY-MM-DD"):
+            interface.route_to_vendor(
+                "get_fundamentals", "600519.SS", curr_date="bad-date"
+            )
+        with self._route(
+            "get_income_statement",
+            {"cn_statements": cn_statements, "yfinance": yfinance},
+        ), self.assertRaisesRegex(ValueError, "expected YYYY-MM-DD"):
+            interface.route_to_vendor(
+                "get_income_statement",
+                "000001.SZ",
+                freq="annual",
+                curr_date="bad-date",
+            )
+
+        cn_fundamentals.assert_not_called()
+        cn_statements.assert_not_called()
+        yfinance.assert_not_called()
+
+    def test_china_statement_fallback_keeps_primary_availability_note(self):
+        note = "- AkShare / Sina Income Statement unavailable (changed columns)."
+        cn_statements = mock.Mock(
+            side_effect=NoMarketDataError(
+                "600519.SS",
+                "600519.SS",
+                "Sina primary unavailable",
+                availability_notes=(note,),
+            )
+        )
+        with self._route(
+            "get_income_statement",
+            {"cn_statements": cn_statements, "yfinance": _returns("YF STATEMENT")},
+        ):
+            output = interface.route_to_vendor(
+                "get_income_statement", "600519.SS", "annual", "2026-04-01"
+            )
+
+        self.assertIn("YF STATEMENT", output)
+        self.assertIn("### Source availability notes", output)
+        self.assertIn(note, output)
 
     def test_default_market_routes_validate(self):
         interface.validate_market_routing(default_config.DEFAULT_CONFIG)
