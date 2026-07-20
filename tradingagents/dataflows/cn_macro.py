@@ -33,6 +33,8 @@ _EASTMONEY_DATA = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 _EASTMONEY_LEGACY = "https://datacenter.eastmoney.com/api/data/get"
 _EASTMONEY_KLINE = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
 _NBS_RELEASES = "https://www.stats.gov.cn/sj/zxfb/"
+_SAFE_PARITY = "https://www.safe.gov.cn/AppStructured/hlw/RMBQuery.do"
+_CHINAMONEY_CURVE = "https://www.chinamoney.com.cn/ags/ms/cm-u-bk-currency/ClsYldCurvHis"
 
 
 class _Series(NamedTuple):
@@ -42,10 +44,14 @@ class _Series(NamedTuple):
     timing: str
 
 
+class _Fetched(NamedTuple):
+    points: list[tuple[str, str]]
+    actual_source: str
+    frequency: str | None = None
+
+
 CN_SERIES = {
-    "cn_lpr": _Series(
-        "China 1-year loan prime rate", "%", "Monthly", "trade-date filtered"
-    ),
+    "cn_lpr": _Series("China 1-year loan prime rate", "%", "Monthly", "trade-date filtered"),
     "cn_10y_yield": _Series(
         "China 10-year government bond yield", "%", "Daily", "trade-date filtered"
     ),
@@ -73,9 +79,7 @@ CN_SERIES = {
         "Monthly",
         "observation-period filtered; non-vintage",
     ),
-    "usd_cny": _Series(
-        "USD/CNY central parity", "CNY per USD", "Daily", "trade-date filtered"
-    ),
+    "usd_cny": _Series("USD/CNY central parity", "CNY per USD", "Daily", "trade-date filtered"),
 }
 
 _series_cache = SeriesCache(namespace="cn")
@@ -110,6 +114,21 @@ def _request_text(url: str, *, label: str) -> str:
     def request():
         response = requests.get(
             url,
+            headers={"User-Agent": _UA},
+            timeout=REQUEST_TIMEOUT,
+        )
+        response.raise_for_status()
+        response.encoding = "utf-8"
+        return response.text
+
+    return call_with_retry(request, label=label)
+
+
+def _post_text(url: str, *, label: str, data: dict) -> str:
+    def request():
+        response = requests.post(
+            url,
+            data=data,
             headers={"User-Agent": _UA},
             timeout=REQUEST_TIMEOUT,
         )
@@ -199,7 +218,7 @@ def _fetch_economy(
     return _date_value_points(rows, "REPORT_DATE", value_field, start, end)
 
 
-def _fetch_10y(start: date, end: date) -> list[tuple[str, str]]:
+def _fetch_10y_eastmoney(start: date, end: date) -> list[tuple[str, str]]:
     payload = _request_json(
         _EASTMONEY_LEGACY,
         label="Eastmoney China 10-year government bond yield",
@@ -208,7 +227,6 @@ def _fetch_10y(start: date, end: date) -> list[tuple[str, str]]:
             "sty": "SOLAR_DATE,EMM00166466",
             "st": "SOLAR_DATE",
             "sr": -1,
-            "token": "894050c76af8597a853f5b408b759f5d",
             "p": 1,
             "ps": 500,
         },
@@ -222,7 +240,120 @@ def _fetch_10y(start: date, end: date) -> list[tuple[str, str]]:
     return _date_value_points(rows, "SOLAR_DATE", "EMM00166466", start, end)
 
 
-def _fetch_usd_cny(start: date, end: date) -> list[tuple[str, str]]:
+def _fetch_10y_chinamoney(start: date, end: date) -> list[tuple[str, str]]:
+    query_start = max(start, end - timedelta(days=14))
+    payload = _request_json(
+        _CHINAMONEY_CURVE,
+        label="ChinaMoney government bond yield curve",
+        params={
+            "lang": "CN",
+            "reference": "1,2,3",
+            "bondType": "CYCC000",
+            "startDate": query_start.isoformat(),
+            "endDate": end.isoformat(),
+            "pageNum": 1,
+            # The public endpoint rejects larger page sizes. Rows are newest-first
+            # and one date's 10Y tenor is within the first 50, so one request is
+            # sufficient for the latest-value fallback.
+            "pageSize": 50,
+            "termId": 1,
+        },
+    )
+    records = payload.get("records")
+    if records is None:
+        return []
+    if not isinstance(records, list) or not all(isinstance(row, dict) for row in records):
+        raise AkShareSchemaError("ChinaMoney yield-curve response has invalid rows.")
+    points = {}
+    for row in records:
+        try:
+            tenor = float(row.get("yearTermStr"))
+        except (TypeError, ValueError):
+            continue
+        observation = _parse_date(row.get("newDateValueCN"))
+        value = _numeric(row.get("maturityYieldStr"))
+        if tenor == 10.0 and observation and value and start <= observation <= end:
+            points[observation.isoformat()] = value
+    if not points:
+        return []
+    latest = max(points)
+    return [(latest, points[latest])]
+
+
+def _fetch_10y(start: date, end: date) -> _Fetched:
+    try:
+        points = _fetch_10y_eastmoney(start, end)
+        if points:
+            return _Fetched(points, "Eastmoney")
+    except AkShareRequestError:
+        pass
+    return _Fetched(
+        _fetch_10y_chinamoney(start, end),
+        "China Foreign Exchange Trade System",
+        "Latest official curve snapshot",
+    )
+
+
+class _SafeTableParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.rows: list[list[str]] = []
+        self._row: list[str] | None = None
+        self._cell: list[str] | None = None
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        if tag == "tr":
+            self._row = []
+        elif tag in {"td", "th"} and self._row is not None:
+            self._cell = []
+
+    def handle_data(self, data: str) -> None:
+        if self._cell is not None:
+            self._cell.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"td", "th"} and self._row is not None and self._cell is not None:
+            self._row.append(" ".join("".join(self._cell).split()))
+            self._cell = None
+        elif tag == "tr" and self._row is not None:
+            if self._row:
+                self.rows.append(self._row)
+            self._row = None
+
+
+def _fetch_usd_cny_safe(start: date, end: date) -> list[tuple[str, str]]:
+    if (end - start).days > 366:
+        start = end - timedelta(days=366)
+    raw = _post_text(
+        _SAFE_PARITY,
+        label="SAFE RMB central parity",
+        data={"startDate": start.isoformat(), "endDate": end.isoformat(), "queryYN": "true"},
+    )
+    parser = _SafeTableParser()
+    parser.feed(raw)
+    header_index = next(
+        (index for index, row in enumerate(parser.rows) if "日期" in row and "美元" in row),
+        None,
+    )
+    if header_index is None:
+        raise AkShareSchemaError("SAFE central-parity response is missing the date/USD header.")
+    header = parser.rows[header_index]
+    date_column = header.index("日期")
+    usd_column = header.index("美元")
+    points = {}
+    for row in parser.rows[header_index + 1 :]:
+        if len(row) <= max(date_column, usd_column):
+            continue
+        observation = _parse_date(row[date_column])
+        value = _numeric(row[usd_column])
+        if observation is None or value is None or not start <= observation <= end:
+            continue
+        # SAFE quotes RMB per 100 USD; the public alias is CNY per one USD.
+        points[observation.isoformat()] = f"{float(value) / 100:g}"
+    return sorted(points.items())
+
+
+def _fetch_usd_cny_eastmoney(start: date, end: date) -> list[tuple[str, str]]:
     payload = _request_json(
         _EASTMONEY_KLINE,
         label="Eastmoney USD/CNY central parity",
@@ -235,7 +366,6 @@ def _fetch_usd_cny(start: date, end: date) -> list[tuple[str, str]]:
             "end": end.strftime("%Y%m%d"),
             "fields1": "f1,f2,f3,f4,f5,f6,f7,f8",
             "fields2": "f51,f52,f53,f54,f55,f56",
-            "ut": "f057cbcbce2a86e2866ab8877db1d059",
             "forcect": 1,
         },
     )
@@ -254,6 +384,16 @@ def _fetch_usd_cny(start: date, end: date) -> list[tuple[str, str]]:
         if parsed_date is not None and value is not None and start <= parsed_date <= end:
             points.append((parsed_date.isoformat(), value))
     return sorted(dict(points).items())
+
+
+def _fetch_usd_cny(start: date, end: date) -> _Fetched:
+    try:
+        points = _fetch_usd_cny_safe(start, end)
+        if points:
+            return _Fetched(points, "SAFE")
+    except AkShareRequestError:
+        pass
+    return _Fetched(_fetch_usd_cny_eastmoney(start, end), "Eastmoney")
 
 
 class _ReleaseLinkParser(HTMLParser):
@@ -282,7 +422,9 @@ class _ReleaseLinkParser(HTMLParser):
 
 
 def _plain_text(raw_html: str) -> str:
-    text = re.sub(r"<script\b[^>]*>.*?</script>|<style\b[^>]*>.*?</style>", " ", raw_html, flags=re.I | re.S)
+    text = re.sub(
+        r"<script\b[^>]*>.*?</script>|<style\b[^>]*>.*?</style>", " ", raw_html, flags=re.I | re.S
+    )
     text = re.sub(r"<[^>]+>", " ", text)
     return " ".join(html.unescape(text).split())
 
@@ -353,7 +495,15 @@ def fetch_series(
         "cn_pmi": lambda s, e: _fetch_economy("RPT_ECONOMY_PMI", "MAKE_INDEX", s, e),
         "usd_cny": _fetch_usd_cny,
     }
-    points = fetchers[key](start, end)
+    fetched = fetchers[key](start, end)
+    if isinstance(fetched, _Fetched):
+        points = fetched.points
+        actual_source = fetched.actual_source
+        frequency = fetched.frequency
+    else:
+        points = fetched
+        actual_source = None
+        frequency = None
     if not points:
         return None
     spec = CN_SERIES[key]
@@ -361,12 +511,14 @@ def fetch_series(
         "series_id": key,
         "title": spec.title,
         "units": spec.units,
-        "frequency": spec.frequency,
+        "frequency": frequency or spec.frequency,
         "seasonal": "",
         "start_date": start.isoformat(),
         "points": points,
-        "timing": spec.timing,
+        "timing": f"{actual_source}; {spec.timing}" if actual_source else spec.timing,
     }
+    if actual_source:
+        data["actual_source"] = actual_source
     _series_cache.put(cache_key, data)
     return data
 

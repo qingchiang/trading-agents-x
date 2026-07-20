@@ -1,4 +1,5 @@
 """Shared macro primitives: the bounded SeriesCache used by fred/estat/boj."""
+
 import datetime
 import os
 import tempfile
@@ -10,7 +11,26 @@ import pytest
 
 from tradingagents.dataflows import macro_common
 from tradingagents.dataflows.config import set_config
-from tradingagents.dataflows.macro_common import SeriesCache
+from tradingagents.dataflows.macro_common import SeriesCache, exact_year_over_year
+
+
+@pytest.mark.unit
+def test_exact_year_over_year_requires_matching_calendar_point():
+    result = exact_year_over_year(
+        [("2025-06-01", "100"), ("2026-05-01", "500"), ("2026-06-01", "103")]
+    )
+    assert result is not None
+    assert result.prior_date == "2025-06-01"
+    assert result.pct == pytest.approx(3.0)
+    assert exact_year_over_year([("2025-05-01", "100"), ("2026-06-01", "103")]) is None
+
+
+@pytest.mark.unit
+def test_exact_year_over_year_handles_leap_day_without_interpolation():
+    result = exact_year_over_year([("2023-02-28", "100"), ("2024-02-29", "110")])
+    assert result is not None
+    assert result.prior_date == "2023-02-28"
+    assert result.pct == pytest.approx(10.0)
 
 
 @pytest.mark.unit
@@ -33,8 +53,8 @@ class SeriesCacheTests(unittest.TestCase):
         c = SeriesCache(max_entries=2)
         c.put("a", 1)
         c.put("b", 2)
-        c.get("a")          # touch "a" so "b" is now the LRU
-        c.put("c", 3)       # exceeds bound -> evicts "b"
+        c.get("a")  # touch "a" so "b" is now the LRU
+        c.put("c", 3)  # exceeds bound -> evicts "b"
         self.assertEqual(c.get("a"), 1)
         self.assertIsNone(c.get("b"))
         self.assertEqual(c.get("c"), 3)
@@ -43,7 +63,7 @@ class SeriesCacheTests(unittest.TestCase):
         c = SeriesCache(max_entries=2)
         c.put("a", 1)
         c.put("b", 2)
-        c.put("a", 99)      # update, not a third entry
+        c.put("a", 99)  # update, not a third entry
         self.assertEqual(c.get("a"), 99)
         self.assertEqual(c.get("b"), 2)  # "b" not evicted
 
@@ -52,7 +72,7 @@ class SeriesCacheTests(unittest.TestCase):
         # historical contract) and is never misread as a namespace.
         c = SeriesCache(1)
         c.put("a", 1)
-        c.put("b", 2)          # exceeds bound 1 -> "a" evicted
+        c.put("b", 2)  # exceeds bound 1 -> "a" evicted
         self.assertIsNone(c.get("a"))
         self.assertEqual(c.get("b"), 2)
 
@@ -87,11 +107,58 @@ class SeriesCacheDiskTests(unittest.TestCase):
         # A fresh instance (new process, same namespace) reads it back from disk.
         self.assertEqual(SeriesCache(namespace="fred").get(self._past_key()), value)
 
-    def test_today_is_not_persisted(self):
+    def test_today_is_persisted_in_short_lived_cache(self):
         today = datetime.date.today().isoformat()
         SeriesCache(namespace="fred").put(("cpi", today, 365), {"points": []})
-        # today's data is still moving, so it is memory-only: a new instance misses.
-        self.assertIsNone(SeriesCache(namespace="fred").get(("cpi", today, 365)))
+        self.assertEqual(
+            SeriesCache(namespace="fred").get(("cpi", today, 365)),
+            {"points": []},
+        )
+
+    def test_recent_entry_expires_after_one_hour(self):
+        today = datetime.date.today().isoformat()
+        key = ("cpi", today, 365)
+        c = SeriesCache(namespace="fred")
+        c.put(key, {"points": [(today, "1")]})
+        path = c._recent_disk_file(key)
+        old = time.time() - macro_common._RECENT_DISK_TTL_SECONDS - 1
+        os.utime(path, (old, old))
+        self.assertIsNone(SeriesCache(namespace="fred").get(key))
+        self.assertFalse(os.path.exists(path))
+
+    def test_recent_memory_entry_expires_after_one_hour(self):
+        today = datetime.date.today().isoformat()
+        key = ("cpi", today, 365)
+        c = SeriesCache(namespace="fred")
+        now = time.time()
+        with mock.patch.object(macro_common.time, "time", return_value=now):
+            c.put(key, {"points": [(today, "1")]})
+        path = c._recent_disk_file(key)
+        os.utime(path, (now, now))
+        with mock.patch.object(
+            macro_common.time,
+            "time",
+            return_value=now + macro_common._RECENT_DISK_TTL_SECONDS + 1,
+        ):
+            self.assertIsNone(c.get(key))
+
+    def test_recent_memory_entry_is_invalidated_when_key_becomes_settled(self):
+        key = ("cpi", "2026-01-01", 365)
+        c = SeriesCache(namespace="fred")
+        with mock.patch.object(c, "_is_settled", return_value=False):
+            c.put(key, {"points": [("2026-01-01", "recent")]})
+        with mock.patch.object(c, "_is_settled", return_value=True):
+            self.assertIsNone(c.get(key))
+
+    def test_recent_file_is_not_read_after_key_becomes_settled(self):
+        key = ("cpi", "2026-01-01", 365)
+        c = SeriesCache(namespace="fred")
+        recent_path = c._recent_disk_file(key)
+        os.makedirs(os.path.dirname(recent_path), exist_ok=True)
+        with open(recent_path, "w", encoding="utf-8") as fh:
+            fh.write('{"points": [["2026-01-01", "stale"]]}')
+        with mock.patch.object(c, "_is_settled", return_value=True):
+            self.assertIsNone(c.get(key))
 
     def test_distinct_keys_that_sanitize_alike_do_not_collide(self):
         # "a/b" and "a?b" both sanitize to the prefix "a_b"; the key hash must keep
@@ -163,9 +230,7 @@ class SeriesCacheDiskTests(unittest.TestCase):
         survivors = {f for f in os.listdir(disk_dir) if f.endswith(".json")}
         self.assertEqual(len(survivors), 2)
         # The two newest keys (last written) survive; the three oldest are evicted.
-        self.assertEqual(
-            survivors, {os.path.basename(c._disk_file(k)) for k in keys[-2:]}
-        )
+        self.assertEqual(survivors, {os.path.basename(c._disk_file(k)) for k in keys[-2:]})
 
     def test_new_process_prunes_on_first_write(self):
         # Prior runs leave the dir over cap; a brand-new instance (new process, with
@@ -189,8 +254,8 @@ class SeriesCacheDiskTests(unittest.TestCase):
         today = datetime.date.today()
         recent = (today - datetime.timedelta(days=1)).isoformat()
         cleared = (today - datetime.timedelta(days=macro_common._SETTLE_GRACE_DAYS + 1)).isoformat()
-        self.assertFalse(c._is_settled(("cpi", recent, 365)))   # too recent -> not persisted
-        self.assertTrue(c._is_settled(("cpi", cleared, 365)))   # past the grace -> persisted
+        self.assertFalse(c._is_settled(("cpi", recent, 365)))  # too recent -> not persisted
+        self.assertTrue(c._is_settled(("cpi", cleared, 365)))  # past the grace -> persisted
 
     def test_is_settled_tolerates_unpadded_dates(self):
         # A non-zero-padded curr_date must still be classified by calendar date, not
@@ -214,15 +279,17 @@ class SeriesCacheDiskTests(unittest.TestCase):
                 fh.write("partial")
         os.utime(old_tmp, (time.time() - macro_common._TMP_ORPHAN_SECONDS - 10,) * 2)
         c._prune(disk_dir)
-        self.assertFalse(os.path.exists(old_tmp))   # aged orphan reclaimed
-        self.assertTrue(os.path.exists(fresh_tmp))   # recent tmp left untouched
+        self.assertFalse(os.path.exists(old_tmp))  # aged orphan reclaimed
+        self.assertTrue(os.path.exists(fresh_tmp))  # recent tmp left untouched
 
     def test_long_process_still_prunes_every_interval(self):
         # Once pruned for the process, the write counter continues to bound a long run.
         c = SeriesCache(namespace="fred")
         c._pruned = True  # simulate the first-write prune already having happened
-        with mock.patch.object(macro_common, "_PRUNE_EVERY", 2), \
-                mock.patch.object(c, "_prune") as prune:
+        with (
+            mock.patch.object(macro_common, "_PRUNE_EVERY", 2),
+            mock.patch.object(c, "_prune") as prune,
+        ):
             c.put(("cpi", "2020-07-01", 365), {"points": []})  # write 1: below threshold
             prune.assert_not_called()
             c.put(("cpi", "2020-07-02", 365), {"points": []})  # write 2: threshold hit

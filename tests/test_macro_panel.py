@@ -1,6 +1,7 @@
 """Cross-region macro panel: rendering, never-raise degradation, look-ahead.
 
 fred.fetch_series is mocked, so these run without a network connection or key."""
+
 import unittest
 from copy import deepcopy
 from unittest import mock
@@ -13,15 +14,20 @@ import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
 from tradingagents.agents.analysts import news_analyst
 from tradingagents.agents.analysts.news_analyst import create_news_analyst
-from tradingagents.dataflows import boj, cn_macro, estat, fred, macro_panel
+from tradingagents.dataflows import boj, cn_macro, estat, fred, jp_macro, macro_panel
 from tradingagents.dataflows.config import set_config
 from tradingagents.provenance import extract_provenance
 
 
 def _series(points, series_id="X", timing=None):
     data = {
-        "series_id": series_id, "title": "t", "units": "%", "frequency": "Monthly",
-        "seasonal": "", "start_date": "2025-06-20", "points": points,
+        "series_id": series_id,
+        "title": "t",
+        "units": "%",
+        "frequency": "Monthly",
+        "seasonal": "",
+        "start_date": "2025-06-20",
+        "points": points,
     }
     if timing is not None:
         data["timing"] = timing
@@ -37,6 +43,7 @@ class MacroPanelTests(unittest.TestCase):
         estat._series_cache.clear()
         boj._series_cache.clear()
         cn_macro._series_cache.clear()
+        jp_macro._series_cache.clear()
         self._key_patch = mock.patch.object(fred, "get_api_key", return_value="testkey")
         self._key_patch.start()
         # Stub the JP vendors too so their cells never touch the network (a local
@@ -54,8 +61,13 @@ class MacroPanelTests(unittest.TestCase):
             cn_macro, "fetch_series", return_value=_series([("2025-06-01", "3.0")])
         )
         self._cn_patch.start()
+        self._jp_patch = mock.patch.object(
+            jp_macro, "fetch_series", return_value=_series([("2025-06-01", "2.0")])
+        )
+        self._jp_patch.start()
 
     def tearDown(self):
+        self._jp_patch.stop()
         self._cn_patch.stop()
         self._boj_patch.stop()
         self._estat_patch.stop()
@@ -64,10 +76,12 @@ class MacroPanelTests(unittest.TestCase):
         estat._series_cache.clear()
         boj._series_cache.clear()
         cn_macro._series_cache.clear()
+        jp_macro._series_cache.clear()
 
     def test_renders_dimensions_rows_and_fx_section(self):
         with mock.patch.object(
-            fred, "fetch_series",
+            fred,
+            "fetch_series",
             return_value=_series([("2025-06-01", "1.0"), ("2026-06-01", "2.0")]),
         ):
             out = macro_panel.get_global_macro_panel("2026-06-20")
@@ -88,25 +102,30 @@ class MacroPanelTests(unittest.TestCase):
     def test_cells_dispatch_to_their_declared_source(self):
         # Japan CPI/core -> e-Stat; Japan policy rate / Tankan -> BOJ; everything
         # else (US series, the JP 10Y mirror, FX) -> FRED. No cross-wiring.
-        fred_seen, estat_seen, boj_seen, cn_seen = [], [], [], []
+        fred_seen, estat_seen, boj_seen, cn_seen, jp_seen = [], [], [], [], []
 
         def _spy(seen, val):
             def fake(indicator, curr_date, look_back_days=None):
                 seen.append(indicator)
                 return _series([("2025-01-01", val)])
+
             return fake
 
-        with mock.patch.object(fred, "fetch_series", side_effect=_spy(fred_seen, "1.0")), \
-                mock.patch.object(estat, "fetch_series", side_effect=_spy(estat_seen, "100.0")), \
-                mock.patch.object(boj, "fetch_series", side_effect=_spy(boj_seen, "0.5")), \
-                mock.patch.object(cn_macro, "fetch_series", side_effect=_spy(cn_seen, "3.0")):
+        with (
+            mock.patch.object(fred, "fetch_series", side_effect=_spy(fred_seen, "1.0")),
+            mock.patch.object(estat, "fetch_series", side_effect=_spy(estat_seen, "100.0")),
+            mock.patch.object(boj, "fetch_series", side_effect=_spy(boj_seen, "0.5")),
+            mock.patch.object(cn_macro, "fetch_series", side_effect=_spy(cn_seen, "3.0")),
+            mock.patch.object(jp_macro, "fetch_series", side_effect=_spy(jp_seen, "2.0")),
+        ):
             macro_panel.get_global_macro_panel("2026-06-20")
         self.assertEqual(set(estat_seen), {"jp_cpi", "jp_core_cpi"})
         self.assertEqual(set(boj_seen), {"jp_policy_rate", "jp_tankan"})
         self.assertIn("fed_funds_rate", fred_seen)  # US rate via FRED
-        self.assertIn("DEXJPUS", fred_seen)         # FX via FRED
-        self.assertNotIn("jp_cpi", fred_seen)       # CPI is never asked of FRED
+        self.assertIn("DEXJPUS", fred_seen)  # FX via FRED
+        self.assertNotIn("jp_cpi", fred_seen)  # CPI is never asked of FRED
         self.assertNotIn("jp_policy_rate", fred_seen)  # nor the policy rate
+        self.assertEqual(jp_seen, ["jp_10y_yield"])
         self.assertEqual(
             set(cn_seen),
             {
@@ -123,10 +142,13 @@ class MacroPanelTests(unittest.TestCase):
     def test_none_spec_renders_na_without_fetching(self):
         # A cell with no free source yet (None, e.g. a future China column) must
         # render "n/a" without calling any fetcher.
-        with mock.patch.object(fred, "fetch_series", side_effect=AssertionError("fetched")), \
-                mock.patch.object(estat, "fetch_series", side_effect=AssertionError("fetched")), \
-                mock.patch.object(boj, "fetch_series", side_effect=AssertionError("fetched")), \
-                mock.patch.object(cn_macro, "fetch_series", side_effect=AssertionError("fetched")):
+        with (
+            mock.patch.object(fred, "fetch_series", side_effect=AssertionError("fetched")),
+            mock.patch.object(estat, "fetch_series", side_effect=AssertionError("fetched")),
+            mock.patch.object(boj, "fetch_series", side_effect=AssertionError("fetched")),
+            mock.patch.object(cn_macro, "fetch_series", side_effect=AssertionError("fetched")),
+            mock.patch.object(jp_macro, "fetch_series", side_effect=AssertionError("fetched")),
+        ):
             self.assertEqual(macro_panel._cell(None, "2026-06-20"), "n/a")
 
     def test_cell_failure_degrades_without_raising(self):
@@ -159,7 +181,7 @@ class MacroPanelTests(unittest.TestCase):
             if indicator == "cn_cpi":
                 raise RuntimeError("CPI endpoint unavailable")
             return _series(
-                [("2026-06-01", indicator)],
+                [("2026-06-01", "4.5" if indicator == "cn_gdp" else indicator)],
                 timing="observation-period filtered; non-vintage",
             )
 
@@ -174,9 +196,7 @@ class MacroPanelTests(unittest.TestCase):
 
     def test_single_point_shows_value_without_delta(self):
         # One in-window point must not render a fabricated "+0.00" change.
-        with mock.patch.object(
-            fred, "fetch_series", return_value=_series([("2026-01-01", "5.0")])
-        ):
+        with mock.patch.object(fred, "fetch_series", return_value=_series([("2026-01-01", "5.0")])):
             out = macro_panel.get_global_macro_panel("2026-06-20")
         self.assertIn("5.0 (2026-01-01)", out)
         self.assertNotIn("+0.00", out)
@@ -185,6 +205,22 @@ class MacroPanelTests(unittest.TestCase):
         with mock.patch.object(fred, "fetch_series", return_value=_series([])):
             out = macro_panel.get_global_macro_panel("2026-06-20")
         self.assertIn("n/a", out)
+
+    def test_cpi_and_gdp_use_exact_yoy_and_require_comparator(self):
+        def fetch(indicator, *_args):
+            if indicator == "cpi":
+                return _series([("2025-06-01", "100"), ("2026-06-01", "103")])
+            if indicator == "real_gdp":
+                return _series([("2025-03-01", "100"), ("2026-06-01", "104")])
+            return _series([("2026-06-01", "2")])
+
+        with mock.patch.object(fred, "fetch_series", side_effect=fetch):
+            out = macro_panel.get_global_macro_panel("2026-06-20")
+        self.assertIn("+3.0% YoY (2026-06-01)", out)
+        gdp_row = next(line for line in out.splitlines() if "GDP / growth" in line)
+        self.assertIn("n/a", gdp_row)
+        records = {record.source: record for record in extract_provenance(out)}
+        self.assertIn("9/11 cells available", records["FRED"].timing)
 
     def test_lookahead_curr_date_passed_to_fetch(self):
         captured = {}
@@ -199,7 +235,8 @@ class MacroPanelTests(unittest.TestCase):
 
     def test_non_numeric_latest_renders_without_delta(self):
         with mock.patch.object(
-            fred, "fetch_series",
+            fred,
+            "fetch_series",
             return_value=_series([("2025-01-01", "1.0"), ("2026-01-01", "x")]),
         ):
             out = macro_panel.get_global_macro_panel("2026-06-20")
@@ -234,15 +271,19 @@ class NewsPanelInjectionTests(unittest.TestCase):
         llm = mock.MagicMock()
         llm.bind_tools.side_effect = _bind
         state = {
-            "company_of_interest": ticker, "trade_date": "2026-01-15",
-            "asset_type": "stock", "messages": [],
+            "company_of_interest": ticker,
+            "trade_date": "2026-01-15",
+            "asset_type": "stock",
+            "messages": [],
         }
-        with mock.patch.object(news_analyst, "get_global_macro_panel", return_value=panel_text), \
-                mock.patch.object(
-                    news_analyst,
-                    "get_market_investor_flows",
-                    return_value=market_flows,
-                ) as flows:
+        with (
+            mock.patch.object(news_analyst, "get_global_macro_panel", return_value=panel_text),
+            mock.patch.object(
+                news_analyst,
+                "get_market_investor_flows",
+                return_value=market_flows,
+            ) as flows,
+        ):
             result = create_news_analyst(llm)(state)
         return captured, result, flows
 

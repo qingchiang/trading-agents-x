@@ -16,7 +16,7 @@ place a publication date safely for the look-ahead guards.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 import jpholiday
@@ -52,4 +52,18 @@ def add_business_days(d: date, n: int) -> date:
         result += timedelta(days=1)
         if is_tse_open(result):
             n -= 1
+    return result
+
+
+def completed_market_date(d: date, now: datetime | None = None) -> date:
+    """Return the latest completed TSE date, using 17:00 Tokyo as daily cutoff."""
+    current = now or datetime.now(_TOKYO)
+    current = (
+        current.replace(tzinfo=_TOKYO) if current.tzinfo is None else current.astimezone(_TOKYO)
+    )
+    result = d
+    if result == current.date() and current.time() < time(17):
+        result -= timedelta(days=1)
+    while not is_tse_open(result):
+        result -= timedelta(days=1)
     return result

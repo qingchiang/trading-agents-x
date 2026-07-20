@@ -3,7 +3,8 @@
 The macro microscope tool (``get_macro_indicators``) accepts a free-form indicator
 and must reach whichever source serves it: US series (and raw FRED IDs) go to
 :mod:`fred`, Japan's CPI to :mod:`estat`, Japan's policy rate / Tankan to
-:mod:`boj`, and China aliases to :mod:`cn_macro`. This is **content dispatch by
+:mod:`boj`, Japan's 10Y yield to :mod:`jp_macro`, and China aliases to
+:mod:`cn_macro`. This is **content dispatch by
 indicator**, not the router's fallback-chain — each regional alias is owned by
 exactly one vendor, and the
 owning vendor's typed errors (``VendorNotConfiguredError`` / ``NoMarketDataError``)
@@ -17,7 +18,7 @@ owners per cell, so panel and microscope agree on any indicator.
 
 from tradingagents.provenance import ProvenanceRecord, attach_provenance
 
-from . import boj, cn_macro, estat, fred
+from . import boj, cn_macro, estat, fred, jp_macro
 
 
 def _provenance_status(result: str, source: str, curr_date: str) -> tuple[str, str]:
@@ -39,10 +40,15 @@ def get_macro_indicators(
 ) -> str:
     """Dispatch ``indicator`` to its owning macro vendor and return its report."""
     key = indicator.strip().lower()
+    source_timing = None
     if key in cn_macro.CN_SERIES:
-        source, result = "China macro", cn_macro.get_macro_data(
-            indicator, curr_date, look_back_days
+        source, result = (
+            "China macro",
+            cn_macro.get_macro_data(indicator, curr_date, look_back_days),
         )
+    elif key in jp_macro.JP_SERIES:
+        report = jp_macro.get_macro_report(indicator, curr_date, look_back_days)
+        source, result, source_timing = report.source, report.text, report.timing
     elif key in estat.ESTAT_SERIES:
         source, result = "e-Stat", estat.get_macro_data(indicator, curr_date, look_back_days)
     elif key in boj.BOJ_SERIES:
@@ -50,6 +56,8 @@ def get_macro_indicators(
     else:
         source, result = "FRED", fred.get_macro_data(indicator, curr_date, look_back_days)
     effective, timing = _provenance_status(result, source, curr_date)
+    if source_timing is not None:
+        timing = source_timing
     if key in cn_macro.CN_SERIES and effective != "—":
         timing = cn_macro.timing_for(key)
     return attach_provenance(
