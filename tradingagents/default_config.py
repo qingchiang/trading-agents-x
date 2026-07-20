@@ -126,7 +126,8 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # News / data fetching parameters
     # Increase for longer lookback strategies or to broaden macro coverage;
     # decrease to reduce token usage in agent prompts.
-    "news_article_limit": 20,             # max articles per ticker (ticker-news)
+    "news_article_limit": 30,             # max articles per ticker (ticker-news)
+    "sentiment_filing_limit": 20,         # max low-frequency filing signals
     # Offset from the injected analysis date; endpoints are inclusive, so 14
     # covers 15 calendar dates. News Analyst can explicitly expand to 90 dates.
     "ticker_news_lookback_days": 14,

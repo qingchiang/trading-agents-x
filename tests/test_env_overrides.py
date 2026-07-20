@@ -27,6 +27,8 @@ def test_no_env_uses_built_in_defaults(monkeypatch):
     assert dc.DEFAULT_CONFIG["max_debate_rounds"] == 1
     assert dc.DEFAULT_CONFIG["checkpoint_enabled"] is False
     assert dc.DEFAULT_CONFIG["provenance_appendix"] is False
+    assert dc.DEFAULT_CONFIG["news_article_limit"] == 30
+    assert dc.DEFAULT_CONFIG["sentiment_filing_limit"] == 20
 
 
 def test_string_overrides(monkeypatch):

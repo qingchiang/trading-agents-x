@@ -1,4 +1,5 @@
 """jp_news assembler: EDINET disclosures + Google-News media, combined."""
+
 import unittest
 from unittest import mock
 
@@ -24,10 +25,17 @@ def _spec(value):
 
 
 def _run(edinet, media, tdnet=_TDNET_EMPTY):
-    with mock.patch.object(jp_news, "_edinet_news", **_spec(edinet)), \
-            mock.patch.object(jp_news, "_tdnet_news", **_spec(tdnet)), \
-            mock.patch.object(jp_news, "_google_news", **_spec(media)):
+    with (
+        mock.patch.object(jp_news, "_edinet_news", **_spec(edinet)),
+        mock.patch.object(jp_news, "_tdnet_news", **_spec(tdnet)),
+        mock.patch.object(jp_news, "_google_news", **_spec(media)),
+    ):
         return jp_news.get_news("4568.T", "a", "b")
+
+
+def _block(source: str, titles: list[str]) -> str:
+    items = "\n\n".join(f"### {title}" for title in titles)
+    return f"## {source}\n\n{items}"
 
 
 @pytest.mark.unit
@@ -40,6 +48,52 @@ class JpNewsAssemblerTests(unittest.TestCase):
         # statutory filings, then timely disclosures, then media
         self.assertLess(out.index("EDINET"), out.index("TDnet"))
         self.assertLess(out.index("TDnet"), out.index("media"))
+
+    def test_three_sources_share_one_30_item_budget_with_official_priority(self):
+        edinet_titles = [f"EDINET item {index}" for index in range(15)]
+        tdnet_titles = [f"TDnet item {index}" for index in range(15)]
+        media_titles = [f"Media item {index}" for index in range(15)]
+
+        with mock.patch.object(jp_news, "get_config", return_value={"news_article_limit": 30}):
+            out = _run(
+                _block("EDINET", edinet_titles),
+                _block("Google News", media_titles),
+                tdnet=_block("TDnet", tdnet_titles),
+            )
+
+        self.assertEqual(out.count("\n### "), 30)
+        self.assertIn("EDINET item 14", out)
+        self.assertIn("TDnet item 14", out)
+        self.assertNotIn("Media item 0", out)
+        self.assertIn("returned_items=15; kept_items=0; shared_limit=30", out)
+
+    def test_cross_source_duplicate_keeps_official_item(self):
+        edinet = _block("EDINET", ["通期業績予想の修正 (filer: Example Corp)"])
+        media = _block(
+            "Google News",
+            ["[direct] 通期業績予想の修正 (source: Example News)", "独自取材"],
+        )
+
+        with mock.patch.object(jp_news, "get_config", return_value={"news_article_limit": 30}):
+            out = _run(edinet, media)
+
+        self.assertEqual(out.count("通期業績予想の修正"), 1)
+        self.assertIn("filer: Example Corp", out)
+        self.assertNotIn("source: Example News", out)
+        self.assertIn("独自取材", out)
+
+    def test_configured_limit_is_applied_after_cross_source_merge(self):
+        with mock.patch.object(jp_news, "get_config", return_value={"news_article_limit": 2}):
+            out = _run(
+                _block("EDINET", ["Official one", "Official two"]),
+                _block("Google News", ["Media one"]),
+                tdnet=_block("TDnet", ["Official three"]),
+            )
+
+        self.assertIn("Official one", out)
+        self.assertIn("Official two", out)
+        self.assertNotIn("Official three", out)
+        self.assertNotIn("Media one", out)
 
     def test_tdnet_only_present(self):
         out = _run(_EDINET_EMPTY, _MEDIA_EMPTY, tdnet=_TDNET_DATA)
@@ -71,9 +125,11 @@ class JpNewsAssemblerTests(unittest.TestCase):
         self.assertIn("有価証券報告書", out)
 
     def test_extended_window_is_clamped_only_for_tdnet(self):
-        with mock.patch.object(jp_news, "_edinet_news", return_value=_EDINET_DATA) as edinet, \
-                mock.patch.object(jp_news, "_tdnet_news", return_value=_TDNET_DATA) as tdnet, \
-                mock.patch.object(jp_news, "_google_news", return_value=_MEDIA_DATA) as media:
+        with (
+            mock.patch.object(jp_news, "_edinet_news", return_value=_EDINET_DATA) as edinet,
+            mock.patch.object(jp_news, "_tdnet_news", return_value=_TDNET_DATA) as tdnet,
+            mock.patch.object(jp_news, "_google_news", return_value=_MEDIA_DATA) as media,
+        ):
             jp_news.get_news("4568.T", "2026-04-19", "2026-07-17")
 
         edinet.assert_called_once_with("4568.T", "2026-04-19", "2026-07-17")
