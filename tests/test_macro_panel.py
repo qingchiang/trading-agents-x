@@ -43,6 +43,7 @@ class MacroPanelTests(unittest.TestCase):
         estat._series_cache.clear()
         boj._series_cache.clear()
         cn_macro._series_cache.clear()
+        cn_macro._nbs_index_cache.clear()
         jp_macro._series_cache.clear()
         self._key_patch = mock.patch.object(fred, "get_api_key", return_value="testkey")
         self._key_patch.start()
@@ -76,6 +77,7 @@ class MacroPanelTests(unittest.TestCase):
         estat._series_cache.clear()
         boj._series_cache.clear()
         cn_macro._series_cache.clear()
+        cn_macro._nbs_index_cache.clear()
         jp_macro._series_cache.clear()
 
     def test_renders_dimensions_rows_and_fx_section(self):
@@ -136,6 +138,12 @@ class MacroPanelTests(unittest.TestCase):
                     frequency="Daily",
                     fallback_reason="SAFE primary retrieval unavailable",
                 )
+            elif indicator == "cn_cpi":
+                data.update(
+                    actual_source="Eastmoney",
+                    timing="observation-period filtered; non-vintage",
+                    fallback_reason="NBS primary retrieval unavailable",
+                )
             return data
 
         with (
@@ -165,6 +173,11 @@ class MacroPanelTests(unittest.TestCase):
         fx_record = records["global macro panel / usd_cny"]
         self.assertEqual(fx_record.source, "Eastmoney")
         self.assertIn("SAFE primary retrieval unavailable", fx_record.timing)
+        cpi_record = records["global macro panel / cn_cpi"]
+        self.assertEqual(cpi_record.source, "Eastmoney")
+        self.assertEqual(cpi_record.effective, "2026-06-19")
+        self.assertIn("non-vintage", cpi_record.timing)
+        self.assertIn("NBS primary retrieval unavailable", cpi_record.timing)
         warnings = append_provenance_appendix(
             "REPORT", records.values(), enabled=False
         )
@@ -182,6 +195,14 @@ class MacroPanelTests(unittest.TestCase):
                 data.update(actual_source="Eastmoney", frequency="Daily")
             elif indicator == "usd_cny":
                 data.update(actual_source="SAFE", frequency="Daily")
+            elif indicator in {"cn_cpi", "cn_gdp", "cn_pmi"}:
+                data.update(
+                    actual_source="National Bureau of Statistics of China",
+                    timing=(
+                        "official release-date filtered; latest-release coverage; "
+                        "release date=2026-06-19"
+                    ),
+                )
             return data
 
         with (
@@ -296,10 +317,22 @@ class MacroPanelTests(unittest.TestCase):
 
         self.assertIn("| CPI / inflation |", out)
         self.assertIn("cn_pmi (2026-06-01)", out)
-        records = {record.source: record for record in extract_provenance(out)}
+        extracted = extract_provenance(out)
+        records = {record.source: record for record in extracted}
         self.assertIn("6/7 cells available", records["China macro"].timing)
         self.assertIn("partial coverage", records["China macro"].timing)
         self.assertIn("non-vintage", records["China macro"].timing)
+        cpi_record = next(
+            record
+            for record in extracted
+            if record.evidence == "global macro panel / cn_cpi"
+        )
+        self.assertEqual(cpi_record.effective, "—")
+        self.assertIn("retrieval unavailable", cpi_record.timing)
+        warnings = append_provenance_appendix(
+            "REPORT", [cpi_record], enabled=False
+        )
+        self.assertIn("source unavailable for requested date/window", warnings)
 
     def test_single_point_shows_value_without_delta(self):
         # One in-window point must not render a fabricated "+0.00" change.

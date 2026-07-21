@@ -226,13 +226,15 @@ installed with the default project dependencies.
   `FRED_API_KEY`; only FRED-owned US/global cells become `n/a`.
 
 China macro timing is not uniform. LPR, bond yield, and USD/CNY are filtered by
-trade date. The unemployment value comes from the latest eligible official NBS
-release, so older historical windows may be unavailable. CPI, GDP, and PMI are
-filtered only by observation period and are explicitly marked **non-vintage**:
-upstream revisions or later publication timing can make them unsuitable for
-strict point-in-time backtests. The implementation is optimized for low-frequency
-live analysis and bounds each upstream query to one page; memory/disk caching
-avoids repeated requests for the same settled window.
+trade date. CPI, GDP, PMI, and unemployment prefer the latest eligible official
+NBS release, with the release date and observation period recorded separately;
+GDP also records that the displayed headline is cumulative year-to-date YoY.
+The bounded NBS lookup covers recent release-index pages, so older historical
+windows may be unavailable. CPI/GDP/PMI then fall back to Eastmoney values that
+are filtered only by observation period and explicitly marked **non-vintage**:
+upstream revisions or later publication timing can make that fallback unsuitable
+for strict point-in-time backtests. Memory/disk caching avoids repeated requests
+for the same analysis window.
 
 AkShare and the keyless China assemblers depend on public upstream web endpoints.
 Those sites can change columns, pagination, or anti-bot behavior without notice.

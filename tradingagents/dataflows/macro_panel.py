@@ -66,11 +66,14 @@ _SOURCE_LABELS = {
     "jp": "Japan macro",
 }
 
-# These series can switch between materially different vendors/frequencies.
-# Keep an individual audit record in addition to the aggregate source coverage.
+# These series can switch between materially different vendors or availability
+# semantics. Keep an individual audit record in addition to aggregate coverage.
 _FALLBACK_AUDIT_SERIES = {
     ("jp", "jp_10y_yield"): "Japan Ministry of Finance / FRED",
     ("cn", "cn_10y_yield"): "Eastmoney / China Foreign Exchange Trade System",
+    ("cn", "cn_cpi"): "National Bureau of Statistics of China / Eastmoney",
+    ("cn", "cn_gdp"): "National Bureau of Statistics of China / Eastmoney",
+    ("cn", "cn_pmi"): "National Bureau of Statistics of China / Eastmoney",
     ("cn", "usd_cny"): "SAFE / Eastmoney",
 }
 
@@ -321,10 +324,12 @@ def get_global_macro_panel(curr_date: str) -> str:
         f"{regional}\n\n{risk}\n\n"
         "_Sources: Japan policy rate / Tankan from BOJ (官), Japan 10Y from "
         "Japan Ministry of Finance with FRED fallback, Japan CPI / core "
-        "inflation from e-Stat (官), China from SAFE / Eastmoney market data, "
-        "ChinaMoney bond fallback, and the latest NBS unemployment release (官); "
+        "inflation from e-Stat (官), recent China CPI/GDP/PMI and unemployment "
+        "from NBS release pages (官), China FX from SAFE / Eastmoney market data, "
+        "and China 10Y from Eastmoney with a ChinaMoney bond fallback; "
         "remaining cells come from FRED. "
-        "China CPI/GDP/PMI are observation-period filtered, non-vintage data. "
+        "China CPI/GDP/PMI fall back to observation-period-filtered, non-vintage "
+        "Eastmoney data when no eligible recent NBS release is discoverable. "
         "Remaining gaps: US ISM PMI and China core inflation._"
     )
     records = list(series_records)

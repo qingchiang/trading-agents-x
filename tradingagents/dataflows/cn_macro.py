@@ -1,10 +1,10 @@
 """Keyless China macro series for the global panel and microscope tool.
 
-The vendor uses bounded requests against Eastmoney's public macro/market-data
-endpoints plus the National Bureau of Statistics release page for the latest
-surveyed urban unemployment rate.  Series with only a reference period (CPI,
-GDP and PMI) are explicitly non-vintage; trade/release-dated series are filtered
-by their available date.
+CPI, GDP, PMI, and unemployment prefer bounded National Bureau of Statistics
+release-page retrieval so recent readings have an auditable publication date.
+CPI/GDP/PMI fall back to Eastmoney's observation-period-only, non-vintage
+series when a recent official release is not discoverable.  Market series keep
+their existing SAFE/Eastmoney/ChinaMoney chains and are filtered by trade date.
 """
 
 from __future__ import annotations
@@ -50,6 +50,20 @@ class _Fetched(NamedTuple):
     actual_source: str
     frequency: str | None = None
     fallback_reason: str | None = None
+    timing: str | None = None
+    metadata: dict[str, str] | None = None
+
+
+class _NbsRelease(NamedTuple):
+    title: str
+    url: str
+    release_date: date
+
+
+class _NbsObservation(NamedTuple):
+    point: tuple[str, str]
+    observation_period: str
+    growth_basis: str | None = None
 
 
 class MacroReport(NamedTuple):
@@ -67,13 +81,13 @@ CN_SERIES = {
         "China CPI inflation (YoY)",
         "%",
         "Monthly",
-        "observation-period filtered; non-vintage",
+        "official release-date filtered when available; Eastmoney fallback is non-vintage",
     ),
     "cn_gdp": _Series(
         "China GDP growth (YoY)",
         "%",
         "Quarterly",
-        "observation-period filtered; non-vintage",
+        "official release-date filtered when available; Eastmoney fallback is non-vintage",
     ),
     "cn_unemployment": _Series(
         "China surveyed urban unemployment rate",
@@ -85,12 +99,19 @@ CN_SERIES = {
         "China official manufacturing PMI",
         "index",
         "Monthly",
-        "observation-period filtered; non-vintage",
+        "official release-date filtered when available; Eastmoney fallback is non-vintage",
     ),
     "usd_cny": _Series("USD/CNY central parity", "CNY per USD", "Daily", "trade-date filtered"),
 }
 
 _series_cache = SeriesCache(namespace="cn")
+_nbs_index_cache = SeriesCache(max_entries=32, namespace="cn_nbs_index")
+
+_NBS_SOURCE = "National Bureau of Statistics of China"
+_NBS_INDEX_PAGES = (_NBS_RELEASES, urljoin(_NBS_RELEASES, "index_1.html"))
+_NBS_TIMING = "official release-date filtered; latest-release coverage"
+_EASTMONEY_NON_VINTAGE_TIMING = "observation-period filtered; non-vintage"
+_NBS_CHAIN_CACHE_VERSION = "nbs-release-v1"
 
 
 def timing_for(indicator: str) -> str:
@@ -444,6 +465,232 @@ def _plain_text(raw_html: str) -> str:
     return " ".join(html.unescape(text).split())
 
 
+def _release_date_from_url(url: str) -> date | None:
+    match = re.search(r"t(\d{8})_", url)
+    if not match:
+        return None
+    try:
+        return datetime.strptime(match.group(1), "%Y%m%d").date()
+    except ValueError:
+        return None
+
+
+def _nbs_release_page(page_index: int, end: date) -> list[_NbsRelease]:
+    """Return one bounded NBS release-index page, cached per analysis date."""
+    cache_key = (f"release-index-{page_index}", end.isoformat(), 0)
+    cached = _nbs_index_cache.get(cache_key)
+    if isinstance(cached, dict) and isinstance(cached.get("releases"), list):
+        releases = []
+        for row in cached["releases"]:
+            if not isinstance(row, dict) or "title" not in row or "url" not in row:
+                continue
+            release_date = _parse_date(row.get("release_date"))
+            if release_date is not None:
+                releases.append(_NbsRelease(row["title"], row["url"], release_date))
+        if releases:
+            return releases
+
+    url = _NBS_INDEX_PAGES[page_index]
+    listing = _request_text(url, label=f"NBS data-release index page {page_index + 1}")
+    parser = _ReleaseLinkParser()
+    parser.feed(listing)
+    releases_by_url: dict[str, _NbsRelease] = {}
+    for title, href in parser.links:
+        article_url = urljoin(_NBS_RELEASES, href)
+        release_date = _release_date_from_url(article_url)
+        if release_date is None:
+            continue
+        candidate = _NbsRelease(title, article_url, release_date)
+        existing = releases_by_url.get(article_url)
+        if existing is None or len(candidate.title) > len(existing.title):
+            releases_by_url[article_url] = candidate
+    releases = list(releases_by_url.values())
+    if not releases:
+        raise AkShareSchemaError("NBS data-release index is missing dated article links.")
+    releases.sort(key=lambda item: item.release_date, reverse=True)
+    _nbs_index_cache.put(
+        cache_key,
+        {
+            "releases": [
+                {
+                    "title": item.title,
+                    "url": item.url,
+                    "release_date": item.release_date.isoformat(),
+                }
+                for item in releases
+            ]
+        },
+    )
+    return releases
+
+
+def _find_nbs_release(indicator: str, end: date) -> _NbsRelease | None:
+    title_terms = {
+        "cn_cpi": ("居民消费价格同比",),
+        "cn_gdp": ("国内生产总值初步核算结果",),
+        "cn_pmi": ("中国采购经理指数运行情况",),
+    }
+    terms = title_terms[indicator]
+    for page_index in range(len(_NBS_INDEX_PAGES)):
+        candidates = [
+            item
+            for item in _nbs_release_page(page_index, end)
+            if item.release_date <= end and all(term in item.title for term in terms)
+        ]
+        if candidates:
+            return max(candidates, key=lambda item: item.release_date)
+    return None
+
+
+def _parse_nbs_cpi(title: str, article: str) -> _NbsObservation:
+    period = re.search(r"(?P<year>20\d{2})年(?P<month>\d{1,2})月份?", title)
+    value = re.search(
+        r"(?:全国)?居民消费价格同比"
+        r"(?:(?P<direction>上涨|下降)\s*(?P<value>[0-9.]+)\s*%|(?P<flat>持平))",
+        article,
+    )
+    if not period or not value:
+        raise AkShareSchemaError("NBS CPI release is missing the national YoY headline.")
+    year = int(period.group("year"))
+    month = int(period.group("month"))
+    raw_value = 0.0 if value.group("flat") else float(value.group("value"))
+    numeric_value = -raw_value if value.group("direction") == "下降" else raw_value
+    if not -100.0 <= numeric_value <= 100.0:
+        raise AkShareSchemaError("NBS CPI headline value is outside percentage bounds.")
+    try:
+        observation = date(year, month, 1)
+    except ValueError as exc:
+        raise AkShareSchemaError("NBS CPI release has an invalid reference month.") from exc
+    return _NbsObservation(
+        (observation.isoformat(), f"{numeric_value:g}"),
+        f"{year:04d}-{month:02d}",
+    )
+
+
+def _parse_nbs_pmi(title: str, article: str) -> _NbsObservation:
+    period = re.search(r"(?P<year>20\d{2})年(?P<month>\d{1,2})月", title)
+    value = re.search(
+        r"\d{1,2}\s*月份?，?\s*制造业采购经理指数\s*"
+        r"(?:（\s*PMI\s*）)?\s*为\s*([0-9.]+)\s*%",
+        article,
+    )
+    if not period or not value:
+        raise AkShareSchemaError("NBS PMI release is missing its period or headline value.")
+    year = int(period.group("year"))
+    month = int(period.group("month"))
+    numeric_value = float(value.group(1))
+    if not 0.0 <= numeric_value <= 100.0:
+        raise AkShareSchemaError("NBS PMI headline value is outside index bounds.")
+    try:
+        observation = date(year, month, 1)
+    except ValueError as exc:
+        raise AkShareSchemaError("NBS PMI release has an invalid reference month.") from exc
+    return _NbsObservation(
+        (observation.isoformat(), f"{numeric_value:g}"),
+        f"{year:04d}-{month:02d}",
+    )
+
+
+def _parse_nbs_gdp(title: str, raw_html: str) -> _NbsObservation:
+    period = re.search(r"(?P<year>20\d{2})年(?P<quarter>[一二三四])季度", title)
+    if not period:
+        raise AkShareSchemaError("NBS GDP release title is missing the reference quarter.")
+    parser = _SafeTableParser()
+    parser.feed(raw_html)
+    gdp_rows = [row for row in parser.rows if row and row[0].strip().upper() == "GDP"]
+    if not gdp_rows:
+        raise AkShareSchemaError("NBS GDP release is missing the headline GDP table row.")
+    values = [_numeric(value) for value in gdp_rows[0][1:]]
+    numeric_values = [value for value in values if value is not None]
+    year = int(period.group("year"))
+    quarter = {"一": 1, "二": 2, "三": 3, "四": 4}[period.group("quarter")]
+    expected_values = 2 if quarter == 1 else 4
+    if len(numeric_values) != expected_values:
+        raise AkShareSchemaError("NBS GDP headline row changed its expected column count.")
+    yoy_value = float(numeric_values[-1])
+    if not -100.0 <= yoy_value <= 100.0:
+        raise AkShareSchemaError("NBS GDP headline value is outside percentage bounds.")
+    month = quarter * 3
+    next_month = date(year + (month == 12), month % 12 + 1, 1)
+    observation = next_month - timedelta(days=1)
+    period_labels = {
+        1: f"{year} Q1 / year-to-date",
+        2: f"{year} H1",
+        3: f"{year} Q1-Q3",
+        4: f"{year} full year",
+    }
+    growth_basis = "cumulative year-to-date YoY"
+    if quarter == 1:
+        growth_basis += " (same as single-quarter YoY for Q1)"
+    return _NbsObservation(
+        (observation.isoformat(), f"{yoy_value:g}"),
+        period_labels[quarter],
+        growth_basis,
+    )
+
+
+def _fetch_nbs_indicator(indicator: str, start: date, end: date) -> _Fetched | None:
+    release = _find_nbs_release(indicator, end)
+    if release is None:
+        return None
+    raw_html = _request_text(release.url, label=f"NBS {indicator} release")
+    article = _plain_text(raw_html)
+    parsers = {
+        "cn_cpi": lambda: _parse_nbs_cpi(release.title, article),
+        "cn_gdp": lambda: _parse_nbs_gdp(release.title, raw_html),
+        "cn_pmi": lambda: _parse_nbs_pmi(release.title, article),
+    }
+    parsed = parsers[indicator]()
+    observation = _parse_date(parsed.point[0])
+    if observation is None or not start <= observation <= end:
+        return None
+    metadata = {
+        "release_date": release.release_date.isoformat(),
+        "observation_period": parsed.observation_period,
+    }
+    if parsed.growth_basis:
+        metadata["growth_basis"] = parsed.growth_basis
+    return _Fetched(
+        [parsed.point],
+        _NBS_SOURCE,
+        timing=_NBS_TIMING,
+        metadata=metadata,
+    )
+
+
+def _fetch_economy_chain(
+    indicator: str,
+    report_name: str,
+    value_field: str,
+    start: date,
+    end: date,
+) -> _Fetched:
+    fallback_reason = "NBS returned no usable recent official release"
+    primary_failed = False
+    try:
+        official = _fetch_nbs_indicator(indicator, start, end)
+        if official is not None and official.points:
+            return official
+    except AkShareSchemaError:
+        primary_failed = True
+        fallback_reason = "NBS primary response schema changed"
+    except (AkShareRequestError, AkShareRateLimitError):
+        primary_failed = True
+        fallback_reason = "NBS primary retrieval unavailable"
+    fallback_points = _fetch_economy(report_name, value_field, start, end)
+    if primary_failed and not fallback_points:
+        raise AkShareRequestError(
+            f"China macro {indicator} retrieval unavailable: {fallback_reason}; "
+            "Eastmoney returned no usable observations."
+        )
+    return _Fetched(
+        fallback_points,
+        "Eastmoney",
+        fallback_reason=fallback_reason,
+        timing=_EASTMONEY_NON_VINTAGE_TIMING,
+    )
+
+
 def _fetch_unemployment(start: date, end: date) -> list[tuple[str, str]]:
     listing = _request_text(_NBS_RELEASES, label="NBS data-release index")
     parser = _ReleaseLinkParser()
@@ -494,7 +741,12 @@ def fetch_series(
             f"'{indicator}' is not a known China macro alias. "
             f"Known aliases: {', '.join(sorted(CN_SERIES))}."
         )
-    cache_key = (key, curr_date, look_back_days)
+    cache_series_id = (
+        f"{key}:{_NBS_CHAIN_CACHE_VERSION}"
+        if key in {"cn_cpi", "cn_gdp", "cn_pmi"}
+        else key
+    )
+    cache_key = (cache_series_id, curr_date, look_back_days)
     cached = _series_cache.get(cache_key)
     if cached is not None:
         return cached
@@ -504,10 +756,16 @@ def fetch_series(
     fetchers = {
         "cn_lpr": _fetch_lpr,
         "cn_10y_yield": _fetch_10y,
-        "cn_cpi": lambda s, e: _fetch_economy("RPT_ECONOMY_CPI", "NATIONAL_SAME", s, e),
-        "cn_gdp": lambda s, e: _fetch_economy("RPT_ECONOMY_GDP", "SUM_SAME", s, e),
+        "cn_cpi": lambda s, e: _fetch_economy_chain(
+            "cn_cpi", "RPT_ECONOMY_CPI", "NATIONAL_SAME", s, e
+        ),
+        "cn_gdp": lambda s, e: _fetch_economy_chain(
+            "cn_gdp", "RPT_ECONOMY_GDP", "SUM_SAME", s, e
+        ),
         "cn_unemployment": _fetch_unemployment,
-        "cn_pmi": lambda s, e: _fetch_economy("RPT_ECONOMY_PMI", "MAKE_INDEX", s, e),
+        "cn_pmi": lambda s, e: _fetch_economy_chain(
+            "cn_pmi", "RPT_ECONOMY_PMI", "MAKE_INDEX", s, e
+        ),
         "usd_cny": _fetch_usd_cny,
     }
     fetched = fetchers[key](start, end)
@@ -516,14 +774,27 @@ def fetch_series(
         actual_source = fetched.actual_source
         frequency = fetched.frequency
         fallback_reason = fetched.fallback_reason
+        source_timing = fetched.timing
+        metadata = fetched.metadata or {}
     else:
         points = fetched
         actual_source = None
         frequency = None
         fallback_reason = None
+        source_timing = None
+        metadata = {}
     if not points:
         return None
     spec = CN_SERIES[key]
+    timing = source_timing or spec.timing
+    if metadata:
+        timing_details = [
+            f"release date={metadata['release_date']}",
+            f"observation period={metadata['observation_period']}",
+        ]
+        if metadata.get("growth_basis"):
+            timing_details.append(f"growth basis={metadata['growth_basis']}")
+        timing = f"{timing}; {'; '.join(timing_details)}"
     data = {
         "series_id": key,
         "title": spec.title,
@@ -532,12 +803,13 @@ def fetch_series(
         "seasonal": "",
         "start_date": start.isoformat(),
         "points": points,
-        "timing": f"{actual_source}; {spec.timing}" if actual_source else spec.timing,
+        "timing": f"{actual_source}; {timing}" if actual_source else timing,
     }
     if actual_source:
         data["actual_source"] = actual_source
     if fallback_reason:
         data["fallback_reason"] = fallback_reason
+    data.update(metadata)
     _series_cache.put(cache_key, data)
     return data
 
