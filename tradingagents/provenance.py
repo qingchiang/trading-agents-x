@@ -116,6 +116,10 @@ _WARNING_RULES = (
     (("failed",), "source retrieval failed"),
     (("fallback",), "fallback source used"),
     (
+        ("adjustment provider changed",),
+        "adjustment provider changed; technical indicators may differ",
+    ),
+    (
         (
             "non-point-in-time",
             "not point-in-time",

@@ -205,13 +205,17 @@ See [CLAUDE.md](CLAUDE.md) for the full vendor architecture.
 The first China-market release supports Shanghai and Shenzhen individual stocks.
 It does not yet cover Beijing `.BJ`, Hong Kong `.HK`, ETFs, funds, options, or
 intraday/high-frequency data. A-share market data uses **AkShare first** and
-**yfinance as the configured fallback**; AkShare is installed with the default
-project dependencies.
+**yfinance as the configured fallback**; inside AkShare's price adapter, Tencent
+qfq history is primary and Eastmoney qfq history is a cold fallback. AkShare is
+installed with the default project dependencies.
 
 - Price history and technical indicators use forward-adjusted (`qfq`) OHLCV so
   the verified snapshot and derived indicators share one price basis. Results
   report the actual source and effective trading date, and stale suspended or
-  delisted data is not presented as a current quote.
+  delisted data is not presented as a current quote. A normal technical warmup
+  uses one bounded Tencent request (up to 640 bars); longer windows paginate
+  backward only when necessary. Source fallback always replaces the whole
+  requested window because adjustment factors can differ between providers.
 - Company profiles, financial abstracts, statements, announcements, research,
   media news, and A-share-specific sentiment evidence are assembled from Chinese
   sources with per-source provenance. Historical data without a defensible

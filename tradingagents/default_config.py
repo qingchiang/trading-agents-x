@@ -172,7 +172,8 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # news stay market-agnostic (cross-border context analyzed across all markets
     # at once) and always use ``data_vendors``. Japanese-market vendors are wired
     # in for ".T" (Tokyo). China phase 2 routes Shanghai/Shenzhen prices and
-    # indicators through AkShare first, with yfinance as the configured fallback.
+    # indicators through AkShare first (Tencent qfq, then Eastmoney qfq), with
+    # yfinance as the configured final fallback.
     # China fundamentals assemble CNINFO/Sina data before yfinance degradation.
     # These are true ordered fallback chains, distinct from macro_data's per-owner
     # dispatch; don't "fix" one into the other. For JP prices, indicators, and

@@ -10,7 +10,7 @@ from tradingagents.provenance import ProvenanceRecord, attach_provenance
 
 from ..market_data_validator import render_verified_market_snapshot
 from ..stockstats_utils import render_indicator_window
-from .akshare_stock import fetch_ohlcv
+from .akshare_stock import ADJUSTMENT_FALLBACK_NOTE, fetch_ohlcv
 
 _WARMUP_DAYS = 450
 
@@ -34,6 +34,11 @@ def get_indicator(
         f"# Requested analysis date: {curr_date}\n"
         f"# Effective trading date: {result.effective_end}\n\n"
     )
+    timing = "market-date filtered; qfq adjusted; future rows excluded"
+    if result.fallback_reason:
+        timing += (
+            f"; fallback: {result.fallback_reason}; {ADJUSTMENT_FALLBACK_NOTE}"
+        )
     return attach_provenance(
         metadata
         + render_indicator_window(
@@ -44,7 +49,7 @@ def get_indicator(
             source=result.source,
             requested=curr_date,
             effective=result.effective_end,
-            timing="market-date filtered; qfq adjusted; future rows excluded",
+            timing=timing,
         ),
     )
 
@@ -61,4 +66,10 @@ def get_verified_market_snapshot(
         look_back_days,
         source=result.source,
         adjustment=result.adjustment,
+        provenance_timing=(
+            f"market-date filtered; rows after cutoff excluded; fallback: "
+            f"{result.fallback_reason}; {ADJUSTMENT_FALLBACK_NOTE}"
+            if result.fallback_reason
+            else None
+        ),
     )

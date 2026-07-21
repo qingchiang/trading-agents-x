@@ -88,6 +88,7 @@ def render_verified_market_snapshot(
     *,
     source: str,
     adjustment: str | None = None,
+    provenance_timing: str | None = None,
 ) -> str:
     """Render a deterministic snapshot from a vendor-supplied OHLCV frame."""
     # `df` keeps the original capitalized OHLCV columns (Open/High/Low/Close/
@@ -157,6 +158,9 @@ def render_verified_market_snapshot(
             source=source,
             requested=curr_date,
             effective=latest_date,
-            timing="market-date filtered; rows after cutoff excluded",
+            timing=(
+                provenance_timing
+                or "market-date filtered; rows after cutoff excluded"
+            ),
         ),
     )

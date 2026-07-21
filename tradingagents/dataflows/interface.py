@@ -595,6 +595,15 @@ def route_to_vendor(method: str, *args, _provenance: bool = False, **kwargs):
                             if existing_records
                             else f"fallback vendor selected; {record.timing}"
                         )
+                        if market in {".SS", ".SZ"} and method in {
+                            "get_stock_data",
+                            "get_indicators",
+                            "get_verified_market_snapshot",
+                        }:
+                            fallback_timing += (
+                                "; adjustment provider changed; "
+                                "technical indicators may differ"
+                            )
                         record = ProvenanceRecord(
                             evidence=record.evidence,
                             source=record.source,

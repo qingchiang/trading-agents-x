@@ -1,12 +1,14 @@
-"""AkShare qfq daily OHLCV with Eastmoney→Tencent internal fallback."""
+"""AkShare qfq daily OHLCV with Tencent→Eastmoney internal fallback."""
 
 from __future__ import annotations
 
 import logging
 import math
+import re
+import time
 from collections import OrderedDict
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -31,6 +33,17 @@ _SHANGHAI = ZoneInfo("Asia/Shanghai")
 logger = logging.getLogger(__name__)
 _CACHE_MAX_ENTRIES = 128
 _FRAME_CACHE: OrderedDict[tuple[str, str, str], OHLCVResult] = OrderedDict()
+_TENCENT_URL = "https://proxy.finance.qq.com/ifzqgtimg/appstock/app/newfqkline/get"
+_TENCENT_PAGE_SIZE = 640
+_TENCENT_MAX_PAGES = 128
+_LOG_DETAIL_MAX_CHARS = 400
+_LATEST_ROW_RE = re.compile(r"latest row is (\d{4}-\d{2}-\d{2})", re.IGNORECASE)
+_SENSITIVE_QUERY_RE = re.compile(
+    r"(?i)\b(api[_-]?key|token|secret|authorization)=([^&\s]+)"
+)
+ADJUSTMENT_FALLBACK_NOTE = (
+    "adjustment provider changed; technical indicators may differ"
+)
 _LOT_BASED_VOLUME_SOURCES = frozenset(
     {"AkShare / Eastmoney", "AkShare / Tencent"}
 )
@@ -45,6 +58,7 @@ class OHLCVResult:
     requested_end: str
     effective_end: str
     adjustment: str = "qfq (forward-adjusted)"
+    fallback_reason: str | None = None
 
 
 _COLUMN_ALIASES = {
@@ -76,6 +90,31 @@ _EXTENDED_COLUMNS = ("Amount", "AmplitudePct", "PctChange", "PriceChange", "Turn
 def clear_cache() -> None:
     """Clear the successful-frame LRU (primarily for tests)."""
     _FRAME_CACHE.clear()
+
+
+def _health_failure(exc: Exception) -> tuple[str, str, str]:
+    """Return bounded, one-line endpoint-health fields for an exception."""
+    raw_detail = exc.detail if isinstance(exc, NoMarketDataError) else str(exc)
+    detail = " ".join(str(raw_detail).split())
+    detail = _SENSITIVE_QUERY_RE.sub(r"\1=<redacted>", detail)
+    if len(detail) > _LOG_DETAIL_MAX_CHARS:
+        detail = detail[: _LOG_DETAIL_MAX_CHARS - 3] + "..."
+
+    latest_match = _LATEST_ROW_RE.search(detail)
+    latest = latest_match.group(1) if latest_match else "n/a"
+    if isinstance(exc, NoMarketDataError):
+        status = "stale" if latest_match or "stale" in detail.casefold() else "no_data"
+    elif isinstance(exc, AkShareSchemaError):
+        status = "schema_error"
+    elif isinstance(exc, AkShareRateLimitError):
+        status = "rate_limited"
+    elif isinstance(exc, AkShareUnavailableError):
+        status = "unavailable"
+    elif isinstance(exc, AkShareRequestError):
+        status = "request_error"
+    else:
+        status = "unexpected_error"
+    return status, latest, detail or type(exc).__name__
 
 
 def _remember(key: tuple[str, str, str], result: OHLCVResult) -> None:
@@ -156,6 +195,82 @@ def _fetch_eastmoney(code: str, start_date: str, end_date: str) -> pd.DataFrame:
     )
 
 
+def _fetch_tencent_page(
+    prefixed_code: str,
+    start_date: str,
+    end_date: str,
+    *,
+    decoder,
+) -> pd.DataFrame:
+    """Fetch and validate one bounded Tencent qfq page."""
+    params = {
+        "_var": f"kline_dayqfq{end_date.replace('-', '')}",
+        "param": (
+            f"{prefixed_code},day,{start_date},{end_date},"
+            f"{_TENCENT_PAGE_SIZE},qfq"
+        ),
+        "r": "0.8205512681390605",
+    }
+
+    def request_page():
+        response = requests.get(
+            _TENCENT_URL,
+            params=params,
+            timeout=REQUEST_TIMEOUT,
+        )
+        response.raise_for_status()
+        return response
+
+    response = call_with_retry(
+        request_page,
+        label=f"AkShare Tencent stock_zh_a_hist_tx ({start_date} to {end_date})",
+    )
+    try:
+        marker = response.text.find("={")
+        if marker < 0:
+            raise ValueError("missing JSON assignment marker")
+        payload = decoder.decode(response.text[marker + 1 :])
+        stock_data = payload.get("data", {}).get(prefixed_code, {})
+    except Exception as exc:  # noqa: BLE001 - upstream payload failures vary
+        raise AkShareSchemaError(
+            f"AkShare Tencent response for {start_date} to {end_date} "
+            f"could not be decoded: {exc}"
+        ) from exc
+    if not isinstance(stock_data, dict) or "qfqday" not in stock_data:
+        keys = sorted(stock_data) if isinstance(stock_data, dict) else []
+        raise AkShareSchemaError(
+            "AkShare Tencent qfq response is missing qfqday; "
+            f"received keys {keys}"
+        )
+    rows = stock_data.get("qfqday") or []
+    if not isinstance(rows, list):
+        raise AkShareSchemaError("AkShare Tencent qfqday is not a row list.")
+    if not rows:
+        return pd.DataFrame()
+    if any(not isinstance(row, (list, tuple)) or len(row) < 6 for row in rows):
+        raise AkShareSchemaError("AkShare Tencent qfq row schema changed.")
+    frame = pd.DataFrame([row[:6] for row in rows])
+    frame.columns = ["date", "open", "close", "high", "low", "amount"]
+    frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
+    if frame["date"].isna().any():
+        raise AkShareSchemaError("AkShare Tencent qfq response contains invalid dates.")
+    duplicate_rows = frame[frame["date"].duplicated(keep=False)]
+    if not duplicate_rows.empty and (
+        duplicate_rows.groupby("date", sort=False).nunique(dropna=False).max(axis=1)
+        > 1
+    ).any():
+        raise AkShareSchemaError(
+            "AkShare Tencent qfq page contains conflicting duplicate dates."
+        )
+    frame = (
+        frame.drop_duplicates("date", keep="last")
+        .sort_values("date")
+        .reset_index(drop=True)
+    )
+    frame.attrs["raw_count"] = len(rows)
+    return frame
+
+
 def _fetch_tencent(prefixed_code: str, start_date: str, end_date: str) -> pd.DataFrame:
     """Equivalent bounded-timeout path for AkShare's Tencent daily endpoint.
 
@@ -174,49 +289,53 @@ def _fetch_tencent(prefixed_code: str, start_date: str, end_date: str) -> pd.Dat
             f"AkShare Tencent decoder is unavailable: {type(exc).__name__}: {exc}"
         ) from exc
 
-    url = "https://proxy.finance.qq.com/ifzqgtimg/appstock/app/newfqkline/get"
     frames: list[pd.DataFrame] = []
-    for year in range(int(start_date[:4]), int(end_date[:4]) + 1):
-        params = {
-            "_var": f"kline_dayqfq{year}",
-            "param": f"{prefixed_code},day,{year}-01-01,{year}-12-31,640,qfq",
-            "r": "0.8205512681390605",
-        }
-
-        def request_year(request_params=params):
-            response = requests.get(
-                url,
-                params=request_params,
-                timeout=REQUEST_TIMEOUT,
-            )
-            response.raise_for_status()
-            return response
-
-        response = call_with_retry(
-            request_year,
-            label=f"AkShare Tencent stock_zh_a_hist_tx ({year})",
+    cursor_end = pd.Timestamp(end_date)
+    requested_start = pd.Timestamp(start_date)
+    previous_earliest: pd.Timestamp | None = None
+    for _page_number in range(_TENCENT_MAX_PAGES):
+        page = _fetch_tencent_page(
+            prefixed_code,
+            start_date,
+            cursor_end.strftime("%Y-%m-%d"),
+            decoder=demjson,
         )
-        try:
-            payload = demjson.decode(response.text[response.text.find("={") + 1 :])
-            stock_data = payload.get("data", {}).get(prefixed_code, {})
-        except Exception as exc:  # noqa: BLE001 - upstream payload failures vary
+        if page.empty:
+            break
+        earliest = page["date"].min()
+        latest = page["date"].max()
+        # Tencent treats ``count`` as authoritative and can backfill rows before
+        # the requested start date. That is useful for one-call warmups; keep
+        # those rows only long enough to decide whether another page is needed,
+        # then apply the caller's exact window below. Rows after the page end
+        # would violate the analysis-date cutoff and remain a schema failure.
+        if latest > cursor_end:
             raise AkShareSchemaError(
-                f"AkShare Tencent response for {year} could not be decoded: {exc}"
-            ) from exc
-        if "qfqday" not in stock_data:
-            raise AkShareSchemaError(
-                f"AkShare Tencent qfq response for {year} is missing qfqday; "
-                f"received keys {sorted(stock_data)}"
+                "AkShare Tencent qfq page returned rows after its requested end."
             )
-        rows = stock_data.get("qfqday") or []
-        if rows:
-            frames.append(pd.DataFrame(rows).iloc[:, :6])
+        if previous_earliest is not None and latest >= previous_earliest:
+            raise AkShareSchemaError(
+                "AkShare Tencent qfq pagination did not move backward."
+            )
+        frames.append(page)
+        raw_count = int(page.attrs.get("raw_count", len(page)))
+        if earliest <= requested_start or raw_count < _TENCENT_PAGE_SIZE:
+            break
+        previous_earliest = earliest
+        cursor_end = earliest - timedelta(days=1)
+    else:
+        raise AkShareSchemaError(
+            f"AkShare Tencent qfq pagination exceeded {_TENCENT_MAX_PAGES} pages."
+        )
 
     if not frames:
         return pd.DataFrame()
     frame = pd.concat(frames, ignore_index=True)
-    frame.columns = ["date", "open", "close", "high", "low", "amount"]
-    frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
+    conflicts = frame.groupby("date", sort=False).nunique(dropna=False).max(axis=1)
+    if (conflicts > 1).any():
+        raise AkShareSchemaError(
+            "AkShare Tencent qfq pages returned conflicting duplicate dates."
+        )
     frame = frame[
         (frame["date"] >= pd.Timestamp(start_date))
         & (frame["date"] <= pd.Timestamp(end_date))
@@ -225,7 +344,7 @@ def _fetch_tencent(prefixed_code: str, start_date: str, end_date: str) -> pd.Dat
 
 
 def fetch_ohlcv(symbol: str, start_date: str, end_date: str) -> OHLCVResult:
-    """Fetch validated qfq bars, trying Eastmoney then Tencent, and cache success."""
+    """Fetch validated qfq bars, trying Tencent then Eastmoney, and cache success."""
     canonical, code, exchange = canonical_a_share(symbol)
     requested_start = pd.Timestamp(start_date).strftime("%Y-%m-%d")
     requested_end = pd.Timestamp(end_date).strftime("%Y-%m-%d")
@@ -246,14 +365,16 @@ def fetch_ohlcv(symbol: str, start_date: str, end_date: str) -> OHLCVResult:
             requested_end,
             cached.effective_end,
             cached.adjustment,
+            cached.fallback_reason,
         )
 
     attempts = (
-        ("AkShare / Eastmoney", lambda: _fetch_eastmoney(code, effective_start, expected_end)),
         ("AkShare / Tencent", lambda: _fetch_tencent(f"{exchange}{code}", effective_start, expected_end)),
+        ("AkShare / Eastmoney", lambda: _fetch_eastmoney(code, effective_start, expected_end)),
     )
     errors: list[Exception] = []
-    for source, fetch in attempts:
+    for source_index, (source, fetch) in enumerate(attempts):
+        started = time.monotonic()
         try:
             frame = _normalize_frame(
                 fetch(),
@@ -263,16 +384,56 @@ def fetch_ohlcv(symbol: str, start_date: str, end_date: str) -> OHLCVResult:
                 start_date=effective_start,
                 expected_end=expected_end,
             )
+            fallback_reason = None
+            if source_index > 0:
+                primary_error = errors[0]
+                fallback_reason = (
+                    "Tencent returned no usable observations"
+                    if isinstance(primary_error, NoMarketDataError)
+                    else "Tencent primary retrieval unavailable"
+                )
             result = OHLCVResult(
-                frame, source, canonical, requested_end, expected_end
+                frame,
+                source,
+                canonical,
+                requested_end,
+                expected_end,
+                fallback_reason=fallback_reason,
             )
             _remember(key, result)
+            elapsed_ms = round((time.monotonic() - started) * 1000)
+            logger.info(
+                "%s healthy for %s: schema=valid rows=%d latest=%s "
+                "latency_ms=%d adjustment=qfq",
+                source,
+                canonical,
+                len(frame),
+                expected_end,
+                elapsed_ms,
+            )
             return OHLCVResult(
-                frame.copy(), source, canonical, requested_end, expected_end
+                frame.copy(),
+                source,
+                canonical,
+                requested_end,
+                expected_end,
+                fallback_reason=fallback_reason,
             )
         except Exception as exc:  # noqa: BLE001 - internal source fallback boundary
             errors.append(exc)
-            logger.warning("%s failed for %s: %s", source, canonical, exc)
+            elapsed_ms = round((time.monotonic() - started) * 1000)
+            status, latest, detail = _health_failure(exc)
+            logger.warning(
+                "%s unhealthy for %s: status=%s latest=%s latency_ms=%d "
+                "error=%s detail=%s",
+                source,
+                canonical,
+                status,
+                latest,
+                elapsed_ms,
+                type(exc).__name__,
+                detail,
+            )
 
     if errors and all(isinstance(exc, NoMarketDataError) for exc in errors):
         raise errors[-1]
@@ -303,6 +464,11 @@ def get_stock(symbol: str, start_date: str, end_date: str) -> str:
         f"# Total records: {len(output)}\n"
         f"# Data retrieved on: {datetime.now(_SHANGHAI).isoformat(timespec='seconds')}\n\n"
     )
+    timing = "market-date filtered; qfq adjusted; future rows excluded"
+    if result.fallback_reason:
+        timing += (
+            f"; fallback: {result.fallback_reason}; {ADJUSTMENT_FALLBACK_NOTE}"
+        )
     return attach_provenance(
         header + output.to_csv(index=False),
         ProvenanceRecord(
@@ -310,6 +476,6 @@ def get_stock(symbol: str, start_date: str, end_date: str) -> str:
             source=result.source,
             requested=f"{start_date} to {end_date}",
             effective=f"{output.iloc[0]['Date']} to {result.effective_end}",
-            timing="market-date filtered; qfq adjusted; future rows excluded",
+            timing=timing,
         ),
     )
