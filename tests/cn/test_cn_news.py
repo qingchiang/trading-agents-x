@@ -19,10 +19,12 @@ from tradingagents.provenance import append_provenance_appendix, extract_provena
 @pytest.fixture(autouse=True)
 def clear_cninfo_directory_cache():
     news_sources._cninfo_org_ids.cache_clear()
+    news_sources._clear_feed_cache()
     yield
     clear = getattr(news_sources._cninfo_org_ids, "cache_clear", None)
     if clear:
         clear()
+    news_sources._clear_feed_cache()
 
 
 @pytest.mark.unit
@@ -128,6 +130,122 @@ def test_research_missing_data_field_is_schema_failure(monkeypatch):
 
     with pytest.raises(AkShareSchemaError, match="data"):
         news_sources.research_rows("000001.SZ", "2026-01-01", "2026-01-10")
+
+
+@pytest.mark.unit
+def test_cninfo_short_and_wider_windows_share_one_same_cutoff_superset(monkeypatch):
+    monkeypatch.setattr(news_sources, "_cninfo_org_ids", lambda: {"600519": "org"})
+    calls = []
+
+    def request(*_args, **kwargs):
+        calls.append(kwargs["data"])
+        return {
+            "announcements": [
+                {
+                    "secCode": "600519",
+                    "announcementTitle": "older announcement",
+                    "announcementTime": int(
+                        datetime(2025, 12, 25, tzinfo=timezone.utc).timestamp() * 1000
+                    ),
+                    "announcementId": "old",
+                    "orgId": "org",
+                },
+                {
+                    "secCode": "600519",
+                    "announcementTitle": "recent announcement",
+                    "announcementTime": int(
+                        datetime(2026, 1, 5, tzinfo=timezone.utc).timestamp() * 1000
+                    ),
+                    "announcementId": "new",
+                    "orgId": "org",
+                },
+            ]
+        }
+
+    monkeypatch.setattr(news_sources, "_request_json", request)
+
+    short = news_sources.disclosure_rows("600519.SS", "2026-01-01", "2026-01-10")
+    wider = news_sources.disclosure_rows("600519.SS", "2025-12-20", "2026-01-10")
+
+    assert [row["title"] for row in short] == ["recent announcement"]
+    assert {row["title"] for row in wider} == {
+        "older announcement",
+        "recent announcement",
+    }
+    assert len(calls) == 1
+    assert calls[0]["seDate"] == "2025-10-13~2026-01-10"
+
+
+@pytest.mark.unit
+def test_research_short_and_wider_windows_share_one_same_cutoff_superset(monkeypatch):
+    calls = []
+
+    def request(*_args, **kwargs):
+        calls.append(kwargs["params"])
+        return {
+            "data": [
+                {
+                    "stockCode": "000001",
+                    "publishDate": "2025-12-25",
+                    "title": "older report",
+                },
+                {
+                    "stockCode": "000001",
+                    "publishDate": "2026-01-05",
+                    "title": "recent report",
+                },
+            ]
+        }
+
+    monkeypatch.setattr(news_sources, "_request_json", request)
+
+    short = news_sources.research_rows("000001.SZ", "2026-01-01", "2026-01-10")
+    wider = news_sources.research_rows("000001.SZ", "2025-12-20", "2026-01-10")
+
+    assert [row["title"] for row in short] == ["recent report"]
+    assert {row["title"] for row in wider} == {"older report", "recent report"}
+    assert len(calls) == 1
+    assert calls[0]["beginTime"] == "2025-10-13"
+
+
+@pytest.mark.unit
+def test_low_frequency_cache_never_reuses_a_later_cutoff(monkeypatch):
+    calls = []
+
+    def request(*_args, **kwargs):
+        calls.append(kwargs["params"]["endTime"])
+        return {"data": []}
+
+    monkeypatch.setattr(news_sources, "_request_json", request)
+
+    news_sources.research_rows("000001.SZ", "2026-01-01", "2026-01-10")
+    news_sources.research_rows("000001.SZ", "2026-01-01", "2026-01-09")
+
+    assert calls == ["2026-01-10", "2026-01-09"]
+
+
+@pytest.mark.unit
+def test_low_frequency_cache_expires_and_does_not_cache_schema_failures(monkeypatch):
+    clock = [0.0]
+    calls = []
+
+    def request(*_args, **_kwargs):
+        calls.append(clock[0])
+        if len(calls) == 1:
+            return {"message": "invalid response"}
+        return {"data": []}
+
+    monkeypatch.setattr(news_sources.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(news_sources, "_request_json", request)
+
+    with pytest.raises(AkShareSchemaError):
+        news_sources.research_rows("000001.SZ", "2026-01-01", "2026-01-10")
+    news_sources.research_rows("000001.SZ", "2026-01-01", "2026-01-10")
+    news_sources.research_rows("000001.SZ", "2026-01-01", "2026-01-10")
+    clock[0] = news_sources._FEED_CACHE_TTL_SECONDS + 1
+    news_sources.research_rows("000001.SZ", "2026-01-01", "2026-01-10")
+
+    assert calls == [0.0, 0.0, news_sources._FEED_CACHE_TTL_SECONDS + 1]
 
 
 @pytest.mark.unit

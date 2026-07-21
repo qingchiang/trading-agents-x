@@ -33,6 +33,8 @@ from tradingagents.agents.schemas import (
 from tradingagents.agents.trader.trader import create_trader
 from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.errors import VendorNotConfiguredError
+from tradingagents.dataflows.market_signals import FetchedSentimentSignal, SentimentSignal
+from tradingagents.provenance import ProvenanceRecord, attach_provenance
 
 # ---------------------------------------------------------------------------
 # Render functions
@@ -391,6 +393,45 @@ class TestSentimentAnalystAgent:
         result = analyst(_make_sentiment_state())
         assert len(result["messages"]) == 1
         assert result["sentiment_report"] == result["messages"][0].content
+
+    def test_market_signal_embedded_provenance_uses_actual_fallback_source(self):
+        config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        set_config({"provenance_appendix": True})
+        captured = {}
+        spec = SentimentSignal(
+            tag="test_signal",
+            fetch=lambda *_args: "",
+            evidence="registry evidence",
+            source="configured primary",
+            title="Test signal",
+            intro="Test source.",
+            effective=lambda date: date,
+            timing="publication-date filtered",
+        )
+        body = attach_provenance(
+            "FALLBACK_DATA",
+            ProvenanceRecord(
+                evidence="registry evidence",
+                source="actual fallback",
+                requested="2026-01-15",
+                effective="2026-01-15",
+                timing="fallback source used",
+            ),
+        )
+        fetched = (FetchedSentimentSignal(spec=spec, body=body),)
+        state = {**_make_sentiment_state(), "company_of_interest": "600519.SS"}
+        try:
+            with mock.patch(f"{_SENTIMENT_MOD}.get_news") as news, mock.patch(
+                f"{_SENTIMENT_MOD}.fetch_sentiment_signals", return_value=fetched
+            ):
+                news.func.return_value = "NEWS_DATA"
+                result = create_sentiment_analyst(_structured_sentiment_llm(captured))(state)
+        finally:
+            config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+
+        report = result["sentiment_report"]
+        assert "| registry evidence | actual fallback |" in report
+        assert "| registry evidence | configured primary |" not in report
 
     def test_prompt_contains_ticker(self):
         captured = {}

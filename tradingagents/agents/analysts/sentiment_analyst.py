@@ -253,6 +253,10 @@ def create_sentiment_analyst(llm):
             for result in fetched_market_signals:
                 spec = result.spec
                 body = result.body
+                body_records = extract_provenance(body)
+                if body_records:
+                    records.extend(body_records)
+                    continue
                 lowered = body.casefold()
                 if "unavailable" in lowered:
                     record_timing = "unavailable"

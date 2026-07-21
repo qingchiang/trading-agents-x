@@ -150,7 +150,7 @@ def _cn_signals() -> tuple[SentimentSignal, ...]:
             tag="cn_holding_changes",
             fetch=get_cn_holding_changes,
             evidence="major-shareholder and executive holding changes",
-            source="Eastmoney exchange disclosures",
+            source="Eastmoney disclosures / CNINFO fallback",
             title="Insider & major-shareholder holding changes",
             intro=(
                 "Records use available disclosure/update dates. When a source exposes "
@@ -165,7 +165,7 @@ def _cn_signals() -> tuple[SentimentSignal, ...]:
             tag="cn_research",
             fetch=get_cn_research_signal,
             evidence="sell-side ratings and target prices",
-            source="Eastmoney Research",
+            source="Sina Finance / Eastmoney Research",
             title="Sell-side rating & target-price changes",
             intro=(
                 "Professional opinions published by the analysis date. Compare rating "

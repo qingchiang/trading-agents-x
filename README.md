@@ -219,7 +219,12 @@ installed with the default project dependencies.
 - Company profiles, financial abstracts, statements, announcements, research,
   media news, and A-share-specific sentiment evidence are assembled from Chinese
   sources with per-source provenance. Historical data without a defensible
-  publication timestamp fails closed or is explicitly labelled non-PIT.
+  publication timestamp fails closed or is explicitly labelled non-PIT. Sell-side
+  rating/target signals prefer the directly parsed Sina institutional-rating page
+  and fall back to Eastmoney research. Structured Eastmoney holding-change feeds
+  use exact-code CNINFO announcements only when a feed fails. CNINFO and Eastmoney
+  low-frequency candidates share a bounded 90-date, same-cutoff memory cache, so
+  news and sentiment reuse one response without crossing an analysis-date boundary.
 - The global macro panel adds China 1-year LPR, 10-year government yield, CPI,
   GDP growth, surveyed urban unemployment, official manufacturing PMI, and
   USD/CNY central parity. These keyless cells remain available without a

@@ -11,6 +11,8 @@ from threading import Lock
 import pandas as pd
 import requests
 
+from tradingagents.provenance import ProvenanceRecord, attach_provenance
+
 from .calendar import previous_trade_date
 from .common import (
     REQUEST_TIMEOUT,
@@ -20,6 +22,7 @@ from .common import (
     canonical_a_share,
 )
 from .news_sources import disclosure_rows, research_rows
+from .sina_ratings import rating_rows as sina_rating_rows
 
 _SSE_MARGIN = "https://query.sse.com.cn/marketdata/tradedata/queryMargin.do"
 _SZSE_REPORT = "https://www.szse.cn/api/report/ShowReport"
@@ -215,6 +218,7 @@ def get_holding_changes(ticker: str, curr_date: str) -> str:
     events = []
     failures: list[tuple[str, Exception]] = []
     coverage_notes: list[str] = []
+    provenance: list[ProvenanceRecord] = []
     successful_sources = 0
     for source, report_name, date_field, sort_columns, sort_types, parse in feed_specs:
         try:
@@ -229,38 +233,111 @@ def get_holding_changes(ticker: str, curr_date: str) -> str:
             )
         except Exception as exc:  # noqa: BLE001 - preserve the other independent feed
             failures.append((source, exc))
+            provenance.append(
+                ProvenanceRecord(
+                    evidence=f"{source} holding changes",
+                    source=f"Eastmoney {source} disclosures",
+                    requested=f"{start} to {end}",
+                    effective="—",
+                    timing="unavailable",
+                )
+            )
             continue
         successful_sources += 1
+        timing = "event/disclosure/update-date filtered"
         if truncated:
             coverage_notes.append(
                 f"<{source} holding feed truncated: latest {_HOLDING_PAGE_SIZE} "
                 "window records used; coverage is incomplete>"
             )
-        events.extend(parse(records, start, end))
+            timing += "; partial coverage; result set truncated"
+        parsed = parse(records, start, end)
+        if any("non-strict PIT" in text for _visible, text in parsed):
+            timing += "; non-strict PIT"
+        if not parsed:
+            timing = f"available; no qualifying records; {timing}"
+        provenance.append(
+            ProvenanceRecord(
+                evidence=f"{source} holding changes",
+                source=f"Eastmoney {source} disclosures",
+                requested=f"{start} to {end}",
+                effective=f"{start} to {end}",
+                timing=timing,
+            )
+        )
+        events.extend(parsed)
 
-    if successful_sources == 0:
-        raise failures[0][1]
     notes = [
         f"<{source} holding feed unavailable: {type(exc).__name__}>"
         for source, exc in failures
     ]
     notes.extend(coverage_notes)
+    cninfo_succeeded = False
+    if failures:
+        try:
+            announcements = disclosure_rows(ticker, start.isoformat(), end.isoformat())
+        except Exception as exc:  # noqa: BLE001 - preserve structured feed results
+            notes.append(f"<CNINFO holding-announcement fallback unavailable: {type(exc).__name__}>")
+            provenance.append(
+                ProvenanceRecord(
+                    evidence="holding-change announcement fallback",
+                    source="CNINFO",
+                    requested=f"{start} to {end}",
+                    effective="—",
+                    timing="unavailable",
+                )
+            )
+        else:
+            cninfo_succeeded = True
+            matched = [
+                row
+                for row in announcements
+                if any(term in row["title"] for term in _HOLDING_ANNOUNCEMENT_TERMS)
+            ]
+            for row in matched:
+                visible = row["published"].date()
+                events.append(
+                    (
+                        visible,
+                        f"- {visible}: [official announcement fallback] {row['title']}; "
+                        "timing=disclosure-date filtered",
+                    )
+                )
+            provenance.append(
+                ProvenanceRecord(
+                    evidence="holding-change announcement fallback",
+                    source="CNINFO",
+                    requested=f"{start} to {end}",
+                    effective=f"{start} to {end}",
+                    timing=(
+                        "fallback source used; disclosure-date filtered"
+                        if matched
+                        else "available; no qualifying records; queried after structured "
+                        "holding-feed failure"
+                    ),
+                )
+            )
+
+    if successful_sources == 0 and not cninfo_succeeded:
+        raise failures[0][1]
     if not events:
+        source_label = "Eastmoney" if not failures else "available"
         empty = (
-            f"<Eastmoney holding changes: no matching events in available feeds "
+            f"<{source_label} holding changes: no matching events in available feeds "
             f"for {code} from {start} to {end}>"
         )
-        return "\n".join((empty, *notes))
+        return attach_provenance("\n".join((empty, *notes)), *provenance)
     lines = [
         text for _visible, text in sorted(events, key=lambda item: item[0], reverse=True)[:8]
     ]
     if notes:
         lines.extend(notes)
-    return (
+    return attach_provenance(
         "Major-shareholder/executive holding changes "
         "(disclosure/update-date filtered where available; records without those dates "
         "use event dates and are non-strict PIT):\n"
-        + "\n".join(lines)
+        + "\n".join(lines),
+        *provenance,
     )
 
 
@@ -454,17 +531,97 @@ def get_research_signal(ticker: str, curr_date: str) -> str:
     """Return recent ratings and target ranges known by the analysis date."""
     end = datetime.strptime(curr_date, "%Y-%m-%d").date()
     start = end - timedelta(days=89)
-    rows = research_rows(ticker, start.isoformat(), end.isoformat())
+    requested = f"{start} to {end}"
+    provenance = []
+    notes = []
+    try:
+        rows = sina_rating_rows(ticker, start.isoformat(), end.isoformat())
+    except Exception as exc:  # noqa: BLE001 - Eastmoney remains an independent fallback
+        rows = []
+        notes.append(f"<Sina rating feed unavailable: {type(exc).__name__}>")
+        provenance.append(
+            ProvenanceRecord(
+                evidence="sell-side ratings and target prices",
+                source="Sina Finance institutional ratings",
+                requested=requested,
+                effective="—",
+                timing="unavailable",
+            )
+        )
+        fallback_reason = "Sina rating feed unavailable"
+    else:
+        provenance.append(
+            ProvenanceRecord(
+                evidence="sell-side ratings and target prices",
+                source="Sina Finance institutional ratings",
+                requested=requested,
+                effective=requested,
+                timing=(
+                    "publication-date filtered"
+                    if rows
+                    else "available; no relevant items in window; returned_items=0"
+                ),
+            )
+        )
+        fallback_reason = "Sina returned no qualifying ratings in the requested window"
+
+    source = "Sina Finance"
     if not rows:
-        return f"<Eastmoney research: no coverage in {start} to {end}>"
+        try:
+            rows = research_rows(ticker, start.isoformat(), end.isoformat())
+        except Exception as exc:  # noqa: BLE001 - keep Sina's successful-empty state visible
+            notes.append(f"<Eastmoney research fallback unavailable: {type(exc).__name__}>")
+            provenance.append(
+                ProvenanceRecord(
+                    evidence="sell-side ratings and target prices",
+                    source="Eastmoney Research",
+                    requested=requested,
+                    effective="—",
+                    timing="unavailable",
+                )
+            )
+            rows = []
+        else:
+            provenance.append(
+                ProvenanceRecord(
+                    evidence="sell-side ratings and target prices",
+                    source="Eastmoney Research",
+                    requested=requested,
+                    effective=requested,
+                    timing=(
+                        f"fallback source used; reason={fallback_reason}; publication-date filtered"
+                        if rows
+                        else "available; no relevant items in window; returned_items=0; "
+                        "queried after Sina returned no usable rows"
+                    ),
+                )
+            )
+            source = "Eastmoney Research"
+
+    if not rows:
+        body = f"<Sina/Eastmoney research: no usable coverage in {start} to {end}>"
+        if notes:
+            body += "\n" + "\n".join(notes)
+        return attach_provenance(body, *provenance)
     lines = []
     for row in sorted(rows, key=lambda item: item["published"], reverse=True)[:8]:
         target = f"{_display(row['target_low'])}–{_display(row['target_high'])}"
-        lines.append(
+        detail = (
             f"- {row['published']}: {row['institution']}; rating={row['rating']}; "
-            f"rating_change={row['rating_change']}; target={target}; {row['title']}"
+            f"rating_change={row['rating_change']}; target={target}"
         )
-    return "Sell-side rating and target changes (publication-date filtered):\n" + "\n".join(lines)
+        if row.get("analyst") and row["analyst"].casefold() != "nan":
+            detail += f"; analysts={row['analyst']}"
+        if row.get("title"):
+            detail += f"; {row['title']}"
+        lines.append(detail)
+    if notes:
+        lines.extend(notes)
+    return attach_provenance(
+        f"Sell-side rating and target changes ({source}; publication-date filtered):\n"
+        + "\n".join(lines),
+        *provenance,
+    )
 
 
 _IMPORTANT_TERMS = (
@@ -484,6 +641,13 @@ _IMPORTANT_TERMS = (
     "停牌",
     "复牌",
     "退市",
+)
+
+_HOLDING_ANNOUNCEMENT_TERMS = (
+    "增持",
+    "减持",
+    "持股变动",
+    "权益变动",
 )
 
 

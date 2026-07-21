@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import html
 import re
-from datetime import date, datetime
+import time
+from collections import OrderedDict
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 from functools import lru_cache
+from threading import RLock
 from urllib.parse import urlencode
 
 import pandas as pd
@@ -20,6 +24,23 @@ _CNINFO_QUERY = "https://www.cninfo.com.cn/new/hisAnnouncement/query"
 _CNINFO_DETAIL = "https://www.cninfo.com.cn/new/disclosure/detail"
 _RESEARCH_QUERY = "https://reportapi.eastmoney.com/report/list"
 _TITLE_TAG = re.compile(r"<[^>]+>")
+_SHARED_LOOKBACK_DAYS = 90
+_FEED_CACHE_TTL_SECONDS = 15 * 60
+_FEED_CACHE_MAXSIZE = 128
+
+
+@dataclass(frozen=True)
+class _FeedCacheEntry:
+    expires_at: float
+    start: date
+    end: date
+    rows: tuple[dict, ...]
+
+
+_FEED_CACHE: OrderedDict[tuple[str, str, str, int], _FeedCacheEntry] = OrderedDict()
+_FEED_CACHE_LOCK = RLock()
+_CNINFO_FETCH_LOCK = RLock()
+_RESEARCH_FETCH_LOCK = RLock()
 
 
 def news_quotas() -> tuple[int, int, int]:
@@ -56,6 +77,56 @@ def _parse_date(value) -> date | None:
     return parsed.date()
 
 
+def _feed_cache_get(
+    key: tuple[str, str, str, int], start: date, end: date
+) -> list[dict] | None:
+    now = time.monotonic()
+    cached = _FEED_CACHE.get(key)
+    if cached is None:
+        return None
+    if now >= cached.expires_at:
+        del _FEED_CACHE[key]
+        return None
+    if cached.start > start or cached.end < end:
+        return None
+    _FEED_CACHE.move_to_end(key)
+    return [dict(row) for row in cached.rows]
+
+
+def _feed_cache_put(
+    key: tuple[str, str, str, int], start: date, end: date, rows: list[dict]
+) -> None:
+    _FEED_CACHE[key] = _FeedCacheEntry(
+        expires_at=time.monotonic() + _FEED_CACHE_TTL_SECONDS,
+        start=start,
+        end=end,
+        rows=tuple(dict(row) for row in rows),
+    )
+    _FEED_CACHE.move_to_end(key)
+    while len(_FEED_CACHE) > _FEED_CACHE_MAXSIZE:
+        _FEED_CACHE.popitem(last=False)
+
+
+def _clear_feed_cache() -> None:
+    """Clear low-frequency response caches for deterministic tests."""
+    with _FEED_CACHE_LOCK:
+        _FEED_CACHE.clear()
+
+
+def _shared_fetch_start(start: date, end: date) -> date:
+    """Expand short same-cutoff requests to the shared 90-date candidate window."""
+    return min(start, end - timedelta(days=_SHARED_LOOKBACK_DAYS - 1))
+
+
+def _slice_rows(rows: list[dict], start: date, end: date) -> list[dict]:
+    return [
+        dict(row)
+        for row in rows
+        if (published := row.get("published")) is not None
+        and start <= (published.date() if isinstance(published, datetime) else published) <= end
+    ]
+
+
 def _response_records(payload, field: str, label: str) -> list[dict]:
     """Validate a tabular JSON envelope while accepting an explicit null as empty."""
     if not isinstance(payload, dict) or field not in payload:
@@ -73,68 +144,80 @@ def disclosure_rows(ticker: str, start_date: str, end_date: str) -> list[dict]:
     _canonical, code, _exchange = canonical_a_share(ticker)
     start = datetime.strptime(start_date, "%Y-%m-%d").date()
     end = datetime.strptime(end_date, "%Y-%m-%d").date()
-    org_id = _cninfo_org_ids().get(code)
-    if not org_id:
-        return []
-    payload = {
-        "pageNum": 1,
-        "pageSize": min(max(get_config()["news_article_limit"] * 4, 30), 100),
-        "column": "szse",
-        "tabName": "fulltext",
-        "plate": "",
-        "stock": f"{code},{org_id}",
-        "searchkey": "",
-        "secid": "",
-        "category": "",
-        "trade": "",
-        "seDate": f"{start_date}~{end_date}",
-        "sortName": "time",
-        "sortType": "desc",
-        "isHLtitle": "true",
-    }
-    result = _request_json(
-        "POST", _CNINFO_QUERY, label="CNINFO company announcements", data=payload
-    )
-    # CNINFO uses ``announcements: null`` for a normal empty window. Treat it as
-    # empty before inspecting columns, avoiding AkShare's historical KeyError.
-    records = _response_records(result, "announcements", "CNINFO announcements")
-    rows = []
-    for record in records:
-        if not isinstance(record, dict) or str(record.get("secCode", "")).zfill(6) != code:
-            continue
-        timestamp = pd.to_datetime(
-            record.get("announcementTime"), unit="ms", utc=True, errors="coerce"
-        )
-        if pd.isna(timestamp):
-            continue
-        local = timestamp.tz_convert("Asia/Shanghai")
-        if not start <= local.date() <= end:
-            continue
-        title = html.unescape(
-            _TITLE_TAG.sub("", str(record.get("announcementTitle") or ""))
-        ).strip()
-        announcement_id = str(record.get("announcementId") or "")
-        row_org = str(record.get("orgId") or org_id)
-        if not title or not announcement_id:
-            continue
-        query = urlencode(
-            {
-                "stockCode": code,
-                "announcementId": announcement_id,
-                "orgId": row_org,
-                "announcementTime": local.strftime("%Y-%m-%d"),
-            }
-        )
-        rows.append(
-            {
-                "code": code,
-                "name": str(record.get("secName") or ""),
-                "title": title,
-                "published": local.to_pydatetime(),
-                "url": f"{_CNINFO_DETAIL}?{query}",
-            }
-        )
-    return rows
+    fetch_start = _shared_fetch_start(start, end)
+    page_size = min(max(get_config()["news_article_limit"] * 4, 30), 100)
+    cache_key = ("cninfo", code, end.isoformat(), page_size)
+    with _CNINFO_FETCH_LOCK:
+        with _FEED_CACHE_LOCK:
+            rows = _feed_cache_get(cache_key, fetch_start, end)
+        if rows is None:
+            org_id = _cninfo_org_ids().get(code)
+            if not org_id:
+                rows = []
+            else:
+                payload = {
+                    "pageNum": 1,
+                    "pageSize": page_size,
+                    "column": "szse",
+                    "tabName": "fulltext",
+                    "plate": "",
+                    "stock": f"{code},{org_id}",
+                    "searchkey": "",
+                    "secid": "",
+                    "category": "",
+                    "trade": "",
+                    "seDate": f"{fetch_start.isoformat()}~{end.isoformat()}",
+                    "sortName": "time",
+                    "sortType": "desc",
+                    "isHLtitle": "true",
+                }
+                result = _request_json(
+                    "POST", _CNINFO_QUERY, label="CNINFO company announcements", data=payload
+                )
+                # CNINFO uses ``announcements: null`` for a normal empty window.
+                records = _response_records(result, "announcements", "CNINFO announcements")
+                rows = []
+                for record in records:
+                    if (
+                        not isinstance(record, dict)
+                        or str(record.get("secCode", "")).zfill(6) != code
+                    ):
+                        continue
+                    timestamp = pd.to_datetime(
+                        record.get("announcementTime"), unit="ms", utc=True, errors="coerce"
+                    )
+                    if pd.isna(timestamp):
+                        continue
+                    local = timestamp.tz_convert("Asia/Shanghai")
+                    if not fetch_start <= local.date() <= end:
+                        continue
+                    title = html.unescape(
+                        _TITLE_TAG.sub("", str(record.get("announcementTitle") or ""))
+                    ).strip()
+                    announcement_id = str(record.get("announcementId") or "")
+                    row_org = str(record.get("orgId") or org_id)
+                    if not title or not announcement_id:
+                        continue
+                    query = urlencode(
+                        {
+                            "stockCode": code,
+                            "announcementId": announcement_id,
+                            "orgId": row_org,
+                            "announcementTime": local.strftime("%Y-%m-%d"),
+                        }
+                    )
+                    rows.append(
+                        {
+                            "code": code,
+                            "name": str(record.get("secName") or ""),
+                            "title": title,
+                            "published": local.to_pydatetime(),
+                            "url": f"{_CNINFO_DETAIL}?{query}",
+                        }
+                    )
+            with _FEED_CACHE_LOCK:
+                _feed_cache_put(cache_key, fetch_start, end, rows)
+    return _slice_rows(rows, start, end)
 
 
 def research_rows(ticker: str, start_date: str, end_date: str) -> list[dict]:
@@ -142,58 +225,74 @@ def research_rows(ticker: str, start_date: str, end_date: str) -> list[dict]:
     _canonical, code, _exchange = canonical_a_share(ticker)
     start = datetime.strptime(start_date, "%Y-%m-%d").date()
     end = datetime.strptime(end_date, "%Y-%m-%d").date()
-    params = {
-        "industryCode": "*",
-        "industry": "*",
-        "rating": "*",
-        "ratingChange": "*",
-        "beginTime": start_date,
-        "endTime": end_date,
-        "pageNo": 1,
-        "pageSize": min(max(get_config()["news_article_limit"] * 4, 30), 100),
-        "qType": 0,
-        "orgCode": "",
-        "code": code,
-        "rcode": "",
-    }
-    payload = _request_json(
-        "GET", _RESEARCH_QUERY, label="Eastmoney stock research reports", params=params
-    )
-    records = _response_records(payload, "data", "Eastmoney research")
-    rows = []
-    for record in records:
-        if not isinstance(record, dict) or str(record.get("stockCode", "")).zfill(6) != code:
-            continue
-        published = _parse_date(record.get("publishDate"))
-        if published is None or not start <= published <= end:
-            continue
-        title = str(record.get("title") or "").strip()
-        info_code = str(record.get("infoCode") or "")
-        if not title:
-            continue
-        rating = str(record.get("emRatingName") or "n/a")
-        previous_rating = str(record.get("lastEmRatingName") or "").strip()
-        if not previous_rating:
-            rating_change = "initiated / prior rating unavailable"
-        elif rating == previous_rating:
-            rating_change = f"reiterated {rating}"
-        else:
-            rating_change = f"{previous_rating} -> {rating}"
-        rows.append(
-            {
+    fetch_start = _shared_fetch_start(start, end)
+    page_size = min(max(get_config()["news_article_limit"] * 4, 30), 100)
+    cache_key = ("eastmoney-research", code, end.isoformat(), page_size)
+    with _RESEARCH_FETCH_LOCK:
+        with _FEED_CACHE_LOCK:
+            rows = _feed_cache_get(cache_key, fetch_start, end)
+        if rows is None:
+            params = {
+                "industryCode": "*",
+                "industry": "*",
+                "rating": "*",
+                "ratingChange": "*",
+                "beginTime": fetch_start.isoformat(),
+                "endTime": end.isoformat(),
+                "pageNo": 1,
+                "pageSize": page_size,
+                "qType": 0,
+                "orgCode": "",
                 "code": code,
-                "name": str(record.get("stockName") or ""),
-                "title": title,
-                "published": published,
-                "institution": str(record.get("orgSName") or "Unknown"),
-                "rating": rating,
-                "rating_change": rating_change,
-                "target_low": record.get("indvAimPriceL"),
-                "target_high": record.get("indvAimPriceT"),
-                "url": f"https://pdf.dfcfw.com/pdf/H3_{info_code}_1.pdf" if info_code else "",
+                "rcode": "",
             }
-        )
-    return rows
+            payload = _request_json(
+                "GET", _RESEARCH_QUERY, label="Eastmoney stock research reports", params=params
+            )
+            records = _response_records(payload, "data", "Eastmoney research")
+            rows = []
+            for record in records:
+                if (
+                    not isinstance(record, dict)
+                    or str(record.get("stockCode", "")).zfill(6) != code
+                ):
+                    continue
+                published = _parse_date(record.get("publishDate"))
+                if published is None or not fetch_start <= published <= end:
+                    continue
+                title = str(record.get("title") or "").strip()
+                info_code = str(record.get("infoCode") or "")
+                if not title:
+                    continue
+                rating = str(record.get("emRatingName") or "n/a")
+                previous_rating = str(record.get("lastEmRatingName") or "").strip()
+                if not previous_rating:
+                    rating_change = "initiated / prior rating unavailable"
+                elif rating == previous_rating:
+                    rating_change = f"reiterated {rating}"
+                else:
+                    rating_change = f"{previous_rating} -> {rating}"
+                rows.append(
+                    {
+                        "code": code,
+                        "name": str(record.get("stockName") or ""),
+                        "title": title,
+                        "published": published,
+                        "institution": str(record.get("orgSName") or "Unknown"),
+                        "rating": rating,
+                        "rating_change": rating_change,
+                        "target_low": record.get("indvAimPriceL"),
+                        "target_high": record.get("indvAimPriceT"),
+                        "url": (
+                            f"https://pdf.dfcfw.com/pdf/H3_{info_code}_1.pdf"
+                            if info_code
+                            else ""
+                        ),
+                    }
+                )
+            with _FEED_CACHE_LOCK:
+                _feed_cache_put(cache_key, fetch_start, end, rows)
+    return _slice_rows(rows, start, end)
 
 
 def _dedupe_limit(rows: list[dict], limit: int) -> list[dict]:

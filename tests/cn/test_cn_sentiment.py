@@ -7,6 +7,11 @@ import pytest
 
 from tradingagents.dataflows.cn import cn_sentiment
 from tradingagents.dataflows.cn.common import AkShareRequestError, AkShareSchemaError
+from tradingagents.provenance import (
+    append_provenance_appendix,
+    extract_provenance,
+    strip_provenance_markers,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -18,6 +23,7 @@ def clear_holding_cache():
 
 @pytest.mark.unit
 def test_research_signal_is_publication_date_bounded(monkeypatch):
+    monkeypatch.setattr(cn_sentiment, "sina_rating_rows", lambda *_args: [])
     monkeypatch.setattr(
         cn_sentiment,
         "research_rows",
@@ -41,6 +47,87 @@ def test_research_signal_is_publication_date_bounded(monkeypatch):
 
 
 @pytest.mark.unit
+def test_research_signal_prefers_sina_without_querying_eastmoney(monkeypatch):
+    monkeypatch.setattr(
+        cn_sentiment,
+        "sina_rating_rows",
+        lambda *_args: [
+            {
+                "published": date(2026, 1, 10),
+                "institution": "Sina Broker",
+                "analyst": "Analyst A",
+                "rating": "买入",
+                "rating_change": "reiterated 买入",
+                "target_low": 10,
+                "target_high": 12,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        cn_sentiment,
+        "research_rows",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("fallback queried")),
+    )
+
+    result = cn_sentiment.get_research_signal("000001.SZ", "2026-01-10")
+
+    assert "Sina Finance; publication-date filtered" in result
+    assert "analysts=Analyst A" in result
+    assert [record.source for record in extract_provenance(result)] == [
+        "Sina Finance institutional ratings"
+    ]
+
+
+@pytest.mark.unit
+def test_research_signal_uses_eastmoney_after_sina_failure(monkeypatch):
+    monkeypatch.setattr(
+        cn_sentiment,
+        "sina_rating_rows",
+        lambda *_args: (_ for _ in ()).throw(AkShareRequestError("Sina failed")),
+    )
+    monkeypatch.setattr(
+        cn_sentiment,
+        "research_rows",
+        lambda *_args: [
+            {
+                "published": date(2026, 1, 10),
+                "institution": "Eastmoney Broker",
+                "rating": "Buy",
+                "rating_change": "upgrade",
+                "target_low": 10,
+                "target_high": 12,
+                "title": "Report",
+            }
+        ],
+    )
+
+    result = cn_sentiment.get_research_signal("000001.SZ", "2026-01-10")
+    records = extract_provenance(result)
+
+    assert "Eastmoney Research; publication-date filtered" in result
+    assert "Sina rating feed unavailable" in result
+    assert [record.source for record in records] == [
+        "Sina Finance institutional ratings",
+        "Eastmoney Research",
+    ]
+    assert "fallback source used" in records[1].timing
+
+
+@pytest.mark.unit
+def test_research_successful_empty_primary_and_fallback_do_not_warn(monkeypatch):
+    monkeypatch.setattr(cn_sentiment, "sina_rating_rows", lambda *_args: [])
+    monkeypatch.setattr(cn_sentiment, "research_rows", lambda *_args: [])
+
+    result = cn_sentiment.get_research_signal("000001.SZ", "2026-01-10")
+    report = append_provenance_appendix(
+        "REPORT", extract_provenance(result), enabled=False
+    )
+
+    assert "no usable coverage" in result
+    assert "Data Quality Warnings" not in report
+
+
+@pytest.mark.unit
 def test_holding_changes_distinguishes_no_events(monkeypatch):
     class Response:
         @staticmethod
@@ -51,7 +138,9 @@ def test_holding_changes_distinguishes_no_events(monkeypatch):
 
     result = cn_sentiment.get_holding_changes("600519.SS", "2026-01-10")
 
-    assert result.startswith("<Eastmoney holding changes: no matching events")
+    assert strip_provenance_markers(result).startswith(
+        "<Eastmoney holding changes: no matching events"
+    )
 
 
 @pytest.mark.unit
@@ -124,6 +213,7 @@ def test_holding_changes_labels_event_date_only_major_holder_data_as_non_strict_
 
     assert "[major shareholder] Holder A" in result
     assert "timing=event-date only; non-strict PIT" in result
+    assert "non-strict PIT" in extract_provenance(result)[0].timing
 
 
 @pytest.mark.unit
@@ -207,9 +297,41 @@ def test_holding_api_error_is_not_reported_as_empty(monkeypatch):
             return {"success": False, "message": "bad query", "result": None}
 
     monkeypatch.setattr(cn_sentiment, "_request", lambda *_args, **_kwargs: Response())
+    monkeypatch.setattr(
+        cn_sentiment,
+        "disclosure_rows",
+        lambda *_args: (_ for _ in ()).throw(AkShareRequestError("CNINFO failed")),
+    )
 
     with pytest.raises(AkShareRequestError, match="bad query"):
         cn_sentiment.get_holding_changes("600519.SS", "2026-01-10")
+
+
+@pytest.mark.unit
+def test_holding_errors_fall_back_to_exact_code_cninfo_announcements(monkeypatch):
+    class Response:
+        @staticmethod
+        def json():
+            return {"success": False, "message": "bad query", "result": None}
+
+    monkeypatch.setattr(cn_sentiment, "_request", lambda *_args, **_kwargs: Response())
+    monkeypatch.setattr(
+        cn_sentiment,
+        "disclosure_rows",
+        lambda *_args: [
+            {
+                "published": pd.Timestamp("2026-01-09", tz="Asia/Shanghai").to_pydatetime(),
+                "title": "关于控股股东增持公司股份的公告",
+            }
+        ],
+    )
+
+    result = cn_sentiment.get_holding_changes("600519.SS", "2026-01-10")
+    records = extract_provenance(result)
+
+    assert "[official announcement fallback] 关于控股股东增持公司股份的公告" in result
+    assert records[-1].source == "CNINFO"
+    assert "fallback source used" in records[-1].timing
 
 
 @pytest.mark.unit
@@ -293,7 +415,9 @@ def test_holding_no_data_code_is_normal_empty(monkeypatch):
 
     result = cn_sentiment.get_holding_changes("600519.SS", "2026-01-10")
 
-    assert result.startswith("<Eastmoney holding changes: no matching events")
+    assert strip_provenance_markers(result).startswith(
+        "<Eastmoney holding changes: no matching events"
+    )
 
 
 @pytest.mark.unit
