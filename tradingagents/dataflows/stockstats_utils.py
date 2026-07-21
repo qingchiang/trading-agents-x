@@ -3,6 +3,7 @@ import os
 import time
 from datetime import datetime
 from typing import Annotated
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import yfinance as yf
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 # is treated as stale. Generous enough to span long holiday weekends, tight
 # enough to catch the year-old frames yfinance occasionally returns (#1021).
 MAX_OHLCV_STALE_DAYS = 10
+_SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
 def yf_retry(func, max_retries=3, base_delay=2.0):
@@ -134,6 +136,35 @@ def _truncate_ohlcv_to_effective_date(
     return data
 
 
+def _mainland_live_cache_phase(
+    curr_date: str,
+    symbol: str,
+    canonical: str | None = None,
+    *,
+    now: datetime | None = None,
+) -> str | None:
+    """Return a completed-session cache phase for a live mainland request.
+
+    Yahoo can expose the current daily candle before the mainland close.  The
+    raw download is cached before downstream cutoff filtering, so a cache file
+    warmed during the session must not be reused after the 15:30 completion
+    boundary.  Historical requests deliberately return ``None`` and retain the
+    existing one-file-per-symbol cache used by backtests.
+    """
+    requested = pd.to_datetime(curr_date, errors="coerce")
+    if pd.isna(requested):
+        return None
+    current = now or datetime.now(_SHANGHAI)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=_SHANGHAI)
+    else:
+        current = current.astimezone(_SHANGHAI)
+    if requested.date() != current.date():
+        return None
+    cutoff = _mainland_effective_ohlcv_date(curr_date, symbol, canonical)
+    return cutoff.strftime("%Y-%m-%d") if cutoff is not None else None
+
+
 def _assert_ohlcv_not_stale(
     data: pd.DataFrame,
     curr_date: str,
@@ -204,9 +235,13 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     end_str = (today_date + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
 
     os.makedirs(config["data_cache_dir"], exist_ok=True)
+    live_cache_phase = _mainland_live_cache_phase(curr_date, symbol, canonical)
+    phase_suffix = (
+        f"-CN-completed-{live_cache_phase}" if live_cache_phase is not None else ""
+    )
     data_file = os.path.join(
         config["data_cache_dir"],
-        f"{safe_symbol}-YFin-data-{start_str}-{end_str}.csv",
+        f"{safe_symbol}-YFin-data-{start_str}-{end_str}{phase_suffix}.csv",
     )
 
     # A cached file may be empty if a prior fetch failed (unknown symbol,
