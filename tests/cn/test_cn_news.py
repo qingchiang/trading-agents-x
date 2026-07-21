@@ -5,6 +5,7 @@ from unittest import mock
 
 import pytest
 
+from tradingagents.dataflows import interface
 from tradingagents.dataflows.cn import cn_news, google_news, news_sources
 from tradingagents.dataflows.cn.common import AkShareSchemaError
 from tradingagents.dataflows.errors import NoMarketDataError
@@ -12,6 +13,7 @@ from tradingagents.dataflows.news_quality import (
     build_chinese_company_aliases,
     classify_chinese_google_article,
 )
+from tradingagents.provenance import append_provenance_appendix, extract_provenance
 
 
 @pytest.fixture(autouse=True)
@@ -242,6 +244,86 @@ def test_cn_assembler_preserves_other_sources_when_one_fails(monkeypatch):
     assert "DISCLOSURES" in result
     assert "<Eastmoney Research unavailable: TimeoutError>" in result
     assert '"source":"CNINFO"' in result
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "google_output",
+    [
+        (
+            "## MEDIA\n\n### [direct] item\nbody\n\n"
+            "Query availability note: 1 of 2 Google News name queries failed."
+        ),
+        (
+            "<Google News China partially unavailable: 1 of 2 name queries failed; "
+            "successful queries returned no relevant items>"
+        ),
+    ],
+)
+def test_cn_assembler_promotes_partial_google_query_failure_to_provenance_warning(
+    monkeypatch, google_output
+):
+    monkeypatch.setattr(
+        cn_news,
+        "_disclosure_news",
+        lambda *_args: "## DISCLOSURES\n\n### [direct] official item",
+    )
+    monkeypatch.setattr(cn_news, "_research_news", lambda *_args: "No research")
+    monkeypatch.setattr(cn_news, "_google_news", lambda *_args: google_output)
+
+    result = cn_news.get_news("600519.SS", "2026-01-01", "2026-01-10")
+    records = extract_provenance(result)
+    google_record = next(record for record in records if record.source == "Google News China")
+    report = append_provenance_appendix("REPORT", records, enabled=False)
+
+    assert google_record.timing.endswith("partial coverage; query_failures=1/2")
+    assert (
+        "- **get_news** (source: Google News China): partial coverage"
+        in report
+    )
+
+
+@pytest.mark.unit
+def test_cn_partial_empty_status_survives_yfinance_router_fallback(monkeypatch):
+    monkeypatch.setattr(cn_news, "_disclosure_news", lambda *_args: "No disclosures")
+    monkeypatch.setattr(cn_news, "_research_news", lambda *_args: "No research")
+    monkeypatch.setattr(
+        cn_news,
+        "_google_news",
+        lambda *_args: (
+            "<Google News China partially unavailable: 1 of 2 name queries failed; "
+            "successful queries returned no relevant items>"
+        ),
+    )
+    fallback = mock.Mock(return_value="## FALLBACK\n\n### fallback item")
+
+    with mock.patch.dict(
+        interface.VENDOR_METHODS,
+        {"get_news": {"cn_news": cn_news.get_news, "yfinance": fallback}},
+    ), mock.patch.object(interface, "get_vendor", return_value="cn_news,yfinance"):
+        result = interface.route_to_vendor(
+            "get_news",
+            "600519.SS",
+            "2026-01-01",
+            "2026-01-10",
+            _provenance=True,
+        )
+
+    records = extract_provenance(result)
+    report = append_provenance_appendix("REPORT", records, enabled=False)
+
+    assert any(
+        record.source == "Google News China"
+        and record.timing == "partial coverage; query_failures=1/2"
+        for record in records
+    )
+    assert any(
+        record.source == "yfinance"
+        and record.timing.startswith("fallback vendor selected;")
+        for record in records
+    )
+    assert "(source: Google News China): partial coverage" in report
+    assert "(source: yfinance): fallback source used" in report
 
 
 @pytest.mark.unit

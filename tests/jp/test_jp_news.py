@@ -7,6 +7,7 @@ import pytest
 
 from tradingagents.dataflows.errors import NoMarketDataError, VendorNotConfiguredError
 from tradingagents.dataflows.jp import jp_news
+from tradingagents.provenance import extract_provenance
 
 _EDINET_DATA = "## 4568.T EDINET disclosures, from a to b:\n\n### 有価証券報告書"
 _TDNET_DATA = "## 4568.T timely disclosures (TDnet 適時開示), from a to b:\n\n### 自己株式の取得"
@@ -65,7 +66,11 @@ class JpNewsAssemblerTests(unittest.TestCase):
         self.assertIn("EDINET item 14", out)
         self.assertIn("TDnet item 14", out)
         self.assertNotIn("Media item 0", out)
-        self.assertIn("returned_items=15; kept_items=0; shared_limit=30", out)
+        self.assertIn(
+            "returned_items=15; duplicate_items=0; kept_items=0; "
+            "shared_limit=30; truncated_by_global_cap=15",
+            out,
+        )
 
     def test_cross_source_duplicate_keeps_official_item(self):
         edinet = _block("EDINET", ["通期業績予想の修正 (filer: Example Corp)"])
@@ -81,6 +86,11 @@ class JpNewsAssemblerTests(unittest.TestCase):
         self.assertIn("filer: Example Corp", out)
         self.assertNotIn("source: Example News", out)
         self.assertIn("独自取材", out)
+        self.assertIn(
+            "returned_items=2; duplicate_items=1; kept_items=1; shared_limit=30",
+            out,
+        )
+        self.assertNotIn("truncated_by_global_cap", out)
 
     def test_configured_limit_is_applied_after_cross_source_merge(self):
         with mock.patch.object(jp_news, "get_config", return_value={"news_article_limit": 2}):
@@ -94,6 +104,7 @@ class JpNewsAssemblerTests(unittest.TestCase):
         self.assertIn("Official two", out)
         self.assertNotIn("Official three", out)
         self.assertNotIn("Media one", out)
+        self.assertIn("truncated_by_global_cap=1", out)
 
     def test_tdnet_only_present(self):
         out = _run(_EDINET_EMPTY, _MEDIA_EMPTY, tdnet=_TDNET_DATA)
@@ -143,7 +154,12 @@ class JpNewsAssemblerTests(unittest.TestCase):
     def test_edinet_error_and_empty_media_raises(self):
         with self.assertRaises(NoMarketDataError) as ctx:
             _run(RuntimeError("boom"), _MEDIA_EMPTY)
-        self.assertIn("<EDINET unavailable: RuntimeError>", ctx.exception.availability_notes)
+        note = ctx.exception.availability_notes[0]
+        self.assertIn("<EDINET unavailable: RuntimeError>", note)
+        records = extract_provenance(note)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].source, "EDINET")
+        self.assertEqual(records[0].timing, "unavailable")
 
 
 if __name__ == "__main__":

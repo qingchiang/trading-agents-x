@@ -575,17 +575,34 @@ def route_to_vendor(method: str, *args, _provenance: bool = False, **kwargs):
     last_no_data: NoMarketDataError | None = None
     first_error: Exception | None = None
     availability_notes: list[str] = []
-    for vendor in vendor_chain:
+    for vendor_index, vendor in enumerate(vendor_chain):
         vendor_impl = VENDOR_METHODS[method][vendor]
         impl_func = vendor_impl[0] if isinstance(vendor_impl, list) else vendor_impl
 
         try:
             result = impl_func(*args, **kwargs)
-            if _provenance and isinstance(result, str) and not extract_provenance(result):
-                record = _provenance_for_route(
-                    method, vendor, args, config, result
+            if _provenance and isinstance(result, str):
+                existing_records = extract_provenance(result)
+                record = (
+                    _provenance_for_route(method, vendor, args, config, result)
+                    if not existing_records or vendor_index > 0
+                    else None
                 )
                 if record is not None:
+                    if vendor_index > 0:
+                        fallback_timing = (
+                            "fallback vendor selected"
+                            if existing_records
+                            else f"fallback vendor selected; {record.timing}"
+                        )
+                        record = ProvenanceRecord(
+                            evidence=record.evidence,
+                            source=record.source,
+                            requested=record.requested,
+                            effective=record.effective,
+                            timing=fallback_timing,
+                            retrieved_at=record.retrieved_at,
+                        )
                     result = attach_provenance(result, record)
             # Availability notes describe failed earlier legs, not items returned
             # by this successful vendor. Append them only after provenance has

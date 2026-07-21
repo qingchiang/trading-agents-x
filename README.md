@@ -193,7 +193,7 @@ J-Quants plan tiers: the **Light** plan covers prices, `/fins/summary`, and exch
 **What this fork optimizes.**
 - **Historical runs fail closed for live-only data.** JP official sources remain look-ahead-safe, and historical runs do not query current StockTwits, Reddit, Polymarket, yfinance `.info`, Alpha Vantage `OVERVIEW`, or yfinance `.T` statement frames without filing timestamps. Graph-facing Market, News, and Fundamentals tools inject the analysis date from workflow state, so the LLM cannot omit or override an end/current date; ticker news exposes only a recent/extended window choice, never a model-supplied date. Direct statement calls that omit a date retain live-retrieval compatibility and are labelled as such. Yahoo ticker news compares publication timestamps in the exchange-local calendar for supported suffixes, New York for unsuffixed US securities, and UTC for crypto; near-live social messages use the same requested-date principle.
 
-- **Analyst data retains deterministic provenance metadata.** Actual tool results and prefetched blocks carry internal source, cutoff, effective-date, and timing records before temporary messages are cleared. Set `provenance_appendix = True` to append those records to Market, Fundamentals, News, and Sentiment reports as an English audit table; it is hidden by default to keep downstream context concise. In audit mode, missing tools and historical/live-only exclusions remain explicit, JP fundamentals distinguish the J-Quants official summary from optional yfinance live detail, and a live analysis may truthfully show an analysis date later than the latest completed trading session.
+- **Analyst data retains deterministic provenance metadata.** Actual tool results and prefetched blocks carry internal source, cutoff, effective-date, and timing records before temporary messages are cleared. Material fallback, availability, coverage, and point-in-time limitations always render under `Data Quality Warnings`; routine successful empty windows do not warn. Set `provenance_appendix = True` to additionally append the full records to Market, Fundamentals, News, and Sentiment reports as an English `Data Provenance` audit table. JP fundamentals distinguish the J-Quants official summary from optional yfinance live detail, and a live analysis may truthfully show an analysis date later than the latest completed trading session.
 - **More accurate data.** Official J-Quants prices and `/fins/summary` fundamentals replace Yahoo's thin `.T` coverage; the fundamentals assembler computes valuation ratios and a TOPIX-weekly beta on a proper Japanese benchmark, deduplicates repeated period disclosures, and labels IFRS/GAAP scope explicitly.
 - **Signal, not noise.** Yahoo ticker news and Google News JP default to the configured lookback offset (`14` means 15 inclusive calendar dates); News Analyst may manually replace that result with an extended query whose baseline is 90 dates and which never shortens a longer configured recent range. Explicit ticker/full-name evidence is `[direct]`, ambiguous names/tickers and summary-only mentions are `[candidate]`, and `[context]` remains external background. For JP extended queries, Google receives the full graph range, EDINET is capped to 90 dates, and TDnet is truthfully capped to its free rolling 31-date archive using the Tokyo calendar date. EDINET's all-market daily document lists are shared by news and 90-date holdings/TOB scans through a bounded memory + gzip disk cache; Tokyo's current day remains short-TTL memory-only. Fast-decaying StockTwits/Reddit sentiment and global macro news remain at their shorter defaults.
 - **Point-in-time-safe identity.** Live analysis can use rich yfinance `.info` identity fields. Historical graph startup and news alias resolution use exact-symbol `yf.Search` metadata instead, so current sector/industry cannot leak into a backtest.
@@ -278,11 +278,12 @@ print(decision)
 
 See `tradingagents/default_config.py` for all configuration options.
 
-Detailed `Data provenance` tables are disabled by default to keep analyst and
+Detailed `Data Provenance` tables are disabled by default to keep analyst and
 downstream-agent context concise. Enable them for debugging/auditing with
 `provenance_appendix = True` in the config or
-`TRADINGAGENTS_PROVENANCE_APPENDIX=true` in the environment. Source, date, and
-point-in-time warnings that affect interpretation remain in normal report text.
+`TRADINGAGENTS_PROVENANCE_APPENDIX=true` in the environment. Material source,
+fallback, coverage, date, and point-in-time limitations remain visible under
+`Data Quality Warnings` even when the detailed table is disabled.
 
 ### Reasoning effort by role
 

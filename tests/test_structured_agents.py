@@ -440,7 +440,7 @@ class TestSentimentAnalystAgent:
         llm.invoke.return_value = MagicMock(content=plain)
         result = create_sentiment_analyst(llm)(_make_sentiment_state())["sentiment_report"]
         assert result.startswith(plain)
-        assert "## Data provenance" not in result
+        assert "## Data Provenance" not in result
 
     def test_falls_back_to_freetext_when_structured_call_fails(self):
         config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
@@ -452,7 +452,7 @@ class TestSentimentAnalystAgent:
         llm.invoke.return_value = MagicMock(content=plain)
         result = create_sentiment_analyst(llm)(_make_sentiment_state())["sentiment_report"]
         assert result.startswith(plain)
-        assert "## Data provenance" not in result
+        assert "## Data Provenance" not in result
 
 
 _SENTIMENT_MOD = "tradingagents.agents.analysts.sentiment_analyst"
@@ -560,7 +560,7 @@ class TestSentimentMarketGating:
         assert "ticker-endpoint provenance alone is not evidence" in prompt_text
         assert "[context]` is" in prompt_text
         report = result["sentiment_report"]
-        assert "## Data provenance" in report
+        assert "## Data Provenance" in report
         assert "| ownership and control filings | EDINET |" in report
         assert "| margin balances | J-Quants |" in report
         assert "| large short positions | J-Quants |" in report

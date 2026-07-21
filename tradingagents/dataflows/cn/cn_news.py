@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor
 
 from tradingagents.provenance import ProvenanceRecord, attach_provenance
@@ -17,6 +18,11 @@ from .news_sources import (
 )
 
 logger = logging.getLogger(__name__)
+
+_PARTIAL_QUERY_RE = re.compile(
+    r"(?P<failed>\d+) of (?P<total>\d+) (?:Google News )?name queries failed",
+    re.IGNORECASE,
+)
 
 
 def _article_key(paragraph: str) -> str:
@@ -63,6 +69,17 @@ def _safe_feed(source: str, fetch, ticker: str, start_date: str, end_date: str) 
         return f"<{source} unavailable: {type(exc).__name__}>"
 
 
+def _partial_query_timing(output: str) -> str | None:
+    """Return an auditable status for a partially successful name-query fanout."""
+    match = _PARTIAL_QUERY_RE.search(output)
+    if match is None:
+        return None
+    return (
+        "partial coverage; "
+        f"query_failures={match.group('failed')}/{match.group('total')}"
+    )
+
+
 def get_news(ticker: str, start_date: str, end_date: str) -> str:
     """Combine CNINFO, Eastmoney and Chinese Google News; fall back only if empty."""
     feeds = (
@@ -81,30 +98,40 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
     blocks = _dedupe_blocks(
         [item for item in rendered if item.startswith("## ")], article_limit
     )
-    notes = [item for item in rendered if item.startswith("<")]
+    records = []
+    notes: list[tuple[str, ProvenanceRecord]] = []
+    for (source, _fetch), output in zip(feeds, rendered, strict=True):
+        partial_timing = _partial_query_timing(output)
+        if output.startswith("## "):
+            timing = f"publication-date filtered; returned_items={output.count(chr(10) + '### ')}"
+            if partial_timing:
+                timing += f"; {partial_timing}"
+        elif output.startswith("<"):
+            timing = partial_timing or "unavailable"
+        else:
+            timing = "available; no relevant items in window; returned_items=0"
+        record = ProvenanceRecord(
+            evidence="get_news",
+            source=source,
+            requested=f"{start_date} to {end_date}",
+            effective=f"{start_date} to {end_date}",
+            timing=timing,
+        )
+        records.append(record)
+        if output.startswith("<"):
+            notes.append((output, record))
+
     if not blocks:
         raise NoMarketDataError(
             ticker,
             detail="no CNINFO announcements, Eastmoney research, or Chinese media news in the window",
-            availability_notes=notes,
+            availability_notes=(
+                attach_provenance(note, record) for note, record in notes
+            ),
         )
     if notes:
-        blocks.append("### Source availability notes\n" + "\n".join(notes))
-    records = []
-    for (source, _fetch), output in zip(feeds, rendered, strict=True):
-        if output.startswith("## "):
-            timing = f"publication-date filtered; returned_items={output.count(chr(10) + '### ')}"
-        elif output.startswith("<"):
-            timing = "unavailable"
-        else:
-            timing = "available; no relevant items in window; returned_items=0"
-        records.append(
-            ProvenanceRecord(
-                evidence="get_news",
-                source=source,
-                requested=f"{start_date} to {end_date}",
-                effective=f"{start_date} to {end_date}",
-                timing=timing,
-            )
+        blocks.append(
+            "### Source availability notes\n"
+            + "\n".join(note for note, _record in notes)
         )
     return attach_provenance("\n\n".join(blocks), *records)

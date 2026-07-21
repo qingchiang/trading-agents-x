@@ -82,7 +82,8 @@ class TestRouteToVendorSentinel(unittest.TestCase):
         self.assertIn("<TDnet unavailable: outside rolling archive>", result)
         self.assertEqual(
             extract_provenance(result)[0].timing,
-            "publication/disclosure-date filtered; returned_items=1",
+            "fallback vendor selected; publication/disclosure-date filtered; "
+            "returned_items=1",
         )
 
     def test_no_data_from_all_vendors_returns_sentinel(self):

@@ -65,6 +65,16 @@ class _FeedBlock:
     items: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class _MergeCounts:
+    """Auditable disposition of items received from one sub-feed."""
+
+    returned: int
+    duplicates: int
+    kept: int
+    cap_omitted: int
+
+
 def _split_feed_block(block: str) -> _FeedBlock:
     """Split a sub-feed block without depending on its source-specific body."""
     starts = [match.start() for match in _ITEM_START_RE.finditer(block)]
@@ -86,30 +96,44 @@ def _item_key(item: str) -> str:
     return canonical_headline(title)
 
 
-def _merge_blocks(blocks: list[str], limit: int) -> tuple[list[str], list[tuple[int, int]]]:
+def _merge_blocks(blocks: list[str], limit: int) -> tuple[list[str], list[_MergeCounts]]:
     """Deduplicate and cap blocks in source-priority order.
 
-    Returns rendered non-empty blocks plus ``(raw, kept)`` counts aligned with
-    the input. EDINET and TDnet precede Google News at the caller, so an
+    Returns rendered non-empty blocks plus disposition counts aligned with the
+    input. EDINET and TDnet precede Google News at the caller, so an
     equivalent official disclosure wins over a media headline and remaining
     prompt capacity is assigned to official sources first.
     """
     remaining = max(1, limit)
     seen: set[str] = set()
     merged: list[str] = []
-    counts: list[tuple[int, int]] = []
+    counts: list[_MergeCounts] = []
     for block in blocks:
         parsed = _split_feed_block(block)
         kept: list[str] = []
+        duplicates = 0
+        cap_omitted = 0
         for item in parsed.items:
             key = _item_key(item)
-            if not key or key in seen:
+            if not key:
+                continue
+            if key in seen:
+                duplicates += 1
                 continue
             seen.add(key)
             if remaining > 0:
                 kept.append(item)
                 remaining -= 1
-        counts.append((len(parsed.items), len(kept)))
+            else:
+                cap_omitted += 1
+        counts.append(
+            _MergeCounts(
+                returned=len(parsed.items),
+                duplicates=duplicates,
+                kept=len(kept),
+                cap_omitted=cap_omitted,
+            )
+        )
         if kept:
             merged.append(f"{parsed.preamble}\n\n" + "\n\n".join(kept))
     return merged, counts
@@ -169,42 +193,52 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
         )
     rendered = list(rendered)
     data_blocks = [block for block in rendered if block.startswith(_DATA_PREFIX)]
-    notes = [block for block in rendered if block.startswith(_NOTE_PREFIX)]
-
-    if not data_blocks:
-        raise NoMarketDataError(
-            ticker,
-            detail="no EDINET/TDnet disclosures or media news in the window",
-            availability_notes=notes,
-        )
     limit = max(1, int(get_config()["news_article_limit"]))
     blocks, merged_counts = _merge_blocks(data_blocks, limit)
-    if notes:
-        blocks.append("### Source availability notes\n" + "\n".join(notes))
     records = []
+    notes: list[tuple[str, ProvenanceRecord]] = []
     data_count_index = 0
     for (source, _fetch, effective_start, effective_end), block in zip(
         feed_requests, rendered, strict=True
     ):
         if block.startswith(_DATA_PREFIX):
-            raw_count, kept_count = merged_counts[data_count_index]
+            counts = merged_counts[data_count_index]
             data_count_index += 1
             timing = (
                 "publication/disclosure-date filtered; "
-                f"returned_items={raw_count}; kept_items={kept_count}; "
+                f"returned_items={counts.returned}; "
+                f"duplicate_items={counts.duplicates}; "
+                f"kept_items={counts.kept}; "
                 f"shared_limit={limit}"
             )
+            if counts.cap_omitted:
+                timing += f"; truncated_by_global_cap={counts.cap_omitted}"
         elif block.startswith(_NOTE_PREFIX):
             timing = "unavailable"
         else:
             timing = "available; no relevant items in window; returned_items=0"
-        records.append(
-            ProvenanceRecord(
-                evidence="get_news",
-                source=source,
-                requested=f"{start_date} to {end_date}",
-                effective=f"{effective_start} to {effective_end}",
-                timing=timing,
-            )
+        record = ProvenanceRecord(
+            evidence="get_news",
+            source=source,
+            requested=f"{start_date} to {end_date}",
+            effective=f"{effective_start} to {effective_end}",
+            timing=timing,
+        )
+        records.append(record)
+        if block.startswith(_NOTE_PREFIX):
+            notes.append((block, record))
+
+    if not blocks:
+        raise NoMarketDataError(
+            ticker,
+            detail="no EDINET/TDnet disclosures or media news in the window",
+            availability_notes=(
+                attach_provenance(note, record) for note, record in notes
+            ),
+        )
+    if notes:
+        blocks.append(
+            "### Source availability notes\n"
+            + "\n".join(note for note, _record in notes)
         )
     return attach_provenance("\n\n".join(blocks), *records)

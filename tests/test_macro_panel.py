@@ -291,7 +291,7 @@ class NewsPanelInjectionTests(unittest.TestCase):
         captured, result, _ = self._run("PANEL_XYZ")
         self.assertIn("PANEL_XYZ", captured["prompt"])
         self.assertEqual(result["news_report"], result["messages"][0].content)
-        self.assertIn("## Data provenance", result["news_report"])
+        self.assertIn("## Data Provenance", result["news_report"])
         self.assertIn("| global macro panel | unknown |", result["news_report"])
         self.assertIn("no auditable source metadata captured", result["news_report"])
         self.assertIn("| routed ticker news | — |", result["news_report"])
