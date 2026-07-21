@@ -36,6 +36,7 @@ def test_static_quote_id_returns_validated_daily_points(monkeypatch):
     assert data["points"] == [("2026-07-16", "2.7")]
     assert data["actual_source"] == "Eastmoney"
     assert data["frequency"] == "Daily"
+    assert "fallback_reason" not in data
 
 
 @pytest.mark.unit
@@ -97,6 +98,7 @@ def test_self_heal_failure_falls_back_to_fred(monkeypatch):
     assert data["actual_source"] == "FRED"
     assert data["frequency"] == "Monthly"
     assert "fallback" in data["timing"]
+    assert data["fallback_reason"] == "Eastmoney primary retrieval unavailable"
 
 
 @pytest.mark.unit
@@ -116,6 +118,7 @@ def test_empty_self_heal_result_falls_back_to_fred(monkeypatch):
     data = jp_macro.fetch_series("jp_10y_yield", "2026-07-17", 365)
 
     assert data["actual_source"] == "FRED"
+    assert data["fallback_reason"] == "Eastmoney returned no usable observations"
 
 
 @pytest.mark.unit

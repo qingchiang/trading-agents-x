@@ -20,6 +20,7 @@ import requests
 
 from .cn.common import (
     REQUEST_TIMEOUT,
+    AkShareRateLimitError,
     AkShareRequestError,
     AkShareSchemaError,
     call_with_retry,
@@ -48,6 +49,13 @@ class _Fetched(NamedTuple):
     points: list[tuple[str, str]]
     actual_source: str
     frequency: str | None = None
+    fallback_reason: str | None = None
+
+
+class MacroReport(NamedTuple):
+    text: str
+    source: str
+    timing: str
 
 
 CN_SERIES = {
@@ -281,16 +289,18 @@ def _fetch_10y_chinamoney(start: date, end: date) -> list[tuple[str, str]]:
 
 
 def _fetch_10y(start: date, end: date) -> _Fetched:
+    fallback_reason = "Eastmoney returned no usable observations"
     try:
         points = _fetch_10y_eastmoney(start, end)
         if points:
             return _Fetched(points, "Eastmoney")
-    except AkShareRequestError:
-        pass
+    except (AkShareRequestError, AkShareRateLimitError):
+        fallback_reason = "Eastmoney primary retrieval unavailable"
     return _Fetched(
         _fetch_10y_chinamoney(start, end),
         "China Foreign Exchange Trade System",
         "Latest official curve snapshot",
+        fallback_reason,
     )
 
 
@@ -387,13 +397,18 @@ def _fetch_usd_cny_eastmoney(start: date, end: date) -> list[tuple[str, str]]:
 
 
 def _fetch_usd_cny(start: date, end: date) -> _Fetched:
+    fallback_reason = "SAFE returned no usable observations"
     try:
         points = _fetch_usd_cny_safe(start, end)
         if points:
             return _Fetched(points, "SAFE")
-    except AkShareRequestError:
-        pass
-    return _Fetched(_fetch_usd_cny_eastmoney(start, end), "Eastmoney")
+    except (AkShareRequestError, AkShareRateLimitError):
+        fallback_reason = "SAFE primary retrieval unavailable"
+    return _Fetched(
+        _fetch_usd_cny_eastmoney(start, end),
+        "Eastmoney",
+        fallback_reason=fallback_reason,
+    )
 
 
 class _ReleaseLinkParser(HTMLParser):
@@ -500,10 +515,12 @@ def fetch_series(
         points = fetched.points
         actual_source = fetched.actual_source
         frequency = fetched.frequency
+        fallback_reason = fetched.fallback_reason
     else:
         points = fetched
         actual_source = None
         frequency = None
+        fallback_reason = None
     if not points:
         return None
     spec = CN_SERIES[key]
@@ -519,8 +536,42 @@ def fetch_series(
     }
     if actual_source:
         data["actual_source"] = actual_source
+    if fallback_reason:
+        data["fallback_reason"] = fallback_reason
     _series_cache.put(cache_key, data)
     return data
+
+
+def get_macro_report(
+    indicator: str,
+    curr_date: str,
+    look_back_days: int | None = None,
+) -> MacroReport:
+    """Render China macro data and retain actual-source fallback metadata."""
+    if indicator.strip().lower() not in CN_SERIES:
+        raise NoMarketDataError(indicator, detail="not a China macro series")
+    data = fetch_series(indicator, curr_date, look_back_days)
+    if data is None:
+        return MacroReport(
+            f"China macro: no data for '{indicator}' in this window.",
+            "China macro",
+            "available; no observations in requested window",
+        )
+    source = str(data.get("actual_source") or "China macro")
+    data_timing = str(data.get("timing") or timing_for(indicator))
+    timing = f"{data['frequency']}; {data_timing}"
+    fallback_reason = data.get("fallback_reason")
+    if fallback_reason:
+        timing += f"; fallback: {fallback_reason}"
+    return MacroReport(
+        render_macro_report(
+            "China macro" if source == "China macro" else f"China macro / {source}",
+            data,
+            curr_date,
+        ),
+        source,
+        timing,
+    )
 
 
 def get_macro_data(
@@ -529,9 +580,4 @@ def get_macro_data(
     look_back_days: int | None = None,
 ) -> str:
     """Render one China macro series for the microscope tool."""
-    if indicator.strip().lower() not in CN_SERIES:
-        raise NoMarketDataError(indicator, detail="not a China macro series")
-    data = fetch_series(indicator, curr_date, look_back_days)
-    if data is None:
-        return f"China macro: no data for '{indicator}' in this window."
-    return render_macro_report("China macro", data, curr_date)
+    return get_macro_report(indicator, curr_date, look_back_days).text

@@ -137,6 +137,21 @@ class MacroDispatchTests(unittest.TestCase):
             out = route_to_vendor("get_macro_indicators", "cn_lpr", "2026-06-20")
         self.assertIn("## China macro: China LPR", out)
 
+    def test_china_fallback_provenance_uses_actual_source_and_reason(self):
+        data = _data("usd_cny", "USD/CNY", [("2026-06-19", "7.1")])
+        data.update(
+            actual_source="Eastmoney",
+            timing="Eastmoney; trade-date filtered",
+            fallback_reason="SAFE primary retrieval unavailable",
+        )
+        with mock.patch.object(cn_macro, "fetch_series", return_value=data):
+            out = route_to_vendor("get_macro_indicators", "usd_cny", "2026-06-20")
+
+        record = extract_provenance(out)[0]
+        self.assertEqual(record.source, "Eastmoney")
+        self.assertIn("Monthly", record.timing)
+        self.assertIn("fallback: SAFE primary retrieval unavailable", record.timing)
+
     def test_missing_fred_key_degrades_with_the_fred_reason_not_a_jp_one(self):
         # Regression guard: a US indicator with no FRED key must degrade naming the
         # real cause (FRED unavailable), NOT a misleading "not a BOJ series" no-data

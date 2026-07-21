@@ -16,7 +16,7 @@ from tradingagents.agents.analysts import news_analyst
 from tradingagents.agents.analysts.news_analyst import create_news_analyst
 from tradingagents.dataflows import boj, cn_macro, estat, fred, jp_macro, macro_panel
 from tradingagents.dataflows.config import set_config
-from tradingagents.provenance import extract_provenance
+from tradingagents.provenance import append_provenance_appendix, extract_provenance
 
 
 def _series(points, series_id="X", timing=None):
@@ -98,6 +98,110 @@ class MacroPanelTests(unittest.TestCase):
             self.assertIn(label, out)
         # cell shows latest value (date) + absolute change + percent change
         self.assertIn("2.0 (2026-06-01, Δ +1.00, +100.0%)", out)
+
+    def test_policy_rate_cells_name_regional_indicator_and_frequency(self):
+        with mock.patch.object(
+            fred,
+            "fetch_series",
+            return_value=_series([("2026-06-01", "1.0")]),
+        ):
+            out = macro_panel.get_global_macro_panel("2026-06-20")
+
+        policy_row = next(
+            line for line in out.splitlines() if "Policy / reference rate" in line
+        )
+        self.assertIn("Fed funds rate [Monthly]", policy_row)
+        self.assertIn("BOJ policy rate [Daily]", policy_row)
+        self.assertIn("1Y LPR [Monthly]", policy_row)
+
+    def test_fallback_series_provenance_records_source_frequency_date_and_reason(self):
+        jp_data = _series([("2026-06-18", "1.9")], timing="observation-date filtered")
+        jp_data.update(
+            actual_source="FRED",
+            frequency="Monthly",
+            fallback_reason="Eastmoney primary retrieval unavailable",
+        )
+
+        def cn_fetch(indicator, *_args):
+            data = _series([("2026-06-19", "7.1")], timing="trade-date filtered")
+            if indicator == "cn_10y_yield":
+                data.update(
+                    actual_source="China Foreign Exchange Trade System",
+                    frequency="Latest official curve snapshot",
+                    fallback_reason="Eastmoney returned no usable observations",
+                )
+            elif indicator == "usd_cny":
+                data.update(
+                    actual_source="Eastmoney",
+                    frequency="Daily",
+                    fallback_reason="SAFE primary retrieval unavailable",
+                )
+            return data
+
+        with (
+            mock.patch.object(
+                fred,
+                "fetch_series",
+                return_value=_series([("2026-06-01", "1.0")]),
+            ),
+            mock.patch.object(jp_macro, "fetch_series", return_value=jp_data),
+            mock.patch.object(cn_macro, "fetch_series", side_effect=cn_fetch),
+        ):
+            out = macro_panel.get_global_macro_panel("2026-06-20")
+
+        records = {
+            record.evidence: record
+            for record in extract_provenance(out)
+            if record.evidence.startswith("global macro panel /")
+        }
+        jp_record = records["global macro panel / jp_10y_yield"]
+        self.assertEqual(jp_record.source, "FRED")
+        self.assertEqual(jp_record.effective, "2026-06-18")
+        self.assertIn("frequency=Monthly", jp_record.timing)
+        self.assertIn("Eastmoney primary retrieval unavailable", jp_record.timing)
+        cn_record = records["global macro panel / cn_10y_yield"]
+        self.assertEqual(cn_record.source, "China Foreign Exchange Trade System")
+        self.assertIn("frequency=Latest official curve snapshot", cn_record.timing)
+        fx_record = records["global macro panel / usd_cny"]
+        self.assertEqual(fx_record.source, "Eastmoney")
+        self.assertIn("SAFE primary retrieval unavailable", fx_record.timing)
+        warnings = append_provenance_appendix(
+            "REPORT", records.values(), enabled=False
+        )
+        self.assertIn("fallback source used", warnings)
+
+    def test_primary_fallback_capable_series_do_not_emit_fallback_warning(self):
+        jp_data = _series([("2026-06-18", "1.9")], timing="trade-date filtered")
+        jp_data.update(actual_source="Eastmoney", frequency="Daily")
+
+        def cn_fetch(indicator, *_args):
+            data = _series([("2026-06-19", "7.1")], timing="trade-date filtered")
+            if indicator == "cn_10y_yield":
+                data.update(actual_source="Eastmoney", frequency="Daily")
+            elif indicator == "usd_cny":
+                data.update(actual_source="SAFE", frequency="Daily")
+            return data
+
+        with (
+            mock.patch.object(
+                fred,
+                "fetch_series",
+                return_value=_series([("2026-06-01", "1.0")]),
+            ),
+            mock.patch.object(jp_macro, "fetch_series", return_value=jp_data),
+            mock.patch.object(cn_macro, "fetch_series", side_effect=cn_fetch),
+        ):
+            out = macro_panel.get_global_macro_panel("2026-06-20")
+
+        records = [
+            record
+            for record in extract_provenance(out)
+            if record.evidence.startswith("global macro panel /")
+        ]
+        self.assertEqual(
+            append_provenance_appendix("REPORT", records, enabled=False),
+            "REPORT",
+        )
 
     def test_cells_dispatch_to_their_declared_source(self):
         # Japan CPI/core -> e-Stat; Japan policy rate / Tankan -> BOJ; everything
@@ -192,6 +296,7 @@ class MacroPanelTests(unittest.TestCase):
         self.assertIn("cn_pmi (2026-06-01)", out)
         records = {record.source: record for record in extract_provenance(out)}
         self.assertIn("6/7 cells available", records["China macro"].timing)
+        self.assertIn("partial coverage", records["China macro"].timing)
         self.assertIn("non-vintage", records["China macro"].timing)
 
     def test_single_point_shows_value_without_delta(self):

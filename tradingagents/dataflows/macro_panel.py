@@ -57,6 +57,22 @@ _SOURCES = {
     "jp": jp_macro,
 }
 
+_SOURCE_LABELS = {
+    "fred": "FRED",
+    "estat": "e-Stat",
+    "boj": "BOJ",
+    "cn": "China macro",
+    "jp": "Japan macro",
+}
+
+# These series can switch between materially different vendors/frequencies.
+# Keep an individual audit record in addition to the aggregate source coverage.
+_FALLBACK_AUDIT_SERIES = {
+    ("jp", "jp_10y_yield"): "Eastmoney / FRED",
+    ("cn", "cn_10y_yield"): "Eastmoney / China Foreign Exchange Trade System",
+    ("cn", "usd_cny"): "SAFE / Eastmoney",
+}
+
 # Per-country comparison sections. Structure:
 #   (dimension label + meaning, ((row label, {region: (source, indicator)_or_None}), ...))
 # Each region maps to a (source, indicator) pair, or None when no free source
@@ -72,9 +88,21 @@ _REGIONAL_SECTIONS = (
             (
                 "Policy / reference rate",
                 {
-                    "US": ("fred", "fed_funds_rate"),
-                    "Japan": ("boj", "jp_policy_rate"),
-                    "China": ("cn", "cn_lpr"),
+                    "US": (
+                        "fred",
+                        "fed_funds_rate",
+                        "window",
+                        None,
+                        "Fed funds rate [Monthly]",
+                    ),
+                    "Japan": (
+                        "boj",
+                        "jp_policy_rate",
+                        "window",
+                        None,
+                        "BOJ policy rate [Daily]",
+                    ),
+                    "China": ("cn", "cn_lpr", "window", None, "1Y LPR [Monthly]"),
                 },
             ),
             (
@@ -145,6 +173,7 @@ def _cell(
     curr_date: str,
     source_stats: dict[str, dict[str, object]] | None = None,
     unavailable_sources: dict[str, str] | None = None,
+    series_records: list[ProvenanceRecord] | None = None,
 ) -> str:
     """Render one cell: latest value (date) + change over the ~1y window, or "n/a".
 
@@ -160,6 +189,31 @@ def _cell(
     source, indicator = spec[:2]
     display = spec[2] if len(spec) >= 3 else "window"
     look_back_days = spec[3] if len(spec) >= 4 else None
+    cell_label = spec[4] if len(spec) >= 5 else None
+    audit_source_chain = _FALLBACK_AUDIT_SERIES.get((source, indicator))
+
+    def audit(data: dict | None, effective: str, timing: str) -> None:
+        if series_records is None or audit_source_chain is None:
+            return
+        actual_source = (
+            str(data.get("actual_source"))
+            if data and data.get("actual_source")
+            else audit_source_chain
+        )
+        frequency = str(data.get("frequency") or "unknown") if data else "unknown"
+        status = f"frequency={frequency}; {timing}"
+        fallback_reason = data.get("fallback_reason") if data else None
+        if fallback_reason:
+            status += f"; fallback: {fallback_reason}"
+        series_records.append(
+            ProvenanceRecord(
+                evidence=f"global macro panel / {indicator}",
+                source=actual_source,
+                requested=curr_date,
+                effective=effective,
+                timing=status,
+            )
+        )
     stats = None
     if source_stats is not None:
         stats = source_stats.setdefault(
@@ -170,14 +224,17 @@ def _cell(
     if unavailable_sources and source in unavailable_sources:
         if stats is not None:
             stats["unavailable"] = unavailable_sources[source]
+        audit(None, "—", "retrieval unavailable")
         return "n/a"
     try:
         data = _SOURCES[source].fetch_series(indicator, curr_date, look_back_days)
         summary = summarize_points(data["points"]) if data else None
     except Exception as exc:
         logger.warning("Macro panel cell %s/%s failed: %s", source, indicator, exc)
+        audit(None, "—", "retrieval unavailable")
         return "n/a"
     if summary is None:
+        audit(data, "—", "available; no observations in requested window")
         return "n/a"
     if display == "exact_yoy":
         yoy = exact_year_over_year(data["points"])
@@ -195,6 +252,7 @@ def _cell(
     else:
         pct = f", {summary.pct:+.1f}%" if summary.pct is not None else ""
         rendered = f"{summary.last_val} ({summary.last_date}, Δ {summary.delta:+.2f}{pct})"
+    audit(data, summary.last_date, str(data.get("timing") or "observation-date filtered"))
     if stats is not None:
         stats["successes"] = int(stats["successes"]) + 1
         dates = stats["dates"]
@@ -203,7 +261,7 @@ def _cell(
         timings = stats["timings"]
         if isinstance(timings, list) and data.get("timing"):
             timings.append(str(data["timing"]))
-    return rendered
+    return f"{cell_label}: {rendered}" if cell_label else rendered
 
 
 def get_global_macro_panel(curr_date: str) -> str:
@@ -224,6 +282,7 @@ def get_global_macro_panel(curr_date: str) -> str:
         unavailable_sources["fred"] = "API key is not configured"
 
     source_stats: dict[str, dict[str, object]] = {}
+    series_records: list[ProvenanceRecord] = []
     rows = [
         "| Indicator | " + " | ".join(_REGIONS) + " |",
         "| --- |" + " --- |" * len(_REGIONS),
@@ -237,6 +296,7 @@ def get_global_macro_panel(curr_date: str) -> str:
                     curr_date,
                     source_stats,
                     unavailable_sources,
+                    series_records,
                 )
                 for region in _REGIONS
             ]
@@ -246,7 +306,8 @@ def get_global_macro_panel(curr_date: str) -> str:
     risk_rows = ["| Risk / FX — cross-border capital flow | Latest |", "| --- | --- |"]
     for label, spec in _GLOBAL_RISK:
         risk_rows.append(
-            f"| {label} | {_cell(spec, curr_date, source_stats, unavailable_sources)} |"
+            f"| {label} | "
+            f"{_cell(spec, curr_date, source_stats, unavailable_sources, series_records)} |"
         )
     risk = "\n".join(risk_rows)
 
@@ -265,14 +326,7 @@ def get_global_macro_panel(curr_date: str) -> str:
         "China CPI/GDP/PMI are observation-period filtered, non-vintage data. "
         "Remaining gaps: US ISM PMI and China core inflation._"
     )
-    source_labels = {
-        "fred": "FRED",
-        "estat": "e-Stat",
-        "boj": "BOJ",
-        "cn": "China macro",
-        "jp": "Japan macro",
-    }
-    records = []
+    records = list(series_records)
     for source, stats in source_stats.items():
         attempts = int(stats["attempts"])
         successes = int(stats["successes"])
@@ -283,16 +337,19 @@ def get_global_macro_panel(curr_date: str) -> str:
             timing = f"unavailable: {stats['unavailable']}; 0/{attempts} cells available"
         elif successes:
             timing_modes = "; ".join(dict.fromkeys(str(value) for value in timings))
+            coverage = f"{successes}/{attempts} cells available"
             timing = (
-                f"{timing_modes or 'observation-date filtered'}; "
-                f"{successes}/{attempts} cells available"
+                f"{timing_modes or 'observation-date filtered'}; {coverage}"
+                if successes == attempts
+                else f"partial coverage; {timing_modes or 'observation-date filtered'}; "
+                f"{coverage}"
             )
         else:
             timing = f"retrieval unavailable or no observations; 0/{attempts} cells available"
         records.append(
             ProvenanceRecord(
                 evidence="global macro panel",
-                source=source_labels.get(source, source),
+                source=_SOURCE_LABELS.get(source, source),
                 requested=curr_date,
                 effective=effective,
                 timing=timing,

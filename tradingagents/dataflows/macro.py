@@ -42,10 +42,8 @@ def get_macro_indicators(
     key = indicator.strip().lower()
     source_timing = None
     if key in cn_macro.CN_SERIES:
-        source, result = (
-            "China macro",
-            cn_macro.get_macro_data(indicator, curr_date, look_back_days),
-        )
+        report = cn_macro.get_macro_report(indicator, curr_date, look_back_days)
+        source, result, source_timing = report.source, report.text, report.timing
     elif key in jp_macro.JP_SERIES:
         report = jp_macro.get_macro_report(indicator, curr_date, look_back_days)
         source, result, source_timing = report.source, report.text, report.timing
@@ -58,8 +56,6 @@ def get_macro_indicators(
     effective, timing = _provenance_status(result, source, curr_date)
     if source_timing is not None:
         timing = source_timing
-    if key in cn_macro.CN_SERIES and effective != "—":
-        timing = cn_macro.timing_for(key)
     return attach_provenance(
         result,
         ProvenanceRecord(

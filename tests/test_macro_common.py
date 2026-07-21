@@ -160,6 +160,22 @@ class SeriesCacheDiskTests(unittest.TestCase):
         with mock.patch.object(c, "_is_settled", return_value=True):
             self.assertIsNone(c.get(key))
 
+    def test_t_minus_two_recent_entry_transitions_to_settled_at_t_minus_three(self):
+        key = ("cpi", "2026-07-19", 365)
+        c = SeriesCache(namespace="fred")
+        value = {"points": [("2026-07-19", "1.0")]}
+        with mock.patch.object(macro_common, "get_current_date", return_value="2026-07-21"):
+            c.put(key, value)
+            recent_path = c._recent_disk_file(key)
+            self.assertTrue(os.path.exists(recent_path))
+            self.assertFalse(os.path.exists(c._disk_file(key)))
+
+        with mock.patch.object(macro_common, "get_current_date", return_value="2026-07-22"):
+            self.assertIsNone(c.get(key))
+            c.put(key, value)
+            self.assertTrue(os.path.exists(c._disk_file(key)))
+            self.assertFalse(os.path.exists(recent_path))
+
     def test_distinct_keys_that_sanitize_alike_do_not_collide(self):
         # "a/b" and "a?b" both sanitize to the prefix "a_b"; the key hash must keep
         # their files apart so one series never serves another's data (FRED accepts
@@ -256,6 +272,13 @@ class SeriesCacheDiskTests(unittest.TestCase):
         cleared = (today - datetime.timedelta(days=macro_common._SETTLE_GRACE_DAYS + 1)).isoformat()
         self.assertFalse(c._is_settled(("cpi", recent, 365)))  # too recent -> not persisted
         self.assertTrue(c._is_settled(("cpi", cleared, 365)))  # past the grace -> persisted
+
+    def test_recent_boundary_is_today_through_t_minus_two(self):
+        c = SeriesCache(namespace="fred")
+        with mock.patch.object(macro_common, "get_current_date", return_value="2026-07-21"):
+            for curr_date in ("2026-07-21", "2026-07-20", "2026-07-19"):
+                self.assertFalse(c._is_settled(("cpi", curr_date, 365)))
+            self.assertTrue(c._is_settled(("cpi", "2026-07-18", 365)))
 
     def test_is_settled_tolerates_unpadded_dates(self):
         # A non-zero-padded curr_date must still be classified by calendar date, not

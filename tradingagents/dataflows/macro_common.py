@@ -233,7 +233,7 @@ class SeriesCache:
             today = datetime.strptime(get_current_date(), "%Y-%m-%d").date()
         except ValueError:
             return False
-        return key_date < today - timedelta(days=_SETTLE_GRACE_DAYS)
+        return key_date <= today - timedelta(days=_SETTLE_GRACE_DAYS)
 
     def _disk_get(self, key):
         settled = self._is_settled(key)

@@ -81,6 +81,7 @@ def test_usd_cny_parses_close_and_drops_future(monkeypatch):
 
     assert data["points"] == [("2026-01-10", "7.2")]
     assert data["actual_source"] == "Eastmoney"
+    assert data["fallback_reason"] == "SAFE returned no usable observations"
 
 
 @pytest.mark.unit
@@ -102,6 +103,7 @@ def test_safe_central_parity_is_primary_and_converts_per_100_usd(monkeypatch):
         data = cn_macro.fetch_series("usd_cny", "2026-01-15", 30)
     assert data["points"] == [("2026-01-10", "7.1234")]
     assert data["actual_source"] == "SAFE"
+    assert "fallback_reason" not in data
 
 
 @pytest.mark.unit
@@ -139,6 +141,7 @@ def test_safe_missing_header_uses_eastmoney_fallback(monkeypatch):
 
     assert data["points"] == [("2026-01-10", "7.2")]
     assert data["actual_source"] == "Eastmoney"
+    assert data["fallback_reason"] == "SAFE primary retrieval unavailable"
 
 
 @pytest.mark.unit
@@ -159,6 +162,7 @@ def test_cn_10y_falls_back_to_latest_official_curve_point(monkeypatch):
     assert data["points"] == [("2026-01-14", "1.7")]
     assert data["frequency"] == "Latest official curve snapshot"
     assert "China Foreign Exchange Trade System" in data["timing"]
+    assert data["fallback_reason"] == "Eastmoney returned no usable observations"
 
 
 @pytest.mark.unit

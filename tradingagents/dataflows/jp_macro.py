@@ -11,6 +11,7 @@ import requests
 from . import fred
 from .cn.common import (
     REQUEST_TIMEOUT,
+    AkShareRateLimitError,
     AkShareRequestError,
     AkShareSchemaError,
     call_with_retry,
@@ -149,10 +150,12 @@ def fetch_series(indicator: str, curr_date: str, look_back_days: int | None = No
     requested_end = datetime.strptime(curr_date, "%Y-%m-%d").date()
     end = completed_market_date(requested_end)
     start = end - timedelta(days=look_back_days)
+    fallback_reason = "Eastmoney returned no usable observations"
     try:
         points = _fetch_primary(start, end)
-    except AkShareRequestError:
+    except (AkShareRequestError, AkShareRateLimitError):
         points = []
+        fallback_reason = "Eastmoney primary retrieval unavailable"
     if not points:
         fallback = fred.fetch_series(_FRED_10Y, end.isoformat(), look_back_days)
         if not fallback or not fallback.get("points"):
@@ -163,6 +166,7 @@ def fetch_series(indicator: str, curr_date: str, look_back_days: int | None = No
             title="Japan 10-year government bond yield",
             timing="FRED monthly fallback; observation-date filtered",
             actual_source="FRED",
+            fallback_reason=fallback_reason,
         )
     else:
         data = {
@@ -194,10 +198,14 @@ def get_macro_report(
             "available; no observations in requested window",
         )
     source = str(data["actual_source"])
+    timing = f"{data['frequency']}; {data['timing']}"
+    fallback_reason = data.get("fallback_reason")
+    if fallback_reason:
+        timing += f"; fallback: {fallback_reason}"
     return MacroReport(
         render_macro_report(f"Japan macro / {source}", data, curr_date),
         source,
-        f"{data['frequency']}; {data['timing']}",
+        timing,
     )
 
 
