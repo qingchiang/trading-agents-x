@@ -17,8 +17,9 @@ The panel is organised on four investment-meaning dimensions:
     in their own section rather than a US/Japan column split.
 
 **Source is per-cell**, so an indicator can be served by whichever provider has
-the timely free series: most cells use **FRED** (US series plus the Japanese OECD
-10Y mirror, and USD/JPY, DXY, VIX); **Japan CPI / core inflation** come from
+the timely free series: most cells use **FRED** (US series plus USD/JPY, DXY and
+VIX); **Japan 10Y** comes from the Ministry of Finance's daily constant-maturity
+curve with FRED as fallback; **Japan CPI / core inflation** come from
 **e-Stat** (FRED's OECD mirror was discontinued ~2021); **Japan's policy rate
 (daily) and Tankan DI (quarterly)** come from the **BOJ** API; and the China
 column uses keyless Eastmoney/NBS sources. Making the source explicit per cell
@@ -26,8 +27,8 @@ keeps the panel and any router-served microscope tool from diverging on the same
 indicator.
 
 Prefetched like the sentiment sources, so it **must never raise**: any per-cell
-fetch failure degrades to "n/a". Look-ahead is inherited from
-:func:`fred.fetch_series` (observations capped at ``curr_date``).
+fetch failure degrades to "n/a". Each source filters observations to the analysis
+date; MOF additionally enforces its next-business-day 09:30 JST publication lag.
 """
 
 from __future__ import annotations
@@ -68,7 +69,7 @@ _SOURCE_LABELS = {
 # These series can switch between materially different vendors/frequencies.
 # Keep an individual audit record in addition to the aggregate source coverage.
 _FALLBACK_AUDIT_SERIES = {
-    ("jp", "jp_10y_yield"): "Eastmoney / FRED",
+    ("jp", "jp_10y_yield"): "Japan Ministry of Finance / FRED",
     ("cn", "cn_10y_yield"): "Eastmoney / China Foreign Exchange Trade System",
     ("cn", "usd_cny"): "SAFE / Eastmoney",
 }
@@ -319,7 +320,7 @@ def get_global_macro_panel(curr_date: str) -> str:
         "drives USD/JPY, which flows straight into Japanese exporters' earnings.\n\n"
         f"{regional}\n\n{risk}\n\n"
         "_Sources: Japan policy rate / Tankan from BOJ (官), Japan 10Y from "
-        "Eastmoney with FRED fallback, Japan CPI / core "
+        "Japan Ministry of Finance with FRED fallback, Japan CPI / core "
         "inflation from e-Stat (官), China from SAFE / Eastmoney market data, "
         "ChinaMoney bond fallback, and the latest NBS unemployment release (官); "
         "remaining cells come from FRED. "

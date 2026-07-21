@@ -119,7 +119,7 @@ class MacroPanelTests(unittest.TestCase):
         jp_data.update(
             actual_source="FRED",
             frequency="Monthly",
-            fallback_reason="Eastmoney primary retrieval unavailable",
+            fallback_reason="MOF primary retrieval unavailable",
         )
 
         def cn_fetch(indicator, *_args):
@@ -158,7 +158,7 @@ class MacroPanelTests(unittest.TestCase):
         self.assertEqual(jp_record.source, "FRED")
         self.assertEqual(jp_record.effective, "2026-06-18")
         self.assertIn("frequency=Monthly", jp_record.timing)
-        self.assertIn("Eastmoney primary retrieval unavailable", jp_record.timing)
+        self.assertIn("MOF primary retrieval unavailable", jp_record.timing)
         cn_record = records["global macro panel / cn_10y_yield"]
         self.assertEqual(cn_record.source, "China Foreign Exchange Trade System")
         self.assertIn("frequency=Latest official curve snapshot", cn_record.timing)
@@ -171,8 +171,10 @@ class MacroPanelTests(unittest.TestCase):
         self.assertIn("fallback source used", warnings)
 
     def test_primary_fallback_capable_series_do_not_emit_fallback_warning(self):
-        jp_data = _series([("2026-06-18", "1.9")], timing="trade-date filtered")
-        jp_data.update(actual_source="Eastmoney", frequency="Daily")
+        jp_data = _series(
+            [("2026-06-18", "1.9")], timing="publication-time filtered"
+        )
+        jp_data.update(actual_source="Japan Ministry of Finance", frequency="Daily")
 
         def cn_fetch(indicator, *_args):
             data = _series([("2026-06-19", "7.1")], timing="trade-date filtered")
