@@ -66,6 +66,7 @@ addopts = "-ra --strict-markers"
 markers = [
     "unit: fast isolated unit tests",
     "integration: tests requiring external services",
+    "live_data: opt-in live market-data contract tests",
     "smoke: quick sanity-check tests",
 ]
 filterwarnings = [

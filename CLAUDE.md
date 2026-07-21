@@ -11,13 +11,14 @@ pip install -e ".[dev]"   # install with dev extras (pytest + ruff)
 pytest -q                                 # full test suite
 pytest tests/test_market_routing.py       # one file
 pytest tests/test_x.py::Cls::test_y       # one test
+RUN_LIVE_DATA_TESTS=1 PYTHON_DOTENV_DISABLED=1 uv run --extra dev pytest -q -m live_data
 ruff check .                              # lint (CI runs this repo-wide, strict)
 
 python main.py        # scripted single-ticker run (edit ticker/date in main.py)
 tradingagents         # interactive CLI (also: python -m cli.main)
 ```
 
-CI (`.github/workflows/ci.yml`) runs three jobs on push/PR: `test` (pytest on Python 3.10–3.13), `smoke-install` (bare `pip install .` then import — catches undeclared runtime deps), and `lint` (`ruff check .`). Pytest markers: `unit`, `integration`, `smoke`.
+CI (`.github/workflows/ci.yml`) runs three jobs on push/PR: `test` (pytest on Python 3.10–3.13), `smoke-install` (bare `pip install .` then import — catches undeclared runtime deps), and `lint` (`ruff check .`). Pytest markers: `unit`, `integration`, `live_data`, `smoke`. Live-data contract tests are opt-in via `RUN_LIVE_DATA_TESTS=1`; default pytest and CI never make those network requests.
 
 `pyproject.toml` uses PEP 621 extras. **Declare runtime deps in `[project.dependencies]`** — the `smoke-install` job bare-imports the package, so an undeclared runtime import fails CI — and dev/test tools in `[project.optional-dependencies].dev`. **Ship non-code data files (e.g. JSON snapshots) via `[tool.setuptools.package-data]`** and load them with `importlib.resources`, not a relative path — an editable install sees the file on disk but a real `pip install .` only bundles registered package-data, and `smoke-install` won't catch the gap because it imports without reading the file.
 

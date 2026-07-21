@@ -247,6 +247,17 @@ Such failures are validated and degraded per source/cell rather than globally,
 but production users should monitor provenance and freshness instead of treating
 a successful HTTP response as proof that data is current.
 
+Maintainers can run the opt-in, serial low-frequency endpoint contracts with:
+
+```bash
+RUN_LIVE_DATA_TESTS=1 PYTHON_DOTENV_DISABLED=1 uv run --extra dev pytest -q -m live_data
+```
+
+The suite checks schemas, completed-date cutoffs, broad value ranges, actual
+sources, and audited fallbacks without pinning prices or row counts. Its terminal
+summary records each endpoint's status, source, latest observation, and latency.
+Default pytest and CI collect but skip these network checks.
+
 ## TradingAgents Package
 
 ### Implementation Details
