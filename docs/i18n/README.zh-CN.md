@@ -45,8 +45,9 @@ TradingAgentsX 模拟一支小型投资团队：市场、基本面、新闻和�
 </p>
 
 框架既支持交互式 CLI，也支持直接通过 Python 调用。分析师可以独立选择，
-LLM 提供商可以配置；已完成的决策可写入跨轮次复盘日志，可选的 LangGraph
-检查点则可以恢复中断的分析。
+LLM 提供商可以配置。直接调用 `TradingAgentsGraph.propagate()` 时，还可以把
+决策写入跨轮次复盘日志，并通过可选的 LangGraph 检查点恢复中断的分析；
+交互式 CLI 目前尚未接入这两项运行生命周期功能。
 
 > TradingAgentsX 是研究框架，其输出不构成金融、投资或交易建议。结果取决于
 > 模型行为、数据质量、时间边界和运行配置。
@@ -282,21 +283,21 @@ TRADINGAGENTS_DEEP_REASONING_EFFORT=high
 
 ## 持久化与恢复
 
-已完成的运行会把决策追加到
+持久化与恢复目前仅适用于通过 `TradingAgentsGraph.propagate()` 发起的 Python
+直接调用。成功完成的 `propagate()` 运行会把决策追加到
 `~/.tradingagents/memory/trading_memory.md`。以后再次分析同一只股票时，
 系统可以比较实际原始收益与相对基准收益，并在投资组合经理的上下文中加入简短
 复盘。可通过 `TRADINGAGENTS_MEMORY_LOG_PATH` 修改路径。
 
-检查点恢复默认关闭，可按需启用：
-
-```bash
-tradingagents analyze --checkpoint
-tradingagents analyze --clear-checkpoints
-```
-
-每只股票的 SQLite 检查点位于
+直接通过 Python 调用时，可在图配置中设置 `checkpoint_enabled=True`，按需启用
+检查点恢复。每只股票的 SQLite 检查点随后会写入
 `~/.tradingagents/cache/checkpoints/`；可通过 `TRADINGAGENTS_CACHE_DIR`
 修改基础目录。成功完成后会清除对应检查点。
+
+交互式 CLI 目前直接流式执行已编译的图，因此不会读取或追加复盘日志，也不会
+创建或恢复检查点；保存 CLI 报告同样不会写入记忆。CLI 仍会显示
+`--checkpoint`、`--no-checkpoint` 和 `--clear-checkpoints` 参数，但目前只有
+`--clear-checkpoints` 会生效：它会在分析开始前删除已有的检查点数据库。
 
 ## 可复现性
 

@@ -48,8 +48,10 @@ TradingAgentsX は小規模な投資チームをモデル化します。市場�
 </p>
 
 対話型 CLI と Python からの直接利用に対応しています。アナリストは個別に選択でき、
-LLM プロバイダーも設定可能です。完了した判断は実行をまたぐ振り返りログへ保存でき、
-任意の LangGraph チェックポイントによって中断した分析を再開できます。
+LLM プロバイダーも設定可能です。`TradingAgentsGraph.propagate()` を直接呼び出す
+実行では、判断を実行間の振り返りログへ保存し、任意の LangGraph チェックポイント
+から中断した分析を再開できます。対話型 CLI は現在、この 2 つの実行ライフサイクル
+機能を使用していません。
 
 > TradingAgentsX はリサーチ用フレームワークです。出力は金融、投資、売買の助言を
 > 構成しません。結果はモデルの挙動、データ品質、時点、設定に依存します。
@@ -293,21 +295,25 @@ TRADINGAGENTS_DEEP_REASONING_EFFORT=high
 
 ## 永続化と復旧
 
-完了した実行は判断を `~/.tradingagents/memory/trading_memory.md` に追記します。
+永続化と復旧は現在、Python から `TradingAgentsGraph.propagate()` を直接呼び出す
+実行にのみ適用されます。正常終了した `propagate()` 実行は、判断を
+`~/.tradingagents/memory/trading_memory.md` に追記します。
 同じ銘柄の後続実行では、実現した素のリターンとベンチマーク相対リターンを比較し、
 ポートフォリオマネージャーのコンテキストへ短い振り返りを挿入できます。パスは
 `TRADINGAGENTS_MEMORY_LOG_PATH` で変更できます。
 
-チェックポイントからの再開は任意です。
-
-```bash
-tradingagents analyze --checkpoint
-tradingagents analyze --clear-checkpoints
-```
-
-銘柄別 SQLite チェックポイントは `~/.tradingagents/cache/checkpoints/` に保存され、
+Python から直接利用する場合は、グラフ設定で `checkpoint_enabled=True` を指定すると
+チェックポイントからの再開が有効になります。銘柄別 SQLite チェックポイントは
+`~/.tradingagents/cache/checkpoints/` に保存され、
 ベースディレクトリは `TRADINGAGENTS_CACHE_DIR` で変更できます。正常終了した実行は
 対応するチェックポイントを削除します。
+
+対話型 CLI は現在、コンパイル済みグラフを直接ストリーミング実行するため、振り返り
+ログの読み書きも、チェックポイントの作成・再開も行いません。CLI レポートの保存でも
+メモリーエントリーは書き込まれません。CLI には引き続き `--checkpoint`、
+`--no-checkpoint`、`--clear-checkpoints` が表示されますが、現時点で効果があるのは
+`--clear-checkpoints` のみで、分析開始前に既存のチェックポイントデータベースを
+削除します。
 
 ## 再現性
 

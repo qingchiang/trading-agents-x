@@ -50,9 +50,10 @@ analysts → bull/bear debate → research manager → trader
 </p>
 
 The framework supports interactive CLI runs and direct Python use. Analysts can
-be selected independently, LLM providers are configurable, completed decisions
-can feed a cross-run reflection log, and optional LangGraph checkpoints can
-resume interrupted analyses.
+be selected independently and LLM providers are configurable. Direct
+`TradingAgentsGraph.propagate()` runs can also feed a cross-run reflection log
+and use optional LangGraph checkpoints; the interactive CLI does not currently
+use either lifecycle feature.
 
 > TradingAgentsX is a research framework. Its output is not financial,
 > investment, or trading advice. Results depend on model behavior, data quality,
@@ -302,22 +303,24 @@ source of truth for curated choices.
 
 ## Persistence and recovery
 
-Completed runs append decisions to
-`~/.tradingagents/memory/trading_memory.md`. A later run for the same ticker can
-compare realized raw and benchmark-relative returns and inject a short reflection
-into the portfolio-manager context. Override the path with
+Persistence and recovery currently apply only to direct Python runs through
+`TradingAgentsGraph.propagate()`. Completed `propagate()` runs append decisions
+to `~/.tradingagents/memory/trading_memory.md`. A later run for the same ticker
+can compare realized raw and benchmark-relative returns and inject a short
+reflection into the portfolio-manager context. Override the path with
 `TRADINGAGENTS_MEMORY_LOG_PATH`.
 
-Checkpoint resume is opt-in:
-
-```bash
-tradingagents analyze --checkpoint
-tradingagents analyze --clear-checkpoints
-```
-
-Per-ticker SQLite checkpoints live under
+For direct Python use, set `checkpoint_enabled=True` in the graph config to opt
+in to checkpoint resume. Per-ticker SQLite checkpoints then live under
 `~/.tradingagents/cache/checkpoints/`; override the base with
 `TRADINGAGENTS_CACHE_DIR`. Successful runs clear their checkpoints.
+
+The interactive CLI currently streams the compiled graph directly, so it does
+not read or append the memory log and does not create or resume checkpoints.
+Saving a CLI report does not write a memory entry. The CLI still exposes
+`--checkpoint`, `--no-checkpoint`, and `--clear-checkpoints`; only
+`--clear-checkpoints` currently has an effect, deleting existing checkpoint
+databases before the analysis starts.
 
 ## Reproducibility
 
