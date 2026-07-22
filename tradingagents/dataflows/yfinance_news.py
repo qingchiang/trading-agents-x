@@ -2,7 +2,6 @@
 
 import contextlib
 from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
 
 import yfinance as yf
 from dateutil.relativedelta import relativedelta
@@ -15,30 +14,7 @@ from .news_quality import (
     classify_yahoo_article,
 )
 from .stockstats_utils import yf_retry
-from .symbol_utils import crypto_base, normalize_symbol
-
-_NEWS_TIMEZONES_BY_SUFFIX = {
-    ".T": "Asia/Tokyo",
-    ".HK": "Asia/Hong_Kong",
-    ".SS": "Asia/Shanghai",
-    ".SZ": "Asia/Shanghai",
-    ".NS": "Asia/Kolkata",
-    ".BO": "Asia/Kolkata",
-    ".L": "Europe/London",
-    ".TO": "America/Toronto",
-    ".AX": "Australia/Sydney",
-}
-
-
-def _news_timezone(ticker: str | None):
-    """Return the calendar timezone used to judge Yahoo publication dates."""
-    if ticker is None or crypto_base(ticker):
-        return timezone.utc
-    upper = ticker.upper()
-    for suffix, timezone_name in _NEWS_TIMEZONES_BY_SUFFIX.items():
-        if upper.endswith(suffix):
-            return ZoneInfo(timezone_name)
-    return ZoneInfo("America/New_York")
+from .symbol_utils import market_timezone, normalize_symbol
 
 
 def _extract_article_data(article: dict) -> dict:
@@ -104,7 +80,7 @@ def _in_news_window(
     window it's excluded, since we can't prove it isn't future news
     (look-ahead safety, #992/#1007).
     """
-    market_tz = _news_timezone(ticker)
+    market_tz = market_timezone(ticker)
     if pub_date is not None:
         if not isinstance(pub_date, datetime):
             return False

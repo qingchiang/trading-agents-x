@@ -12,7 +12,7 @@ from stockstats import wrap
 from yfinance.exceptions import YFRateLimitError
 
 from .config import get_config
-from .symbol_utils import NoMarketDataError, normalize_symbol
+from .symbol_utils import NoMarketDataError, market_today, normalize_symbol
 from .utils import safe_ticker_component
 
 logger = logging.getLogger(__name__)
@@ -215,7 +215,13 @@ def _assert_ohlcv_not_stale(
         )
 
 
-def _needs_same_day_refresh(data_file, curr_date_dt, today_date) -> bool:
+def _needs_same_day_refresh(
+    data_file,
+    curr_date_dt,
+    symbol: str,
+    *,
+    now: datetime | None = None,
+) -> bool:
     """Whether a cached frame must be refetched to reflect the requested day.
 
     The cache file is keyed per day, so without this a run started before the
@@ -227,7 +233,7 @@ def _needs_same_day_refresh(data_file, curr_date_dt, today_date) -> bool:
     governs every current-day cache. Historical requests always reuse the cache,
     since those rows are immutable.
     """
-    if curr_date_dt.date() < today_date.date():
+    if curr_date_dt.date() < market_today(symbol, now):
         return False
     return time.time() - os.path.getmtime(data_file) > OHLCV_CACHE_TTL_SECONDS
 
@@ -278,7 +284,7 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
         if (
             not cached.empty
             and "Close" in cached.columns
-            and not _needs_same_day_refresh(data_file, curr_date_dt, today_date)
+            and not _needs_same_day_refresh(data_file, curr_date_dt, canonical)
         ):
             data = cached
 

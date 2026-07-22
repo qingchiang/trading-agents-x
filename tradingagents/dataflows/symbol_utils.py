@@ -23,6 +23,8 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Iterable
+from datetime import date, datetime, timezone, tzinfo
+from zoneinfo import ZoneInfo
 
 # NoMarketDataError lives in the vendor-error taxonomy (errors.py); re-exported
 # here for the many call sites that import it alongside normalize_symbol.
@@ -88,6 +90,39 @@ _CRYPTO_QUOTES = ("USDT", "USDC", "USD")
 _SHANGHAI_A_SHARE_PREFIXES = ("600", "601", "603", "605", "688", "689")
 _SHENZHEN_A_SHARE_PREFIXES = ("000", "001", "002", "003", "300", "301")
 _MAINLAND_MARKET_BENCHMARKS = frozenset({"000001.SS", "399001.SZ"})
+
+# Calendar timezone used when a date boundary depends on the instrument's
+# exchange rather than the host machine. Unsuffixed Yahoo symbols retain the US
+# default, while continuously traded crypto uses UTC.
+_MARKET_TIMEZONES_BY_SUFFIX = {
+    ".T": "Asia/Tokyo",
+    ".HK": "Asia/Hong_Kong",
+    ".SS": "Asia/Shanghai",
+    ".SZ": "Asia/Shanghai",
+    ".NS": "Asia/Kolkata",
+    ".BO": "Asia/Kolkata",
+    ".L": "Europe/London",
+    ".TO": "America/Toronto",
+    ".AX": "Australia/Sydney",
+}
+
+# Yahoo's major index symbols do not carry exchange suffixes, so preserve their
+# market identity explicitly after alias normalization (for example,
+# ``JP225`` -> ``^N225``). Keep this aligned with the supported index aliases
+# above and the regional benchmark symbols in ``DEFAULT_CONFIG``.
+_MARKET_TIMEZONES_BY_SYMBOL = {
+    "^N225": "Asia/Tokyo",
+    "^HSI": "Asia/Hong_Kong",
+    "^NSEI": "Asia/Kolkata",
+    "^BSESN": "Asia/Kolkata",
+    "^FTSE": "Europe/London",
+    "^GSPTSE": "America/Toronto",
+    "^AXJO": "Australia/Sydney",
+    "^GDAXI": "Europe/Berlin",
+    "^FCHI": "Europe/Paris",
+    "^STOXX50E": "Europe/Paris",
+}
+_DEFAULT_MARKET_TIMEZONE = ZoneInfo("America/New_York")
 
 
 def infer_mainland_equity_suffix(code: str) -> str | None:
@@ -263,3 +298,29 @@ def match_exchange_suffix(symbol: str, suffixes: Iterable[str]) -> str:
         if upper.endswith(suffix.upper()):
             return suffix
     return ""
+
+
+def market_timezone(symbol: str | None) -> tzinfo:
+    """Return the calendar timezone used for a Yahoo-compatible instrument."""
+    if symbol is None:
+        return timezone.utc
+    canonical = normalize_symbol(symbol)
+    if crypto_base(canonical):
+        return timezone.utc
+    if canonical in _MARKET_TIMEZONES_BY_SYMBOL:
+        return ZoneInfo(_MARKET_TIMEZONES_BY_SYMBOL[canonical])
+    suffix = match_exchange_suffix(canonical, _MARKET_TIMEZONES_BY_SUFFIX)
+    if suffix:
+        return ZoneInfo(_MARKET_TIMEZONES_BY_SUFFIX[suffix])
+    return _DEFAULT_MARKET_TIMEZONE
+
+
+def market_today(symbol: str | None, now: datetime | None = None) -> date:
+    """Return the instrument's current calendar date, independent of host timezone."""
+    market_tz = market_timezone(symbol)
+    current = now or datetime.now(market_tz)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=market_tz)
+    else:
+        current = current.astimezone(market_tz)
+    return current.date()
