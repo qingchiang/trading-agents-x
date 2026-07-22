@@ -35,7 +35,11 @@ class TickerSymbolHandlingTests(unittest.TestCase):
         self.assertEqual(graph.ticker, "600519.SS")
         graph._resolve_pending_entries.assert_called_once_with("600519.SS")
         graph._run_graph.assert_called_once_with(
-            "600519.SS", "2026-07-18", asset_type="stock"
+            "600519.SS",
+            "2026-07-18",
+            asset_type="stock",
+            on_chunk=None,
+            resume_step=None,
         )
 
     def test_programmatic_graph_entry_normalizes_shanghai_alias(self):
@@ -50,7 +54,11 @@ class TickerSymbolHandlingTests(unittest.TestCase):
         self.assertEqual(graph.ticker, "600519.SS")
         graph._resolve_pending_entries.assert_called_once_with("600519.SS")
         graph._run_graph.assert_called_once_with(
-            "600519.SS", "2026-07-18", asset_type="stock"
+            "600519.SS",
+            "2026-07-18",
+            asset_type="stock",
+            on_chunk=None,
+            resume_step=None,
         )
 
     def test_single_get_ticker_no_shadow(self):

@@ -78,11 +78,22 @@ class AnalystWallTimeTracker:
         self.plan = plan
         self._started_at: dict[str, float] = {}
         self._wall_times: dict[str, float] = {}
+        self._resumed: set[str] = set()
 
     def mark_started(self, analyst_key: str, started_at: float | None = None) -> None:
         if analyst_key not in ANALYST_NODE_SPECS:
             raise ValueError(f"unknown analyst key: {analyst_key}")
+        if analyst_key in self._resumed:
+            return
         self._started_at.setdefault(analyst_key, monotonic() if started_at is None else started_at)
+
+    def mark_resumed(self, analyst_key: str) -> None:
+        """Mark work restored from a checkpoint without fabricating wall time."""
+        if analyst_key not in ANALYST_NODE_SPECS:
+            raise ValueError(f"unknown analyst key: {analyst_key}")
+        self._resumed.add(analyst_key)
+        self._started_at.pop(analyst_key, None)
+        self._wall_times.pop(analyst_key, None)
 
     def mark_completed(
         self,
@@ -91,6 +102,8 @@ class AnalystWallTimeTracker:
     ) -> None:
         if analyst_key not in ANALYST_NODE_SPECS:
             raise ValueError(f"unknown analyst key: {analyst_key}")
+        if analyst_key in self._resumed:
+            return
         if analyst_key in self._wall_times:
             return
         started_at = self._started_at.get(analyst_key)
@@ -109,6 +122,9 @@ class AnalystWallTimeTracker:
             if duration is not None:
                 label = spec.agent_node.removesuffix(" Analyst")
                 parts.append(f"{label} {duration:.2f}s")
+            elif spec.key in self._resumed:
+                label = spec.agent_node.removesuffix(" Analyst")
+                parts.append(f"{label} resumed")
         if not parts:
             return "Analyst wall time: pending"
         return "Analyst wall time: " + " | ".join(parts)

@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -385,7 +386,14 @@ class TradingAgentsGraph:
             f"asset={asset_type}",
         ])
 
-    def propagate(self, company_name, trade_date, asset_type: str = "stock"):
+    def propagate(
+        self,
+        company_name,
+        trade_date,
+        asset_type: str = "stock",
+        *,
+        on_chunk: Callable[[dict[str, Any], int | None], None] | None = None,
+    ):
         """Run the trading agents graph for a company on a specific date.
 
         ``asset_type`` selects between the stock pipeline (default) and the
@@ -394,12 +402,15 @@ class TradingAgentsGraph:
         ``checkpoint_enabled`` is set in config, the graph is recompiled with
         a per-ticker SqliteSaver so a crashed run can resume from the last
         successful node on a subsequent invocation with the same ticker+date.
+
+        ``on_chunk`` receives each streamed state plus the restored checkpoint
+        step for the first replayed snapshot (``None`` for all other chunks).
+        Supplying it lets interactive callers render progress while this method
+        continues to own persistence, checkpoint, and cleanup semantics.
         """
         company_name = normalize_symbol(company_name)
         self.ticker = company_name
-
-        # Resolve any pending memory-log entries for this ticker before the pipeline runs.
-        self._resolve_pending_entries(company_name)
+        resume_step = None
 
         # Recompile with a checkpointer if the user opted in.
         if self.config.get("checkpoint_enabled"):
@@ -409,19 +420,34 @@ class TradingAgentsGraph:
             saver = self._checkpointer_ctx.__enter__()
             self.graph = self.workflow.compile(checkpointer=saver)
 
-            step = checkpoint_step(
+            resume_step = checkpoint_step(
                 self.config["data_cache_dir"], company_name, str(trade_date),
                 self._run_signature(asset_type),
             )
-            if step is not None:
+            if resume_step is not None:
                 logger.info(
-                    "Resuming from step %d for %s on %s", step, company_name, trade_date
+                    "Resuming from step %d for %s on %s",
+                    resume_step,
+                    company_name,
+                    trade_date,
                 )
             else:
                 logger.info("Starting fresh for %s on %s", company_name, trade_date)
 
         try:
-            return self._run_graph(company_name, trade_date, asset_type=asset_type)
+            # A resumed run must retain the memory and instrument context stored
+            # in its checkpoint. Re-running fresh-start preparation could mutate
+            # the log or mix newly resolved context into an in-flight analysis.
+            if resume_step is None:
+                self._resolve_pending_entries(company_name)
+
+            return self._run_graph(
+                company_name,
+                trade_date,
+                asset_type=asset_type,
+                on_chunk=on_chunk,
+                resume_step=resume_step,
+            )
         finally:
             if self._checkpointer_ctx is not None:
                 self._checkpointer_ctx.__exit__(None, None, None)
@@ -443,24 +469,38 @@ class TradingAgentsGraph:
             )
         return write_report_tree(final_state, ticker, save_path)
 
-    def _run_graph(self, company_name, trade_date, asset_type: str = "stock"):
+    def _run_graph(
+        self,
+        company_name,
+        trade_date,
+        asset_type: str = "stock",
+        *,
+        on_chunk: Callable[[dict[str, Any], int | None], None] | None = None,
+        resume_step: int | None = None,
+    ):
         """Execute the graph and write the resulting state to disk and memory log."""
-        # Initialize state — inject memory log context for PM and the
-        # deterministically resolved instrument identity for all agents.
-        past_context = self.memory_log.get_past_context(company_name)
-        instrument_context = self.resolve_instrument_context(
-            company_name,
-            asset_type,
-            str(trade_date),
-        )
-        init_agent_state = self.propagator.create_initial_state(
-            company_name,
-            trade_date,
-            asset_type=asset_type,
-            past_context=past_context,
-            instrument_context=instrument_context,
-        )
-        args = self.propagator.get_graph_args()
+        if resume_step is None:
+            # Initialize state — inject memory log context for PM and the
+            # deterministically resolved instrument identity for all agents.
+            past_context = self.memory_log.get_past_context(company_name)
+            instrument_context = self.resolve_instrument_context(
+                company_name,
+                asset_type,
+                str(trade_date),
+            )
+            graph_input = self.propagator.create_initial_state(
+                company_name,
+                trade_date,
+                asset_type=asset_type,
+                past_context=past_context,
+                instrument_context=instrument_context,
+            )
+        else:
+            # LangGraph resumes only when no new input is submitted. Passing a
+            # fresh initial state here starts a new turn and reruns prior nodes.
+            graph_input = None
+
+        args = self.propagator.get_graph_args(callbacks=getattr(self, "callbacks", []))
 
         # Inject thread_id so same ticker+date+graph-shape resumes; a different
         # date or graph shape starts fresh (#1089).
@@ -468,11 +508,17 @@ class TradingAgentsGraph:
             tid = thread_id(company_name, str(trade_date), self._run_signature(asset_type))
             args.setdefault("config", {}).setdefault("configurable", {})["thread_id"] = tid
 
-        if self.debug:
-            trace = []
+        if self.debug or on_chunk is not None:
+            final_state = {}
             last_printed = None
-            for chunk in self.graph.stream(init_agent_state, **args):
-                if chunk["messages"]:
+            first_chunk = True
+            for chunk in self.graph.stream(graph_input, **args):
+                restored_step = (
+                    resume_step if first_chunk and resume_step is not None else None
+                )
+                if on_chunk is not None:
+                    on_chunk(chunk, restored_step)
+                elif restored_step is None and chunk.get("messages"):
                     msg = chunk["messages"][-1]
                     # Nodes after the trader don't append to messages, so the
                     # same trailing message repeats across chunks. Print it only
@@ -481,14 +527,12 @@ class TradingAgentsGraph:
                     if signature != last_printed:
                         msg.pretty_print()
                         last_printed = signature
-                    trace.append(chunk)
-            # Streamed chunks are per-node deltas. Merge them so the returned
-            # state matches what graph.invoke() yields in the non-debug path.
-            final_state = {}
-            for chunk in trace:
                 final_state.update(chunk)
+                first_chunk = False
+            if not final_state:
+                raise RuntimeError("graph stream completed without a final state")
         else:
-            final_state = self.graph.invoke(init_agent_state, **args)
+            final_state = self.graph.invoke(graph_input, **args)
 
         # Store current state for reflection.
         self.curr_state = final_state

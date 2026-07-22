@@ -50,10 +50,9 @@ analysts → bull/bear debate → research manager → trader
 </p>
 
 The framework supports interactive CLI runs and direct Python use. Analysts can
-be selected independently and LLM providers are configurable. Direct
-`TradingAgentsGraph.propagate()` runs can also feed a cross-run reflection log
-and use optional LangGraph checkpoints; the interactive CLI does not currently
-use either lifecycle feature.
+be selected independently and LLM providers are configurable. CLI and direct
+`TradingAgentsGraph.propagate()` runs share a cross-run reflection log and can
+use optional LangGraph checkpoints to resume interrupted analyses.
 
 > TradingAgentsX is a research framework. Its output is not financial,
 > investment, or trading advice. Results depend on model behavior, data quality,
@@ -303,24 +302,44 @@ source of truth for curated choices.
 
 ## Persistence and recovery
 
-Persistence and recovery currently apply only to direct Python runs through
-`TradingAgentsGraph.propagate()`. Completed `propagate()` runs append decisions
-to `~/.tradingagents/memory/trading_memory.md`. A later run for the same ticker
-can compare realized raw and benchmark-relative returns and inject a short
-reflection into the portfolio-manager context. Override the path with
-`TRADINGAGENTS_MEMORY_LOG_PATH`.
+Completed CLI and direct `TradingAgentsGraph.propagate()` runs append decisions
+to `~/.tradingagents/memory/trading_memory.md`; saving a CLI report is not
+required. A later fresh run for the same ticker can compare realized raw and
+benchmark-relative returns and inject a short reflection into the
+portfolio-manager context. Override the path with `TRADINGAGENTS_MEMORY_LOG_PATH`.
 
-For direct Python use, set `checkpoint_enabled=True` in the graph config to opt
-in to checkpoint resume. Per-ticker SQLite checkpoints then live under
+Checkpointing is disabled by default. These options apply to the root command:
+
+```bash
+tradingagents --checkpoint
+tradingagents --no-checkpoint
+tradingagents --clear-checkpoints
+```
+
+- Omitting both `--checkpoint` and `--no-checkpoint` honors
+  `TRADINGAGENTS_CHECKPOINT_ENABLED`; checkpointing remains disabled when the
+  environment variable is unset.
+- `--checkpoint` forces checkpointing on and `--no-checkpoint` forces it off.
+  Both command-line options override the environment variable.
+- `--clear-checkpoints` deletes all checkpoint databases before the
+  questionnaire begins, but does not enable checkpointing by itself. The rules
+  above still determine whether the current run uses checkpoints.
+
+When checkpointing is enabled, the CLI automatically resumes a matching saved
+run when one exists. Otherwise, it starts the analysis from the beginning and
+saves new checkpoints as nodes complete. A match requires the same canonical
+ticker, analysis date, analyst selection, debate depth, risk depth, and asset
+type; changing any of these inputs starts a new run.
+
+A matching checkpoint normally remains when a previous checkpoint-enabled run
+was interrupted before successful completion and at least one state had been
+written to SQLite. A successful run appends its decision and clears the
+corresponding checkpoint thread, so completed analyses are not resumed later.
+
+For direct Python use, set `checkpoint_enabled=True` in the graph config.
+Per-ticker SQLite checkpoints live under
 `~/.tradingagents/cache/checkpoints/`; override the base with
-`TRADINGAGENTS_CACHE_DIR`. Successful runs clear their checkpoints.
-
-The interactive CLI currently streams the compiled graph directly, so it does
-not read or append the memory log and does not create or resume checkpoints.
-Saving a CLI report does not write a memory entry. The CLI still exposes
-`--checkpoint`, `--no-checkpoint`, and `--clear-checkpoints`; only
-`--clear-checkpoints` currently has an effect, deleting existing checkpoint
-databases before the analysis starts.
+`TRADINGAGENTS_CACHE_DIR`.
 
 ## Reproducibility
 

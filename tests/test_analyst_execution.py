@@ -88,3 +88,22 @@ class AnalystWallTimeTrackerTests(unittest.TestCase):
             tracker.get_wall_times(),
             {"market": 3.0, "news": 5.0},
         )
+
+    def test_resumed_analyst_is_labeled_without_zero_duration(self):
+        plan = build_analyst_execution_plan(["market", "news"])
+        tracker = AnalystWallTimeTracker(plan)
+
+        tracker.mark_started("market", started_at=10.0)
+        tracker.mark_resumed("market")
+        sync_analyst_tracker_from_chunk(
+            tracker,
+            {"market_report": "restored", "news_report": ""},
+            now=20.0,
+        )
+        tracker.mark_completed("news", completed_at=24.5)
+
+        self.assertEqual(tracker.get_wall_times(), {"news": 4.5})
+        self.assertEqual(
+            tracker.format_summary(),
+            "Analyst wall time: Market resumed | News 4.50s",
+        )

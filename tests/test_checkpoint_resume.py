@@ -3,6 +3,7 @@
 import tempfile
 import unittest
 from typing import TypedDict
+from unittest.mock import MagicMock
 
 from langgraph.graph import END, StateGraph
 
@@ -40,6 +41,72 @@ def _build_graph() -> StateGraph:
     builder.add_edge("analyst", "trader")
     builder.add_edge("trader", END)
     return builder
+
+
+class _LifecycleState(TypedDict):
+    count: int
+    visits: list[str]
+    final_trade_decision: str
+
+
+def _make_lifecycle_graph(tmpdir, should_crash, calls):
+    from tradingagents.graph.trading_graph import TradingAgentsGraph
+
+    def analyst(state: _LifecycleState) -> dict:
+        calls["analyst"] += 1
+        return {
+            "count": state["count"] + 1,
+            "visits": [*state["visits"], "analyst"],
+        }
+
+    def trader(state: _LifecycleState) -> dict:
+        calls["trader"] += 1
+        if should_crash["value"]:
+            raise RuntimeError("simulated lifecycle crash")
+        return {
+            "count": state["count"] + 10,
+            "visits": [*state["visits"], "trader"],
+        }
+
+    workflow = StateGraph(_LifecycleState)
+    workflow.add_node("analyst", analyst)
+    workflow.add_node("trader", trader)
+    workflow.set_entry_point("analyst")
+    workflow.add_edge("analyst", "trader")
+    workflow.add_edge("trader", END)
+
+    graph = object.__new__(TradingAgentsGraph)
+    graph.config = {
+        "checkpoint_enabled": True,
+        "data_cache_dir": tmpdir,
+        "max_debate_rounds": 1,
+        "max_risk_discuss_rounds": 1,
+    }
+    graph.selected_analysts = ("market",)
+    graph.workflow = workflow
+    graph.graph = workflow.compile()
+    graph._checkpointer_ctx = None
+    graph.debug = False
+    graph.callbacks = []
+    graph.ticker = None
+    graph.curr_state = None
+    graph.memory_log = MagicMock()
+    graph.memory_log.get_past_context.return_value = "PAST CONTEXT"
+    graph.resolve_instrument_context = MagicMock(return_value="IDENTITY")
+    graph._resolve_pending_entries = MagicMock()
+    graph._log_state = MagicMock()
+    graph.process_signal = MagicMock(return_value="Hold")
+    graph.propagator = MagicMock()
+    graph.propagator.create_initial_state.return_value = {
+        "count": 0,
+        "visits": [],
+        "final_trade_decision": "Rating: Hold",
+    }
+    graph.propagator.get_graph_args.return_value = {
+        "stream_mode": "values",
+        "config": {},
+    }
+    return graph
 
 
 class TestCheckpointResume(unittest.TestCase):
@@ -212,6 +279,77 @@ class TestCheckpointSignature(unittest.TestCase):
         # Stable for identical inputs.
         g.config = {"max_debate_rounds": 1, "max_risk_discuss_rounds": 1}
         self.assertEqual(base, g._run_signature("stock"))
+
+
+class TestTradingGraphCheckpointLifecycle(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.ticker = "TEST"
+        self.date = "2026-04-20"
+        self.should_crash = {"value": True}
+        self.calls = {"analyst": 0, "trader": 0}
+        self.graph = _make_lifecycle_graph(
+            self.tmpdir,
+            self.should_crash,
+            self.calls,
+        )
+
+    def test_propagate_resumes_without_replaying_completed_nodes(self):
+        with self.assertRaisesRegex(RuntimeError, "simulated lifecycle crash"):
+            self.graph.propagate(self.ticker, self.date)
+
+        signature = self.graph._run_signature("stock")
+        self.assertTrue(
+            has_checkpoint(self.tmpdir, self.ticker, self.date, signature)
+        )
+        self.assertEqual(self.calls, {"analyst": 1, "trader": 1})
+        self.graph.memory_log.store_decision.assert_not_called()
+
+        self.should_crash["value"] = False
+        events = []
+        final_state, decision = self.graph.propagate(
+            self.ticker,
+            self.date,
+            on_chunk=lambda state, step: events.append((state, step)),
+        )
+
+        self.assertEqual(final_state["count"], 11)
+        self.assertEqual(final_state["visits"], ["analyst", "trader"])
+        self.assertEqual(decision, "Hold")
+        self.assertEqual(self.calls, {"analyst": 1, "trader": 2})
+        self.assertIsNotNone(events[0][1])
+        self.assertTrue(all(step is None for _, step in events[1:]))
+        self.graph._resolve_pending_entries.assert_called_once_with(self.ticker)
+        self.graph.resolve_instrument_context.assert_called_once_with(
+            self.ticker, "stock", self.date
+        )
+        self.graph.memory_log.store_decision.assert_called_once()
+        self.assertFalse(
+            has_checkpoint(self.tmpdir, self.ticker, self.date, signature)
+        )
+        self.assertIsNone(self.graph._checkpointer_ctx)
+
+    def test_chunk_callback_failure_keeps_checkpoint_and_skips_memory(self):
+        self.should_crash["value"] = False
+
+        def fail_after_analyst(state, _step):
+            if state["count"] == 1:
+                raise RuntimeError("display failed")
+
+        with self.assertRaisesRegex(RuntimeError, "display failed"):
+            self.graph.propagate(
+                self.ticker,
+                self.date,
+                on_chunk=fail_after_analyst,
+            )
+
+        signature = self.graph._run_signature("stock")
+        self.assertTrue(
+            has_checkpoint(self.tmpdir, self.ticker, self.date, signature)
+        )
+        self.graph.memory_log.store_decision.assert_not_called()
+        self.graph._log_state.assert_not_called()
+        self.assertIsNone(self.graph._checkpointer_ctx)
 
 
 if __name__ == "__main__":

@@ -179,27 +179,6 @@ def test_graph_startup_forwards_trade_date_to_context_resolver():
         "NVDA", "stock", "2020-01-02"
     )
 
-
-@pytest.mark.unit
-def test_cli_context_resolver_forwards_selected_analysis_date():
-    from cli.main import _resolve_cli_instrument_context
-
-    graph = MagicMock()
-    graph.resolve_instrument_context.return_value = "IDENTITY CONTEXT"
-    selections = {
-        "ticker": "NVDA",
-        "asset_type": "stock",
-        "analysis_date": "2020-01-02",
-    }
-
-    context = _resolve_cli_instrument_context(graph, selections)
-
-    assert context == "IDENTITY CONTEXT"
-    graph.resolve_instrument_context.assert_called_once_with(
-        "NVDA", "stock", "2020-01-02"
-    )
-
-
 @pytest.mark.unit
 class GetInstrumentContextFromStateTests(unittest.TestCase):
     def test_prefers_precomputed_context(self):
