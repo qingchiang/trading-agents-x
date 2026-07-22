@@ -10,6 +10,16 @@ from datetime import datetime
 from pathlib import Path
 
 
+def _format_report_part(name: str, text: str) -> str:
+    """Render one role-owned report block with a visible boundary."""
+    return f"---\n\n### {name}\n\n{text}"
+
+
+def _format_report_section(title: str, content: str) -> str:
+    """Render one report-team section with a visible boundary."""
+    return f"---\n\n## {title}\n\n{content}"
+
+
 def write_report_tree(final_state: dict, ticker: str, save_path) -> Path:
     """Save a completed run's reports to ``save_path``; return the complete-report path."""
     save_path = Path(save_path)
@@ -36,8 +46,8 @@ def write_report_tree(final_state: dict, ticker: str, save_path) -> Path:
         (analysts_dir / "fundamentals.md").write_text(final_state["fundamentals_report"], encoding="utf-8")
         analyst_parts.append(("Fundamentals Analyst", final_state["fundamentals_report"]))
     if analyst_parts:
-        content = "\n\n".join(f"### {name}\n{text}" for name, text in analyst_parts)
-        sections.append(f"## I. Analyst Team Reports\n\n{content}")
+        content = "\n\n".join(_format_report_part(name, text) for name, text in analyst_parts)
+        sections.append(_format_report_section("I. Analyst Team Reports", content))
 
     # 2. Research
     if final_state.get("investment_debate_state"):
@@ -57,15 +67,16 @@ def write_report_tree(final_state: dict, ticker: str, save_path) -> Path:
             (research_dir / "manager.md").write_text(debate["judge_decision"], encoding="utf-8")
             research_parts.append(("Research Manager", debate["judge_decision"]))
         if research_parts:
-            content = "\n\n".join(f"### {name}\n{text}" for name, text in research_parts)
-            sections.append(f"## II. Research Team Decision\n\n{content}")
+            content = "\n\n".join(_format_report_part(name, text) for name, text in research_parts)
+            sections.append(_format_report_section("II. Research Team Decision", content))
 
     # 3. Trading
     if final_state.get("trader_investment_plan"):
         trading_dir = save_path / "3_trading"
         trading_dir.mkdir(exist_ok=True)
         (trading_dir / "trader.md").write_text(final_state["trader_investment_plan"], encoding="utf-8")
-        sections.append(f"## III. Trading Team Plan\n\n### Trader\n{final_state['trader_investment_plan']}")
+        content = _format_report_part("Trader", final_state["trader_investment_plan"])
+        sections.append(_format_report_section("III. Trading Team Plan", content))
 
     # 4. Risk Management
     if final_state.get("risk_debate_state"):
@@ -85,15 +96,16 @@ def write_report_tree(final_state: dict, ticker: str, save_path) -> Path:
             (risk_dir / "neutral.md").write_text(risk["neutral_history"], encoding="utf-8")
             risk_parts.append(("Neutral Analyst", risk["neutral_history"]))
         if risk_parts:
-            content = "\n\n".join(f"### {name}\n{text}" for name, text in risk_parts)
-            sections.append(f"## IV. Risk Management Team Decision\n\n{content}")
+            content = "\n\n".join(_format_report_part(name, text) for name, text in risk_parts)
+            sections.append(_format_report_section("IV. Risk Management Team Decision", content))
 
         # 5. Portfolio Manager
         if risk.get("judge_decision"):
             portfolio_dir = save_path / "5_portfolio"
             portfolio_dir.mkdir(exist_ok=True)
             (portfolio_dir / "decision.md").write_text(risk["judge_decision"], encoding="utf-8")
-            sections.append(f"## V. Portfolio Manager Decision\n\n### Portfolio Manager\n{risk['judge_decision']}")
+            content = _format_report_part("Portfolio Manager", risk["judge_decision"])
+            sections.append(_format_report_section("V. Portfolio Manager Decision", content))
 
     # Write consolidated report
     header = f"# Trading Analysis Report: {ticker}\n\nGenerated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"

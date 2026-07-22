@@ -19,6 +19,27 @@ def _state():
     }
 
 
+def _complete_state():
+    return {
+        "market_report": "MKT",
+        "sentiment_report": "SENTIMENT",
+        "news_report": "NEWS",
+        "fundamentals_report": "FUNDAMENTALS",
+        "investment_debate_state": {
+            "bull_history": "BULL",
+            "bear_history": "BEAR",
+            "judge_decision": "RM PLAN",
+        },
+        "trader_investment_plan": "TRADE",
+        "risk_debate_state": {
+            "aggressive_history": "AGGRESSIVE",
+            "conservative_history": "CONSERVATIVE",
+            "neutral_history": "NEUTRAL",
+            "judge_decision": "PM DECISION",
+        },
+    }
+
+
 @pytest.mark.unit
 def test_write_report_tree_creates_files(tmp_path):
     out = write_report_tree(_state(), "AAPL", tmp_path)
@@ -31,6 +52,38 @@ def test_write_report_tree_creates_files(tmp_path):
     complete = out.read_text()
     assert "Trading Analysis Report: AAPL" in complete
     assert "MKT" in complete and "PM DECISION" in complete
+
+
+@pytest.mark.unit
+def test_complete_report_separates_every_section_and_role(tmp_path):
+    complete = write_report_tree(_complete_state(), "AAPL", tmp_path).read_text()
+
+    section_titles = (
+        "I. Analyst Team Reports",
+        "II. Research Team Decision",
+        "III. Trading Team Plan",
+        "IV. Risk Management Team Decision",
+        "V. Portfolio Manager Decision",
+    )
+    role_titles = (
+        "Market Analyst",
+        "Sentiment Analyst",
+        "News Analyst",
+        "Fundamentals Analyst",
+        "Bull Researcher",
+        "Bear Researcher",
+        "Research Manager",
+        "Trader",
+        "Aggressive Analyst",
+        "Conservative Analyst",
+        "Neutral Analyst",
+        "Portfolio Manager",
+    )
+
+    for title in section_titles:
+        assert f"---\n\n## {title}\n\n" in complete
+    for title in role_titles:
+        assert f"---\n\n### {title}\n\n" in complete
 
 
 @pytest.mark.unit
