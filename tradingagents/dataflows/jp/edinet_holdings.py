@@ -139,7 +139,11 @@ def get_large_holdings(ticker: str, curr_date: str, look_back_days: int = _LOOK_
             f"between {scanned_start} and {curr_date}"
         )
 
-    items = render_filings(matches, _format_filing, get_config()["news_article_limit"])
+    items = render_filings(
+        matches,
+        _format_filing,
+        get_config()["sentiment_filing_limit"],
+    )
     return (
         f"EDINET ownership & control filings about {ticker}, {scanned_start} to {curr_date} "
         "(大量保有 5%+ stakes and 公開買付 takeover bids; type/filer/date below, "

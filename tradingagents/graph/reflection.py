@@ -1,4 +1,4 @@
-# TradingAgents/graph/reflection.py
+# tradingagents/graph/reflection.py
 
 from typing import Any
 

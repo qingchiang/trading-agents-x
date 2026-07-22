@@ -1,4 +1,4 @@
-"""Shared primitives for the macro vendors (fred / estat / boj).
+"""Shared primitives for the macro vendors (fred / estat / boj / jp / cn).
 
 These vendors deliberately share a return shape and rendering, so the cross-region
 panel and the get_macro_indicators microscope tool treat every source uniformly.
@@ -7,6 +7,7 @@ including the :class:`SeriesCache` they memoize fetches in. It imports the confi
 accessor and the clock (for the cache's cross-run disk layer) but no vendor, so
 the vendors can still import from it freely.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -42,6 +43,7 @@ _UNSAFE_FILENAME_CHARS = re.compile(r"[^0-9A-Za-z._-]")
 # being trusted forever, while still saving the vast majority of a backtest's
 # cross-run re-fetches.
 _DISK_TTL_SECONDS = 30 * 24 * 60 * 60  # 30 days
+_RECENT_DISK_TTL_SECONDS = 60 * 60  # 60 minutes
 
 # Cap the persisted files per namespace — the disk analogue of ``max_entries`` — so
 # a multi-date backtest (one file per series/date/window) can't grow the cache dir
@@ -56,12 +58,9 @@ _PRUNE_EVERY = 512
 # generous so an in-flight write on a slow filesystem is never deleted mid-flight.
 _TMP_ORPHAN_SECONDS = 3600  # 1 hour
 
-# Only persist a date once it is at least this many days behind today. "Before
-# today" alone isn't enough: a source can lag the host clock (timezone skew +
-# next-business-day publication), so yesterday's window may still be missing its
-# latest observation — caching that incomplete snapshot would pin it for the whole
-# TTL. A few days' grace lets the source finish publishing before we persist; recent
-# dates just stay memory-only (re-fetched per run) until they clear it.
+# Only treat a date as settled once it is at least this many days behind today.
+# Recent dates use the separate one-hour cache because a source can still be
+# publishing; after the grace window, the 30-day settled path becomes eligible.
 _SETTLE_GRACE_DAYS = 3
 
 
@@ -77,6 +76,12 @@ def _restore_series(value):
     return value
 
 
+class _CacheEntry(NamedTuple):
+    value: object
+    stored_at: float
+    settled: bool
+
+
 class SeriesCache:
     """A bounded process-level LRU for fetched macro series, optionally disk-backed.
 
@@ -88,14 +93,14 @@ class SeriesCache:
     cannot grow it without limit; the default holds ~tens of dates' worth of the
     panel's dozen-odd series, and an evicted entry is simply re-fetched.
 
-    When built with a ``namespace`` (fred/estat/boj), *settled* entries are also
+    When built with a ``namespace`` (fred/estat/boj/jp/cn), entries are also
     persisted under ``<data_cache_dir>/macro/<namespace>/`` so a later run — a
     multi-date backtest re-reading the same past dates is the motivating case —
     reads them from disk instead of re-hitting the rate-limited API. "Settled"
     means the key's ``curr_date`` is at least ``_SETTLE_GRACE_DAYS`` behind today
     (not merely before it): a source lagging the host clock may still be publishing
-    a very recent date, so today and the last few days stay in memory only (a
-    grace-widened form of the rule the EDINET document cache uses). A cached value is
+    a very recent date. Those moving windows use a separate 60-minute disk entry;
+    once settled, only the long-lived path is considered. A cached value is
     inherently as-of ``curr_date`` (its points never exceed it), so serving it in a
     later run cannot leak future data. A past window is fixed but its *values* can
     still be revised upstream (GDP/payroll/CPI revisions), so a persisted entry is
@@ -113,26 +118,49 @@ class SeriesCache:
     serialization error degrades to a normal fetch.
     """
 
-    def __init__(self, max_entries: int = 512, *, namespace: str | None = None):
+    def __init__(
+        self,
+        max_entries: int = 512,
+        *,
+        namespace: str | None = None,
+        recent_ttl_seconds: int | None = _RECENT_DISK_TTL_SECONDS,
+    ):
         # ``max_entries`` stays the first positional arg (its historical contract);
         # ``namespace`` is keyword-only so ``SeriesCache(256)`` can't be misread as a
         # namespace and silently disable the bound.
         self._data: OrderedDict = OrderedDict()
         self._max = max_entries
         self._namespace = namespace
-        # Cross-run bound: prune once on this process's first settled write (the
+        self._recent_ttl_seconds = recent_ttl_seconds
+        # Cross-run bound: prune once on this process's first disk write (the
         # counter resets per process, so a short run would never hit the throttle).
         self._pruned = False
         self._writes_since_prune = 0
 
     def get(self, key):
         if key in self._data:
-            self._data.move_to_end(key)  # mark most-recently-used
-            return self._data[key]
-        value = self._disk_get(key)
-        if value is not None:
-            self._remember(key, value)  # promote a disk hit into the in-memory LRU
-        return value
+            entry = self._data[key]
+            settled = self._is_settled(key)
+            ttl = _DISK_TTL_SECONDS if settled else self._recent_ttl_seconds
+            expired = (
+                self._namespace is not None
+                and ttl is not None
+                and time.time() - entry.stored_at > ttl
+            )
+            if entry.settled == settled and not expired:
+                self._data.move_to_end(key)  # mark most-recently-used
+                return entry.value
+            del self._data[key]
+        entry = self._disk_get(key)
+        if entry is not None:
+            self._remember(
+                key,
+                entry.value,
+                stored_at=entry.stored_at,
+                settled=entry.settled,
+            )
+            return entry.value
+        return None
 
     def put(self, key, value) -> None:
         self._remember(key, value)
@@ -147,9 +175,20 @@ class SeriesCache:
 
     # -- internals ---------------------------------------------------------
 
-    def _remember(self, key, value) -> None:
+    def _remember(
+        self,
+        key,
+        value,
+        *,
+        stored_at: float | None = None,
+        settled: bool | None = None,
+    ) -> None:
         """Insert into the in-memory LRU, evicting the oldest past the bound."""
-        self._data[key] = value
+        self._data[key] = _CacheEntry(
+            value,
+            time.time() if stored_at is None else stored_at,
+            self._is_settled(key) if settled is None else settled,
+        )
         self._data.move_to_end(key)
         while len(self._data) > self._max:
             self._data.popitem(last=False)  # evict least-recently-used
@@ -170,6 +209,13 @@ class SeriesCache:
         digest = hashlib.sha1(repr(key).encode("utf-8")).hexdigest()[:16]
         return os.path.join(disk_dir, f"{prefix}__{digest}.json")
 
+    def _recent_disk_file(self, key) -> str | None:
+        """Return the short-lived cache path, kept distinct from settled data."""
+        path = self._disk_file(key)
+        if path is None:
+            return None
+        return path.removesuffix(".json") + ".recent.json"
+
     def _is_settled(self, key) -> bool:
         """True when the key's ``curr_date`` (key[1]) is settled enough to persist.
 
@@ -187,26 +233,34 @@ class SeriesCache:
             today = datetime.strptime(get_current_date(), "%Y-%m-%d").date()
         except ValueError:
             return False
-        return key_date < today - timedelta(days=_SETTLE_GRACE_DAYS)
+        return key_date <= today - timedelta(days=_SETTLE_GRACE_DAYS)
 
     def _disk_get(self, key):
-        path = self._disk_file(key)
+        settled = self._is_settled(key)
+        path = self._disk_file(key) if settled else self._recent_disk_file(key)
         if path is None:
             return None
+        ttl = _DISK_TTL_SECONDS if settled else self._recent_ttl_seconds
+        if ttl is None:
+            return None
         try:
-            if time.time() - os.path.getmtime(path) > _DISK_TTL_SECONDS:
+            stored_at = os.path.getmtime(path)
+            if time.time() - stored_at > ttl:
                 # Stale: re-fetch so upstream revisions can land, and delete the
                 # unusable file rather than leave it to accumulate.
                 self._remove(path)
                 return None
             with open(path, encoding="utf-8") as fh:
-                return _restore_series(json.load(fh))
+                return _CacheEntry(_restore_series(json.load(fh)), stored_at, settled)
         except (OSError, ValueError):
             return None
 
     def _disk_put(self, key, value) -> None:
-        path = self._disk_file(key)
-        if path is None or not self._is_settled(key):
+        settled = self._is_settled(key)
+        if not settled and self._recent_ttl_seconds is None:
+            return
+        path = self._disk_file(key) if settled else self._recent_disk_file(key)
+        if path is None:
             return
         disk_dir = os.path.dirname(path)
         try:
@@ -225,8 +279,14 @@ class SeriesCache:
         except (OSError, TypeError, ValueError):
             logger.debug("macro disk cache write skipped for %s", self._namespace)
             return
+        if settled:
+            # A key that crossed the grace boundary must never keep serving the
+            # short-lived snapshot under long-term cache semantics.
+            recent_path = self._recent_disk_file(key)
+            if recent_path is not None:
+                self._remove(recent_path)
         self._writes_since_prune += 1
-        # Prune on the first settled write of the process (bounds accumulation
+        # Prune on the first disk write of the process (bounds accumulation
         # across short runs) and every _PRUNE_EVERY writes after (bounds a long one).
         if not self._pruned or self._writes_since_prune >= _PRUNE_EVERY:
             self._prune(disk_dir)
@@ -278,12 +338,53 @@ class PointsSummary(NamedTuple):
     numeric; ``pct`` is also ``None`` when the base is zero. ``pct`` is the
     meaningful figure for index series (CPI), where an absolute delta is opaque.
     """
+
     last_val: str
     last_date: str
     first_val: str
     first_date: str
     delta: float | None
     pct: float | None
+
+
+class YearOverYearSummary(NamedTuple):
+    """Latest reading and its exact same-period prior-year comparison."""
+
+    last_val: str
+    last_date: str
+    prior_val: str
+    prior_date: str
+    pct: float
+
+
+def exact_year_over_year(points: list) -> YearOverYearSummary | None:
+    """Calculate YoY only when the exact prior-year calendar point exists.
+
+    February 29 compares with February 28 in the prior non-leap year, the normal
+    calendar-year counterpart. No nearest-neighbour lookup or interpolation is
+    performed, so sparse/revised series cannot silently produce an approximation.
+    """
+    if not points:
+        return None
+    values = {str(point_date): value for point_date, value in points}
+    last_date, last_val = points[-1]
+    try:
+        parsed = datetime.strptime(str(last_date), "%Y-%m-%d").date()
+        try:
+            prior = parsed.replace(year=parsed.year - 1)
+        except ValueError:  # February 29 in a leap year
+            prior = parsed.replace(year=parsed.year - 1, day=28)
+        prior_date = prior.isoformat()
+        prior_val = values[prior_date]
+        current = float(last_val)
+        base = float(prior_val)
+    except (KeyError, TypeError, ValueError):
+        return None
+    if base == 0:
+        return None
+    return YearOverYearSummary(
+        str(last_val), str(last_date), str(prior_val), prior_date, (current - base) / base * 100
+    )
 
 
 def summarize_points(points: list) -> PointsSummary | None:
@@ -350,8 +451,6 @@ def render_macro_report(source_label: str, data: dict, curr_date: str) -> str:
         note = f"\n_(showing the most recent {MAX_ROWS} of {len(points)} observations)_\n"
 
     table = (
-        "\n| Date | Value |\n| --- | --- |\n"
-        + "\n".join(f"| {d} | {v} |" for d, v in shown)
-        + "\n"
+        "\n| Date | Value |\n| --- | --- |\n" + "\n".join(f"| {d} | {v} |" for d, v in shown) + "\n"
     )
     return header + summary + note + table

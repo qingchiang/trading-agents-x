@@ -89,6 +89,27 @@ class VendorRoutingTests(unittest.TestCase):
             interface.route_to_vendor("get_stock_data", "AAPL", "2026-01-01", "2026-01-10")
         self.assertIn("bogus_vendor", str(ctx.exception))
 
+    def test_unknown_vendor_is_not_ignored_when_chain_has_valid_fallback(self):
+        set_config({"data_vendors": {"core_stock_apis": "bogus_vendor,yfinance"}})
+        with self.assertRaisesRegex(ValueError, "bogus_vendor"):
+            interface.route_to_vendor(
+                "get_stock_data", "AAPL", "2026-01-01", "2026-01-10"
+            )
+
+    def test_duplicate_vendor_chain_raises(self):
+        set_config({"data_vendors": {"core_stock_apis": "yfinance,yfinance"}})
+        with self.assertRaisesRegex(ValueError, "duplicate vendor"):
+            interface.route_to_vendor(
+                "get_stock_data", "AAPL", "2026-01-01", "2026-01-10"
+            )
+
+    def test_default_sentinel_cannot_be_mixed_with_explicit_vendor(self):
+        set_config({"data_vendors": {"core_stock_apis": "default,yfinance"}})
+        with self.assertRaisesRegex(ValueError, "must be used by itself"):
+            interface.route_to_vendor(
+                "get_stock_data", "AAPL", "2026-01-01", "2026-01-10"
+            )
+
     def test_default_sentinel_uses_all_vendors(self):
         # No explicit choice ("default") keeps the resilient full-chain behavior.
         set_config({"data_vendors": {"core_stock_apis": "default"}})

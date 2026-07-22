@@ -87,6 +87,21 @@ class HoldingsTests(unittest.TestCase):
         self.assertIn("5%+ position", out)
         self.assertIn("change report", out)
 
+    def test_filing_limit_is_independent_from_ticker_news_limit(self):
+        set_config({"news_article_limit": 30, "sentiment_filing_limit": 1})
+        mapping = {"2026-06-22": [
+            _holding(filer="OLDER", doc_id="OLD", when="2026-06-22 15:00"),
+            _holding(filer="NEWER", doc_id="NEW", when="2026-06-22 16:00"),
+        ]}
+
+        with self._patch(mapping):
+            out = edinet_holdings.get_large_holdings(
+                "9984.T", "2026-06-22", look_back_days=0
+            )
+
+        self.assertIn("NEWER", out)
+        self.assertNotIn("OLDER", out)
+
     def test_unknown_code_skips_without_scanning(self):
         fd = mock.Mock(side_effect=_by_date({}))
         with mock.patch.object(edinet_common, "fetch_documents", fd):

@@ -7,12 +7,15 @@ surfaces the reason.
 """
 import copy
 import unittest
+from datetime import datetime
 from unittest import mock
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import pytest
 
 import tradingagents.dataflows.config as config_module
+import tradingagents.dataflows.stockstats_utils as stockstats_utils
 import tradingagents.dataflows.y_finance as y_finance
 import tradingagents.default_config as default_config
 from tradingagents.dataflows import interface
@@ -57,6 +60,66 @@ class StaleGuardUnitTests(unittest.TestCase):
     def test_long_holiday_gap_within_threshold_is_accepted(self):
         _assert_ohlcv_not_stale(_frame("2026-06-02"), "2026-06-11", "X")  # 9 days
 
+    def test_historical_mainland_request_has_no_live_cache_phase(self):
+        phase = stockstats_utils._mainland_live_cache_phase(
+            "2026-06-10",
+            "600519.SS",
+            "600519.SS",
+            now=datetime(2026, 6, 11, 16, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+        )
+        self.assertIsNone(phase)
+
+
+@pytest.mark.unit
+def test_mainland_yfinance_cache_refreshes_when_completed_session_changes(
+    monkeypatch, tmp_path
+):
+    """A pre-close raw candle must not become the post-close verified candle."""
+    state = {"completed": "2026-06-10", "downloads": 0}
+
+    def fake_download(*args, **kwargs):
+        state["downloads"] += 1
+        current_close = 111.0 if state["downloads"] == 1 else 120.0
+        return pd.DataFrame(
+            {
+                "Open": [100.0, current_close - 1],
+                "High": [102.0, current_close + 1],
+                "Low": [99.0, current_close - 2],
+                "Close": [101.0, current_close],
+                "Volume": [1_000_000, 2_000_000],
+            },
+            index=pd.DatetimeIndex(
+                [pd.Timestamp("2026-06-10"), pd.Timestamp("2026-06-11")],
+                name="Date",
+            ),
+        )
+
+    monkeypatch.setattr(
+        stockstats_utils,
+        "get_config",
+        lambda: {"data_cache_dir": str(tmp_path)},
+    )
+    monkeypatch.setattr(stockstats_utils.yf, "download", fake_download)
+    monkeypatch.setattr(
+        stockstats_utils,
+        "_mainland_live_cache_phase",
+        lambda *_args, **_kwargs: state["completed"],
+    )
+    monkeypatch.setattr(
+        stockstats_utils,
+        "_mainland_effective_ohlcv_date",
+        lambda *_args, **_kwargs: pd.Timestamp(state["completed"]),
+    )
+
+    before_close = stockstats_utils.load_ohlcv("600519.SS", "2026-06-11")
+    assert before_close["Date"].max() == pd.Timestamp("2026-06-10")
+
+    state["completed"] = "2026-06-11"
+    after_close = stockstats_utils.load_ohlcv("600519.SS", "2026-06-11")
+
+    assert state["downloads"] == 2
+    assert after_close.iloc[-1]["Close"] == 120.0
+
 
 @pytest.mark.unit
 class StaleGuardPropagationTests(unittest.TestCase):
@@ -73,7 +136,8 @@ class StaleGuardPropagationTests(unittest.TestCase):
             def __init__(self, symbol):
                 pass
 
-            def history(self, start, end):
+            def history(self, start, end, auto_adjust):
+                assert auto_adjust is True
                 return stale
 
         with mock.patch.object(y_finance.yf, "Ticker", DummyTicker), \

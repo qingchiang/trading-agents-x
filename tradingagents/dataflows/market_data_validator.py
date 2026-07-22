@@ -75,6 +75,7 @@ def build_verified_market_snapshot(
         look_back_days,
         indicators,
         source="yfinance",
+        adjustment="auto-adjusted prices (yfinance auto_adjust=True)",
     )
 
 
@@ -86,6 +87,8 @@ def render_verified_market_snapshot(
     indicators: Iterable[str] | None = None,
     *,
     source: str,
+    adjustment: str | None = None,
+    provenance_timing: str | None = None,
 ) -> str:
     """Render a deterministic snapshot from a vendor-supplied OHLCV frame."""
     # `df` keeps the original capitalized OHLCV columns (Open/High/Low/Close/
@@ -116,6 +119,7 @@ def render_verified_market_snapshot(
         f"## Verified market data snapshot for {symbol.upper()}",
         "",
         f"- Data source: {source}",
+        *([f"- Price adjustment: {adjustment}"] if adjustment else []),
         f"- Requested analysis date: {curr_date}",
         f"- Latest trading row used: {latest_date}",
         "- Rows after the requested analysis date are excluded before verification.",
@@ -154,6 +158,9 @@ def render_verified_market_snapshot(
             source=source,
             requested=curr_date,
             effective=latest_date,
-            timing="market-date filtered; rows after cutoff excluded",
+            timing=(
+                provenance_timing
+                or "market-date filtered; rows after cutoff excluded"
+            ),
         ),
     )

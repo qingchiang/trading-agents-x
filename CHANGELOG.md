@@ -1,17 +1,44 @@
 # Changelog
 
-All notable changes to TradingAgents are documented here.
+All notable changes to TradingAgentsX are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and upstream releases follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-Fork releases append a PEP 440 local version (`+jp.N`) to the upstream version
-they are based on. Entries without `+jp.N` below are retained from upstream;
-breaking changes within the 0.x line are called out explicitly.
+and upstream releases follow
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versioned entries
+through `0.3.1` are retained from upstream.
+
+No fork-specific release has been published from this development line yet.
+Although package metadata currently uses `0.3.1+jp.1` as a PEP 440 local
+version identifier during development, no corresponding tag or release exists;
+the work remains under `Unreleased` until a release is explicitly created.
 
 ## [Unreleased]
 
+This section contains the fork work developed on top of upstream `0.3.1`,
+including the Japanese and China market branches.
+
 ### Added
 
+- **Market-aware data routing.** Canonical symbol normalization and configurable
+  suffix routes select dedicated `.T`, `.SS`, and `.SZ` vendor chains without
+  changing agent-facing tools or the default behavior of other markets.
+- **Japanese-market dataflow.** J-Quants v2 prices, summaries, ratios, TOPIX
+  beta, and positioning data are combined with EDINET filings, TDnet timely
+  disclosures, Japanese Google News, and live-only ratings. Historical paths
+  enforce disclosure and publication boundaries.
+- **China A-share dataflow.** Shanghai and Shenzhen individual equities support
+  bare-code normalization, Tencent/Eastmoney qfq prices, technical indicators,
+  CNINFO/Sina fundamentals and statements, Chinese company news, and
+  market-specific sentiment evidence. Beijing, Hong Kong, funds, ETFs, options,
+  and intraday China data remain out of scope.
+- **Cross-region macro panel.** US, Japan, and China rates, inflation, activity,
+  and FX series share owner-based dispatch, per-cell failure isolation,
+  effective-date metadata, and bounded cross-run caches.
+- **Structured source provenance.** Analyst evidence retains requested and
+  effective dates, actual sources, and timing metadata. Material fallback,
+  stale data, missing/partial coverage, truncation, and non-PIT/non-vintage
+  limitations render as `Data Quality Warnings`; the detailed appendix is
+  optional.
 - **Independent quick/deep reasoning effort.** New
   `quick_reasoning_effort` / `deep_reasoning_effort` config keys and matching
   `TRADINGAGENTS_*` environment variables resolve through a centralized model
@@ -24,33 +51,41 @@ breaking changes within the 0.x line are called out explicitly.
 - **Explicit live-test gate.** Tests disable dotenv loading and replace real API
   keys with placeholders by default. DeepSeek wire-level tests additionally
   require `RUN_LIVE_LLM_TESTS=1` and an explicitly exported key.
-
-## [0.3.1+jp.1] — 2026-07-15
-
-First fork release based on upstream 0.3.1, adding first-class Japanese-market
-data while preserving the upstream behavior for markets without a suffix route.
-
-### Added
-
-- **Market-aware data routing.** Exchange-suffix configuration routes `.T`
-  instruments through Japanese vendors with ordered yfinance fallback, without
-  hard-coding Tokyo behavior into the shared dataflow interfaces.
-- **Japanese prices and fundamentals.** J-Quants v2 supplies official TSE
-  prices, indicators, financial summaries, investor flows, and date-safe
-  valuation ratios; TOPIX-based beta and curated statement details enrich the
-  fundamentals view without using future information.
-- **Japanese news and positioning.** EDINET filings, TDnet timely disclosures,
-  Japanese Google News, margin balances, short positions, large-shareholding
-  reports, and tender-offer filings provide per-company news and sentiment
-  signals for Tokyo-listed securities.
-- **Cross-region macro context.** FRED, e-Stat, and BOJ series feed a
-  look-ahead-safe macro panel with owner-based dispatch and reusable disk caches.
+- **Cross-market live-data contracts.** An opt-in serial suite checks US, Japan,
+  and China schemas, completed-date cutoffs, source attribution, broad value
+  ranges, and fallback auditability without pinning exact live values.
 
 ### Changed
 
-- **Fork identity and documentation.** Rebranded the package as
-  `trading-agents-x`, documented the Japanese-market architecture and upstream
-  attribution, and adopted the `0.3.1+jp.1` fork-version convention.
+- **Fork identity and documentation.** Branded the project as TradingAgentsX
+  with the `trading-agents-x` distribution name, retained upstream attribution,
+  and moved durable multi-market contracts into tool-neutral architecture
+  documentation.
+- **Ticker-news budgets and reuse.** Japanese and China assemblers enforce one
+  shared article cap after cross-source deduplication. China low-frequency
+  candidates are cached by exact ticker and analysis cutoff so News and
+  Sentiment can reuse them without crossing historical boundaries.
+- **Source selection and freshness.** Tencent is the primary China qfq price
+  source, with Eastmoney cold fallback. Japan 10-year yield uses official daily
+  Ministry of Finance CSVs before a monthly FRED fallback. Recent China
+  CPI/GDP/PMI prefer eligible NBS releases; USD/CNY parity prefers SAFE.
+- **Runtime dependencies.** AkShare is installed by default for the China
+  adapters; `uv.lock` records the resolved development environment.
+
+### Fixed
+
+- **Point-in-time boundaries.** Graph tools inject the immutable analysis date;
+  historical identity, news, statements, positioning signals, and macro series
+  no longer silently mix in current-only data.
+- **Fallback auditability.** Router- and assembler-level fallbacks retain the
+  actual selected source and a standardized reason, including when a successful
+  result already carries internal provenance.
+- **Market-data consistency.** China price fallbacks replace the complete
+  adjusted window, stale OHLCV is rejected, non-trading end dates resolve to the
+  latest completed session, and indicators reuse the verified price basis.
+- **Cache freshness.** Recent macro observations use a short-lived cache before
+  transitioning to settled history, failed/empty results are not cached, and
+  live yfinance history is isolated by completed market session.
 
 ## [0.3.1] — 2026-07-05
 
@@ -479,6 +514,10 @@ PRs from late 2025 also landed here.
   portfolio manager. LangGraph orchestration, yfinance data, per-agent
   BM25 memory, single-provider OpenAI integration, interactive CLI.
 
+[Unreleased]: https://github.com/qingchiang/trading-agents-x/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/TauricResearch/TradingAgents/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/TauricResearch/TradingAgents/compare/v0.2.5...v0.3.0
+[0.2.5]: https://github.com/TauricResearch/TradingAgents/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/TauricResearch/TradingAgents/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/TauricResearch/TradingAgents/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/TauricResearch/TradingAgents/compare/v0.2.1...v0.2.2

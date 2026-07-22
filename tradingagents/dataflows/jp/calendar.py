@@ -16,7 +16,7 @@ place a publication date safely for the look-ahead guards.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 import jpholiday
@@ -45,6 +45,35 @@ def is_tse_open(d: date) -> bool:
     return not jpholiday.is_holiday(d)
 
 
+def is_government_business_day(d: date) -> bool:
+    """Return whether Japanese national-government offices are open on ``d``.
+
+    The MOF publication calendar differs slightly from JPX around year-end:
+    national-government offices close from December 29 through January 3,
+    while the exchange can still trade on December 29 or 30.  JP10Y visibility
+    therefore uses this calendar rather than :func:`is_tse_open`.
+    """
+    if d.weekday() >= 5:
+        return False
+    if d.month == 12 and d.day >= 29:
+        return False
+    if d.month == 1 and d.day <= 3:
+        return False
+    return not jpholiday.is_holiday(d)
+
+
+def add_government_business_days(d: date, n: int) -> date:
+    """Return the date ``n`` Japanese government business days after ``d``."""
+    if n < 0:
+        raise ValueError("n must be non-negative")
+    result = d
+    while n > 0:
+        result += timedelta(days=1)
+        if is_government_business_day(result):
+            n -= 1
+    return result
+
+
 def add_business_days(d: date, n: int) -> date:
     """Return the date ``n`` TSE trading days after ``d`` (``n`` >= 0)."""
     result = d
@@ -52,4 +81,18 @@ def add_business_days(d: date, n: int) -> date:
         result += timedelta(days=1)
         if is_tse_open(result):
             n -= 1
+    return result
+
+
+def completed_market_date(d: date, now: datetime | None = None) -> date:
+    """Return the latest completed TSE date, using 17:00 Tokyo as daily cutoff."""
+    current = now or datetime.now(_TOKYO)
+    current = (
+        current.replace(tzinfo=_TOKYO) if current.tzinfo is None else current.astimezone(_TOKYO)
+    )
+    result = d
+    if result == current.date() and current.time() < time(17):
+        result -= timedelta(days=1)
+    while not is_tse_open(result):
+        result -= timedelta(days=1)
     return result

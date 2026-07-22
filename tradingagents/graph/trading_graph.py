@@ -1,4 +1,4 @@
-# TradingAgents/graph/trading_graph.py
+# tradingagents/graph/trading_graph.py
 
 import json
 import logging
@@ -42,7 +42,8 @@ from tradingagents.agents.utils.technical_indicators_tools import (
     get_indicators_for_analysis,
 )
 from tradingagents.dataflows.config import set_config
-from tradingagents.dataflows.symbol_utils import match_exchange_suffix
+from tradingagents.dataflows.interface import validate_market_routing
+from tradingagents.dataflows.symbol_utils import match_exchange_suffix, normalize_symbol
 from tradingagents.dataflows.utils import safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.llm_clients import create_llm_client
@@ -104,6 +105,7 @@ class TradingAgentsGraph:
 
         # Update the interface's config
         set_config(self.config)
+        validate_market_routing()
 
         # Create necessary directories
         os.makedirs(self.config["data_cache_dir"], exist_ok=True)
@@ -261,6 +263,7 @@ class TradingAgentsGraph:
         explicit = self.config.get("benchmark_ticker")
         if explicit:
             return explicit
+        ticker = normalize_symbol(ticker)
         benchmark_map = self.config.get("benchmark_map", {})
         suffix = match_exchange_suffix(ticker, benchmark_map)
         if suffix:
@@ -392,6 +395,7 @@ class TradingAgentsGraph:
         a per-ticker SqliteSaver so a crashed run can resume from the last
         successful node on a subsequent invocation with the same ticker+date.
         """
+        company_name = normalize_symbol(company_name)
         self.ticker = company_name
 
         # Resolve any pending memory-log entries for this ticker before the pipeline runs.

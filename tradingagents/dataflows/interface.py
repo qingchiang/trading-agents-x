@@ -20,6 +20,19 @@ from .alpha_vantage import (
     get_stock as get_alpha_vantage_stock,
     get_verified_market_snapshot as get_alpha_vantage_verified_snapshot,
 )
+from .cn import (
+    get_indicator as get_akshare_indicator,
+    get_stock as get_akshare_stock,
+    get_verified_market_snapshot as get_akshare_verified_snapshot,
+)
+from .cn.cn_fundamentals import get_fundamentals as get_cn_fundamentals
+from .cn.cn_news import get_news as get_cn_news
+from .cn.cn_statements import (
+    get_balance_sheet as get_cn_balance_sheet,
+    get_cashflow as get_cn_cashflow,
+    get_income_statement as get_cn_income_statement,
+)
+from .cn.sina_finance import validate_analysis_date as validate_cn_analysis_date
 from .config import get_config
 from .errors import (
     NoMarketDataError,
@@ -47,11 +60,12 @@ from .jp.jquants import (
 )
 from .jp.tdnet_news import get_news as get_tdnet_news
 from .macro import get_macro_indicators as get_macro_dispatch
-from .market_context import infer_market
+from .market_context import TICKERLESS_METHODS, infer_market
 from .market_data_validator import (
     build_verified_market_snapshot as get_yfinance_verified_snapshot,
 )
 from .polymarket import get_prediction_markets as get_polymarket_prediction_markets
+from .symbol_utils import normalize_symbol
 from .y_finance import (
     get_balance_sheet as get_yfinance_balance_sheet,
     get_cashflow as get_yfinance_cashflow,
@@ -124,6 +138,10 @@ VENDOR_LIST = [
     "tdnet_news",
     "google_news",
     "jp_news",
+    "akshare",
+    "cn_fundamentals",
+    "cn_statements",
+    "cn_news",
 ]
 
 # Optional enrichment categories. These add macro/event context to the news
@@ -137,17 +155,20 @@ OPTIONAL_CATEGORIES = {"macro_data", "prediction_markets"}
 VENDOR_METHODS = {
     # core_stock_apis
     "get_stock_data": {
+        "akshare": get_akshare_stock,
         "alpha_vantage": get_alpha_vantage_stock,
         "yfinance": get_YFin_data_online,
         "jquants": get_jquants_stock,
     },
     # technical_indicators
     "get_indicators": {
+        "akshare": get_akshare_indicator,
         "alpha_vantage": get_alpha_vantage_indicator,
         "yfinance": get_stock_stats_indicators_window,
         "jquants": get_jquants_indicator,
     },
     "get_verified_market_snapshot": {
+        "akshare": get_akshare_verified_snapshot,
         "alpha_vantage": get_alpha_vantage_verified_snapshot,
         "yfinance": get_yfinance_verified_snapshot,
         "jquants": get_jquants_verified_snapshot,
@@ -158,24 +179,28 @@ VENDOR_METHODS = {
         "yfinance": get_yfinance_fundamentals,
         "jquants": get_jquants_fundamentals,
         "jp_fundamentals": get_jp_fundamentals,
+        "cn_fundamentals": get_cn_fundamentals,
     },
     "get_balance_sheet": {
         "alpha_vantage": get_alpha_vantage_balance_sheet,
         "yfinance": get_yfinance_balance_sheet,
         "jquants": get_jquants_balance_sheet,
         "jp_statements": get_jp_balance_sheet,
+        "cn_statements": get_cn_balance_sheet,
     },
     "get_cashflow": {
         "alpha_vantage": get_alpha_vantage_cashflow,
         "yfinance": get_yfinance_cashflow,
         "jquants": get_jquants_cashflow,
         "jp_statements": get_jp_cashflow,
+        "cn_statements": get_cn_cashflow,
     },
     "get_income_statement": {
         "alpha_vantage": get_alpha_vantage_income_statement,
         "yfinance": get_yfinance_income_statement,
         "jquants": get_jquants_income_statement,
         "jp_statements": get_jp_income_statement,
+        "cn_statements": get_cn_income_statement,
     },
     # news_data
     "get_news": {
@@ -185,6 +210,7 @@ VENDOR_METHODS = {
         "tdnet_news": get_tdnet_news,
         "google_news": get_google_news,
         "jp_news": get_jp_news,
+        "cn_news": get_cn_news,
     },
     "get_global_news": {
         "yfinance": get_global_news_yfinance,
@@ -214,6 +240,101 @@ def get_category_for_method(method: str) -> str:
         if method in info["tools"]:
             return category
     raise ValueError(f"Method '{method}' not found in any category")
+
+
+def parse_vendor_chain(value: str) -> list[str]:
+    """Parse a configured vendor chain and reject ambiguous entries."""
+    if not isinstance(value, str):
+        raise ValueError(f"Vendor chain must be a string, got {type(value).__name__}")
+    vendors = [vendor.strip() for vendor in value.split(",")]
+    if not vendors or any(not vendor for vendor in vendors):
+        raise ValueError(f"Vendor chain contains an empty entry: {value!r}")
+    duplicates = sorted({vendor for vendor in vendors if vendors.count(vendor) > 1})
+    if duplicates:
+        raise ValueError(f"Vendor chain contains duplicate vendor(s): {duplicates}")
+    if "default" in vendors and vendors != ["default"]:
+        raise ValueError("The 'default' vendor sentinel must be used by itself")
+    return vendors
+
+
+def validate_market_routing(config: dict | None = None) -> None:
+    """Fail fast when any effective default/market route cannot serve a method.
+
+    Validation follows the same tool -> market -> default precedence as runtime
+    routing. Assemblers may implement only part of a category, so each resolved
+    chain is checked collectively for the specific method being validated.
+    """
+    config = get_config() if config is None else config
+    default_routes = config.get("data_vendors", {})
+    tool_routes = config.get("tool_vendors", {})
+    routes = config.get("data_vendors_by_market", {})
+    if not isinstance(default_routes, dict):
+        raise ValueError("data_vendors must be a mapping")
+    if not isinstance(tool_routes, dict):
+        raise ValueError("tool_vendors must be a mapping")
+    if not isinstance(routes, dict):
+        raise ValueError("data_vendors_by_market must be a mapping")
+
+    registered = set(VENDOR_LIST)
+    registered.update(
+        vendor for methods in VENDOR_METHODS.values() for vendor in methods
+    )
+
+    def declared_chain(raw_chain: str, context: str) -> list[str]:
+        vendors = parse_vendor_chain(raw_chain)
+        unknown = [
+            vendor
+            for vendor in vendors
+            if vendor != "default" and vendor not in registered
+        ]
+        if unknown:
+            raise ValueError(f"Unknown vendor(s) {unknown} in {context}")
+        return vendors
+
+    for category, raw_chain in default_routes.items():
+        if category not in TOOLS_CATEGORIES:
+            raise ValueError(f"Unknown data category {category!r} in data_vendors")
+        declared_chain(raw_chain, f"data_vendors/{category}")
+
+    for method, raw_chain in tool_routes.items():
+        if method not in VENDOR_METHODS:
+            raise ValueError(f"Unknown method {method!r} in tool_vendors")
+        declared_chain(raw_chain, f"tool_vendors/{method}")
+
+    for suffix, categories in routes.items():
+        if not isinstance(suffix, str) or not suffix.startswith("."):
+            raise ValueError(f"Market route key must be a dotted suffix, got {suffix!r}")
+        if not isinstance(categories, dict):
+            raise ValueError(f"Market route {suffix!r} must map categories to chains")
+        for category, raw_chain in categories.items():
+            if category not in TOOLS_CATEGORIES:
+                raise ValueError(f"Unknown data category {category!r} in market route {suffix!r}")
+            methods = TOOLS_CATEGORIES[category]["tools"]
+            if all(method in TICKERLESS_METHODS for method in methods):
+                continue
+            declared_chain(raw_chain, f"market route {suffix!r}/{category}")
+
+    for market in ("", *routes):
+        for category, category_info in TOOLS_CATEGORIES.items():
+            for method in category_info["tools"]:
+                if market and method in TICKERLESS_METHODS:
+                    continue
+                raw_chain = get_vendor(category, method, market, config)
+                context = (
+                    f"effective route {market!r}/{category}/{method}"
+                    if market
+                    else f"effective default route {category}/{method}"
+                )
+                vendors = declared_chain(raw_chain, context)
+                if vendors == ["default"]:
+                    continue
+                servers = VENDOR_METHODS.get(method, {})
+                if not any(vendor in servers for vendor in vendors):
+                    raise ValueError(
+                        f"Effective route {market or '<default>'!r}/{category} "
+                        f"cannot serve {method!r}; configured chain is {raw_chain!r}"
+                    )
+
 
 def get_vendor(category: str, method: str = None, market: str = "", config: dict = None) -> str:
     """Get the configured vendor for a data category or specific tool method.
@@ -397,17 +518,31 @@ def _attach_unavailable_provenance(
 
 def route_to_vendor(method: str, *args, _provenance: bool = False, **kwargs):
     """Route method calls to appropriate vendor implementation with fallback support."""
+    if method not in VENDOR_METHODS:
+        raise ValueError(f"Method '{method}' not supported")
+
+    requested_symbol = args[0] if args else None
+
+    # Normalize before market inference, so a direct data-tool call using a bare
+    # A-share code selects the same .SS/.SZ route as CLI and graph callers.
+    if method not in TICKERLESS_METHODS and args and isinstance(args[0], str):
+        args = (normalize_symbol(args[0]), *args[1:])
+
     category = get_category_for_method(method)
     # Suffix-based routing: ticker-bearing methods infer the market from their
     # first arg; ticker-less ones are market-agnostic (market=""). Read config
     # once and thread it through so the per-call deep-copy happens a single time.
     config = get_config()
     market = infer_market(method, args, config.get("data_vendors_by_market", {}))
+    if market in {".SS", ".SZ"}:
+        if method == "get_fundamentals":
+            curr_date = kwargs.get("curr_date", args[1] if len(args) >= 2 else None)
+            validate_cn_analysis_date(curr_date)
+        elif method in {"get_balance_sheet", "get_cashflow", "get_income_statement"}:
+            curr_date = kwargs.get("curr_date", args[2] if len(args) >= 3 else None)
+            validate_cn_analysis_date(curr_date)
     vendor_config = get_vendor(category, method, market, config)
-    primary_vendors = [v.strip() for v in vendor_config.split(',')]
-
-    if method not in VENDOR_METHODS:
-        raise ValueError(f"Method '{method}' not supported")
+    primary_vendors = parse_vendor_chain(vendor_config)
 
     all_available_vendors = list(VENDOR_METHODS[method].keys())
 
@@ -416,8 +551,18 @@ def route_to_vendor(method: str, *args, _provenance: bool = False, **kwargs):
     # unexpected source and caused cross-vendor inconsistencies. For multi-vendor
     # fallback, list them in order, e.g. data_vendors="yfinance,alpha_vantage".
     # The "default" sentinel (no explicit config) uses all available vendors.
-    explicit = [v for v in primary_vendors if v and v != "default"]
+    explicit = [v for v in primary_vendors if v != "default"]
     if explicit:
+        unknown = [
+            vendor
+            for vendor in explicit
+            if vendor not in VENDOR_LIST and vendor not in VENDOR_METHODS[method]
+        ]
+        if unknown:
+            raise ValueError(
+                f"Unknown configured vendor(s) {unknown} for '{method}'. "
+                f"Known vendors: {VENDOR_LIST}."
+            )
         vendor_chain = [v for v in explicit if v in VENDOR_METHODS[method]]
         if not vendor_chain:
             raise ValueError(
@@ -430,17 +575,43 @@ def route_to_vendor(method: str, *args, _provenance: bool = False, **kwargs):
     last_no_data: NoMarketDataError | None = None
     first_error: Exception | None = None
     availability_notes: list[str] = []
-    for vendor in vendor_chain:
+    for vendor_index, vendor in enumerate(vendor_chain):
         vendor_impl = VENDOR_METHODS[method][vendor]
         impl_func = vendor_impl[0] if isinstance(vendor_impl, list) else vendor_impl
 
         try:
             result = impl_func(*args, **kwargs)
-            if _provenance and isinstance(result, str) and not extract_provenance(result):
-                record = _provenance_for_route(
-                    method, vendor, args, config, result
+            if _provenance and isinstance(result, str):
+                existing_records = extract_provenance(result)
+                record = (
+                    _provenance_for_route(method, vendor, args, config, result)
+                    if not existing_records or vendor_index > 0
+                    else None
                 )
                 if record is not None:
+                    if vendor_index > 0:
+                        fallback_timing = (
+                            "fallback vendor selected"
+                            if existing_records
+                            else f"fallback vendor selected; {record.timing}"
+                        )
+                        if market in {".SS", ".SZ"} and method in {
+                            "get_stock_data",
+                            "get_indicators",
+                            "get_verified_market_snapshot",
+                        }:
+                            fallback_timing += (
+                                "; adjustment provider changed; "
+                                "technical indicators may differ"
+                            )
+                        record = ProvenanceRecord(
+                            evidence=record.evidence,
+                            source=record.source,
+                            requested=record.requested,
+                            effective=record.effective,
+                            timing=fallback_timing,
+                            retrieved_at=record.retrieved_at,
+                        )
                     result = attach_provenance(result, record)
             # Availability notes describe failed earlier legs, not items returned
             # by this successful vendor. Append them only after provenance has
@@ -480,7 +651,11 @@ def route_to_vendor(method: str, *args, _provenance: bool = False, **kwargs):
                 "Returning NO_DATA for %s, but a vendor errored earlier: %s",
                 method, first_error,
             )
-        sym = last_no_data.symbol
+        sym = (
+            requested_symbol
+            if isinstance(requested_symbol, str)
+            else last_no_data.symbol
+        )
         canonical = last_no_data.canonical
         resolved = "" if canonical == sym else f" (resolved to '{canonical}')"
         # Surface the typed error's detail (e.g. "latest row is 2025-06-11 ...

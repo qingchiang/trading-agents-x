@@ -3,6 +3,7 @@ import os
 import time
 from datetime import datetime
 from typing import Annotated
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import yfinance as yf
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 # is treated as stale. Generous enough to span long holiday weekends, tight
 # enough to catch the year-old frames yfinance occasionally returns (#1021).
 MAX_OHLCV_STALE_DAYS = 10
+_SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
 def yf_retry(func, max_retries=3, base_delay=2.0):
@@ -87,6 +89,82 @@ def _coerce_ohlcv_dates(data: pd.DataFrame) -> pd.Series:
     return pd.Series(dtype="datetime64[ns]")
 
 
+def _mainland_effective_ohlcv_date(
+    curr_date: str,
+    symbol: str,
+    canonical: str | None = None,
+) -> pd.Timestamp | None:
+    """Return the latest completed mainland session, or ``None`` off-market."""
+    canonical_symbol = normalize_symbol(canonical or symbol)
+    if not canonical_symbol.endswith((".SS", ".SZ")):
+        return None
+    try:
+        from .cn.calendar import effective_trade_date
+
+        return pd.Timestamp(effective_trade_date(curr_date))
+    except Exception as exc:  # noqa: BLE001 - normalize calendar/vendor failures
+        raise NoMarketDataError(
+            symbol,
+            canonical,
+            "cannot verify mainland freshness because the trading calendar "
+            f"is unavailable ({type(exc).__name__}: {exc}) — refusing to use "
+            "potentially stale fallback data",
+        ) from exc
+
+
+def _truncate_ohlcv_to_effective_date(
+    data: pd.DataFrame,
+    curr_date: str,
+    symbol: str,
+    canonical: str | None = None,
+) -> pd.DataFrame:
+    """Exclude incomplete mainland daily bars before downstream computation."""
+    cutoff = _mainland_effective_ohlcv_date(curr_date, symbol, canonical)
+    if cutoff is None or data is None or data.empty:
+        return data
+
+    if "Date" in data.columns:
+        dates = pd.to_datetime(data["Date"], errors="coerce")
+        if dates.dt.tz is not None:
+            dates = dates.dt.tz_localize(None)
+        return data.loc[dates.dt.normalize() <= cutoff].copy()
+    if isinstance(data.index, pd.DatetimeIndex):
+        dates = pd.to_datetime(data.index, errors="coerce")
+        if dates.tz is not None:
+            dates = dates.tz_localize(None)
+        return data.loc[dates.normalize() <= cutoff].copy()
+    return data
+
+
+def _mainland_live_cache_phase(
+    curr_date: str,
+    symbol: str,
+    canonical: str | None = None,
+    *,
+    now: datetime | None = None,
+) -> str | None:
+    """Return a completed-session cache phase for a live mainland request.
+
+    Yahoo can expose the current daily candle before the mainland close.  The
+    raw download is cached before downstream cutoff filtering, so a cache file
+    warmed during the session must not be reused after the 15:30 completion
+    boundary.  Historical requests deliberately return ``None`` and retain the
+    existing one-file-per-symbol cache used by backtests.
+    """
+    requested = pd.to_datetime(curr_date, errors="coerce")
+    if pd.isna(requested):
+        return None
+    current = now or datetime.now(_SHANGHAI)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=_SHANGHAI)
+    else:
+        current = current.astimezone(_SHANGHAI)
+    if requested.date() != current.date():
+        return None
+    cutoff = _mainland_effective_ohlcv_date(curr_date, symbol, canonical)
+    return cutoff.strftime("%Y-%m-%d") if cutoff is not None else None
+
+
 def _assert_ohlcv_not_stale(
     data: pd.DataFrame,
     curr_date: str,
@@ -115,12 +193,19 @@ def _assert_ohlcv_not_stale(
         return
     latest = dates.max().normalize()
     stale_days = (requested - latest).days
-    if stale_days > max_stale_days:
+    exact_expected = _mainland_effective_ohlcv_date(curr_date, symbol, canonical)
+    stale = latest != exact_expected if exact_expected is not None else stale_days > max_stale_days
+    if stale:
+        expected_detail = (
+            f"expected mainland trading date is {exact_expected.date()}"
+            if exact_expected is not None
+            else f"{stale_days} days before the requested {requested.date()}"
+        )
         raise NoMarketDataError(
             symbol,
             canonical,
-            f"latest row is {latest.date()}, {stale_days} days before the "
-            f"requested {requested.date()} (stale) — refusing to use it",
+            f"latest row is {latest.date()}, {expected_detail} (stale) — "
+            "refusing to use it",
         )
 
 
@@ -150,9 +235,13 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     end_str = (today_date + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
 
     os.makedirs(config["data_cache_dir"], exist_ok=True)
+    live_cache_phase = _mainland_live_cache_phase(curr_date, symbol, canonical)
+    phase_suffix = (
+        f"-CN-completed-{live_cache_phase}" if live_cache_phase is not None else ""
+    )
     data_file = os.path.join(
         config["data_cache_dir"],
-        f"{safe_symbol}-YFin-data-{start_str}-{end_str}.csv",
+        f"{safe_symbol}-YFin-data-{start_str}-{end_str}{phase_suffix}.csv",
     )
 
     # A cached file may be empty if a prior fetch failed (unknown symbol,
@@ -186,6 +275,13 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
 
     # Filter to curr_date to prevent look-ahead bias in backtesting
     data = data[data["Date"] <= curr_date_dt]
+    data = _truncate_ohlcv_to_effective_date(data, curr_date, symbol, canonical)
+    if data.empty:
+        raise NoMarketDataError(
+            symbol,
+            canonical,
+            f"no completed market rows on or before {curr_date}",
+        )
 
     # Reject a stale frame (latest row far older than curr_date) rather than
     # feeding year-old prices into indicators (#1021).

@@ -58,7 +58,7 @@ def test_market_final_report_keeps_snapshot_source_and_effective_session():
     report = result["market_report"]
     assert report == result["messages"][0].content
     assert "| get_verified_market_snapshot | J-Quants | 2026-07-17 | 2026-07-16 |" in report
-    assert report.count("## Data provenance") == 1
+    assert report.count("## Data Provenance") == 1
 
 
 @pytest.mark.unit
@@ -100,6 +100,8 @@ def test_market_report_omits_appendix_by_default():
         ProvenanceRecord(
             evidence="get_verified_market_snapshot",
             source="J-Quants",
+            effective="2026-07-17",
+            timing="market-date filtered",
         ),
     )
     result = create_market_analyst(_final_llm())(_state(content))

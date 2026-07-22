@@ -80,6 +80,82 @@ _YAHOO_SAFE = re.compile(r"^[A-Za-z0-9._\-\^=]+$")
 # match before the ``USD`` substring.
 _CRYPTO_QUOTES = ("USDT", "USDC", "USD")
 
+# Mainland China A-share prefixes supported by the first China-market branch.
+# These are equity boards only: Shanghai main board / STAR Market and Shenzhen
+# main board / ChiNext. Funds, bonds, B-shares and Beijing listings deliberately
+# remain out of scope, so an otherwise ambiguous bare six-digit code fails loud
+# instead of being routed as an unsuffixed US ticker.
+_SHANGHAI_A_SHARE_PREFIXES = ("600", "601", "603", "605", "688", "689")
+_SHENZHEN_A_SHARE_PREFIXES = ("000", "001", "002", "003", "300", "301")
+_MAINLAND_MARKET_BENCHMARKS = frozenset({"000001.SS", "399001.SZ"})
+
+
+def infer_mainland_equity_suffix(code: str) -> str | None:
+    """Return ``.SS``/``.SZ`` for a supported six-digit A-share equity code."""
+    value = str(code)
+    if not re.fullmatch(r"\d{6}", value):
+        return None
+    if value.startswith(_SHANGHAI_A_SHARE_PREFIXES):
+        return ".SS"
+    if value.startswith(_SHENZHEN_A_SHARE_PREFIXES):
+        return ".SZ"
+    return None
+
+
+def _validate_explicit_mainland_suffix(symbol: str) -> None:
+    """Reject unsupported mainland security types and wrong equity exchanges."""
+    match = re.fullmatch(r"(\d{6})(\.SS|\.SZ)", symbol)
+    if match is None:
+        return
+    if symbol in _MAINLAND_MARKET_BENCHMARKS:
+        return
+    code, suffix = match.groups()
+    expected = infer_mainland_equity_suffix(code)
+    if expected is None:
+        raise ValueError(
+            f"Mainland security {symbol!r} is not supported in the A-share equity "
+            "phase; ETFs, funds, bonds, and non-benchmark indices are out of scope."
+        )
+    if suffix != expected:
+        raise ValueError(
+            f"Exchange suffix mismatch for {symbol!r}: equity code {code} "
+            f"requires {expected}, not {suffix}."
+        )
+
+
+def _normalize_explicit_china_suffix(symbol: str) -> str | None:
+    """Normalize supported China aliases and reject explicitly unsupported ones."""
+    match = re.fullmatch(r"(\d{6})\.(SH|BJ)", symbol)
+    if match is None:
+        return None
+    code, suffix = match.groups()
+    if suffix == "SH":
+        return f"{code}.SS"
+    raise ValueError(
+        f"Beijing Stock Exchange symbol {symbol!r} is not supported; "
+        "China market phase 1 supports Shanghai (.SS) and Shenzhen (.SZ) "
+        "A-share equities only."
+    )
+
+
+def _normalize_bare_a_share(code: str) -> str | None:
+    """Return a Yahoo-style A-share symbol for a bare six-digit equity code.
+
+    ``None`` means the input is not a bare six-digit code. A bare six-digit code
+    outside the explicitly supported Shanghai/Shenzhen equity prefixes raises so
+    it cannot silently fall through to the US market.
+    """
+    if not re.fullmatch(r"\d{6}", code):
+        return None
+    suffix = infer_mainland_equity_suffix(code)
+    if suffix is not None:
+        return f"{code}{suffix}"
+    raise ValueError(
+        f"Cannot infer a supported Shanghai/Shenzhen A-share exchange for bare "
+        f"code {code!r}. Use an explicit Yahoo-style suffix for a supported "
+        "instrument; Beijing listings and non-equity securities are out of scope."
+    )
+
 
 def crypto_base(raw: str) -> str | None:
     """Return the crypto base (e.g. ``BTC``) for a known USD/USDT/USDC-quoted
@@ -106,11 +182,13 @@ def normalize_symbol(raw: str) -> str:
     """Map a user/broker symbol to its canonical Yahoo Finance symbol.
 
     Resolution order (first match wins):
-      1. Explicit alias table (metals, energy, index CFDs).
-      2. Crypto rule: a known crypto base quoted in USD/USDT/USDC (dashed or
+      1. Explicit China suffix: ``CODE.SH`` -> ``CODE.SS``; ``CODE.BJ`` raises.
+      2. Bare Shanghai/Shenzhen A-share equity code -> ``CODE.SS``/``CODE.SZ``.
+      3. Explicit alias table (metals, energy, index CFDs).
+      4. Crypto rule: a known crypto base quoted in USD/USDT/USDC (dashed or
          not) -> ``BASE-USD``.
-      3. Forex rule: six letters that are two ISO currency codes -> ``PAIR=X``.
-      4. Otherwise the upper-cased symbol is returned unchanged (plain
+      5. Forex rule: six letters that are two ISO currency codes -> ``PAIR=X``.
+      6. Otherwise the upper-cased symbol is returned unchanged (plain
          equities, ETFs, Yahoo-native symbols like ``GC=F`` or ``^GSPC``).
 
     A trailing ``+`` (broker CFD marker, e.g. ``XAUUSD+``) is stripped before
@@ -124,8 +202,14 @@ def normalize_symbol(raw: str) -> str:
     # Broker CFD/qualifier suffixes Yahoo never uses.
     s = s.rstrip("+")
 
+    explicit_china = _normalize_explicit_china_suffix(s)
+    a_share = _normalize_bare_a_share(s)
     crypto = _normalize_crypto(s)
-    if s in _ALIASES:
+    if explicit_china is not None:
+        canonical = explicit_china
+    elif a_share is not None:
+        canonical = a_share
+    elif s in _ALIASES:
         canonical = _ALIASES[s]
     elif crypto is not None:
         canonical = crypto
@@ -134,6 +218,7 @@ def normalize_symbol(raw: str) -> str:
     else:
         canonical = s
 
+    _validate_explicit_mainland_suffix(canonical)
     if canonical != raw.strip().upper():
         logger.info("Resolved symbol %r to Yahoo symbol %r", raw, canonical)
     return canonical

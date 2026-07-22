@@ -126,7 +126,8 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # News / data fetching parameters
     # Increase for longer lookback strategies or to broaden macro coverage;
     # decrease to reduce token usage in agent prompts.
-    "news_article_limit": 20,             # max articles per ticker (ticker-news)
+    "news_article_limit": 30,             # max articles per ticker (ticker-news)
+    "sentiment_filing_limit": 20,         # max low-frequency filing signals
     # Offset from the injected analysis date; endpoints are inclusive, so 14
     # covers 15 calendar dates. News Analyst can explicitly expand to 90 dates.
     "ticker_news_lookback_days": 14,
@@ -154,7 +155,8 @@ DEFAULT_CONFIG = _apply_env_overrides({
         "news_data": "yfinance",             # Options: alpha_vantage, yfinance
         # "macro" dispatches each indicator to its owning source: fred (US series
         # + raw FRED IDs; needs FRED_API_KEY), e-Stat (Japan CPI), BOJ (Japan
-        # policy rate / Tankan, keyless). Set "fred" to force US-only. See macro.py.
+        # policy rate / Tankan, keyless), and China macro (keyless). Set "fred"
+        # to force US-only. See macro.py.
         "macro_data": "macro",
 
         "prediction_markets": "polymarket",  # Options: polymarket (keyless)
@@ -169,10 +171,13 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # Only per-instrument (ticker-bearing) tools are routed; macro and global
     # news stay market-agnostic (cross-border context analyzed across all markets
     # at once) and always use ``data_vendors``. Japanese-market vendors are wired
-    # in for ".T" (Tokyo); add ".SS" / ".SZ" / ".HK" for China-market support.
-    # Each chain is "<JP vendor>,yfinance" — a true ordered fallback (try the JP
-    # vendor, then Yahoo), distinct from macro_data's per-owner dispatch; don't
-    # "fix" one into the other. For prices/indicators/fundamentals yfinance is
+    # in for ".T" (Tokyo). China phase 2 routes Shanghai/Shenzhen prices and
+    # indicators through AkShare first (Tencent qfq, then Eastmoney qfq), with
+    # yfinance as the configured final fallback.
+    # China fundamentals assemble CNINFO/Sina data before yfinance degradation.
+    # These are true ordered fallback chains, distinct from macro_data's per-owner
+    # dispatch; don't "fix" one into the other. For JP prices, indicators, and
+    # fundamentals, yfinance is
     # OPTIONAL keyless degradation: jquants serves every method when a key is set,
     # and Yahoo (which covers Tokyo) keeps a keyless ".T" run working instead of
     # hard-erroring. For news_data yfinance is also the SOLE server of
@@ -192,6 +197,18 @@ DEFAULT_CONFIG = _apply_env_overrides({
             # headlines (edinet alone would win the fallback and hide the media
             # side); yfinance (English media) stays a keyless last resort.
             "news_data": "jp_news,yfinance",
+        },
+        ".SS": {
+            "core_stock_apis": "akshare,yfinance",
+            "technical_indicators": "akshare,yfinance",
+            "fundamental_data": "cn_fundamentals,cn_statements,akshare,yfinance",
+            "news_data": "cn_news,yfinance",
+        },
+        ".SZ": {
+            "core_stock_apis": "akshare,yfinance",
+            "technical_indicators": "akshare,yfinance",
+            "fundamental_data": "cn_fundamentals,cn_statements,akshare,yfinance",
+            "news_data": "cn_news,yfinance",
         },
     },
     # Benchmark for alpha calculation in the reflection layer.

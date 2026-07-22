@@ -33,6 +33,8 @@ from tradingagents.agents.schemas import (
 from tradingagents.agents.trader.trader import create_trader
 from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.errors import VendorNotConfiguredError
+from tradingagents.dataflows.market_signals import FetchedSentimentSignal, SentimentSignal
+from tradingagents.provenance import ProvenanceRecord, attach_provenance
 
 # ---------------------------------------------------------------------------
 # Render functions
@@ -392,6 +394,45 @@ class TestSentimentAnalystAgent:
         assert len(result["messages"]) == 1
         assert result["sentiment_report"] == result["messages"][0].content
 
+    def test_market_signal_embedded_provenance_uses_actual_fallback_source(self):
+        config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        set_config({"provenance_appendix": True})
+        captured = {}
+        spec = SentimentSignal(
+            tag="test_signal",
+            fetch=lambda *_args: "",
+            evidence="registry evidence",
+            source="configured primary",
+            title="Test signal",
+            intro="Test source.",
+            effective=lambda date: date,
+            timing="publication-date filtered",
+        )
+        body = attach_provenance(
+            "FALLBACK_DATA",
+            ProvenanceRecord(
+                evidence="registry evidence",
+                source="actual fallback",
+                requested="2026-01-15",
+                effective="2026-01-15",
+                timing="fallback source used",
+            ),
+        )
+        fetched = (FetchedSentimentSignal(spec=spec, body=body),)
+        state = {**_make_sentiment_state(), "company_of_interest": "600519.SS"}
+        try:
+            with mock.patch(f"{_SENTIMENT_MOD}.get_news") as news, mock.patch(
+                f"{_SENTIMENT_MOD}.fetch_sentiment_signals", return_value=fetched
+            ):
+                news.func.return_value = "NEWS_DATA"
+                result = create_sentiment_analyst(_structured_sentiment_llm(captured))(state)
+        finally:
+            config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+
+        report = result["sentiment_report"]
+        assert "| registry evidence | actual fallback |" in report
+        assert "| registry evidence | configured primary |" not in report
+
     def test_prompt_contains_ticker(self):
         captured = {}
         create_sentiment_analyst(_structured_sentiment_llm(captured))(_make_sentiment_state())
@@ -440,7 +481,7 @@ class TestSentimentAnalystAgent:
         llm.invoke.return_value = MagicMock(content=plain)
         result = create_sentiment_analyst(llm)(_make_sentiment_state())["sentiment_report"]
         assert result.startswith(plain)
-        assert "## Data provenance" not in result
+        assert "## Data Provenance" not in result
 
     def test_falls_back_to_freetext_when_structured_call_fails(self):
         config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
@@ -452,10 +493,11 @@ class TestSentimentAnalystAgent:
         llm.invoke.return_value = MagicMock(content=plain)
         result = create_sentiment_analyst(llm)(_make_sentiment_state())["sentiment_report"]
         assert result.startswith(plain)
-        assert "## Data provenance" not in result
+        assert "## Data Provenance" not in result
 
 
 _SENTIMENT_MOD = "tradingagents.agents.analysts.sentiment_analyst"
+_SIGNALS_MOD = "tradingagents.dataflows.market_signals"
 
 
 @pytest.mark.unit
@@ -482,10 +524,10 @@ class TestSentimentMarketGating:
             set_config({"data_vendors_by_market": routes})
         with mock.patch(f"{_SENTIMENT_MOD}.fetch_stocktwits_messages") as st, \
                 mock.patch(f"{_SENTIMENT_MOD}.fetch_reddit_posts") as rd, \
-                mock.patch(f"{_SENTIMENT_MOD}.get_large_holdings") as holdings, \
-                mock.patch(f"{_SENTIMENT_MOD}.get_margin_balance") as margin, \
-                mock.patch(f"{_SENTIMENT_MOD}.get_short_positions") as shorts, \
-                mock.patch(f"{_SENTIMENT_MOD}.get_analyst_ratings_block") as ratings, \
+                mock.patch(f"{_SIGNALS_MOD}.get_large_holdings") as holdings, \
+                mock.patch(f"{_SIGNALS_MOD}.get_margin_balance") as margin, \
+                mock.patch(f"{_SIGNALS_MOD}.get_short_positions") as shorts, \
+                mock.patch(f"{_SIGNALS_MOD}.get_analyst_ratings_block") as ratings, \
                 mock.patch(f"{_SENTIMENT_MOD}.get_news") as news, \
                 mock.patch(f"{_SENTIMENT_MOD}.is_live", return_value=live):
             st.return_value = "STOCKTWITS_DATA"
@@ -559,7 +601,7 @@ class TestSentimentMarketGating:
         assert "ticker-endpoint provenance alone is not evidence" in prompt_text
         assert "[context]` is" in prompt_text
         report = result["sentiment_report"]
-        assert "## Data provenance" in report
+        assert "## Data Provenance" in report
         assert "| ownership and control filings | EDINET |" in report
         assert "| margin balances | J-Quants |" in report
         assert "| large short positions | J-Quants |" in report
@@ -596,6 +638,20 @@ class TestSentimentMarketGating:
         assert "| EDINET |" not in report
         assert "| J-Quants |" not in report
         assert "| analyst consensus | yfinance |" not in report
+
+    def test_default_a_share_route_skips_us_social_without_jp_signals(self):
+        _captured, st, rd, holdings, margin, shorts, ratings, result = self._run(
+            "600519.SS"
+        )
+        st.assert_not_called()
+        rd.assert_not_called()
+        holdings.assert_not_called()
+        margin.assert_not_called()
+        shorts.assert_not_called()
+        ratings.assert_not_called()
+        report = result["sentiment_report"]
+        assert "| EDINET |" not in report
+        assert "| J-Quants |" not in report
 
     def test_historical_us_run_skips_live_social_fetchers(self):
         captured, st, rd, *_rest, result = self._run("NVDA", live=False)

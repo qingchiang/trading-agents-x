@@ -17,17 +17,18 @@ The panel is organised on four investment-meaning dimensions:
     in their own section rather than a US/Japan column split.
 
 **Source is per-cell**, so an indicator can be served by whichever provider has
-the timely free series: most cells use **FRED** (US series plus the Japanese OECD
-10Y mirror, and USD/JPY, DXY, VIX); **Japan CPI / core inflation** come from
-**e-Stat** (FRED's OECD mirror was discontinued ~2021); and **Japan's policy rate
-(daily) and Tankan DI (quarterly)** come from the **BOJ** API. Making the source
-explicit per cell keeps the panel and any router-served microscope tool from
-diverging on the same indicator. China becomes a fourth column when that branch
-lands.
+the timely free series: most cells use **FRED** (US series plus USD/JPY, DXY and
+VIX); **Japan 10Y** comes from the Ministry of Finance's daily constant-maturity
+curve with FRED as fallback; **Japan CPI / core inflation** come from
+**e-Stat** (FRED's OECD mirror was discontinued ~2021); **Japan's policy rate
+(daily) and Tankan DI (quarterly)** come from the **BOJ** API; and the China
+column uses keyless Eastmoney/NBS sources. Making the source explicit per cell
+keeps the panel and any router-served microscope tool from diverging on the same
+indicator.
 
 Prefetched like the sentiment sources, so it **must never raise**: any per-cell
-fetch failure degrades to "n/a". Look-ahead is inherited from
-:func:`fred.fetch_series` (observations capped at ``curr_date``).
+fetch failure degrades to "n/a". Each source filters observations to the analysis
+date; MOF additionally enforces its next-business-day 09:30 JST publication lag.
 """
 
 from __future__ import annotations
@@ -36,14 +37,13 @@ import logging
 
 from tradingagents.provenance import ProvenanceRecord, attach_provenance
 
-from . import boj, estat, fred
-from .macro_common import summarize_points
+from . import boj, cn_macro, estat, fred, jp_macro
+from .macro_common import exact_year_over_year, summarize_points
 
 logger = logging.getLogger(__name__)
 
-# Region columns for the per-country sections, in display order. China becomes
-# one more column here (plus its series per cell) when that branch lands.
-_REGIONS = ("US", "Japan")
+# Region columns for the per-country sections, in display order.
+_REGIONS = ("US", "Japan", "China")
 
 # A cell's source: the vendor module whose ``fetch_series`` serves it. Both return
 # the same shape, so _cell renders either uniformly; the explicit source keeps the
@@ -54,6 +54,27 @@ _SOURCES = {
     "fred": fred,
     "estat": estat,
     "boj": boj,
+    "cn": cn_macro,
+    "jp": jp_macro,
+}
+
+_SOURCE_LABELS = {
+    "fred": "FRED",
+    "estat": "e-Stat",
+    "boj": "BOJ",
+    "cn": "China macro",
+    "jp": "Japan macro",
+}
+
+# These series can switch between materially different vendors or availability
+# semantics. Keep an individual audit record in addition to aggregate coverage.
+_FALLBACK_AUDIT_SERIES = {
+    ("jp", "jp_10y_yield"): "Japan Ministry of Finance / FRED",
+    ("cn", "cn_10y_yield"): "Eastmoney / China Foreign Exchange Trade System",
+    ("cn", "cn_cpi"): "National Bureau of Statistics of China / Eastmoney",
+    ("cn", "cn_gdp"): "National Bureau of Statistics of China / Eastmoney",
+    ("cn", "cn_pmi"): "National Bureau of Statistics of China / Eastmoney",
+    ("cn", "usd_cny"): "SAFE / Eastmoney",
 }
 
 # Per-country comparison sections. Structure:
@@ -65,41 +86,98 @@ _SOURCES = {
 # everything else from FRED. The one remaining gap (US ISM PMI — removed from
 # FRED, no free series) stays None rather than dropping the comparison row.
 _REGIONAL_SECTIONS = (
-    ("Liquidity / rates — valuation anchor", (
-        ("Policy / overnight rate", {"US": ("fred", "fed_funds_rate"),
-                                      "Japan": ("boj", "jp_policy_rate")}),
-        ("10Y govt bond yield",     {"US": ("fred", "10y_treasury"),
-                                      "Japan": ("fred", "IRLTLT01JPM156N")}),
-    )),
-    ("Inflation — policy outlook", (
-        ("CPI (index; ~YoY via Δ)", {"US": ("fred", "cpi"),
-                                     "Japan": ("estat", "jp_cpi")}),
-        ("Core inflation",          {"US": ("fred", "core_pce"),
-                                     "Japan": ("estat", "jp_core_cpi")}),
-    )),
-    ("Activity — fundamentals", (
-        ("Real GDP",     {"US": ("fred", "real_gdp"),
-                          "Japan": ("fred", "JPNRGDPEXP")}),
-        ("Unemployment", {"US": ("fred", "unemployment_rate"),
-                          "Japan": ("fred", "LRHUTTTTJPM156S")}),
-        ("Business sentiment (ISM PMI / Tankan DI)",
-                         {"US": None,
-                          "Japan": ("boj", "jp_tankan")}),
-    )),
+    (
+        "Liquidity / rates — valuation anchor",
+        (
+            (
+                "Policy / reference rate",
+                {
+                    "US": (
+                        "fred",
+                        "fed_funds_rate",
+                        "window",
+                        None,
+                        "Fed funds rate [Monthly]",
+                    ),
+                    "Japan": (
+                        "boj",
+                        "jp_policy_rate",
+                        "window",
+                        None,
+                        "BOJ policy rate [Daily]",
+                    ),
+                    "China": ("cn", "cn_lpr", "window", None, "1Y LPR [Monthly]"),
+                },
+            ),
+            (
+                "10Y govt bond yield",
+                {
+                    "US": ("fred", "10y_treasury"),
+                    "Japan": ("jp", "jp_10y_yield"),
+                    "China": ("cn", "cn_10y_yield"),
+                },
+            ),
+        ),
+    ),
+    (
+        "Inflation — policy outlook",
+        (
+            (
+                "CPI / inflation",
+                {
+                    "US": ("fred", "cpi", "exact_yoy", 550),
+                    "Japan": ("estat", "jp_cpi", "exact_yoy", 550),
+                    "China": ("cn", "cn_cpi", "yoy_rate", 365),
+                },
+            ),
+            (
+                "Core inflation",
+                {"US": ("fred", "core_pce"), "Japan": ("estat", "jp_core_cpi"), "China": None},
+            ),
+        ),
+    ),
+    (
+        "Activity — fundamentals",
+        (
+            (
+                "GDP / growth",
+                {
+                    "US": ("fred", "real_gdp", "exact_yoy", 550),
+                    "Japan": ("fred", "JPNRGDPEXP", "exact_yoy", 550),
+                    "China": ("cn", "cn_gdp", "yoy_rate", 365),
+                },
+            ),
+            (
+                "Unemployment",
+                {
+                    "US": ("fred", "unemployment_rate"),
+                    "Japan": ("fred", "LRHUTTTTJPM156S"),
+                    "China": ("cn", "cn_unemployment"),
+                },
+            ),
+            (
+                "Business sentiment (ISM PMI / Tankan DI)",
+                {"US": None, "Japan": ("boj", "jp_tankan"), "China": ("cn", "cn_pmi")},
+            ),
+        ),
+    ),
 )
 
 # Cross-border risk & FX — global single values (not per-country): (label, (source, indicator)).
 _GLOBAL_RISK: tuple[tuple[str, tuple[str, str]], ...] = (
-    ("USD/JPY",              ("fred", "DEXJPUS")),
+    ("USD/JPY", ("fred", "DEXJPUS")),
+    ("USD/CNY central parity", ("cn", "usd_cny")),
     ("Dollar index (broad)", ("fred", "DTWEXBGS")),
-    ("VIX",                  ("fred", "VIXCLS")),
+    ("VIX", ("fred", "VIXCLS")),
 )
 
 
 def _cell(
-    spec: tuple[str, str] | None,
+    spec: tuple | None,
     curr_date: str,
     source_stats: dict[str, dict[str, object]] | None = None,
+    unavailable_sources: dict[str, str] | None = None,
+    series_records: list[ProvenanceRecord] | None = None,
 ) -> str:
     """Render one cell: latest value (date) + change over the ~1y window, or "n/a".
 
@@ -112,62 +190,103 @@ def _cell(
     """
     if not spec:
         return "n/a"
-    source, indicator = spec
+    source, indicator = spec[:2]
+    display = spec[2] if len(spec) >= 3 else "window"
+    look_back_days = spec[3] if len(spec) >= 4 else None
+    cell_label = spec[4] if len(spec) >= 5 else None
+    audit_source_chain = _FALLBACK_AUDIT_SERIES.get((source, indicator))
+
+    def audit(data: dict | None, effective: str, timing: str) -> None:
+        if series_records is None or audit_source_chain is None:
+            return
+        actual_source = (
+            str(data.get("actual_source"))
+            if data and data.get("actual_source")
+            else audit_source_chain
+        )
+        frequency = str(data.get("frequency") or "unknown") if data else "unknown"
+        status = f"frequency={frequency}; {timing}"
+        fallback_reason = data.get("fallback_reason") if data else None
+        if fallback_reason:
+            status += f"; fallback: {fallback_reason}"
+        series_records.append(
+            ProvenanceRecord(
+                evidence=f"global macro panel / {indicator}",
+                source=actual_source,
+                requested=curr_date,
+                effective=effective,
+                timing=status,
+            )
+        )
     stats = None
     if source_stats is not None:
         stats = source_stats.setdefault(
             source,
-            {"attempts": 0, "successes": 0, "dates": []},
+            {"attempts": 0, "successes": 0, "dates": [], "timings": []},
         )
         stats["attempts"] = int(stats["attempts"]) + 1
+    if unavailable_sources and source in unavailable_sources:
+        if stats is not None:
+            stats["unavailable"] = unavailable_sources[source]
+        audit(None, "—", "retrieval unavailable")
+        return "n/a"
     try:
-        data = _SOURCES[source].fetch_series(indicator, curr_date)
+        data = _SOURCES[source].fetch_series(indicator, curr_date, look_back_days)
         summary = summarize_points(data["points"]) if data else None
     except Exception as exc:
         logger.warning("Macro panel cell %s/%s failed: %s", source, indicator, exc)
+        audit(None, "—", "retrieval unavailable")
         return "n/a"
     if summary is None:
+        audit(data, "—", "available; no observations in requested window")
         return "n/a"
+    if display == "exact_yoy":
+        yoy = exact_year_over_year(data["points"])
+        if yoy is None:
+            return "n/a"
+        rendered = f"{yoy.pct:+.1f}% YoY ({yoy.last_date})"
+    elif display == "yoy_rate":
+        try:
+            value = float(summary.last_val)
+        except (TypeError, ValueError):
+            return "n/a"
+        rendered = f"{value:+g}% YoY ({summary.last_date})"
+    elif summary.delta is None:
+        rendered = f"{summary.last_val} ({summary.last_date})"
+    else:
+        pct = f", {summary.pct:+.1f}%" if summary.pct is not None else ""
+        rendered = f"{summary.last_val} ({summary.last_date}, Δ {summary.delta:+.2f}{pct})"
+    audit(data, summary.last_date, str(data.get("timing") or "observation-date filtered"))
     if stats is not None:
         stats["successes"] = int(stats["successes"]) + 1
         dates = stats["dates"]
         if isinstance(dates, list):
             dates.append(summary.last_date)
-    if summary.delta is None:
-        return f"{summary.last_val} ({summary.last_date})"
-    pct = f", {summary.pct:+.1f}%" if summary.pct is not None else ""
-    return f"{summary.last_val} ({summary.last_date}, Δ {summary.delta:+.2f}{pct})"
+        timings = stats["timings"]
+        if isinstance(timings, list) and data.get("timing"):
+            timings.append(str(data["timing"]))
+    return f"{cell_label}: {rendered}" if cell_label else rendered
 
 
 def get_global_macro_panel(curr_date: str) -> str:
     """Return a compact cross-region macro panel as of ``curr_date`` (markdown).
 
-    A per-country comparison table (liquidity / inflation / activity, US vs Japan)
-    plus a cross-border risk & FX table (USD/JPY, DXY, VIX). Each cell is the
+    A per-country comparison table (liquidity / inflation / activity across the
+    US, Japan and China) plus a cross-border risk & FX table. Each cell is the
     latest reading and its ~1-year change. Look-ahead-safe (nothing after
     ``curr_date``) and never-raising (failed/absent cells show "n/a"), so it is
     safe to prefetch and inject unconditionally into the news prompt.
     """
-    # One global check for the deterministic "no key" case, so an unconfigured FRED
-    # short-circuits to a clear note instead of 13 raise+log cycles all showing n/a.
+    # Disable only FRED cells for the deterministic no-key case. Keyless China and
+    # BOJ cells, plus configured e-Stat cells, must remain independently available.
+    unavailable_sources: dict[str, str] = {}
     try:
         fred.get_api_key()
     except fred.FredNotConfiguredError:
-        return attach_provenance(
-            (
-                f"## Global macro panel (as of {curr_date})\n"
-                "_Macro panel unavailable: FRED_API_KEY is not configured._"
-            ),
-            ProvenanceRecord(
-                evidence="global macro panel",
-                source="FRED",
-                requested=curr_date,
-                effective="—",
-                timing="unavailable: API key is not configured",
-            ),
-        )
+        unavailable_sources["fred"] = "API key is not configured"
 
     source_stats: dict[str, dict[str, object]] = {}
+    series_records: list[ProvenanceRecord] = []
     rows = [
         "| Indicator | " + " | ".join(_REGIONS) + " |",
         "| --- |" + " --- |" * len(_REGIONS),
@@ -176,7 +295,13 @@ def get_global_macro_panel(curr_date: str) -> str:
         rows.append(f"| **{dimension}** |" + " |" * len(_REGIONS))
         for label, specs_by_region in section:
             cells = [
-                _cell(specs_by_region[region], curr_date, source_stats)
+                _cell(
+                    specs_by_region[region],
+                    curr_date,
+                    source_stats,
+                    unavailable_sources,
+                    series_records,
+                )
                 for region in _REGIONS
             ]
             rows.append(f"| {label} | " + " | ".join(cells) + " |")
@@ -184,40 +309,53 @@ def get_global_macro_panel(curr_date: str) -> str:
 
     risk_rows = ["| Risk / FX — cross-border capital flow | Latest |", "| --- | --- |"]
     for label, spec in _GLOBAL_RISK:
-        risk_rows.append(f"| {label} | {_cell(spec, curr_date, source_stats)} |")
+        risk_rows.append(
+            f"| {label} | "
+            f"{_cell(spec, curr_date, source_stats, unavailable_sources, series_records)} |"
+        )
     risk = "\n".join(risk_rows)
 
     panel = (
         f"## Global macro panel (as of {curr_date})\n"
-        "Cross-border backdrop every analysis needs; cells show value (date) and the "
-        "change over ~1 year. Read the regions together — e.g. the US–Japan rate gap "
+        "Cross-border backdrop every analysis needs; CPI/GDP cells show exact YoY "
+        "comparisons, while other cells show value (date) and the change over ~1 year. "
+        "Read the regions together — e.g. the US–Japan rate gap "
         "drives USD/JPY, which flows straight into Japanese exporters' earnings.\n\n"
         f"{regional}\n\n{risk}\n\n"
-        "_Sources: Japan policy rate / Tankan from BOJ (官), Japan CPI / core "
-        "inflation from e-Stat (官), the rest from FRED. Remaining gap: US ISM PMI "
-        "(no free series). China joins as a column with its own branch._"
+        "_Sources: Japan policy rate / Tankan from BOJ (官), Japan 10Y from "
+        "Japan Ministry of Finance with FRED fallback, Japan CPI / core "
+        "inflation from e-Stat (官), recent China CPI/GDP/PMI and unemployment "
+        "from NBS release pages (官), China FX from SAFE / Eastmoney market data, "
+        "and China 10Y from Eastmoney with a ChinaMoney bond fallback; "
+        "remaining cells come from FRED. "
+        "China CPI/GDP/PMI fall back to observation-period-filtered, non-vintage "
+        "Eastmoney data when no eligible recent NBS release is discoverable. "
+        "Remaining gaps: US ISM PMI and China core inflation._"
     )
-    source_labels = {"fred": "FRED", "estat": "e-Stat", "boj": "BOJ"}
-    records = []
+    records = list(series_records)
     for source, stats in source_stats.items():
         attempts = int(stats["attempts"])
         successes = int(stats["successes"])
         dates = stats["dates"] if isinstance(stats["dates"], list) else []
+        timings = stats["timings"] if isinstance(stats["timings"], list) else []
         effective = max(dates) if dates else "—"
-        if successes:
+        if stats.get("unavailable"):
+            timing = f"unavailable: {stats['unavailable']}; 0/{attempts} cells available"
+        elif successes:
+            timing_modes = "; ".join(dict.fromkeys(str(value) for value in timings))
+            coverage = f"{successes}/{attempts} cells available"
             timing = (
-                "observation-date filtered; "
-                f"{successes}/{attempts} cells available"
+                f"{timing_modes or 'observation-date filtered'}; {coverage}"
+                if successes == attempts
+                else f"partial coverage; {timing_modes or 'observation-date filtered'}; "
+                f"{coverage}"
             )
         else:
-            timing = (
-                "retrieval unavailable or no observations; "
-                f"0/{attempts} cells available"
-            )
+            timing = f"retrieval unavailable or no observations; 0/{attempts} cells available"
         records.append(
             ProvenanceRecord(
                 evidence="global macro panel",
-                source=source_labels.get(source, source),
+                source=_SOURCE_LABELS.get(source, source),
                 requested=curr_date,
                 effective=effective,
                 timing=timing,
