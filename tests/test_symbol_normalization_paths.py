@@ -6,12 +6,37 @@ the news path: a broker symbol like XAUUSD must resolve to the same Yahoo symbol
 hit the right instrument instead of failing/mismatching.
 """
 import pandas as pd
+import pytest
 
 import tradingagents.agents.utils.agent_utils as au
 import tradingagents.dataflows.instrument_identity as identity_dataflow
 import tradingagents.dataflows.yfinance_news as ynews
 import tradingagents.graph.trading_graph as tg
+from tradingagents.dataflows.symbol_utils import market_timezone
 from tradingagents.graph.trading_graph import TradingAgentsGraph
+
+
+@pytest.mark.parametrize(
+    ("symbol", "timezone_name"),
+    (
+        ("JP225", "Asia/Tokyo"),
+        ("^N225", "Asia/Tokyo"),
+        ("HK50", "Asia/Hong_Kong"),
+        ("^HSI", "Asia/Hong_Kong"),
+        ("UK100", "Europe/London"),
+        ("^FTSE", "Europe/London"),
+        ("GER40", "Europe/Berlin"),
+        ("^GDAXI", "Europe/Berlin"),
+        ("FRA40", "Europe/Paris"),
+        ("EU50", "Europe/Paris"),
+        ("^NSEI", "Asia/Kolkata"),
+        ("^BSESN", "Asia/Kolkata"),
+        ("^GSPTSE", "America/Toronto"),
+        ("^AXJO", "Australia/Sydney"),
+    ),
+)
+def test_market_timezone_preserves_suffixless_index_identity(symbol, timezone_name):
+    assert market_timezone(symbol).key == timezone_name
 
 
 def test_identity_lookup_normalizes_symbol(monkeypatch):
