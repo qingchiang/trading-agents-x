@@ -1,427 +1,381 @@
-# trading-agents-x
+# TradingAgentsX
+
+<div align="center">
+
+**English** · [简体中文](docs/i18n/README.zh-CN.md) ·
+[日本語](docs/i18n/README.ja.md)
+
+</div>
 
 <div align="center" style="line-height: 1;">
   <a href="https://arxiv.org/abs/2412.20138" target="_blank"><img alt="arXiv" src="https://img.shields.io/badge/arXiv-2412.20138-B31B1B?logo=arxiv"/></a>
   <img alt="License" src="https://img.shields.io/badge/License-Apache_2.0-blue.svg"/>
 </div>
 
-A multi-agent LLM trading framework with first-class **Japanese-market (`.T`) data support** — J-Quants, EDINET, TDnet, and multi-region macro (FRED / e-Stat / BOJ) vendors wired through a generic suffix-based market-routing layer.
+A multi-agent LLM trading framework with first-class dataflows for US-listed
+securities, Japanese equities (`.T`), and Shanghai/Shenzhen A-shares
+(`.SS`/`.SZ`). Market-specific sources feed one common agent graph with explicit
+analysis-date boundaries, source provenance, and auditable fallbacks.
 
-> **Fork notice.** This is an independently maintained fork of [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) (Apache-2.0). It adds Japanese-market data vendors and market-aware routing on top of the upstream framework and does not track upstream releases one-to-one. For upstream release news and community, see the [upstream repository](https://github.com/TauricResearch/TradingAgents). Original attribution and license are retained — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+> **Fork notice.** This is an independently maintained fork of
+> [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents)
+> (Apache-2.0). It does not track upstream releases one-to-one. Upstream
+> attribution and licensing are retained in [LICENSE](LICENSE) and
+> [NOTICE](NOTICE).
 
 <div align="center">
 
-🚀 [Framework](#tradingagents-framework) | ⚡ [Installation & CLI](#installation-and-cli) | 🇯🇵 [Japanese Market](#japanese-market-support-this-fork) | 📦 [Package Usage](#tradingagents-package) | 📄 [Citation](#citation)
+[Overview](#overview) · [Markets](#market-support) ·
+[Installation](#installation) · [CLI](#cli-usage) ·
+[Japan](#japanese-market) · [China](#china-a-shares) ·
+[Python API](#python-api) · [Development](#development) ·
+[Architecture](docs/architecture.md) · [Changelog](CHANGELOG.md)
 
 </div>
 
-## TradingAgents Framework
+## Overview
 
-TradingAgents is a multi-agent trading framework that mirrors the dynamics of real-world trading firms. By deploying specialized LLM-powered agents: from fundamental analysts, sentiment experts, and technical analysts, to trader, risk management team, the platform collaboratively evaluates market conditions and informs trading decisions. Moreover, these agents engage in dynamic discussions to pinpoint the optimal strategy.
+TradingAgentsX models a small investment team: four analysts prepare market,
+fundamental, news, and sentiment evidence; bull and bear researchers debate it;
+a trader proposes a position; and a risk team and portfolio manager produce the
+final decision.
+
+```text
+analysts → bull/bear debate → research manager → trader
+         → risk debate → portfolio manager → reflection
+```
 
 <p align="center">
   <img src="assets/schema.png" style="width: 100%; height: auto;">
 </p>
 
-> TradingAgents framework is designed for research purposes. Trading performance may vary based on many factors, including the chosen backbone language models, model temperature, trading periods, the quality of data, and other non-deterministic factors. [It is not intended as financial, investment, or trading advice.](https://tauric.ai/disclaimer/)
+The framework supports interactive CLI runs and direct Python use. Analysts can
+be selected independently, LLM providers are configurable, completed decisions
+can feed a cross-run reflection log, and optional LangGraph checkpoints can
+resume interrupted analyses.
 
-Our framework decomposes complex trading tasks into specialized roles.
+> TradingAgentsX is a research framework. Its output is not financial,
+> investment, or trading advice. Results depend on model behavior, data quality,
+> timing, and configuration.
 
-### Analyst Team
-- Fundamentals Analyst: Evaluates company financials and performance metrics, identifying intrinsic values and potential red flags.
-- Sentiment Analyst: Aggregates news headlines, StockTwits, and Reddit chatter into a single sentiment read to gauge short-term market mood.
-- News Analyst: Monitors global news and macroeconomic indicators, interpreting the impact of events on market conditions.
-- Technical Analyst: Utilizes technical indicators (like MACD and RSI) to detect trading patterns and forecast price movements.
+## Market support
 
-<p align="center">
-  <img src="assets/analyst.png" width="100%" style="display: inline-block; margin: 0 2%;">
-</p>
+Internally, instruments use Yahoo-compatible canonical symbols. Supported
+aliases are normalized before market routing, so `600519` becomes
+`600519.SS`, `000001` becomes `000001.SZ`, and `600519.SH` becomes
+`600519.SS`. Unsupported or ambiguous six-digit mainland securities fail
+loudly instead of falling through to the US route.
 
-### Researcher Team
-- Comprises both bullish and bearish researchers who critically assess the insights provided by the Analyst Team. Through structured debates, they balance potential gains against inherent risks.
+| Market | Example | Dataflow |
+| --- | --- | --- |
+| US/default | `NVDA`, `SPY` | yfinance-based default route |
+| Japan | `7203.T` | J-Quants and Japanese disclosure sources, with configured fallbacks |
+| China A-shares | `600519.SS`, `000001.SZ` | Tencent/AkShare plus Chinese fundamentals, news, and macro sources |
+| Other Yahoo markets | `0700.HK`, `AZN.L`, `RELIANCE.NS` | Default Yahoo-compatible behavior; no dedicated local-market dataflow |
+| Crypto/FX | `BTC-USD`, `EURUSD=X` | Yahoo-compatible default route and supported aliases |
 
-<p align="center">
-  <img src="assets/researcher.png" width="70%" style="display: inline-block; margin: 0 2%;">
-</p>
+The dedicated China scope currently covers Shanghai and Shenzhen individual
+A-share equities. Beijing `.BJ`, Hong Kong `.HK`, ETFs, funds, options, and
+intraday/high-frequency China data are outside this phase.
 
-### Trader Agent
-- Composes reports from the analysts and researchers to make informed trading decisions, determining the timing and magnitude of trades.
+### Default source routing
 
-<p align="center">
-  <img src="assets/trader.png" width="70%" style="display: inline-block; margin: 0 2%;">
-</p>
+Arrows denote ordered fallback; sources in parentheses are assembled together.
 
-### Risk Management and Portfolio Manager
-- Continuously evaluates portfolio risk by assessing market volatility, liquidity, and other risk factors. The risk management team evaluates and adjusts trading strategies, providing assessment reports to the Portfolio Manager for final decision.
-- The Portfolio Manager approves/rejects the transaction proposal. If approved, the order will be sent to the simulated exchange and executed.
+| Market | Prices and indicators | Fundamentals and statements | Ticker news |
+| --- | --- | --- | --- |
+| US/default | yfinance | yfinance | yfinance |
+| Japan `.T` | J-Quants → yfinance | JP assemblers → J-Quants → yfinance | (EDINET + TDnet + Google News) → yfinance |
+| China `.SS`/`.SZ` | Tencent qfq → Eastmoney qfq → yfinance | (CNINFO + Sina) → yfinance | (CNINFO + Eastmoney Research + Google News) → yfinance |
 
-<p align="center">
-  <img src="assets/risk.png" width="70%" style="display: inline-block; margin: 0 2%;">
-</p>
+The global news analyst also receives a cross-region macro panel. US/global
+cells use FRED; Japanese cells use BOJ, e-Stat, Ministry of Finance, and FRED;
+Chinese cells use NBS, Eastmoney, SAFE, and a deliberately limited ChinaMoney
+fallback. A missing source disables only the cells it owns.
 
-## Installation and CLI
+See [docs/architecture.md](docs/architecture.md) for routing, caching,
+point-in-time, and failure contracts.
 
-### Installation
+### Data integrity and provenance
 
-Clone the repository:
+- Graph-facing tools receive the analysis date from workflow state. Historical
+  runs do not silently inject current snapshots from live-only sources.
+- Vendor chains are explicit. The router never adds an unconfigured fallback,
+  and assemblers own intentional multi-source composition.
+- Results retain requested and effective dates, actual sources, and timing or
+  fallback status as structured provenance.
+- Material fallback, stale data, missing or partial coverage, truncation, and
+  non-PIT/non-vintage limitations appear under `Data Quality Warnings`.
+  Successful empty news windows do not generate a warning.
+- Set `provenance_appendix = True` or
+  `TRADINGAGENTS_PROVENANCE_APPENDIX=true` to add the detailed English
+  `Data Provenance` table. Important warnings remain visible when it is off.
+
+## Installation
+
+Python 3.10 or newer is required.
+
 ```bash
 git clone https://github.com/qingchiang/trading-agents-x.git
 cd trading-agents-x
-```
 
-Create a virtual environment in any of your favorite environment managers:
-```bash
-conda create -n tradingagents python=3.12
-conda activate tradingagents
-```
-
-Install the package and its dependencies:
-```bash
+python -m venv .venv
+source .venv/bin/activate
 pip install .
+```
+
+For development, install the `dev` extra:
+
+```bash
+pip install -e ".[dev]"
 ```
 
 ### Docker
 
-Alternatively, run with Docker:
 ```bash
-cp .env.example .env  # add your API keys
+cp .env.example .env  # add the keys you use
 docker compose run --rm tradingagents
 ```
 
-For local models with Ollama:
+For the bundled Ollama service:
+
 ```bash
 docker compose --profile ollama run --rm tradingagents-ollama
 ```
 
-### Required APIs
+## Configuration
 
-TradingAgents supports multiple LLM providers. Set the API key for your chosen provider:
+Copy the environment template and configure one LLM provider:
 
-```bash
-export OPENAI_API_KEY=...          # OpenAI (GPT)
-export GOOGLE_API_KEY=...          # Google (Gemini)
-export ANTHROPIC_API_KEY=...       # Anthropic (Claude)
-export XAI_API_KEY=...             # xAI (Grok)
-export DEEPSEEK_API_KEY=...        # DeepSeek
-export DASHSCOPE_API_KEY=...       # Qwen — International (dashscope-intl.aliyuncs.com)
-export DASHSCOPE_CN_API_KEY=...    # Qwen — China (dashscope.aliyuncs.com)
-export ZHIPU_API_KEY=...           # GLM via Z.AI (international)
-export ZHIPU_CN_API_KEY=...        # GLM via BigModel (China, open.bigmodel.cn)
-export MINIMAX_API_KEY=...         # MiniMax — Global (api.minimax.io)
-export MINIMAX_CN_API_KEY=...      # MiniMax — China (api.minimaxi.com)
-export OPENROUTER_API_KEY=...      # OpenRouter
-export ALPHA_VANTAGE_API_KEY=...   # Alpha Vantage
-```
-
-Japanese-market (`.T`) data uses its own keys (J-Quants, EDINET, e-Stat) — see [Japanese Market Support](#japanese-market-support-this-fork) below. All are optional; without them `.T` tickers fall back to yfinance.
-
-For Azure OpenAI, copy `.env.enterprise.example` to `.env.enterprise` and fill in your credentials.
-
-For AWS Bedrock, install the extra with `pip install ".[bedrock]"`, set `llm_provider: "bedrock"`, configure AWS credentials (environment variables, `~/.aws/credentials`, or an IAM role) and `AWS_DEFAULT_REGION`, and use a Bedrock model ID, e.g. `us.anthropic.claude-opus-4-8-v1:0`.
-
-For local models, configure Ollama with `llm_provider: "ollama"`. The default endpoint is `http://localhost:11434/v1`; set `OLLAMA_BASE_URL` to point at a remote `ollama-serve`. Pull models with `ollama pull <name>`, and pick "Custom model ID" in the CLI for any model not listed by default.
-
-For any other OpenAI-compatible server (vLLM, LM Studio, llama.cpp, or a custom relay), use `llm_provider: "openai_compatible"` and set the endpoint via `backend_url` (or `TRADINGAGENTS_LLM_BACKEND_URL`), e.g. `http://localhost:8000/v1` for vLLM or `http://localhost:1234/v1` for LM Studio. The model is whatever your server serves. No key is needed for local servers; set `OPENAI_COMPATIBLE_API_KEY` when the endpoint requires one.
-
-Alternatively, copy `.env.example` to `.env` and fill in your keys:
 ```bash
 cp .env.example .env
 ```
 
-### CLI Usage
+Native clients are available for OpenAI, Anthropic, Google, Azure OpenAI, and
+Amazon Bedrock. The OpenAI-compatible registry covers xAI, DeepSeek, Qwen, GLM,
+MiniMax, OpenRouter, Mistral, Kimi, Groq, NVIDIA NIM, Ollama, and arbitrary
+compatible endpoints such as vLLM or LM Studio. See [.env.example](.env.example)
+for provider-specific variables.
 
-Launch the interactive CLI:
-```bash
-tradingagents          # installed command
-python -m cli.main     # alternative: run directly from source
-```
-You will see a screen where you can select your desired tickers, analysis date, LLM provider, research depth, and more.
+Amazon Bedrock requires `pip install ".[bedrock]"`. Azure users can start from
+`.env.enterprise.example`. Ollama defaults to `http://localhost:11434/v1` and
+can be redirected with `OLLAMA_BASE_URL`.
 
-### Markets and tickers
+Common examples:
 
-TradingAgents works with any market Yahoo Finance covers, using the exchange-suffixed ticker. Company identity and the alpha benchmark resolve automatically per market.
-
-- US: `AAPL`, `SPY`
-- Hong Kong: `0700.HK` · Tokyo: `7203.T` · London: `AZN.L`
-- India: `RELIANCE.NS`, `.BO` · Canada: `.TO` · Australia: `.AX`
-- China A-shares: Shanghai `.SS`, Shenzhen `.SZ` (e.g. `600519.SS` for Kweichow Moutai); supported bare six-digit stock codes are normalized at entry (`600519` → `600519.SS`, `000001` → `000001.SZ`)
-- Crypto: `BTC-USD`, `ETH-USD`
-
-<p align="center">
-  <img src="assets/cli/cli_init.png" width="100%" style="display: inline-block; margin: 0 2%;">
-</p>
-
-An interface will appear showing results as they load, letting you track the agent's progress as it runs.
-
-<p align="center">
-  <img src="assets/cli/cli_news.png" width="100%" style="display: inline-block; margin: 0 2%;">
-</p>
-
-<p align="center">
-  <img src="assets/cli/cli_transaction.png" width="100%" style="display: inline-block; margin: 0 2%;">
-</p>
-
-## Japanese Market Support (this fork)
-
-Yahoo Finance covers `.T` tickers only thinly (adjusted OHLC, sparse fundamentals, English-only news). This fork routes Tokyo tickers to **native Japanese data sources** across all four analysts, wired through the generic suffix-based routing layer:
-
-| Analyst | Source | What it adds over the Yahoo baseline |
-|---|---|---|
-| Market / technicals | **J-Quants** `/equities/bars/daily` | Official TSE prices, indicators, and vendor-routed verified snapshots with explicit source labels |
-| Fundamentals | **J-Quants** `/fins/summary` + assemblers | Disclosure-date-safe ratios, deduplicated/accounting-labelled summaries, and live-only curated statement detail |
-| News | **EDINET** + **TDnet 適時開示** + **Google News (ja)** + **J-Quants** section flows | Statutory filings, timely disclosures, Japanese-language media, and clearly labelled Prime/Standard/Growth market context that is never attributed to the ticker |
-| Sentiment | **J-Quants** per-stock margin / short-sale + **EDINET** 大量保有 & 公開買付 (TOB) | Per-company positioning and filings in place of US-retail social feeds; exchange-wide investor flows are intentionally excluded |
-| Macro | **FRED** + **e-Stat** + **BOJ** | Cross-region backdrop (JP equities move on the Fed, China, and the BOJ), disk-cached across runs |
-
-**Configuration.** Add the free keys to `.env` (see `.env.example`):
-
-```bash
-export JQUANTS_API_KEY=...   # J-Quants v2 — prices, fundamentals, sentiment signals (https://jpx-jquants.com/)
-export EDINET_API_KEY=...    # EDINET — statutory disclosures + large-shareholding / TOB (https://api.edinet-fsa.go.jp/)
-export ESTAT_APP_ID=...      # e-Stat — Japanese CPI for the macro panel (https://www.e-stat.go.jp/api/)
-export FRED_API_KEY=...      # FRED — US/global macro (https://fred.stlouisfed.org/docs/api/api_key.html)
+```dotenv
+OPENAI_API_KEY=...
+ANTHROPIC_API_KEY=...
+GOOGLE_API_KEY=...
+DEEPSEEK_API_KEY=...
+OPENROUTER_API_KEY=...
 ```
 
-J-Quants plan tiers: the **Light** plan covers prices, `/fins/summary`, and exchange-section investor flows — enough for market, fundamentals, and News regional context. The **Standard** plan additionally unlocks the per-ticker margin-balance and short-position sentiment signals. The **Premium** plan is *not* required (line-item `/fins/details` is intentionally unused).
+For an arbitrary compatible endpoint, use `llm_provider =
+"openai_compatible"`, set `backend_url` (or
+`TRADINGAGENTS_LLM_BACKEND_URL`), and provide
+`OPENAI_COMPATIBLE_API_KEY` only when the endpoint requires one.
 
-**Graceful fallback — nothing is mandatory.** The JP vendors are *additive*: each degrades to the configured fallback rather than crashing.
-- No `JQUANTS_API_KEY` → prices and near-live fundamentals can fall back to **yfinance** (Yahoo data, English); historical `.T` statements fail closed because Yahoo does not expose filing timestamps.
-- No `EDINET_API_KEY` → the news assembler drops the filings segment but still returns Google-News media (which needs no key); if every source is empty it falls back to yfinance.
-- On the **Light** plan → the Standard-only margin/short signals are simply omitted; the remaining sentiment signals still populate.
-- Missing macro keys → the macro panel degrades to a sentinel (macro is an optional category), never blocking a run.
+### Optional market-data keys
 
-**What this fork optimizes.**
-- **Historical runs fail closed for live-only data.** JP official sources remain look-ahead-safe, and historical runs do not query current StockTwits, Reddit, Polymarket, yfinance `.info`, Alpha Vantage `OVERVIEW`, or yfinance `.T` statement frames without filing timestamps. Graph-facing Market, News, and Fundamentals tools inject the analysis date from workflow state, so the LLM cannot omit or override an end/current date; ticker news exposes only a recent/extended window choice, never a model-supplied date. Direct statement calls that omit a date retain live-retrieval compatibility and are labelled as such. Yahoo ticker news compares publication timestamps in the exchange-local calendar for supported suffixes, New York for unsuffixed US securities, and UTC for crypto; near-live social messages use the same requested-date principle.
+China's initial dataflow is keyless. Japanese sources degrade independently, so
+none of the following keys is mandatory:
 
-- **Analyst data retains deterministic provenance metadata.** Actual tool results and prefetched blocks carry internal source, cutoff, effective-date, and timing records before temporary messages are cleared. Material fallback, availability, coverage, and point-in-time limitations always render under `Data Quality Warnings`; routine successful empty windows do not warn. Set `provenance_appendix = True` to additionally append the full records to Market, Fundamentals, News, and Sentiment reports as an English `Data Provenance` audit table. JP fundamentals distinguish the J-Quants official summary from optional yfinance live detail, and a live analysis may truthfully show an analysis date later than the latest completed trading session.
-- **More accurate data.** Official J-Quants prices and `/fins/summary` fundamentals replace Yahoo's thin `.T` coverage; the fundamentals assembler computes valuation ratios and a TOPIX-weekly beta on a proper Japanese benchmark, deduplicates repeated period disclosures, and labels IFRS/GAAP scope explicitly.
-- **Signal, not noise.** Yahoo ticker news and Google News JP default to the configured lookback offset (`14` means 15 inclusive calendar dates); News Analyst may manually replace that result with an extended query whose baseline is 90 dates and which never shortens a longer configured recent range. Explicit ticker/full-name evidence is `[direct]`, ambiguous names/tickers and summary-only mentions are `[candidate]`, and `[context]` remains external background. For JP extended queries, Google receives the full graph range, EDINET is capped to 90 dates, and TDnet is truthfully capped to its free rolling 31-date archive using the Tokyo calendar date. EDINET's all-market daily document lists are shared by news and 90-date holdings/TOB scans through a bounded memory + gzip disk cache; Tokyo's current day remains short-TTL memory-only. Fast-decaying StockTwits/Reddit sentiment and global macro news remain at their shorter defaults.
-- **Point-in-time-safe identity.** Live analysis can use rich yfinance `.info` identity fields. Historical graph startup and news alias resolution use exact-symbol `yf.Search` metadata instead, so current sector/industry cannot leak into a backtest.
-
-See [docs/architecture.md](docs/architecture.md) for the full vendor
-architecture.
-
-## China A-share Support (this fork)
-
-The first China-market release supports Shanghai and Shenzhen individual stocks.
-It does not yet cover Beijing `.BJ`, Hong Kong `.HK`, ETFs, funds, options, or
-intraday/high-frequency data. A-share market data uses **AkShare first** and
-**yfinance as the configured fallback**; inside AkShare's price adapter, Tencent
-qfq history is primary and Eastmoney qfq history is a cold fallback. AkShare is
-installed with the default project dependencies.
-
-- Price history and technical indicators use forward-adjusted (`qfq`) OHLCV so
-  the verified snapshot and derived indicators share one price basis. Results
-  report the actual source and effective trading date, and stale suspended or
-  delisted data is not presented as a current quote. A normal technical warmup
-  uses one bounded Tencent request (up to 640 bars); longer windows paginate
-  backward only when necessary. Source fallback always replaces the whole
-  requested window because adjustment factors can differ between providers.
-- Company profiles, financial abstracts, statements, announcements, research,
-  media news, and A-share-specific sentiment evidence are assembled from Chinese
-  sources with per-source provenance. Historical data without a defensible
-  publication timestamp fails closed or is explicitly labelled non-PIT. Sell-side
-  rating/target signals prefer the directly parsed Sina institutional-rating page
-  and fall back to Eastmoney research. Structured Eastmoney holding-change feeds
-  use exact-code CNINFO announcements only when a feed fails. CNINFO and Eastmoney
-  low-frequency candidates share a bounded 90-date, same-cutoff memory cache, so
-  news and sentiment reuse one response without crossing an analysis-date boundary.
-- The global macro panel adds China 1-year LPR, 10-year government yield, CPI,
-  GDP growth, surveyed urban unemployment, official manufacturing PMI, and
-  USD/CNY central parity. These keyless cells remain available without a
-  `FRED_API_KEY`; only FRED-owned US/global cells become `n/a`.
-
-China macro timing is not uniform. LPR, bond yield, and USD/CNY are filtered by
-trade date. CPI, GDP, PMI, and unemployment prefer the latest eligible official
-NBS release, with the release date and observation period recorded separately;
-GDP also records that the displayed headline is cumulative year-to-date YoY.
-The bounded NBS lookup covers recent release-index pages, so older historical
-windows may be unavailable. CPI/GDP/PMI then fall back to Eastmoney values that
-are filtered only by observation period and explicitly marked **non-vintage**:
-upstream revisions or later publication timing can make that fallback unsuitable
-for strict point-in-time backtests. Memory/disk caching avoids repeated requests
-for the same analysis window.
-
-AkShare and the keyless China assemblers depend on public upstream web endpoints.
-Those sites can change columns, pagination, or anti-bot behavior without notice.
-Such failures are validated and degraded per source/cell rather than globally,
-but production users should monitor provenance and freshness instead of treating
-a successful HTTP response as proof that data is current.
-
-Maintainers can run the opt-in, serial low-frequency endpoint contracts with:
-
-```bash
-RUN_LIVE_DATA_TESTS=1 PYTHON_DOTENV_DISABLED=1 uv run --extra dev pytest -q -m live_data
+```dotenv
+JQUANTS_API_KEY=...  # prices, summaries, and plan-dependent positioning data
+EDINET_API_KEY=...   # statutory filings, holdings, and tender offers
+ESTAT_APP_ID=...     # Japanese CPI series
+FRED_API_KEY=...     # US/global macro and selected Japanese fallback series
 ```
 
-The suite checks schemas, completed-date cutoffs, broad value ranges, actual
-sources, and audited fallbacks without pinning prices or row counts. Its terminal
-summary records each endpoint's status, source, latest observation, and latency.
-Default pytest and CI collect but skip these network checks.
+## CLI usage
 
-## TradingAgents Package
+```bash
+tradingagents
+# or
+python -m cli.main
+```
 
-### Implementation Details
+The CLI lets you select a ticker, analysis date, analysts, research depth, and
+LLM provider. The same canonical symbol and market route are used by the CLI and
+the Python graph.
 
-We built TradingAgents with LangGraph to ensure flexibility and modularity. The framework supports multiple LLM providers: OpenAI, Google, Anthropic, xAI, DeepSeek, Qwen (Alibaba DashScope, international and China endpoints), GLM (Zhipu), MiniMax (global + China), OpenRouter, Ollama for local models, and Azure OpenAI for enterprise.
+<p align="center">
+  <img src="assets/cli/cli_init.png" width="100%" style="display: inline-block;">
+</p>
 
-### Python Usage
+## Japanese market
 
-To use TradingAgents inside your code, you can import the `tradingagents` module and initialize a `TradingAgentsGraph()` object. The `.propagate()` function will return a decision. You can run `main.py`, here's also a quick example:
+Tokyo tickers use local sources across all four analysts instead of relying on
+Yahoo's thinner English-language coverage.
+
+| Area | Primary evidence |
+| --- | --- |
+| Market/technicals | J-Quants v2 adjusted daily bars and verified snapshots |
+| Fundamentals | J-Quants summaries, disclosure-safe ratios, TOPIX-weekly beta, curated near-live statement detail |
+| News | EDINET filings, TDnet timely disclosures, Google News Japan, and labelled exchange-section context |
+| Sentiment | Per-stock margin/short data, EDINET large-shareholding and tender-offer filings, live-only ratings |
+| Macro | BOJ policy/Tankan, e-Stat CPI, MOF daily JGB yields, and FRED fallbacks |
+
+J-Quants Light covers prices, summaries, and exchange-section flows. Standard
+also unlocks per-ticker margin and short-position signals; Premium is not
+required. Without a J-Quants key, prices and near-live fundamentals can fall
+back to yfinance. Historical statements fail closed when the fallback lacks
+filing timestamps. Without EDINET, other news sources continue independently.
+
+Japanese historical paths enforce publication dates where available. The
+current-day EDINET list stays short-lived, settled filing lists use bounded disk
+caches, and Ministry of Finance yield data observes its next-business-day
+09:30 JST publication boundary before entering an analysis.
+
+## China A-shares
+
+The current China scope targets low-frequency analysis of Shanghai and Shenzhen
+individual stocks.
+
+| Area | Primary evidence |
+| --- | --- |
+| Market/technicals | Tencent forward-adjusted (`qfq`) OHLCV; Eastmoney then yfinance fallback |
+| Fundamentals | CNINFO company profile plus disclosure-filtered Sina abstracts and statements |
+| News | Exact-code CNINFO announcements, Eastmoney research, and Chinese Google News |
+| Sentiment | SSE/SZSE margin data, holding changes, ratings/targets, and important announcements |
+| Macro | 1Y LPR, China 10Y, CPI, GDP, unemployment, manufacturing PMI, and USD/CNY parity |
+
+Prices, verified snapshots, and indicators share one qfq history. The normal
+technical warm-up fits in one bounded Tencent request; longer histories paginate
+only when needed. A fallback replaces the whole requested window because
+adjustment factors can differ between providers.
+
+Company evidence is assembled per source and keeps separate provenance.
+Historical data without defensible visibility metadata fails closed or is
+labelled non-PIT. Low-frequency CNINFO and Eastmoney candidates share a bounded,
+same-cutoff cache so News and Sentiment can reuse results without crossing an
+analysis-date boundary.
+
+China macro timing varies by source. NBS releases preserve both publication date
+and observation period; GDP is cumulative year-to-date YoY. CPI, GDP, and PMI
+fall back to observation-period-filtered Eastmoney series only when an eligible
+recent NBS release is unavailable, and that fallback is explicitly non-vintage.
+SAFE is primary for USD/CNY central parity. ChinaMoney is limited to a latest
+curve snapshot fallback and is not expanded into a historical crawler.
+
+AkShare and the keyless China assemblers depend on public web endpoints. Their
+schemas, pagination, and anti-bot behavior can change without notice. Production
+users should monitor effective dates, actual sources, and quality warnings rather
+than treating HTTP success as proof of freshness.
+
+## Python API
 
 ```python
-from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
-
-ta = TradingAgentsGraph(debug=True, config=DEFAULT_CONFIG.copy())
-
-# forward propagate
-_, decision = ta.propagate("NVDA", "2026-01-15")
-print(decision)
-```
-
-You can also adjust the default configuration to set your own choice of LLMs, debate rounds, etc.
-
-```python
 from tradingagents.graph.trading_graph import TradingAgentsGraph
-from tradingagents.default_config import DEFAULT_CONFIG
 
 config = DEFAULT_CONFIG.copy()
-config["llm_provider"] = "openai"        # e.g. openai, google, anthropic, deepseek, groq, ollama; openai_compatible covers any OpenAI-compatible endpoint (vLLM, LM Studio, llama.cpp, ...)
-config["deep_think_llm"] = "gpt-5.5"     # Model for complex reasoning
-config["quick_think_llm"] = "gpt-5.4-mini" # Model for quick tasks
+config["llm_provider"] = "openai"
+config["quick_think_llm"] = "gpt-5.4-mini"
+config["deep_think_llm"] = "gpt-5.5"
 config["quick_reasoning_effort"] = "low"
 config["deep_reasoning_effort"] = "high"
-config["max_debate_rounds"] = 2
 
-ta = TradingAgentsGraph(debug=True, config=config)
-_, decision = ta.propagate("NVDA", "2026-01-15")
+graph = TradingAgentsGraph(debug=True, config=config)
+final_state, decision = graph.propagate("600519", "2026-07-17")
 print(decision)
 ```
 
-See `tradingagents/default_config.py` for all configuration options.
-
-Detailed `Data Provenance` tables are disabled by default to keep analyst and
-downstream-agent context concise. Enable them for debugging/auditing with
-`provenance_appendix = True` in the config or
-`TRADINGAGENTS_PROVENANCE_APPENDIX=true` in the environment. Material source,
-fallback, coverage, date, and point-in-time limitations remain visible under
-`Data Quality Warnings` even when the detailed table is disabled.
+`propagate()` returns `(final_state, decision)`. See
+`tradingagents/default_config.py` for all configuration options.
 
 ### Reasoning effort by role
 
-The `quick_reasoning_effort` and `deep_reasoning_effort` config keys shown above
-control reasoning depth independently for the two roles. For CLI or unattended
-runs, set their environment-variable equivalents in `.env`:
+`quick_reasoning_effort` and `deep_reasoning_effort` configure the two model
+roles independently. Their environment equivalents are:
 
 ```dotenv
 TRADINGAGENTS_QUICK_REASONING_EFFORT=low
 TRADINGAGENTS_DEEP_REASONING_EFFORT=high
 ```
 
-Each role uses this precedence: role-specific value, then the selected
-provider's legacy shared key (`TRADINGAGENTS_OPENAI_REASONING_EFFORT`,
-`TRADINGAGENTS_GOOGLE_THINKING_LEVEL`, or `TRADINGAGENTS_ANTHROPIC_EFFORT`),
-then the provider default. Use `provider_default` to explicitly omit the native
-SDK parameter and block legacy fallback. Values are provider-native and are not
-translated between providers. OpenAI/OpenAI-compatible/Azure and DeepSeek send
-`reasoning_effort`, Google sends `thinking_level`, and Anthropic sends `effort`.
+Role-specific values take precedence over legacy provider-wide settings. Use
+`provider_default` to omit the native SDK parameter and block legacy fallback.
+Supported levels remain provider- and model-specific; the CLI catalog is the
+source of truth for curated choices.
 
-DeepSeek V4 accepts the effective levels `high` and `max`. Thinking mode is
-enabled by default for V4; these role settings control its effort only and do
-not toggle thinking mode. The non-thinking alias `deepseek-chat`, scheduled for
-deprecation on 2026-07-24, does not receive `reasoning_effort`.
+## Persistence and recovery
 
-The OpenAI CLI catalog includes GPT-5.6 Luna and Terra for quick work and
-GPT-5.6 Sol and Terra for deep work. `gpt-5.6` aliases Sol; the four GPT-5.6 IDs
-support `none`, `low`, `medium`, `high`, `xhigh`, and `max`. The default models
-remain `gpt-5.4-mini` and `gpt-5.5`.
+Completed runs append decisions to
+`~/.tradingagents/memory/trading_memory.md`. A later run for the same ticker can
+compare realized raw and benchmark-relative returns and inject a short reflection
+into the portfolio-manager context. Override the path with
+`TRADINGAGENTS_MEMORY_LOG_PATH`.
 
-## Persistence and Recovery
-
-TradingAgents persists two kinds of state across runs.
-
-### Decision log
-
-The decision log is always on. Each completed run appends its decision to `~/.tradingagents/memory/trading_memory.md`. On the next run for the same ticker, TradingAgents fetches the realised return (raw and alpha vs the ticker's market benchmark — SPY for US, the Nikkei 225 for `.T`, resolved per market via `benchmark_map`), generates a one-paragraph reflection, and injects the most recent same-ticker decisions plus recent cross-ticker lessons into the Portfolio Manager prompt, so each analysis carries forward what worked and what didn't.
-
-Override the path with `TRADINGAGENTS_MEMORY_LOG_PATH`.
-
-### Checkpoint resume
-
-Checkpoint resume is opt-in via `--checkpoint`. When enabled, LangGraph saves state after each node so a crashed or interrupted run resumes from the last successful step instead of starting over. On a resume run you will see `Resuming from step N for <TICKER> on <date>` in the logs; on a new run you will see `Starting fresh`. Checkpoints are cleared automatically on successful completion.
-
-Per-ticker SQLite databases live at `~/.tradingagents/cache/checkpoints/<TICKER>.db` (override the base with `TRADINGAGENTS_CACHE_DIR`). Use `--clear-checkpoints` to reset all of them before a run.
+Checkpoint resume is opt-in:
 
 ```bash
-tradingagents analyze --checkpoint           # enable for this run
-tradingagents analyze --clear-checkpoints    # reset before running
+tradingagents analyze --checkpoint
+tradingagents analyze --clear-checkpoints
 ```
 
-```python
-config = DEFAULT_CONFIG.copy()
-config["checkpoint_enabled"] = True
-ta = TradingAgentsGraph(config=config)
-_, decision = ta.propagate("NVDA", "2026-01-15")
-```
+Per-ticker SQLite checkpoints live under
+`~/.tradingagents/cache/checkpoints/`; override the base with
+`TRADINGAGENTS_CACHE_DIR`. Successful runs clear their checkpoints.
 
 ## Reproducibility
 
-TradingAgents is LLM-driven, so two runs of the same ticker and date can differ. This is expected for a research tool built on language models, not a defect. The variation comes from a few distinct sources, and it helps to separate them.
+LLM sampling and live data make byte-identical reruns unlikely. Historical runs
+reduce one major source of drift by excluding live-only social, identity, and
+statement snapshots. Exact company identity, canonical symbols, verified market
+snapshots, source provenance, and date cutoffs are deterministic for a given
+retrieved payload.
 
-Language model sampling is non-deterministic. Even at a fixed temperature, providers do not guarantee byte-identical output across calls, and reasoning models (the default GPT-5.x family, and any thinking-mode model) vary the most because their internal reasoning is itself sampled.
+Lowering `temperature` can help only for models that honor it; reasoning models
+often do not. Treat the framework as a research scaffold rather than a strategy
+with a fixed, reproducible return.
 
-Live data moves. News and other live feeds can return different content as time passes. For historical trade dates the framework now skips StockTwits, Reddit, and yfinance `.info` instead of injecting current data. For dates inside the five-day live window, social messages are filtered to the requested start/end dates, though the public feed sample itself can still change between retrievals.
+## Development
 
-To reduce variation you can lower the sampling temperature. Set `temperature` in your config (or `TRADINGAGENTS_TEMPERATURE` in `.env`); lower values make models that honor it more repeatable. The current curated models are reasoning-first and largely ignore temperature, so for tighter reproducibility use a non-reasoning model, which you can set explicitly via the Custom model ID option.
-
-```python
-config = DEFAULT_CONFIG.copy()
-config["llm_provider"] = "openai"
-config["temperature"] = 0.0
-# Reasoning models ignore temperature. For tighter reproducibility, set a
-# non-reasoning deep/quick model explicitly (e.g. via the Custom model ID option).
-```
-
-What does not vary anymore: the analyzed company identity is resolved deterministically from the ticker before any agent runs, and the market analyst grounds exact price and indicator claims in a verified data snapshot routed through the configured technical vendor chain. The snapshot always labels the actual source, including fallback.
-
-Backtest results are not guaranteed to match any published figure. Returns depend on the model, the temperature, the date range, data quality, and the sampling above. Treat the framework as a research scaffold for studying multi-agent analysis, not as a strategy with a fixed, replicable return.
-
-## Contributing
-
-Contributions are welcome: bug fixes, documentation, and feature ideas; past contributions are credited per release in [`CHANGELOG.md`](CHANGELOG.md).
-
-### Testing
-
-The default test suite disables project dotenv loading and replaces API
-credentials with placeholders before test modules are collected. It never runs
-live LLM calls.
+The default suite disables project dotenv loading, substitutes placeholder
+credentials, and skips all live network contracts.
 
 ```bash
 PYTHON_DOTENV_DISABLED=1 uv run --extra dev pytest -q
 PYTHON_DOTENV_DISABLED=1 uv run --extra dev ruff check .
 ```
 
-The DeepSeek wire-level integration test is opt-in. It runs only when both the
-flag and key are explicitly supplied by the launching shell or secret manager:
+Cross-market live-data contracts are opt-in and serial:
+
+```bash
+RUN_LIVE_DATA_TESTS=1 PYTHON_DOTENV_DISABLED=1 \
+  uv run --extra dev pytest -q -m live_data
+```
+
+The live suite validates schemas, completed-date cutoffs, broad value ranges,
+actual sources, and audited fallbacks without pinning exact prices or row counts.
+Default pytest and CI collect but skip it.
+
+The DeepSeek wire-level integration test is separately opt-in:
 
 ```bash
 RUN_LIVE_LLM_TESTS=1 DEEPSEEK_API_KEY=... \
   uv run --extra dev pytest -q tests/test_deepseek_reasoning.py -m integration
 ```
 
+Contributions are welcome. See [AGENTS.md](AGENTS.md) for shared development
+rules, [docs/architecture.md](docs/architecture.md) for durable design
+contracts, and [CHANGELOG.md](CHANGELOG.md) for release history.
+
 ## Citation
 
-Please reference our work if you find *TradingAgents* provides you with some help :)
+Please cite the original TradingAgents paper when this framework supports your
+work:
 
-```
+```bibtex
 @misc{xiao2025tradingagentsmultiagentsllmfinancial,
-      title={TradingAgents: Multi-Agents LLM Financial Trading Framework}, 
+      title={TradingAgents: Multi-Agents LLM Financial Trading Framework},
       author={Yijia Xiao and Edward Sun and Di Luo and Wei Wang},
       year={2025},
       eprint={2412.20138},
       archivePrefix={arXiv},
       primaryClass={q-fin.TR},
-      url={https://arxiv.org/abs/2412.20138}, 
+      url={https://arxiv.org/abs/2412.20138},
 }
 ```

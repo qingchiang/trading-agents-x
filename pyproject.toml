@@ -8,7 +8,7 @@ name = "trading-agents-x"
 # upstream release this fork is synced to (0.3.1); +jp.N marks fork builds on
 # that base. Bump the base on the next upstream sync, .N on fork-only changes.
 version = "0.3.1+jp.1"
-description = "Multi-agent LLM trading framework with Japanese-market (J-Quants/EDINET/TDnet) data support — a fork of TradingAgents"
+description = "TradingAgentsX: multi-agent LLM research with US, Japan, and China A-share dataflows — a fork of TradingAgents"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -45,7 +45,7 @@ dev = [
     "pytest-subtests>=0.13",
 ]
 # Amazon Bedrock support (AWS SigV4 auth + boto3). Optional so the core install
-# stays lean: pip install "tradingagents[bedrock]".
+# stays lean: pip install "trading-agents-x[bedrock]".
 bedrock = [
     "langchain-aws>=1.5.0",
 ]

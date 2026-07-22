@@ -1,4 +1,4 @@
-# TradingAgents/graph/trading_graph.py
+# tradingagents/graph/trading_graph.py
 
 import json
 import logging

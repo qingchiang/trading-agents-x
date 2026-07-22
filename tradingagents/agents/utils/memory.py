@@ -1,4 +1,4 @@
-"""Append-only markdown decision log for TradingAgents."""
+"""Append-only markdown decision log for TradingAgentsX."""
 
 import re
 from pathlib import Path
