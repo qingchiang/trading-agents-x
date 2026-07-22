@@ -198,7 +198,8 @@ J-Quants plan tiers: the **Light** plan covers prices, `/fins/summary`, and exch
 - **Signal, not noise.** Yahoo ticker news and Google News JP default to the configured lookback offset (`14` means 15 inclusive calendar dates); News Analyst may manually replace that result with an extended query whose baseline is 90 dates and which never shortens a longer configured recent range. Explicit ticker/full-name evidence is `[direct]`, ambiguous names/tickers and summary-only mentions are `[candidate]`, and `[context]` remains external background. For JP extended queries, Google receives the full graph range, EDINET is capped to 90 dates, and TDnet is truthfully capped to its free rolling 31-date archive using the Tokyo calendar date. EDINET's all-market daily document lists are shared by news and 90-date holdings/TOB scans through a bounded memory + gzip disk cache; Tokyo's current day remains short-TTL memory-only. Fast-decaying StockTwits/Reddit sentiment and global macro news remain at their shorter defaults.
 - **Point-in-time-safe identity.** Live analysis can use rich yfinance `.info` identity fields. Historical graph startup and news alias resolution use exact-symbol `yf.Search` metadata instead, so current sector/industry cannot leak into a backtest.
 
-See [CLAUDE.md](CLAUDE.md) for the full vendor architecture.
+See [docs/architecture.md](docs/architecture.md) for the full vendor
+architecture.
 
 ## China A-share Support (this fork)
 
