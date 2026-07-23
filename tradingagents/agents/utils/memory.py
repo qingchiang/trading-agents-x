@@ -4,6 +4,29 @@ import re
 from pathlib import Path
 
 from tradingagents.agents.utils.rating import parse_rating
+from tradingagents.dataflows.symbol_utils import crypto_base, market_timezone
+
+
+def _coerce_non_negative_int(
+    value,
+    *,
+    name: str,
+    default: int | None,
+) -> int | None:
+    """Return a non-negative integer config value, preserving ``None``."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a non-negative integer, not {value!r}")
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, str) and re.fullmatch(r"[+-]?\d+", value.strip()):
+        parsed = int(value)
+    else:
+        raise ValueError(f"{name} must be a non-negative integer, got {value!r}")
+    if parsed < 0:
+        raise ValueError(f"{name} must be >= 0, got {parsed}")
+    return parsed
 
 
 class TradingMemoryLog:
@@ -11,6 +34,8 @@ class TradingMemoryLog:
 
     # HTML comment: cannot appear in LLM prose output, safe as a hard delimiter
     _SEPARATOR = "\n\n<!-- ENTRY_END -->\n\n"
+    _DEFAULT_MAX_ENTRIES = 1000
+    _DEFAULT_CROSS_TICKER_LIMIT = 3
     # Precompiled patterns — avoids re-compilation on every load_entries() call
     _DECISION_RE = re.compile(r"DECISION:\n(.*?)(?=\nREFLECTION:|\Z)", re.DOTALL)
     _REFLECTION_RE = re.compile(r"REFLECTION:\n(.*?)$", re.DOTALL)
@@ -22,8 +47,20 @@ class TradingMemoryLog:
         if path:
             self._log_path = Path(path).expanduser()
             self._log_path.parent.mkdir(parents=True, exist_ok=True)
-        # Optional cap on resolved entries. None disables rotation.
-        self._max_entries = cfg.get("memory_log_max_entries")
+        # Global cap on resolved entries. Pending entries are never pruned.
+        self._max_entries = _coerce_non_negative_int(
+            cfg.get("memory_log_max_entries", self._DEFAULT_MAX_ENTRIES),
+            name="memory_log_max_entries",
+            default=None,
+        )
+        self._cross_ticker_limit = _coerce_non_negative_int(
+            cfg.get(
+                "memory_cross_ticker_limit",
+                self._DEFAULT_CROSS_TICKER_LIMIT,
+            ),
+            name="memory_cross_ticker_limit",
+            default=self._DEFAULT_CROSS_TICKER_LIMIT,
+        )
 
     # --- Write path (Phase A) ---
 
@@ -32,19 +69,39 @@ class TradingMemoryLog:
         ticker: str,
         trade_date: str,
         final_trade_decision: str,
+        *,
+        asset_type: str | None = None,
     ) -> None:
         """Append pending entry at end of propagate(). No LLM call."""
         if not self._log_path:
             return
         # Idempotency guard: fast raw-text scan instead of full parse
+        raw = ""
         if self._log_path.exists():
             raw = self._log_path.read_text(encoding="utf-8")
             for line in raw.splitlines():
                 if line.startswith(f"[{trade_date} | {ticker} |") and line.endswith("| pending]"):
                     return
+            # A newly appended pending entry does not affect the resolved cap,
+            # but applying rotation here bounds legacy oversized logs even when
+            # no outcome happens to be resolved during this run.
+            blocks = raw.split(self._SEPARATOR)
+            rotated = self._apply_rotation(blocks)
+            if rotated != blocks:
+                self._write_blocks(rotated)
+
+        normalized_asset_type = self._asset_type(ticker, asset_type)
+        market = self._market(ticker, normalized_asset_type)
         rating = parse_rating(final_trade_decision)
         tag = f"[{trade_date} | {ticker} | {rating} | pending]"
-        entry = f"{tag}\n\nDECISION:\n{final_trade_decision}{self._SEPARATOR}"
+        metadata_fields = [f"asset_type={normalized_asset_type}"]
+        if market is not None:
+            metadata_fields.append(f"market={market}")
+        metadata = f"META: {' | '.join(metadata_fields)}"
+        entry = (
+            f"{tag}\n\n{metadata}\n\nDECISION:\n"
+            f"{final_trade_decision}{self._SEPARATOR}"
+        )
         with open(self._log_path, "a", encoding="utf-8") as f:
             f.write(entry)
 
@@ -67,19 +124,45 @@ class TradingMemoryLog:
         """Return entries with outcome:pending (for Phase B)."""
         return [e for e in self.load_entries() if e.get("pending")]
 
-    def get_past_context(self, ticker: str, n_same: int = 5, n_cross: int = 3) -> str:
+    def get_past_context(
+        self,
+        ticker: str,
+        n_same: int = 5,
+        n_cross: int | None = None,
+        *,
+        asset_type: str | None = None,
+    ) -> str:
         """Return formatted past context string for agent prompt injection."""
         entries = [e for e in self.load_entries() if not e.get("pending")]
         if not entries:
             return ""
 
+        cross_limit = (
+            self._cross_ticker_limit
+            if n_cross is None
+            else _coerce_non_negative_int(
+                n_cross,
+                name="n_cross",
+                default=self._cross_ticker_limit,
+            )
+        )
+        target_asset_type = self._asset_type(ticker, asset_type)
+        target_market = self._market(ticker, target_asset_type)
         same, cross = [], []
         for e in reversed(entries):
-            if len(same) >= n_same and len(cross) >= n_cross:
+            cross_complete = cross_limit == 0 or len(cross) >= cross_limit
+            if len(same) >= n_same and cross_complete:
                 break
             if e["ticker"] == ticker and len(same) < n_same:
                 same.append(e)
-            elif e["ticker"] != ticker and len(cross) < n_cross:
+            elif (
+                e["ticker"] != ticker
+                and len(cross) < cross_limit
+                and target_market is not None
+                and e["market"] is not None
+                and e["asset_type"] == target_asset_type
+                and e["market"] == target_market
+            ):
                 cross.append(e)
 
         if not same and not cross:
@@ -156,10 +239,7 @@ class TradingMemoryLog:
             return
 
         new_blocks = self._apply_rotation(new_blocks)
-        new_text = self._SEPARATOR.join(new_blocks)
-        tmp_path = self._log_path.with_suffix(".tmp")
-        tmp_path.write_text(new_text, encoding="utf-8")
-        tmp_path.replace(self._log_path)
+        self._write_blocks(new_blocks)
 
     def batch_update_with_outcomes(self, updates: list[dict]) -> None:
         """Apply multiple outcome updates in a single read + atomic write.
@@ -210,10 +290,7 @@ class TradingMemoryLog:
                 new_blocks.append(block)
 
         new_blocks = self._apply_rotation(new_blocks)
-        new_text = self._SEPARATOR.join(new_blocks)
-        tmp_path = self._log_path.with_suffix(".tmp")
-        tmp_path.write_text(new_text, encoding="utf-8")
-        tmp_path.replace(self._log_path)
+        self._write_blocks(new_blocks)
 
     # --- Helpers ---
 
@@ -254,6 +331,33 @@ class TradingMemoryLog:
             kept.append(block)
         return kept
 
+    def _write_blocks(self, blocks: list[str]) -> None:
+        """Atomically rewrite the log from separator-delimited blocks."""
+        new_text = self._SEPARATOR.join(blocks)
+        tmp_path = self._log_path.with_suffix(".tmp")
+        tmp_path.write_text(new_text, encoding="utf-8")
+        tmp_path.replace(self._log_path)
+
+    @staticmethod
+    def _asset_type(ticker: str, asset_type: str | None = None) -> str:
+        """Normalize explicit asset type or infer it for legacy entries."""
+        if asset_type is not None:
+            value = getattr(asset_type, "value", asset_type)
+            return str(value).strip().lower()
+        return "crypto" if crypto_base(ticker) else "stock"
+
+    @staticmethod
+    def _market(ticker: str, asset_type: str) -> str | None:
+        """Return a stable regional market bucket for memory filtering."""
+        if asset_type == "crypto":
+            return "CRYPTO"
+        try:
+            return str(market_timezone(ticker))
+        except ValueError:
+            # Keep legacy symbols rejected by the shared market utility out of
+            # cross-ticker matching rather than inventing a market locally.
+            return None
+
     def _parse_entry(self, raw: str) -> dict | None:
         lines = raw.strip().splitlines()
         if not lines:
@@ -274,6 +378,20 @@ class TradingMemoryLog:
             "holding": fields[5] if len(fields) > 5 else None,
         }
         body = "\n".join(lines[1:]).strip()
+        metadata = {}
+        metadata_line = next(
+            (line.strip() for line in lines[1:] if line.strip()),
+            "",
+        )
+        if metadata_line.startswith("META:"):
+            for field in metadata_line.removeprefix("META:").split("|"):
+                key, separator, value = field.strip().partition("=")
+                if separator and key in {"asset_type", "market"}:
+                    metadata[key] = value.strip()
+        asset_type = metadata.get("asset_type") or self._asset_type(entry["ticker"])
+        market = metadata.get("market") or self._market(entry["ticker"], asset_type)
+        entry["asset_type"] = asset_type
+        entry["market"] = market
         decision_match = self._DECISION_RE.search(body)
         reflection_match = self._REFLECTION_RE.search(body)
         entry["decision"] = decision_match.group(1).strip() if decision_match else ""

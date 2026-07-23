@@ -287,6 +287,17 @@ TRADINGAGENTS_DEEP_REASONING_EFFORT=high
 股票发起新的运行时，系统可以比较实际原始收益与相对基准收益，并在投资组合经理
 的上下文中加入简短复盘。可通过 `TRADINGAGENTS_MEMORY_LOG_PATH` 修改路径。
 
+共享记忆文件默认最多保留 1000 条已结算记录。超过这一全局上限时，会按文件顺序
+删除最早的已结算记录；pending 记录不计入上限，也不会被裁剪。设置
+`TRADINGAGENTS_MEMORY_LOG_MAX_ENTRIES=0` 可取消已结算记录的数量限制；直接使用
+Python 配置时，`0` 或 `None` 均表示不限制。
+
+每次新的分析会注入同一 ticker 最近 5 条完整记忆；此外，默认还会注入其他 ticker
+最近 3 条仅包含复盘的经验，但候选必须同时属于相同资产类型和区域市场。例如沪深
+A 股属于同一市场，而中国、日本和美国市场互不共享。可通过
+`TRADINGAGENTS_MEMORY_CROSS_TICKER_LIMIT` 调整跨 ticker 条数；设置为 `0` 即关闭
+跨 ticker 记忆。
+
 检查点功能默认关闭。以下参数都作用于根命令：
 
 ```bash

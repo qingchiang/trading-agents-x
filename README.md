@@ -308,6 +308,20 @@ required. A later fresh run for the same ticker can compare realized raw and
 benchmark-relative returns and inject a short reflection into the
 portfolio-manager context. Override the path with `TRADINGAGENTS_MEMORY_LOG_PATH`.
 
+The shared log keeps at most 1,000 resolved entries by default. When that
+global limit is exceeded, the oldest resolved entries are removed in file
+order; pending entries are not counted or pruned. Set
+`TRADINGAGENTS_MEMORY_LOG_MAX_ENTRIES=0` to keep resolved entries without a
+limit. Direct Python configuration can use either `0` or `None`.
+
+For each fresh analysis, memory supplies up to five recent full entries for the
+same ticker. It also supplies up to three recent reflection-only lessons from
+other tickers, but only when both the asset type and regional market match
+(for example, Shanghai and Shenzhen A-shares share a market bucket, while
+China, Japan, and the US do not). Configure that cross-ticker count with
+`TRADINGAGENTS_MEMORY_CROSS_TICKER_LIMIT`; set it to `0` to disable
+cross-ticker memory.
+
 Checkpointing is disabled by default. These options apply to the root command:
 
 ```bash

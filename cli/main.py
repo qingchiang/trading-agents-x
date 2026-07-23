@@ -22,6 +22,7 @@ from rich.text import Text
 from cli.announcements import display_announcements, fetch_announcements
 from cli.stats_handler import StatsCallbackHandler
 from cli.utils import (
+    TICKER_INPUT_EXAMPLES,
     ask_glm_region,
     ask_minimax_region,
     ask_output_language,
@@ -544,7 +545,10 @@ def get_user_selections():
     console.print(
         create_question_box(
             "Step 1: Ticker Symbol",
-            "Enter the ticker, with exchange suffix when needed (e.g. SPY, 0700.HK, BTC-USD)",
+            (
+                "Enter the ticker, with exchange suffix when needed "
+                f"(e.g. {TICKER_INPUT_EXAMPLES})"
+            ),
             "SPY",
         )
     )

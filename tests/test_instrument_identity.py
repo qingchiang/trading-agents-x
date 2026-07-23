@@ -175,6 +175,10 @@ def test_graph_startup_forwards_trade_date_to_context_resolver():
 
     graph._run_graph("NVDA", "2020-01-02")
 
+    graph.memory_log.get_past_context.assert_called_once_with(
+        "NVDA",
+        asset_type="stock",
+    )
     graph.resolve_instrument_context.assert_called_once_with(
         "NVDA", "stock", "2020-01-02"
     )

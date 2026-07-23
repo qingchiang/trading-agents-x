@@ -29,6 +29,8 @@ def test_no_env_uses_built_in_defaults(monkeypatch):
     assert dc.DEFAULT_CONFIG["provenance_appendix"] is False
     assert dc.DEFAULT_CONFIG["news_article_limit"] == 30
     assert dc.DEFAULT_CONFIG["sentiment_filing_limit"] == 20
+    assert dc.DEFAULT_CONFIG["memory_log_max_entries"] == 1000
+    assert dc.DEFAULT_CONFIG["memory_cross_ticker_limit"] == 3
 
 
 def test_string_overrides(monkeypatch):
@@ -54,6 +56,8 @@ def test_int_coercion(monkeypatch):
         TRADINGAGENTS_MAX_RISK_ROUNDS="2",
         TRADINGAGENTS_TICKER_NEWS_LOOKBACK_DAYS="14",
         TRADINGAGENTS_SOCIAL_LOOKBACK_DAYS="7",
+        TRADINGAGENTS_MEMORY_LOG_MAX_ENTRIES="0",
+        TRADINGAGENTS_MEMORY_CROSS_TICKER_LIMIT="5",
     )
     assert dc.DEFAULT_CONFIG["max_debate_rounds"] == 3
     assert isinstance(dc.DEFAULT_CONFIG["max_debate_rounds"], int)
@@ -61,6 +65,8 @@ def test_int_coercion(monkeypatch):
     assert isinstance(dc.DEFAULT_CONFIG["max_risk_discuss_rounds"], int)
     assert dc.DEFAULT_CONFIG["ticker_news_lookback_days"] == 14
     assert dc.DEFAULT_CONFIG["social_lookback_days"] == 7
+    assert dc.DEFAULT_CONFIG["memory_log_max_entries"] == 0
+    assert dc.DEFAULT_CONFIG["memory_cross_ticker_limit"] == 5
 
 
 
@@ -126,6 +132,22 @@ def test_invalid_int_raises(monkeypatch):
         importlib.reload(default_config_module)
     # Restore module state for subsequent tests in this process
     monkeypatch.delenv("TRADINGAGENTS_MAX_DEBATE_ROUNDS", raising=False)
+    importlib.reload(default_config_module)
+
+
+@pytest.mark.parametrize(
+    "env_name",
+    [
+        "TRADINGAGENTS_MEMORY_LOG_MAX_ENTRIES",
+        "TRADINGAGENTS_MEMORY_CROSS_TICKER_LIMIT",
+    ],
+)
+@pytest.mark.parametrize("value", ["-1", "not-a-number"])
+def test_invalid_memory_limit_raises(monkeypatch, env_name, value):
+    monkeypatch.setenv(env_name, value)
+    with pytest.raises(ValueError, match=env_name):
+        importlib.reload(default_config_module)
+    monkeypatch.delenv(env_name, raising=False)
     importlib.reload(default_config_module)
 
 
