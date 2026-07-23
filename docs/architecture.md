@@ -9,6 +9,12 @@ Code and tests remain authoritative for exact schemas, limits, and retry values.
 Python API. `propagate(ticker, trade_date, asset_type="stock")` normalizes the
 instrument and returns `(final_state, decision)`.
 
+The interactive CLI also runs through `propagate()`, using its optional stream
+callback to render full-state chunks. This keeps memory-log preparation and
+commit, checkpoint resume and cleanup, instrument context, and graph callbacks
+under one lifecycle. A resumed invocation submits no new graph input; its first
+streamed value is the restored checkpoint snapshot.
+
 ```text
 analysts → bull/bear debate → research manager → trader
          → risk debate → portfolio manager → reflection

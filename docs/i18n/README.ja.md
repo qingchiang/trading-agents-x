@@ -48,10 +48,9 @@ TradingAgentsX は小規模な投資チームをモデル化します。市場�
 </p>
 
 対話型 CLI と Python からの直接利用に対応しています。アナリストは個別に選択でき、
-LLM プロバイダーも設定可能です。`TradingAgentsGraph.propagate()` を直接呼び出す
-実行では、判断を実行間の振り返りログへ保存し、任意の LangGraph チェックポイント
-から中断した分析を再開できます。対話型 CLI は現在、この 2 つの実行ライフサイクル
-機能を使用していません。
+LLM プロバイダーも設定可能です。CLI と `TradingAgentsGraph.propagate()` の直接実行は、
+実行間の振り返りログを共有し、任意の LangGraph チェックポイントから中断した分析を
+再開できます。
 
 > TradingAgentsX はリサーチ用フレームワークです。出力は金融、投資、売買の助言を
 > 構成しません。結果はモデルの挙動、データ品質、時点、設定に依存します。
@@ -295,25 +294,44 @@ TRADINGAGENTS_DEEP_REASONING_EFFORT=high
 
 ## 永続化と復旧
 
-永続化と復旧は現在、Python から `TradingAgentsGraph.propagate()` を直接呼び出す
-実行にのみ適用されます。正常終了した `propagate()` 実行は、判断を
-`~/.tradingagents/memory/trading_memory.md` に追記します。
-同じ銘柄の後続実行では、実現した素のリターンとベンチマーク相対リターンを比較し、
-ポートフォリオマネージャーのコンテキストへ短い振り返りを挿入できます。パスは
-`TRADINGAGENTS_MEMORY_LOG_PATH` で変更できます。
+正常終了した CLI と `TradingAgentsGraph.propagate()` の実行は、判断を
+`~/.tradingagents/memory/trading_memory.md` に追記します。CLI レポートを保存する
+必要はありません。同じ銘柄の後続の新規実行では、実現した素のリターンとベンチマーク
+相対リターンを比較し、ポートフォリオマネージャーのコンテキストへ短い振り返りを
+挿入できます。パスは `TRADINGAGENTS_MEMORY_LOG_PATH` で変更できます。
 
-Python から直接利用する場合は、グラフ設定で `checkpoint_enabled=True` を指定すると
-チェックポイントからの再開が有効になります。銘柄別 SQLite チェックポイントは
+チェックポイント機能はデフォルトで無効です。次のオプションはいずれもルートコマンドに
+指定します。
+
+```bash
+tradingagents --checkpoint
+tradingagents --no-checkpoint
+tradingagents --clear-checkpoints
+```
+
+- `--checkpoint` と `--no-checkpoint` のどちらも指定しない場合は、
+  `TRADINGAGENTS_CHECKPOINT_ENABLED` の設定に従います。この環境変数も未設定なら
+  無効です。
+- `--checkpoint` はチェックポイントを強制的に有効化し、`--no-checkpoint` は
+  強制的に無効化します。どちらも環境変数より優先されます。
+- `--clear-checkpoints` は質問開始前にすべてのチェックポイントデータベースを
+  削除しますが、それ自体はチェックポイントを有効化しません。この実行で有効に
+  するかどうかは、前述の規則で決まります。
+
+チェックポイントが有効な場合、条件の一致する保存済み実行があれば CLI はその状態から
+自動的に再開します。該当する保存状態がなければ最初から分析を始め、各ノードの完了後に
+新しいチェックポイントを保存します。一致条件は、正規化済み銘柄、分析日、アナリスト
+選択、討論深度、リスク深度、資産タイプです。いずれかが異なる場合は新規実行になります。
+
+一致するチェックポイントは通常、チェックポイントを有効にした前回の実行が正常終了前に
+中断され、かつ中断前に少なくとも一つの状態が SQLite へ書き込まれていた場合に残ります。
+正常終了した実行は判断を追記し、対応する checkpoint thread を削除するため、完了済みの
+分析が次回に再開されることはありません。
+
+Python から直接利用する場合は、グラフ設定で `checkpoint_enabled=True` を指定します。
+銘柄別 SQLite チェックポイントは
 `~/.tradingagents/cache/checkpoints/` に保存され、
-ベースディレクトリは `TRADINGAGENTS_CACHE_DIR` で変更できます。正常終了した実行は
-対応するチェックポイントを削除します。
-
-対話型 CLI は現在、コンパイル済みグラフを直接ストリーミング実行するため、振り返り
-ログの読み書きも、チェックポイントの作成・再開も行いません。CLI レポートの保存でも
-メモリーエントリーは書き込まれません。CLI には引き続き `--checkpoint`、
-`--no-checkpoint`、`--clear-checkpoints` が表示されますが、現時点で効果があるのは
-`--clear-checkpoints` のみで、分析開始前に既存のチェックポイントデータベースを
-削除します。
+ベースディレクトリは `TRADINGAGENTS_CACHE_DIR` で変更できます。
 
 ## 再現性
 

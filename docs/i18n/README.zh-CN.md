@@ -45,9 +45,8 @@ TradingAgentsX 模拟一支小型投资团队：市场、基本面、新闻和�
 </p>
 
 框架既支持交互式 CLI，也支持直接通过 Python 调用。分析师可以独立选择，
-LLM 提供商可以配置。直接调用 `TradingAgentsGraph.propagate()` 时，还可以把
-决策写入跨轮次复盘日志，并通过可选的 LangGraph 检查点恢复中断的分析；
-交互式 CLI 目前尚未接入这两项运行生命周期功能。
+LLM 提供商可以配置。CLI 与直接调用 `TradingAgentsGraph.propagate()` 的运行
+共用跨轮次复盘日志，也可以通过可选的 LangGraph 检查点恢复中断的分析。
 
 > TradingAgentsX 是研究框架，其输出不构成金融、投资或交易建议。结果取决于
 > 模型行为、数据质量、时间边界和运行配置。
@@ -283,21 +282,38 @@ TRADINGAGENTS_DEEP_REASONING_EFFORT=high
 
 ## 持久化与恢复
 
-持久化与恢复目前仅适用于通过 `TradingAgentsGraph.propagate()` 发起的 Python
-直接调用。成功完成的 `propagate()` 运行会把决策追加到
-`~/.tradingagents/memory/trading_memory.md`。以后再次分析同一只股票时，
-系统可以比较实际原始收益与相对基准收益，并在投资组合经理的上下文中加入简短
-复盘。可通过 `TRADINGAGENTS_MEMORY_LOG_PATH` 修改路径。
+成功完成的 CLI 与 `TradingAgentsGraph.propagate()` 运行都会把决策追加到
+`~/.tradingagents/memory/trading_memory.md`，无需先保存 CLI 报告。以后针对同一
+股票发起新的运行时，系统可以比较实际原始收益与相对基准收益，并在投资组合经理
+的上下文中加入简短复盘。可通过 `TRADINGAGENTS_MEMORY_LOG_PATH` 修改路径。
 
-直接通过 Python 调用时，可在图配置中设置 `checkpoint_enabled=True`，按需启用
-检查点恢复。每只股票的 SQLite 检查点随后会写入
+检查点功能默认关闭。以下参数都作用于根命令：
+
+```bash
+tradingagents --checkpoint
+tradingagents --no-checkpoint
+tradingagents --clear-checkpoints
+```
+
+- 不传 `--checkpoint` 或 `--no-checkpoint` 时，采用
+  `TRADINGAGENTS_CHECKPOINT_ENABLED` 的开关状态；未设置该环境变量时默认为关闭。
+- `--checkpoint` 会强制启用检查点，`--no-checkpoint` 会强制关闭检查点，两者的
+  优先级都高于环境变量。
+- `--clear-checkpoints` 会在问卷开始前删除全部检查点数据库，但它本身不会启用
+  检查点；本次运行是否启用仍由前两项规则决定。
+
+启用检查点后，如果已经存在匹配的已保存运行，CLI 会自动从该状态继续；如果没有，
+则会从头开始分析，并在节点完成后持续保存新的检查点。匹配条件包括规范化股票代码、
+分析日期、分析师组合、辩论深度、风险深度和资产类型；任一条件不同都会开始新的运行。
+
+匹配的检查点通常来自上一次已启用检查点、但在成功完成前意外中断的运行，而且中断前
+至少已有一个状态写入 SQLite。成功完成的运行会追加决策并清除对应的 checkpoint
+thread，因此下次不会恢复已经成功完成的分析。
+
+直接通过 Python 调用时，可在图配置中设置 `checkpoint_enabled=True`。每只股票的
+SQLite 检查点会写入
 `~/.tradingagents/cache/checkpoints/`；可通过 `TRADINGAGENTS_CACHE_DIR`
-修改基础目录。成功完成后会清除对应检查点。
-
-交互式 CLI 目前直接流式执行已编译的图，因此不会读取或追加复盘日志，也不会
-创建或恢复检查点；保存 CLI 报告同样不会写入记忆。CLI 仍会显示
-`--checkpoint`、`--no-checkpoint` 和 `--clear-checkpoints` 参数，但目前只有
-`--clear-checkpoints` 会生效：它会在分析开始前删除已有的检查点数据库。
+修改基础目录。
 
 ## 可复现性
 
