@@ -94,9 +94,10 @@ class TradingMemoryLog:
         market = self._market(ticker, normalized_asset_type)
         rating = parse_rating(final_trade_decision)
         tag = f"[{trade_date} | {ticker} | {rating} | pending]"
-        metadata = (
-            f"META: asset_type={normalized_asset_type} | market={market}"
-        )
+        metadata_fields = [f"asset_type={normalized_asset_type}"]
+        if market is not None:
+            metadata_fields.append(f"market={market}")
+        metadata = f"META: {' | '.join(metadata_fields)}"
         entry = (
             f"{tag}\n\n{metadata}\n\nDECISION:\n"
             f"{final_trade_decision}{self._SEPARATOR}"
@@ -157,6 +158,8 @@ class TradingMemoryLog:
             elif (
                 e["ticker"] != ticker
                 and len(cross) < cross_limit
+                and target_market is not None
+                and e["market"] is not None
                 and e["asset_type"] == target_asset_type
                 and e["market"] == target_market
             ):
@@ -344,17 +347,16 @@ class TradingMemoryLog:
         return "crypto" if crypto_base(ticker) else "stock"
 
     @staticmethod
-    def _market(ticker: str, asset_type: str) -> str:
+    def _market(ticker: str, asset_type: str) -> str | None:
         """Return a stable regional market bucket for memory filtering."""
         if asset_type == "crypto":
             return "CRYPTO"
         try:
             return str(market_timezone(ticker))
         except ValueError:
-            # Legacy logs may contain an unsuffixed symbol that predates current
-            # validation rules. Preserve the established US fallback instead
-            # of making the entire memory file unreadable.
-            return "America/New_York"
+            # Keep legacy symbols rejected by the shared market utility out of
+            # cross-ticker matching rather than inventing a market locally.
+            return None
 
     def _parse_entry(self, raw: str) -> dict | None:
         lines = raw.strip().splitlines()
@@ -377,14 +379,15 @@ class TradingMemoryLog:
         }
         body = "\n".join(lines[1:]).strip()
         metadata = {}
-        for line in lines[1:]:
-            if not line.startswith("META:"):
-                continue
-            for field in line.removeprefix("META:").split("|"):
+        metadata_line = next(
+            (line.strip() for line in lines[1:] if line.strip()),
+            "",
+        )
+        if metadata_line.startswith("META:"):
+            for field in metadata_line.removeprefix("META:").split("|"):
                 key, separator, value = field.strip().partition("=")
                 if separator and key in {"asset_type", "market"}:
                     metadata[key] = value.strip()
-            break
         asset_type = metadata.get("asset_type") or self._asset_type(entry["ticker"])
         market = metadata.get("market") or self._market(entry["ticker"], asset_type)
         entry["asset_type"] = asset_type

@@ -407,10 +407,10 @@ class TestTradingMemoryLogCore:
         assert entry["market"] == "Asia/Tokyo"
         assert path.read_text(encoding="utf-8") == before
 
-    def test_unrecognized_legacy_unsuffixed_ticker_uses_us_market(self, tmp_path):
+    def test_legacy_unsuffixed_ticker_uses_shared_us_default(self, tmp_path):
         _seed_completed(
             tmp_path,
-            "123456",
+            "LEGACY",
             "2026-01-01",
             "Legacy decision.",
             "Legacy lesson.",
@@ -420,6 +420,44 @@ class TestTradingMemoryLogCore:
 
         assert entry["asset_type"] == "stock"
         assert entry["market"] == "America/New_York"
+
+    def test_explicit_unsupported_legacy_market_is_not_shared_with_us(self, tmp_path):
+        _seed_completed(
+            tmp_path,
+            "430047.BJ",
+            "2026-01-01",
+            "Legacy Beijing decision.",
+            "Beijing lesson.",
+        )
+        log = make_log(tmp_path)
+
+        entry = log.load_entries()[0]
+        context = log.get_past_context("NVDA", asset_type="stock")
+
+        assert entry["market"] is None
+        assert "Beijing lesson." not in context
+
+    def test_meta_text_in_legacy_decision_body_is_not_parsed_as_metadata(
+        self,
+        tmp_path,
+    ):
+        _seed_completed(
+            tmp_path,
+            "AAPL",
+            "2026-01-01",
+            (
+                "Legacy note.\n"
+                "META: asset_type=stock | market=Asia/Tokyo"
+            ),
+            "US lesson.",
+        )
+        log = make_log(tmp_path)
+
+        entry = log.load_entries()[0]
+        context = log.get_past_context("NVDA", asset_type="stock")
+
+        assert entry["market"] == "America/New_York"
+        assert "US lesson." in context
 
     # No-op when config is None
 
