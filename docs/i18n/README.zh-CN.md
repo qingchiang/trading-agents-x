@@ -11,29 +11,73 @@
   <img alt="License" src="https://img.shields.io/badge/License-Apache_2.0-blue.svg"/>
 </div>
 
-一个多智能体 LLM 交易研究框架，为美股、日本股票（`.T`）以及沪深
-A 股（`.SS`/`.SZ`）提供一等支持的数据链。不同市场的数据源汇入同一套
-智能体图，并明确约束分析日期、记录来源出处和可审计的降级过程。
+TradingAgentsX 是建立在 TradingAgents 智能体图之上的多智能体 LLM 金融研究框架。
+它增加了日本股票（`.T`）和沪深 A 股（`.SS`/`.SZ`）的专用数据链，同时保留
+美国/默认路由。各市场自有数据源与 assembler 汇入同一工作流，并明确约束
+分析日期、记录来源出处和可审计的降级过程。
 
 > **Fork 说明。** 本项目是
 > [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents)
-> 的独立维护 fork（Apache-2.0），不会与上游版本逐一同步。上游署名与
-> 许可信息保留在 [LICENSE](../../LICENSE) 和 [NOTICE](../../NOTICE) 中。
+> 的独立维护 fork（Apache-2.0）。`0.3.1` 及以前的版本沿革继承自上游；
+> 从 `0.4.0` 开始，TradingAgentsX 独立维护发布与版本线。项目仍可选择性
+> 吸收上游改动，但上游版本号不再决定本项目的版本号。上游署名与许可信息
+> 保留在 [LICENSE](../../LICENSE)、[NOTICE](../../NOTICE) 和
+> [版本历史](../../CHANGELOG.md) 中。
 
 <div align="center">
 
-[概览](#概览) · [市场支持](#市场支持) · [安装](#安装) ·
+[项目增强](#tradingagentsx-的增强) · [概览](#概览) ·
+[市场支持](#市场支持) · [安装](#安装) ·
 [CLI](#cli-用法) · [日本市场](#日本市场) · [中国 A 股](#中国-a-股) ·
 [Python API](#python-api) · [开发](#开发) ·
 [架构](../architecture.md) · [变更记录](../../CHANGELOG.md)
 
 </div>
 
+## TradingAgentsX 的增强
+
+- **专用区域数据系统，而不只是支持股票代码后缀。** 日股与 A 股的 adapter
+  和 assembler 从本地数据源为市场、基本面、新闻、情绪、披露、持仓信号和
+  宏观分析提供证据。
+- **在数据流中落实 point-in-time 完整性。** 工作流注入分析日期；adapter
+  执行数据源可见性和市场本地日历边界。如果仅限当前时点的降级源无法用于
+  历史分析，数据链会明确拒绝使用。
+- **可审计的证据。** 结果通过结构化 provenance 保留请求日期、有效日期、
+  实际选中的来源、降级状态和重要限制，并显示 `Data Quality Warnings`。
+- **跨区域宏观背景。** 美国、日本和中国指标汇入同一个故障隔离面板；单个
+  提供商缺失不会抹去其他来源负责的单元格。
+- **独立运行控制与连续性。** Quick/deep 模型角色可分别配置 reasoning；
+  CLI 与 Python 运行共用有界、按市场隔离的复盘日志，并可选择启用检查点恢复。
+- **面向发布的验证。** CI 覆盖 Python 3.10–3.13、全仓库 lint 和干净安装
+  smoke；可选 live contract 验证跨市场 schema、已完成交易日截止边界、
+  实际来源和降级过程。
+
+### 数据流概览
+
+```mermaid
+flowchart LR
+    Input["股票代码 + 分析日期"] --> Context["规范股票代码<br/>市场本地上下文"]
+    Context --> Router{"已配置的市场路由"}
+    Router --> US["美国 / 默认数据源"]
+    Router --> JP["日本 assembler<br/>J-Quants · EDINET · TDnet"]
+    Router --> CN["中国 assembler<br/>腾讯 · CNINFO · 新浪"]
+    US --> Guard["数据源自有 PIT 检查<br/>校验 + 新鲜度"]
+    JP --> Guard
+    CN --> Guard
+    Macro["美国 / 日本 / 中国宏观面板"] --> Guard
+    Guard --> Provenance["结构化 provenance<br/>降级 + 质量警告"]
+    Provenance --> Analysts["市场 · 基本面<br/>新闻 · 情绪"]
+    Analysts --> Decision["辩论 · 交易员 · 风险<br/>组合决策 + 复盘"]
+```
+
+该图有意保持为高层概览。精确的路由优先级、assembler 归属、缓存和
+point-in-time 契约详见[架构文档](../architecture.md)。
+
 ## 概览
 
-TradingAgentsX 模拟一支小型投资团队：市场、基本面、新闻和情绪四类分析师
-准备证据；多空研究员展开辩论；交易员提出仓位；最后由风险团队和投资组合
-经理给出最终决策。
+TradingAgentsX 保留上游的投资团队拓扑：市场、基本面、新闻和情绪四类
+分析师准备证据；多空研究员展开辩论；交易员提出仓位；最后由风险团队和
+投资组合经理给出最终决策。
 
 ```text
 分析师 → 多空辩论 → 研究经理 → 交易员
@@ -48,7 +92,7 @@ TradingAgentsX 模拟一支小型投资团队：市场、基本面、新闻和�
 LLM 提供商可以配置。CLI 与直接调用 `TradingAgentsGraph.propagate()` 的运行
 共用跨轮次复盘日志，也可以通过可选的 LangGraph 检查点恢复中断的分析。
 
-> TradingAgentsX 是研究框架，其输出不构成金融、投资或交易建议。结果取决于
+> TradingAgentsX 是金融研究框架，其输出不构成金融、投资或交易建议。结果取决于
 > 模型行为、数据质量、时间边界和运行配置。
 
 ## 市场支持
