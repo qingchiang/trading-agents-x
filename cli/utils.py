@@ -17,7 +17,7 @@ from tradingagents.llm_clients.reasoning_effort import (
 
 console = Console()
 
-TICKER_INPUT_EXAMPLES = "SPY, 600519, 0700.HK, BTC-USD"
+TICKER_INPUT_EXAMPLES = "SPY, 7203.T, 600519, 0700.HK, BTC-USD"
 
 ANALYST_ORDER = [
     ("Market Analyst", AnalystType.MARKET),
