@@ -12,20 +12,25 @@
   <img alt="License" src="https://img.shields.io/badge/License-Apache_2.0-blue.svg"/>
 </div>
 
-A multi-agent LLM trading framework with first-class dataflows for US-listed
-securities, Japanese equities (`.T`), and Shanghai/Shenzhen A-shares
-(`.SS`/`.SZ`). Market-specific sources feed one common agent graph with explicit
-analysis-date boundaries, source provenance, and auditable fallbacks.
+TradingAgentsX is a multi-agent LLM financial research framework built on the
+TradingAgents agent graph. It adds dedicated dataflows for Japanese equities
+(`.T`) and Shanghai/Shenzhen A-shares (`.SS`/`.SZ`) alongside the US/default
+route. Market-owned sources and assemblers feed one common workflow with
+explicit analysis-date boundaries, source provenance, and auditable fallbacks.
 
 > **Fork notice.** This is an independently maintained fork of
 > [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents)
-> (Apache-2.0). It does not track upstream releases one-to-one. Upstream
-> attribution and licensing are retained in [LICENSE](LICENSE) and
-> [NOTICE](NOTICE).
+> (Apache-2.0). Release history through `0.3.1` is inherited from upstream;
+> starting with `0.4.0`, TradingAgentsX maintains an independent release and
+> version line. Selected upstream changes may still be incorporated, but they do
+> not determine this project's version numbers. Upstream attribution and
+> licensing are retained in [LICENSE](LICENSE), [NOTICE](NOTICE), and the
+> [release history](CHANGELOG.md).
 
 <div align="center">
 
-[Overview](#overview) · [Markets](#market-support) ·
+[Highlights](#what-tradingagentsx-adds) · [Overview](#overview) ·
+[Markets](#market-support) ·
 [Installation](#installation) · [CLI](#cli-usage) ·
 [Japan](#japanese-market) · [China](#china-a-shares) ·
 [Python API](#python-api) · [Development](#development) ·
@@ -33,12 +38,54 @@ analysis-date boundaries, source provenance, and auditable fallbacks.
 
 </div>
 
+## What TradingAgentsX adds
+
+- **Dedicated regional data systems, not suffix-only access.** Japanese and
+  China A-share adapters and assemblers supply market, fundamentals, news,
+  sentiment, disclosures, positioning, and macro evidence from local sources.
+- **Point-in-time integrity by construction.** The workflow injects the analysis
+  date; adapters enforce source visibility and market-local calendar boundaries,
+  and historical paths fail closed when a live-only fallback cannot be justified.
+- **Auditable evidence.** Results preserve requested and effective dates, the
+  actual selected source, fallback status, and material limitations as
+  structured provenance and `Data Quality Warnings`.
+- **Cross-region macro context.** US, Japan, and China indicators share one
+  fault-isolated panel without letting a missing provider erase unrelated cells.
+- **Independent runtime control and continuity.** Quick/deep model roles have
+  separate reasoning controls, while CLI and Python runs share a bounded,
+  market-aware reflection log and optional checkpoint recovery.
+- **Release-grade validation.** CI covers Python 3.10–3.13, repository-wide
+  linting, and clean-install smoke tests; opt-in live contracts validate
+  cross-market schemas, completed-date cutoffs, actual sources, and fallbacks.
+
+### Dataflow at a glance
+
+```mermaid
+flowchart LR
+    Input["Ticker + analysis date"] --> Context["Canonical symbol<br/>market-local context"]
+    Context --> Router{"Configured market router"}
+    Router --> US["US / default vendors"]
+    Router --> JP["Japan assemblers<br/>J-Quants · EDINET · TDnet"]
+    Router --> CN["China assemblers<br/>Tencent · CNINFO · Sina"]
+    US --> Guard["Source-owned PIT checks<br/>validation + freshness"]
+    JP --> Guard
+    CN --> Guard
+    Macro["US / Japan / China macro panel"] --> Guard
+    Guard --> Provenance["Structured provenance<br/>fallback + quality warnings"]
+    Provenance --> Analysts["Market · Fundamentals<br/>News · Sentiment"]
+    Analysts --> Decision["Debate · Trader · Risk<br/>Portfolio decision + reflection"]
+```
+
+The diagram is intentionally high-level. The exact routing precedence,
+assembler ownership, caching, and point-in-time contracts live in
+[docs/architecture.md](docs/architecture.md).
+
 ## Overview
 
-TradingAgentsX models a small investment team: four analysts prepare market,
-fundamental, news, and sentiment evidence; bull and bear researchers debate it;
-a trader proposes a position; and a risk team and portfolio manager produce the
-final decision.
+TradingAgentsX retains the upstream investment-team topology: four analysts
+prepare market, fundamental, news, and sentiment evidence; bull and bear
+researchers debate it; a trader proposes a position; and a risk team and
+portfolio manager produce the final decision.
 
 ```text
 analysts → bull/bear debate → research manager → trader
@@ -54,7 +101,7 @@ be selected independently and LLM providers are configurable. CLI and direct
 `TradingAgentsGraph.propagate()` runs share a cross-run reflection log and can
 use optional LangGraph checkpoints to resume interrupted analyses.
 
-> TradingAgentsX is a research framework. Its output is not financial,
+> TradingAgentsX is a financial research framework. Its output is not financial,
 > investment, or trading advice. Results depend on model behavior, data quality,
 > timing, and configuration.
 

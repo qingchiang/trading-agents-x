@@ -1,6 +1,8 @@
 import contextlib
 import warnings
 
+from .version import __version__
+
 # Load .env files at package import so DEFAULT_CONFIG's env-var overlay
 # (and every llm_clients consumer) sees the user's keys regardless of
 # which entry point started the process. find_dotenv(usecwd=True) walks

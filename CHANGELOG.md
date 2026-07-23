@@ -3,19 +3,20 @@
 All notable changes to TradingAgentsX are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and upstream releases follow
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versioned entries
-through `0.3.1` are retained from upstream.
-
-No fork-specific release has been published from this development line yet.
-Although package metadata currently uses `0.3.1+jp.1` as a PEP 440 local
-version identifier during development, no corresponding tag or release exists;
-the work remains under `Unreleased` until a release is explicitly created.
+and TradingAgentsX follows
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html). Entries through
+`0.3.1` are inherited from upstream TradingAgents. Starting with `0.4.0`,
+TradingAgentsX maintains an independent release and version history. Upstream
+changes may still be incorporated, but they do not determine this project's
+version numbers.
 
 ## [Unreleased]
 
-This section contains the fork work developed on top of upstream `0.3.1`,
-including the Japanese and China market branches.
+## [0.4.0] — 2026-07-23
+
+The first independent TradingAgentsX release builds on upstream `0.3.1` with
+Japanese and China A-share dataflows, cross-market evidence integrity, and
+expanded runtime configuration.
 
 ### Added
 
@@ -71,6 +72,14 @@ including the Japanese and China market branches.
   CPI/GDP/PMI prefer eligible NBS releases; USD/CNY parity prefers SAFE.
 - **Runtime dependencies.** AkShare is installed by default for the China
   adapters; `uv.lock` records the resolved development environment.
+- **Bounded, market-aware decision memory.** Resolved history now has a
+  configurable global cap, while pending records remain intact. Cross-ticker
+  reflections are limited by both asset type and regional market, with
+  configurable context limits and backward-compatible legacy entry inference.
+- **Unified CLI persistence lifecycle.** Interactive runs now use
+  `TradingAgentsGraph.propagate()` so reflection logging and checkpoint handling
+  share the Python API path. Matching checkpoints resume without replaying
+  completed nodes, while the CLI restores streamed state and timing.
 
 ### Fixed
 
@@ -86,6 +95,17 @@ including the Japanese and China market branches.
 - **Cache freshness.** Recent macro observations use a short-lived cache before
   transitioning to settled history, failed/empty results are not cached, and
   live yfinance history is isolated by completed market session.
+- **Legacy memory isolation.** Unsupported legacy market symbols no longer
+  enter cross-ticker context, and metadata is read only from the entry header so
+  decision prose cannot override stored market identity.
+- **CLI ticker guidance.** Both ticker prompts now share examples covering US,
+  Tokyo, mainland China, Hong Kong, and crypto symbols.
+- **Agent and report reliability.** Schema-only agents no longer get prompted
+  to call unavailable external tools, sentiment narratives honor the configured
+  output language, and consolidated reports preserve visible team and
+  role-owned section boundaries.
+- **CLI terminal handling.** Windows sessions without a usable console buffer
+  now receive an actionable error instead of a prompt-toolkit traceback.
 
 ## [0.3.1] — 2026-07-05
 
@@ -514,7 +534,8 @@ PRs from late 2025 also landed here.
   portfolio manager. LangGraph orchestration, yfinance data, per-agent
   BM25 memory, single-provider OpenAI integration, interactive CLI.
 
-[Unreleased]: https://github.com/qingchiang/trading-agents-x/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/qingchiang/trading-agents-x/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/qingchiang/trading-agents-x/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/TauricResearch/TradingAgents/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/TauricResearch/TradingAgents/compare/v0.2.5...v0.3.0
 [0.2.5]: https://github.com/TauricResearch/TradingAgents/compare/v0.2.4...v0.2.5

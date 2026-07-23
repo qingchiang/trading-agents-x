@@ -11,10 +11,12 @@ from threading import RLock
 import pandas as pd
 import requests
 
+from tradingagents.version import BROWSER_USER_AGENT
+
 from .common import REQUEST_TIMEOUT, AkShareSchemaError, call_with_retry, canonical_a_share
 
 _RATING_URL = "https://stock.finance.sina.com.cn/stock/go.php/vIR_StockSearch/key/{code}.phtml"
-_UA = "Mozilla/5.0 trading-agents-x/0.3.0"
+_UA = BROWSER_USER_AGENT
 _CACHE_TTL_SECONDS = 15 * 60
 _CACHE_MAXSIZE = 128
 _CACHE: OrderedDict[tuple[str, str], tuple[float, tuple[dict, ...]]] = OrderedDict()
