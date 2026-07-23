@@ -4,11 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "trading-agents-x"
-# Fork versioning: <upstream base>+jp.<fork iteration>. The base tracks the
-# upstream release this fork is synced to (0.3.1); +jp.N marks fork builds on
-# that base. Bump the base on the next upstream sync, .N on fork-only changes.
-version = "0.3.1+jp.1"
-description = "TradingAgentsX: multi-agent LLM research with US, Japan, and China A-share dataflows — a fork of TradingAgents"
+version = "0.4.0"
+description = "TradingAgentsX: a multi-agent LLM financial research framework for US, Japan, and China A-shares — an independent fork of TradingAgents"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

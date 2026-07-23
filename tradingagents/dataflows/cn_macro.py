@@ -18,6 +18,8 @@ from urllib.parse import urljoin
 
 import requests
 
+from tradingagents.version import BROWSER_USER_AGENT
+
 from .cn.common import (
     REQUEST_TIMEOUT,
     AkShareRateLimitError,
@@ -29,7 +31,7 @@ from .errors import NoMarketDataError
 from .macro_common import SeriesCache, render_macro_report
 
 DEFAULT_LOOKBACK_DAYS = 365
-_UA = "Mozilla/5.0 trading-agents-x/0.3.1"
+_UA = BROWSER_USER_AGENT
 _EASTMONEY_DATA = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 _EASTMONEY_LEGACY = "https://datacenter.eastmoney.com/api/data/get"
 _EASTMONEY_KLINE = "https://push2his.eastmoney.com/api/qt/stock/kline/get"

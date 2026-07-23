@@ -21,12 +21,14 @@ from datetime import datetime, timezone
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
+from tradingagents.version import IDENTIFIED_USER_AGENT
+
 from .symbol_utils import crypto_base
 
 logger = logging.getLogger(__name__)
 
 _API = "https://api.stocktwits.com/api/2/streams/symbol/{ticker}.json"
-_UA = "trading-agents-x/0.3.1 (+https://github.com/qingchiang/trading-agents-x)"
+_UA = IDENTIFIED_USER_AGENT
 
 
 def _stocktwits_symbol(ticker: str) -> str:

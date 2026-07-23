@@ -11,6 +11,8 @@ from email.utils import parsedate_to_datetime
 import pandas as pd
 import requests
 
+from tradingagents.version import USER_AGENT
+
 from ..news_quality import (
     build_chinese_company_aliases,
     canonical_headline,
@@ -22,6 +24,7 @@ from .news_sources import news_quotas
 
 _RSS = "https://news.google.com/rss/search"
 _CST = timezone(timedelta(hours=8))
+_UA = USER_AGENT
 logger = logging.getLogger(__name__)
 
 
@@ -54,7 +57,7 @@ def _fetch_items(query: str) -> list[dict]:
         response = requests.get(
             _RSS,
             params={"hl": "zh-CN", "gl": "CN", "ceid": "CN:zh-Hans", "q": query},
-            headers={"User-Agent": "trading-agents-x/0.3.0"},
+            headers={"User-Agent": _UA},
             timeout=REQUEST_TIMEOUT,
         )
         response.raise_for_status()

@@ -15,11 +15,13 @@ import time
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from tradingagents.version import IDENTIFIED_USER_AGENT
+
 logger = logging.getLogger(__name__)
 
 # Identified User-Agent for this fork (served a plain descriptive token, as with
 # Reddit/Google-News RSS). Points at the fork so a site operator can reach us.
-USER_AGENT = "trading-agents-x/0.3.0 (+https://github.com/qingchiang/trading-agents-x)"
+USER_AGENT = IDENTIFIED_USER_AGENT
 
 
 def retry_after_seconds(exc: HTTPError) -> float | None:

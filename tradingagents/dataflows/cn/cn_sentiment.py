@@ -12,6 +12,7 @@ import pandas as pd
 import requests
 
 from tradingagents.provenance import ProvenanceRecord, attach_provenance
+from tradingagents.version import BROWSER_USER_AGENT
 
 from .calendar import previous_trade_date
 from .common import (
@@ -27,7 +28,7 @@ from .sina_ratings import rating_rows as sina_rating_rows
 _SSE_MARGIN = "https://query.sse.com.cn/marketdata/tradedata/queryMargin.do"
 _SZSE_REPORT = "https://www.szse.cn/api/report/ShowReport"
 _EASTMONEY_DATA = "https://datacenter-web.eastmoney.com/api/data/v1/get"
-_UA = "Mozilla/5.0 trading-agents-x/0.3.0"
+_UA = BROWSER_USER_AGENT
 _HOLDING_PAGE_SIZE = 100
 _HOLDING_CACHE_TTL_SECONDS = 15 * 60
 _HOLDING_CACHE_MAXSIZE = 128

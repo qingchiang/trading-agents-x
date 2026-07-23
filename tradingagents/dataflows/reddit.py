@@ -31,6 +31,8 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
+from tradingagents.version import IDENTIFIED_USER_AGENT
+
 from .symbol_utils import crypto_base
 
 logger = logging.getLogger(__name__)
@@ -41,7 +43,7 @@ _RSS = "https://www.reddit.com/r/{sub}/search.rss?{qs}"
 # blocks generic/anonymous tokens like bare "Mozilla/5.0" or "curl/…" but
 # serves this one on both endpoints; the RSS feed accepts it even when the
 # JSON search endpoint 403s, so no browser-spoofing is needed.
-_UA = "trading-agents-x/0.3.1 (+https://github.com/qingchiang/trading-agents-x)"
+_UA = IDENTIFIED_USER_AGENT
 _ATOM_NS = {"atom": "http://www.w3.org/2005/Atom"}
 
 # Default subreddits ordered roughly by signal density for ticker-specific
