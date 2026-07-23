@@ -25,6 +25,24 @@ Sentiment, and Fundamentals analysts are independently configurable. Sentiment
 prefetches evidence instead of tool-calling; News prefetches the cross-region
 macro panel.
 
+### Decision memory
+
+Successful graph runs append a pending decision to the shared Markdown memory
+log. A later fresh run for the same ticker settles eligible pending decisions
+with realized and benchmark-relative returns, then injects memory into the
+portfolio-manager context. Pending entries are retained without a count or age
+limit. Resolved entries have a configurable global cap (1,000 by default);
+rotation removes the oldest resolved blocks in file order and never removes
+pending blocks.
+
+Context selection keeps up to five full resolved entries for the same ticker.
+Cross-ticker context is reflection-only and defaults to the three most recent
+resolved entries whose asset type and regional market both match. Regional
+markets use the existing `market_timezone()` identity; crypto uses one
+`CRYPTO` bucket. New entries persist this identity in an optional `META` line.
+Legacy entries without metadata remain unchanged on disk and infer asset type
+and market from their canonical ticker when read.
+
 ## Cross-cutting contracts
 
 ### Symbols and markets

@@ -482,7 +482,10 @@ class TradingAgentsGraph:
         if resume_step is None:
             # Initialize state — inject memory log context for PM and the
             # deterministically resolved instrument identity for all agents.
-            past_context = self.memory_log.get_past_context(company_name)
+            past_context = self.memory_log.get_past_context(
+                company_name,
+                asset_type=asset_type,
+            )
             instrument_context = self.resolve_instrument_context(
                 company_name,
                 asset_type,
@@ -545,6 +548,7 @@ class TradingAgentsGraph:
             ticker=company_name,
             trade_date=trade_date,
             final_trade_decision=final_state["final_trade_decision"],
+            asset_type=asset_type,
         )
 
         # Clear checkpoint on successful completion to avoid stale state.

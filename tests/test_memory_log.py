@@ -31,8 +31,9 @@ DECISION_NO_RATING = (
 # Shared helpers
 # ---------------------------------------------------------------------------
 
-def make_log(tmp_path, filename="trading_memory.md"):
+def make_log(tmp_path, filename="trading_memory.md", **overrides):
     config = {"memory_log_path": str(tmp_path / filename)}
+    config.update(overrides)
     return TradingMemoryLog(config)
 
 
@@ -48,9 +49,17 @@ def _seed_completed(tmp_path, ticker, date, decision_text, reflection_text, file
         f.write(entry)
 
 
-def _resolve_entry(log, ticker, date, decision, reflection="Good call."):
+def _resolve_entry(
+    log,
+    ticker,
+    date,
+    decision,
+    reflection="Good call.",
+    *,
+    asset_type=None,
+):
     """Store a decision then immediately resolve it via the API."""
-    log.store_decision(ticker, date, decision)
+    log.store_decision(ticker, date, decision, asset_type=asset_type)
     log.update_with_outcome(ticker, date, 0.05, 0.02, 5, reflection)
 
 
@@ -158,6 +167,31 @@ class TestTradingMemoryLogCore:
         log.store_decision("NVDA", "2026-01-10", DECISION_BUY)
         text = (tmp_path / "trading_memory.md").read_text(encoding="utf-8")
         assert "[2026-01-10 | NVDA | Buy | pending]" in text
+        assert "META: asset_type=stock | market=America/New_York" in text
+
+    def test_explicit_asset_metadata_survives_resolution(self, tmp_path):
+        log = make_log(tmp_path)
+        log.store_decision(
+            "BTC-USD",
+            "2026-01-10",
+            DECISION_BUY,
+            asset_type="crypto",
+        )
+        log.update_with_outcome(
+            "BTC-USD",
+            "2026-01-10",
+            0.05,
+            0.02,
+            5,
+            "Momentum confirmed.",
+        )
+
+        text = (tmp_path / "trading_memory.md").read_text(encoding="utf-8")
+        entry = log.load_entries()[0]
+        assert "META: asset_type=crypto | market=CRYPTO" in text
+        assert entry["asset_type"] == "crypto"
+        assert entry["market"] == "CRYPTO"
+        assert entry["pending"] is False
 
     # Rating parsing
 
@@ -284,6 +318,109 @@ class TestTradingMemoryLogCore:
         assert "AAPL" not in ctx
         assert "META" in ctx
 
+    def test_configured_cross_ticker_limit_and_disable(self, tmp_path):
+        for i, ticker in enumerate(["AAPL", "MSFT", "GOOG"]):
+            _seed_completed(
+                tmp_path,
+                ticker,
+                f"2026-01-{i+1:02d}",
+                f"Buy {ticker}.",
+                f"Lesson {ticker}.",
+            )
+
+        limited = make_log(tmp_path, memory_cross_ticker_limit=1)
+        assert "Lesson GOOG." in limited.get_past_context("NVDA")
+        assert "Lesson MSFT." not in limited.get_past_context("NVDA")
+
+        disabled = make_log(tmp_path, memory_cross_ticker_limit=0)
+        assert disabled.get_past_context("NVDA") == ""
+
+    def test_cross_ticker_requires_same_stock_market(self, tmp_path):
+        _seed_completed(
+            tmp_path,
+            "600519.SS",
+            "2026-01-01",
+            "Buy Kweichow Moutai.",
+            "Shanghai lesson.",
+        )
+        _seed_completed(
+            tmp_path,
+            "7203.T",
+            "2026-01-02",
+            "Buy Toyota.",
+            "Tokyo lesson.",
+        )
+        _seed_completed(
+            tmp_path,
+            "NVDA",
+            "2026-01-03",
+            "Buy Nvidia.",
+            "US lesson.",
+        )
+        log = make_log(tmp_path)
+
+        context = log.get_past_context("000001.SZ", asset_type="stock")
+
+        assert "Shanghai lesson." in context
+        assert "Tokyo lesson." not in context
+        assert "US lesson." not in context
+
+    def test_cross_ticker_requires_same_asset_type(self, tmp_path):
+        _seed_completed(
+            tmp_path,
+            "ETH-USD",
+            "2026-01-01",
+            "Buy Ether.",
+            "Crypto lesson.",
+        )
+        _seed_completed(
+            tmp_path,
+            "NVDA",
+            "2026-01-02",
+            "Buy Nvidia.",
+            "Stock lesson.",
+        )
+        log = make_log(tmp_path)
+
+        crypto_context = log.get_past_context("BTC-USD", asset_type="crypto")
+        stock_context = log.get_past_context("AAPL", asset_type="stock")
+
+        assert "Crypto lesson." in crypto_context
+        assert "Stock lesson." not in crypto_context
+        assert "Stock lesson." in stock_context
+        assert "Crypto lesson." not in stock_context
+
+    def test_legacy_entry_metadata_is_inferred_without_migration(self, tmp_path):
+        _seed_completed(
+            tmp_path,
+            "7203.T",
+            "2026-01-01",
+            "Buy Toyota.",
+            "Tokyo lesson.",
+        )
+        path = tmp_path / "trading_memory.md"
+        before = path.read_text(encoding="utf-8")
+
+        entry = make_log(tmp_path).load_entries()[0]
+
+        assert entry["asset_type"] == "stock"
+        assert entry["market"] == "Asia/Tokyo"
+        assert path.read_text(encoding="utf-8") == before
+
+    def test_unrecognized_legacy_unsuffixed_ticker_uses_us_market(self, tmp_path):
+        _seed_completed(
+            tmp_path,
+            "123456",
+            "2026-01-01",
+            "Legacy decision.",
+            "Legacy lesson.",
+        )
+
+        entry = make_log(tmp_path).load_entries()[0]
+
+        assert entry["asset_type"] == "stock"
+        assert entry["market"] == "America/New_York"
+
     # No-op when config is None
 
     def test_no_log_path_is_noop(self):
@@ -292,14 +429,18 @@ class TestTradingMemoryLogCore:
         assert log.load_entries() == []
         assert log.get_past_context("NVDA") == ""
 
-    # Rotation: opt-in cap on resolved entries
+    # Rotation: global cap on resolved entries
 
-    def test_rotation_disabled_by_default(self, tmp_path):
-        """Without max_entries, all resolved entries are kept."""
-        log = make_log(tmp_path)
+    def test_rotation_can_be_disabled(self, tmp_path):
+        """A zero max_entries setting keeps all resolved entries."""
+        log = make_log(tmp_path, memory_log_max_entries=0)
         for i in range(7):
             _resolve_entry(log, "NVDA", f"2026-01-{i+1:02d}", DECISION_BUY, f"Lesson {i}.")
         assert len(log.load_entries()) == 7
+
+    def test_default_rotation_cap_is_1000(self, tmp_path):
+        log = make_log(tmp_path)
+        assert log._max_entries == 1000
 
     def test_rotation_prunes_oldest_resolved(self, tmp_path):
         """When max_entries is set and exceeded, oldest resolved entries are pruned."""
@@ -344,6 +485,39 @@ class TestTradingMemoryLogCore:
         for i in range(3):
             _resolve_entry(log, "NVDA", f"2026-01-{i+1:02d}", DECISION_BUY, f"Lesson {i}.")
         assert len(log.load_entries()) == 3
+
+    def test_store_prunes_legacy_oversized_log_before_append(self, tmp_path):
+        for i in range(4):
+            _seed_completed(
+                tmp_path,
+                "NVDA",
+                f"2026-01-{i+1:02d}",
+                f"Decision {i}.",
+                f"Lesson {i}.",
+            )
+        log = make_log(tmp_path, memory_log_max_entries=2)
+
+        log.store_decision("AAPL", "2026-02-01", DECISION_BUY)
+
+        entries = log.load_entries()
+        assert [entry["date"] for entry in entries if not entry["pending"]] == [
+            "2026-01-03",
+            "2026-01-04",
+        ]
+        assert [entry["ticker"] for entry in entries if entry["pending"]] == ["AAPL"]
+
+    @pytest.mark.parametrize(
+        ("key", "value"),
+        [
+            ("memory_log_max_entries", -1),
+            ("memory_log_max_entries", 1.5),
+            ("memory_cross_ticker_limit", -1),
+            ("memory_cross_ticker_limit", "1.5"),
+        ],
+    )
+    def test_memory_limits_reject_invalid_values(self, tmp_path, key, value):
+        with pytest.raises(ValueError, match=key):
+            make_log(tmp_path, **{key: value})
 
     # Rating parsing: markdown bold and numbered list formats
 
@@ -456,7 +630,10 @@ class TestDeferredReflection:
         assert e["alpha"] == "+2.1%"
         assert e["holding"] == "5d"
         raw_text = (tmp_path / "trading_memory.md").read_text(encoding="utf-8")
-        assert "[2026-01-10 | NVDA | Buy | +4.2% | +2.1% | 5d]\n\nDECISION:" in raw_text
+        assert (
+            "[2026-01-10 | NVDA | Buy | +4.2% | +2.1% | 5d]\n\n"
+            "META: asset_type=stock | market=America/New_York\n\nDECISION:"
+        ) in raw_text
 
     # Reflector.reflect_on_final_decision
 

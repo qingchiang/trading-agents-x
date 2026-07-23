@@ -16,6 +16,8 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_MAX_DEBATE_ROUNDS":    "max_debate_rounds",
     "TRADINGAGENTS_MAX_RISK_ROUNDS":      "max_risk_discuss_rounds",
     "TRADINGAGENTS_CHECKPOINT_ENABLED":   "checkpoint_enabled",
+    "TRADINGAGENTS_MEMORY_LOG_MAX_ENTRIES": "memory_log_max_entries",
+    "TRADINGAGENTS_MEMORY_CROSS_TICKER_LIMIT": "memory_cross_ticker_limit",
     "TRADINGAGENTS_PROVENANCE_APPENDIX":  "provenance_appendix",
     "TRADINGAGENTS_BENCHMARK_TICKER":     "benchmark_ticker",
     "TRADINGAGENTS_TEMPERATURE":          "temperature",
@@ -35,6 +37,10 @@ _ENV_OVERRIDES = {
 
 _BOOL_TRUE = ("true", "1", "yes", "on")
 _BOOL_FALSE = ("false", "0", "no", "off")
+_NON_NEGATIVE_INT_KEYS = {
+    "memory_log_max_entries",
+    "memory_cross_ticker_limit",
+}
 
 
 def _coerce(value: str, reference):
@@ -68,6 +74,8 @@ def _apply_env_overrides(config: dict) -> dict:
             continue
         try:
             config[key] = _coerce(raw, config.get(key))
+            if key in _NON_NEGATIVE_INT_KEYS and config[key] < 0:
+                raise ValueError(f"must be >= 0, got {config[key]}")
         except ValueError as exc:
             raise ValueError(f"Invalid value for {env_var}: {exc}") from exc
     return config
@@ -78,10 +86,11 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "results_dir": os.getenv("TRADINGAGENTS_RESULTS_DIR", os.path.join(_TRADINGAGENTS_HOME, "logs")),
     "data_cache_dir": os.getenv("TRADINGAGENTS_CACHE_DIR", os.path.join(_TRADINGAGENTS_HOME, "cache")),
     "memory_log_path": os.getenv("TRADINGAGENTS_MEMORY_LOG_PATH", os.path.join(_TRADINGAGENTS_HOME, "memory", "trading_memory.md")),
-    # Optional cap on the number of resolved memory log entries. When set,
-    # the oldest resolved entries are pruned once this limit is exceeded.
-    # Pending entries are never pruned. None disables rotation entirely.
-    "memory_log_max_entries": None,
+    # Global cap on resolved memory entries. Pending entries are never pruned;
+    # 0 disables rotation.
+    "memory_log_max_entries": 1000,
+    # Cross-ticker reflections injected into PM context. 0 disables them.
+    "memory_cross_ticker_limit": 3,
     # LLM settings
     "llm_provider": "openai",
     "deep_think_llm": "gpt-5.5",

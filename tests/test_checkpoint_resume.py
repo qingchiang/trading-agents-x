@@ -323,7 +323,12 @@ class TestTradingGraphCheckpointLifecycle(unittest.TestCase):
         self.graph.resolve_instrument_context.assert_called_once_with(
             self.ticker, "stock", self.date
         )
-        self.graph.memory_log.store_decision.assert_called_once()
+        self.graph.memory_log.store_decision.assert_called_once_with(
+            ticker=self.ticker,
+            trade_date=self.date,
+            final_trade_decision="Rating: Hold",
+            asset_type="stock",
+        )
         self.assertFalse(
             has_checkpoint(self.tmpdir, self.ticker, self.date, signature)
         )
