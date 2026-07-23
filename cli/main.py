@@ -64,9 +64,16 @@ if sys.platform == "win32":  # pragma: no cover - platform dependent
 else:
     _NO_CONSOLE_ERRORS = ()
 
+PROJECT_DESCRIPTION = "Multi-Agent LLM Financial Research Framework"
+UPSTREAM_ATTRIBUTION = (
+    "[dim]Built on "
+    "[link=https://github.com/TauricResearch/TradingAgents]TradingAgents[/link] by "
+    "[link=https://github.com/TauricResearch]Tauric Research[/link][/dim]"
+)
+
 app = typer.Typer(
     name="TradingAgentsX",
-    help="TradingAgentsX CLI: Multi-Agent LLM Financial Research Framework",
+    help=f"TradingAgentsX CLI: {PROJECT_DESCRIPTION}",
     add_completion=True,  # Enable shell completion
 )
 
@@ -292,7 +299,7 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
     layout["header"].update(
         Panel(
             "[bold green]Welcome to TradingAgentsX CLI[/bold green]\n"
-            "[dim]Based on [TradingAgents](https://github.com/TauricResearch/TradingAgents)[/dim]",
+            + UPSTREAM_ATTRIBUTION,
             title="Welcome to TradingAgentsX",
             border_style="green",
             padding=(1, 2),
@@ -507,15 +514,11 @@ def get_user_selections():
     # Create welcome box content
     welcome_content = f"{welcome_ascii}\n"
     welcome_content += (
-        "[bold green]TradingAgentsX: Multi-Agent LLM Financial Research "
-        "Framework - CLI[/bold green]\n\n"
+        f"[bold green]TradingAgentsX: {PROJECT_DESCRIPTION} - CLI[/bold green]\n\n"
     )
     welcome_content += "[bold]Workflow Steps:[/bold]\n"
     welcome_content += "I. Analyst Team → II. Research Team → III. Trader → IV. Risk Management → V. Portfolio Management\n\n"
-    welcome_content += (
-        "[dim]Based on [TradingAgents](https://github.com/TauricResearch/TradingAgents) "
-        "by [Tauric Research](https://github.com/TauricResearch)[/dim]"
-    )
+    welcome_content += UPSTREAM_ATTRIBUTION
 
     # Create and center the welcome box
     welcome_box = Panel(
@@ -523,7 +526,7 @@ def get_user_selections():
         border_style="green",
         padding=(1, 2),
         title="Welcome to TradingAgentsX",
-        subtitle="Multi-Agent LLM Financial Research Framework",
+        subtitle=PROJECT_DESCRIPTION,
     )
     console.print(Align.center(welcome_box))
     console.print()
