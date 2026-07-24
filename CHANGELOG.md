@@ -12,6 +12,12 @@ version numbers.
 
 ## [Unreleased]
 
+### Changed
+
+- **Distribution attribution metadata.** Refreshed the packaged NOTICE to use
+  the independent TradingAgentsX identity and durable project scope, and added
+  explicit SPDX license, license-file, and project URL metadata to the wheel.
+
 ### Fixed
 
 - **Decision-memory outcome window.** Pending decisions now settle only after

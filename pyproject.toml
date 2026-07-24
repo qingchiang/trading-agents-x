@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=77.0.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,6 +7,8 @@ name = "trading-agents-x"
 version = "0.4.0"
 description = "TradingAgentsX: a multi-agent LLM financial research framework for US, Japan, and China A-shares — an independent fork of TradingAgents"
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.10"
 dependencies = [
     "langchain-core>=0.3.81",
@@ -49,6 +51,12 @@ bedrock = [
 
 [project.scripts]
 tradingagents = "cli.main:app"
+
+[project.urls]
+Homepage = "https://github.com/qingchiang/trading-agents-x"
+Repository = "https://github.com/qingchiang/trading-agents-x"
+Issues = "https://github.com/qingchiang/trading-agents-x/issues"
+Changelog = "https://github.com/qingchiang/trading-agents-x/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 include = ["tradingagents*", "cli*"]
