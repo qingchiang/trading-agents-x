@@ -36,6 +36,7 @@ class TradingMemoryLog:
     _SEPARATOR = "\n\n<!-- ENTRY_END -->\n\n"
     _DEFAULT_MAX_ENTRIES = 1000
     _DEFAULT_CROSS_TICKER_LIMIT = 3
+    _MIN_CONTEXT_HOLDING_DAYS = 5
     # Precompiled patterns — avoids re-compilation on every load_entries() call
     _DECISION_RE = re.compile(r"DECISION:\n(.*?)(?=\nREFLECTION:|\Z)", re.DOTALL)
     _REFLECTION_RE = re.compile(r"REFLECTION:\n(.*?)$", re.DOTALL)
@@ -133,7 +134,11 @@ class TradingMemoryLog:
         asset_type: str | None = None,
     ) -> str:
         """Return formatted past context string for agent prompt injection."""
-        entries = [e for e in self.load_entries() if not e.get("pending")]
+        entries = [
+            e
+            for e in self.load_entries()
+            if not e.get("pending") and self._eligible_for_context(e)
+        ]
         if not entries:
             return ""
 
@@ -337,6 +342,16 @@ class TradingMemoryLog:
         tmp_path = self._log_path.with_suffix(".tmp")
         tmp_path.write_text(new_text, encoding="utf-8")
         tmp_path.replace(self._log_path)
+
+    @classmethod
+    def _eligible_for_context(cls, entry: dict) -> bool:
+        """Return whether a resolved entry has a trustworthy observation window."""
+        holding = entry.get("holding")
+        match = re.fullmatch(r"(\d+)d", str(holding or "").strip())
+        return bool(
+            match
+            and int(match.group(1)) >= cls._MIN_CONTEXT_HOLDING_DAYS
+        )
 
     @staticmethod
     def _asset_type(ticker: str, asset_type: str | None = None) -> str:

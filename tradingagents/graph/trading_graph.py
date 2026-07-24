@@ -4,10 +4,12 @@ import json
 import logging
 import os
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 import yfinance as yf
 from langgraph.prebuilt import ToolNode
 
@@ -44,7 +46,11 @@ from tradingagents.agents.utils.technical_indicators_tools import (
 )
 from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.interface import validate_market_routing
-from tradingagents.dataflows.symbol_utils import match_exchange_suffix, normalize_symbol
+from tradingagents.dataflows.symbol_utils import (
+    market_today,
+    match_exchange_suffix,
+    normalize_symbol,
+)
 from tradingagents.dataflows.utils import safe_ticker_component
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.llm_clients import create_llm_client
@@ -62,6 +68,32 @@ from .setup import GraphSetup
 from .signal_processing import SignalProcessor
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _OutcomeObservation:
+    """Aligned completed-session outcome used by deferred reflection."""
+
+    raw_return: float
+    alpha_return: float
+    holding_days: int
+    start_date: str
+    end_date: str
+
+
+def _close_by_local_date(frame: pd.DataFrame) -> pd.Series:
+    """Return closes indexed by their original exchange-local calendar date."""
+    if frame.empty or "Close" not in frame:
+        return pd.Series(dtype=float)
+    index = pd.DatetimeIndex(frame.index)
+    if index.tz is not None:
+        index = index.tz_localize(None)
+    closes = pd.Series(
+        frame["Close"].to_numpy(),
+        index=index.normalize(),
+        dtype=float,
+    )
+    return closes[~closes.index.duplicated(keep="last")].dropna().sort_index()
 
 
 def _coerce_max_retries(value):
@@ -274,47 +306,67 @@ class TradingAgentsGraph:
     def _fetch_returns(
         self, ticker: str, trade_date: str, holding_days: int = 5,
         benchmark: str = "SPY",
-    ) -> tuple[float | None, float | None, int | None]:
-        """Fetch raw and alpha return for ticker over holding_days from trade_date.
+    ) -> _OutcomeObservation | None:
+        """Fetch a fully matured, date-aligned return observation.
 
         ``benchmark`` is the index used as the alpha baseline (resolved by the
-        caller via ``_resolve_benchmark``). Returns ``(raw_return, alpha_return,
-        actual_holding_days)`` or ``(None, None, None)`` if price data is
-        unavailable (too recent, delisted, or network error).
+        caller via ``_resolve_benchmark``). Both histories exclude their current
+        market-local date so an incomplete daily candle is never treated as a
+        completed session. Returns ``None`` until the ticker and benchmark have
+        ``holding_days + 1`` common completed closes.
         """
-        from tradingagents.dataflows.symbol_utils import normalize_symbol
-
         try:
             start = datetime.strptime(trade_date, "%Y-%m-%d")
-            end = start + timedelta(days=holding_days + 7)  # buffer for weekends/holidays
-            end_str = end.strftime("%Y-%m-%d")
+            canonical_ticker = normalize_symbol(ticker)
+            stock_end = market_today(canonical_ticker)
+            benchmark_end = market_today(benchmark)
+            if stock_end <= start.date() or benchmark_end <= start.date():
+                return None
 
             # Normalize so the realized-return lookup hits the same instrument
             # the analysis priced (e.g. XAUUSD -> GC=F) (#984). The benchmark is
             # already a canonical Yahoo symbol from ``_resolve_benchmark``.
-            stock = yf.Ticker(normalize_symbol(ticker)).history(start=trade_date, end=end_str)
-            bench = yf.Ticker(benchmark).history(start=trade_date, end=end_str)
-
-            if len(stock) < 2 or len(bench) < 2:
-                return None, None, None
-
-            actual_days = min(holding_days, len(stock) - 1, len(bench) - 1)
-            raw = float(
-                (stock["Close"].iloc[actual_days] - stock["Close"].iloc[0])
-                / stock["Close"].iloc[0]
+            stock = yf.Ticker(canonical_ticker).history(
+                start=trade_date,
+                end=stock_end.isoformat(),
             )
+            bench = yf.Ticker(benchmark).history(
+                start=trade_date,
+                end=benchmark_end.isoformat(),
+            )
+            stock_close = _close_by_local_date(stock)
+            benchmark_close = _close_by_local_date(bench)
+            common_dates = stock_close.index.intersection(
+                benchmark_close.index,
+            ).sort_values()
+            required_points = holding_days + 1
+            if len(common_dates) < required_points:
+                return None
+
+            start_date = common_dates[0]
+            end_date = common_dates[holding_days]
+            stock_start = stock_close.loc[start_date]
+            stock_end_close = stock_close.loc[end_date]
+            benchmark_start = benchmark_close.loc[start_date]
+            benchmark_end_close = benchmark_close.loc[end_date]
+            raw = float((stock_end_close - stock_start) / stock_start)
             bench_ret = float(
-                (bench["Close"].iloc[actual_days] - bench["Close"].iloc[0])
-                / bench["Close"].iloc[0]
+                (benchmark_end_close - benchmark_start) / benchmark_start
             )
             alpha = raw - bench_ret
-            return raw, alpha, actual_days
+            return _OutcomeObservation(
+                raw_return=raw,
+                alpha_return=alpha,
+                holding_days=holding_days,
+                start_date=start_date.date().isoformat(),
+                end_date=end_date.date().isoformat(),
+            )
         except Exception as e:
             logger.warning(
                 "Could not resolve outcome for %s on %s vs %s (will retry next run): %s",
                 ticker, trade_date, benchmark, e,
             )
-            return None, None, None
+            return None
 
     def _resolve_pending_entries(self, ticker: str) -> None:
         """Resolve pending log entries for ticker at the start of a new run.
@@ -333,23 +385,27 @@ class TradingAgentsGraph:
         benchmark = self._resolve_benchmark(ticker)
         updates = []
         for entry in pending:
-            raw, alpha, days = self._fetch_returns(
+            observation = self._fetch_returns(
                 ticker, entry["date"], benchmark=benchmark,
             )
-            if raw is None:
+            if observation is None:
                 continue  # price not available yet — try again next run
             reflection = self.reflector.reflect_on_final_decision(
                 final_decision=entry.get("decision", ""),
-                raw_return=raw,
-                alpha_return=alpha,
+                raw_return=observation.raw_return,
+                alpha_return=observation.alpha_return,
                 benchmark_name=benchmark,
+                ticker=ticker,
+                holding_days=observation.holding_days,
+                observation_start=observation.start_date,
+                observation_end=observation.end_date,
             )
             updates.append({
                 "ticker": ticker,
                 "trade_date": entry["date"],
-                "raw_return": raw,
-                "alpha_return": alpha,
-                "holding_days": days,
+                "raw_return": observation.raw_return,
+                "alpha_return": observation.alpha_return,
+                "holding_days": observation.holding_days,
                 "reflection": reflection,
             })
 

@@ -35,6 +35,24 @@ limit. Resolved entries have a configurable global cap (1,000 by default);
 rotation removes the oldest resolved blocks in file order and never removes
 pending blocks.
 
+Settlement uses a fixed five-session outcome window. Ticker and benchmark
+histories end at their respective `market_today()` dates (exclusive), retain
+their exchange-local calendar labels, and are intersected by date. A pending
+record matures only when six common completed closes exist; returns use the
+first and sixth closes, producing five aligned trading intervals. Raw return is
+`end_stock / start_stock - 1`; alpha subtracts the benchmark return over those
+same dates. A fresh run for the same ticker performs this settlement before
+context construction; checkpoint restoration does not.
+
+The reflection prompt receives the ticker, benchmark, aligned-session count,
+observation dates, raw return, alpha, and original decision. It follows the
+configured output language and frames the result as short-term market feedback,
+not proof or disproof of a medium- or long-term thesis. It may compare the
+short-term move only with evidence explicitly present in the stored decision.
+The reflector deterministically prefixes the generated prose with the
+language-neutral observation range (`[start → end | 5d]`), so exact dates
+survive storage even when the model does not repeat them.
+
 Context selection keeps up to five full resolved entries for the same ticker.
 Cross-ticker context is reflection-only and defaults to the three most recent
 resolved entries whose asset type and regional market both match. Regional
@@ -42,6 +60,11 @@ markets use the existing `market_timezone()` identity; crypto uses one
 `CRYPTO` bucket. New entries persist this identity in an optional `META` line.
 Legacy entries without metadata remain unchanged on disk and infer asset type
 and market from their canonical ticker when read.
+
+Only resolved entries with a parseable holding window of at least `5d` are
+eligible for either context path. Older shorter-window entries and entries
+whose holding window is missing or malformed remain unchanged on disk but are
+excluded from context.
 
 ## Cross-cutting contracts
 
