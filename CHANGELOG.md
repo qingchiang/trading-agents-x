@@ -12,6 +12,14 @@ version numbers.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Decision-memory outcome window.** Pending decisions now settle only after
+  six common ticker/benchmark closes form five aligned completed trading
+  intervals. Reflections retain the exact observation range and remain short-term,
+  output-language-aware feedback; legacy resolved records with shorter,
+  missing, or malformed holding windows are no longer injected into context.
+
 ## [0.4.0] — 2026-07-23
 
 The first independent TradingAgentsX release builds on upstream `0.3.1` with

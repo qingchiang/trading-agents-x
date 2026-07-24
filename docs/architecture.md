@@ -39,9 +39,10 @@ Settlement uses a fixed five-session outcome window. Ticker and benchmark
 histories end at their respective `market_today()` dates (exclusive), retain
 their exchange-local calendar labels, and are intersected by date. A pending
 record matures only when six common completed closes exist; returns use the
-first and sixth closes, producing five aligned trading intervals. A fresh run
-for the same ticker performs this settlement before context construction;
-checkpoint restoration does not.
+first and sixth closes, producing five aligned trading intervals. Raw return is
+`end_stock / start_stock - 1`; alpha subtracts the benchmark return over those
+same dates. A fresh run for the same ticker performs this settlement before
+context construction; checkpoint restoration does not.
 
 The reflection prompt receives the ticker, benchmark, aligned-session count,
 observation dates, raw return, alpha, and original decision. It follows the
@@ -60,8 +61,8 @@ markets use the existing `market_timezone()` identity; crypto uses one
 Legacy entries without metadata remain unchanged on disk and infer asset type
 and market from their canonical ticker when read.
 
-Only resolved entries with a parseable holding window of at least five days
-are eligible for either context path. Older shorter-window entries and entries
+Only resolved entries with a parseable holding window of at least `5d` are
+eligible for either context path. Older shorter-window entries and entries
 whose holding window is missing or malformed remain unchanged on disk but are
 excluded from context.
 
