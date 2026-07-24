@@ -5,6 +5,8 @@ the news path: a broker symbol like XAUUSD must resolve to the same Yahoo symbol
 (GC=F) that the price path uses, so identity, realized-return, and news lookups
 hit the right instrument instead of failing/mismatching.
 """
+from datetime import date
+
 import pandas as pd
 import pytest
 
@@ -67,18 +69,23 @@ def test_fetch_returns_normalizes_symbol(monkeypatch):
             queried.append(symbol)
 
         def history(self, *args, **kwargs):
-            return pd.DataFrame({"Close": [100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0]})
+            return pd.DataFrame(
+                {"Close": [100.0, 101.0, 102.0, 103.0, 104.0, 105.0]},
+                index=pd.date_range("2025-01-02", periods=6, freq="B"),
+            )
 
     monkeypatch.setattr(tg.yf, "Ticker", FakeTicker)
+    monkeypatch.setattr(tg, "market_today", lambda symbol: date(2025, 1, 20))
 
     # _fetch_returns does not use ``self``; call unbound to avoid building the graph.
-    raw, alpha, days = TradingAgentsGraph._fetch_returns(
+    outcome = TradingAgentsGraph._fetch_returns(
         None, "XAUUSD", "2025-01-02", holding_days=5, benchmark="SPY"
     )
 
     assert queried[0] == "GC=F"  # stock symbol normalized (#984)
     assert queried[1] == "SPY"   # benchmark left as the canonical symbol
-    assert raw is not None and days is not None
+    assert outcome is not None
+    assert outcome.holding_days == 5
 
 
 def test_news_lookup_normalizes_symbol(monkeypatch):

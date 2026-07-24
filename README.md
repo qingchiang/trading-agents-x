@@ -355,6 +355,17 @@ required. A later fresh run for the same ticker can compare realized raw and
 benchmark-relative returns and inject a short reflection into the
 portfolio-manager context. Override the path with `TRADINGAGENTS_MEMORY_LOG_PATH`.
 
+Pending outcomes use a fixed five-session observation window. Settlement waits
+for six completed closes shared by the ticker and its regional benchmark: the
+first close is the start and the sixth is the end, giving five aligned trading
+intervals. Each instrument's current market-local date is excluded, so
+different holidays or missing sessions delay settlement instead of shortening
+the window. The reflection follows `TRADINGAGENTS_OUTPUT_LANGUAGE` and is
+short-term market feedback only; it does not claim that a medium- or long-term
+thesis has been proved or disproved. A language-neutral prefix such as
+`[2026-01-05 → 2026-01-12 | 5d]` preserves the exact observation dates
+independently of the generated prose.
+
 The shared log keeps at most 1,000 resolved entries by default. When that
 global limit is exceeded, the oldest resolved entries are removed in file
 order; pending entries are not counted or pruned. Set
@@ -368,6 +379,11 @@ other tickers, but only when both the asset type and regional market match
 China, Japan, and the US do not). Configure that cross-ticker count with
 `TRADINGAGENTS_MEMORY_CROSS_TICKER_LIMIT`; set it to `0` to disable
 cross-ticker memory.
+
+Resolved records are eligible for context only when their stored holding
+window is at least `5d`. Older `1d`–`4d` records and records with a missing or
+malformed holding window remain unchanged in the Markdown file but are never
+injected as same- or cross-ticker memory.
 
 Checkpointing is disabled by default. These options apply to the root command:
 
