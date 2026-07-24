@@ -1,14 +1,19 @@
-trading-agents-x
+TradingAgentsX
 Copyright 2026 qingchiang
 
-This product is a modified derivative work of:
+This independently maintained project is a modified derivative work of:
 
   TradingAgents: Multi-Agents LLM Financial Trading Framework
   Copyright Tauric Research
   https://github.com/TauricResearch/TradingAgents
   Licensed under the Apache License, Version 2.0.
 
-This fork adds Japanese-market data vendors (J-Quants, EDINET, TDnet,
-e-Stat, BOJ) and a suffix-based, market-aware data-routing layer on top
-of the upstream framework. Files modified from the upstream original are
-recorded in this project's Git history.
+TradingAgentsX extends the upstream framework with multi-market data systems,
+point-in-time evidence controls, auditable source provenance, and shared
+runtime continuity across CLI and Python usage. Current capabilities and
+release history are documented at:
+
+  https://github.com/qingchiang/trading-agents-x
+
+Files modified from the upstream original are recorded in this project's Git
+history.
