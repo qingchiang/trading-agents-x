@@ -1,0 +1,1070 @@
+"""Parallel, evidence-first research graph with Fast/Standard/Deep profiles."""
+
+from __future__ import annotations
+
+import json
+import operator
+import re
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
+from datetime import date
+from typing import Annotated, Any, Literal
+
+from langchain_core.messages import HumanMessage, ToolMessage
+from langgraph.graph import END, START, StateGraph
+from langgraph.prebuilt import ToolNode
+from langgraph.runtime import Runtime
+from pydantic import BaseModel
+from typing_extensions import TypedDict
+
+from tradingagents.agents import (
+    create_fundamentals_analyst,
+    create_market_analyst,
+    create_news_analyst,
+    create_sentiment_analyst,
+)
+from tradingagents.agents.utils.agent_states import AgentState
+from tradingagents.agents.utils.agent_utils import get_news
+from tradingagents.agents.utils.core_stock_tools import get_stock_data_for_analysis
+from tradingagents.agents.utils.fundamental_data_tools import (
+    get_balance_sheet_for_analysis,
+    get_cashflow_for_analysis,
+    get_fundamentals_for_analysis,
+    get_income_statement_for_analysis,
+)
+from tradingagents.agents.utils.macro_data_tools import (
+    get_macro_indicators_for_analysis,
+)
+from tradingagents.agents.utils.market_data_validation_tools import (
+    get_verified_market_snapshot_for_analysis,
+)
+from tradingagents.agents.utils.news_data_tools import (
+    get_global_news_for_analysis,
+    get_news_for_analysis,
+)
+from tradingagents.agents.utils.prediction_markets_tools import (
+    get_prediction_markets_for_analysis,
+)
+from tradingagents.agents.utils.technical_indicators_tools import (
+    get_indicators_for_analysis,
+)
+from tradingagents.application.contracts import (
+    AnalystClaim,
+    AnalystReport,
+    EvidenceBundle,
+    EvidenceItem,
+    EvidenceQuality,
+    PerspectiveReview,
+    ResearchDecision,
+    ResearchRating,
+    RunProfile,
+)
+from tradingagents.application.metrics import MetricsCallback
+from tradingagents.application.runtime import RunContext, check_cancelled
+from tradingagents.dataflows.config import use_config
+from tradingagents.provenance import (
+    ProvenanceRecord,
+    extract_provenance,
+    strip_provenance_markers,
+)
+
+_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_CONTROL_COMMENT_RE = re.compile(
+    r"<!--\s*tradingagents-data-provenance:(?:start|end)\s*-->"
+)
+_WARNING_HEADING = "## Data Quality Warnings"
+_PROVENANCE_HEADING = "## Data Provenance"
+
+
+def _merge_dicts(
+    left: dict[str, Any] | None,
+    right: dict[str, Any] | None,
+) -> dict[str, Any]:
+    return {**(left or {}), **(right or {})}
+
+
+class ResearchState(TypedDict, total=False):
+    ticker: str
+    analysis_date: str
+    asset_type: str
+    profile: str
+    analysts: list[str]
+    analyst_reports: Annotated[dict[str, dict[str, Any]], _merge_dicts]
+    evidence_items: Annotated[list[dict[str, Any]], operator.add]
+    evidence_bundle: dict[str, Any]
+    reviews: Annotated[dict[str, dict[str, Any]], _merge_dicts]
+    risk_reviews: Annotated[dict[str, dict[str, Any]], _merge_dicts]
+    draft_decision: dict[str, Any]
+    final_decision: dict[str, Any]
+    rebuttal_round: int
+    debate_continue: bool
+    warnings: Annotated[list[str], operator.add]
+
+
+@dataclass(frozen=True)
+class RoleSpec:
+    key: str
+    label: str
+    objective: str
+    model: Literal["quick", "deep"] = "quick"
+
+
+@dataclass(frozen=True)
+class GraphExecution:
+    state: dict[str, Any]
+    evidence: EvidenceBundle
+    reports: dict[str, AnalystReport]
+    decision: ResearchDecision
+
+
+_PERSPECTIVE_SPECS = {
+    "bull": RoleSpec(
+        key="bull",
+        label="Bull Researcher",
+        objective=(
+            "Build the strongest evidence-grounded constructive case. Identify "
+            "catalysts, rebut material bearish claims, and cite evidence refs."
+        ),
+    ),
+    "bear": RoleSpec(
+        key="bear",
+        label="Bear Researcher",
+        objective=(
+            "Build the strongest evidence-grounded skeptical case. Identify "
+            "downside mechanisms, challenge bullish claims, and cite evidence refs."
+        ),
+    ),
+    "risk": RoleSpec(
+        key="risk",
+        label="Risk Reviewer",
+        objective=(
+            "Stress-test the draft as a research conclusion. Identify invalidation "
+            "conditions and evidence gaps without proposing position sizing."
+        ),
+    ),
+    "aggressive": RoleSpec(
+        key="aggressive",
+        label="Aggressive Risk Lens",
+        objective=(
+            "Stress-test whether the draft underweights asymmetric upside and "
+            "opportunity cost, while explicitly identifying failure conditions."
+        ),
+    ),
+    "neutral": RoleSpec(
+        key="neutral",
+        label="Neutral Risk Lens",
+        objective=(
+            "Balance upside and downside mechanisms, surface uncertainty, and "
+            "challenge overconfident claims on either side."
+        ),
+    ),
+    "conservative": RoleSpec(
+        key="conservative",
+        label="Conservative Risk Lens",
+        objective=(
+            "Stress-test downside, data quality, regime shifts, and thesis "
+            "invalidation without giving account-level trading instructions."
+        ),
+    ),
+}
+
+
+class ResearchGraph:
+    """Build and execute a graph for one immutable request/configuration."""
+
+    def __init__(
+        self,
+        *,
+        quick_llm: Any,
+        deep_llm: Any,
+        profile: RunProfile,
+        selected_analysts: Iterable[str],
+        metrics: MetricsCallback | None = None,
+    ):
+        self.quick_llm = quick_llm
+        self.deep_llm = deep_llm
+        self.profile = profile
+        self.selected_analysts = tuple(selected_analysts)
+        self.metrics = metrics or MetricsCallback()
+        self._analyst_subgraphs = self._build_analyst_subgraphs()
+        self.workflow = self._build_workflow()
+
+    def execute(
+        self,
+        context: RunContext,
+        *,
+        checkpointer: Any = None,
+        checkpoint_thread_id: str,
+        resume: bool = False,
+        on_event: Callable[[dict[str, Any]], None] | None = None,
+    ) -> GraphExecution:
+        graph = self.workflow.compile(checkpointer=checkpointer)
+        config: dict[str, Any] = {
+            "configurable": {"thread_id": checkpoint_thread_id},
+            "recursion_limit": 120,
+            "callbacks": [self.metrics],
+        }
+        graph_input = None if resume else self._initial_state(context)
+        final_state: dict[str, Any] | None = None
+        for mode, chunk in graph.stream(
+            graph_input,
+            config=config,
+            context=context,
+            stream_mode=["values", "custom"],
+        ):
+            if mode == "custom":
+                if on_event:
+                    on_event(dict(chunk))
+            elif mode == "values":
+                final_state = dict(chunk)
+        if final_state is None:
+            snapshot = graph.get_state(config)
+            final_state = dict(snapshot.values)
+        evidence = EvidenceBundle.model_validate(final_state["evidence_bundle"])
+        reports = {
+            key: AnalystReport.model_validate(value)
+            for key, value in final_state["analyst_reports"].items()
+        }
+        decision = ResearchDecision.model_validate(final_state["final_decision"])
+        return GraphExecution(
+            state=final_state,
+            evidence=evidence,
+            reports=reports,
+            decision=decision,
+        )
+
+    def _initial_state(self, context: RunContext) -> ResearchState:
+        request = context.request
+        return {
+            "ticker": request.ticker,
+            "analysis_date": request.analysis_date.isoformat(),
+            "asset_type": request.asset_type.value,
+            "profile": request.profile.value,
+            "analysts": list(request.analysts),
+            "analyst_reports": {},
+            "evidence_items": [],
+            "reviews": {},
+            "risk_reviews": {},
+            "rebuttal_round": 0,
+            "debate_continue": False,
+            "warnings": [],
+        }
+
+    def _build_analyst_subgraphs(self) -> dict[str, Any]:
+        factories = {
+            "market": lambda: create_market_analyst(self.quick_llm),
+            "social": lambda: create_sentiment_analyst(self.quick_llm),
+            "news": lambda: create_news_analyst(self.quick_llm),
+            "fundamentals": lambda: create_fundamentals_analyst(self.quick_llm),
+        }
+        tool_nodes = {
+            "market": ToolNode(
+                [
+                    get_stock_data_for_analysis,
+                    get_indicators_for_analysis,
+                    get_verified_market_snapshot_for_analysis,
+                ]
+            ),
+            "social": ToolNode([get_news]),
+            "news": ToolNode(
+                [
+                    get_news_for_analysis,
+                    get_global_news_for_analysis,
+                    get_macro_indicators_for_analysis,
+                    get_prediction_markets_for_analysis,
+                ]
+            ),
+            "fundamentals": ToolNode(
+                [
+                    get_fundamentals_for_analysis,
+                    get_balance_sheet_for_analysis,
+                    get_cashflow_for_analysis,
+                    get_income_statement_for_analysis,
+                ]
+            ),
+        }
+        subgraphs: dict[str, Any] = {}
+        for analyst in self.selected_analysts:
+            builder = StateGraph(AgentState, context_schema=RunContext)
+            builder.add_node("agent", factories[analyst]())
+            builder.add_node("tools", tool_nodes[analyst])
+            builder.add_edge(START, "agent")
+            builder.add_conditional_edges(
+                "agent",
+                _analyst_route,
+                {"tools": "tools", "done": END},
+            )
+            builder.add_edge("tools", "agent")
+            subgraphs[analyst] = builder.compile()
+        return subgraphs
+
+    def _build_workflow(self) -> StateGraph:
+        workflow = StateGraph(ResearchState, context_schema=RunContext)
+        analyst_nodes = []
+        for analyst in self.selected_analysts:
+            node_name = f"analyst.{analyst}"
+            analyst_nodes.append(node_name)
+            workflow.add_node(node_name, self._create_analyst_node(analyst))
+            workflow.add_edge(START, node_name)
+            workflow.add_edge(node_name, "evidence.seal")
+        workflow.add_node("evidence.seal", self._seal_evidence)
+
+        if self.profile is RunProfile.FAST:
+            workflow.add_node("committee.final", self._create_final_committee(fast=True))
+            workflow.add_edge("evidence.seal", "committee.final")
+            workflow.add_edge("committee.final", END)
+            return workflow
+
+        workflow.add_node(
+            "review.bull",
+            self._create_review_node(_PERSPECTIVE_SPECS["bull"]),
+        )
+        workflow.add_node(
+            "review.bear",
+            self._create_review_node(_PERSPECTIVE_SPECS["bear"]),
+        )
+        workflow.add_edge("evidence.seal", "review.bull")
+        workflow.add_edge("evidence.seal", "review.bear")
+
+        if self.profile is RunProfile.DEEP:
+            workflow.add_node("debate.control", self._debate_control)
+            workflow.add_node(
+                "review.bull.rebuttal",
+                self._create_review_node(
+                    _PERSPECTIVE_SPECS["bull"], rebuttal=True
+                ),
+            )
+            workflow.add_node(
+                "review.bear.rebuttal",
+                self._create_review_node(
+                    _PERSPECTIVE_SPECS["bear"], rebuttal=True
+                ),
+            )
+            workflow.add_edge("review.bull", "debate.control")
+            workflow.add_edge("review.bear", "debate.control")
+            workflow.add_conditional_edges(
+                "debate.control",
+                self._route_deep_debate,
+                {
+                    "bull_rebuttal": "review.bull.rebuttal",
+                    "bear_rebuttal": "review.bear.rebuttal",
+                    "judge": "judge.research",
+                },
+            )
+            workflow.add_edge("review.bull.rebuttal", "debate.control")
+            workflow.add_edge("review.bear.rebuttal", "debate.control")
+        else:
+            workflow.add_edge("review.bull", "judge.research")
+            workflow.add_edge("review.bear", "judge.research")
+
+        workflow.add_node("judge.research", self._research_judge)
+
+        if self.profile is RunProfile.STANDARD:
+            workflow.add_node(
+                "risk.review",
+                self._create_risk_node(_PERSPECTIVE_SPECS["risk"]),
+            )
+            workflow.add_edge("judge.research", "risk.review")
+            workflow.add_node(
+                "committee.final", self._create_final_committee(fast=False)
+            )
+            workflow.add_edge("risk.review", "committee.final")
+        else:
+            for key in ("aggressive", "neutral", "conservative"):
+                name = f"risk.{key}"
+                workflow.add_node(
+                    name,
+                    self._create_risk_node(_PERSPECTIVE_SPECS[key]),
+                )
+                workflow.add_edge("judge.research", name)
+                workflow.add_edge(name, "committee.final")
+            workflow.add_node(
+                "committee.final", self._create_final_committee(fast=False)
+            )
+
+        workflow.add_edge("committee.final", END)
+        return workflow
+
+    def _create_analyst_node(self, analyst: str):
+        report_key = {
+            "market": "market_report",
+            "social": "sentiment_report",
+            "news": "news_report",
+            "fundamentals": "fundamentals_report",
+        }[analyst]
+
+        def analyst_node(
+            state: ResearchState,
+            runtime: Runtime[RunContext],
+        ) -> dict[str, Any]:
+            context = runtime.context
+            node_name = f"analyst.{analyst}"
+            self._start_node(runtime, node_name)
+            check_cancelled(context)
+            local_state: dict[str, Any] = {
+                "messages": [HumanMessage(content=context.request.ticker)],
+                "company_of_interest": context.request.ticker,
+                "asset_type": context.request.asset_type.value,
+                "instrument_context": context.instrument_context,
+                "trade_date": context.request.analysis_date.isoformat(),
+                "past_context": context.past_context,
+                "market_report": "",
+                "sentiment_report": "",
+                "news_report": "",
+                "fundamentals_report": "",
+            }
+            with use_config(dict(context.legacy_config)):
+                result = self._analyst_subgraphs[analyst].invoke(
+                    local_state,
+                    config={
+                        "recursion_limit": 40,
+                        "callbacks": [self.metrics],
+                    },
+                    context=context,
+                )
+            narrative = _clean_narrative(str(result.get(report_key, "")))
+            evidence = _collect_evidence(
+                result.get("messages", []),
+                narrative,
+                requested_date=context.request.analysis_date,
+                analyst=analyst,
+            )
+            typed = _adapt_analyst_report(analyst, narrative, evidence)
+            check_cancelled(context)
+            self._finish_node(
+                runtime,
+                node_name,
+                {
+                    "evidence_count": len(evidence),
+                    "confidence": typed.confidence,
+                    "warnings": len(typed.warnings),
+                },
+            )
+            return {
+                "analyst_reports": {
+                    analyst: typed.model_dump(mode="json")
+                },
+                "evidence_items": [
+                    item.model_dump(mode="json") for item in evidence
+                ],
+                "warnings": list(typed.warnings),
+            }
+
+        return analyst_node
+
+    def _seal_evidence(
+        self,
+        state: ResearchState,
+        runtime: Runtime[RunContext],
+    ) -> dict[str, Any]:
+        node = "evidence.seal"
+        self._start_node(runtime, node)
+        check_cancelled(runtime.context)
+        deduped: dict[str, EvidenceItem] = {}
+        for raw in state.get("evidence_items", []):
+            item = EvidenceItem.model_validate(raw)
+            deduped[item.ref] = item
+        bundle = EvidenceBundle(
+            instrument=state["ticker"],
+            analysis_date=date.fromisoformat(state["analysis_date"]),
+            items=tuple(deduped.values()),
+        )
+        reports: dict[str, dict[str, Any]] = {}
+        valid_refs = set(deduped)
+        for key, raw in state["analyst_reports"].items():
+            report = AnalystReport.model_validate(raw)
+            refs = tuple(ref for ref in report.evidence_refs if ref in valid_refs)
+            claims = tuple(
+                claim.model_copy(
+                    update={
+                        "evidence_refs": tuple(
+                            ref for ref in claim.evidence_refs if ref in valid_refs
+                        )
+                    }
+                )
+                for claim in report.claims
+            )
+            reports[key] = report.model_copy(
+                update={"evidence_refs": refs, "claims": claims}
+            ).model_dump(mode="json")
+        self._finish_node(
+            runtime,
+            node,
+            {"items": len(bundle.items), "digest": bundle.digest},
+        )
+        return {
+            "evidence_bundle": bundle.model_dump(mode="json"),
+            "analyst_reports": reports,
+        }
+
+    def _create_review_node(self, spec: RoleSpec, rebuttal: bool = False):
+        llm = self.quick_llm if spec.model == "quick" else self.deep_llm
+
+        def review_node(
+            state: ResearchState,
+            runtime: Runtime[RunContext],
+        ) -> dict[str, Any]:
+            suffix = ".rebuttal" if rebuttal else ""
+            node = f"review.{spec.key}{suffix}"
+            self._start_node(runtime, node)
+            check_cancelled(runtime.context)
+            opponent = "bear" if spec.key == "bull" else "bull"
+            opponent_context = (
+                state.get("reviews", {}).get(opponent) if rebuttal else None
+            )
+            prompt = _research_prompt(
+                state,
+                title=spec.label,
+                objective=spec.objective,
+                extra=(
+                    "This is a targeted rebuttal. Address the opposing structured "
+                    f"review below. Set new_evidence_refs only for refs not cited "
+                    f"in your prior review; do not invent refs.\n"
+                    f"OPPOSING REVIEW:\n{json.dumps(opponent_context, ensure_ascii=False)}"
+                    if rebuttal
+                    else (
+                        "Produce a structured independent review. "
+                        "new_evidence_refs should normally be empty in the first round."
+                    )
+                ),
+            )
+            review = _invoke_review(llm, spec, prompt, state)
+            self._finish_node(
+                runtime,
+                node,
+                {
+                    "evidence_refs": len(review.evidence_refs),
+                    "new_evidence_refs": len(review.new_evidence_refs),
+                    "claim_rebuttals": len(review.claim_rebuttals),
+                },
+            )
+            return {
+                "reviews": {spec.key: review.model_dump(mode="json")}
+            }
+
+        return review_node
+
+    def _debate_control(
+        self,
+        state: ResearchState,
+        runtime: Runtime[RunContext],
+    ) -> dict[str, Any]:
+        node = "debate.control"
+        self._start_node(runtime, node)
+        check_cancelled(runtime.context)
+        round_number = int(state.get("rebuttal_round", 0))
+        active = any(
+            review.get("new_evidence_refs") or review.get("claim_rebuttals")
+            for review in state.get("reviews", {}).values()
+        )
+        should_continue = active and round_number < 2
+        next_round = round_number + 1 if should_continue else round_number
+        self._finish_node(
+            runtime,
+            node,
+            {"round": round_number, "continue": should_continue},
+        )
+        return {
+            "rebuttal_round": next_round,
+            "debate_continue": should_continue,
+        }
+
+    @staticmethod
+    def _route_deep_debate(state: ResearchState) -> list[str]:
+        if state.get("debate_continue", False):
+            return ["bull_rebuttal", "bear_rebuttal"]
+        return ["judge"]
+
+    def _research_judge(
+        self,
+        state: ResearchState,
+        runtime: Runtime[RunContext],
+    ) -> dict[str, Any]:
+        node = "judge.research"
+        self._start_node(runtime, node)
+        check_cancelled(runtime.context)
+        prompt = _research_prompt(
+            state,
+            title="Research Judge",
+            objective=(
+                "Evaluate the structured bull and bear reviews, resolve material "
+                "claim conflicts, and draft a research-only decision. Do not give "
+                "position sizing, entry, stop, or target prices."
+            ),
+            extra=(
+                "PERSPECTIVE REVIEWS:\n"
+                + json.dumps(state.get("reviews", {}), ensure_ascii=False)
+            ),
+        )
+        decision = _invoke_decision(self.deep_llm, prompt, state)
+        self._finish_node(
+            runtime,
+            node,
+            {
+                "rating": decision.rating.value,
+                "confidence": decision.confidence,
+            },
+        )
+        return {"draft_decision": decision.model_dump(mode="json")}
+
+    def _create_risk_node(self, spec: RoleSpec):
+        def risk_node(
+            state: ResearchState,
+            runtime: Runtime[RunContext],
+        ) -> dict[str, Any]:
+            node = (
+                "risk.review"
+                if spec.key == "risk"
+                else f"risk.{spec.key}"
+            )
+            self._start_node(runtime, node)
+            check_cancelled(runtime.context)
+            prompt = _research_prompt(
+                state,
+                title=spec.label,
+                objective=spec.objective,
+                extra=(
+                    "DRAFT DECISION:\n"
+                    + json.dumps(
+                        state.get("draft_decision", {}),
+                        ensure_ascii=False,
+                    )
+                ),
+            )
+            review = _invoke_review(
+                self.quick_llm,
+                spec,
+                prompt,
+                state,
+            )
+            self._finish_node(
+                runtime,
+                node,
+                {"risks": len(review.risks)},
+            )
+            return {
+                "risk_reviews": {spec.key: review.model_dump(mode="json")}
+            }
+
+        return risk_node
+
+    def _create_final_committee(self, *, fast: bool):
+        def final_node(
+            state: ResearchState,
+            runtime: Runtime[RunContext],
+        ) -> dict[str, Any]:
+            node = "committee.final"
+            self._start_node(runtime, node)
+            check_cancelled(runtime.context)
+            if fast:
+                objective = (
+                    "Directly synthesize the typed analyst reports into one "
+                    "research-only decision. Explicitly preserve uncertainty and "
+                    "cite evidence refs."
+                )
+                extra = ""
+            else:
+                objective = (
+                    "Produce the final research-only decision after considering the "
+                    "judge draft and all risk reviews. Do not include position sizing, "
+                    "entry, stop, target price, or execution instructions."
+                )
+                extra = (
+                    "DRAFT DECISION:\n"
+                    + json.dumps(
+                        state.get("draft_decision", {}),
+                        ensure_ascii=False,
+                    )
+                    + "\nRISK REVIEWS:\n"
+                    + json.dumps(
+                        state.get("risk_reviews", {}),
+                        ensure_ascii=False,
+                    )
+                )
+            prompt = _research_prompt(
+                state,
+                title="Final Research Committee",
+                objective=objective,
+                extra=extra,
+            )
+            decision = _invoke_decision(self.deep_llm, prompt, state)
+            self._finish_node(
+                runtime,
+                node,
+                {
+                    "rating": decision.rating.value,
+                    "confidence": decision.confidence,
+                },
+            )
+            return {"final_decision": decision.model_dump(mode="json")}
+
+        return final_node
+
+    def _start_node(
+        self,
+        runtime: Runtime[RunContext],
+        node: str,
+    ) -> None:
+        self.metrics.node_started(node)
+        runtime.stream_writer(
+            {
+                "event_type": "node.started",
+                "node": node,
+                "payload": {},
+            }
+        )
+
+    def _finish_node(
+        self,
+        runtime: Runtime[RunContext],
+        node: str,
+        payload: dict[str, Any],
+    ) -> None:
+        self.metrics.node_finished(node)
+        runtime.stream_writer(
+            {
+                "event_type": "node.completed",
+                "node": node,
+                "payload": payload,
+            }
+        )
+
+
+def _analyst_route(state: AgentState) -> str:
+    messages = state.get("messages", [])
+    if messages and getattr(messages[-1], "tool_calls", None):
+        return "tools"
+    return "done"
+
+
+def _collect_evidence(
+    messages: Iterable[Any],
+    narrative: str,
+    *,
+    requested_date: date,
+    analyst: str,
+) -> list[EvidenceItem]:
+    items: dict[str, EvidenceItem] = {}
+    tool_messages = [
+        message for message in messages if isinstance(message, ToolMessage)
+    ]
+    for message in tool_messages:
+        content = message.content if isinstance(message.content, str) else str(
+            message.content
+        )
+        records = extract_provenance(content)
+        if not records:
+            records = [
+                ProvenanceRecord(
+                    evidence=getattr(message, "name", None) or f"{analyst} tool",
+                    source="unknown",
+                    requested=requested_date.isoformat(),
+                    effective="unknown",
+                    timing="no auditable source metadata captured",
+                )
+            ]
+        clean_content = strip_provenance_markers(content)
+        for record in records:
+            item = _evidence_from_record(
+                record,
+                requested_date=requested_date,
+                content=clean_content,
+            )
+            items[item.ref] = item
+    for record in _parse_provenance_table(narrative):
+        item = _evidence_from_record(
+            record,
+            requested_date=requested_date,
+            content=None,
+        )
+        items[item.ref] = item
+    if not items:
+        item = EvidenceItem.create(
+            source="unknown",
+            evidence_type=f"{analyst} analyst evidence",
+            requested_date=requested_date,
+            content=None,
+            quality=EvidenceQuality.UNAVAILABLE,
+            provenance={
+                "timing": "no auditable source metadata captured",
+            },
+        )
+        items[item.ref] = item
+    return list(items.values())
+
+
+def _evidence_from_record(
+    record: ProvenanceRecord,
+    *,
+    requested_date: date,
+    content: str | None,
+) -> EvidenceItem:
+    effective = _last_date(record.effective)
+    if effective and effective > requested_date:
+        effective = None
+    timing = record.timing.casefold()
+    unavailable = any(
+        token in timing
+        for token in ("unavailable", "failed", "not requested", "no usable data")
+    )
+    degraded = any(
+        token in timing
+        for token in (
+            "fallback",
+            "partial",
+            "stale",
+            "truncated",
+            "non-point-in-time",
+            "non-vintage",
+        )
+    )
+    quality = (
+        EvidenceQuality.UNAVAILABLE
+        if unavailable
+        else EvidenceQuality.LOW
+        if degraded or record.source.casefold() in {"unknown", "—", ""}
+        else EvidenceQuality.HIGH
+    )
+    return EvidenceItem.create(
+        source=record.source or "unknown",
+        evidence_type=record.evidence or "unknown evidence",
+        requested_date=requested_date,
+        effective_date=effective,
+        content=content,
+        quality=quality,
+        fallback="fallback" in timing,
+        provenance={
+            "requested": record.requested,
+            "effective": record.effective,
+            "timing": record.timing,
+            "retrieved_at": record.retrieved_at,
+        },
+    )
+
+
+def _last_date(value: str | None) -> date | None:
+    matches = _DATE_RE.findall(value or "")
+    if not matches:
+        return None
+    try:
+        return max(date.fromisoformat(raw) for raw in matches)
+    except ValueError:
+        return None
+
+
+def _parse_provenance_table(text: str) -> list[ProvenanceRecord]:
+    if _PROVENANCE_HEADING not in text:
+        return []
+    section = text.split(_PROVENANCE_HEADING, 1)[1]
+    records = []
+    for line in section.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("|") or stripped.startswith("|---"):
+            continue
+        cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+        if not cells or cells[0] == "Evidence" or len(cells) < 5:
+            continue
+        records.append(
+            ProvenanceRecord(
+                evidence=cells[0],
+                source=cells[1],
+                requested=cells[2],
+                effective=cells[3],
+                timing=cells[4],
+            )
+        )
+    return records
+
+
+def _clean_narrative(value: str) -> str:
+    return _CONTROL_COMMENT_RE.sub(
+        "",
+        strip_provenance_markers(value),
+    ).strip()
+
+
+def _adapt_analyst_report(
+    analyst: str,
+    narrative: str,
+    evidence: list[EvidenceItem],
+) -> AnalystReport:
+    refs = tuple(item.ref for item in evidence)
+    warnings = []
+    if _WARNING_HEADING in narrative:
+        warning_section = narrative.split(_WARNING_HEADING, 1)[1]
+        if _PROVENANCE_HEADING in warning_section:
+            warning_section = warning_section.split(_PROVENANCE_HEADING, 1)[0]
+        warnings.extend(
+            line.removeprefix("- ").strip()
+            for line in warning_section.splitlines()
+            if line.strip().startswith("- ")
+        )
+    warnings.extend(
+        f"{item.evidence_type}: {item.quality.value}"
+        for item in evidence
+        if item.quality in {EvidenceQuality.LOW, EvidenceQuality.UNAVAILABLE}
+    )
+    paragraphs = [
+        paragraph.strip()
+        for paragraph in re.split(r"\n\s*\n", narrative)
+        if paragraph.strip() and not paragraph.lstrip().startswith("#")
+    ]
+    summary = paragraphs[0][:1200] if paragraphs else "No substantive report."
+    sentences = [
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?。！？])\s+", narrative)
+        if len(sentence.strip()) >= 20
+    ][:6]
+    claims = tuple(
+        AnalystClaim(text=sentence[:1500], evidence_refs=refs)
+        for sentence in sentences
+    )
+    unavailable = sum(
+        item.quality is EvidenceQuality.UNAVAILABLE for item in evidence
+    )
+    low = sum(item.quality is EvidenceQuality.LOW for item in evidence)
+    confidence = max(
+        0.1,
+        min(0.9, 0.85 - unavailable * 0.2 - low * 0.1),
+    )
+    return AnalystReport(
+        analyst=analyst,
+        summary=summary,
+        claims=claims,
+        confidence=confidence,
+        evidence_refs=refs,
+        warnings=tuple(dict.fromkeys(warnings)),
+        narrative=narrative,
+    )
+
+
+def _research_prompt(
+    state: ResearchState,
+    *,
+    title: str,
+    objective: str,
+    extra: str,
+) -> str:
+    bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
+    evidence_index = [
+        {
+            "ref": item.ref,
+            "source": item.source,
+            "type": item.evidence_type,
+            "effective_date": (
+                item.effective_date.isoformat() if item.effective_date else None
+            ),
+            "quality": item.quality.value,
+            "fallback": item.fallback,
+            "content_excerpt": item.content[:1200] if item.content else None,
+        }
+        for item in bundle.items
+    ]
+    reports = {
+        key: {
+            "summary": value.get("summary"),
+            "claims": value.get("claims"),
+            "confidence": value.get("confidence"),
+            "warnings": value.get("warnings"),
+        }
+        for key, value in state["analyst_reports"].items()
+    }
+    return f"""You are the {title} in an evidence-first investment research system.
+
+Objective:
+{objective}
+
+Rules:
+- Use only the sealed evidence and typed analyst reports below.
+- Every exact figure or factual assertion must be traceable to an existing
+  evidence ref such as ev_0123456789ab.
+- Never invent evidence refs, sources, dates, prices, or portfolio context.
+- Missing evidence is uncertainty, not a neutral or bearish signal.
+- This is research, not personalized investment advice. Do not provide position
+  sizing, account allocation, entry price, stop loss, price target, or execution.
+- The five-session memory is short-term feedback, not ground truth.
+
+Instrument: {state["ticker"]}
+Analysis cutoff: {state["analysis_date"]}
+
+TYPED ANALYST REPORTS:
+{json.dumps(reports, ensure_ascii=False)}
+
+SEALED EVIDENCE INDEX:
+{json.dumps(evidence_index, ensure_ascii=False)}
+
+{extra}
+"""
+
+
+def _invoke_review(
+    llm: Any,
+    spec: RoleSpec,
+    prompt: str,
+    state: ResearchState,
+) -> PerspectiveReview:
+    result, plain = _invoke_structured(llm, PerspectiveReview, prompt)
+    bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
+    valid = {item.ref for item in bundle.items}
+    if result is None:
+        result = PerspectiveReview(
+            role=spec.key,
+            thesis=plain or "The model returned no structured review.",
+            evidence_refs=tuple(valid),
+            risks=(),
+        )
+    refs = tuple(ref for ref in result.evidence_refs if ref in valid)
+    new_refs = tuple(ref for ref in result.new_evidence_refs if ref in valid)
+    return result.model_copy(
+        update={
+            "role": spec.key,
+            "evidence_refs": refs,
+            "new_evidence_refs": new_refs,
+        }
+    )
+
+
+def _invoke_decision(
+    llm: Any,
+    prompt: str,
+    state: ResearchState,
+) -> ResearchDecision:
+    result, plain = _invoke_structured(llm, ResearchDecision, prompt)
+    bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
+    valid = {item.ref for item in bundle.items}
+    if result is None:
+        result = ResearchDecision(
+            rating=ResearchRating.HOLD,
+            confidence=0.3,
+            thesis=plain or "Insufficient structured evidence for a directional view.",
+            evidence_refs=tuple(valid),
+            catalysts=(),
+            risks=("Structured decision output was unavailable.",),
+            invalidation_conditions=(
+                "Reassess when higher-quality evidence becomes available.",
+            ),
+            time_horizon="Unspecified research horizon",
+        )
+    refs = tuple(ref for ref in result.evidence_refs if ref in valid)
+    if not refs and valid:
+        refs = tuple(sorted(valid))
+    return result.model_copy(update={"evidence_refs": refs})
+
+
+def _invoke_structured(
+    llm: Any,
+    schema: type[BaseModel],
+    prompt: str,
+) -> tuple[Any | None, str]:
+    try:
+        structured = llm.with_structured_output(schema)
+        result = structured.invoke(prompt)
+        if result is not None:
+            return schema.model_validate(result), ""
+    except Exception:
+        pass
+    try:
+        response = llm.invoke(prompt)
+        return None, str(getattr(response, "content", response))
+    except Exception as exc:
+        return None, f"{type(exc).__name__}: model response unavailable"
