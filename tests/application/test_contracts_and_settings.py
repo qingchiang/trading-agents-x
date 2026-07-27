@@ -49,7 +49,7 @@ def test_evidence_bundle_rejects_future_information() -> None:
         source="fixture",
         evidence_type="filing",
         requested_date=date(2026, 7, 24),
-        available_at=datetime(2026, 7, 25, tzinfo=timezone.utc),
+        available_at=datetime(2026, 7, 25, 5, tzinfo=timezone.utc),
         content="Not yet available at the analysis cutoff.",
     )
 

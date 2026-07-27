@@ -704,8 +704,14 @@ class RunRepository:
                 ReflectionRecord,
                 ReflectionRecord.outcome_id == OutcomeRecord.id,
             )
-            .where(OutcomeRecord.status == "resolved")
-            .order_by(OutcomeRecord.resolved_at.desc())
+            .where(
+                OutcomeRecord.status == "resolved",
+                OutcomeRecord.holding_intervals >= 5,
+            )
+            .order_by(
+                OutcomeRecord.resolved_at.desc(),
+                OutcomeRecord.id.desc(),
+            )
         )
         with self.sessions() as session:
             rows = list(session.execute(resolved))
@@ -765,7 +771,10 @@ class RunRepository:
                 ReflectionRecord,
                 ReflectionRecord.outcome_id == OutcomeRecord.id,
             )
-            .order_by(DecisionRecord.created_at.desc())
+            .order_by(
+                DecisionRecord.created_at.desc(),
+                DecisionRecord.id.desc(),
+            )
             .limit(min(max(1, limit), 500))
         )
         if ticker:

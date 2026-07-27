@@ -1,0 +1,139 @@
+{
+  "version": "1",
+  "market": "US",
+  "ticker": "NVDA",
+  "cases": [
+    {
+      "scenario": "bullish",
+      "analysis_date": "2026-07-24",
+      "rating": "Overweight",
+      "thesis": "Constructive operating evidence outweighs the identified risks.",
+      "catalyst": "Demand remains resilient.",
+      "risks": ["valuation compression", "demand normalization", "execution slippage"],
+      "evidence": [
+        {
+          "key": "revenue",
+          "source": "SEC 10-Q",
+          "effective_date": "2026-07-18",
+          "available_at": "2026-07-18T20:00:00Z",
+          "content": "Revenue grew 25% year over year.",
+          "value": "25%",
+          "quality": "high",
+          "fallback": false,
+          "provenance": {"filing": "10-Q"}
+        }
+      ],
+      "claims": [
+        {"text": "Revenue grew 25% year over year.", "evidence_keys": ["revenue"]}
+      ]
+    },
+    {
+      "scenario": "bearish",
+      "analysis_date": "2026-07-24",
+      "rating": "Underweight",
+      "thesis": "Deteriorating operating evidence supports a cautious conclusion.",
+      "catalyst": "A verified demand recovery would improve the view.",
+      "risks": ["margin pressure", "inventory correction", "competitive execution"],
+      "evidence": [
+        {
+          "key": "margin",
+          "source": "SEC 10-Q",
+          "effective_date": "2026-07-18",
+          "available_at": "2026-07-18T20:00:00Z",
+          "content": "Gross margin declined to 61.5%.",
+          "value": "61.5%",
+          "quality": "high",
+          "fallback": false,
+          "provenance": {"filing": "10-Q"}
+        }
+      ],
+      "claims": [
+        {"text": "Gross margin declined to 61.5%.", "evidence_keys": ["margin"]}
+      ]
+    },
+    {
+      "scenario": "mixed",
+      "analysis_date": "2026-07-24",
+      "rating": "Hold",
+      "thesis": "Conflicting demand and valuation signals support a balanced view.",
+      "catalyst": "New disclosures could resolve the mixed evidence.",
+      "risks": ["valuation uncertainty", "cycle reversal", "forecast dispersion"],
+      "evidence": [
+        {
+          "key": "sales",
+          "source": "SEC 10-Q",
+          "effective_date": "2026-07-18",
+          "available_at": "2026-07-18T20:00:00Z",
+          "content": "Data-center sales increased 18%.",
+          "value": "18%",
+          "quality": "high",
+          "fallback": false,
+          "provenance": {"filing": "10-Q"}
+        },
+        {
+          "key": "multiple",
+          "source": "Exchange close",
+          "effective_date": "2026-07-23",
+          "available_at": "2026-07-23T21:00:00Z",
+          "content": "The observed earnings multiple was 42.0.",
+          "value": 42.0,
+          "quality": "medium",
+          "fallback": false,
+          "provenance": {"session": "completed"}
+        }
+      ],
+      "claims": [
+        {"text": "Data-center sales increased 18%.", "evidence_keys": ["sales"]},
+        {"text": "The observed earnings multiple was 42.0.", "evidence_keys": ["multiple"]}
+      ]
+    },
+    {
+      "scenario": "missing",
+      "analysis_date": "2026-07-24",
+      "rating": "Hold",
+      "thesis": "Missing source coverage prevents a directional conclusion.",
+      "catalyst": "Auditable coverage becoming available would reduce uncertainty.",
+      "risks": ["data availability", "uncertainty persistence", "coverage bias"],
+      "evidence": [
+        {
+          "key": "coverage",
+          "source": "SEC filings",
+          "effective_date": null,
+          "available_at": null,
+          "content": null,
+          "value": null,
+          "quality": "unavailable",
+          "fallback": false,
+          "provenance": {"timing": "no usable data"}
+        }
+      ],
+      "claims": [
+        {"text": "Required filing coverage is unavailable.", "evidence_keys": ["coverage"]}
+      ]
+    },
+    {
+      "scenario": "historical",
+      "analysis_date": "2024-06-28",
+      "rating": "Hold",
+      "thesis": "The point-in-time historical snapshot supports a neutral conclusion.",
+      "catalyst": "Later evidence is intentionally excluded from this snapshot.",
+      "risks": ["historical coverage", "revision uncertainty", "regime change"],
+      "evidence": [
+        {
+          "key": "historical_growth",
+          "source": "SEC 10-Q",
+          "effective_date": "2024-05-22",
+          "available_at": "2024-05-22T20:00:00Z",
+          "content": "Reported quarterly revenue growth was 22%.",
+          "value": "22%",
+          "quality": "high",
+          "fallback": false,
+          "provenance": {"cutoff": "2024-06-28"}
+        }
+      ],
+      "claims": [
+        {"text": "Reported quarterly revenue growth was 22%.", "evidence_keys": ["historical_growth"]}
+      ]
+    }
+  ]
+}

@@ -17,7 +17,11 @@ from pydantic import (
     model_validator,
 )
 
-from tradingagents.dataflows.symbol_utils import crypto_base, normalize_symbol
+from tradingagents.dataflows.symbol_utils import (
+    crypto_base,
+    market_timezone,
+    normalize_symbol,
+)
 
 _SYMBOL_PATTERN = re.compile(r"^[A-Z0-9^][A-Z0-9.^=_-]*$")
 
@@ -149,10 +153,18 @@ class EvidenceBundle(FrozenModel):
                 raise ValueError(
                     f"{item.ref} effective_date is after the analysis cutoff"
                 )
-            if item.available_at and item.available_at.date() > self.analysis_date:
-                raise ValueError(
-                    f"{item.ref} available_at is after the analysis cutoff"
-                )
+            if item.available_at:
+                if item.available_at.utcoffset() is None:
+                    raise ValueError(
+                        f"{item.ref} available_at must include a timezone"
+                    )
+                available_date = item.available_at.astimezone(
+                    market_timezone(self.instrument)
+                ).date()
+                if available_date > self.analysis_date:
+                    raise ValueError(
+                        f"{item.ref} available_at is after the analysis cutoff"
+                    )
         canonical = json.dumps(
             [item.model_dump(mode="json") for item in self.items],
             ensure_ascii=False,

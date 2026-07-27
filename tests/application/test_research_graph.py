@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 from typing import Any
 
 import pytest
 
 from tradingagents.application.contracts import (
     AnalysisRequest,
+    EvidenceQuality,
     PerspectiveReview,
     ResearchDecision,
     ResearchRating,
@@ -14,7 +16,11 @@ from tradingagents.application.contracts import (
 )
 from tradingagents.application.metrics import MetricsCallback
 from tradingagents.application.runtime import RunContext
-from tradingagents.graph.research_graph import ResearchGraph
+from tradingagents.graph.research_graph import (
+    ResearchGraph,
+    _evidence_from_record,
+)
+from tradingagents.provenance import ProvenanceRecord
 
 
 class _StructuredInvoker:
@@ -207,3 +213,22 @@ def test_deep_debate_stops_when_rebuttals_add_no_new_information(
     )
 
     assert execution.state["rebuttal_round"] <= 2
+
+
+def test_future_dated_provenance_is_withheld_before_bundle_sealing() -> None:
+    item = _evidence_from_record(
+        ProvenanceRecord(
+            evidence="Future filing",
+            source="fixture",
+            requested="2026-07-24",
+            effective="2026-07-25",
+            timing="vendor returned a future record",
+        ),
+        requested_date=date(2026, 7, 24),
+        content="This future payload must not reach any agent.",
+    )
+
+    assert item.effective_date is None
+    assert item.content is None
+    assert item.quality is EvidenceQuality.UNAVAILABLE
+    assert "future-dated evidence withheld" in item.provenance["timing"]

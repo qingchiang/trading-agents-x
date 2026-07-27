@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import operator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from threading import Barrier, Lock
+from typing import Annotated
 
 import pytest
+from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.graph import END, START, StateGraph
+from typing_extensions import TypedDict
 
 from tradingagents.application.contracts import (
     AnalysisRequest,
@@ -89,15 +94,122 @@ class _Graph:
         return _execution(context.request.ticker)
 
 
+class _CheckpointState(TypedDict):
+    completed: Annotated[list[str], operator.add]
+
+
+class _ResumableGraph:
+    first_calls = 0
+    second_calls = 0
+    fail_second_once = True
+
+    def __init__(self, **_kwargs):
+        pass
+
+    def execute(
+        self,
+        context,
+        *,
+        checkpointer,
+        checkpoint_thread_id,
+        resume,
+        on_event,
+    ):
+        def first_node(_state):
+            type(self).first_calls += 1
+            on_event(
+                {
+                    "event_type": "node.completed",
+                    "node": "fixture.first",
+                    "payload": {},
+                }
+            )
+            return {"completed": ["first"]}
+
+        def second_node(_state):
+            type(self).second_calls += 1
+            if type(self).fail_second_once:
+                type(self).fail_second_once = False
+                raise RuntimeError("fixture crash after first checkpoint")
+            on_event(
+                {
+                    "event_type": "node.completed",
+                    "node": "fixture.second",
+                    "payload": {},
+                }
+            )
+            return {"completed": ["second"]}
+
+        workflow = StateGraph(_CheckpointState)
+        workflow.add_node("first", first_node)
+        workflow.add_node("second", second_node)
+        workflow.add_edge(START, "first")
+        workflow.add_edge("first", "second")
+        workflow.add_edge("second", END)
+        graph = workflow.compile(checkpointer=checkpointer)
+        state = graph.invoke(
+            None if resume else {"completed": []},
+            config={"configurable": {"thread_id": checkpoint_thread_id}},
+        )
+        assert state["completed"] == ["first", "second"]
+        return _execution(context.request.ticker)
+
+
+class _CancellingCheckpointGraph:
+    def __init__(self, **_kwargs):
+        pass
+
+    def execute(
+        self,
+        context,
+        *,
+        checkpointer,
+        checkpoint_thread_id,
+        resume,
+        on_event,
+    ):
+        def first_node(_state):
+            on_event(
+                {
+                    "event_type": "node.completed",
+                    "node": "fixture.before_cancel",
+                    "payload": {},
+                }
+            )
+            return {"completed": ["first"]}
+
+        def cancel_node(_state):
+            raise RunCancelled("fixture cooperative cancellation")
+
+        workflow = StateGraph(_CheckpointState)
+        workflow.add_node("first", first_node)
+        workflow.add_node("cancel", cancel_node)
+        workflow.add_edge(START, "first")
+        workflow.add_edge("first", "cancel")
+        workflow.add_edge("cancel", END)
+        graph = workflow.compile(checkpointer=checkpointer)
+        graph.invoke(
+            None if resume else {"completed": []},
+            config={"configurable": {"thread_id": checkpoint_thread_id}},
+        )
+        raise AssertionError("cancelling graph must not complete")
+
+
 @pytest.fixture(autouse=True)
 def _reset_graph():
     _Graph.barrier = None
     _Graph.observed = []
     _Graph.error = None
+    _ResumableGraph.first_calls = 0
+    _ResumableGraph.second_calls = 0
+    _ResumableGraph.fail_second_once = True
     yield
     _Graph.barrier = None
     _Graph.observed = []
     _Graph.error = None
+    _ResumableGraph.first_calls = 0
+    _ResumableGraph.second_calls = 0
+    _ResumableGraph.fail_second_once = True
 
 
 def _service(app_settings, repository: RunRepository) -> AnalysisService:
@@ -251,3 +363,123 @@ def test_queued_cancel_is_terminal_and_emits_event(
 
     assert cancelled.status is RunStatus.CANCELLED
     assert repository.list_events(queued.id)[-1].event_type == "run.cancelled"
+
+
+def test_retry_resumes_real_langgraph_checkpoint_and_success_cleans_it(
+    app_settings,
+    repository,
+) -> None:
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_ResumableGraph,
+        identity_resolver=lambda ticker, _date: {"company_name": ticker},
+    )
+    queued = service.enqueue(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+    checkpoint_thread = repository.checkpoint_thread(queued.id)
+    claimed = repository.claim_run(queued.id, "worker-1", 30)
+
+    with pytest.raises(RuntimeError, match="after first checkpoint"):
+        service.execute_claimed(claimed, worker_id="worker-1")
+
+    with SqliteSaver.from_conn_string(str(app_settings.database_path)) as saver:
+        saver.setup()
+        checkpoint_config = {
+            "configurable": {"thread_id": checkpoint_thread}
+        }
+        assert saver.get_tuple(checkpoint_config) is not None
+
+    retried = service.retry(queued.id)
+    assert retried.attempt == 2
+    assert repository.checkpoint_thread(queued.id) == checkpoint_thread
+    claimed_again = repository.claim_run(queued.id, "worker-2", 30)
+    result = service.execute_claimed(claimed_again, worker_id="worker-2")
+
+    assert result.status is RunStatus.SUCCEEDED
+    assert _ResumableGraph.first_calls == 1
+    assert _ResumableGraph.second_calls == 2
+    assert "run.resumed" in {
+        event.event_type for event in repository.list_events(queued.id)
+    }
+    with SqliteSaver.from_conn_string(str(app_settings.database_path)) as saver:
+        saver.setup()
+        assert saver.get_tuple(checkpoint_config) is None
+
+
+def test_cooperative_cancel_deletes_real_pending_checkpoint(
+    app_settings,
+    repository,
+) -> None:
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_CancellingCheckpointGraph,
+        identity_resolver=lambda ticker, _date: {"company_name": ticker},
+    )
+    queued = service.enqueue(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+    checkpoint_thread = repository.checkpoint_thread(queued.id)
+    claimed = repository.claim_run(queued.id, "worker", 30)
+
+    result = service.execute_claimed(claimed, worker_id="worker")
+
+    assert result.status is RunStatus.CANCELLED
+    with SqliteSaver.from_conn_string(str(app_settings.database_path)) as saver:
+        saver.setup()
+        assert saver.get_tuple(
+            {"configurable": {"thread_id": checkpoint_thread}}
+        ) is None
+
+
+@pytest.mark.parametrize("format", ("markdown", "json"))
+def test_service_export_reads_the_durable_result(
+    format,
+    app_settings,
+    repository,
+) -> None:
+    service = _service(app_settings, repository)
+    result = service.run(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+
+    media_type, body = service.export(result.run_id, format=format)
+
+    assert media_type.startswith(
+        "text/markdown" if format == "markdown" else "application/json"
+    )
+    assert result.run_id in body
+    assert "Fixture thesis" in body
+
+
+def test_service_export_rejects_unknown_format(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(app_settings, repository)
+    result = service.run(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+
+    with pytest.raises(ValueError, match="markdown.*json"):
+        service.export(result.run_id, format="pdf")
