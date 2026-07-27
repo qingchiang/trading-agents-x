@@ -69,15 +69,19 @@ class RunSettings(BaseModel):
     def copy_data_config(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
         return MappingProxyType(deepcopy(dict(value)))
 
-    def legacy_config(self, app: AppSettings) -> dict[str, Any]:
-        """Build the existing dataflow/client config without mutating global state."""
+    @field_validator("llm_max_retries", mode="before")
+    @classmethod
+    def validate_retry_budget(cls, value: Any) -> Any:
+        if isinstance(value, bool):
+            raise ValueError("llm_max_retries must be an integer, not boolean")
+        return value
+
+    def dataflow_config(self, app: AppSettings) -> dict[str, Any]:
+        """Build the run-scoped data and model configuration."""
         config = deepcopy(dict(self.data_config))
         config.update(
             {
                 "data_cache_dir": str(app.data_cache_dir),
-                "results_dir": str(app.home_dir / "legacy-reports"),
-                "memory_log_path": None,
-                "checkpoint_enabled": False,
                 "llm_provider": self.llm_provider,
                 "quick_think_llm": self.quick_model,
                 "deep_think_llm": self.deep_model,

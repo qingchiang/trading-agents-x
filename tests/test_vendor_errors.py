@@ -8,14 +8,13 @@ from unittest import mock
 
 import pytest
 
-import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
 from tradingagents.dataflows import interface
 from tradingagents.dataflows.alpha_vantage_common import (
     AlphaVantageNotConfiguredError,
     AlphaVantageRateLimitError,
 )
-from tradingagents.dataflows.config import set_config
+from tradingagents.dataflows.config import bind_config
 from tradingagents.dataflows.errors import (
     NoMarketDataError,
     VendorError,
@@ -52,14 +51,14 @@ class HierarchyTests(unittest.TestCase):
 @pytest.mark.unit
 class RouterHandlesBaseTypesTests(unittest.TestCase):
     def setUp(self):
-        config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def tearDown(self):
-        config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def test_rate_limit_subclass_caught_by_base(self):
         # A vendor-named rate-limit error skips to the next vendor in the chain.
-        set_config({"data_vendors": {"core_stock_apis": "alpha_vantage,yfinance"}})
+        bind_config({"data_vendors": {"core_stock_apis": "alpha_vantage,yfinance"}})
 
         def _throttled(*a, **k):
             raise AlphaVantageRateLimitError("slow down")
@@ -73,7 +72,7 @@ class RouterHandlesBaseTypesTests(unittest.TestCase):
         self.assertEqual(out, "YF")
 
     def test_not_configured_falls_through_to_next_vendor(self):
-        set_config({"data_vendors": {"core_stock_apis": "alpha_vantage,yfinance"}})
+        bind_config({"data_vendors": {"core_stock_apis": "alpha_vantage,yfinance"}})
 
         def _unconfigured(*a, **k):
             raise AlphaVantageNotConfiguredError("no key")
@@ -88,7 +87,7 @@ class RouterHandlesBaseTypesTests(unittest.TestCase):
 
     def test_sole_unconfigured_vendor_surfaces_the_error(self):
         # With no fallback, the not-configured condition must surface (not vanish).
-        set_config({"data_vendors": {"core_stock_apis": "alpha_vantage"}})
+        bind_config({"data_vendors": {"core_stock_apis": "alpha_vantage"}})
 
         def _unconfigured(*a, **k):
             raise AlphaVantageNotConfiguredError("no key")

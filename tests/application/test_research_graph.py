@@ -95,7 +95,7 @@ def _context(
         run_id=f"fixture-{profile.value}",
         request=request,
         settings=settings,
-        legacy_config=settings.legacy_config(app_settings),
+        dataflow_config=settings.dataflow_config(app_settings),
         past_context="",
         instrument_context="The instrument is NVDA.",
         cancel_requested=lambda: False,

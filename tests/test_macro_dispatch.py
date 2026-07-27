@@ -13,9 +13,9 @@ from unittest import mock
 
 import pytest
 
-import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
 from tradingagents.dataflows import boj, cn_macro, estat, fred, jp_macro, macro_panel
+from tradingagents.dataflows.config import bind_config
 from tradingagents.dataflows.interface import route_to_vendor
 from tradingagents.provenance import extract_provenance
 
@@ -35,12 +35,12 @@ def _data(series_id, title, points):
 @pytest.mark.unit
 class MacroDispatchTests(unittest.TestCase):
     def setUp(self):
-        config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
         for vendor in (fred, estat, boj, cn_macro, jp_macro):
             vendor._series_cache.clear()
 
     def tearDown(self):
-        config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def test_default_macro_vendor_is_the_dispatcher(self):
         self.assertEqual(default_config.DEFAULT_CONFIG["data_vendors"]["macro_data"], "macro")

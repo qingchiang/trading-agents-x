@@ -10,12 +10,11 @@ import pytest
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableLambda
 
-import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
 from tradingagents.agents.analysts import news_analyst
 from tradingagents.agents.analysts.news_analyst import create_news_analyst
 from tradingagents.dataflows import boj, cn_macro, estat, fred, jp_macro, macro_panel
-from tradingagents.dataflows.config import set_config
+from tradingagents.dataflows.config import bind_config
 from tradingagents.provenance import append_provenance_appendix, extract_provenance
 
 
@@ -389,15 +388,11 @@ class NewsPanelInjectionTests(unittest.TestCase):
     get_macro_indicators microscope tool bound."""
 
     def setUp(self):
-        self._previous_config = deepcopy(config_module._config)
-        config_module._config = deepcopy(default_config.DEFAULT_CONFIG)
-
-    def tearDown(self):
-        config_module._config = self._previous_config
+        bind_config(deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def _run(self, panel_text="PANEL_XYZ", ticker="NVDA", market_flows=""):
         captured = {}
-        set_config({"provenance_appendix": True})
+        bind_config({"provenance_appendix": True})
 
         def _bind(tools):
             captured["tools"] = [t.name for t in tools]
@@ -464,7 +459,7 @@ class NewsPanelInjectionTests(unittest.TestCase):
         self.assertIn("do not attempt to supply or override any date", captured["prompt"])
 
     def test_prompt_preserves_configured_recent_window_longer_than_90_dates(self):
-        set_config({"ticker_news_lookback_days": 120})
+        bind_config({"ticker_news_lookback_days": 120})
         captured, _, _ = self._run()
         self.assertIn(
             "window='recent' first; it covers 2025-09-17 through 2026-01-15",

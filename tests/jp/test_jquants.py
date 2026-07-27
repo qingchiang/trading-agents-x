@@ -12,10 +12,9 @@ import pandas as pd
 import pytest
 import requests
 
-import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
 from tradingagents.dataflows import interface
-from tradingagents.dataflows.config import set_config
+from tradingagents.dataflows.config import bind_config
 from tradingagents.dataflows.errors import (
     NoMarketDataError,
     VendorNotConfiguredError,
@@ -196,13 +195,13 @@ class AuthTests(unittest.TestCase):
 @pytest.mark.unit
 class RoutingTests(unittest.TestCase):
     def setUp(self):
-        config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def tearDown(self):
-        config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def test_tokyo_ticker_routes_to_jquants(self):
-        set_config({"data_vendors_by_market": {".T": {"core_stock_apis": "jquants"}}})
+        bind_config({"data_vendors_by_market": {".T": {"core_stock_apis": "jquants"}}})
         sentinel = mock.Mock(return_value="JQ_DATA")
         yf = mock.Mock(return_value="YF_DATA")
         with mock.patch.dict(

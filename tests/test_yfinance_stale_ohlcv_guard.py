@@ -14,12 +14,11 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import pytest
 
-import tradingagents.dataflows.config as config_module
 import tradingagents.dataflows.stockstats_utils as stockstats_utils
 import tradingagents.dataflows.y_finance as y_finance
 import tradingagents.default_config as default_config
 from tradingagents.dataflows import interface
-from tradingagents.dataflows.config import set_config
+from tradingagents.dataflows.config import bind_config
 from tradingagents.dataflows.stockstats_utils import _assert_ohlcv_not_stale
 from tradingagents.dataflows.symbol_utils import NoMarketDataError
 
@@ -148,13 +147,13 @@ class StaleGuardPropagationTests(unittest.TestCase):
 @pytest.mark.unit
 class StaleGuardRoutingTests(unittest.TestCase):
     def setUp(self):
-        config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def tearDown(self):
-        config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def test_router_sentinel_surfaces_stale_reason(self):
-        set_config({"data_vendors": {"core_stock_apis": "yfinance"}})
+        bind_config({"data_vendors": {"core_stock_apis": "yfinance"}})
 
         def _stale(symbol, *a, **k):
             raise NoMarketDataError(

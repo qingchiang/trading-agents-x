@@ -12,9 +12,9 @@ import pandas as pd
 import yfinance as yf
 
 from tradingagents.dataflows.symbol_utils import market_today, normalize_symbol
-from tradingagents.graph.reflection import Reflector
 
 from .llms import create_run_llms
+from .reflection import OutcomeReflector
 from .repository import RunRepository
 from .settings import AppSettings
 
@@ -52,7 +52,7 @@ class OutcomeSettlement:
         repository: RunRepository,
         *,
         history_provider: Any = yf,
-        reflector: Reflector | None = None,
+        reflector: OutcomeReflector | None = None,
     ):
         self.settings = settings
         self.repository = repository
@@ -155,15 +155,20 @@ class OutcomeSettlement:
         reflector = self._reflector
         if reflector is None:
             quick, _ = create_run_llms(self.settings.default_run_settings)
-            reflector = Reflector(quick)
+            reflector = OutcomeReflector(
+                quick,
+                output_language=(
+                    self.settings.default_run_settings.output_language
+                ),
+            )
             self._reflector = reflector
-        return reflector.reflect_on_final_decision(
-            final_decision=json.dumps(decision, ensure_ascii=False),
+        return reflector.reflect(
+            decision=json.dumps(decision, ensure_ascii=False),
             raw_return=observation.raw_return,
             alpha_return=observation.alpha_return,
-            benchmark_name=benchmark,
+            benchmark=benchmark,
             ticker=ticker,
-            holding_days=observation.holding_intervals,
+            holding_intervals=observation.holding_intervals,
             observation_start=observation.start_date.isoformat(),
             observation_end=observation.end_date.isoformat(),
         )

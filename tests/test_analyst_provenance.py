@@ -5,22 +5,19 @@ import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.runnables import RunnableLambda
 
-import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
 from tradingagents.agents.analysts.fundamentals_analyst import (
     create_fundamentals_analyst,
 )
 from tradingagents.agents.analysts.market_analyst import create_market_analyst
-from tradingagents.dataflows.config import set_config
+from tradingagents.dataflows.config import bind_config
 from tradingagents.provenance import ProvenanceRecord, attach_provenance
 
 
 @pytest.fixture(autouse=True)
 def _reset_config():
-    previous = config_module._config
-    config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+    bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
     yield
-    config_module._config = previous
 
 
 def _final_llm():
@@ -42,7 +39,7 @@ def _state(tool_content: str):
 
 @pytest.mark.unit
 def test_market_final_report_keeps_snapshot_source_and_effective_session():
-    set_config({"provenance_appendix": True})
+    bind_config({"provenance_appendix": True})
     content = attach_provenance(
         "SNAPSHOT",
         ProvenanceRecord(
@@ -63,7 +60,7 @@ def test_market_final_report_keeps_snapshot_source_and_effective_session():
 
 @pytest.mark.unit
 def test_fundamentals_final_report_distinguishes_sources_and_missing_tools():
-    set_config({"provenance_appendix": True})
+    bind_config({"provenance_appendix": True})
     content = attach_provenance(
         "STATEMENT",
         ProvenanceRecord(

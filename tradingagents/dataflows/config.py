@@ -11,10 +11,6 @@ _run_config: ContextVar[dict | None] = ContextVar(
     "tradingagents_run_config",
     default=None,
 )
-# Temporary compatibility state for the characterization suite. Production
-# graph/application execution always binds ``_run_config``. This is removed with
-# the old public graph API in the final cutover.
-_config: dict = deepcopy(default_config.DEFAULT_CONFIG)
 
 
 def bind_config(config: dict, *, merge: bool = True) -> Token:
@@ -40,17 +36,6 @@ def bind_config(config: dict, *, merge: bool = True) -> Token:
     return _run_config.set(resolved)
 
 
-def set_config(config: dict) -> None:
-    """Compatibility shim for pre-cutover tests and direct dataflow callers."""
-    global _config
-    incoming = deepcopy(config)
-    for key, value in incoming.items():
-        if isinstance(value, dict) and isinstance(_config.get(key), dict):
-            _config[key].update(value)
-        else:
-            _config[key] = value
-
-
 def reset_config(token: Token) -> None:
     _run_config.reset(token)
 
@@ -67,4 +52,6 @@ def use_config(config: dict, *, merge: bool = False) -> Iterator[dict]:
 def get_config() -> dict:
     """Return a defensive copy of the current run-scoped configuration."""
     current = _run_config.get()
-    return deepcopy(current if current is not None else _config)
+    return deepcopy(
+        current if current is not None else default_config.DEFAULT_CONFIG
+    )

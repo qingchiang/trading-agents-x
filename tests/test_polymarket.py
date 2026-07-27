@@ -10,10 +10,9 @@ from unittest import mock
 import pytest
 import requests
 
-import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
 from tradingagents.dataflows import interface, polymarket
-from tradingagents.dataflows.config import set_config
+from tradingagents.dataflows.config import bind_config
 
 
 def _market(question, prob, *, volume, end_date, closed=False, wk=None):
@@ -105,17 +104,17 @@ class PolymarketResilienceTests(unittest.TestCase):
 @pytest.mark.unit
 class PolymarketRoutingTests(unittest.TestCase):
     def setUp(self):
-        config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def tearDown(self):
-        config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def test_category_routes_to_polymarket(self):
         self.assertEqual(
             interface.get_category_for_method("get_prediction_markets"),
             "prediction_markets",
         )
-        set_config({"data_vendors": {"prediction_markets": "polymarket"}})
+        bind_config({"data_vendors": {"prediction_markets": "polymarket"}})
         with mock.patch.dict(
             interface.VENDOR_METHODS,
             {"get_prediction_markets": {"polymarket": lambda *a, **k: "POLY_OK"}},

@@ -6,9 +6,8 @@ from unittest import mock
 
 import pytest
 
-import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
-from tradingagents.dataflows.config import set_config
+from tradingagents.dataflows.config import bind_config
 from tradingagents.dataflows.jp import edinet_code_map as cm, edinet_common, edinet_holdings
 
 
@@ -38,14 +37,14 @@ def _by_date(mapping):
 class HoldingsTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        set_config({"data_cache_dir": self._tmp.name})
+        bind_config({"data_cache_dir": self._tmp.name})
         cm._reset_for_tests()
         edinet_common._documents_cache.clear()
 
     def tearDown(self):
         cm._reset_for_tests()
         edinet_common._documents_cache.clear()
-        config_module._config = __import__("copy").deepcopy(default_config.DEFAULT_CONFIG)
+        bind_config(__import__("copy").deepcopy(default_config.DEFAULT_CONFIG), merge=False)
         self._tmp.cleanup()
 
     def _patch(self, mapping):
@@ -88,7 +87,7 @@ class HoldingsTests(unittest.TestCase):
         self.assertIn("change report", out)
 
     def test_filing_limit_is_independent_from_ticker_news_limit(self):
-        set_config({"news_article_limit": 30, "sentiment_filing_limit": 1})
+        bind_config({"news_article_limit": 30, "sentiment_filing_limit": 1})
         mapping = {"2026-06-22": [
             _holding(filer="OLDER", doc_id="OLD", when="2026-06-22 15:00"),
             _holding(filer="NEWER", doc_id="NEW", when="2026-06-22 16:00"),

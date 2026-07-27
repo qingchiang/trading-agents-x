@@ -1,8 +1,6 @@
 from collections.abc import Mapping
 from typing import Any
 
-from langchain_core.messages import HumanMessage, RemoveMessage
-
 # Import tools from separate utility files
 from tradingagents.agents.utils.core_stock_tools import get_stock_data
 from tradingagents.agents.utils.fundamental_data_tools import (
@@ -41,17 +39,14 @@ __all__ = [
     "resolve_instrument_identity",
     "get_instrument_context_from_state",
     "get_language_instruction",
-    "create_msg_delete",
 ]
 
 def get_language_instruction(response_scope: str = "your entire response") -> str:
     """Return a prompt instruction for the configured output language.
 
     Returns empty string when English (default), so no extra tokens are used.
-    Applied to every agent whose output reaches the saved report —
-    analysts, researchers, debaters, research manager, trader, and
-    portfolio manager — so a non-English run produces a fully localized
-    report rather than a mix of languages.
+    Applied to analyst reports so a non-English run produces localized
+    user-facing research.
     """
     from tradingagents.dataflows.config import get_config
     lang = get_config().get("output_language", "English")
@@ -114,7 +109,7 @@ def get_instrument_context_from_state(state: Mapping[str, Any]) -> str:
     """Return the instrument context for the current run.
 
     Prefers the identity-resolved context computed once at run start and
-    stored on the state (see ``TradingAgentsGraph.resolve_instrument_context``).
+    stored on the state by :class:`AnalysisService`.
     Falls back to a ticker-only context — with no network lookup — when the
     state was constructed without it (bare programmatic states, tests), so a
     consumer is never forced to make a yfinance call mid-graph.
@@ -126,31 +121,3 @@ def get_instrument_context_from_state(state: Mapping[str, Any]) -> str:
         str(state["company_of_interest"]),
         state.get("asset_type", "stock"),
     )
-
-
-def create_msg_delete():
-    def delete_messages(state):
-        """Clear messages and add a context-anchored placeholder.
-
-        The placeholder must not be a bare ``"Continue"``: some
-        OpenAI-compatible providers interpret that literally as the user task
-        and produce output about the word "continue" instead of analysing the
-        instrument (#888). Anchoring it to the resolved instrument context and
-        date keeps the next analyst on-task even if the provider treats the
-        placeholder as a standalone request.
-        """
-        messages = state["messages"]
-        removal_operations = [RemoveMessage(id=m.id) for m in messages]
-
-        instrument_context = get_instrument_context_from_state(state)
-        trade_date = state.get("trade_date", "the requested date")
-        placeholder = HumanMessage(
-            content=(
-                f"Proceed with your assigned analysis for this workflow. "
-                f"{instrument_context} The analysis date is {trade_date}."
-            )
-        )
-        return {"messages": removal_operations + [placeholder]}
-
-    return delete_messages
-

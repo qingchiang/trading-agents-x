@@ -15,7 +15,7 @@ class RunContext:
     run_id: str
     request: AnalysisRequest
     settings: RunSettings
-    legacy_config: Mapping[str, Any]
+    dataflow_config: Mapping[str, Any]
     past_context: str
     instrument_context: str
     cancel_requested: Callable[[], bool]

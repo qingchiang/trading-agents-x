@@ -10,9 +10,8 @@ from unittest import mock
 
 import pytest
 
-import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
-from tradingagents.dataflows.config import set_config
+from tradingagents.dataflows.config import bind_config
 from tradingagents.dataflows.jp import edinet_code_map as cm
 
 
@@ -21,12 +20,12 @@ class CodeMapTests(unittest.TestCase):
     def setUp(self):
         # Redirect the learned cache to a throwaway dir and reset in-memory maps.
         self._tmp = tempfile.TemporaryDirectory()
-        set_config({"data_cache_dir": self._tmp.name})
+        bind_config({"data_cache_dir": self._tmp.name})
         cm._reset_for_tests()
 
     def tearDown(self):
         cm._reset_for_tests()
-        config_module._config = __import__("copy").deepcopy(default_config.DEFAULT_CONFIG)
+        bind_config(__import__("copy").deepcopy(default_config.DEFAULT_CONFIG), merge=False)
         self._tmp.cleanup()
 
     def _cache_file(self):

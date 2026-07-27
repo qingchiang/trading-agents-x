@@ -1,88 +1,89 @@
-"""Configurable LLM SDK retry budget (#1090/#1091).
+"""Run-scoped SDK retry configuration."""
 
-A single transient 429 burst used to kill an otherwise-healthy multi-agent run
-because each provider SDK's max_retries (default 2) was not exposed. This adds an
-opt-in llm_max_retries knob forwarded to every provider chat client.
-"""
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
+from pydantic import ValidationError
 
+from tradingagents.application.llms import create_run_llms
+from tradingagents.application.settings import RunSettings
 from tradingagents.default_config import build_default_config
-from tradingagents.graph.trading_graph import TradingAgentsGraph, _coerce_max_retries
-
-# --- coercion / validation -------------------------------------------------
-
-@pytest.mark.unit
-@pytest.mark.parametrize("value,expected", [(0, 0), (2, 2), (10, 10), ("6", 6)])
-def test_coerce_accepts_non_negative_ints_and_numeric_strings(value, expected):
-    assert _coerce_max_retries(value) == expected
 
 
-@pytest.mark.unit
-@pytest.mark.parametrize("bad", [-1, "-3"])
-def test_coerce_rejects_negative(bad):
-    with pytest.raises(ValueError, match=">= 0"):
-        _coerce_max_retries(bad)
+def _settings(*, retries=None, provider="openai") -> RunSettings:
+    return RunSettings(
+        llm_provider=provider,
+        llm_max_retries=retries,
+        data_config=build_default_config({}),
+    )
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("bad", [True, False])
-def test_coerce_rejects_booleans(bad):
-    with pytest.raises(ValueError, match="boolean"):
-        _coerce_max_retries(bad)
+@pytest.mark.parametrize("value", [0, 2, 10, "6"])
+def test_run_settings_accept_non_negative_retry_budgets(value):
+    assert _settings(retries=value).llm_max_retries == int(value)
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("bad", ["abc", "1.5", None])
-def test_coerce_rejects_non_integers(bad):
-    with pytest.raises(ValueError, match="integer"):
-        _coerce_max_retries(bad)
-
-
-# --- forwarding into provider kwargs --------------------------------------
-
-def _bare_graph(config):
-    g = object.__new__(TradingAgentsGraph)
-    g.config = config
-    return g
-
-
-@pytest.mark.unit
-def test_not_forwarded_when_unset():
-    kwargs = _bare_graph({"llm_provider": "openai", "llm_max_retries": None})._get_provider_kwargs()
-    assert "max_retries" not in kwargs
+@pytest.mark.parametrize("value", [-1, "-3", "abc", "1.5", True, False])
+def test_run_settings_reject_invalid_retry_budgets(value):
+    with pytest.raises(ValidationError):
+        _settings(retries=value)
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize("provider", ["openai", "anthropic", "google"])
-def test_forwarded_across_providers(provider):
-    kwargs = _bare_graph({"llm_provider": provider, "llm_max_retries": 6})._get_provider_kwargs()
-    assert kwargs["max_retries"] == 6
+def test_retry_budget_is_forwarded_to_both_run_roles(monkeypatch, provider):
+    calls = []
+
+    def factory(**kwargs):
+        calls.append(kwargs)
+        client = MagicMock()
+        client.get_llm.return_value = object()
+        return client
+
+    monkeypatch.setattr(
+        "tradingagents.application.llms.create_llm_client",
+        factory,
+    )
+
+    create_run_llms(_settings(retries=6, provider=provider))
+
+    assert len(calls) == 2
+    assert [call["max_retries"] for call in calls] == [6, 6]
 
 
 @pytest.mark.unit
-def test_forwarded_env_string_is_coerced():
-    # env vars arrive as strings; the consumer coerces (like temperature)
-    kwargs = _bare_graph({"llm_provider": "openai", "llm_max_retries": "4"})._get_provider_kwargs()
-    assert kwargs["max_retries"] == 4
+def test_unset_retry_budget_preserves_provider_default(monkeypatch):
+    calls = []
+
+    def factory(**kwargs):
+        calls.append(kwargs)
+        client = MagicMock()
+        client.get_llm.return_value = object()
+        return client
+
+    monkeypatch.setattr(
+        "tradingagents.application.llms.create_llm_client",
+        factory,
+    )
+
+    create_run_llms(_settings())
+
+    assert all("max_retries" not in call for call in calls)
 
 
 @pytest.mark.unit
-def test_invalid_config_value_fails_loudly():
-    with pytest.raises(ValueError):
-        _bare_graph({"llm_provider": "openai", "llm_max_retries": -1})._get_provider_kwargs()
+def test_environment_retry_string_is_resolved_at_settings_boundary():
+    config = build_default_config(
+        {"TRADINGAGENTS_LLM_MAX_RETRIES": "8"}
+    )
 
+    settings = RunSettings(
+        llm_max_retries=config["llm_max_retries"],
+        data_config=config,
+    )
 
-@pytest.mark.unit
-def test_default_is_none():
-    config = build_default_config({})
-    assert config["llm_max_retries"] is None
-
-
-@pytest.mark.unit
-def test_env_override_sets_config():
-    config = build_default_config({"TRADINGAGENTS_LLM_MAX_RETRIES": "8"})
-    # None-default key: env value arrives as a string and is coerced downstream.
-    assert config["llm_max_retries"] == "8"
-    assert _coerce_max_retries(config["llm_max_retries"]) == 8
+    assert settings.llm_max_retries == 8

@@ -6,6 +6,9 @@ chat client; when unset the provider keeps its own default.
 
 import pytest
 
+from tradingagents.application.llms import create_run_llms
+from tradingagents.application.settings import RunSettings
+from tradingagents.default_config import build_default_config
 from tradingagents.llm_clients.factory import create_llm_client
 
 
@@ -57,23 +60,39 @@ class TestTemperatureEnvOverlay:
 
 @pytest.mark.unit
 class TestProviderKwargsTemperature:
-    """_get_provider_kwargs float-coerces and forwards temperature, or omits it."""
+    """Run construction forwards a resolved temperature to both role clients."""
 
-    def _kwargs_for(self, temperature):
-        from tradingagents.graph.trading_graph import TradingAgentsGraph
-        # Call the method without constructing the full graph.
-        graph = TradingAgentsGraph.__new__(TradingAgentsGraph)
-        graph.config = {"llm_provider": "openai", "temperature": temperature}
-        return TradingAgentsGraph._get_provider_kwargs(graph)
+    def _kwargs_for(self, monkeypatch, temperature):
+        calls = []
 
-    def test_float_string_coerced(self):
-        assert self._kwargs_for("0.3")["temperature"] == 0.3
+        def factory(**kwargs):
+            calls.append(kwargs)
 
-    def test_float_passthrough(self):
-        assert self._kwargs_for(0.0)["temperature"] == 0.0
+            class Client:
+                def get_llm(self):
+                    return object()
 
-    def test_none_omitted(self):
-        assert "temperature" not in self._kwargs_for(None)
+            return Client()
 
-    def test_empty_string_omitted(self):
-        assert "temperature" not in self._kwargs_for("")
+        monkeypatch.setattr(
+            "tradingagents.application.llms.create_llm_client",
+            factory,
+        )
+        settings = RunSettings(
+            temperature=temperature,
+            data_config=build_default_config({}),
+        )
+        create_run_llms(settings)
+        return calls
+
+    def test_float_string_coerced(self, monkeypatch):
+        calls = self._kwargs_for(monkeypatch, "0.3")
+        assert [call["temperature"] for call in calls] == [0.3, 0.3]
+
+    def test_float_passthrough(self, monkeypatch):
+        calls = self._kwargs_for(monkeypatch, 0.0)
+        assert [call["temperature"] for call in calls] == [0.0, 0.0]
+
+    def test_unset_temperature_is_omitted(self, monkeypatch):
+        calls = self._kwargs_for(monkeypatch, None)
+        assert all("temperature" not in call for call in calls)

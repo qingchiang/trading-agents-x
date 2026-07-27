@@ -115,8 +115,8 @@ class AnalysisService:
         if run.status is not RunStatus.RUNNING:
             raise ValueError(f"run {run.id} must be claimed before execution")
         run_settings = RunSettings.model_validate(run.config_snapshot)
-        legacy_config = run_settings.legacy_config(self.settings)
-        validate_market_routing(legacy_config)
+        dataflow_config = run_settings.dataflow_config(self.settings)
+        validate_market_routing(dataflow_config)
         checkpoint_thread = self.repository.checkpoint_thread(run.id)
         self._emit(
             run.id,
@@ -128,7 +128,7 @@ class AnalysisService:
 
         with self._heartbeat(run.id, worker_id):
             try:
-                with use_config(legacy_config):
+                with use_config(dataflow_config):
                     identity = self.identity_resolver(
                         run.request.ticker,
                         run.request.analysis_date.isoformat(),
@@ -157,7 +157,7 @@ class AnalysisService:
                     run_id=run.id,
                     request=run.request,
                     settings=run_settings,
-                    legacy_config=legacy_config,
+                    dataflow_config=dataflow_config,
                     past_context=memory,
                     instrument_context=instrument_context,
                     cancel_requested=lambda: self.repository.cancel_requested(
@@ -183,7 +183,7 @@ class AnalysisService:
                             payload={"attempt": run.attempt},
                             on_event=on_event,
                         )
-                    with use_config(legacy_config):
+                    with use_config(dataflow_config):
                         execution = graph.execute(
                             context,
                             checkpointer=saver,
@@ -196,7 +196,7 @@ class AnalysisService:
                     result = self._result(run.id, execution, metrics)
                     benchmark = self._benchmark(
                         run.request.ticker,
-                        legacy_config,
+                        dataflow_config,
                     )
                     self.repository.complete(
                         run.id,

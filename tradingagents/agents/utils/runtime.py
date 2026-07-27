@@ -18,9 +18,9 @@ def tool_runtime_scope(
     """Validate the state-injected cutoff and bind this tool's run config."""
     context = runtime.context
     request = getattr(context, "request", None)
-    legacy_config = getattr(context, "legacy_config", None)
+    dataflow_config = getattr(context, "dataflow_config", None)
     analysis_date = getattr(request, "analysis_date", None)
-    if analysis_date is None or not isinstance(legacy_config, Mapping):
+    if analysis_date is None or not isinstance(dataflow_config, Mapping):
         with nullcontext():
             yield injected_date
         return
@@ -29,5 +29,5 @@ def tool_runtime_scope(
         raise ValueError(
             "tool analysis date does not match immutable runtime context"
         )
-    with use_config(dict(legacy_config)):
+    with use_config(dict(dataflow_config)):
         yield expected

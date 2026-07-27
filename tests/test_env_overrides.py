@@ -18,13 +18,9 @@ def test_no_env_uses_built_in_defaults():
     assert config["deep_think_llm"] == "gpt-5.5"
     assert config["quick_think_llm"] == "gpt-5.4-mini"
     assert config["backend_url"] is None
-    assert config["max_debate_rounds"] == 1
-    assert config["checkpoint_enabled"] is False
     assert config["provenance_appendix"] is False
     assert config["news_article_limit"] == 30
     assert config["sentiment_filing_limit"] == 20
-    assert config["memory_log_max_entries"] == 1000
-    assert config["memory_cross_ticker_limit"] == 3
 
 
 def test_string_overrides():
@@ -45,22 +41,12 @@ def test_string_overrides():
 
 def test_int_coercion():
     config = _config(
-        TRADINGAGENTS_MAX_DEBATE_ROUNDS="3",
-        TRADINGAGENTS_MAX_RISK_ROUNDS="2",
         TRADINGAGENTS_TICKER_NEWS_LOOKBACK_DAYS="14",
         TRADINGAGENTS_SOCIAL_LOOKBACK_DAYS="7",
-        TRADINGAGENTS_MEMORY_LOG_MAX_ENTRIES="0",
-        TRADINGAGENTS_MEMORY_CROSS_TICKER_LIMIT="5",
     )
 
-    assert config["max_debate_rounds"] == 3
-    assert isinstance(config["max_debate_rounds"], int)
-    assert config["max_risk_discuss_rounds"] == 2
-    assert isinstance(config["max_risk_discuss_rounds"], int)
     assert config["ticker_news_lookback_days"] == 14
     assert config["social_lookback_days"] == 7
-    assert config["memory_log_max_entries"] == 0
-    assert config["memory_cross_ticker_limit"] == 5
 
 
 @pytest.mark.parametrize(
@@ -80,11 +66,9 @@ def test_int_coercion():
 )
 def test_bool_coercion(raw: str, expected: bool):
     config = _config(
-        TRADINGAGENTS_CHECKPOINT_ENABLED=raw,
         TRADINGAGENTS_PROVENANCE_APPENDIX=raw,
     )
 
-    assert config["checkpoint_enabled"] is expected
     assert config["provenance_appendix"] is expected
 
 
@@ -117,40 +101,44 @@ def test_reasoning_effort_defaults_to_none():
 def test_empty_env_value_does_not_clobber_default():
     config = _config(
         TRADINGAGENTS_LLM_PROVIDER="",
-        TRADINGAGENTS_MAX_DEBATE_ROUNDS="",
+        TRADINGAGENTS_TICKER_NEWS_LOOKBACK_DAYS="",
     )
 
     assert config["llm_provider"] == "openai"
-    assert config["max_debate_rounds"] == 1
+    assert config["ticker_news_lookback_days"] == 14
 
 
 def test_invalid_int_raises():
-    with pytest.raises(ValueError, match="TRADINGAGENTS_MAX_DEBATE_ROUNDS"):
-        _config(TRADINGAGENTS_MAX_DEBATE_ROUNDS="not-a-number")
+    with pytest.raises(
+        ValueError,
+        match="TRADINGAGENTS_TICKER_NEWS_LOOKBACK_DAYS",
+    ):
+        _config(TRADINGAGENTS_TICKER_NEWS_LOOKBACK_DAYS="not-a-number")
 
 
 @pytest.mark.parametrize(
     "env_name",
     [
+        "TRADINGAGENTS_MAX_DEBATE_ROUNDS",
+        "TRADINGAGENTS_MAX_RISK_ROUNDS",
+        "TRADINGAGENTS_CHECKPOINT_ENABLED",
         "TRADINGAGENTS_MEMORY_LOG_MAX_ENTRIES",
         "TRADINGAGENTS_MEMORY_CROSS_TICKER_LIMIT",
     ],
 )
-@pytest.mark.parametrize("value", ["-1", "not-a-number"])
-def test_invalid_memory_limit_raises(env_name: str, value: str):
-    with pytest.raises(ValueError, match=env_name):
-        build_default_config({env_name: value})
+def test_removed_legacy_environment_keys_are_ignored(env_name: str):
+    config = build_default_config({env_name: "legacy-value"})
 
+    assert "checkpoint_enabled" not in config
+    assert "memory_log_max_entries" not in config
+    assert "memory_cross_ticker_limit" not in config
+    assert "max_debate_rounds" not in config
+    assert "max_risk_discuss_rounds" not in config
 
 @pytest.mark.parametrize("bad", ["treu", "flase", "maybe", "2", "enabled"])
 def test_invalid_bool_raises(bad: str):
-    with pytest.raises(ValueError, match="TRADINGAGENTS_CHECKPOINT_ENABLED"):
-        _config(TRADINGAGENTS_CHECKPOINT_ENABLED=bad)
-
-
-def test_invalid_provenance_bool_raises():
     with pytest.raises(ValueError, match="TRADINGAGENTS_PROVENANCE_APPENDIX"):
-        _config(TRADINGAGENTS_PROVENANCE_APPENDIX="sometimes")
+        _config(TRADINGAGENTS_PROVENANCE_APPENDIX=bad)
 
 
 def test_unknown_env_var_is_ignored():

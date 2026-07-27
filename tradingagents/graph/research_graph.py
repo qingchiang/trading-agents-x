@@ -88,6 +88,7 @@ class ResearchState(TypedDict, total=False):
     analysis_date: str
     asset_type: str
     profile: str
+    output_language: str
     analysts: list[str]
     analyst_reports: Annotated[dict[str, dict[str, Any]], _merge_dicts]
     evidence_items: Annotated[list[dict[str, Any]], operator.add]
@@ -240,6 +241,7 @@ class ResearchGraph:
             "analysis_date": request.analysis_date.isoformat(),
             "asset_type": request.asset_type.value,
             "profile": request.profile.value,
+            "output_language": context.settings.output_language,
             "analysts": list(request.analysts),
             "analyst_reports": {},
             "evidence_items": [],
@@ -413,7 +415,7 @@ class ResearchGraph:
                 "news_report": "",
                 "fundamentals_report": "",
             }
-            with use_config(dict(context.legacy_config)):
+            with use_config(dict(context.dataflow_config)):
                 result = self._analyst_subgraphs[analyst].invoke(
                     local_state,
                     config={
@@ -800,13 +802,14 @@ def _evidence_from_record(
     content: str | None,
 ) -> EvidenceItem:
     effective = _last_date(record.effective)
-    if effective and effective > requested_date:
+    future_dated = bool(effective and effective > requested_date)
+    if future_dated:
         effective = None
     timing = record.timing.casefold()
     unavailable = any(
         token in timing
         for token in ("unavailable", "failed", "not requested", "no usable data")
-    )
+    ) or future_dated
     degraded = any(
         token in timing
         for token in (
@@ -830,13 +833,17 @@ def _evidence_from_record(
         evidence_type=record.evidence or "unknown evidence",
         requested_date=requested_date,
         effective_date=effective,
-        content=content,
+        content=None if future_dated else content,
         quality=quality,
         fallback="fallback" in timing,
         provenance={
             "requested": record.requested,
             "effective": record.effective,
-            "timing": record.timing,
+            "timing": (
+                f"{record.timing}; future-dated evidence withheld"
+                if future_dated
+                else record.timing
+            ),
             "retrieved_at": record.retrieved_at,
         },
     )
@@ -983,6 +990,8 @@ Rules:
 - This is research, not personalized investment advice. Do not provide position
   sizing, account allocation, entry price, stop loss, price target, or execution.
 - The five-session memory is short-term feedback, not ground truth.
+- Write every human-readable field in {state.get("output_language", "English")}.
+  Keep enum values and evidence refs exactly as defined by their schemas.
 
 Instrument: {state["ticker"]}
 Analysis cutoff: {state["analysis_date"]}

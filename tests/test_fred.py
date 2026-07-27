@@ -9,10 +9,9 @@ from unittest import mock
 
 import pytest
 
-import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
 from tradingagents.dataflows import fred, interface, macro_common
-from tradingagents.dataflows.config import set_config
+from tradingagents.dataflows.config import bind_config
 
 # A small, stable set of observations to format against.
 _META = {
@@ -212,16 +211,16 @@ class FredCacheTests(unittest.TestCase):
 @pytest.mark.unit
 class FredRoutingTests(unittest.TestCase):
     def setUp(self):
-        config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def tearDown(self):
-        config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def test_macro_category_routes_to_fred(self):
         self.assertEqual(
             interface.get_category_for_method("get_macro_indicators"), "macro_data"
         )
-        set_config({"data_vendors": {"macro_data": "fred"}})
+        bind_config({"data_vendors": {"macro_data": "fred"}})
         with mock.patch.dict(
             interface.VENDOR_METHODS,
             {"get_macro_indicators": {"fred": lambda *a, **k: "MACRO_OK"}},
@@ -234,7 +233,7 @@ class FredRoutingTests(unittest.TestCase):
         # macro_data is optional: with only fred and no key, the router degrades
         # to a sentinel instead of aborting the run — a missing optional key must
         # not crash an analysis.
-        set_config({"data_vendors": {"macro_data": "fred"}})
+        bind_config({"data_vendors": {"macro_data": "fred"}})
 
         def _unconfigured(*a, **k):
             raise fred.FredNotConfiguredError("FRED_API_KEY not set")
