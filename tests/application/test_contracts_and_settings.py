@@ -95,3 +95,30 @@ def test_lan_mode_requires_token(tmp_path) -> None:
             },
             load_env_files=False,
         )
+
+
+def test_request_overrides_role_specific_environment_defaults(tmp_path) -> None:
+    settings = AppSettings.from_env(
+        environ={
+            "TRADINGAGENTS_HOME": str(tmp_path),
+            "TRADINGAGENTS_LLM_PROVIDER": "openai",
+            "TRADINGAGENTS_QUICK_THINK_LLM": "quick-default",
+            "TRADINGAGENTS_DEEP_THINK_LLM": "deep-default",
+            "TRADINGAGENTS_QUICK_REASONING_EFFORT": "low",
+            "TRADINGAGENTS_DEEP_REASONING_EFFORT": "high",
+        },
+        load_env_files=False,
+    )
+    request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date="2026-07-24",
+        deep_model="deep-request",
+        deep_reasoning_effort="max",
+    )
+
+    resolved = settings.resolve_run(request)
+
+    assert resolved.quick_model == "quick-default"
+    assert resolved.deep_model == "deep-request"
+    assert resolved.quick_reasoning_effort == "low"
+    assert resolved.deep_reasoning_effort == "max"

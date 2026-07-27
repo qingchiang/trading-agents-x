@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Any, Literal
@@ -17,6 +18,8 @@ from pydantic import (
 )
 
 from tradingagents.dataflows.symbol_utils import crypto_base, normalize_symbol
+
+_SYMBOL_PATTERN = re.compile(r"^[A-Z0-9^][A-Z0-9.^=_-]*$")
 
 
 def utc_now() -> datetime:
@@ -234,6 +237,8 @@ class AnalysisRequest(FrozenModel):
         canonical = normalize_symbol(value)
         if not canonical:
             raise ValueError("ticker must not be empty")
+        if not _SYMBOL_PATTERN.fullmatch(canonical):
+            raise ValueError("ticker contains unsupported characters")
         return canonical
 
     @field_validator("analysts")
@@ -256,6 +261,15 @@ class AnalysisRequest(FrozenModel):
             object.__setattr__(self, "asset_type", inferred)
         elif self.asset_type != inferred and inferred is AssetType.CRYPTO:
             raise ValueError("known crypto symbols must use asset_type='crypto'")
+        if inferred is AssetType.CRYPTO and "fundamentals" in self.analysts:
+            compatible = tuple(
+                analyst for analyst in self.analysts if analyst != "fundamentals"
+            )
+            if not compatible:
+                raise ValueError(
+                    "crypto analysis requires a non-fundamentals analyst"
+                )
+            object.__setattr__(self, "analysts", compatible)
         return self
 
 

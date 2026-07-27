@@ -157,12 +157,12 @@ MODEL_OPTIONS: ProviderModeOptions = {
     # so the two provider keys share one model list.
     "minimax": _MINIMAX_MODELS,
     "minimax-cn": _MINIMAX_MODELS,
-    # OpenRouter: fetched dynamically. Azure: any deployed model name.
+    # OpenRouter and Azure also accept explicit model IDs from API/CLI requests.
     # Ollama display labels intentionally omit a "local" marker — the
     # endpoint is now configurable via OLLAMA_BASE_URL, so the same labels
     # apply whether the user runs ollama-serve on localhost or against a
-    # remote host. The actual resolved endpoint is surfaced separately by
-    # cli.utils.confirm_ollama_endpoint() right after provider selection.
+    # remote host. Settings and Web capabilities surface the configured
+    # provider without exposing endpoint secrets.
     # "Custom model ID" lets users pick any model they have pulled via
     # `ollama pull` beyond the three suggested defaults.
     "ollama": {

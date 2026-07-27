@@ -7,6 +7,7 @@ model name is accepted, and the env backend URL precedence (#978).
 
 import pytest
 
+from tradingagents.application.settings import AppSettings
 from tradingagents.llm_clients.api_key_env import get_api_key_env
 from tradingagents.llm_clients.factory import create_llm_client
 from tradingagents.llm_clients.validators import validate_model
@@ -66,12 +67,17 @@ def test_any_model_accepted_no_forced_key():
 
 
 @pytest.mark.unit
-def test_env_backend_url_precedence():
-    # #978: explicit env URL wins over the menu/default regardless of provider source.
-    from cli.utils import resolve_backend_url
-    assert resolve_backend_url("openai", "https://api.openai.com/v1", env_url="http://proxy/v1") == "http://proxy/v1"
-    assert resolve_backend_url("openai", "https://api.openai.com/v1", env_url=None) == "https://api.openai.com/v1"
-    assert resolve_backend_url("deepseek", None, None) == "https://api.deepseek.com"
+def test_env_backend_url_precedence(tmp_path):
+    settings = AppSettings.from_env(
+        environ={
+            "TRADINGAGENTS_HOME": str(tmp_path),
+            "TRADINGAGENTS_LLM_PROVIDER": "openai",
+            "TRADINGAGENTS_LLM_BACKEND_URL": "http://proxy/v1",
+        },
+        load_env_files=False,
+    )
+
+    assert settings.default_run_settings.backend_url == "http://proxy/v1"
 
 
 @pytest.mark.unit
