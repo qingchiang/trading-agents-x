@@ -1,8 +1,9 @@
 from typing import Annotated
 
 from langchain_core.tools import tool
-from langgraph.prebuilt import InjectedState
+from langgraph.prebuilt import InjectedState, ToolRuntime
 
+from tradingagents.agents.utils.runtime import tool_runtime_scope
 from tradingagents.dataflows.interface import route_to_vendor
 
 
@@ -60,9 +61,11 @@ def get_indicators_for_analysis(
     symbol: Annotated[str, "ticker symbol of the company"],
     indicator: Annotated[str, "technical indicator to retrieve"],
     curr_date: Annotated[str, InjectedState("trade_date")],
+    runtime: ToolRuntime,
     look_back_days: Annotated[int, "how many days to look back"] = 30,
 ) -> str:
     """Retrieve indicators using the workflow's immutable analysis date."""
-    return _get_indicators(
-        symbol, indicator, curr_date, look_back_days, provenance=True
-    )
+    with tool_runtime_scope(runtime, curr_date) as cutoff:
+        return _get_indicators(
+            symbol, indicator, cutoff, look_back_days, provenance=True
+        )

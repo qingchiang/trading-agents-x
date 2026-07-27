@@ -1,4 +1,6 @@
 import os
+from collections.abc import Mapping
+from copy import deepcopy
 
 _TRADINGAGENTS_HOME = os.path.join(os.path.expanduser("~"), ".tradingagents")
 
@@ -66,10 +68,14 @@ def _coerce(value: str, reference):
     return value
 
 
-def _apply_env_overrides(config: dict) -> dict:
-    """Apply TRADINGAGENTS_* env vars to the config dict in-place."""
+def _apply_env_overrides(
+    config: dict,
+    environ: Mapping[str, str] | None = None,
+) -> dict:
+    """Apply TRADINGAGENTS_* values at an explicit application boundary."""
+    env = os.environ if environ is None else environ
     for env_var, key in _ENV_OVERRIDES.items():
-        raw = os.environ.get(env_var)
+        raw = env.get(env_var)
         if raw is None or raw == "":
             continue
         try:
@@ -81,11 +87,13 @@ def _apply_env_overrides(config: dict) -> dict:
     return config
 
 
-DEFAULT_CONFIG = _apply_env_overrides({
+_BASE_CONFIG = {
     "project_dir": os.path.abspath(os.path.join(os.path.dirname(__file__), ".")),
-    "results_dir": os.getenv("TRADINGAGENTS_RESULTS_DIR", os.path.join(_TRADINGAGENTS_HOME, "logs")),
-    "data_cache_dir": os.getenv("TRADINGAGENTS_CACHE_DIR", os.path.join(_TRADINGAGENTS_HOME, "cache")),
-    "memory_log_path": os.getenv("TRADINGAGENTS_MEMORY_LOG_PATH", os.path.join(_TRADINGAGENTS_HOME, "memory", "trading_memory.md")),
+    "results_dir": os.path.join(_TRADINGAGENTS_HOME, "logs"),
+    "data_cache_dir": os.path.join(_TRADINGAGENTS_HOME, "cache"),
+    "memory_log_path": os.path.join(
+        _TRADINGAGENTS_HOME, "memory", "trading_memory.md"
+    ),
     # Global cap on resolved memory entries. Pending entries are never pruned;
     # 0 disables rotation.
     "memory_log_max_entries": 1000,
@@ -239,4 +247,19 @@ DEFAULT_CONFIG = _apply_env_overrides({
         ".SZ":  "399001.SZ",   # Shenzhen (SZSE Component)
         "":     "SPY",         # default for US-listed tickers (no suffix)
     },
-})
+}
+
+
+def build_default_config(
+    environ: Mapping[str, str] | None = None,
+) -> dict:
+    """Return a fresh config, optionally applying an explicit environment."""
+    config = deepcopy(_BASE_CONFIG)
+    if environ is not None:
+        _apply_env_overrides(config, environ)
+    return config
+
+
+# Imports are deterministic. Entry points call ``build_default_config`` through
+# ``AppSettings.from_env`` after they have explicitly loaded environment files.
+DEFAULT_CONFIG = build_default_config()

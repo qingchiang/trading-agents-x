@@ -4,8 +4,6 @@ Temperature is a cross-provider knob: when set it must reach the underlying
 chat client; when unset the provider keeps its own default.
 """
 
-import importlib
-
 import pytest
 
 from tradingagents.llm_clients.factory import create_llm_client
@@ -42,20 +40,18 @@ class TestTemperatureForwarding:
 
 @pytest.mark.unit
 class TestTemperatureEnvOverlay:
-    def test_env_sets_temperature(self, monkeypatch):
+    def test_explicit_environment_sets_temperature(self):
         import tradingagents.default_config as dc
-        monkeypatch.setenv("TRADINGAGENTS_TEMPERATURE", "0.2")
-        importlib.reload(dc)
-        # Stored on config (string from env is fine; consumed via float()).
-        assert dc.DEFAULT_CONFIG["temperature"] in ("0.2", 0.2)
-        assert float(dc.DEFAULT_CONFIG["temperature"]) == 0.2
-        monkeypatch.delenv("TRADINGAGENTS_TEMPERATURE", raising=False)
-        importlib.reload(dc)
 
-    def test_default_temperature_is_none(self, monkeypatch):
+        config = dc.build_default_config({"TRADINGAGENTS_TEMPERATURE": "0.2"})
+
+        assert float(config["temperature"]) == 0.2
+
+    def test_module_default_ignores_process_environment(self, monkeypatch):
         import tradingagents.default_config as dc
-        monkeypatch.delenv("TRADINGAGENTS_TEMPERATURE", raising=False)
-        importlib.reload(dc)
+
+        monkeypatch.setenv("TRADINGAGENTS_TEMPERATURE", "0.2")
+
         assert dc.DEFAULT_CONFIG["temperature"] is None
 
 

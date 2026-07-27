@@ -44,7 +44,7 @@ from tradingagents.agents.utils.prediction_markets_tools import (
 from tradingagents.agents.utils.technical_indicators_tools import (
     get_indicators_for_analysis,
 )
-from tradingagents.dataflows.config import set_config
+from tradingagents.dataflows.config import use_config
 from tradingagents.dataflows.interface import validate_market_routing
 from tradingagents.dataflows.symbol_utils import (
     market_today,
@@ -136,9 +136,7 @@ class TradingAgentsGraph:
         self.config = config or DEFAULT_CONFIG
         self.callbacks = callbacks or []
 
-        # Update the interface's config
-        set_config(self.config)
-        validate_market_routing()
+        validate_market_routing(self.config)
 
         # Create necessary directories
         os.makedirs(self.config["data_cache_dir"], exist_ok=True)
@@ -497,13 +495,14 @@ class TradingAgentsGraph:
             if resume_step is None:
                 self._resolve_pending_entries(company_name)
 
-            return self._run_graph(
-                company_name,
-                trade_date,
-                asset_type=asset_type,
-                on_chunk=on_chunk,
-                resume_step=resume_step,
-            )
+            with use_config(self.config):
+                return self._run_graph(
+                    company_name,
+                    trade_date,
+                    asset_type=asset_type,
+                    on_chunk=on_chunk,
+                    resume_step=resume_step,
+                )
         finally:
             if self._checkpointer_ctx is not None:
                 self._checkpointer_ctx.__exit__(None, None, None)

@@ -1,8 +1,9 @@
 from typing import Annotated
 
 from langchain_core.tools import tool
-from langgraph.prebuilt import InjectedState
+from langgraph.prebuilt import InjectedState, ToolRuntime
 
+from tradingagents.agents.utils.runtime import tool_runtime_scope
 from tradingagents.dataflows.interface import route_to_vendor
 
 
@@ -88,40 +89,52 @@ def get_income_statement(
 def get_fundamentals_for_analysis(
     ticker: Annotated[str, "ticker symbol"],
     curr_date: Annotated[str, InjectedState("trade_date")],
+    runtime: ToolRuntime,
 ) -> str:
     """Retrieve fundamentals using the workflow's immutable analysis date."""
-    return route_to_vendor("get_fundamentals", ticker, curr_date, _provenance=True)
+    with tool_runtime_scope(runtime, curr_date) as cutoff:
+        return route_to_vendor(
+            "get_fundamentals", ticker, cutoff, _provenance=True
+        )
 
 
 @tool("get_balance_sheet")
 def get_balance_sheet_for_analysis(
     ticker: Annotated[str, "ticker symbol"],
     curr_date: Annotated[str, InjectedState("trade_date")],
+    runtime: ToolRuntime,
     freq: Annotated[str, "reporting frequency: annual/quarterly"] = "quarterly",
 ) -> str:
     """Retrieve a balance sheet using the workflow's immutable analysis date."""
-    return route_to_vendor(
-        "get_balance_sheet", ticker, freq, curr_date, _provenance=True
-    )
+    with tool_runtime_scope(runtime, curr_date) as cutoff:
+        return route_to_vendor(
+            "get_balance_sheet", ticker, freq, cutoff, _provenance=True
+        )
 
 
 @tool("get_cashflow")
 def get_cashflow_for_analysis(
     ticker: Annotated[str, "ticker symbol"],
     curr_date: Annotated[str, InjectedState("trade_date")],
+    runtime: ToolRuntime,
     freq: Annotated[str, "reporting frequency: annual/quarterly"] = "quarterly",
 ) -> str:
     """Retrieve cash flow using the workflow's immutable analysis date."""
-    return route_to_vendor("get_cashflow", ticker, freq, curr_date, _provenance=True)
+    with tool_runtime_scope(runtime, curr_date) as cutoff:
+        return route_to_vendor(
+            "get_cashflow", ticker, freq, cutoff, _provenance=True
+        )
 
 
 @tool("get_income_statement")
 def get_income_statement_for_analysis(
     ticker: Annotated[str, "ticker symbol"],
     curr_date: Annotated[str, InjectedState("trade_date")],
+    runtime: ToolRuntime,
     freq: Annotated[str, "reporting frequency: annual/quarterly"] = "quarterly",
 ) -> str:
     """Retrieve an income statement using the workflow's immutable analysis date."""
-    return route_to_vendor(
-        "get_income_statement", ticker, freq, curr_date, _provenance=True
-    )
+    with tool_runtime_scope(runtime, curr_date) as cutoff:
+        return route_to_vendor(
+            "get_income_statement", ticker, freq, cutoff, _provenance=True
+        )

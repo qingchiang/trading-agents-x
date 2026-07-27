@@ -2,11 +2,13 @@
 
 import copy
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
 import pytest
 
 import tradingagents.default_config as default_config
-from tradingagents.dataflows.config import get_config, set_config
+from tradingagents.dataflows.config import get_config, set_config, use_config
 
 
 @pytest.mark.unit
@@ -59,3 +61,20 @@ class DataflowsConfigIsolationTests(unittest.TestCase):
         fresh = get_config()
         self.assertEqual(fresh["tool_vendors"]["get_stock_data"], "alpha_vantage")
         self.assertEqual(fresh["tool_vendors"]["get_news"], "alpha_vantage")
+
+    def test_run_scopes_are_isolated_across_threads(self):
+        barrier = Barrier(2)
+
+        def read_scoped(provider):
+            config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+            config["llm_provider"] = provider
+            with use_config(config):
+                barrier.wait(timeout=5)
+                return get_config()["llm_provider"]
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            first = executor.submit(read_scoped, "openai")
+            second = executor.submit(read_scoped, "deepseek")
+
+        self.assertEqual(first.result(), "openai")
+        self.assertEqual(second.result(), "deepseek")
