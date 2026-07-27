@@ -12,19 +12,74 @@ version numbers.
 
 ## [Unreleased]
 
+### Added
+
+- **Local Web research run center.** Added a React/TypeScript application with
+  Dashboard, New Run, Run Detail, Memory, and Settings views; persistent SSE
+  timelines; sanitized Markdown; and independent English, Simplified Chinese,
+  and Japanese UI locales.
+- **Durable application platform.** Added immutable app/run context, a central
+  `AnalysisService`, SQLite/Alembic repositories for runs, attempts, events,
+  reports, typed decisions, outcomes, reflections, and legacy-import audit
+  records, plus single-worker database leases, crash recovery, cancellation,
+  retry, rerun, and online backup.
+- **Versioned HTTP and Python APIs.** Added `/api/v1` run, event, lifecycle,
+  export, memory, capability, and health endpoints with idempotent creation, and
+  the typed `TradingAgents.run()` / `enqueue()` Python surface.
+- **Evidence-first graph profiles.** Added versioned sealed `EvidenceBundle`
+  handoffs, independent parallel analyst state, typed reports, Fast/Standard/
+  Deep workflows, role-spec review factories, early-stopping rebuttal, and
+  research-only decisions.
+- **Migration and release tooling.** Added dry-run/idempotent Markdown memory
+  import, multi-stage Web/worker images, loopback-first Compose deployment,
+  OpenAPI-to-TypeScript drift checks, wheel-content inspection, Playwright
+  workflows, and fixed cross-market graph evaluation contracts.
+
 ### Changed
 
+- **Independent product architecture.** Normal development no longer merges
+  upstream. The remote and attribution remain for read-only monitoring and
+  selectively audited security/correctness fixes.
+- **Database as source of truth.** Reports, events, decisions, outcomes, and
+  reflections now persist in SQLite; Markdown and JSON are explicit export
+  formats. Five-interval outcome settlement runs as a background worker task.
+- **Non-interactive CLI.** Replaced the questionnaire with explicit `run`,
+  `serve`, `worker`, `runs`, `memory import`, `export`, and `db backup`
+  commands.
+- **Research-only final contract.** Replaced account-level trade instructions
+  with rating, confidence, thesis, evidence refs, catalysts, risks,
+  invalidation conditions, and time horizon.
 - **Distribution attribution metadata.** Refreshed the packaged NOTICE to use
   the independent TradingAgentsX identity and durable project scope, and added
   explicit SPDX license, license-file, and project URL metadata to the wheel.
 
 ### Fixed
 
+- **SQLite migration and health probes.** Alembic now commits connection PRAGMAs
+  before running migrations so its revision survives connection close; the
+  Web health endpoint uses SQLAlchemy 2 result rows correctly.
 - **Decision-memory outcome window.** Pending decisions now settle only after
   six common ticker/benchmark closes form five aligned completed trading
   intervals. Reflections retain the exact observation range and remain short-term,
   output-language-aware feedback; legacy resolved records with shorter,
   missing, or malformed holding windows are no longer injected into context.
+
+### Security
+
+- **Local/LAN boundary.** The server binds to loopback by default. Explicit LAN
+  mode requires an environment token exchanged for a signed `HttpOnly`,
+  `SameSite=Strict` session cookie and enforces same-origin mutations. Provider
+  secrets and sensitive error/tool data are excluded from persistence and SSE.
+
+### Removed
+
+- **Legacy runtime surfaces.** Removed the public `TradingAgentsGraph`, Trader
+  and portfolio/risk-debate graph, interactive Rich/questionary flow, Markdown
+  memory writer, multiple report paths, per-ticker checkpoint databases, and
+  obsolete top-level script entry points.
+- **Unused direct runtime declarations.** Removed `backtrader`,
+  `langchain-experimental`, `redis`, `tqdm`, `pytz`, and runtime `setuptools`
+  declarations; transitive dependencies remain controlled by their owners.
 
 ## [0.4.0] — 2026-07-23
 

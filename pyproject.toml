@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "trading-agents-x"
 version = "0.4.0"
-description = "TradingAgentsX: a multi-agent LLM financial research framework for US, Japan, and China A-shares — an independent fork of TradingAgents"
+description = "A local evidence-first investment research run center for US, Japan, and China A-shares"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
