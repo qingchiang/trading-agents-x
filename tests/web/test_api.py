@@ -1,0 +1,142 @@
+from __future__ import annotations
+
+import httpx2 as httpx
+import pytest
+
+from tradingagents.application.contracts import AnalysisRequest
+
+
+def _payload(ticker: str = "NVDA") -> dict:
+    return {
+        "ticker": ticker,
+        "analysis_date": "2026-07-24",
+        "profile": "standard",
+        "analysts": ["market", "news"],
+        "output_language": "en",
+        "provenance": True,
+    }
+
+
+@pytest.mark.anyio
+async def test_run_creation_is_idempotent_and_conflicts_are_explicit(
+    web_client: httpx.AsyncClient,
+) -> None:
+    first = await web_client.post(
+        "/api/v1/runs",
+        json=_payload(),
+        headers={"Idempotency-Key": "browser-submit"},
+    )
+    repeated = await web_client.post(
+        "/api/v1/runs",
+        json=_payload(),
+        headers={"Idempotency-Key": "browser-submit"},
+    )
+    conflict = await web_client.post(
+        "/api/v1/runs",
+        json=_payload("AAPL"),
+        headers={"Idempotency-Key": "browser-submit"},
+    )
+
+    assert first.status_code == 202
+    assert repeated.status_code == 202
+    assert repeated.json()["id"] == first.json()["id"]
+    assert conflict.status_code == 409
+    assert conflict.json()["error"]["code"] == "idempotency_conflict"
+
+
+@pytest.mark.anyio
+async def test_run_lifecycle_routes_and_filters(
+    web_client: httpx.AsyncClient,
+) -> None:
+    created = (await web_client.post("/api/v1/runs", json=_payload())).json()
+    run_id = created["id"]
+
+    detail = await web_client.get(f"/api/v1/runs/{run_id}")
+    queued = await web_client.get("/api/v1/runs?status=queued")
+    cancelled = await web_client.post(f"/api/v1/runs/{run_id}/cancel")
+    rerun = await web_client.post(f"/api/v1/runs/{run_id}/rerun")
+
+    assert detail.status_code == 200
+    assert detail.json()["run"]["id"] == run_id
+    assert [run["id"] for run in queued.json()] == [run_id]
+    assert cancelled.json()["status"] == "cancelled"
+    assert rerun.json()["parent_run_id"] == run_id
+
+
+@pytest.mark.anyio
+async def test_sse_replays_committed_events_after_last_event_id(
+    web_client: httpx.AsyncClient,
+    web_service,
+) -> None:
+    queued = web_service.enqueue(
+        AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
+    )
+    web_service.cancel(queued.id)
+
+    response = await web_client.get(
+        f"/api/v1/runs/{queued.id}/events",
+        headers={"Last-Event-ID": "1"},
+    )
+
+    assert response.status_code == 200
+    assert "id: 2\n" in response.text
+    assert "event: run.cancelled\n" in response.text
+    assert "id: 1\n" not in response.text
+
+
+@pytest.mark.anyio
+async def test_sse_rejects_invalid_replay_cursor(
+    web_client: httpx.AsyncClient,
+    web_service,
+) -> None:
+    queued = web_service.enqueue(
+        AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
+    )
+
+    response = await web_client.get(
+        f"/api/v1/runs/{queued.id}/events",
+        headers={"Last-Event-ID": "not-an-integer"},
+    )
+
+    assert response.status_code == 400
+
+
+@pytest.mark.anyio
+async def test_openapi_contains_versioned_run_center_contract(
+    web_client: httpx.AsyncClient,
+) -> None:
+    schema = (await web_client.get("/openapi.json")).json()
+    paths = schema["paths"]
+
+    assert {
+        "/api/v1/runs",
+        "/api/v1/runs/{run_id}",
+        "/api/v1/runs/{run_id}/events",
+        "/api/v1/runs/{run_id}/cancel",
+        "/api/v1/runs/{run_id}/retry",
+        "/api/v1/runs/{run_id}/rerun",
+        "/api/v1/runs/{run_id}/export",
+        "/api/v1/memory",
+        "/api/v1/capabilities",
+        "/api/v1/health",
+    } <= set(paths)
+
+
+@pytest.mark.anyio
+async def test_validation_error_does_not_echo_request_values(
+    web_client: httpx.AsyncClient,
+) -> None:
+    private_value = "private-value-that-must-not-be-reflected"
+    response = await web_client.post(
+        "/api/v1/runs",
+        json={
+            **_payload(),
+            "ticker": "",
+            "llm_provider": private_value,
+            "unexpected_secret": private_value,
+        },
+    )
+
+    assert response.status_code == 422
+    assert private_value not in response.text
+    assert response.json()["error"]["code"] == "validation_error"
