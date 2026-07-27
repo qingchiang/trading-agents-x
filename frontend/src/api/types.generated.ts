@@ -1,0 +1,165 @@
+/*
+ * This file is generated from frontend/openapi.json.
+ * Run `npm run openapi:generate` from frontend/ to update it.
+ */
+
+export interface components {
+  schemas: {
+    AnalysisRequest: {
+      analysis_date: string;
+      analysts?: ("market" | "social" | "news" | "fundamentals")[];
+      asset_type?: components["schemas"]["AssetType"] | null;
+      deep_model?: string | null;
+      deep_reasoning_effort?: string | null;
+      llm_provider?: string | null;
+      output_language?: "en" | "zh-Hans" | "ja";
+      profile?: components["schemas"]["RunProfile"];
+      provenance?: boolean;
+      quick_model?: string | null;
+      quick_reasoning_effort?: string | null;
+      ticker: string;
+    };
+    AnalysisResult: {
+      decision: components["schemas"]["ResearchDecision"] | null;
+      instrument: string;
+      metrics?: components["schemas"]["RunMetrics"];
+      reports: Record<string, components["schemas"]["AnalystReport"] | string>;
+      run_id: string;
+      status: components["schemas"]["RunStatus"];
+      warnings?: string[];
+    };
+    AnalystClaim: {
+      evidence_refs?: string[];
+      text: string;
+    };
+    AnalystReport: {
+      analyst: "market" | "social" | "news" | "fundamentals";
+      claims?: components["schemas"]["AnalystClaim"][];
+      confidence: number;
+      evidence_refs?: string[];
+      narrative: string;
+      summary: string;
+      warnings?: string[];
+    };
+    AssetType: "stock" | "crypto";
+    CapabilitiesResponse: {
+      analysts: string[];
+      defaults: components["schemas"]["CapabilityDefaults"];
+      output_languages: string[];
+      profiles: string[];
+      providers: Record<string, components["schemas"]["ProviderCapabilities"]>;
+    };
+    CapabilityDefaults: {
+      deep_model: string;
+      lan_enabled: boolean;
+      llm_provider: string;
+      output_language: string;
+      profile: string;
+      quick_model: string;
+    };
+    HTTPValidationError: {
+      detail?: components["schemas"]["ValidationError"][];
+    };
+    HealthResponse: {
+      database: "ok" | "error";
+      queue: components["schemas"]["QueueHealth"];
+      status: "ok" | "degraded";
+      version: string;
+    };
+    LoginRequest: {
+      token: string;
+    };
+    MemoryEntry: {
+      analysis_date: string;
+      asset_type: string;
+      decision: components["schemas"]["ResearchDecision"];
+      market: string | null;
+      outcome: components["schemas"]["MemoryOutcome"];
+      reflection: string | null;
+      run_id: string;
+      ticker: string;
+    };
+    MemoryOutcome: {
+      alpha_return: number | null;
+      benchmark: string;
+      holding_intervals: number;
+      observation_end: string | null;
+      observation_start: string | null;
+      raw_return: number | null;
+      status: "pending" | "resolved";
+    };
+    ModelOption: {
+      label: string;
+      value: string;
+    };
+    ProviderCapabilities: {
+      api_key_configured: boolean | null;
+      deep_models: components["schemas"]["ModelOption"][];
+      quick_models: components["schemas"]["ModelOption"][];
+      reasoning_efforts: Record<string, string[]>;
+    };
+    QueueHealth: {
+      pending_outcomes: number;
+      queued: number;
+      running: number;
+    };
+    ResearchDecision: {
+      catalysts?: string[];
+      confidence: number;
+      evidence_refs?: string[];
+      invalidation_conditions?: string[];
+      rating: components["schemas"]["ResearchRating"];
+      risks?: string[];
+      thesis: string;
+      time_horizon: string;
+    };
+    ResearchRating: "Buy" | "Overweight" | "Hold" | "Underweight" | "Sell";
+    RunDetail: {
+      result?: components["schemas"]["AnalysisResult"] | null;
+      run: components["schemas"]["RunView"];
+    };
+    RunEvent: {
+      attempt: number;
+      created_at: string;
+      event_type: string;
+      node?: string | null;
+      payload?: Record<string, unknown>;
+      run_id: string;
+      sequence: number;
+    };
+    RunMetrics: {
+      input_tokens?: number;
+      llm_calls?: number;
+      node_wall_times?: Record<string, number>;
+      output_tokens?: number;
+      tool_calls?: number;
+      wall_time_seconds?: number;
+    };
+    RunProfile: "fast" | "standard" | "deep";
+    RunStatus: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+    RunView: {
+      attempt: number;
+      cancel_requested: boolean;
+      config_snapshot: Record<string, unknown>;
+      created_at: string;
+      error_code?: string | null;
+      error_message?: string | null;
+      finished_at?: string | null;
+      id: string;
+      metrics?: components["schemas"]["RunMetrics"];
+      parent_run_id?: string | null;
+      request: components["schemas"]["AnalysisRequest"];
+      started_at?: string | null;
+      status: components["schemas"]["RunStatus"];
+      updated_at: string;
+    };
+    ValidationError: {
+      ctx?: {
+      };
+      input?: unknown;
+      loc: (string | number)[];
+      msg: string;
+      type: string;
+    };
+  };
+}

@@ -123,6 +123,21 @@ async def test_openapi_contains_versioned_run_center_contract(
 
 
 @pytest.mark.anyio
+async def test_frontend_is_served_for_root_and_client_routes(
+    web_client: httpx.AsyncClient,
+) -> None:
+    root = await web_client.get("/")
+    client_route = await web_client.get("/runs/example-run")
+    missing_api = await web_client.get("/api/v1/not-a-route")
+
+    assert root.status_code == 200
+    assert client_route.status_code == 200
+    assert '<div id="root"></div>' in root.text
+    assert client_route.text == root.text
+    assert missing_api.status_code == 404
+
+
+@pytest.mark.anyio
 async def test_validation_error_does_not_echo_request_values(
     web_client: httpx.AsyncClient,
 ) -> None:

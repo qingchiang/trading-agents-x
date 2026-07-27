@@ -24,6 +24,7 @@ from sqlalchemy import func, select
 
 from tradingagents.application.contracts import (
     AnalysisRequest,
+    RunEvent,
     RunStatus,
     RunView,
 )
@@ -37,6 +38,7 @@ from tradingagents.application.service import AnalysisService
 from tradingagents.application.settings import AppSettings
 from tradingagents.llm_clients.api_key_env import PROVIDER_API_KEY_ENV
 from tradingagents.llm_clients.model_catalog import MODEL_OPTIONS
+from tradingagents.llm_clients.reasoning_effort import model_effort_levels
 from tradingagents.version import __version__
 
 from .auth import COOKIE_NAME, SESSION_MAX_AGE, LanSessionManager
@@ -44,6 +46,7 @@ from .models import (
     CapabilitiesResponse,
     HealthResponse,
     LoginRequest,
+    MemoryEntry,
     RunDetail,
 )
 
@@ -186,7 +189,11 @@ def create_app(
         )
         return RunDetail(run=view, result=result)
 
-    @app.get(f"{API_PREFIX}/runs/{{run_id}}/events")
+    @app.get(
+        f"{API_PREFIX}/runs/{{run_id}}/events",
+        response_model=RunEvent,
+        response_class=StreamingResponse,
+    )
     async def stream_events(
         run_id: str,
         request: Request,
@@ -276,7 +283,7 @@ def create_app(
             },
         )
 
-    @app.get(f"{API_PREFIX}/memory")
+    @app.get(f"{API_PREFIX}/memory", response_model=list[MemoryEntry])
     def memory(
         ticker: str | None = None,
         market: str | None = None,
@@ -298,6 +305,11 @@ def create_app(
         providers = {}
         for provider, modes in MODEL_OPTIONS.items():
             env_name = PROVIDER_API_KEY_ENV.get(provider)
+            model_ids = {
+                value
+                for mode in ("quick", "deep")
+                for _label, value in modes[mode]
+            }
             providers[provider] = {
                 "quick_models": [
                     {"label": label, "value": value}
@@ -307,6 +319,13 @@ def create_app(
                     {"label": label, "value": value}
                     for label, value in modes["deep"]
                 ],
+                "reasoning_efforts": {
+                    model: [
+                        "provider_default",
+                        *model_effort_levels(provider, model),
+                    ]
+                    for model in sorted(model_ids)
+                },
                 "api_key_configured": (
                     None
                     if env_name is None

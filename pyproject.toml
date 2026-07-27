@@ -71,6 +71,7 @@ include = ["tradingagents*", "cli*"]
 cli = ["static/*"]
 "tradingagents.dataflows" = ["data/*.json"]
 "tradingagents.persistence" = ["alembic/script.py.mako"]
+"tradingagents.web" = ["static/*", "static/assets/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
