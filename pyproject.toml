@@ -35,6 +35,9 @@ dependencies = [
     "yfinance>=1.4.1",
     "jpholiday>=1.0.3",
     "akshare>=1.18.64",
+    "sqlalchemy>=2.0",
+    "alembic>=1.14",
+    "pydantic>=2.10",
 ]
 
 [project.optional-dependencies]
@@ -64,6 +67,7 @@ include = ["tradingagents*", "cli*"]
 [tool.setuptools.package-data]
 cli = ["static/*"]
 "tradingagents.dataflows" = ["data/*.json"]
+"tradingagents.persistence" = ["alembic/script.py.mako"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
