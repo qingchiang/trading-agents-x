@@ -32,6 +32,10 @@ def run_migrations_online() -> None:
         connection.exec_driver_sql("PRAGMA foreign_keys=ON")
         connection.exec_driver_sql("PRAGMA journal_mode=WAL")
         connection.exec_driver_sql(f"PRAGMA busy_timeout={busy_timeout}")
+        # SQLAlchemy 2 starts an implicit transaction for the PRAGMA calls.
+        # Finish it before handing the connection to Alembic; otherwise SQLite
+        # keeps the DDL but rolls back the alembic_version row on close.
+        connection.commit()
         context.configure(
             connection=connection,
             target_metadata=target_metadata,

@@ -362,7 +362,7 @@ def create_app(
                     session.execute(
                         select(RunRecord.status, func.count())
                         .group_by(RunRecord.status)
-                    )
+                    ).all()
                 )
                 queue["queued"] = int(counts.get("queued", 0))
                 queue["running"] = int(counts.get("running", 0))

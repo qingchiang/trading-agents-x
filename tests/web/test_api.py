@@ -4,6 +4,7 @@ import httpx2 as httpx
 import pytest
 
 from tradingagents.application.contracts import AnalysisRequest
+from tradingagents.version import __version__
 
 
 def _payload(ticker: str = "NVDA") -> dict:
@@ -120,6 +121,30 @@ async def test_openapi_contains_versioned_run_center_contract(
         "/api/v1/capabilities",
         "/api/v1/health",
     } <= set(paths)
+
+
+@pytest.mark.anyio
+async def test_health_reports_database_and_queue_status(
+    web_client: httpx.AsyncClient,
+    web_service,
+) -> None:
+    web_service.enqueue(
+        AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
+    )
+
+    response = await web_client.get("/api/v1/health")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ok",
+        "database": "ok",
+        "queue": {
+            "queued": 1,
+            "running": 0,
+            "pending_outcomes": 0,
+        },
+        "version": __version__,
+    }
 
 
 @pytest.mark.anyio
