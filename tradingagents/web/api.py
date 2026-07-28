@@ -24,12 +24,18 @@ from sqlalchemy import func, select
 from tradingagents.application.contracts import (
     AnalysisRequest,
     ResearchArtifact,
+    RunArchiveState,
     RunEvent,
+    RunPage,
     RunStatus,
     RunView,
     report_language_value,
 )
-from tradingagents.application.database import OutcomeRecord, RunRecord
+from tradingagents.application.database import (
+    DecisionRecord,
+    OutcomeRecord,
+    RunRecord,
+)
 from tradingagents.application.repository import (
     IdempotencyConflictError,
     InvalidRunTransitionError,
@@ -50,6 +56,8 @@ from .models import (
     LoginRequest,
     MemoryEntry,
     ProviderModelCatalog,
+    RunBatchRequest,
+    RunBatchResult,
     RunDetail,
 )
 
@@ -173,17 +181,37 @@ def create_app(
             idempotency_key=idempotency_key,
         )
 
-    @app.get(f"{API_PREFIX}/runs", response_model=list[RunView])
+    @app.get(f"{API_PREFIX}/runs", response_model=RunPage)
     def list_runs(
+        archive_state: RunArchiveState = RunArchiveState.ACTIVE,
         status: RunStatus | None = None,
+        q: Annotated[str | None, Query(max_length=200)] = None,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
     ):
         return repository.list_runs(
+            archive_state=archive_state,
             status=status,
+            q=q,
             limit=limit,
             offset=offset,
         )
+
+    @app.post(
+        f"{API_PREFIX}/runs/archive",
+        response_model=RunBatchResult,
+    )
+    def archive_runs(payload: RunBatchRequest):
+        runs, changed = repository.archive_runs(payload.run_ids)
+        return RunBatchResult(runs=runs, changed=changed)
+
+    @app.post(
+        f"{API_PREFIX}/runs/restore",
+        response_model=RunBatchResult,
+    )
+    def restore_runs(payload: RunBatchRequest):
+        runs, changed = repository.restore_runs(payload.run_ids)
+        return RunBatchResult(runs=runs, changed=changed)
 
     @app.get(f"{API_PREFIX}/runs/{{run_id}}", response_model=RunDetail)
     def get_run(run_id: str):
@@ -380,6 +408,7 @@ def create_app(
                 counts = dict(
                     session.execute(
                         select(RunRecord.status, func.count())
+                        .where(RunRecord.archived_at.is_(None))
                         .group_by(RunRecord.status)
                     ).all()
                 )
@@ -389,7 +418,20 @@ def create_app(
                     session.scalar(
                         select(func.count())
                         .select_from(OutcomeRecord)
-                        .where(OutcomeRecord.status == "pending")
+                        .join(
+                            DecisionRecord,
+                            OutcomeRecord.decision_id
+                            == DecisionRecord.id,
+                        )
+                        .join(
+                            RunRecord,
+                            RunRecord.id
+                            == DecisionRecord.run_id,
+                        )
+                        .where(
+                            OutcomeRecord.status == "pending",
+                            RunRecord.archived_at.is_(None),
+                        )
                     )
                     or 0
                 )

@@ -31,8 +31,10 @@ from .contracts import (
     ResearchArtifactDraft,
     ResearchDecision,
     ResearchWarning,
+    RunArchiveState,
     RunEvent,
     RunMetrics,
+    RunPage,
     RunStatus,
     RunView,
 )
@@ -55,6 +57,11 @@ from .settings import AppSettings
 _SECRET_RE = re.compile(
     r"(?i)(api[-_ ]?key|authorization|bearer|password|secret|token)(\s*[:=]\s*)(\S+)"
 )
+_TERMINAL_STATUSES = {
+    RunStatus.SUCCEEDED.value,
+    RunStatus.FAILED.value,
+    RunStatus.CANCELLED.value,
+}
 
 
 def _utc_naive() -> datetime:
@@ -198,16 +205,124 @@ class RunRepository:
     def list_runs(
         self,
         *,
+        archive_state: RunArchiveState = RunArchiveState.ACTIVE,
         status: RunStatus | None = None,
+        q: str | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> list[RunView]:
-        stmt = select(RunRecord).order_by(RunRecord.created_at.desc())
+    ) -> RunPage:
+        limit = min(max(1, limit), 200)
+        offset = max(0, offset)
+        filters = []
+        if archive_state is RunArchiveState.ACTIVE:
+            filters.append(RunRecord.archived_at.is_(None))
+        elif archive_state is RunArchiveState.ARCHIVED:
+            filters.append(RunRecord.archived_at.is_not(None))
         if status is not None:
-            stmt = stmt.where(RunRecord.status == status.value)
-        stmt = stmt.offset(max(0, offset)).limit(min(max(1, limit), 200))
+            filters.append(RunRecord.status == status.value)
+        if q and (query := q.strip().casefold()):
+            filters.append(
+                or_(
+                    func.lower(RunRecord.id).contains(
+                        query,
+                        autoescape=True,
+                    ),
+                    func.lower(
+                        func.coalesce(
+                            func.json_extract(
+                                RunRecord.request_json,
+                                "$.ticker",
+                            ),
+                            "",
+                        )
+                    ).contains(
+                        query,
+                        autoescape=True,
+                    ),
+                )
+            )
+        stmt = (
+            select(RunRecord)
+            .where(*filters)
+            .order_by(RunRecord.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        count_stmt = select(func.count()).select_from(RunRecord).where(*filters)
         with self.sessions() as session:
-            return [self._view(record) for record in session.scalars(stmt)]
+            return RunPage(
+                items=tuple(
+                    self._view(record) for record in session.scalars(stmt)
+                ),
+                total=int(session.scalar(count_stmt) or 0),
+                limit=limit,
+                offset=offset,
+            )
+
+    def archive_runs(
+        self,
+        run_ids: tuple[str, ...],
+    ) -> tuple[tuple[RunView, ...], int]:
+        """Atomically archive terminal runs after validating the full batch."""
+        now = _utc_naive()
+        with self.sessions.begin() as session:
+            records = {
+                record.id: record
+                for record in session.scalars(
+                    select(RunRecord).where(RunRecord.id.in_(run_ids))
+                )
+            }
+            missing = [run_id for run_id in run_ids if run_id not in records]
+            if missing:
+                raise RunNotFoundError(", ".join(missing))
+            invalid = [
+                record.id
+                for record in records.values()
+                if record.archived_at is None
+                and record.status not in _TERMINAL_STATUSES
+            ]
+            if invalid:
+                raise InvalidRunTransitionError(
+                    "only terminal runs can be archived: "
+                    + ", ".join(invalid)
+                )
+            changed = 0
+            for run_id in run_ids:
+                record = records[run_id]
+                if record.archived_at is None:
+                    record.archived_at = now
+                    record.updated_at = now
+                    changed += 1
+            session.flush()
+            views = tuple(self._view(records[run_id]) for run_id in run_ids)
+        return views, changed
+
+    def restore_runs(
+        self,
+        run_ids: tuple[str, ...],
+    ) -> tuple[tuple[RunView, ...], int]:
+        """Atomically restore archived runs; repeated requests are idempotent."""
+        now = _utc_naive()
+        with self.sessions.begin() as session:
+            records = {
+                record.id: record
+                for record in session.scalars(
+                    select(RunRecord).where(RunRecord.id.in_(run_ids))
+                )
+            }
+            missing = [run_id for run_id in run_ids if run_id not in records]
+            if missing:
+                raise RunNotFoundError(", ".join(missing))
+            changed = 0
+            for run_id in run_ids:
+                record = records[run_id]
+                if record.archived_at is not None:
+                    record.archived_at = None
+                    record.updated_at = now
+                    changed += 1
+            session.flush()
+            views = tuple(self._view(records[run_id]) for run_id in run_ids)
+        return views, changed
 
     def claim_next(self, worker_id: str, lease_seconds: int) -> RunView | None:
         """Atomically claim queued work or recover an expired running lease."""
@@ -222,6 +337,7 @@ class RunRepository:
                     RunRecord.current_attempt,
                 )
                 .where(
+                    RunRecord.archived_at.is_(None),
                     or_(
                         RunRecord.status == RunStatus.QUEUED.value,
                         and_(
@@ -278,6 +394,10 @@ class RunRepository:
             record = session.get(RunRecord, run_id)
             if record is None:
                 raise RunNotFoundError(run_id)
+            if record.archived_at is not None:
+                raise InvalidRunTransitionError(
+                    f"run {run_id} is archived"
+                )
             if record.status != RunStatus.QUEUED.value:
                 raise InvalidRunTransitionError(
                     f"run {run_id} is {record.status}, expected queued"
@@ -330,6 +450,10 @@ class RunRepository:
             record = session.get(RunRecord, run_id)
             if record is None:
                 raise RunNotFoundError(run_id)
+            if record.archived_at is not None:
+                raise InvalidRunTransitionError(
+                    f"run {run_id} is archived"
+                )
             if record.status == RunStatus.QUEUED.value:
                 record.status = RunStatus.CANCELLED.value
                 record.cancel_requested = True
@@ -363,6 +487,10 @@ class RunRepository:
             record = session.get(RunRecord, run_id)
             if record is None:
                 raise RunNotFoundError(run_id)
+            if record.archived_at is not None:
+                raise InvalidRunTransitionError(
+                    f"run {run_id} is archived"
+                )
             if record.status != RunStatus.FAILED.value:
                 raise InvalidRunTransitionError(
                     f"only failed runs can be retried, got {record.status}"
@@ -840,7 +968,11 @@ class RunRepository:
         stmt = (
             select(OutcomeRecord, DecisionRecord)
             .join(DecisionRecord, OutcomeRecord.decision_id == DecisionRecord.id)
-            .where(OutcomeRecord.status == "pending")
+            .join(RunRecord, RunRecord.id == DecisionRecord.run_id)
+            .where(
+                OutcomeRecord.status == "pending",
+                RunRecord.archived_at.is_(None),
+            )
             .order_by(DecisionRecord.analysis_date)
             .limit(limit)
         )
@@ -880,7 +1012,18 @@ class RunRepository:
     ) -> None:
         now = _utc_naive()
         with self.sessions.begin() as session:
-            outcome = session.get(OutcomeRecord, outcome_id)
+            outcome = session.scalar(
+                select(OutcomeRecord)
+                .join(
+                    DecisionRecord,
+                    OutcomeRecord.decision_id == DecisionRecord.id,
+                )
+                .join(RunRecord, RunRecord.id == DecisionRecord.run_id)
+                .where(
+                    OutcomeRecord.id == outcome_id,
+                    RunRecord.archived_at.is_(None),
+                )
+            )
             if outcome is None or outcome.status != "pending":
                 return
             outcome.status = "resolved"
@@ -919,7 +1062,9 @@ class RunRepository:
                 ReflectionRecord,
                 ReflectionRecord.outcome_id == OutcomeRecord.id,
             )
+            .join(RunRecord, RunRecord.id == DecisionRecord.run_id)
             .where(
+                RunRecord.archived_at.is_(None),
                 OutcomeRecord.status == "resolved",
                 OutcomeRecord.holding_intervals >= 5,
                 OutcomeRecord.raw_return.is_not(None),
@@ -1007,6 +1152,7 @@ class RunRepository:
         stmt = (
             select(DecisionRecord, OutcomeRecord, ReflectionRecord)
             .join(OutcomeRecord, OutcomeRecord.decision_id == DecisionRecord.id)
+            .join(RunRecord, RunRecord.id == DecisionRecord.run_id)
             .outerjoin(
                 ReflectionRecord,
                 ReflectionRecord.outcome_id == OutcomeRecord.id,
@@ -1015,6 +1161,7 @@ class RunRepository:
                 DecisionRecord.created_at.desc(),
                 DecisionRecord.id.desc(),
             )
+            .where(RunRecord.archived_at.is_(None))
             .limit(min(max(1, limit), 500))
         )
         if ticker and (ticker_query := ticker.strip().casefold()):
@@ -1306,5 +1453,6 @@ class RunRepository:
             created_at=_aware(record.created_at),
             started_at=_aware(record.started_at),
             finished_at=_aware(record.finished_at),
+            archived_at=_aware(record.archived_at),
             updated_at=_aware(record.updated_at),
         )

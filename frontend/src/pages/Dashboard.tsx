@@ -20,7 +20,7 @@ export default function Dashboard() {
         ]);
         if (mounted) {
           setHealth(nextHealth);
-          setRuns(nextRuns);
+          setRuns(nextRuns.items);
           setError("");
         }
       } catch (cause) {

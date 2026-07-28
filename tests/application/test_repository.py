@@ -20,11 +20,13 @@ from tradingagents.application.contracts import (
     ResearchArtifactDraft,
     ResearchDecision,
     ResearchRating,
+    RunArchiveState,
     RunStatus,
 )
 from tradingagents.application.database import RunAttemptRecord
 from tradingagents.application.repository import (
     IdempotencyConflictError,
+    InvalidRunTransitionError,
     RunRepository,
 )
 from tradingagents.application.settings import AppSettings
@@ -150,6 +152,52 @@ def test_events_are_monotonic_replayable_and_redacted(
     stored = repository.list_events(run.id)[0].payload
     assert stored["api_key"] == "[REDACTED]"
     assert "private" not in stored["message"]
+
+
+def test_archive_restore_filters_are_atomic_and_idempotent(
+    repository: RunRepository,
+    app_settings: AppSettings,
+) -> None:
+    terminal, _ = _create(repository, app_settings, "NVDA")
+    queued, _ = _create(repository, app_settings, "AAPL")
+    repository.request_cancel(terminal.id)
+
+    with pytest.raises(
+        InvalidRunTransitionError,
+        match="only terminal runs",
+    ):
+        repository.archive_runs((terminal.id, queued.id))
+
+    assert repository.get_run(terminal.id).archived_at is None
+    archived, changed = repository.archive_runs((terminal.id,))
+    repeated, changed_again = repository.archive_runs((terminal.id,))
+
+    assert changed == 1
+    assert changed_again == 0
+    assert archived[0].archived_at is not None
+    assert repeated[0].archived_at == archived[0].archived_at
+    assert repository.list_runs().items == (repository.get_run(queued.id),)
+    archived_page = repository.list_runs(
+        archive_state=RunArchiveState.ARCHIVED,
+        q="nv",
+    )
+    assert archived_page.total == 1
+    assert archived_page.items[0].id == terminal.id
+    all_page = repository.list_runs(
+        archive_state=RunArchiveState.ALL,
+        limit=1,
+        offset=1,
+    )
+    assert all_page.total == 2
+    assert len(all_page.items) == 1
+
+    restored, restored_changed = repository.restore_runs((terminal.id,))
+    _, restored_again = repository.restore_runs((terminal.id,))
+
+    assert restored_changed == 1
+    assert restored_again == 0
+    assert restored[0].archived_at is None
+    assert repository.list_runs().total == 2
 
 
 def test_artifacts_are_typed_retained_and_idempotent_across_retries(
@@ -303,6 +351,13 @@ def test_complete_persists_result_and_resolved_memory(
     repository.complete(run.id, result, evidence=evidence, benchmark="SPY")
     restored = repository.get_result(run.id)
     pending = repository.pending_outcomes()
+    repository.archive_runs((run.id,))
+    assert repository.pending_outcomes() == []
+    assert repository.memory_entries() == []
+    repository.restore_runs((run.id,))
+    assert repository.pending_outcomes()[0]["outcome_id"] == (
+        pending[0]["outcome_id"]
+    )
     repository.resolve_outcome(
         pending[0]["outcome_id"],
         observation_start=date(2026, 7, 25),
@@ -321,6 +376,11 @@ def test_complete_persists_result_and_resolved_memory(
     assert len(context.items) == 1
     assert context.items[0].ticker == "NVDA"
     assert "The thesis worked" in context.items[0].reflection
+    repository.archive_runs((run.id,))
+    assert repository.memory_context("NVDA", "stock").items == ()
+    assert repository.memory_entries() == []
+    repository.restore_runs((run.id,))
+    assert repository.memory_context("NVDA", "stock").items[0].run_id == run.id
 
 
 def test_rerun_links_new_run_and_backup_is_consistent(

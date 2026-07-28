@@ -1377,6 +1377,57 @@
         "title": "ResearchWarning",
         "type": "object"
       },
+      "RunArchiveState": {
+        "enum": [
+          "active",
+          "archived",
+          "all"
+        ],
+        "title": "RunArchiveState",
+        "type": "string"
+      },
+      "RunBatchRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "run_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Run Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "run_ids"
+        ],
+        "title": "RunBatchRequest",
+        "type": "object"
+      },
+      "RunBatchResult": {
+        "additionalProperties": false,
+        "properties": {
+          "changed": {
+            "minimum": 0.0,
+            "title": "Changed",
+            "type": "integer"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/RunView"
+            },
+            "title": "Runs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "runs",
+          "changed"
+        ],
+        "title": "RunBatchResult",
+        "type": "object"
+      },
       "RunDetail": {
         "additionalProperties": false,
         "properties": {
@@ -1497,6 +1548,42 @@
         "title": "RunMetrics",
         "type": "object"
       },
+      "RunPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RunView"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "maximum": 200.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "minimum": 0.0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "RunPage",
+        "type": "object"
+      },
       "RunProfile": {
         "enum": [
           "fast",
@@ -1520,6 +1607,18 @@
       "RunView": {
         "additionalProperties": false,
         "properties": {
+          "archived_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
           "attempt": {
             "title": "Attempt",
             "type": "integer"
@@ -1934,6 +2033,15 @@
         "parameters": [
           {
             "in": "query",
+            "name": "archive_state",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RunArchiveState",
+              "default": "active"
+            }
+          },
+          {
+            "in": "query",
             "name": "status",
             "required": false,
             "schema": {
@@ -1946,6 +2054,23 @@
                 }
               ],
               "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
             }
           },
           {
@@ -1977,11 +2102,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/RunView"
-                  },
-                  "title": "Response List Runs Api V1 Runs Get",
-                  "type": "array"
+                  "$ref": "#/components/schemas/RunPage"
                 }
               }
             },
@@ -2054,6 +2175,82 @@
           }
         },
         "summary": "Create Run"
+      }
+    },
+    "/api/v1/runs/archive": {
+      "post": {
+        "operationId": "archive_runs_api_v1_runs_archive_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunBatchResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Archive Runs"
+      }
+    },
+    "/api/v1/runs/restore": {
+      "post": {
+        "operationId": "restore_runs_api_v1_runs_restore_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunBatchResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Restore Runs"
       }
     },
     "/api/v1/runs/{run_id}": {

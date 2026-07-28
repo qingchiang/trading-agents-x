@@ -2,6 +2,8 @@ import type { components } from "./types.generated";
 
 export type AnalysisRequest = components["schemas"]["AnalysisRequest"];
 export type RunView = components["schemas"]["RunView"];
+export type RunPage = components["schemas"]["RunPage"];
+export type RunBatchResult = components["schemas"]["RunBatchResult"];
 export type RunDetail = components["schemas"]["RunDetail"];
 export type AnalysisResult = components["schemas"]["AnalysisResult"];
 export type RunEvent = components["schemas"]["RunEvent"];
@@ -63,7 +65,17 @@ export const api = {
         refresh ? "?refresh=true" : ""
       }`,
     ),
-  runs: (query = "") => request<RunView[]>(`/api/v1/runs${query}`),
+  runs: (query = "") => request<RunPage>(`/api/v1/runs${query}`),
+  archiveRuns: (runIds: string[]) =>
+    request<RunBatchResult>("/api/v1/runs/archive", {
+      method: "POST",
+      body: JSON.stringify({ run_ids: runIds }),
+    }),
+  restoreRuns: (runIds: string[]) =>
+    request<RunBatchResult>("/api/v1/runs/restore", {
+      method: "POST",
+      body: JSON.stringify({ run_ids: runIds }),
+    }),
   run: (id: string) => request<RunDetail>(`/api/v1/runs/${id}`),
   artifacts: (id: string, attempt?: number) =>
     request<ResearchArtifact[]>(

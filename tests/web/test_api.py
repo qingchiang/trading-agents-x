@@ -70,13 +70,76 @@ async def test_run_lifecycle_routes_and_filters(
     detail = await web_client.get(f"/api/v1/runs/{run_id}")
     queued = await web_client.get("/api/v1/runs?status=queued")
     cancelled = await web_client.post(f"/api/v1/runs/{run_id}/cancel")
+    archived = await web_client.post(
+        "/api/v1/runs/archive",
+        json={"run_ids": [run_id]},
+    )
+    archived_page = await web_client.get(
+        "/api/v1/runs?archive_state=archived&q=nv"
+    )
+    archived_detail = await web_client.get(f"/api/v1/runs/{run_id}")
+    archived_export = await web_client.get(
+        f"/api/v1/runs/{run_id}/export?format=json"
+    )
+    restored = await web_client.post(
+        "/api/v1/runs/restore",
+        json={"run_ids": [run_id]},
+    )
     rerun = await web_client.post(f"/api/v1/runs/{run_id}/rerun")
 
     assert detail.status_code == 200
     assert detail.json()["run"]["id"] == run_id
-    assert [run["id"] for run in queued.json()] == [run_id]
+    assert [run["id"] for run in queued.json()["items"]] == [run_id]
+    assert queued.json()["total"] == 1
     assert cancelled.json()["status"] == "cancelled"
+    assert archived.json()["changed"] == 1
+    assert archived.json()["runs"][0]["archived_at"] is not None
+    assert archived_page.json()["items"][0]["id"] == run_id
+    assert archived_detail.json()["run"]["archived_at"] is not None
+    assert archived_export.status_code == 200
+    assert restored.json()["changed"] == 1
+    assert restored.json()["runs"][0]["archived_at"] is None
     assert rerun.json()["parent_run_id"] == run_id
+
+
+@pytest.mark.anyio
+async def test_archive_batch_validation_is_atomic_and_idempotent(
+    web_client: httpx.AsyncClient,
+) -> None:
+    terminal = (
+        await web_client.post("/api/v1/runs", json=_payload("NVDA"))
+    ).json()
+    queued = (
+        await web_client.post("/api/v1/runs", json=_payload("AAPL"))
+    ).json()
+    await web_client.post(f"/api/v1/runs/{terminal['id']}/cancel")
+
+    invalid = await web_client.post(
+        "/api/v1/runs/archive",
+        json={"run_ids": [terminal["id"], queued["id"]]},
+    )
+    active = await web_client.get("/api/v1/runs?archive_state=active")
+    archived = await web_client.post(
+        "/api/v1/runs/archive",
+        json={"run_ids": [terminal["id"]]},
+    )
+    repeated = await web_client.post(
+        "/api/v1/runs/archive",
+        json={"run_ids": [terminal["id"]]},
+    )
+    duplicate_ids = await web_client.post(
+        "/api/v1/runs/archive",
+        json={"run_ids": [terminal["id"], terminal["id"]]},
+    )
+
+    assert invalid.status_code == 409
+    assert {run["id"] for run in active.json()["items"]} == {
+        terminal["id"],
+        queued["id"],
+    }
+    assert archived.json()["changed"] == 1
+    assert repeated.json()["changed"] == 0
+    assert duplicate_ids.status_code == 422
 
 
 @pytest.mark.anyio

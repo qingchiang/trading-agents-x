@@ -90,9 +90,9 @@ async def test_lan_mutations_require_same_origin(tmp_path: Path) -> None:
 
         assert rejected.status_code == 403
         assert accepted.status_code == 202
-        assert len(repository.list_runs()) == 1
+        assert len(repository.list_runs().items) == 1
         assert "local-lan-secret" not in str(
-            repository.list_runs()[0].config_snapshot
+            repository.list_runs().items[0].config_snapshot
         )
 
 

@@ -107,6 +107,12 @@ class RunStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
+class RunArchiveState(str, Enum):
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+    ALL = "all"
+
+
 class AssetType(str, Enum):
     STOCK = "stock"
     CRYPTO = "crypto"
@@ -701,7 +707,15 @@ class RunView(FrozenModel):
     created_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None
+    archived_at: datetime | None = None
     updated_at: datetime
+
+
+class RunPage(FrozenModel):
+    items: tuple[RunView, ...]
+    total: int = Field(ge=0)
+    limit: int = Field(ge=1, le=200)
+    offset: int = Field(ge=0)
 
 
 class RunExport(FrozenModel):

@@ -23,6 +23,12 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
         artifact_columns = {
             column["name"] for column in inspector.get_columns("run_artifacts")
         }
+        run_columns = {
+            column["name"] for column in inspector.get_columns("runs")
+        }
+        run_indexes = {
+            index["name"] for index in inspector.get_indexes("runs")
+        }
         artifact_uniques = {
             tuple(constraint["column_names"])
             for constraint in inspector.get_unique_constraints("run_artifacts")
@@ -52,3 +58,5 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
         "round",
         "content_hash",
     ) in artifact_uniques
+    assert "archived_at" in run_columns
+    assert "ix_runs_archive" in run_indexes

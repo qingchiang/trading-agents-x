@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from tradingagents.application.contracts import (
     AnalysisResult,
@@ -25,6 +25,25 @@ class LoginRequest(ApiModel):
 class RunDetail(ApiModel):
     run: RunView
     result: AnalysisResult | None = None
+
+
+class RunBatchRequest(ApiModel):
+    run_ids: tuple[str, ...] = Field(min_length=1, max_length=100)
+
+    @field_validator("run_ids")
+    @classmethod
+    def validate_run_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        normalized = tuple(run_id.strip() for run_id in value)
+        if any(not run_id for run_id in normalized):
+            raise ValueError("run IDs must not be empty")
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("run IDs must be unique")
+        return normalized
+
+
+class RunBatchResult(ApiModel):
+    runs: tuple[RunView, ...]
+    changed: int = Field(ge=0)
 
 
 class ExportQuery(ApiModel):

@@ -205,6 +205,14 @@ export interface components {
       message: string;
       source?: string | null;
     };
+    RunArchiveState: "active" | "archived" | "all";
+    RunBatchRequest: {
+      run_ids: string[];
+    };
+    RunBatchResult: {
+      changed: number;
+      runs: components["schemas"]["RunView"][];
+    };
     RunDetail: {
       result?: components["schemas"]["AnalysisResult"] | null;
       run: components["schemas"]["RunView"];
@@ -226,9 +234,16 @@ export interface components {
       tool_calls?: number;
       wall_time_seconds?: number;
     };
+    RunPage: {
+      items: components["schemas"]["RunView"][];
+      limit: number;
+      offset: number;
+      total: number;
+    };
     RunProfile: "fast" | "standard" | "deep";
     RunStatus: "queued" | "running" | "succeeded" | "failed" | "cancelled";
     RunView: {
+      archived_at?: string | null;
       attempt: number;
       cancel_requested: boolean;
       config_snapshot: Record<string, unknown>;

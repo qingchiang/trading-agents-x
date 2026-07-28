@@ -38,6 +38,7 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("started_at", sa.DateTime(), nullable=True),
         sa.Column("finished_at", sa.DateTime(), nullable=True),
+        sa.Column("archived_at", sa.DateTime(), nullable=True),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(
             ["parent_run_id"], ["runs.id"], ondelete="SET NULL"
@@ -50,6 +51,12 @@ def upgrade() -> None:
         "ix_runs_claim",
         "runs",
         ["status", "lease_expires_at", "created_at"],
+        unique=False,
+    )
+    op.create_index(
+        "ix_runs_archive",
+        "runs",
+        ["archived_at", "created_at"],
         unique=False,
     )
     op.create_table(
@@ -253,5 +260,6 @@ def downgrade() -> None:
     op.drop_index("ix_run_attempts_run_id", table_name="run_attempts")
     op.drop_table("run_attempts")
     op.drop_index("ix_runs_claim", table_name="runs")
+    op.drop_index("ix_runs_archive", table_name="runs")
     op.drop_index("ix_runs_status", table_name="runs")
     op.drop_table("runs")
