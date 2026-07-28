@@ -2,6 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   api,
+  type AnalystReport,
+  type EvidenceBundle,
+  type EvidenceItem,
+  type PerspectiveReview,
+  type ResearchArtifact,
+  type ResearchDecision,
   type RunDetail as RunDetailType,
   type RunEvent,
 } from "../api/client";
@@ -16,26 +22,44 @@ const eventNames = [
   "run.resumed",
   "node.started",
   "node.completed",
+  "artifact.created",
   "run.succeeded",
   "run.failed",
   "run.cancelled",
   "run.cancel_requested",
   "run.retry_queued",
 ];
+const viewNames = [
+  "timeline",
+  "deliberation",
+  "evidence",
+  "reports",
+  "decision",
+] as const;
+
+type ViewName = (typeof viewNames)[number];
+type ArtifactContent = ResearchArtifact["content"];
 
 export default function RunDetail() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { runId = "" } = useParams();
   const [detail, setDetail] = useState<RunDetailType | null>(null);
+  const [artifacts, setArtifacts] = useState<ResearchArtifact[]>([]);
   const [events, setEvents] = useState<RunEvent[]>([]);
+  const [activeView, setActiveView] = useState<ViewName>("timeline");
   const [activeReport, setActiveReport] = useState("");
+  const [focusedEvidence, setFocusedEvidence] = useState("");
   const [error, setError] = useState("");
 
   const refresh = useCallback(async () => {
     try {
-      const next = await api.run(runId);
-      setDetail(next);
+      const [nextDetail, nextArtifacts] = await Promise.all([
+        api.run(runId),
+        api.artifacts(runId),
+      ]);
+      setDetail(nextDetail);
+      setArtifacts(nextArtifacts);
       setError("");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t("error"));
@@ -60,6 +84,7 @@ export default function RunDetail() {
       });
       if (
         event.event_type === "node.completed" ||
+        event.event_type === "artifact.created" ||
         event.event_type.startsWith("run.")
       ) {
         void refresh();
@@ -72,21 +97,50 @@ export default function RunDetail() {
         source.close();
       }
     };
-    eventNames.forEach((name) => source.addEventListener(name, receive as EventListener));
+    eventNames.forEach((name) =>
+      source.addEventListener(name, receive as EventListener),
+    );
     source.onerror = () => {
       void refresh();
     };
     return () => source.close();
   }, [runId, refresh]);
 
-  const reports = useMemo(
-    () => detail?.result?.reports ?? {},
-    [detail?.result?.reports],
-  );
-  const reportNames = Object.keys(reports);
+  const reports = useMemo<Record<string, AnalystReport | string>>(() => {
+    const completed = detail?.result?.reports ?? {};
+    if (Object.keys(completed).length > 0) return completed;
+    return Object.fromEntries(
+      artifacts
+        .filter(
+          (artifact) =>
+            artifact.stage === "analyst" &&
+            isAnalystReport(artifact.content),
+        )
+        .map((artifact) => [
+          artifact.role,
+          artifact.content as AnalystReport,
+        ]),
+    );
+  }, [artifacts, detail?.result?.reports]);
+  const reportNames = useMemo(() => Object.keys(reports), [reports]);
+
   useEffect(() => {
-    if (!activeReport && reportNames.length) setActiveReport(reportNames[0]);
+    if (reportNames.length && !reportNames.includes(activeReport)) {
+      setActiveReport(reportNames[0]);
+    }
   }, [activeReport, reportNames]);
+
+  useEffect(() => {
+    if (activeView !== "evidence" || !focusedEvidence) return;
+    const target = document.getElementById(`evidence-${focusedEvidence}`);
+    target?.focus();
+    target?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+  }, [activeView, focusedEvidence]);
+
+  const openEvidence = useCallback((ref: string) => {
+    setFocusedEvidence(ref);
+    setActiveView("evidence");
+  }, []);
 
   const act = async (action: "cancel" | "retry" | "rerun") => {
     try {
@@ -102,7 +156,6 @@ export default function RunDetail() {
     return <div className="loading">{error || t("loading")}</div>;
   }
   const { run, result } = detail;
-  const decision = result?.decision;
 
   return (
     <section>
@@ -136,104 +189,74 @@ export default function RunDetail() {
               {t("rerun")}
             </button>
           )}
-          <a className="button" href={`/api/v1/runs/${runId}/export?format=markdown`}>
+          <a
+            className="button"
+            href={`/api/v1/runs/${runId}/export?format=markdown`}
+          >
             {t("exportMarkdown")}
           </a>
-          <a className="button" href={`/api/v1/runs/${runId}/export?format=json`}>
+          <a
+            className="button"
+            href={`/api/v1/runs/${runId}/export?format=json`}
+          >
             {t("exportJson")}
           </a>
         </div>
       </header>
       {error && <div className="alert">{error}</div>}
       {run.error_message && <div className="alert">{run.error_message}</div>}
-      <div className="detail-grid">
-        <article className="panel timeline-panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">{t("liveEvents")}</p>
-              <h2>{t("timeline")}</h2>
-            </div>
-            <span className="event-count">{events.length}</span>
-          </div>
-          <div className="timeline">
-            {events.map((event) => (
-              <div className="timeline-item" key={event.sequence}>
-                <span className="timeline-dot" />
-                <div>
-                  <strong>{event.node || event.event_type}</strong>
-                  <small>
-                    #{event.sequence} · {formatTime(event.created_at)}
-                  </small>
-                  {Object.keys(event.payload ?? {}).length > 0 && (
-                    <code>{JSON.stringify(event.payload ?? {})}</code>
-                  )}
-                </div>
-              </div>
-            ))}
-            {events.length === 0 && <div className="empty-state">{t("loading")}</div>}
-          </div>
-        </article>
-        <article className="panel report-panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">{t("researchArtifacts")}</p>
-              <h2>{t("reports")}</h2>
-            </div>
-          </div>
-          {reportNames.length === 0 ? (
-            <div className="empty-state">{t("noReports")}</div>
-          ) : (
-            <>
-              <div className="tabs">
-                {reportNames.map((name) => (
-                  <button
-                    className={activeReport === name ? "active" : ""}
-                    onClick={() => setActiveReport(name)}
-                    key={name}
-                  >
-                    {name}
-                  </button>
-                ))}
-              </div>
-              <Markdown>{reportNarrative(reports[activeReport])}</Markdown>
-              <ReportMetadata
-                report={reports[activeReport]}
-                warningsLabel={t("warnings")}
-                evidenceLabel={t("evidenceRefs")}
-              />
-            </>
-          )}
-        </article>
-      </div>
-      {decision && (
-        <article className="panel decision-panel">
-          <div className="decision-rating">
-            <span>{t("researchRating")}</span>
-            <strong>{decision.rating}</strong>
-            <small>
-              {t("confidence")} {Math.round(decision.confidence * 100)}%
-            </small>
-          </div>
-          <div className="decision-body">
-            <h2>{t("decision")}</h2>
-            <h3>{t("thesis")}</h3>
-            <div className="decision-thesis">
-              <Markdown>{decision.thesis}</Markdown>
-            </div>
-            <div className="decision-columns">
-              <List title={t("catalysts")} items={decision.catalysts ?? []} />
-              <List title={t("risks")} items={decision.risks ?? []} />
-              <List
-                title={t("invalidation")}
-                items={decision.invalidation_conditions ?? []}
-              />
-            </div>
-            <p className="horizon">
-              <strong>{t("horizon")}:</strong> {decision.time_horizon}
-            </p>
-          </div>
-        </article>
+
+      <nav
+        className="panel view-tabs"
+        aria-label={t("researchViews")}
+        role="tablist"
+      >
+        {viewNames.map((view) => (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeView === view}
+            aria-controls={`run-view-${view}`}
+            className={activeView === view ? "active" : ""}
+            onClick={() => setActiveView(view)}
+            key={view}
+          >
+            {t(view)}
+          </button>
+        ))}
+      </nav>
+
+      {activeView === "timeline" && (
+        <TimelinePanel events={events} />
       )}
+      {activeView === "deliberation" && (
+        <DeliberationPanel
+          artifacts={artifacts}
+          onEvidence={openEvidence}
+        />
+      )}
+      {activeView === "evidence" && (
+        <EvidencePanel
+          evidence={result?.evidence ?? null}
+          focusedRef={focusedEvidence}
+        />
+      )}
+      {activeView === "reports" && (
+        <ReportsPanel
+          reports={reports}
+          reportNames={reportNames}
+          activeReport={activeReport}
+          onReport={setActiveReport}
+          onEvidence={openEvidence}
+        />
+      )}
+      {activeView === "decision" && (
+        <DecisionPanel
+          decision={result?.decision ?? null}
+          onEvidence={openEvidence}
+        />
+      )}
+
       {result && (
         <article className="panel metrics-strip">
           <Metric label={t("llmCalls")} value={result.metrics?.llm_calls ?? 0} />
@@ -256,6 +279,393 @@ export default function RunDetail() {
   );
 }
 
+function TimelinePanel({ events }: { events: RunEvent[] }) {
+  const { t } = useTranslation();
+  return (
+    <article
+      className="panel audit-panel timeline-panel"
+      id="run-view-timeline"
+      role="tabpanel"
+    >
+      <div className="panel-header">
+        <div>
+          <p className="eyebrow">{t("liveEvents")}</p>
+          <h2>{t("timeline")}</h2>
+        </div>
+        <span className="event-count">{events.length}</span>
+      </div>
+      <div className="timeline">
+        {events.map((event) => (
+          <div className="timeline-item" key={event.sequence}>
+            <span className="timeline-dot" />
+            <div>
+              <strong>{event.node || event.event_type}</strong>
+              <small>
+                #{event.sequence} · {formatTime(event.created_at)}
+              </small>
+              {Object.keys(event.payload ?? {}).length > 0 && (
+                <code>{JSON.stringify(event.payload ?? {})}</code>
+              )}
+            </div>
+          </div>
+        ))}
+        {events.length === 0 && (
+          <div className="empty-state">{t("waitingForEvents")}</div>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function DeliberationPanel({
+  artifacts,
+  onEvidence,
+}: {
+  artifacts: ResearchArtifact[];
+  onEvidence: (ref: string) => void;
+}) {
+  const { t } = useTranslation();
+  const deliberation = artifacts.filter(
+    (artifact) =>
+      artifact.stage !== "analyst" && artifact.stage !== "decision",
+  );
+  return (
+    <article
+      className="panel audit-panel"
+      id="run-view-deliberation"
+      role="tabpanel"
+    >
+      <div className="panel-header">
+        <div>
+          <p className="eyebrow">{t("researchArtifacts")}</p>
+          <h2>{t("deliberation")}</h2>
+        </div>
+        <span className="event-count">{deliberation.length}</span>
+      </div>
+      {deliberation.length === 0 ? (
+        <div className="empty-state">
+          {artifacts.length === 0
+            ? t("noArtifactsRecorded")
+            : t("noDeliberation")}
+        </div>
+      ) : (
+        <div className="artifact-list">
+          {deliberation.map((artifact) => (
+            <ArtifactCard
+              artifact={artifact}
+              onEvidence={onEvidence}
+              key={artifact.id}
+            />
+          ))}
+        </div>
+      )}
+    </article>
+  );
+}
+
+function ArtifactCard({
+  artifact,
+  onEvidence,
+}: {
+  artifact: ResearchArtifact;
+  onEvidence: (ref: string) => void;
+}) {
+  const { t } = useTranslation();
+  const content = artifact.content;
+  const perspective = isPerspectiveReview(content) ? content : null;
+  const decision = isResearchDecision(content) ? content : null;
+  const refs = content.evidence_refs ?? [];
+  return (
+    <section className="artifact-card">
+      <header className="artifact-header">
+        <div>
+          <span className="artifact-stage">{artifact.stage}</span>
+          <h3>{artifact.role}</h3>
+        </div>
+        <small>
+          {t("round")} {artifact.round} · {t("attempt")} {artifact.attempt}
+        </small>
+      </header>
+      <div className="artifact-body">
+        <Markdown>
+          {perspective?.thesis ?? decision?.thesis ?? ""}
+        </Markdown>
+        {decision && (
+          <p className="artifact-rating">
+            <strong>{decision.rating}</strong> · {t("confidence")}{" "}
+            {Math.round(decision.confidence * 100)}%
+          </p>
+        )}
+        {perspective && (
+          <>
+            <List
+              title={t("claimRebuttals")}
+              items={perspective.claim_rebuttals ?? []}
+            />
+            <List title={t("risks")} items={perspective.risks ?? []} />
+          </>
+        )}
+        {decision && (
+          <div className="decision-columns compact">
+            <List title={t("catalysts")} items={decision.catalysts ?? []} />
+            <List title={t("risks")} items={decision.risks ?? []} />
+            <List
+              title={t("invalidation")}
+              items={decision.invalidation_conditions ?? []}
+            />
+          </div>
+        )}
+        <EvidenceRefs refs={refs} onEvidence={onEvidence} />
+        {perspective && (perspective.new_evidence_refs ?? []).length > 0 && (
+          <div className="artifact-new-evidence">
+            <strong>{t("newEvidenceRefs")}</strong>
+            <EvidenceRefs
+              refs={perspective.new_evidence_refs ?? []}
+              onEvidence={onEvidence}
+              hideLabel
+            />
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function EvidencePanel({
+  evidence,
+  focusedRef,
+}: {
+  evidence: EvidenceBundle | null;
+  focusedRef: string;
+}) {
+  const { t } = useTranslation();
+  return (
+    <article
+      className="panel audit-panel"
+      id="run-view-evidence"
+      role="tabpanel"
+    >
+      <div className="panel-header">
+        <div>
+          <p className="eyebrow">{t("evidenceBundle")}</p>
+          <h2>{t("evidence")}</h2>
+        </div>
+        <span className="event-count">{evidence?.items.length ?? 0}</span>
+      </div>
+      {!evidence ? (
+        <div className="empty-state">{t("noEvidenceRecorded")}</div>
+      ) : (
+        <>
+          <dl className="bundle-summary">
+            <div>
+              <dt>{t("evidenceDigest")}</dt>
+              <dd>{evidence.digest ?? "—"}</dd>
+            </div>
+            <div>
+              <dt>{t("analysisDate")}</dt>
+              <dd>{evidence.analysis_date}</dd>
+            </div>
+            <div>
+              <dt>{t("version")}</dt>
+              <dd>{evidence.version ?? "1"}</dd>
+            </div>
+          </dl>
+          <div className="evidence-list">
+            {evidence.items.map((item) => (
+              <EvidenceCard
+                item={item}
+                focused={item.ref === focusedRef}
+                key={item.ref}
+              />
+            ))}
+          </div>
+        </>
+      )}
+    </article>
+  );
+}
+
+function EvidenceCard({
+  item,
+  focused,
+}: {
+  item: EvidenceItem;
+  focused: boolean;
+}) {
+  const { t } = useTranslation();
+  const hasValue = item.value !== null && item.value !== undefined;
+  const provenance = item.provenance ?? {};
+  return (
+    <section
+      className={`evidence-card ${focused ? "focused" : ""}`}
+      id={`evidence-${item.ref}`}
+      data-evidence-ref={item.ref}
+      tabIndex={-1}
+    >
+      <header>
+        <div>
+          <code>{item.ref}</code>
+          <h3>{item.evidence_type}</h3>
+        </div>
+        <span className={`quality quality-${item.quality}`}>
+          {item.quality}
+        </span>
+      </header>
+      <dl className="evidence-metadata">
+        <div>
+          <dt>{t("source")}</dt>
+          <dd>{item.source}</dd>
+        </div>
+        <div>
+          <dt>{t("requestedDate")}</dt>
+          <dd>{item.requested_date}</dd>
+        </div>
+        <div>
+          <dt>{t("effectiveDate")}</dt>
+          <dd>{item.effective_date ?? "—"}</dd>
+        </div>
+        <div>
+          <dt>{t("availableAt")}</dt>
+          <dd>{item.available_at ?? "—"}</dd>
+        </div>
+        <div>
+          <dt>{t("fallback")}</dt>
+          <dd>{item.fallback ? t("yes") : t("no")}</dd>
+        </div>
+        {hasValue && (
+          <div>
+            <dt>{t("value")}</dt>
+            <dd>
+              {String(item.value)} {item.unit ?? ""}
+            </dd>
+          </div>
+        )}
+      </dl>
+      {item.content && (
+        <div className="evidence-content">
+          <Markdown>{item.content}</Markdown>
+        </div>
+      )}
+      {Object.keys(provenance).length > 0 && (
+        <details className="provenance-details">
+          <summary>{t("provenanceDetails")}</summary>
+          <pre>{JSON.stringify(provenance, null, 2)}</pre>
+        </details>
+      )}
+    </section>
+  );
+}
+
+function ReportsPanel({
+  reports,
+  reportNames,
+  activeReport,
+  onReport,
+  onEvidence,
+}: {
+  reports: Record<string, AnalystReport | string>;
+  reportNames: string[];
+  activeReport: string;
+  onReport: (report: string) => void;
+  onEvidence: (ref: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <article
+      className="panel audit-panel report-panel"
+      id="run-view-reports"
+      role="tabpanel"
+    >
+      <div className="panel-header">
+        <div>
+          <p className="eyebrow">{t("researchArtifacts")}</p>
+          <h2>{t("reports")}</h2>
+        </div>
+      </div>
+      {reportNames.length === 0 ? (
+        <div className="empty-state">{t("noReports")}</div>
+      ) : (
+        <>
+          <div className="tabs">
+            {reportNames.map((name) => (
+              <button
+                className={activeReport === name ? "active" : ""}
+                onClick={() => onReport(name)}
+                key={name}
+              >
+                {name}
+              </button>
+            ))}
+          </div>
+          <Markdown>{reportNarrative(reports[activeReport])}</Markdown>
+          <ReportMetadata
+            report={reports[activeReport]}
+            onEvidence={onEvidence}
+          />
+        </>
+      )}
+    </article>
+  );
+}
+
+function DecisionPanel({
+  decision,
+  onEvidence,
+}: {
+  decision: ResearchDecision | null;
+  onEvidence: (ref: string) => void;
+}) {
+  const { t } = useTranslation();
+  if (!decision) {
+    return (
+      <article
+        className="panel audit-panel"
+        id="run-view-decision"
+        role="tabpanel"
+      >
+        <div className="empty-state">{t("noDecision")}</div>
+      </article>
+    );
+  }
+  return (
+    <article
+      className="panel audit-panel decision-panel"
+      id="run-view-decision"
+      role="tabpanel"
+    >
+      <div className="decision-rating">
+        <span>{t("researchRating")}</span>
+        <strong>{decision.rating}</strong>
+        <small>
+          {t("confidence")} {Math.round(decision.confidence * 100)}%
+        </small>
+      </div>
+      <div className="decision-body">
+        <h2>{t("decision")}</h2>
+        <h3>{t("thesis")}</h3>
+        <div className="decision-thesis">
+          <Markdown>{decision.thesis}</Markdown>
+        </div>
+        <EvidenceRefs
+          refs={decision.evidence_refs ?? []}
+          onEvidence={onEvidence}
+        />
+        <div className="decision-columns">
+          <List title={t("catalysts")} items={decision.catalysts ?? []} />
+          <List title={t("risks")} items={decision.risks ?? []} />
+          <List
+            title={t("invalidation")}
+            items={decision.invalidation_conditions ?? []}
+          />
+        </div>
+        <p className="horizon">
+          <strong>{t("horizon")}:</strong> {decision.time_horizon}
+        </p>
+      </div>
+    </article>
+  );
+}
+
 function reportNarrative(value: unknown): string {
   if (typeof value === "string") return value;
   if (value && typeof value === "object" && "narrative" in value) {
@@ -266,13 +676,12 @@ function reportNarrative(value: unknown): string {
 
 function ReportMetadata({
   report,
-  warningsLabel,
-  evidenceLabel,
+  onEvidence,
 }: {
   report: unknown;
-  warningsLabel: string;
-  evidenceLabel: string;
+  onEvidence: (ref: string) => void;
 }) {
+  const { t } = useTranslation();
   if (!report || typeof report !== "object") return null;
   const typed = report as {
     warnings?: Array<
@@ -293,7 +702,7 @@ function ReportMetadata({
     <div className="report-metadata">
       {warnings.length > 0 && (
         <div>
-          <strong>{warningsLabel}</strong>
+          <strong>{t("warnings")}</strong>
           <ul>
             {warnings.map((warning) => {
               const message =
@@ -312,26 +721,51 @@ function ReportMetadata({
           </ul>
         </div>
       )}
-      {refs.length > 0 && (
-        <div>
-          <strong>{evidenceLabel}</strong>
-          <div className="evidence-chips">
-            {refs.map((ref) => (
-              <code key={ref}>{ref}</code>
-            ))}
-          </div>
-        </div>
-      )}
+      <EvidenceRefs refs={refs} onEvidence={onEvidence} />
+    </div>
+  );
+}
+
+function EvidenceRefs({
+  refs,
+  onEvidence,
+  hideLabel = false,
+}: {
+  refs: string[];
+  onEvidence: (ref: string) => void;
+  hideLabel?: boolean;
+}) {
+  const { t } = useTranslation();
+  if (!refs.length) return null;
+  return (
+    <div className="evidence-ref-group">
+      {!hideLabel && <strong>{t("evidenceRefs")}</strong>}
+      <div className="evidence-chips">
+        {refs.map((ref) => (
+          <button
+            type="button"
+            onClick={() => onEvidence(ref)}
+            aria-label={`${t("openEvidence")} ${ref}`}
+            key={ref}
+          >
+            <code>{ref}</code>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
 
 function List({ title, items }: { title: string; items: string[] }) {
   return (
-    <div>
+    <div className="artifact-list-section">
       <h3>{title}</h3>
       {items.length ? (
-        <ul>{items.map((item) => <li key={item}>{item}</li>)}</ul>
+        <ul>
+          {items.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
       ) : (
         <span className="muted">—</span>
       )}
@@ -339,7 +773,7 @@ function List({ title, items }: { title: string; items: string[] }) {
   );
 }
 
-function Metric({ label, value }: { label: string; value: string | number }) {
+function Metric({ label, value }: { label: string; value: number | string }) {
   return (
     <div>
       <span>{label}</span>
@@ -348,7 +782,23 @@ function Metric({ label, value }: { label: string; value: string | number }) {
   );
 }
 
-function formatTime(value: string) {
+function isAnalystReport(content: ArtifactContent): content is AnalystReport {
+  return "analyst" in content && "narrative" in content;
+}
+
+function isPerspectiveReview(
+  content: ArtifactContent,
+): content is PerspectiveReview {
+  return "role" in content;
+}
+
+function isResearchDecision(
+  content: ArtifactContent,
+): content is ResearchDecision {
+  return "rating" in content && "time_horizon" in content;
+}
+
+function formatTime(value: string): string {
   return new Intl.DateTimeFormat(undefined, {
     hour: "2-digit",
     minute: "2-digit",

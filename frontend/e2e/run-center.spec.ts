@@ -74,6 +74,29 @@ function result(id: string) {
       invalidation_conditions: ["New filing changes the thesis"],
       time_horizon: "6-12 months",
     },
+    evidence: {
+      version: "1",
+      instrument: "NVDA",
+      analysis_date: "2026-07-24",
+      sealed_at: timestamp,
+      digest: "fixture-digest",
+      items: [
+        {
+          ref: "ev_0123456789ab",
+          source: "fixture-feed",
+          evidence_type: "Price snapshot",
+          requested_date: "2026-07-24",
+          effective_date: "2026-07-24",
+          available_at: timestamp,
+          content: "The close was **100 USD**.",
+          value: 100,
+          unit: "USD",
+          quality: "high",
+          fallback: false,
+          provenance: { vendor: "fixture-feed" },
+        },
+      ],
+    },
     metrics: {
       llm_calls: 4,
       tool_calls: 3,
@@ -191,6 +214,37 @@ test("runs the local research workflow across UI locales", async ({ page }) => {
         ],
       });
     }
+    const artifactMatch = path.match(
+      /^\/api\/v1\/runs\/([^/]+)\/artifacts$/,
+    );
+    if (artifactMatch) {
+      const id = artifactMatch[1];
+      return route.fulfill({
+        json:
+          id === "run-report"
+            ? [
+                {
+                  id: "artifact-bull",
+                  run_id: id,
+                  attempt: 1,
+                  stage: "perspective",
+                  role: "bull",
+                  round: 0,
+                  schema_version: "1",
+                  created_at: timestamp,
+                  content: {
+                    role: "bull",
+                    thesis: "Demand remains **constructive**.",
+                    claim_rebuttals: ["Valuation risk is reflected."],
+                    evidence_refs: ["ev_0123456789ab"],
+                    new_evidence_refs: [],
+                    risks: ["Demand could slow."],
+                  },
+                },
+              ]
+            : [],
+      });
+    }
     const eventMatch = path.match(/^\/api\/v1\/runs\/([^/]+)\/events$/);
     if (eventMatch) {
       const id = eventMatch[1];
@@ -258,10 +312,22 @@ test("runs the local research workflow across UI locales", async ({ page }) => {
   await expect(page.getByText("Queued")).toBeVisible();
 
   await page.goto("/runs/run-report");
+  await page.getByRole("tab", { name: "Deliberation" }).click();
+  await expect(page.getByText("constructive")).toBeVisible();
+  await page
+    .getByRole("button", {
+      name: "Open evidence ev_0123456789ab",
+    })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Price snapshot" }),
+  ).toBeVisible();
+  await page.getByRole("tab", { name: "Reports" }).click();
   await expect(page.getByRole("heading", { name: "Market report" })).toBeVisible();
   await page.getByRole("button", { name: "news" }).click();
   await expect(page.getByRole("heading", { name: "News report" })).toBeVisible();
   await page.reload();
+  await page.getByRole("tab", { name: "Agent timeline" }).click();
   await expect(page.getByText(/#2/)).toBeVisible();
 
   await page.getByRole("link", { name: "Memory" }).click();

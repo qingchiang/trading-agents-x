@@ -1,8 +1,9 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import {
   api,
+  type ResearchArtifact,
   type RunDetail as RunDetailType,
   type RunEvent,
 } from "../api/client";
@@ -13,6 +14,7 @@ import RunDetail from "./RunDetail";
 vi.mock("../api/client", () => ({
   api: {
     run: vi.fn(),
+    artifacts: vi.fn(),
     action: vi.fn(),
   },
 }));
@@ -107,6 +109,29 @@ const detail = {
       invalidation_conditions: ["New filing changes the thesis"],
       time_horizon: "6-12 months",
     },
+    evidence: {
+      version: "1",
+      instrument: "NVDA",
+      analysis_date: "2026-07-24",
+      sealed_at: "2026-07-24T00:00:30Z",
+      digest: "fixture-digest",
+      items: [
+        {
+          ref: "ev_0123456789ab",
+          source: "fixture",
+          evidence_type: "Price snapshot",
+          requested_date: "2026-07-24",
+          effective_date: "2026-07-24",
+          available_at: "2026-07-24T00:00:00Z",
+          content: "**Close:** 100 USD",
+          value: 100,
+          unit: "USD",
+          quality: "high",
+          fallback: false,
+          provenance: { vendor: "fixture-feed" },
+        },
+      ],
+    },
     metrics: {
       llm_calls: 4,
       tool_calls: 3,
@@ -119,14 +144,56 @@ const detail = {
   },
 } as unknown as RunDetailType;
 
+const artifacts = [
+  {
+    id: "artifact-bull",
+    run_id: "run-1",
+    attempt: 1,
+    stage: "perspective",
+    role: "bull",
+    round: 0,
+    schema_version: "1",
+    created_at: "2026-07-24T00:00:40Z",
+    content: {
+      role: "bull",
+      thesis: "**Demand** remains constructive.",
+      claim_rebuttals: ["Valuation risk is already reflected."],
+      evidence_refs: ["ev_0123456789ab"],
+      new_evidence_refs: [],
+      risks: ["Demand could slow."],
+    },
+  },
+  {
+    id: "artifact-judge",
+    run_id: "run-1",
+    attempt: 1,
+    stage: "judge",
+    role: "research_judge",
+    round: 0,
+    schema_version: "1",
+    created_at: "2026-07-24T00:00:50Z",
+    content: {
+      rating: "Hold",
+      confidence: 0.62,
+      thesis: "The judge draft remains balanced.",
+      evidence_refs: ["ev_0123456789ab"],
+      catalysts: [],
+      risks: ["Demand slows"],
+      invalidation_conditions: ["New evidence supersedes the snapshot"],
+      time_horizon: "6-12 months",
+    },
+  },
+] as unknown as ResearchArtifact[];
+
 beforeEach(async () => {
   vi.resetAllMocks();
   await i18n.changeLanguage("en");
   vi.mocked(api.run).mockResolvedValue(detail);
+  vi.mocked(api.artifacts).mockResolvedValue(artifacts);
   vi.stubGlobal("EventSource", FakeEventSource);
 });
 
-test("renders typed reports, provenance warnings, metrics, and replayed events", async () => {
+test("restores deliberation and resolves evidence references across run views", async () => {
   render(
     <Router initialPath="/runs/run-1">
       <RunDetail />
@@ -134,11 +201,54 @@ test("renders typed reports, provenance warnings, metrics, and replayed events",
   );
 
   expect(await screen.findByRole("heading", { name: "NVDA" })).toBeVisible();
+  expect(screen.getByRole("tab", { name: "Agent timeline" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  expect(screen.getByText("1,200")).toBeVisible();
+
+  fireEvent.click(screen.getByRole("tab", { name: "Deliberation" }));
+  expect(await screen.findByText("Demand")).toBeVisible();
+  expect(screen.getByText("research_judge")).toBeVisible();
+
+  fireEvent.click(
+    screen.getAllByRole("button", {
+      name: "Open evidence ev_0123456789ab",
+    })[0],
+  );
+  expect(
+    screen.getByRole("tab", { name: "Evidence" }),
+  ).toHaveAttribute("aria-selected", "true");
+  expect(
+    await screen.findByRole("heading", { name: "Price snapshot" }),
+  ).toBeVisible();
+  fireEvent.click(screen.getByText("Provenance details"));
+  expect(screen.getByText("fixture-feed", { exact: false })).toBeVisible();
+
+  fireEvent.click(screen.getByRole("tab", { name: "Reports" }));
   expect(
     await screen.findByText("Historical source was partial."),
   ).toBeVisible();
   expect(await screen.findByText("ev_0123456789ab")).toBeVisible();
-  expect(screen.getByText("1,200")).toBeVisible();
+
+  fireEvent.click(screen.getByRole("tab", { name: "Decision" }));
+  expect(await screen.findByText("Evidence is balanced.")).toBeVisible();
+
+  const artifactEvent = {
+    run_id: "run-1",
+    sequence: 6,
+    attempt: 1,
+    event_type: "artifact.created",
+    node: "judge.research",
+    payload: {
+      artifact_id: "artifact-judge",
+      stage: "judge",
+      role: "research_judge",
+    },
+    created_at: "2026-07-24T00:00:50Z",
+  } as RunEvent;
+  act(() => FakeEventSource.instance.emit("artifact.created", artifactEvent));
+  await vi.waitFor(() => expect(api.artifacts).toHaveBeenCalledTimes(2));
 
   const event = {
     run_id: "run-1",
@@ -151,6 +261,26 @@ test("renders typed reports, provenance warnings, metrics, and replayed events",
   } as RunEvent;
   act(() => FakeEventSource.instance.emit("run.succeeded", event));
 
+  fireEvent.click(screen.getByRole("tab", { name: "Agent timeline" }));
   expect(await screen.findByText(/#7/)).toBeVisible();
   expect(FakeEventSource.instance.closed).toBe(true);
+  await vi.waitFor(() => expect(api.artifacts).toHaveBeenCalledTimes(3));
+});
+
+test("labels historical runs that have no recorded artifacts", async () => {
+  vi.mocked(api.artifacts).mockResolvedValue([]);
+  render(
+    <Router initialPath="/runs/run-1">
+      <RunDetail />
+    </Router>,
+  );
+
+  expect(await screen.findByRole("heading", { name: "NVDA" })).toBeVisible();
+  fireEvent.click(screen.getByRole("tab", { name: "Deliberation" }));
+
+  expect(
+    await screen.findByText(
+      "This historical run did not record typed research artifacts.",
+    ),
+  ).toBeVisible();
 });

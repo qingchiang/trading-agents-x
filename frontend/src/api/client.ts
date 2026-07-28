@@ -5,6 +5,12 @@ export type RunView = components["schemas"]["RunView"];
 export type RunDetail = components["schemas"]["RunDetail"];
 export type AnalysisResult = components["schemas"]["AnalysisResult"];
 export type RunEvent = components["schemas"]["RunEvent"];
+export type ResearchArtifact = components["schemas"]["ResearchArtifact"];
+export type AnalystReport = components["schemas"]["AnalystReport"];
+export type PerspectiveReview = components["schemas"]["PerspectiveReview"];
+export type ResearchDecision = components["schemas"]["ResearchDecision"];
+export type EvidenceBundle = components["schemas"]["EvidenceBundle"];
+export type EvidenceItem = components["schemas"]["EvidenceItem"];
 export type Capabilities = components["schemas"]["CapabilitiesResponse"];
 export type ProviderModelCatalog =
   components["schemas"]["ProviderModelCatalog"];
@@ -58,6 +64,12 @@ export const api = {
     ),
   runs: (query = "") => request<RunView[]>(`/api/v1/runs${query}`),
   run: (id: string) => request<RunDetail>(`/api/v1/runs/${id}`),
+  artifacts: (id: string, attempt?: number) =>
+    request<ResearchArtifact[]>(
+      `/api/v1/runs/${id}/artifacts${
+        attempt === undefined ? "" : `?attempt=${attempt}`
+      }`,
+    ),
   createRun: (payload: AnalysisRequest, idempotencyKey: string) =>
     request<RunView>("/api/v1/runs", {
       method: "POST",
