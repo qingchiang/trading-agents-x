@@ -81,6 +81,52 @@ def test_composite_tool_payload_creates_one_item_with_all_origins() -> None:
     ]
 
 
+def test_exact_prefetched_bodies_are_aggregated_with_all_origins() -> None:
+    blocks = [
+        {
+            "content": "ONE SHARED PREFETCH BODY",
+            "records": [
+                {
+                    "evidence": "filing",
+                    "source": "EDINET",
+                    "requested": "2026-07-24",
+                    "effective": "2026-07-23",
+                    "timing": "publication-date filtered",
+                    "retrieved_at": None,
+                }
+            ],
+        },
+        {
+            "content": "ONE SHARED PREFETCH BODY",
+            "records": [
+                {
+                    "evidence": "market data",
+                    "source": "JPX",
+                    "requested": "2026-07-24",
+                    "effective": "2026-07-24",
+                    "timing": "point-in-time available",
+                    "retrieved_at": None,
+                }
+            ],
+        },
+    ]
+
+    items = _collect_evidence(
+        [],
+        "Report.",
+        requested_date=date(2026, 7, 24),
+        analyst="social",
+        prefetched_blocks=blocks,
+    )
+
+    assert len(items) == 1
+    assert items[0].content == "ONE SHARED PREFETCH BODY"
+    assert [origin.source for origin in items[0].origins] == [
+        "EDINET",
+        "JPX",
+    ]
+
+
 def test_composite_quality_is_low_for_mixed_or_fallback_origins() -> None:
     item = _evidence_from_records(
         (

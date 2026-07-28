@@ -76,6 +76,7 @@ from tradingagents.graph.structured_output import (
 from tradingagents.provenance import (
     ProvenanceRecord,
     extract_provenance,
+    provenance_quality_issues,
     strip_provenance_markers,
 )
 
@@ -455,6 +456,7 @@ class ResearchGraph:
                 "sentiment_report": "",
                 "news_report": "",
                 "fundamentals_report": "",
+                "prefetched_evidence": [],
             }
             with use_config(dict(context.dataflow_config)):
                 result = self._analyst_subgraphs[analyst].invoke(
@@ -471,6 +473,7 @@ class ResearchGraph:
                 narrative,
                 requested_date=context.request.analysis_date,
                 analyst=analyst,
+                prefetched_blocks=result.get("prefetched_evidence", []),
             )
             typed = _adapt_analyst_report(analyst, narrative, evidence)
             check_cancelled(context)
@@ -895,9 +898,33 @@ def _collect_evidence(
     *,
     requested_date: date,
     analyst: str,
+    prefetched_blocks: Iterable[dict[str, Any]] = (),
 ) -> list[EvidenceItem]:
     items: dict[str, EvidenceItem] = {}
-    tool_origin_keys: set[tuple[str, ...]] = set()
+    origin_keys: set[tuple[str, ...]] = set()
+    content_groups: dict[str, list[ProvenanceRecord]] = {}
+    content_order: list[str] = []
+    empty_payloads: list[tuple[ProvenanceRecord, ...]] = []
+
+    def collect_payload(
+        records: Iterable[ProvenanceRecord],
+        content: str | None,
+    ) -> None:
+        records = tuple(dict.fromkeys(records))
+        if not records:
+            return
+        origin_keys.update(_record_identity(record) for record in records)
+        if content:
+            if content not in content_groups:
+                content_groups[content] = []
+                content_order.append(content)
+            existing = content_groups[content]
+            for record in records:
+                if record not in existing:
+                    existing.append(record)
+        else:
+            empty_payloads.append(records)
+
     tool_messages = [
         message for message in messages if isinstance(message, ToolMessage)
     ]
@@ -916,16 +943,34 @@ def _collect_evidence(
                     timing="no auditable source metadata captured",
                 )
             ]
-        clean_content = strip_provenance_markers(content)
+        collect_payload(records, strip_provenance_markers(content).strip() or None)
+
+    for block in prefetched_blocks:
+        raw_records = block.get("records", [])
+        records = []
+        for raw in raw_records:
+            try:
+                records.append(ProvenanceRecord(**raw))
+            except (TypeError, ValueError):
+                continue
+        collect_payload(records, block.get("content"))
+
+    for content in content_order:
+        item = _evidence_from_records(
+            content_groups[content],
+            requested_date=requested_date,
+            content=content,
+        )
+        items[item.ref] = item
+    for records in empty_payloads:
         item = _evidence_from_records(
             records,
             requested_date=requested_date,
-            content=clean_content,
+            content=None,
         )
         items[item.ref] = item
-        tool_origin_keys.update(_record_identity(record) for record in records)
     for record in _parse_provenance_table(narrative):
-        if _record_identity(record) in tool_origin_keys:
+        if _record_identity(record) in origin_keys:
             continue
         item = _evidence_from_record(
             record,
@@ -1197,21 +1242,36 @@ def _adapt_analyst_report(
             )
         )
     for item in evidence:
-        if item.quality not in {
-            EvidenceQuality.LOW,
-            EvidenceQuality.UNAVAILABLE,
-        }:
+        if any(warning.evidence_ref == item.ref for warning in warnings):
             continue
-        already_described = any(
-            warning.evidence_ref == item.ref
-            or (
-                warning.source
-                and warning.source.casefold() == item.source.casefold()
-                and item.evidence_type.casefold() in warning.message.casefold()
+        origin_records = tuple(
+            ProvenanceRecord(
+                evidence=origin.evidence_type,
+                source=origin.source,
+                requested=origin.requested,
+                effective=origin.effective,
+                timing=origin.timing,
+                retrieved_at=origin.retrieved_at,
             )
-            for warning in warnings
+            for origin in item.origins
         )
-        if not already_described:
+        issues = provenance_quality_issues(origin_records)
+        for issue in issues:
+            warnings.append(
+                ResearchWarning(
+                    code=f"evidence.{issue.code}",
+                    message=(
+                        f"{issue.evidence} ({issue.source}): {issue.reason}"
+                    ),
+                    evidence_ref=item.ref,
+                    source=issue.source,
+                )
+            )
+        if (
+            not issues
+            and item.quality
+            in {EvidenceQuality.LOW, EvidenceQuality.UNAVAILABLE}
+        ):
             warnings.append(
                 ResearchWarning(
                     code=f"evidence.{item.quality.value}",

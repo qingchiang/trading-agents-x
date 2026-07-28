@@ -1,8 +1,15 @@
 """Local state for one evidence-collection analyst subgraph."""
 
-from typing import Annotated
+from typing import Annotated, TypedDict
 
 from langgraph.graph import MessagesState
+
+
+class PrefetchedEvidenceBlock(TypedDict):
+    """JSON-safe evidence transported by analysts that prefetch their inputs."""
+
+    content: str | None
+    records: list[dict[str, str | None]]
 
 
 class AgentState(MessagesState):
@@ -15,3 +22,7 @@ class AgentState(MessagesState):
     sentiment_report: Annotated[str, "Sentiment analyst narrative"]
     news_report: Annotated[str, "News analyst narrative"]
     fundamentals_report: Annotated[str, "Fundamentals analyst narrative"]
+    prefetched_evidence: Annotated[
+        list[PrefetchedEvidenceBlock],
+        "Evidence fetched before an analyst LLM call",
+    ]

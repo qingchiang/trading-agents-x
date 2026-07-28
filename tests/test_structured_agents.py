@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime, timezone
 from unittest import mock
 from unittest.mock import MagicMock
 
@@ -25,6 +26,7 @@ from tradingagents.dataflows.market_signals import (
     FetchedSentimentSignal,
     SentimentSignal,
 )
+from tradingagents.graph.research_graph import _collect_evidence
 from tradingagents.provenance import ProvenanceRecord, attach_provenance
 
 _SENTIMENT_MOD = "tradingagents.agents.analysts.sentiment_analyst"
@@ -131,9 +133,10 @@ def _run(
     news_side_effect=None,
     signals=(),
     llm=None,
+    provenance_appendix=True,
 ):
     captured = {}
-    bind_config({"provenance_appendix": True})
+    bind_config({"provenance_appendix": provenance_appendix})
     if routes:
         bind_config({"data_vendors_by_market": routes})
     with (
@@ -151,7 +154,15 @@ def _run(
         ) as market_signals,
         mock.patch(f"{_SENTIMENT_MOD}.get_news") as news,
         mock.patch(f"{_SENTIMENT_MOD}.is_live", return_value=live),
+        mock.patch(f"{_SENTIMENT_MOD}.datetime") as clock,
     ):
+        clock.now.return_value = datetime(
+            2026,
+            1,
+            15,
+            12,
+            tzinfo=timezone.utc,
+        )
         if news_side_effect:
             news.func.side_effect = news_side_effect
         else:
@@ -299,7 +310,13 @@ def test_routed_markets_skip_us_social_and_use_per_name_signals(
     prompt = "\n".join(map(str, captured["prompt"]))
     assert "unavailable: no coverage for this market" in prompt
     assert "SIGNAL_DATA" in prompt
-    assert "## Data Provenance" in result["sentiment_report"]
+    assert "## Data Provenance" not in result["sentiment_report"]
+    signal_block = next(
+        block
+        for block in result["prefetched_evidence"]
+        if block["content"] == "SIGNAL_DATA"
+    )
+    assert signal_block["records"][0]["source"] == "official source"
 
 
 @pytest.mark.unit
@@ -314,7 +331,12 @@ def test_historical_us_run_never_queries_live_social_sources():
     signals.assert_not_called()
     prompt = "\n".join(map(str, captured["prompt"]))
     assert "live-only source unavailable for historical trade_date" in prompt
-    assert "unavailable for historical date" in result["sentiment_report"]
+    assert "unavailable for historical date" not in result["sentiment_report"]
+    assert result["prefetched_evidence"][1]["content"] is None
+    assert (
+        result["prefetched_evidence"][1]["records"][0]["timing"]
+        == "unavailable for historical date; vendor not queried"
+    )
 
 
 @pytest.mark.unit
@@ -359,9 +381,17 @@ def test_provenance_uses_actual_fallback_source():
         signals=(signal,),
     )
 
-    report = result["sentiment_report"]
-    assert "| ownership filings | actual fallback |" in report
-    assert "| ownership filings | configured primary |" not in report
+    assert "Data Provenance" not in result["sentiment_report"]
+    fallback_block = next(
+        block
+        for block in result["prefetched_evidence"]
+        if block["content"] == "FALLBACK_DATA"
+    )
+    assert fallback_block["records"][0]["source"] == "actual fallback"
+    assert all(
+        record["source"] != "configured primary"
+        for record in fallback_block["records"]
+    )
 
 
 @pytest.mark.unit
@@ -405,4 +435,74 @@ def test_structured_output_failures_fall_back_without_provenance_loss(
     *_prefix, result = _run(llm=llm)
 
     assert result["sentiment_report"].startswith("Fallback narrative.")
-    assert "## Data Provenance" in result["sentiment_report"]
+    assert "## Data Provenance" not in result["sentiment_report"]
+    assert result["prefetched_evidence"]
+
+
+@pytest.mark.unit
+def test_prefetched_evidence_is_independent_of_appendix_display_setting():
+    enabled = _run(provenance_appendix=True)[-1]
+    disabled = _run(provenance_appendix=False)[-1]
+    enabled_evidence = _collect_evidence(
+        enabled["messages"],
+        enabled["sentiment_report"],
+        requested_date=date(2026, 1, 15),
+        analyst="social",
+        prefetched_blocks=enabled["prefetched_evidence"],
+    )
+    disabled_evidence = _collect_evidence(
+        disabled["messages"],
+        disabled["sentiment_report"],
+        requested_date=date(2026, 1, 15),
+        analyst="social",
+        prefetched_blocks=disabled["prefetched_evidence"],
+    )
+
+    assert enabled["sentiment_report"] == disabled["sentiment_report"]
+    assert enabled["prefetched_evidence"] == disabled["prefetched_evidence"]
+    assert enabled_evidence == disabled_evidence
+    assert "Data Provenance" not in enabled["sentiment_report"]
+
+
+@pytest.mark.unit
+def test_japan_margin_figure_becomes_resolvable_evidence():
+    spec = SentimentSignal(
+        tag="margin",
+        fetch=lambda *_args: "",
+        evidence="margin trading balance",
+        source="JPX",
+        title="Margin balance",
+        intro="Per-name margin signal.",
+        effective=lambda value: value,
+        timing="publication-date filtered",
+    )
+    body = attach_provenance(
+        "Margin buying balance: JPY 12,345,678.",
+        ProvenanceRecord(
+            evidence="margin trading balance",
+            source="JPX",
+            requested="2026-01-15",
+            effective="2026-01-14",
+            timing="publication-date filtered",
+        ),
+    )
+    result = _run(
+        ticker="2802.T",
+        routes={".T": {"news_data": "jp_news"}},
+        signals=(FetchedSentimentSignal(spec=spec, body=body),),
+    )[-1]
+
+    evidence = _collect_evidence(
+        result["messages"],
+        result["sentiment_report"],
+        requested_date=date(2026, 1, 15),
+        analyst="social",
+        prefetched_blocks=result["prefetched_evidence"],
+    )
+
+    margin = next(
+        item for item in evidence if item.evidence_type == "margin trading balance"
+    )
+    assert margin.content == "Margin buying balance: JPY 12,345,678."
+    assert margin.source == "JPX"
+    assert margin.ref.startswith("ev_")

@@ -36,6 +36,16 @@ class ProvenanceRecord:
     retrieved_at: str | None = None
 
 
+@dataclass(frozen=True)
+class ProvenanceQualityIssue:
+    """One deterministic quality issue derived from source metadata."""
+
+    evidence: str
+    source: str
+    code: str
+    reason: str
+
+
 def provenance_marker(record: ProvenanceRecord) -> str:
     """Serialize public provenance fields into a versioned HTML comment."""
     payload = {key: value for key, value in asdict(record).items() if value is not None}
@@ -109,14 +119,19 @@ def _escape_cell(value: str) -> str:
 
 
 _WARNING_RULES = (
-    (("not requested",), "expected evidence was not requested"),
-    (("no auditable source metadata",), "no auditable source metadata captured"),
-    (("no usable data",), "no usable data from configured sources"),
-    (("unavailable",), "source unavailable for requested date/window"),
-    (("failed",), "source retrieval failed"),
-    (("fallback",), "fallback source used"),
+    (("not requested",), "not_requested", "expected evidence was not requested"),
+    (
+        ("no auditable source metadata",),
+        "missing_metadata",
+        "no auditable source metadata captured",
+    ),
+    (("no usable data",), "no_usable_data", "no usable data from configured sources"),
+    (("unavailable",), "unavailable", "source unavailable for requested date/window"),
+    (("failed",), "retrieval_failed", "source retrieval failed"),
+    (("fallback",), "fallback", "fallback source used"),
     (
         ("adjustment provider changed",),
+        "adjustment_changed",
         "adjustment provider changed; technical indicators may differ",
     ),
     (
@@ -126,13 +141,19 @@ _WARNING_RULES = (
             "not historical pit",
             "non-strict pit",
         ),
+        "not_point_in_time",
         "not point-in-time",
     ),
-    (("non-vintage",), "non-vintage series"),
-    (("not queried",), "source was not queried"),
-    (("truncated",), "result set truncated"),
-    (("stale",), "stale data"),
-    (("partial",), "partial coverage"),
+    (("non-vintage",), "non_vintage", "non-vintage series"),
+    (("not queried",), "not_queried", "source was not queried"),
+    (("truncated",), "truncated", "result set truncated"),
+    (("stale",), "stale", "stale data"),
+    (("partial",), "partial", "partial coverage"),
+    (
+        ("future-dated evidence withheld",),
+        "future_dated",
+        "future-dated evidence withheld",
+    ),
 )
 
 
@@ -143,9 +164,9 @@ def _is_successful_empty(timing: str) -> bool:
     )
 
 
-def _quality_warnings(
+def provenance_quality_issues(
     records: Iterable[ProvenanceRecord],
-) -> list[tuple[str, str, str]]:
+) -> list[ProvenanceQualityIssue]:
     """Return deterministic warnings for material provenance degradation.
 
     Routine date filtering and an empty-but-successful news window are not
@@ -153,33 +174,42 @@ def _quality_warnings(
     coverage, stale/truncated data, or timing that is unsuitable for strict
     historical interpretation.
     """
-    warnings: list[tuple[str, str, str]] = []
+    issues: list[ProvenanceQualityIssue] = []
     seen: set[tuple[str, str, str]] = set()
     for record in records:
         timing = record.timing.strip()
         timing_search = timing.casefold()
         reasons = list(
             dict.fromkeys(
-                label
-                for terms, label in _WARNING_RULES
+                (code, label)
+                for terms, code, label in _WARNING_RULES
                 if any(term in timing_search for term in terms)
             )
         )
         if record.source.strip().casefold() in {"", "unknown", "—"}:
-            reasons.append("source metadata unknown")
+            reasons.append(("unknown_source", "source metadata unknown"))
         if (
             record.effective.strip().casefold() in {"", "unknown", "—"}
             and not _is_successful_empty(timing_search)
         ):
-            reasons.append("effective date/window unknown")
+            reasons.append(
+                ("unknown_effective", "effective date/window unknown")
+            )
         evidence = _escape_cell(record.evidence)
         source = _escape_cell(record.source)
-        for reason in dict.fromkeys(reasons):
+        for code, reason in dict.fromkeys(reasons):
             key = (evidence.casefold(), source.casefold(), reason.casefold())
             if key not in seen:
-                warnings.append((evidence, source, reason))
+                issues.append(
+                    ProvenanceQualityIssue(
+                        evidence=evidence,
+                        source=source,
+                        code=code,
+                        reason=reason,
+                    )
+                )
                 seen.add(key)
-    return warnings
+    return issues
 
 
 def append_provenance_appendix(
@@ -235,16 +265,17 @@ def append_provenance_appendix(
             )
         )
 
-    warnings = _quality_warnings(deduped)
-    if not enabled and not warnings:
+    issues = provenance_quality_issues(deduped)
+    if not enabled and not issues:
         return report
 
     rows = [_APPENDIX_START, "---", ""]
-    if warnings:
+    if issues:
         rows.extend(["## Data Quality Warnings", ""])
         rows.extend(
-            f"- **{evidence}** (source: {source}): {_escape_cell(reason)}"
-            for evidence, source, reason in warnings
+            f"- **{issue.evidence}** (source: {issue.source}): "
+            f"{_escape_cell(issue.reason)}"
+            for issue in issues
         )
         rows.append("")
     if enabled:

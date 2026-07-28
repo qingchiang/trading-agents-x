@@ -30,12 +30,15 @@ See: https://github.com/TauricResearch/TradingAgents/issues/796
 """
 
 import logging
+from collections.abc import Iterable
+from dataclasses import asdict
 from datetime import datetime, timezone
 
 from langchain_core.messages import AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.schemas import SentimentReport, render_sentiment_report
+from tradingagents.agents.utils.agent_states import PrefetchedEvidenceBlock
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
@@ -58,8 +61,8 @@ from tradingagents.dataflows.reddit import fetch_reddit_posts
 from tradingagents.dataflows.stocktwits import fetch_stocktwits_messages
 from tradingagents.provenance import (
     ProvenanceRecord,
-    append_provenance_appendix,
     extract_provenance,
+    strip_provenance_markers,
 )
 
 logger = logging.getLogger(__name__)
@@ -193,9 +196,9 @@ def create_sentiment_analyst(llm):
             structured_prompt=structured_messages,
         )
 
-        records = extract_provenance(news_block)
-        if not records:
-            records.append(
+        news_records = extract_provenance(news_block)
+        if not news_records:
+            news_records.append(
                 ProvenanceRecord(
                     evidence="routed ticker news",
                     source="unknown",
@@ -239,78 +242,95 @@ def create_sentiment_analyst(llm):
         reddit_effective, reddit_timing, reddit_retrieved = social_status(
             reddit_block, reddit_retrieved_at
         )
-        records.extend(
-            (
-                ProvenanceRecord(
-                    evidence="retail social messages",
-                    source="StockTwits",
-                    requested=f"{social_start_date} to {end_date}",
-                    effective=stocktwits_effective,
-                    timing=stocktwits_timing,
-                    retrieved_at=stocktwits_retrieved,
-                ),
-                ProvenanceRecord(
-                    evidence="community discussion",
-                    source="Reddit public feeds",
-                    requested=f"{social_start_date} to {end_date}",
-                    effective=reddit_effective,
-                    timing=reddit_timing,
-                    retrieved_at=reddit_retrieved,
-                ),
-            )
+        stocktwits_record = ProvenanceRecord(
+            evidence="retail social messages",
+            source="StockTwits",
+            requested=f"{social_start_date} to {end_date}",
+            effective=stocktwits_effective,
+            timing=stocktwits_timing,
+            retrieved_at=stocktwits_retrieved,
         )
+        reddit_record = ProvenanceRecord(
+            evidence="community discussion",
+            source="Reddit public feeds",
+            requested=f"{social_start_date} to {end_date}",
+            effective=reddit_effective,
+            timing=reddit_timing,
+            retrieved_at=reddit_retrieved,
+        )
+        prefetched_evidence = [
+            _prefetched_evidence_block(news_block, news_records),
+            _prefetched_evidence_block(
+                stocktwits_block,
+                (stocktwits_record,),
+            ),
+            _prefetched_evidence_block(
+                reddit_block,
+                (reddit_record,),
+            ),
+        ]
         if fetched_market_signals:
             for result in fetched_market_signals:
                 spec = result.spec
                 body = result.body
                 body_records = extract_provenance(body)
-                if body_records:
-                    records.extend(body_records)
-                    continue
-                lowered = body.casefold()
-                if "unavailable" in lowered:
-                    record_timing = "unavailable"
-                    record_effective = "—"
-                elif "skipped" in lowered or "no edinet code" in lowered:
-                    record_timing = "not queried; identifier unavailable"
-                    record_effective = "—"
-                elif body:
-                    record_timing = spec.timing
-                    record_effective = spec.effective(end_date)
-                elif spec.live_only:
-                    record_timing = (
-                        "unavailable for historical date; vendor not queried"
-                        if not live_run
-                        else "no analyst snapshot returned; retrieval success unknown"
-                    )
-                    record_effective = "—"
-                else:
-                    record_timing = "available; no qualifying records"
-                    record_effective = spec.effective(end_date)
-                records.append(
-                    ProvenanceRecord(
-                        evidence=spec.evidence,
-                        source=spec.source,
-                        requested=end_date,
-                        effective=record_effective,
-                        timing=record_timing,
-                        retrieved_at=result.retrieved_at,
-                    )
+                if not body_records:
+                    lowered = body.casefold()
+                    if "unavailable" in lowered:
+                        record_timing = "unavailable"
+                        record_effective = "—"
+                    elif "skipped" in lowered or "no edinet code" in lowered:
+                        record_timing = "not queried; identifier unavailable"
+                        record_effective = "—"
+                    elif body:
+                        record_timing = spec.timing
+                        record_effective = spec.effective(end_date)
+                    elif spec.live_only:
+                        record_timing = (
+                            "unavailable for historical date; vendor not queried"
+                            if not live_run
+                            else "no analyst snapshot returned; retrieval success unknown"
+                        )
+                        record_effective = "—"
+                    else:
+                        record_timing = "available; no qualifying records"
+                        record_effective = spec.effective(end_date)
+                    body_records = [
+                        ProvenanceRecord(
+                            evidence=spec.evidence,
+                            source=spec.source,
+                            requested=end_date,
+                            effective=record_effective,
+                            timing=record_timing,
+                            retrieved_at=result.retrieved_at,
+                        )
+                    ]
+                prefetched_evidence.append(
+                    _prefetched_evidence_block(body, body_records)
                 )
-
-        report_text = append_provenance_appendix(
-            report_text,
-            records,
-            requested_date=end_date,
-            enabled=config["provenance_appendix"],
-        )
 
         return {
             "messages": [AIMessage(content=report_text)],
             "sentiment_report": report_text,
+            "prefetched_evidence": prefetched_evidence,
         }
 
     return sentiment_analyst_node
+
+
+def _prefetched_evidence_block(
+    body: str,
+    records: Iterable[ProvenanceRecord],
+) -> PrefetchedEvidenceBlock:
+    """Serialize one prefetch response without coupling it to report rendering."""
+
+    content = strip_provenance_markers(body).strip()
+    if not content or (content.startswith("<") and content.endswith(">")):
+        content = None
+    return {
+        "content": content,
+        "records": [asdict(record) for record in records],
+    }
 
 
 def _optional_section(title: str, intro: str, tag: str, body: str) -> str:
