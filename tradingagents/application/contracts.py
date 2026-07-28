@@ -17,6 +17,7 @@ from pydantic import (
     model_validator,
 )
 
+from tradingagents.application.reporting import order_reports
 from tradingagents.dataflows.symbol_utils import (
     crypto_base,
     market_timezone,
@@ -667,6 +668,14 @@ class AnalysisResult(FrozenModel):
     evidence: EvidenceBundle | None = None
     metrics: RunMetrics = Field(default_factory=RunMetrics)
     warnings: tuple[ResearchWarning, ...] = ()
+
+    @field_validator("reports")
+    @classmethod
+    def order_public_reports(
+        cls,
+        value: dict[str, AnalystReport | str],
+    ) -> dict[str, AnalystReport | str]:
+        return order_reports(value)
 
     @field_validator("warnings", mode="before")
     @classmethod

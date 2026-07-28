@@ -207,6 +207,10 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
         evidence_refs=(evidence_item.ref,),
         narrative="Fixture report.",
     )
+    reports = {
+        name: report.model_copy(update={"analyst": name})
+        for name in ("social", "news", "market", "fundamentals")
+    }
     artifact, _ = web_repository.append_artifact(
         queued.id,
         ResearchArtifactDraft(
@@ -229,7 +233,7 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
             run_id=queued.id,
             status=RunStatus.SUCCEEDED,
             instrument="NVDA",
-            reports={"market": report},
+            reports=reports,
             decision=decision,
             evidence=evidence,
         ),
@@ -246,6 +250,12 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
     )
 
     assert detail.status_code == 200
+    assert list(detail.json()["result"]["reports"]) == [
+        "fundamentals",
+        "market",
+        "news",
+        "social",
+    ]
     assert detail.json()["result"]["evidence"]["digest"] == evidence.digest
     assert detail.json()["result"]["evidence"]["items"][0]["ref"] == (
         evidence_item.ref

@@ -340,3 +340,48 @@ def test_rerun_links_new_run_and_backup_is_consistent(
 
     with pytest.raises(ValueError, match="must differ"):
         repository.backup(app_settings.database_path)
+
+
+def test_reports_use_canonical_order_across_result_and_repository(
+    repository: RunRepository,
+    app_settings: AppSettings,
+) -> None:
+    run, _ = _create(repository, app_settings)
+    repository.claim_run(run.id, "fixture-worker", 30)
+    evidence = EvidenceBundle(
+        instrument="NVDA",
+        analysis_date=date(2026, 7, 24),
+        items=(),
+    )
+    result = AnalysisResult(
+        run_id=run.id,
+        status=RunStatus.SUCCEEDED,
+        instrument="NVDA",
+        reports={
+            "social": "Social report.",
+            "news": "News report.",
+            "market": "Market report.",
+            "fundamentals": "Fundamentals report.",
+            "legacy": "Legacy report.",
+        },
+        decision=None,
+    )
+
+    assert list(result.reports) == [
+        "fundamentals",
+        "market",
+        "news",
+        "social",
+        "legacy",
+    ]
+
+    repository.complete(run.id, result, evidence=evidence, benchmark="SPY")
+    restored = repository.get_result(run.id)
+
+    assert list(restored.reports) == [
+        "fundamentals",
+        "market",
+        "news",
+        "social",
+        "legacy",
+    ]

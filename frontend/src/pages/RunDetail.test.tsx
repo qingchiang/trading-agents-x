@@ -1,4 +1,9 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import {
@@ -8,7 +13,7 @@ import {
   type RunEvent,
 } from "../api/client";
 import i18n from "../i18n";
-import { Router } from "../router";
+import { Router, useLocation } from "../router";
 import RunDetail from "./RunDetail";
 
 vi.mock("../api/client", () => ({
@@ -42,6 +47,33 @@ class FakeEventSource {
       new MessageEvent(name, { data: JSON.stringify(event) }),
     );
   }
+}
+
+function analystReport(
+  analyst: "fundamentals" | "market" | "news" | "social",
+  title: string,
+  warnings: unknown[] = [],
+) {
+  return {
+    analyst,
+    summary: `${title} summary`,
+    claims: [],
+    confidence: 0.7,
+    evidence_refs: ["ev_0123456789ab"],
+    warnings,
+    narrative: `# ${title} report\n\nEvidence-grounded narrative.`,
+  };
+}
+
+function LocationProbe() {
+  const location = useLocation();
+  return (
+    <output data-testid="router-location">
+      {location.pathname}
+      {location.search}
+      {location.hash}
+    </output>
+  );
 }
 
 const detail = {
@@ -82,22 +114,17 @@ const detail = {
     status: "succeeded",
     instrument: "NVDA",
     reports: {
-      market: {
-        analyst: "market",
-        summary: "Summary",
-        claims: [],
-        confidence: 0.7,
-        evidence_refs: ["ev_0123456789ab"],
-        warnings: [
-          {
-            code: "evidence.degraded",
-            message: "Historical source was partial.",
-            evidence_ref: "ev_0123456789ab",
-            source: "fixture",
-          },
-        ],
-        narrative: "# Market report\n\nEvidence-grounded narrative.",
-      },
+      social: analystReport("social", "Social"),
+      news: analystReport("news", "News"),
+      market: analystReport("market", "Market", [
+        {
+          code: "evidence.degraded",
+          message: "Historical source was partial.",
+          evidence_ref: "ev_0123456789ab",
+          source: "fixture",
+        },
+      ]),
+      fundamentals: analystReport("fundamentals", "Fundamentals"),
     },
     decision: {
       rating: "Hold",
@@ -188,6 +215,7 @@ const artifacts = [
 
 beforeEach(async () => {
   vi.resetAllMocks();
+  localStorage.removeItem("tradingagents-timeline-order");
   await i18n.changeLanguage("en");
   vi.mocked(api.run).mockResolvedValue(detail);
   vi.mocked(api.artifacts).mockResolvedValue(artifacts);
@@ -227,6 +255,28 @@ test("restores deliberation and resolves evidence references across run views", 
   expect(screen.getByText("fixture-feed", { exact: false })).toBeVisible();
 
   fireEvent.click(screen.getByRole("tab", { name: "Reports" }));
+  const fundamentalsTab = screen.getByRole("button", {
+    name: "Fundamentals",
+  });
+  const marketTab = screen.getByRole("button", { name: "Market" });
+  const newsTab = screen.getByRole("button", { name: "News" });
+  const socialTab = screen.getByRole("button", { name: "Sentiment" });
+  expect(
+    fundamentalsTab.compareDocumentPosition(marketTab) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).not.toBe(0);
+  expect(
+    marketTab.compareDocumentPosition(newsTab) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).not.toBe(0);
+  expect(
+    newsTab.compareDocumentPosition(socialTab) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).not.toBe(0);
+  expect(
+    await screen.findByRole("heading", { name: "Fundamentals report" }),
+  ).toBeVisible();
+  fireEvent.click(marketTab);
   expect(
     await screen.findByText("Historical source was partial."),
   ).toBeVisible();
@@ -271,7 +321,18 @@ test("restores deliberation and resolves evidence references across run views", 
   act(() => FakeEventSource.instance.emit("run.succeeded", event));
 
   fireEvent.click(screen.getByRole("tab", { name: "Agent timeline" }));
-  expect(await screen.findByText(/#7/)).toBeVisible();
+  const newest = await screen.findByText(/#7/);
+  const older = screen.getByText(/#6/);
+  expect(
+    newest.compareDocumentPosition(older) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).not.toBe(0);
+  fireEvent.click(screen.getByRole("button", { name: "Earliest first" }));
+  expect(
+    older.compareDocumentPosition(newest) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).not.toBe(0);
+  expect(localStorage.getItem("tradingagents-timeline-order")).toBe("oldest");
   expect(FakeEventSource.instance.closed).toBe(true);
   await vi.waitFor(() => expect(api.artifacts).toHaveBeenCalledTimes(3));
 });
@@ -292,4 +353,71 @@ test("labels historical runs that have no recorded artifacts", async () => {
       "This historical run did not record typed research artifacts.",
     ),
   ).toBeVisible();
+});
+
+test("restores report and evidence navigation from the URL", async () => {
+  const initialPath = "/runs/run-1?view=reports&report=news";
+  const view = render(
+    <Router initialPath={initialPath}>
+      <RunDetail />
+      <LocationProbe />
+    </Router>,
+  );
+
+  expect(
+    await screen.findByRole("heading", { name: "News report" }),
+  ).toBeVisible();
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: "Open evidence ev_0123456789ab",
+    }),
+  );
+  expect(screen.getByTestId("router-location")).toHaveTextContent(
+    "/runs/run-1?view=evidence&ref=ev_0123456789ab&return_view=reports&return_report=news",
+  );
+
+  fireEvent.click(
+    screen.getByRole("button", { name: /Return to reports/ }),
+  );
+  expect(screen.getByTestId("router-location")).toHaveTextContent(
+    "/runs/run-1?view=reports&report=news",
+  );
+  expect(
+    await screen.findByRole("heading", { name: "News report" }),
+  ).toBeVisible();
+
+  const restoredPath =
+    screen.getByTestId("router-location").textContent ?? initialPath;
+  view.unmount();
+  render(
+    <Router initialPath={restoredPath}>
+      <RunDetail />
+    </Router>,
+  );
+
+  expect(
+    await screen.findByRole("heading", { name: "News report" }),
+  ).toBeVisible();
+});
+
+test("localizes canonical report labels for zh-CN", async () => {
+  await i18n.changeLanguage("zh-CN");
+  render(
+    <Router initialPath="/runs/run-1?view=reports">
+      <RunDetail />
+    </Router>,
+  );
+
+  expect(
+    await screen.findByRole("heading", { name: "Fundamentals report" }),
+  ).toBeVisible();
+  const labels = ["基本面", "市场", "新闻", "舆情"].map((name) =>
+    screen.getByRole("button", { name }),
+  );
+  labels.slice(0, -1).forEach((label, index) => {
+    expect(
+      label.compareDocumentPosition(labels[index + 1]) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+  });
 });

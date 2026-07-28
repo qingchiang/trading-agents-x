@@ -49,6 +49,7 @@ from .database import (
     RunRecord,
     create_sqlite_engine,
 )
+from .reporting import order_reports
 from .settings import AppSettings
 
 _SECRET_RE = re.compile(
@@ -623,7 +624,7 @@ class RunRepository:
                 raise RunNotFoundError(run_id)
             if record.status != RunStatus.RUNNING.value:
                 raise InvalidRunTransitionError(record.status)
-            for name, report in result.reports.items():
+            for name, report in order_reports(result.reports).items():
                 if hasattr(report, "model_dump"):
                     structured = report.model_dump(mode="json")
                     markdown = getattr(report, "narrative", json.dumps(structured))
@@ -744,6 +745,7 @@ class RunRepository:
                 )
             else:
                 reports[report.name] = report.markdown
+        reports = order_reports(reports)
         decision = (
             ResearchDecision.model_validate(decision_record.decision_json)
             if decision_record

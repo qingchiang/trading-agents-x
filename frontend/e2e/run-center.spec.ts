@@ -322,13 +322,39 @@ test("runs the local research workflow across UI locales", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "Price snapshot" }),
   ).toBeVisible();
+  await page.getByRole("button", { name: /Return to deliberation/ }).click();
+  await expect(page.getByText("constructive")).toBeVisible();
   await page.getByRole("tab", { name: "Reports" }).click();
   await expect(page.getByRole("heading", { name: "Market report" })).toBeVisible();
-  await page.getByRole("button", { name: "news" }).click();
+  await page.getByRole("button", { name: "News" }).click();
   await expect(page.getByRole("heading", { name: "News report" })).toBeVisible();
   await page.reload();
+  await expect(page.getByRole("heading", { name: "News report" })).toBeVisible();
+  await page
+    .getByRole("button", {
+      name: "Open evidence ev_0123456789ab",
+    })
+    .click();
+  await expect(page).toHaveURL(
+    /view=evidence.*ref=ev_0123456789ab.*return_view=reports.*return_report=news/,
+  );
+  await page.goBack();
+  await expect(page).toHaveURL(/view=reports.*report=news/);
+  await expect(page.getByRole("heading", { name: "News report" })).toBeVisible();
+  await page
+    .getByRole("button", {
+      name: "Open evidence ev_0123456789ab",
+    })
+    .click();
+  await page.getByRole("button", { name: /Return to reports/ }).click();
+  await expect(page.getByRole("heading", { name: "News report" })).toBeVisible();
   await page.getByRole("tab", { name: "Agent timeline" }).click();
   await expect(page.getByText(/#2/)).toBeVisible();
+  await expect(page.locator(".timeline-item small").first()).toContainText("#2");
+  await page.getByRole("button", { name: "Earliest first" }).click();
+  await expect(page.locator(".timeline-item small").first()).toContainText("#1");
+  await page.reload();
+  await expect(page.locator(".timeline-item small").first()).toContainText("#1");
 
   await page.getByRole("link", { name: "Memory" }).click();
   await expect(

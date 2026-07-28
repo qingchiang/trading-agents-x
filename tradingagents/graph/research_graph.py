@@ -65,6 +65,7 @@ from tradingagents.application.contracts import (
 )
 from tradingagents.application.evidence import group_evidence_by_content
 from tradingagents.application.metrics import MetricsCallback
+from tradingagents.application.reporting import order_reports
 from tradingagents.application.runtime import RunContext, check_cancelled
 from tradingagents.dataflows.config import use_config
 from tradingagents.graph.structured_output import (
@@ -252,10 +253,12 @@ class ResearchGraph:
             snapshot = graph.get_state(config)
             final_state = dict(snapshot.values)
         evidence = EvidenceBundle.model_validate(final_state["evidence_bundle"])
-        reports = {
-            key: AnalystReport.model_validate(value)
-            for key, value in final_state["analyst_reports"].items()
-        }
+        reports = order_reports(
+            {
+                key: AnalystReport.model_validate(value)
+                for key, value in final_state["analyst_reports"].items()
+            }
+        )
         decision = ResearchDecision.model_validate(final_state["final_decision"])
         warnings = tuple(
             ResearchWarning.model_validate(value)

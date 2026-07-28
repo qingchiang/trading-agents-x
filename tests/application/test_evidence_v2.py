@@ -255,3 +255,50 @@ def test_markdown_export_renders_an_exact_body_once_with_all_refs() -> None:
     assert f"`{first.ref}`" in markdown
     assert f"`{second.ref}`" in markdown
     assert "source-a, source-b" in markdown
+
+
+def test_markdown_export_uses_canonical_report_order() -> None:
+    now = datetime(2026, 7, 24, 12, tzinfo=timezone.utc)
+    result = AnalysisResult(
+        run_id="fixture-run",
+        status=RunStatus.SUCCEEDED,
+        instrument="7203.T",
+        reports={
+            "social": "SOCIAL BODY",
+            "news": "NEWS BODY",
+            "market": "MARKET BODY",
+            "fundamentals": "FUNDAMENTALS BODY",
+        },
+        decision=None,
+    )
+    run_export = RunExport(
+        run=RunView(
+            id="fixture-run",
+            status=RunStatus.SUCCEEDED,
+            request=AnalysisRequest(
+                ticker="7203.T",
+                analysis_date="2026-07-24",
+            ),
+            config_snapshot={},
+            attempt=1,
+            cancel_requested=False,
+            created_at=now,
+            updated_at=now,
+        ),
+        result=result,
+    )
+
+    markdown = render_run_export_markdown(run_export)
+
+    assert list(result.reports) == [
+        "fundamentals",
+        "market",
+        "news",
+        "social",
+    ]
+    assert (
+        markdown.index("FUNDAMENTALS BODY")
+        < markdown.index("MARKET BODY")
+        < markdown.index("NEWS BODY")
+        < markdown.index("SOCIAL BODY")
+    )

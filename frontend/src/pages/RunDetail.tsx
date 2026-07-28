@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import {
   api,
@@ -13,15 +14,25 @@ import {
 } from "../api/client";
 import Markdown from "../components/Markdown";
 import StatusBadge from "../components/StatusBadge";
-import { Link, useNavigate, useParams } from "../router";
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useParams,
+} from "../router";
 
 const terminal = new Set(["succeeded", "failed", "cancelled"]);
+const reportOrder = ["fundamentals", "market", "news", "social"] as const;
+const timelineOrderStorageKey = "tradingagents-timeline-order";
 const eventNames = [
   "run.queued",
   "run.started",
   "run.resumed",
   "node.started",
   "node.completed",
+  "node.output_retry",
+  "node.output_recovered",
+  "node.output_failed",
   "artifact.created",
   "run.succeeded",
   "run.failed",
@@ -38,19 +49,29 @@ const viewNames = [
 ] as const;
 
 type ViewName = (typeof viewNames)[number];
+type ReturnViewName = Exclude<ViewName, "evidence">;
+type TimelineOrder = "newest" | "oldest";
 type ArtifactContent = ResearchArtifact["content"];
 
 export default function RunDetail() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
   const { runId = "" } = useParams();
   const [detail, setDetail] = useState<RunDetailType | null>(null);
   const [artifacts, setArtifacts] = useState<ResearchArtifact[]>([]);
   const [events, setEvents] = useState<RunEvent[]>([]);
-  const [activeView, setActiveView] = useState<ViewName>("timeline");
-  const [activeReport, setActiveReport] = useState("");
-  const [focusedEvidence, setFocusedEvidence] = useState("");
   const [error, setError] = useState("");
+  const searchParams = useMemo(
+    () => new URLSearchParams(location.search),
+    [location.search],
+  );
+  const requestedView = searchParams.get("view");
+  const activeView: ViewName = isViewName(requestedView)
+    ? requestedView
+    : "timeline";
+  const requestedReport = searchParams.get("report") ?? "";
+  const focusedEvidence = searchParams.get("ref") ?? "";
 
   const refresh = useCallback(async () => {
     try {
@@ -80,7 +101,7 @@ export default function RunDetail() {
         if (current.some((item) => item.sequence === event.sequence)) {
           return current;
         }
-        return [...current, event].sort((a, b) => a.sequence - b.sequence);
+        return [...current, event];
       });
       if (
         event.event_type === "node.completed" ||
@@ -122,25 +143,108 @@ export default function RunDetail() {
         ]),
     );
   }, [artifacts, detail?.result?.reports]);
-  const reportNames = useMemo(() => Object.keys(reports), [reports]);
+  const reportNames = useMemo(
+    () => orderReportNames(Object.keys(reports)),
+    [reports],
+  );
+  const activeReport = reportNames.includes(requestedReport)
+    ? requestedReport
+    : (reportNames[0] ?? "");
 
   useEffect(() => {
-    if (reportNames.length && !reportNames.includes(activeReport)) {
-      setActiveReport(reportNames[0]);
+    if (
+      activeView !== "reports" ||
+      !activeReport ||
+      requestedReport === activeReport
+    ) {
+      return;
     }
-  }, [activeReport, reportNames]);
+    navigate(
+      runDetailPath(runId, {
+        view: "reports",
+        report: activeReport,
+      }),
+      { replace: true },
+    );
+  }, [activeReport, activeView, navigate, requestedReport, runId]);
 
   useEffect(() => {
     if (activeView !== "evidence" || !focusedEvidence) return;
     const target = document.getElementById(`evidence-${focusedEvidence}`);
     target?.focus();
     target?.scrollIntoView?.({ behavior: "smooth", block: "center" });
-  }, [activeView, focusedEvidence]);
+  }, [
+    activeView,
+    detail?.result?.evidence?.digest,
+    detail?.result?.evidence?.items.length,
+    focusedEvidence,
+  ]);
 
-  const openEvidence = useCallback((ref: string) => {
-    setFocusedEvidence(ref);
-    setActiveView("evidence");
-  }, []);
+  const selectView = useCallback(
+    (view: ViewName) => {
+      navigate(
+        runDetailPath(runId, {
+          view,
+          report:
+            view === "reports" && activeReport ? activeReport : undefined,
+        }),
+        { replace: true },
+      );
+    },
+    [activeReport, navigate, runId],
+  );
+
+  const selectReport = useCallback(
+    (report: string) => {
+      navigate(
+        runDetailPath(runId, {
+          view: "reports",
+          report,
+        }),
+        { replace: true },
+      );
+    },
+    [navigate, runId],
+  );
+
+  const openEvidence = useCallback(
+    (ref: string) => {
+      navigate(
+        runDetailPath(runId, {
+          view: "evidence",
+          ref,
+          return_view:
+            activeView === "evidence" ? "timeline" : activeView,
+          return_report:
+            activeView === "reports" && activeReport
+              ? activeReport
+              : undefined,
+        }),
+      );
+    },
+    [activeReport, activeView, navigate, runId],
+  );
+
+  const requestedReturnView = searchParams.get("return_view");
+  const returnView: ReturnViewName = isReturnViewName(requestedReturnView)
+    ? requestedReturnView
+    : "timeline";
+  const requestedReturnReport = searchParams.get("return_report") ?? "";
+  const returnReport =
+    returnView === "reports" && reportNames.includes(requestedReturnReport)
+      ? requestedReturnReport
+      : returnView === "reports"
+        ? activeReport
+        : "";
+  const returnFromEvidence = useCallback(() => {
+    navigate(
+      runDetailPath(runId, {
+        view: returnView,
+        report: returnReport || undefined,
+      }),
+      { replace: true },
+    );
+  }, [navigate, returnReport, returnView, runId]);
 
   const act = async (action: "cancel" | "retry" | "rerun") => {
     try {
@@ -218,7 +322,7 @@ export default function RunDetail() {
             aria-selected={activeView === view}
             aria-controls={`run-view-${view}`}
             className={activeView === view ? "active" : ""}
-            onClick={() => setActiveView(view)}
+            onClick={() => selectView(view)}
             key={view}
           >
             {t(view)}
@@ -239,6 +343,8 @@ export default function RunDetail() {
         <EvidencePanel
           evidence={result?.evidence ?? null}
           focusedRef={focusedEvidence}
+          onReturn={returnFromEvidence}
+          returnLabel={returnViewLabel(t, returnView)}
         />
       )}
       {activeView === "reports" && (
@@ -246,7 +352,7 @@ export default function RunDetail() {
           reports={reports}
           reportNames={reportNames}
           activeReport={activeReport}
-          onReport={setActiveReport}
+          onReport={selectReport}
           onEvidence={openEvidence}
         />
       )}
@@ -281,6 +387,22 @@ export default function RunDetail() {
 
 function TimelinePanel({ events }: { events: RunEvent[] }) {
   const { t } = useTranslation();
+  const [order, setOrder] = useState<TimelineOrder>(readTimelineOrder);
+  const orderedEvents = useMemo(
+    () =>
+      [...events].sort((left, right) =>
+        order === "newest"
+          ? right.sequence - left.sequence
+          : left.sequence - right.sequence,
+      ),
+    [events, order],
+  );
+
+  const updateOrder = (next: TimelineOrder) => {
+    setOrder(next);
+    localStorage.setItem(timelineOrderStorageKey, next);
+  };
+
   return (
     <article
       className="panel audit-panel timeline-panel"
@@ -292,10 +414,34 @@ function TimelinePanel({ events }: { events: RunEvent[] }) {
           <p className="eyebrow">{t("liveEvents")}</p>
           <h2>{t("timeline")}</h2>
         </div>
-        <span className="event-count">{events.length}</span>
+        <div className="timeline-controls">
+          <div
+            className="timeline-order"
+            role="group"
+            aria-label={t("timelineOrder")}
+          >
+            <button
+              type="button"
+              className={order === "newest" ? "active" : ""}
+              aria-pressed={order === "newest"}
+              onClick={() => updateOrder("newest")}
+            >
+              {t("latestFirst")}
+            </button>
+            <button
+              type="button"
+              className={order === "oldest" ? "active" : ""}
+              aria-pressed={order === "oldest"}
+              onClick={() => updateOrder("oldest")}
+            >
+              {t("earliestFirst")}
+            </button>
+          </div>
+          <span className="event-count">{events.length}</span>
+        </div>
       </div>
       <div className="timeline">
-        {events.map((event) => (
+        {orderedEvents.map((event) => (
           <div className="timeline-item" key={event.sequence}>
             <span className="timeline-dot" />
             <div>
@@ -434,9 +580,13 @@ function ArtifactCard({
 function EvidencePanel({
   evidence,
   focusedRef,
+  onReturn,
+  returnLabel,
 }: {
   evidence: EvidenceBundle | null;
   focusedRef: string;
+  onReturn: () => void;
+  returnLabel: string;
 }) {
   const { t } = useTranslation();
   return (
@@ -450,7 +600,16 @@ function EvidencePanel({
           <p className="eyebrow">{t("evidenceBundle")}</p>
           <h2>{t("evidence")}</h2>
         </div>
-        <span className="event-count">{evidence?.items.length ?? 0}</span>
+        <div className="evidence-panel-actions">
+          <button
+            type="button"
+            className="button compact-button"
+            onClick={onReturn}
+          >
+            ← {returnLabel}
+          </button>
+          <span className="event-count">{evidence?.items.length ?? 0}</span>
+        </div>
       </div>
       {!evidence ? (
         <div className="empty-state">{t("noEvidenceRecorded")}</div>
@@ -593,7 +752,7 @@ function ReportsPanel({
                 onClick={() => onReport(name)}
                 key={name}
               >
-                {name}
+                {reportLabel(t, name)}
               </button>
             ))}
           </div>
@@ -822,6 +981,66 @@ function isResearchDecision(
   content: ArtifactContent,
 ): content is ResearchDecision {
   return "rating" in content && "time_horizon" in content;
+}
+
+function isViewName(value: string | null): value is ViewName {
+  return value !== null && (viewNames as readonly string[]).includes(value);
+}
+
+function isReturnViewName(value: string | null): value is ReturnViewName {
+  return isViewName(value) && value !== "evidence";
+}
+
+function orderReportNames(names: string[]): string[] {
+  const known = reportOrder.filter((name) => names.includes(name));
+  const legacy = names
+    .filter((name) => !(reportOrder as readonly string[]).includes(name))
+    .sort();
+  return [...known, ...legacy];
+}
+
+function reportLabel(t: TFunction, name: string): string {
+  const labels: Record<string, string> = {
+    fundamentals: "fundamentalsAnalyst",
+    market: "marketAnalyst",
+    news: "newsAnalyst",
+    social: "socialAnalyst",
+  };
+  return labels[name] ? t(labels[name]) : name;
+}
+
+function returnViewLabel(t: TFunction, view: ReturnViewName): string {
+  const labels: Record<ReturnViewName, string> = {
+    timeline: "returnToTimeline",
+    deliberation: "returnToDeliberation",
+    reports: "returnToReports",
+    decision: "returnToDecision",
+  };
+  return t(labels[view]);
+}
+
+function runDetailPath(
+  runId: string,
+  values: {
+    view?: ViewName;
+    report?: string;
+    ref?: string;
+    return_view?: ReturnViewName;
+    return_report?: string;
+  },
+): string {
+  const params = new URLSearchParams();
+  Object.entries(values).forEach(([key, value]) => {
+    if (value) params.set(key, value);
+  });
+  const query = params.toString();
+  return `/runs/${encodeURIComponent(runId)}${query ? `?${query}` : ""}`;
+}
+
+function readTimelineOrder(): TimelineOrder {
+  return localStorage.getItem(timelineOrderStorageKey) === "oldest"
+    ? "oldest"
+    : "newest";
 }
 
 function formatTime(value: string): string {

@@ -14,8 +14,14 @@ type NavigateOptions = {
   replace?: boolean;
 };
 
-type RouterValue = {
+export type RouterLocation = {
   pathname: string;
+  search: string;
+  hash: string;
+};
+
+type RouterValue = {
+  location: RouterLocation;
   navigate: (to: string, options?: NavigateOptions) => void;
 };
 
@@ -26,30 +32,30 @@ export function Router({
   initialPath,
 }: PropsWithChildren<{ initialPath?: string }>) {
   const browserBacked = initialPath === undefined;
-  const [pathname, setPathname] = useState(
-    initialPath ?? window.location.pathname,
+  const [location, setLocation] = useState<RouterLocation>(() =>
+    parseLocation(initialPath ?? browserLocation()),
   );
 
   useEffect(() => {
     if (!browserBacked) return;
-    const syncLocation = () => setPathname(window.location.pathname);
+    const syncLocation = () => setLocation(parseLocation(browserLocation()));
     window.addEventListener("popstate", syncLocation);
     return () => window.removeEventListener("popstate", syncLocation);
   }, [browserBacked]);
 
   const navigate = useCallback(
     (to: string, options?: NavigateOptions) => {
-      const next = normalizePath(to);
+      const next = parseLocation(to);
       if (browserBacked) {
         const method = options?.replace ? "replaceState" : "pushState";
-        window.history[method](null, "", next);
+        window.history[method](null, "", locationPath(next));
       }
-      setPathname(next);
+      setLocation(next);
     },
     [browserBacked],
   );
 
-  const value = useMemo(() => ({ pathname, navigate }), [navigate, pathname]);
+  const value = useMemo(() => ({ location, navigate }), [location, navigate]);
   return (
     <RouterContext.Provider value={value}>{children}</RouterContext.Provider>
   );
@@ -60,7 +66,11 @@ export function useNavigate() {
 }
 
 export function usePathname() {
-  return useRouter().pathname;
+  return useRouter().location.pathname;
+}
+
+export function useLocation() {
+  return useRouter().location;
 }
 
 export function useParams() {
@@ -109,7 +119,7 @@ export function NavLink({
   ...props
 }: NavLinkProps) {
   const pathname = usePathname();
-  const target = normalizePath(to);
+  const target = parseLocation(to).pathname;
   const isActive = end
     ? pathname === target
     : pathname === target || pathname.startsWith(`${target}/`);
@@ -126,8 +136,24 @@ function useRouter() {
   return context;
 }
 
-function normalizePath(path: string) {
-  const [pathname] = path.split(/[?#]/, 1);
+function normalizePathname(pathname: string) {
   if (!pathname || pathname === "/") return "/";
   return `/${pathname.replace(/^\/+|\/+$/g, "")}`;
+}
+
+function parseLocation(path: string): RouterLocation {
+  const url = new URL(path || "/", "http://tradingagents.local");
+  return {
+    pathname: normalizePathname(url.pathname),
+    search: url.search,
+    hash: url.hash,
+  };
+}
+
+function locationPath(location: RouterLocation) {
+  return `${location.pathname}${location.search}${location.hash}`;
+}
+
+function browserLocation() {
+  return `${window.location.pathname}${window.location.search}${window.location.hash}`;
 }
