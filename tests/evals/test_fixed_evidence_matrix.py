@@ -13,6 +13,9 @@ from tradingagents.application.contracts import (
     EvidenceBundle,
     EvidenceItem,
     EvidenceQuality,
+    MemoryContext,
+    MemoryOutcome,
+    MemoryRecord,
     ResearchDecision,
     ResearchRating,
     RunProfile,
@@ -177,6 +180,49 @@ def _base_output():
     return _build_result(CASES[0], RunProfile.STANDARD)
 
 
+def _memory_for(
+    bundle: EvidenceBundle,
+    decision: ResearchDecision,
+    *,
+    evidence_refs: tuple[str, ...] | None = None,
+) -> MemoryContext:
+    run_id = "prior-run"
+    past_decision = decision.model_copy(
+        update={
+            "evidence_refs": (
+                decision.evidence_refs
+                if evidence_refs is None
+                else evidence_refs
+            ),
+            "memory_refs": (),
+        }
+    )
+    return MemoryContext(
+        instrument=bundle.instrument,
+        market="fixture-market",
+        items=(
+            MemoryRecord(
+                ref=f"memory:{run_id}",
+                run_id=run_id,
+                scope="same_ticker",
+                ticker=bundle.instrument,
+                market="fixture-market",
+                analysis_date=date(2024, 6, 28),
+                decision=past_decision,
+                outcome=MemoryOutcome(
+                    benchmark="fixture-benchmark",
+                    observation_start=date(2024, 7, 1),
+                    observation_end=date(2024, 7, 8),
+                    holding_intervals=5,
+                    raw_return=0.01,
+                    alpha_return=-0.01,
+                ),
+                reflection="Past risk calibration was too optimistic.",
+            ),
+        ),
+    )
+
+
 @pytest.mark.unit
 def test_eval_rejects_dangling_evidence_refs() -> None:
     bundle, report, decision = _base_output()
@@ -218,6 +264,143 @@ def test_eval_rejects_exact_figure_absent_from_referenced_evidence() -> None:
     assert "figure.untraceable" in {
         issue.code for issue in evaluation.severe_issues
     }
+
+
+@pytest.mark.unit
+def test_eval_accepts_only_memory_refs_supplied_to_the_current_run() -> None:
+    bundle, report, decision = _base_output()
+    memory = _memory_for(bundle, decision)
+    decision = decision.model_copy(update={"memory_refs": memory.refs})
+
+    accepted = validate_research_output(
+        bundle=bundle,
+        reports=(report,),
+        decision=decision,
+        memory=memory,
+    )
+    unresolved = validate_research_output(
+        bundle=bundle,
+        reports=(report,),
+        decision=decision.model_copy(
+            update={"memory_refs": ("memory:not-supplied",)}
+        ),
+        memory=memory,
+    )
+
+    assert accepted.severe_issues == ()
+    assert "memory_ref.unresolved" in {
+        issue.code for issue in unresolved.severe_issues
+    }
+
+
+@pytest.mark.unit
+def test_eval_never_treats_historical_memory_as_current_evidence() -> None:
+    bundle, report, decision = _base_output()
+    historical_ref = "ev_deadbeefdead"
+    memory = _memory_for(
+        bundle,
+        decision,
+        evidence_refs=(historical_ref,),
+    )
+    decision = decision.model_copy(
+        update={
+            "thesis": "Historical memory reported 99% growth.",
+            "evidence_refs": (historical_ref,),
+            "memory_refs": memory.refs,
+        }
+    )
+
+    evaluation = validate_research_output(
+        bundle=bundle,
+        reports=(report,),
+        decision=decision,
+        memory=memory,
+    )
+
+    assert {"evidence_ref.unresolved", "figure.untraceable"} <= {
+        issue.code for issue in evaluation.severe_issues
+    }
+
+
+@pytest.mark.unit
+def test_eval_rejects_memory_refs_in_the_evidence_channel() -> None:
+    bundle, report, decision = _base_output()
+    memory = _memory_for(bundle, decision)
+    decision = decision.model_copy(
+        update={
+            "evidence_refs": memory.refs,
+            "memory_refs": memory.refs,
+        }
+    )
+
+    evaluation = validate_research_output(
+        bundle=bundle,
+        reports=(report,),
+        decision=decision,
+        memory=memory,
+    )
+
+    assert "memory_ref.used_as_evidence" in {
+        issue.code for issue in evaluation.severe_issues
+    }
+
+
+@pytest.mark.unit
+def test_eval_rejects_memory_for_a_different_instrument() -> None:
+    bundle, report, decision = _base_output()
+    memory = _memory_for(bundle, decision).model_copy(
+        update={"instrument": "DIFFERENT"}
+    )
+
+    evaluation = validate_research_output(
+        bundle=bundle,
+        reports=(report,),
+        decision=decision.model_copy(update={"memory_refs": memory.refs}),
+        memory=memory,
+    )
+
+    assert "memory.instrument_mismatch" in {
+        issue.code for issue in evaluation.severe_issues
+    }
+
+
+@pytest.mark.unit
+def test_memory_context_rejects_duplicate_or_misclassified_records() -> None:
+    bundle, _, decision = _base_output()
+    memory = _memory_for(bundle, decision)
+    item = memory.items[0]
+
+    with pytest.raises(ValidationError, match="memory refs must be unique"):
+        MemoryContext(
+            instrument=bundle.instrument,
+            market=memory.market,
+            items=(item, item),
+        )
+    with pytest.raises(
+        ValidationError,
+        match="same-ticker memory must match",
+    ):
+        MemoryContext(
+            instrument="DIFFERENT",
+            market=memory.market,
+            items=(item,),
+        )
+    cross = item.model_copy(
+        update={
+            "scope": "same_market",
+            "decision": None,
+            "outcome": None,
+        }
+    )
+    with pytest.raises(
+        ValidationError,
+        match="same-market memory must be another instrument",
+    ):
+        MemoryContext(
+            instrument=bundle.instrument,
+            market=memory.market,
+            items=(cross,),
+        )
 
 
 @pytest.mark.unit
@@ -518,6 +701,30 @@ def test_release_gate_requires_three_repetitions() -> None:
     measurements["current_standard"] = measurements["current_standard"][:-1]
 
     with pytest.raises(ValueError, match="repetitions 1, 2, 3"):
+        evaluate_release_gates(**measurements)
+
+
+@pytest.mark.unit
+def test_release_gate_rejects_duplicate_repetitions() -> None:
+    measurements = _passing_measurements()
+    measurements["current_standard"] = (
+        *measurements["current_standard"],
+        measurements["current_standard"][0],
+    )
+
+    with pytest.raises(ValueError, match="duplicate measurement"):
+        evaluate_release_gates(**measurements)
+
+
+@pytest.mark.unit
+def test_release_gate_rejects_wrong_profile_collection() -> None:
+    measurements = _passing_measurements()
+    measurements["current_standard"] = tuple(
+        item.model_copy(update={"profile": RunProfile.FAST})
+        for item in measurements["current_standard"]
+    )
+
+    with pytest.raises(ValueError, match="requires profile standard"):
         evaluate_release_gates(**measurements)
 
 

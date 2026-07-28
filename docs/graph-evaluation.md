@@ -26,6 +26,10 @@ calling an LLM or network source. They verify graph-facing contracts such as:
 - research decisions contain no account sizing, entry, stop, target, order, or
   portfolio-weight instructions;
 - expected rating and seeded risk terms remain consistent.
+- decision `memory:*` references resolve only against memory supplied to the
+  current run;
+- historical memory references and figures cannot enter the current
+  `evidence_refs` channel.
 
 Run them with:
 
@@ -45,6 +49,9 @@ Performance gates require an external, opt-in run that records
 - the same model for baseline Standard, current Standard, and current Deep;
 - the same case IDs in all three groups;
 - exactly repetitions 1, 2, and 3 for every case/profile;
+- Standard rows only in the baseline/current Standard groups and Deep rows only
+  in the current Deep group;
+- no duplicate case/profile/repetition rows;
 - observed token counts and wall time from the runtime metrics callback;
 - deterministic contract evaluation of each output.
 
@@ -82,8 +89,9 @@ authorization/provider headers must not be captured.
 | Standard wall time | median at least 25% below baseline |
 | Deep risk recall | median at least 10 percentage points above current Standard |
 
-The evaluator rejects incomplete repetition matrices, mismatched case sets, and
-mixed model identities before calculating gates.
+The evaluator rejects incomplete or duplicate repetition matrices, wrong-profile
+collections, mismatched case sets, and mixed model identities before calculating
+gates.
 
 Deep is not releaseable as a supported profile until its risk-recall gate
 passes. A failure should lead to prompt/topology adjustment and another recorded

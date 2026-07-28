@@ -14,6 +14,7 @@ from tradingagents.application.contracts import (
     AnalystReport,
     EvidenceBundle,
     EvidenceQuality,
+    MemoryContext,
     ResearchDecision,
     ResearchRating,
     RunProfile,
@@ -79,6 +80,7 @@ def validate_research_output(
     bundle: EvidenceBundle,
     reports: Iterable[AnalystReport],
     decision: ResearchDecision,
+    memory: MemoryContext | None = None,
     expected_rating: ResearchRating | None = None,
     expected_risk_terms: Iterable[str] = (),
 ) -> OutputEvaluation:
@@ -149,6 +151,46 @@ def validate_research_output(
             )
 
     _check_refs(decision.evidence_refs, valid_refs, "decision", issues)
+    valid_memory_refs = set(memory.refs if memory is not None else ())
+    if (
+        memory is not None
+        and memory.instrument.casefold() != bundle.instrument.casefold()
+    ):
+        issues.append(
+            EvalIssue(
+                severity="severe",
+                code="memory.instrument_mismatch",
+                location="memory.instrument",
+                message=(
+                    f"Memory for {memory.instrument} cannot calibrate "
+                    f"{bundle.instrument}."
+                ),
+            )
+        )
+    for ref in decision.memory_refs:
+        if ref not in valid_memory_refs:
+            issues.append(
+                EvalIssue(
+                    severity="severe",
+                    code="memory_ref.unresolved",
+                    location="decision.memory_refs",
+                    message=(
+                        f"Memory ref {ref} was not supplied to this run."
+                    ),
+                )
+            )
+    for ref in decision.evidence_refs:
+        if ref.startswith("memory:"):
+            issues.append(
+                EvalIssue(
+                    severity="severe",
+                    code="memory_ref.used_as_evidence",
+                    location="decision.evidence_refs",
+                    message=(
+                        f"Memory ref {ref} cannot be used as current evidence."
+                    ),
+                )
+            )
     decision_texts = (
         ("thesis", decision.thesis),
         *((f"catalysts[{i}]", value) for i, value in enumerate(decision.catalysts)),
@@ -218,12 +260,16 @@ def evaluate_release_gates(
     baseline = tuple(baseline_standard)
     standard = tuple(current_standard)
     deep = tuple(current_deep)
-    for label, measurements in (
-        ("baseline_standard", baseline),
-        ("current_standard", standard),
-        ("current_deep", deep),
+    for label, measurements, expected_profile in (
+        ("baseline_standard", baseline, RunProfile.STANDARD),
+        ("current_standard", standard, RunProfile.STANDARD),
+        ("current_deep", deep, RunProfile.DEEP),
     ):
-        _validate_measurement_matrix(label, measurements)
+        _validate_measurement_matrix(
+            label,
+            measurements,
+            expected_profile=expected_profile,
+        )
     baseline_cases = {item.case_id for item in baseline}
     if (
         {item.case_id for item in standard} != baseline_cases
@@ -330,11 +376,26 @@ def _evidence_payload(item: object) -> str:
 def _validate_measurement_matrix(
     label: str,
     measurements: tuple[EvalMeasurement, ...],
+    *,
+    expected_profile: RunProfile,
 ) -> None:
     if not measurements:
         raise ValueError(f"{label} must not be empty")
     repetitions: dict[tuple[str, RunProfile], set[int]] = defaultdict(set)
+    seen: set[tuple[str, RunProfile, int]] = set()
     for item in measurements:
+        if item.profile is not expected_profile:
+            raise ValueError(
+                f"{label} requires profile {expected_profile.value}, "
+                f"got {item.profile.value}"
+            )
+        key = (item.case_id, item.profile, item.repetition)
+        if key in seen:
+            raise ValueError(
+                f"{label} contains duplicate measurement "
+                f"{item.case_id}/{item.profile.value}/{item.repetition}"
+            )
+        seen.add(key)
         repetitions[(item.case_id, item.profile)].add(item.repetition)
     incomplete = [
         f"{case_id}/{profile.value}"

@@ -411,6 +411,31 @@ class MemoryContext(FrozenModel):
     market: str | None = None
     items: tuple[MemoryRecord, ...] = ()
 
+    @model_validator(mode="after")
+    def validate_context(self) -> MemoryContext:
+        refs = [item.ref for item in self.items]
+        if len(refs) != len(set(refs)):
+            raise ValueError("memory refs must be unique")
+        instrument = self.instrument.casefold()
+        for item in self.items:
+            if (
+                item.scope == "same_ticker"
+                and item.ticker.casefold() != instrument
+            ):
+                raise ValueError(
+                    "same-ticker memory must match the current instrument"
+                )
+            if item.scope == "same_market" and (
+                item.ticker.casefold() == instrument
+                or self.market is None
+                or item.market != self.market
+            ):
+                raise ValueError(
+                    "same-market memory must be another instrument "
+                    "in the current market"
+                )
+        return self
+
     @property
     def refs(self) -> tuple[str, ...]:
         return tuple(item.ref for item in self.items)
