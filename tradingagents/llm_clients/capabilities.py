@@ -24,6 +24,7 @@ StructuredMethod = Literal[
     "json_schema",       # uses response_format={"type":"json_schema",...}
     "none",              # no structured output available; caller falls back to free-text
 ]
+ThinkingMode = Literal["enabled", "disabled"]
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,10 @@ class ModelCapabilities:
     # (Coding Plan, MiniMax-Text-01, etc.), so we only set it where the
     # model actually consumes it. (#826)
     requires_reasoning_split: bool = False
+    # Provider-specific safety ceiling used only for typed output calls.
+    # DeepSeek JSON Output recommends an explicit max_tokens value to avoid
+    # unbounded whitespace or partially emitted JSON.
+    structured_output_max_tokens: int | None = None
 
 
 # The legacy reasoner endpoint accepts ``tools`` but rejects forced
@@ -55,16 +60,27 @@ _DEEPSEEK_REASONER = ModelCapabilities(
     requires_reasoning_content_roundtrip=True,
 )
 
-# DeepSeek V4 exposes tool selection and JSON Output, but the live
-# thinking-mode endpoint rejects a forced schema tool with
-# ``Thinking mode does not support this tool_choice``. Prefer JSON mode so
-# post-analyst nodes never depend on an optional tool call.
-_DEEPSEEK_V4 = ModelCapabilities(
+# DeepSeek V4 defaults to thinking mode. In that mode the official endpoint
+# rejects ``required`` and named ``tool_choice`` values, so post-analyst
+# nodes use JSON Output instead of depending on an optional tool call.
+_DEEPSEEK_V4_THINKING = ModelCapabilities(
     supports_tool_choice=False,
     supports_json_mode=True,
     supports_json_schema=False,
     preferred_structured_method="json_mode",
     requires_reasoning_content_roundtrip=True,
+    structured_output_max_tokens=16_384,
+)
+
+# The same V4 model IDs accept forced tools when thinking is explicitly
+# disabled. Keep this separate from the default thinking-mode contract so a
+# future non-thinking caller can use LangChain's schema tool reliably.
+_DEEPSEEK_V4_NON_THINKING = ModelCapabilities(
+    supports_tool_choice=True,
+    supports_json_mode=True,
+    supports_json_schema=False,
+    preferred_structured_method="function_calling",
+    structured_output_max_tokens=16_384,
 )
 
 _DEEPSEEK_CHAT = ModelCapabilities(
@@ -102,8 +118,8 @@ _DEFAULT = ModelCapabilities(
 _BY_ID: dict[str, ModelCapabilities] = {
     "deepseek-chat": _DEEPSEEK_CHAT,
     "deepseek-reasoner": _DEEPSEEK_REASONER,
-    "deepseek-v4-flash": _DEEPSEEK_V4,
-    "deepseek-v4-pro": _DEEPSEEK_V4,
+    "deepseek-v4-flash": _DEEPSEEK_V4_THINKING,
+    "deepseek-v4-pro": _DEEPSEEK_V4_THINKING,
     # MiniMax — full official model lineup per
     # platform.minimax.io/docs/api-reference/text-openai-api
     "MiniMax-M2.7": _MINIMAX_THINKING,
@@ -115,17 +131,26 @@ _BY_ID: dict[str, ModelCapabilities] = {
     "MiniMax-M2": _MINIMAX_THINKING,
 }
 
-# Forward-compat patterns. New ``deepseek-v5-*`` models inherit the V4 API
-# contract, while reasoner variants retain the legacy tool-choice restriction.
+# Pattern matches are limited to API families whose compatibility contract is
+# established. Future versioned DeepSeek models must be added after discovery
+# or an explicit probe instead of silently inheriting V4 behavior.
 _BY_PATTERN: list[tuple[re.Pattern[str], ModelCapabilities]] = [
-    (re.compile(r"^deepseek-v\d"), _DEEPSEEK_V4),
     (re.compile(r"^deepseek-reasoner"), _DEEPSEEK_REASONER),
     (re.compile(r"^MiniMax-M\d"), _MINIMAX_THINKING),
 ]
 
 
-def get_capabilities(model_name: str) -> ModelCapabilities:
-    """Resolve capabilities by exact ID, then pattern, then default."""
+def get_capabilities(
+    model_name: str,
+    *,
+    thinking_mode: ThinkingMode | None = None,
+) -> ModelCapabilities:
+    """Resolve capabilities by model and, where relevant, thinking mode."""
+    if (
+        model_name in {"deepseek-v4-flash", "deepseek-v4-pro"}
+        and thinking_mode == "disabled"
+    ):
+        return _DEEPSEEK_V4_NON_THINKING
     if model_name in _BY_ID:
         return _BY_ID[model_name]
     for pattern, caps in _BY_PATTERN:

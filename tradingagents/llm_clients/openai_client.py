@@ -8,7 +8,7 @@ from langchain_openai import ChatOpenAI
 
 from .api_key_env import get_api_key_env
 from .base_client import BaseLLMClient, normalize_content
-from .capabilities import get_capabilities
+from .capabilities import ModelCapabilities, ThinkingMode, get_capabilities
 from .reasoning_effort import RESOLVED_MARKER, resolve_native_reasoning_value
 from .validators import validate_model
 
@@ -31,16 +31,32 @@ class NormalizedChatOpenAI(ChatOpenAI):
     stays small.
     """
 
+    def _model_capabilities(self) -> ModelCapabilities:
+        return get_capabilities(self.model_name)
+
     def invoke(self, input, config=None, **kwargs):
         return normalize_content(super().invoke(input, config, **kwargs))
 
     @property
     def preferred_structured_output_method(self) -> str:
         """Expose the selected transport for application-level auditing."""
-        return get_capabilities(self.model_name).preferred_structured_method
+        return self._model_capabilities().preferred_structured_method
+
+    @property
+    def structured_output_max_tokens(self) -> int | None:
+        """Return an explicit typed-output ceiling when the provider needs one."""
+        capability_limit = (
+            self._model_capabilities().structured_output_max_tokens
+        )
+        if capability_limit is None:
+            return None
+        configured = getattr(self, "max_tokens", None)
+        if isinstance(configured, int) and configured > 0:
+            return configured
+        return capability_limit
 
     def with_structured_output(self, schema, *, method=None, **kwargs):
-        caps = get_capabilities(self.model_name)
+        caps = self._model_capabilities()
         if caps.preferred_structured_method == "none":
             raise NotImplementedError(
                 f"{self.model_name} has no structured-output method available; "
@@ -97,6 +113,22 @@ def _input_to_messages(input_: Any) -> list:
     return []
 
 
+def _configured_thinking_mode(client: Any) -> ThinkingMode | None:
+    """Read DeepSeek's explicit mode without treating omission as disabled."""
+    extra_body = getattr(client, "extra_body", None)
+    if not isinstance(extra_body, dict):
+        return None
+    thinking = extra_body.get("thinking")
+    if not isinstance(thinking, dict):
+        return None
+    mode = thinking.get("type")
+    if mode == "enabled":
+        return "enabled"
+    if mode == "disabled":
+        return "disabled"
+    return None
+
+
 class DeepSeekChatOpenAI(NormalizedChatOpenAI):
     """DeepSeek-specific overrides on top of the OpenAI-compatible client.
 
@@ -109,8 +141,15 @@ class DeepSeekChatOpenAI(NormalizedChatOpenAI):
 
     Structured-output handling is delegated to the capability dispatch in
     ``NormalizedChatOpenAI.with_structured_output``. V4 thinking models prefer
-    JSON mode; the legacy reasoner endpoint continues to bind an unforced tool.
+    JSON mode; V4 with thinking explicitly disabled can force a schema tool;
+    the legacy reasoner endpoint continues to bind an unforced tool.
     """
+
+    def _model_capabilities(self) -> ModelCapabilities:
+        return get_capabilities(
+            self.model_name,
+            thinking_mode=_configured_thinking_mode(self),
+        )
 
     def _get_request_payload(self, input_, *, stop=None, **kwargs):
         payload = super()._get_request_payload(input_, stop=stop, **kwargs)
@@ -176,7 +215,8 @@ class MinimaxChatOpenAI(NormalizedChatOpenAI):
 
 # Kwargs forwarded from user config to ChatOpenAI
 _PASSTHROUGH_KWARGS = (
-    "timeout", "max_retries", "reasoning_effort", "temperature",
+    "timeout", "max_retries", "max_tokens", "reasoning_effort", "temperature",
+    "extra_body",
     "api_key", "callbacks", "http_client", "http_async_client",
 )
 

@@ -25,28 +25,45 @@ class TestExactIdMatches:
         assert caps.supports_tool_choice is False
         assert caps.preferred_structured_method == "json_mode"
         assert caps.requires_reasoning_content_roundtrip is True
+        assert caps.structured_output_max_tokens == 16_384
 
     def test_deepseek_v4_pro_prefers_json_mode(self):
-        caps = get_capabilities("deepseek-v4-pro")
+        caps = get_capabilities(
+            "deepseek-v4-pro",
+            thinking_mode="enabled",
+        )
         assert caps.supports_tool_choice is False
         assert caps.preferred_structured_method == "json_mode"
         assert caps.requires_reasoning_content_roundtrip is True
+
+    @pytest.mark.parametrize(
+        "model",
+        ("deepseek-v4-flash", "deepseek-v4-pro"),
+    )
+    def test_deepseek_v4_non_thinking_supports_forced_tools(
+        self,
+        model: str,
+    ):
+        caps = get_capabilities(model, thinking_mode="disabled")
+        assert caps.supports_tool_choice is True
+        assert caps.preferred_structured_method == "function_calling"
+        assert caps.requires_reasoning_content_roundtrip is False
+        assert caps.structured_output_max_tokens == 16_384
 
 
 @pytest.mark.unit
 class TestPatternMatches:
-    """Forward-compat regex patterns catch unknown DeepSeek and MiniMax variants."""
+    """Patterns are reserved for API families with an established contract."""
 
-    def test_future_deepseek_v5_inherits_thinking_quirks(self):
+    def test_future_deepseek_v5_does_not_inherit_v4_contract(self):
         caps = get_capabilities("deepseek-v5-flash")
-        assert caps.supports_tool_choice is False
-        assert caps.preferred_structured_method == "json_mode"
-        assert caps.requires_reasoning_content_roundtrip is True
+        assert caps.supports_tool_choice is True
+        assert caps.preferred_structured_method == "function_calling"
+        assert caps.requires_reasoning_content_roundtrip is False
 
-    def test_future_deepseek_v9_inherits_thinking_quirks(self):
+    def test_future_deepseek_v9_requires_explicit_capability_discovery(self):
         caps = get_capabilities("deepseek-v9-anything")
-        assert caps.supports_tool_choice is False
-        assert caps.preferred_structured_method == "json_mode"
+        assert caps == get_capabilities("totally-made-up-model-id")
 
     def test_reasoner_variant_inherits_thinking_quirks(self):
         caps = get_capabilities("deepseek-reasoner-pro")
@@ -115,7 +132,7 @@ class TestDefault:
         assert caps.supports_tool_choice is True
 
     def test_exact_match_precedes_pattern(self):
-        """deepseek-chat must NOT match the v\\d regex."""
+        """The legacy exact ID keeps its declared non-thinking behavior."""
         caps = get_capabilities("deepseek-chat")
         assert caps.supports_tool_choice is True
 

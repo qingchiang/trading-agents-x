@@ -74,21 +74,36 @@ class StructuredOutputRunner(Generic[StructuredModel]):
     ) -> StructuredOutputResult[StructuredModel]:
         primary_reason = "structured_binding_error"
         primary_generation_method = _primary_generation_method(self.llm)
+        bind_kwargs = _structured_output_kwargs(self.llm)
+        primary_prompt = (
+            _primary_json_prompt(
+                prompt,
+                schema=self.schema,
+                example=example,
+                allowed_evidence_refs=allowed_evidence_refs,
+                allowed_memory_refs=allowed_memory_refs,
+            )
+            if primary_generation_method is ArtifactGenerationMethod.JSON_MODE
+            else prompt
+        )
         try:
             primary = self.llm.with_structured_output(
                 self.schema,
                 include_raw=True,
+                **bind_kwargs,
             )
         except Exception:
             primary = None
         if primary is not None:
             try:
-                response = primary.invoke(prompt)
+                response = primary.invoke(primary_prompt)
             except Exception:
                 primary_reason = "provider_error"
             else:
                 parsed, raw = _unpack_response(response, self.schema)
-                if parsed is not None:
+                if _is_truncated(raw):
+                    primary_reason = "output_truncated"
+                elif parsed is not None:
                     try:
                         value = self._validate(parsed)
                     except _InvalidOutput as exc:
@@ -135,22 +150,28 @@ class StructuredOutputRunner(Generic[StructuredModel]):
                 self.schema,
                 method="json_mode",
                 include_raw=True,
+                **bind_kwargs,
             )
         except Exception:
             recovery = None
 
+        failure_reason = "structured_binding_error"
         try:
             response = (
                 recovery.invoke(recovery_prompt)
                 if recovery is not None
-                else self.llm.invoke(recovery_prompt)
+                else self.llm.invoke(recovery_prompt, **bind_kwargs)
             )
         except Exception:
             failure_reason = "provider_error"
         else:
             parsed, raw = _unpack_response(response, self.schema)
-            candidate = parsed
-            if candidate is None:
+            if _is_truncated(raw):
+                failure_reason = "output_truncated"
+                candidate = None
+            else:
+                candidate = parsed
+            if candidate is None and failure_reason != "output_truncated":
                 try:
                     candidate = _strict_json_object(raw)
                 except _InvalidOutput as exc:
@@ -226,6 +247,13 @@ def _primary_generation_method(llm: Any) -> ArtifactGenerationMethod:
     return ArtifactGenerationMethod.TOOL_CALL
 
 
+def _structured_output_kwargs(llm: Any) -> dict[str, Any]:
+    max_tokens = getattr(llm, "structured_output_max_tokens", None)
+    if isinstance(max_tokens, int) and max_tokens > 0:
+        return {"max_tokens": max_tokens}
+    return {}
+
+
 def _unpack_response(
     response: Any,
     schema: type[StructuredModel],
@@ -239,6 +267,16 @@ def _unpack_response(
     if isinstance(response, dict):
         return response, None
     return None, response
+
+
+def _is_truncated(raw: Any) -> bool:
+    metadata = getattr(raw, "response_metadata", None)
+    if not isinstance(metadata, dict) and isinstance(raw, dict):
+        metadata = raw.get("response_metadata")
+    if not isinstance(metadata, dict):
+        return False
+    finish_reason = metadata.get("finish_reason")
+    return finish_reason in {"length", "max_tokens", "max_output_tokens"}
 
 
 def _strict_json_object(raw: Any) -> dict[str, Any]:
@@ -282,7 +320,49 @@ def _recovery_prompt(
     allowed_evidence_refs: tuple[str, ...],
     allowed_memory_refs: tuple[str, ...],
 ) -> str:
-    return f"""The previous response did not satisfy the required output contract.
+    return _json_contract_prompt(
+        original_prompt,
+        schema=schema,
+        example=example,
+        allowed_evidence_refs=allowed_evidence_refs,
+        allowed_memory_refs=allowed_memory_refs,
+        retry=True,
+    )
+
+
+def _primary_json_prompt(
+    original_prompt: str,
+    *,
+    schema: type[BaseModel],
+    example: dict[str, Any],
+    allowed_evidence_refs: tuple[str, ...],
+    allowed_memory_refs: tuple[str, ...],
+) -> str:
+    return _json_contract_prompt(
+        original_prompt,
+        schema=schema,
+        example=example,
+        allowed_evidence_refs=allowed_evidence_refs,
+        allowed_memory_refs=allowed_memory_refs,
+        retry=False,
+    )
+
+
+def _json_contract_prompt(
+    original_prompt: str,
+    *,
+    schema: type[BaseModel],
+    example: dict[str, Any],
+    allowed_evidence_refs: tuple[str, ...],
+    allowed_memory_refs: tuple[str, ...],
+    retry: bool,
+) -> str:
+    introduction = (
+        "The previous response did not satisfy the required output contract."
+        if retry
+        else "Produce the required structured result using JSON Output."
+    )
+    return f"""{introduction}
 Return exactly one JSON object and no Markdown, prose, or code fence.
 The object must satisfy the JSON Schema and all semantic requirements in the
 original task. Use only refs from the allowlists below.
