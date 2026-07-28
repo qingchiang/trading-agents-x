@@ -334,7 +334,7 @@ def test_worker_once_processes_at_most_one_item(
     assert "Queue is empty" in result.output
 
 
-def test_runs_list_show_cancel_and_rerun(
+def test_runs_list_show_and_cancel(
     monkeypatch,
     cli_service: AnalysisService,
 ) -> None:
@@ -346,15 +346,12 @@ def test_runs_list_show_cancel_and_rerun(
     listed = runner.invoke(cli.app, ["runs", "list", "--json"])
     shown = runner.invoke(cli.app, ["runs", "show", queued.id])
     cancelled = runner.invoke(cli.app, ["runs", "cancel", queued.id])
-    rerun = runner.invoke(cli.app, ["runs", "rerun", queued.id])
 
-    assert listed.exit_code == shown.exit_code == cancelled.exit_code == rerun.exit_code == 0
+    assert listed.exit_code == shown.exit_code == cancelled.exit_code == 0
     assert json.loads(listed.stdout)[0]["id"] == queued.id
     assert json.loads(shown.stdout)["result"] is None
     assert json.loads(cancelled.stdout)["status"] == "cancelled"
-    rerun_payload = json.loads(rerun.stdout)
-    assert rerun_payload["parent_run_id"] == queued.id
-    assert rerun_payload["id"] != queued.id
+    assert runner.invoke(cli.app, ["runs", "rerun", queued.id]).exit_code != 0
 
 
 def test_runs_retry_creates_a_new_attempt(

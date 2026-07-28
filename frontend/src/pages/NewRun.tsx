@@ -6,8 +6,9 @@ import {
   type Capabilities,
   type DiscoveredModel,
   type ProviderModelCatalog,
+  type RunCreateRequest,
 } from "../api/client";
-import { useNavigate } from "../router";
+import { Link, useLocation, useNavigate } from "../router";
 
 const analystKeys = ["market", "social", "news", "fundamentals"] as const;
 const customModelValue = "__custom_model_id__";
@@ -15,6 +16,11 @@ const customModelValue = "__custom_model_id__";
 export default function NewRun() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
+  const fromRun = useMemo(
+    () => new URLSearchParams(location.search).get("from_run")?.trim() ?? "",
+    [location.search],
+  );
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   const [modelCatalog, setModelCatalog] =
     useState<ProviderModelCatalog | null>(null);
@@ -34,26 +40,81 @@ export default function NewRun() {
   const [quickReasoning, setQuickReasoning] = useState("provider_default");
   const [deepReasoning, setDeepReasoning] = useState("provider_default");
   const [outputLanguage, setOutputLanguage] = useState("en");
+  const [sourceRunId, setSourceRunId] = useState("");
+  const [templateWarning, setTemplateWarning] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const submission = useRef<{ fingerprint: string; key: string } | null>(null);
 
   useEffect(() => {
-    void api
-      .capabilities()
-      .then((data) => {
+    let active = true;
+    setTemplateWarning("");
+    setSourceRunId("");
+    const bootstrap = async () => {
+      try {
+        const data = await api.capabilities();
+        let source = null;
+        if (fromRun) {
+          try {
+            source = await api.run(fromRun);
+          } catch {
+            if (active) {
+              setTemplateWarning(
+                t("templateLoadFailed", { id: fromRun }),
+              );
+            }
+          }
+        }
+        if (!active) return;
         setCapabilities(data);
         const selectableProviders = Object.entries(data.providers).filter(
           ([, config]) => config.selectable,
         );
-        const nextProvider = data.providers[data.defaults.llm_provider]?.selectable
+        const defaultProvider = data.providers[data.defaults.llm_provider]?.selectable
           ? data.defaults.llm_provider
           : (selectableProviders[0]?.[0] ?? "");
+        const sourceRequest = source?.run.request;
+        const sourceIsTerminal =
+          source !== null &&
+          ["succeeded", "failed", "cancelled"].includes(source.run.status);
+        if (source !== null && !sourceIsTerminal) {
+          setTemplateWarning(t("templateSourceNotTerminal"));
+        }
+        const sourceProvider =
+          sourceIsTerminal ? (sourceRequest?.llm_provider ?? "") : "";
+        const sourceProviderAvailable =
+          Boolean(sourceProvider) &&
+          Boolean(data.providers[sourceProvider]?.selectable);
+        const nextProvider = sourceProviderAvailable
+          ? sourceProvider
+          : defaultProvider;
         setProfile(
-          data.defaults.profile as "fast" | "standard" | "deep",
+          (sourceIsTerminal
+            ? sourceRequest?.profile
+            : data.defaults.profile) as "fast" | "standard" | "deep",
+        );
+        setTicker(sourceIsTerminal ? (sourceRequest?.ticker ?? "") : "");
+        setAnalysisDate(
+          sourceIsTerminal
+            ? (sourceRequest?.analysis_date ?? today())
+            : today(),
+        );
+        setAnalysts(
+          sourceIsTerminal
+            ? [...(sourceRequest?.analysts ?? analystKeys)]
+            : [...analystKeys],
         );
         setProvider(nextProvider);
-        if (nextProvider === data.defaults.llm_provider) {
+        if (sourceIsTerminal && sourceProviderAvailable) {
+          setQuickModel(sourceRequest?.quick_model ?? "");
+          setDeepModel(sourceRequest?.deep_model ?? "");
+          setQuickReasoning(
+            sourceRequest?.quick_reasoning_effort ?? "provider_default",
+          );
+          setDeepReasoning(
+            sourceRequest?.deep_reasoning_effort ?? "provider_default",
+          );
+        } else if (nextProvider === data.defaults.llm_provider) {
           setQuickModel(data.defaults.quick_model);
           setDeepModel(data.defaults.deep_model);
           setQuickReasoning(
@@ -68,13 +129,36 @@ export default function NewRun() {
           setQuickReasoning("provider_default");
           setDeepReasoning("provider_default");
         }
-        setOutputLanguage(data.defaults.output_language);
+        setOutputLanguage(
+          sourceIsTerminal
+            ? (sourceRequest?.output_language ?? data.defaults.output_language)
+            : data.defaults.output_language,
+        );
+        setSourceRunId(sourceIsTerminal ? (source?.run.id ?? "") : "");
+        if (
+          sourceIsTerminal &&
+          sourceProvider &&
+          !sourceProviderAvailable
+        ) {
+          setTemplateWarning(
+            t("templateProviderUnavailable", {
+              provider: sourceProvider,
+            }),
+          );
+        } else if (sourceIsTerminal) {
+          setTemplateWarning("");
+        }
         if (!nextProvider) setError(t("noConfiguredProviders"));
-      })
-      .catch((cause) => {
+      } catch (cause) {
+        if (!active) return;
         setError(cause instanceof Error ? cause.message : t("error"));
-      });
-  }, [t]);
+      }
+    };
+    void bootstrap();
+    return () => {
+      active = false;
+    };
+  }, [fromRun, t]);
 
   useEffect(() => {
     if (!capabilities || !provider) return;
@@ -105,12 +189,12 @@ export default function NewRun() {
         setQuickModel(selectedQuick);
         setDeepModel(selectedDeep);
         setQuickReasoning((current) =>
-          reasoningOptions(catalog, selectedQuick).includes(current)
+          reasoningOptions(catalog, selectedQuick, current).includes(current)
             ? current
             : "provider_default",
         );
         setDeepReasoning((current) =>
-          reasoningOptions(catalog, selectedDeep).includes(current)
+          reasoningOptions(catalog, selectedDeep, current).includes(current)
             ? current
             : "provider_default",
         );
@@ -134,8 +218,10 @@ export default function NewRun() {
             ? capabilities.defaults.deep_model
             : customModelValue),
         );
-        setQuickReasoning("provider_default");
-        setDeepReasoning("provider_default");
+        if (!sourceRunId) {
+          setQuickReasoning("provider_default");
+          setDeepReasoning("provider_default");
+        }
       })
       .finally(() => {
         if (active) setModelsLoading(false);
@@ -166,10 +252,9 @@ export default function NewRun() {
     "ja",
   ];
   const configuredOutputLanguage = capabilities?.defaults.output_language ?? "";
-  const customConfiguredLanguage =
-    configuredOutputLanguage &&
-    !reportLanguageOptions.includes(configuredOutputLanguage)
-      ? configuredOutputLanguage
+  const customOutputLanguage =
+    outputLanguage && !reportLanguageOptions.includes(outputLanguage)
+      ? outputLanguage
       : "";
 
   const changeProvider = (next: string) => {
@@ -211,7 +296,7 @@ export default function NewRun() {
       quickModel === customModelValue ? quickCustomModel.trim() : quickModel;
     const resolvedDeepModel =
       deepModel === customModelValue ? deepCustomModel.trim() : deepModel;
-    const payload: AnalysisRequest = {
+    const payload: RunCreateRequest = {
       ticker,
       analysis_date: analysisDate,
       asset_type: null,
@@ -223,6 +308,7 @@ export default function NewRun() {
       quick_reasoning_effort: quickReasoning,
       deep_reasoning_effort: deepReasoning,
       output_language: outputLanguage,
+      source_run_id: sourceRunId || null,
     };
     try {
       const fingerprint = JSON.stringify(payload);
@@ -249,6 +335,15 @@ export default function NewRun() {
           <p className="subtitle">{t("evidenceSnapshotHint")}</p>
         </div>
       </header>
+      {sourceRunId && (
+        <div className="panel template-source">
+          {t("templateFromRun")}{" "}
+          <Link to={`/runs/${encodeURIComponent(sourceRunId)}`}>
+            {sourceRunId}
+          </Link>
+        </div>
+      )}
+      {templateWarning && <div className="alert">{templateWarning}</div>}
       <form className="run-form" onSubmit={submit}>
         <article className="panel form-section">
           <span className="step">01</span>
@@ -395,14 +490,22 @@ export default function NewRun() {
               <ReasoningSelect
                 label={t("quickReasoning")}
                 value={quickReasoning}
-                options={reasoningOptions(modelCatalog, quickModel)}
+                options={reasoningOptions(
+                  modelCatalog,
+                  quickModel,
+                  quickReasoning,
+                )}
                 onChange={setQuickReasoning}
                 providerDefault={t("providerDefault")}
               />
               <ReasoningSelect
                 label={t("deepReasoning")}
                 value={deepReasoning}
-                options={reasoningOptions(modelCatalog, deepModel)}
+                options={reasoningOptions(
+                  modelCatalog,
+                  deepModel,
+                  deepReasoning,
+                )}
                 onChange={setDeepReasoning}
                 providerDefault={t("providerDefault")}
               />
@@ -412,11 +515,15 @@ export default function NewRun() {
                   value={outputLanguage}
                   onChange={(event) => setOutputLanguage(event.target.value)}
                 >
-                  {customConfiguredLanguage && (
-                    <option value={customConfiguredLanguage}>
-                      {t("configuredOutputLanguage", {
-                        value: customConfiguredLanguage,
-                      })}
+                  {customOutputLanguage && (
+                    <option value={customOutputLanguage}>
+                      {customOutputLanguage === configuredOutputLanguage
+                        ? t("configuredOutputLanguage", {
+                            value: customOutputLanguage,
+                          })
+                        : t("sourceOutputLanguage", {
+                            value: customOutputLanguage,
+                          })}
                     </option>
                   )}
                   {reportLanguageOptions.map((language) => (
@@ -481,7 +588,7 @@ function chooseModel(
   role: ModelRole,
 ) {
   const ids = new Set(catalog.models.map((model) => model.id));
-  if (current && current !== customModelValue && ids.has(current)) return current;
+  if (current && current !== customModelValue) return current;
   if (configuredDefault && ids.has(configuredDefault)) return configuredDefault;
   return (
     catalog.models.find((model) => model.default_roles.includes(role))?.id ??
@@ -521,12 +628,16 @@ function modelOptions(
 function reasoningOptions(
   catalog: ProviderModelCatalog | null,
   model: string,
+  current = "",
 ) {
-  if (!model || model === customModelValue) return ["provider_default"];
-  return (
-    catalog?.models.find((option) => option.id === model)?.reasoning_efforts ??
-    ["provider_default"]
-  );
+  const options =
+    !model || model === customModelValue
+      ? ["provider_default"]
+      : (catalog?.models.find((option) => option.id === model)
+          ?.reasoning_efforts ?? ["provider_default"]);
+  return current && !options.includes(current)
+    ? [...options, current]
+    : options;
 }
 
 function ReasoningSelect({

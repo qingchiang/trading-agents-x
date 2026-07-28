@@ -1,6 +1,7 @@
 import type { components } from "./types.generated";
 
 export type AnalysisRequest = components["schemas"]["AnalysisRequest"];
+export type RunCreateRequest = components["schemas"]["RunCreateRequest"];
 export type RunView = components["schemas"]["RunView"];
 export type RunPage = components["schemas"]["RunPage"];
 export type RunBatchResult = components["schemas"]["RunBatchResult"];
@@ -83,13 +84,13 @@ export const api = {
         attempt === undefined ? "" : `?attempt=${attempt}`
       }`,
     ),
-  createRun: (payload: AnalysisRequest, idempotencyKey: string) =>
+  createRun: (payload: RunCreateRequest, idempotencyKey: string) =>
     request<RunView>("/api/v1/runs", {
       method: "POST",
       headers: { "Idempotency-Key": idempotencyKey },
       body: JSON.stringify(payload),
     }),
-  action: (id: string, action: "cancel" | "retry" | "rerun") =>
+  action: (id: string, action: "cancel" | "retry") =>
     request<RunView>(`/api/v1/runs/${id}/${action}`, { method: "POST" }),
   memory: (query = "") =>
     request<MemoryEntry[]>(`/api/v1/memory${query}`),

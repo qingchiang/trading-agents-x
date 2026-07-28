@@ -125,13 +125,14 @@ leaves the run recoverable after lease expiry. Heartbeats extend active leases.
 
 - `retry` is valid for a failed run, increments its attempt, and reuses the
   compatible checkpoint thread.
-- `rerun` creates a linked run with a new ID and fresh data/evidence snapshot.
+- a terminal run can seed an editable New Run form; submitting it creates a
+  linked run with a new ID and fresh data/evidence snapshot.
 - a queued cancellation becomes terminal immediately;
 - a running cancellation is checked cooperatively at graph-node boundaries;
 - an in-flight provider call is not force-killed.
 
 Successful and cancelled runs delete their checkpoint thread. Failed runs keep
-it until retry/rerun handling makes the next lifecycle decision.
+it for retry or later archive cleanup.
 
 ### Database
 
@@ -345,7 +346,7 @@ roles, tenant isolation, or Internet-facing hardening.
 
 The default suite is offline. It covers configuration isolation, lifecycle
 transitions, lease recovery, event ordering, checkpoint resume/cleanup,
-SSE replay, cancellation/retry/rerun, SQLite backup, migration, memory
+SSE replay, cancellation/retry/run templates, SQLite backup, migration, memory
 selection, point-in-time evidence sealing, API security, frontend behavior,
 wheel contents, and Docker startup.
 

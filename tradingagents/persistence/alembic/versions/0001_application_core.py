@@ -22,7 +22,7 @@ def upgrade() -> None:
     op.create_table(
         "runs",
         sa.Column("id", sa.String(length=36), nullable=False),
-        sa.Column("parent_run_id", sa.String(length=36), nullable=True),
+        sa.Column("source_run_id", sa.String(length=36), nullable=True),
         sa.Column("idempotency_key", sa.String(length=200), nullable=True),
         sa.Column("status", sa.String(length=20), nullable=False),
         sa.Column("instrument_name", sa.String(length=300), nullable=True),
@@ -42,7 +42,7 @@ def upgrade() -> None:
         sa.Column("archived_at", sa.DateTime(), nullable=True),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(
-            ["parent_run_id"], ["runs.id"], ondelete="SET NULL"
+            ["source_run_id"], ["runs.id"], ondelete="SET NULL"
         ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("idempotency_key"),

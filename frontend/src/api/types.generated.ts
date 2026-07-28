@@ -221,6 +221,20 @@ export interface components {
       changed: number;
       runs: components["schemas"]["RunView"][];
     };
+    RunCreateRequest: {
+      analysis_date: string;
+      analysts?: ("market" | "social" | "news" | "fundamentals")[];
+      asset_type?: components["schemas"]["AssetType"] | null;
+      deep_model?: string | null;
+      deep_reasoning_effort?: string | null;
+      llm_provider?: string | null;
+      output_language?: components["schemas"]["ReportLanguage"] | string | null;
+      profile?: components["schemas"]["RunProfile"];
+      quick_model?: string | null;
+      quick_reasoning_effort?: string | null;
+      source_run_id?: string | null;
+      ticker: string;
+    };
     RunDetail: {
       result?: components["schemas"]["AnalysisResult"] | null;
       run: components["schemas"]["RunView"];
@@ -262,8 +276,8 @@ export interface components {
       id: string;
       instrument_name?: string | null;
       metrics?: components["schemas"]["RunMetrics"];
-      parent_run_id?: string | null;
       request: components["schemas"]["AnalysisRequest"];
+      source_run_id?: string | null;
       started_at?: string | null;
       status: components["schemas"]["RunStatus"];
       updated_at: string;

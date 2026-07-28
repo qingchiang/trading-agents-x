@@ -79,7 +79,7 @@ function LocationProbe() {
 const detail = {
   run: {
     id: "run-1",
-    parent_run_id: null,
+    source_run_id: null,
     status: "succeeded",
     request: {
       ticker: "NVDA",
@@ -419,6 +419,24 @@ test("restores deliberation and resolves evidence references across run views", 
   expect(localStorage.getItem("tradingagents-timeline-order")).toBe("oldest");
   expect(FakeEventSource.instance.closed).toBe(true);
   await vi.waitFor(() => expect(api.artifacts).toHaveBeenCalledTimes(3));
+});
+
+test("opens an editable new-run template instead of rerunning immediately", async () => {
+  render(
+    <Router initialPath="/runs/run-1">
+      <RunDetail />
+      <LocationProbe />
+    </Router>,
+  );
+
+  fireEvent.click(
+    await screen.findByRole("link", { name: "New from this run" }),
+  );
+
+  expect(screen.getByTestId("router-location")).toHaveTextContent(
+    "/runs/new?from_run=run-1",
+  );
+  expect(api.action).not.toHaveBeenCalled();
 });
 
 test("persists the collapsed audit-details display preference", async () => {

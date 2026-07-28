@@ -24,9 +24,11 @@ from tradingagents.application.contracts import (
     RunStatus,
 )
 from tradingagents.application.database import RunAttemptRecord, RunRecord
+from tradingagents.application.maintenance import ArchiveMaintenance
 from tradingagents.application.repository import (
     IdempotencyConflictError,
     InvalidRunTransitionError,
+    RunNotFoundError,
     RunRepository,
 )
 from tradingagents.application.settings import AppSettings
@@ -414,23 +416,114 @@ def test_complete_persists_result_and_resolved_memory(
     assert repository.memory_context("NVDA", "stock").items[0].run_id == run.id
 
 
-def test_rerun_links_new_run_and_backup_is_consistent(
+def test_research_template_requires_terminal_source_and_backup_is_consistent(
     repository: RunRepository,
     app_settings: AppSettings,
     tmp_path: Path,
 ) -> None:
     source, _ = _create(repository, app_settings)
-    rerun = repository.rerun(source.id)
+    with pytest.raises(
+        InvalidRunTransitionError,
+        match="source run must be terminal",
+    ):
+        repository.create_run(
+            _request("AAPL"),
+            app_settings.resolve_run(_request("AAPL")).snapshot(),
+            source_run_id=source.id,
+        )
+    repository.request_cancel(source.id)
+    template_request = _request("AAPL")
+    created, _ = repository.create_run(
+        template_request,
+        app_settings.resolve_run(template_request).snapshot(),
+        source_run_id=source.id,
+    )
     backup = repository.backup(tmp_path / "backup" / "snapshot.db")
 
-    assert rerun.id != source.id
-    assert rerun.parent_run_id == source.id
+    assert created.id != source.id
+    assert created.source_run_id == source.id
     with sqlite3.connect(backup) as connection:
         assert connection.execute("PRAGMA integrity_check").fetchone() == ("ok",)
         assert connection.execute("SELECT COUNT(*) FROM runs").fetchone() == (2,)
 
     with pytest.raises(ValueError, match="must differ"):
         repository.backup(app_settings.database_path)
+
+
+def test_research_template_rejects_missing_source_and_idempotency_mismatch(
+    repository: RunRepository,
+    app_settings: AppSettings,
+) -> None:
+    request = _request("NVDA")
+    with pytest.raises(RunNotFoundError):
+        repository.create_run(
+            request,
+            app_settings.resolve_run(request).snapshot(),
+            source_run_id="00000000-0000-0000-0000-000000000000",
+        )
+
+    source, _ = _create(repository, app_settings, "AAPL")
+    repository.request_cancel(source.id)
+    repository.create_run(
+        request,
+        app_settings.resolve_run(request).snapshot(),
+        source_run_id=source.id,
+        idempotency_key="template-submit",
+    )
+    with pytest.raises(IdempotencyConflictError):
+        repository.create_run(
+            request,
+            app_settings.resolve_run(request).snapshot(),
+            idempotency_key="template-submit",
+        )
+
+
+def test_research_template_and_source_purge_are_race_safe(
+    repository: RunRepository,
+    app_settings: AppSettings,
+) -> None:
+    source, _ = _create(repository, app_settings, "NVDA")
+    repository.request_cancel(source.id)
+    repository.archive_runs((source.id,))
+    with repository.sessions.begin() as session:
+        session.get(RunRecord, source.id).archived_at = datetime(2026, 7, 1)
+    request = _request("AAPL")
+    barrier = Barrier(2)
+
+    def create_from_source():
+        barrier.wait(timeout=5)
+        try:
+            return repository.create_run(
+                request,
+                app_settings.resolve_run(request).snapshot(),
+                source_run_id=source.id,
+            )[0]
+        except RunNotFoundError:
+            return None
+
+    def purge_source():
+        barrier.wait(timeout=5)
+        return ArchiveMaintenance(
+            app_settings,
+            repository,
+            utc_clock=lambda: datetime(
+                2026,
+                9,
+                1,
+                tzinfo=timezone.utc,
+            ),
+        ).run_once()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        created_future = executor.submit(create_from_source)
+        purge_future = executor.submit(purge_source)
+        created = created_future.result(timeout=10)
+        assert purge_future.result(timeout=10) == 1
+
+    with pytest.raises(RunNotFoundError):
+        repository.get_run(source.id)
+    if created is not None:
+        assert repository.get_run(created.id).source_run_id is None
 
 
 def test_reports_use_canonical_order_across_result_and_repository(

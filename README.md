@@ -41,7 +41,7 @@ or portfolio rebalancing.
   provider/models, reasoning effort, and report language.
 - **Run Detail:** persistent event timeline, analyst reports, structured
   decision, collapsible audit details, token/tool metrics, cancellation,
-  retry, rerun, and export.
+  retry, editable run templates, and export.
 - **Memory:** search complete decisions, outcomes, and reflections, expand
   catalysts/risks/invalidation, and reopen the originating run.
 - **Settings:** read-only capabilities, safe defaults, and whether provider
@@ -160,10 +160,11 @@ queued → running → succeeded | failed | cancelled
 
 A worker claims work with a database lease. Expired leases can recover from a
 LangGraph checkpoint. `retry` adds an attempt to the same run and can reuse a
-compatible checkpoint; `rerun` creates a linked run with a fresh evidence
-snapshot. Cancellation is cooperative at graph-node boundaries and does not
-force-kill an in-flight provider request. Successful and cancelled runs delete
-their checkpoints; failed runs retain them until the retry/rerun decision.
+compatible checkpoint. “New from this run” opens an editable New Run form and
+only creates a linked run after confirmation. Cancellation is cooperative at
+graph-node boundaries and does not force-kill an in-flight provider request.
+Successful and cancelled runs delete their checkpoints; failed runs retain
+them for retry or later archive cleanup.
 
 See [architecture.md](docs/architecture.md) for subsystem and data-integrity
 contracts.
@@ -208,7 +209,7 @@ The CLI is non-interactive and automation-friendly:
 tradingagents run TICKER [options]
 tradingagents serve
 tradingagents worker [--once]
-tradingagents runs list|show|cancel|retry|rerun
+tradingagents runs list|show|cancel|retry
 tradingagents memory import PATH [--apply] [--no-backup]
 tradingagents export RUN_ID [--format markdown|json] [-o PATH]
 tradingagents db backup PATH
@@ -229,12 +230,15 @@ GET  /api/v1/runs/{id}
 GET  /api/v1/runs/{id}/events
 POST /api/v1/runs/{id}/cancel
 POST /api/v1/runs/{id}/retry
-POST /api/v1/runs/{id}/rerun
 GET  /api/v1/runs/{id}/export
+GET  /api/v1/instruments/recent
 GET  /api/v1/memory
 GET  /api/v1/capabilities
 GET  /api/v1/health
 ```
+
+`POST /api/v1/runs` accepts an optional terminal `source_run_id`; the Web UI
+uses it only after the user reviews and submits the prefilled New Run form.
 
 Send `Idempotency-Key` when creating a run from a retryable client. FastAPI
 serves its OpenAPI document at `/openapi.json`; generated TypeScript API types

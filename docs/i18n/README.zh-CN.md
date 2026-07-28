@@ -25,7 +25,8 @@ TradingAgentsX 是一个面向本地单用户的投资研究运行中心。它�
 - **New Run：** 标的、PIT 日期、analysts、Fast/Standard/Deep、
   provider/model、reasoning 与报告语言。
 - **Run Detail：** 可恢复的事件时间线、报告 tabs、结构化决策、warning、
-  可折叠审计详情、token/tool/wall-time 指标，以及取消、retry、rerun、导出。
+  可折叠审计详情、token/tool/wall-time 指标，以及取消、retry、
+  基于当前运行新建和导出。
 - **Memory：** 检索完整 decision、outcome 与 reflection，展开催化因素、
   风险和失效条件，并返回对应运行的研究结论。
 - **Settings：** 只读能力列表、非敏感默认值和 API key 是否已配置。
@@ -119,7 +120,8 @@ worker 通过数据库 lease 原子领取任务。lease 过期后可从 LangGrap
 checkpoint 恢复：
 
 - `retry` 在同一个 run 下增加 attempt，并可复用兼容 checkpoint；
-- `rerun` 创建关联的新 run，并重新获取证据；
+- “基于此运行新建”先打开可编辑的 New Run 表单，确认提交后才创建关联的新 run
+  并重新获取证据；
 - cancel 在 graph node 边界协作完成，不会强杀正在执行的 provider 请求；
 - 成功或取消后删除 checkpoint，失败时保留到后续处理。
 
@@ -163,7 +165,7 @@ CLI 现在是非交互式命令：
 tradingagents run TICKER [options]
 tradingagents serve
 tradingagents worker [--once]
-tradingagents runs list|show|cancel|retry|rerun
+tradingagents runs list|show|cancel|retry
 tradingagents memory import PATH [--apply] [--no-backup]
 tradingagents export RUN_ID [--format markdown|json] [-o PATH]
 tradingagents db backup PATH
@@ -174,9 +176,10 @@ Markdown/JSON 只作为显式导出格式；SQLite 是唯一事实源。
 
 ## API 与安全
 
-版本化 API 覆盖 run 创建/查询、事件 SSE、cancel/retry/rerun、export、
+版本化 API 覆盖 run 创建/查询、事件 SSE、cancel/retry、export、
 memory、capabilities 与 health。创建 run 时可发送 `Idempotency-Key`，
-避免浏览器重复提交。OpenAPI 位于 `/openapi.json`。
+避免浏览器重复提交；也可在用户确认模板表单后发送终态 run 的
+`source_run_id`。OpenAPI 位于 `/openapi.json`。
 
 API key 只从进程环境读取，不写入 SQLite、SSE 或浏览器存储。默认服务只绑定
 loopback。显式开启 LAN 时需要：

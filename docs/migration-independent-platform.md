@@ -191,8 +191,9 @@ The command refuses to overwrite a destination unless `--force` is supplied.
 - Analysts share one sealed evidence snapshot after parallel collection.
 - Cancellation takes effect at node boundaries; an active provider request may
   finish first.
-- `retry` continues the same run/attempt lineage; `rerun` creates a linked run
-  with fresh evidence.
+- `retry` continues the same run/attempt lineage; “New from this run” opens an
+  editable form and creates a linked run with fresh evidence only after
+  confirmation.
 - Outcome settlement runs in the background and no longer waits for a later
   same-ticker analysis.
 - UI language and report language are separate settings.

@@ -259,12 +259,6 @@ def retry(run_id: str) -> None:
     _print_lifecycle(lambda service: service.retry(run_id))
 
 
-@runs_app.command()
-def rerun(run_id: str) -> None:
-    """Create a linked run with a fresh data snapshot."""
-    _print_lifecycle(lambda service: service.rerun(run_id))
-
-
 @memory_app.command("import")
 def import_memory(
     source: Annotated[

@@ -154,7 +154,15 @@ def test_archive_maintenance_purges_owned_data_and_preserves_audit_links(
 ) -> None:
     now = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
     run = _complete_archived_run(repository, app_settings)
-    child = repository.rerun(run.id)
+    child_request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date="2026-07-25",
+    )
+    child, _ = repository.create_run(
+        child_request,
+        app_settings.resolve_run(child_request).snapshot(),
+        source_run_id=run.id,
+    )
     checkpoint_thread = repository.checkpoint_thread(run.id)
     _insert_checkpoint(app_settings, checkpoint_thread)
     _set_archived_at(repository, run.id, now - timedelta(days=31))
@@ -179,7 +187,7 @@ def test_archive_maintenance_purges_owned_data_and_preserves_audit_links(
     assert purged == 1
     with pytest.raises(RunNotFoundError):
         repository.get_run(run.id)
-    assert repository.get_run(child.id).parent_run_id is None
+    assert repository.get_run(child.id).source_run_id is None
     with repository.sessions() as session:
         for model in (
             RunAttemptRecord,

@@ -276,11 +276,10 @@ export default function RunDetail() {
     );
   }, [navigate, returnReport, returnView, runId]);
 
-  const act = async (action: "cancel" | "retry" | "rerun") => {
+  const act = async (action: "cancel" | "retry") => {
     try {
-      const next = await api.action(runId, action);
-      if (action === "rerun") navigate(`/runs/${next.id}`);
-      else await refresh();
+      await api.action(runId, action);
+      await refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t("error"));
     }
@@ -306,6 +305,14 @@ export default function RunDetail() {
             {run.request.analysis_date} · {run.request.profile} · {t("attempt")}{" "}
             {run.attempt}
           </p>
+          {run.source_run_id && (
+            <p className="subtitle">
+              {t("sourceRun")}:{" "}
+              <Link to={`/runs/${encodeURIComponent(run.source_run_id)}`}>
+                {run.source_run_id}
+              </Link>
+            </p>
+          )}
         </div>
         <div className="action-row">
           {(run.status === "queued" || run.status === "running") && (
@@ -319,9 +326,12 @@ export default function RunDetail() {
             </button>
           )}
           {terminal.has(run.status) && (
-            <button className="button" onClick={() => void act("rerun")}>
-              {t("rerun")}
-            </button>
+            <Link
+              className="button"
+              to={`/runs/new?from_run=${encodeURIComponent(runId)}`}
+            >
+              {t("newFromRun")}
+            </Link>
           )}
           <a
             className="button"

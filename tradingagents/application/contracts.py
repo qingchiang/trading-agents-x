@@ -696,7 +696,7 @@ class AnalysisResult(FrozenModel):
 
 class RunView(FrozenModel):
     id: str
-    parent_run_id: str | None = None
+    source_run_id: str | None = None
     instrument_name: str | None = None
     status: RunStatus
     request: AnalysisRequest

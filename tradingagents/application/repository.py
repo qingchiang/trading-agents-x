@@ -131,12 +131,13 @@ class RunRepository:
         config_snapshot: dict[str, Any],
         *,
         idempotency_key: str | None = None,
-        parent_run_id: str | None = None,
+        source_run_id: str | None = None,
     ) -> tuple[RunView, bool]:
         now = _utc_naive()
         request_json = request.model_dump(mode="json")
         try:
             with self.sessions.begin() as session:
+                session.connection().exec_driver_sql("BEGIN IMMEDIATE")
                 if idempotency_key:
                     existing = session.scalar(
                         select(RunRecord).where(
@@ -144,16 +145,28 @@ class RunRepository:
                         )
                     )
                     if existing is not None:
-                        if existing.request_json != request_json:
+                        if (
+                            existing.request_json != request_json
+                            or existing.source_run_id != source_run_id
+                        ):
                             raise IdempotencyConflictError(
                                 "idempotency key was already used for a "
                                 "different request"
                             )
                         return self._view(existing), False
+                if source_run_id is not None:
+                    source = session.get(RunRecord, source_run_id)
+                    if source is None:
+                        raise RunNotFoundError(source_run_id)
+                    if source.status not in _TERMINAL_STATUSES:
+                        raise InvalidRunTransitionError(
+                            "source run must be terminal before it can be "
+                            "used as a research template"
+                        )
                 run_id = str(uuid4())
                 record = RunRecord(
                     id=run_id,
-                    parent_run_id=parent_run_id,
+                    source_run_id=source_run_id,
                     idempotency_key=idempotency_key,
                     status=RunStatus.QUEUED.value,
                     request_json=request_json,
@@ -185,7 +198,10 @@ class RunRepository:
                 )
                 if existing is None:
                     raise
-                if existing.request_json != request_json:
+                if (
+                    existing.request_json != request_json
+                    or existing.source_run_id != source_run_id
+                ):
                     raise IdempotencyConflictError(
                         "idempotency key was already used for a different request"
                     ) from exc
@@ -664,16 +680,6 @@ class RunRepository:
                 raise RunNotFoundError(run_id)
             attempt = self._attempt(session, record)
             return attempt.checkpoint_thread_id
-
-    def rerun(self, run_id: str) -> RunView:
-        source = self.get_run(run_id)
-        request = source.request
-        view, _ = self.create_run(
-            request,
-            source.config_snapshot,
-            parent_run_id=run_id,
-        )
-        return view
 
     def append_event(
         self,
@@ -1595,7 +1601,7 @@ class RunRepository:
     def _view(record: RunRecord) -> RunView:
         return RunView(
             id=record.id,
-            parent_run_id=record.parent_run_id,
+            source_run_id=record.source_run_id,
             instrument_name=record.instrument_name,
             status=RunStatus(record.status),
             request=AnalysisRequest.model_validate(record.request_json),

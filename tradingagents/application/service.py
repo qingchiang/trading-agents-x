@@ -88,6 +88,7 @@ class AnalysisService:
         request: AnalysisRequest,
         *,
         idempotency_key: str | None = None,
+        source_run_id: str | None = None,
     ) -> RunView:
         run_settings = self.settings.resolve_run(request)
         request = self.settings.materialize_request(
@@ -98,6 +99,7 @@ class AnalysisService:
             request,
             run_settings.snapshot(),
             idempotency_key=idempotency_key,
+            source_run_id=source_run_id,
         )
         if created:
             self.repository.append_event(
@@ -106,6 +108,7 @@ class AnalysisService:
                 payload={
                     "profile": request.profile.value,
                     "ticker": request.ticker,
+                    "source_run_id": source_run_id,
                 },
             )
         return view
@@ -313,15 +316,6 @@ class AnalysisService:
             run_id,
             "run.retry_queued",
             payload={"attempt": view.attempt},
-        )
-        return view
-
-    def rerun(self, run_id: str) -> RunView:
-        view = self.repository.rerun(run_id)
-        self.repository.append_event(
-            view.id,
-            "run.queued",
-            payload={"rerun_of": run_id},
         )
         return view
 

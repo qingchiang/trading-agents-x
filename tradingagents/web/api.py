@@ -24,7 +24,6 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select
 
 from tradingagents.application.contracts import (
-    AnalysisRequest,
     RecentInstrument,
     ResearchArtifact,
     RunArchiveState,
@@ -62,6 +61,7 @@ from .models import (
     ProviderModelCatalog,
     RunBatchRequest,
     RunBatchResult,
+    RunCreateRequest,
     RunDetail,
 )
 
@@ -191,15 +191,16 @@ def create_app(
 
     @app.post(f"{API_PREFIX}/runs", response_model=RunView, status_code=202)
     def create_run(
-        request: AnalysisRequest,
+        request: RunCreateRequest,
         idempotency_key: Annotated[
             str | None,
             Header(alias="Idempotency-Key", max_length=200),
         ] = None,
     ):
         return service.enqueue(
-            request,
+            request.analysis_request(),
             idempotency_key=idempotency_key,
+            source_run_id=request.source_run_id,
         )
 
     @app.get(f"{API_PREFIX}/runs", response_model=RunPage)
@@ -335,10 +336,6 @@ def create_app(
     @app.post(f"{API_PREFIX}/runs/{{run_id}}/retry", response_model=RunView)
     def retry_run(run_id: str):
         return service.retry(run_id)
-
-    @app.post(f"{API_PREFIX}/runs/{{run_id}}/rerun", response_model=RunView)
-    def rerun(run_id: str):
-        return service.rerun(run_id)
 
     @app.get(f"{API_PREFIX}/runs/{{run_id}}/export")
     def export_run(

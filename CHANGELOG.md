@@ -22,7 +22,7 @@ version numbers.
   `AnalysisService`, SQLite/Alembic repositories for runs, attempts, events,
   reports, typed decisions, outcomes, reflections, and legacy-import audit
   records, plus single-worker database leases, crash recovery, cancellation,
-  retry, rerun, and online backup.
+  retry, editable run templates, recoverable archives, and online backup.
 - **Versioned HTTP and Python APIs.** Added `/api/v1` run, event, lifecycle,
   export, memory, capability, and health endpoints with idempotent creation, and
   the typed `TradingAgents.run()` / `enqueue()` Python surface.

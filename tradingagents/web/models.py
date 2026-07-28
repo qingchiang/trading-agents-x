@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from tradingagents.application.contracts import (
+    AnalysisRequest,
     AnalysisResult,
     ResearchDecision,
     RunView,
@@ -25,6 +26,20 @@ class LoginRequest(ApiModel):
 class RunDetail(ApiModel):
     run: RunView
     result: AnalysisResult | None = None
+
+
+class RunCreateRequest(AnalysisRequest):
+    source_run_id: str | None = Field(default=None, min_length=1, max_length=36)
+
+    @field_validator("source_run_id", mode="before")
+    @classmethod
+    def normalize_source_run_id(cls, value: str | None) -> str | None:
+        return value.strip() if isinstance(value, str) else value
+
+    def analysis_request(self) -> AnalysisRequest:
+        return AnalysisRequest.model_validate(
+            self.model_dump(exclude={"source_run_id"})
+        )
 
 
 class RunBatchRequest(ApiModel):

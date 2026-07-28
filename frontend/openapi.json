@@ -1487,6 +1487,143 @@
         "title": "RunBatchResult",
         "type": "object"
       },
+      "RunCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "analysis_date": {
+            "format": "date",
+            "title": "Analysis Date",
+            "type": "string"
+          },
+          "analysts": {
+            "default": [
+              "market",
+              "social",
+              "news",
+              "fundamentals"
+            ],
+            "items": {
+              "enum": [
+                "market",
+                "social",
+                "news",
+                "fundamentals"
+              ],
+              "type": "string"
+            },
+            "title": "Analysts",
+            "type": "array"
+          },
+          "asset_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AssetType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "deep_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deep Model"
+          },
+          "deep_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deep Reasoning Effort"
+          },
+          "llm_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Provider"
+          },
+          "output_language": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportLanguage"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Language"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/RunProfile",
+            "default": "standard"
+          },
+          "quick_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quick Model"
+          },
+          "quick_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quick Reasoning Effort"
+          },
+          "source_run_id": {
+            "anyOf": [
+              {
+                "maxLength": 36,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Run Id"
+          },
+          "ticker": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Ticker",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticker",
+          "analysis_date"
+        ],
+        "title": "RunCreateRequest",
+        "type": "object"
+      },
       "RunDetail": {
         "additionalProperties": false,
         "properties": {
@@ -1748,7 +1885,10 @@
           "metrics": {
             "$ref": "#/components/schemas/RunMetrics"
           },
-          "parent_run_id": {
+          "request": {
+            "$ref": "#/components/schemas/AnalysisRequest"
+          },
+          "source_run_id": {
             "anyOf": [
               {
                 "type": "string"
@@ -1757,10 +1897,7 @@
                 "type": "null"
               }
             ],
-            "title": "Parent Run Id"
-          },
-          "request": {
-            "$ref": "#/components/schemas/AnalysisRequest"
+            "title": "Source Run Id"
           },
           "started_at": {
             "anyOf": [
@@ -2262,7 +2399,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AnalysisRequest"
+                "$ref": "#/components/schemas/RunCreateRequest"
               }
             }
           },
@@ -2615,45 +2752,6 @@
           }
         },
         "summary": "Export Run"
-      }
-    },
-    "/api/v1/runs/{run_id}/rerun": {
-      "post": {
-        "operationId": "rerun_api_v1_runs__run_id__rerun_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "run_id",
-            "required": true,
-            "schema": {
-              "title": "Run Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RunView"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Rerun"
       }
     },
     "/api/v1/runs/{run_id}/retry": {

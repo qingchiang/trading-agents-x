@@ -5,7 +5,9 @@ const timestamp = "2026-07-24T00:00:00Z";
 function run(id: string, status: string) {
   return {
     id,
-    parent_run_id: id === "run-2" ? "run-1" : null,
+    source_run_id: id === "run-2" ? "run-1" : null,
+    instrument_name: "NVIDIA Corporation",
+    archived_at: null,
     status,
     request: {
       ticker: "NVDA",
@@ -29,7 +31,7 @@ function run(id: string, status: string) {
       input_tokens: 0,
       output_tokens: 0,
       wall_time_seconds: 0,
-      node_wall_times: {},
+      node_metrics: {},
     },
     created_at: timestamp,
     started_at: null,

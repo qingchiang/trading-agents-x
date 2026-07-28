@@ -29,7 +29,8 @@ invalidation conditions、time horizon が含まれます。ポジション比�
 - **New Run:** ticker、PIT 日付、analysts、Fast/Standard/Deep、
   provider/model、reasoning、レポート言語。
 - **Run Detail:** 永続イベントタイムライン、レポート、構造化 decision、
-  折りたたみ可能な監査詳細、token/tool/wall-time 指標、cancel/retry/rerun/export。
+  折りたたみ可能な監査詳細、token/tool/wall-time 指標、cancel/retry、
+  現在の run をもとにした新規作成、export。
 - **Memory:** 完全な decision、outcome、reflection を検索し、catalyst、
   risk、invalidation を展開して元の run の判断へ戻る。
 - **Settings:** provider/model capability、安全なデフォルト値、API key の
@@ -128,7 +129,8 @@ worker は database lease で run を原子的に claim します。lease が期
 なった場合は LangGraph checkpoint から復旧できます。
 
 - `retry` は同じ run に attempt を追加し、互換 checkpoint を再利用可能。
-- `rerun` は関連する新しい run と新しい evidence snapshot を作成。
+- 「この実行をもとに新規作成」は編集可能な New Run フォームを開き、
+  確認後に関連 run と新しい evidence snapshot を作成。
 - cancel は node 境界で協調的に処理し、実行中の provider request は強制終了
   しない。
 - success/cancel 後は checkpoint を削除し、failure 時は次の判断まで保持。
@@ -176,7 +178,7 @@ CLI は非対話型です。
 tradingagents run TICKER [options]
 tradingagents serve
 tradingagents worker [--once]
-tradingagents runs list|show|cancel|retry|rerun
+tradingagents runs list|show|cancel|retry
 tradingagents memory import PATH [--apply] [--no-backup]
 tradingagents export RUN_ID [--format markdown|json] [-o PATH]
 tradingagents db backup PATH
@@ -188,10 +190,11 @@ export 形式であり、SQLite が唯一の source of truth です。
 
 ## API とセキュリティ
 
-バージョン化 API は run の作成・参照、event SSE、cancel/retry/rerun、
+バージョン化 API は run の作成・参照、event SSE、cancel/retry、
 export、memory、capabilities、health を提供します。run 作成時に
 `Idempotency-Key` を送ることで、ブラウザ再送による重複を防げます。
-OpenAPI は `/openapi.json` です。
+確認済みテンプレートからの作成では、終端 run の `source_run_id` も送信
+できます。OpenAPI は `/openapi.json` です。
 
 API key は process environment からのみ読み取り、SQLite、SSE、browser
 storage には保存しません。デフォルトは loopback bind です。LAN へ公開する

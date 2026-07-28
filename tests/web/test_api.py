@@ -85,7 +85,10 @@ async def test_run_lifecycle_routes_and_filters(
         "/api/v1/runs/restore",
         json={"run_ids": [run_id]},
     )
-    rerun = await web_client.post(f"/api/v1/runs/{run_id}/rerun")
+    templated = await web_client.post(
+        "/api/v1/runs",
+        json={**_payload("AAPL"), "source_run_id": run_id},
+    )
 
     assert detail.status_code == 200
     assert detail.json()["run"]["id"] == run_id
@@ -99,7 +102,8 @@ async def test_run_lifecycle_routes_and_filters(
     assert archived_export.status_code == 200
     assert restored.json()["changed"] == 1
     assert restored.json()["runs"][0]["archived_at"] is None
-    assert rerun.json()["parent_run_id"] == run_id
+    assert templated.status_code == 202
+    assert templated.json()["source_run_id"] == run_id
 
 
 @pytest.mark.anyio
@@ -140,6 +144,32 @@ async def test_archive_batch_validation_is_atomic_and_idempotent(
     assert archived.json()["changed"] == 1
     assert repeated.json()["changed"] == 0
     assert duplicate_ids.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_research_template_source_must_exist_and_be_terminal(
+    web_client: httpx.AsyncClient,
+) -> None:
+    queued = (
+        await web_client.post("/api/v1/runs", json=_payload("NVDA"))
+    ).json()
+
+    active_source = await web_client.post(
+        "/api/v1/runs",
+        json={**_payload("AAPL"), "source_run_id": queued["id"]},
+    )
+    missing_source = await web_client.post(
+        "/api/v1/runs",
+        json={
+            **_payload("AAPL"),
+            "source_run_id": "00000000-0000-0000-0000-000000000000",
+        },
+    )
+
+    assert active_source.status_code == 409
+    assert active_source.json()["error"]["code"] == "invalid_run_transition"
+    assert missing_source.status_code == 404
+    assert missing_source.json()["error"]["code"] == "run_not_found"
 
 
 @pytest.mark.anyio
@@ -194,7 +224,6 @@ async def test_openapi_contains_versioned_run_center_contract(
         "/api/v1/runs/{run_id}/events",
         "/api/v1/runs/{run_id}/cancel",
         "/api/v1/runs/{run_id}/retry",
-        "/api/v1/runs/{run_id}/rerun",
         "/api/v1/runs/{run_id}/export",
         "/api/v1/instruments/recent",
         "/api/v1/memory",
@@ -202,6 +231,7 @@ async def test_openapi_contains_versioned_run_center_contract(
         "/api/v1/providers/{provider}/models",
         "/api/v1/health",
     } <= set(paths)
+    assert "/api/v1/runs/{run_id}/rerun" not in paths
     assert "provenance" not in schema["components"]["schemas"][
         "AnalysisRequest"
     ]["properties"]

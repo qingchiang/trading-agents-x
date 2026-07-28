@@ -5,6 +5,7 @@ import {
   api,
   type Capabilities,
   type ProviderModelCatalog,
+  type RunDetail as RunDetailType,
   type RunView,
 } from "../api/client";
 import i18n from "../i18n";
@@ -16,6 +17,7 @@ vi.mock("../api/client", () => ({
     capabilities: vi.fn(),
     providerModels: vi.fn(),
     createRun: vi.fn(),
+    run: vi.fn(),
   },
 }));
 
@@ -161,6 +163,106 @@ test("keeps UI locale and report output language independent", async () => {
   await waitFor(() => expect(api.createRun).toHaveBeenCalled());
   expect(vi.mocked(api.createRun).mock.calls[0][0].output_language).toBe("ja");
   expect(i18n.language).toBe("en");
+});
+
+test("loads a terminal run as an editable template and preserves custom values", async () => {
+  vi.mocked(api.run).mockResolvedValue({
+    run: {
+      id: "source-run",
+      status: "succeeded",
+      request: {
+        ticker: "7203.T",
+        analysis_date: "2026-07-24",
+        asset_type: "stock",
+        profile: "deep",
+        analysts: ["market", "news"],
+        llm_provider: "openai",
+        quick_model: "source-quick-model",
+        deep_model: "source-deep-model",
+        quick_reasoning_effort: "source-low",
+        deep_reasoning_effort: "source-high",
+        output_language: "Use concise Simplified Chinese",
+      },
+    },
+    result: null,
+  } as unknown as RunDetailType);
+  vi.mocked(api.createRun).mockResolvedValue({ id: "templated-run" } as RunView);
+
+  render(
+    <Router initialPath="/runs/new?from_run=source-run">
+      <NewRunRoutes />
+    </Router>,
+  );
+
+  expect(await screen.findByDisplayValue("7203.T")).toBeVisible();
+  expect(screen.getByLabelText(/^Quick model/)).toHaveValue(
+    "source-quick-model",
+  );
+  expect(screen.getByLabelText(/^Deep model/)).toHaveValue(
+    "source-deep-model",
+  );
+  expect(screen.getByLabelText(/^Quick reasoning/)).toHaveValue("source-low");
+  expect(screen.getByLabelText(/^Deep reasoning/)).toHaveValue("source-high");
+  expect(screen.getByLabelText(/^Report language/)).toHaveValue(
+    "Use concise Simplified Chinese",
+  );
+  expect(screen.getByRole("link", { name: "source-run" })).toHaveAttribute(
+    "href",
+    "/runs/source-run",
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: /Queue research/ }));
+
+  await waitFor(() => expect(api.createRun).toHaveBeenCalled());
+  expect(vi.mocked(api.createRun).mock.calls[0][0]).toMatchObject({
+    ticker: "7203.T",
+    profile: "deep",
+    analysts: ["market", "news"],
+    llm_provider: "openai",
+    quick_model: "source-quick-model",
+    deep_model: "source-deep-model",
+    quick_reasoning_effort: "source-low",
+    deep_reasoning_effort: "source-high",
+    output_language: "Use concise Simplified Chinese",
+    source_run_id: "source-run",
+  });
+});
+
+test("falls back to configured defaults when a source provider is unavailable", async () => {
+  vi.mocked(api.run).mockResolvedValue({
+    run: {
+      id: "unavailable-source",
+      status: "failed",
+      request: {
+        ticker: "NVDA",
+        analysis_date: "2026-07-24",
+        asset_type: "stock",
+        profile: "standard",
+        analysts: ["market"],
+        llm_provider: "anthropic",
+        quick_model: "claude-source-quick",
+        deep_model: "claude-source-deep",
+        quick_reasoning_effort: "low",
+        deep_reasoning_effort: "high",
+        output_language: "ja",
+      },
+    },
+    result: null,
+  } as unknown as RunDetailType);
+
+  render(
+    <Router initialPath="/runs/new?from_run=unavailable-source">
+      <NewRunRoutes />
+    </Router>,
+  );
+
+  expect(await screen.findByDisplayValue("NVDA")).toBeVisible();
+  expect(screen.getByLabelText(/^Provider/)).toHaveValue("openai");
+  expect(screen.getByLabelText(/^Quick model/)).toHaveValue("gpt-5.4-mini");
+  expect(screen.getByLabelText(/^Deep model/)).toHaveValue("gpt-5.5");
+  expect(
+    screen.getByText(/source provider anthropic is unavailable/i),
+  ).toBeVisible();
 });
 
 test("shows a concise Simplified Chinese label", async () => {
