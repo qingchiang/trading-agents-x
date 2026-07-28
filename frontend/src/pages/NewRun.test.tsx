@@ -23,13 +23,19 @@ const capabilities = {
   output_languages: ["en", "zh-CN", "ja"],
   providers: {
     openai: {
+      label: "OpenAI",
       quick_models: [{ label: "Quick", value: "gpt-5.4-mini" }],
       deep_models: [{ label: "Deep", value: "gpt-5.5" }],
       reasoning_efforts: {
         "gpt-5.4-mini": ["provider_default", "low", "high"],
         "gpt-5.5": ["provider_default", "medium", "high"],
       },
+      api_key_required: true,
       api_key_configured: true,
+      configured: true,
+      selectable: true,
+      unavailable_reason: null,
+      model_discovery_supported: true,
     },
   },
   defaults: {

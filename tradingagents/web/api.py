@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from importlib import resources
 from pathlib import Path
 from typing import Annotated, Literal
@@ -36,8 +35,11 @@ from tradingagents.application.repository import (
 )
 from tradingagents.application.service import AnalysisService
 from tradingagents.application.settings import AppSettings
-from tradingagents.llm_clients.api_key_env import PROVIDER_API_KEY_ENV
 from tradingagents.llm_clients.model_catalog import MODEL_OPTIONS
+from tradingagents.llm_clients.model_discovery import (
+    ModelDiscoveryService,
+    UnknownProviderError,
+)
 from tradingagents.llm_clients.reasoning_effort import model_effort_levels
 from tradingagents.version import __version__
 
@@ -47,6 +49,7 @@ from .models import (
     HealthResponse,
     LoginRequest,
     MemoryEntry,
+    ProviderModelCatalog,
     RunDetail,
 )
 
@@ -62,10 +65,12 @@ def create_app(
     settings: AppSettings | None = None,
     *,
     service: AnalysisService | None = None,
+    model_discovery: ModelDiscoveryService | None = None,
 ) -> FastAPI:
     settings = settings or AppSettings.from_env()
     service = service or AnalysisService(settings)
     repository = service.repository
+    model_discovery = model_discovery or ModelDiscoveryService(settings)
     auth = LanSessionManager(settings)
     app = FastAPI(
         title="TradingAgentsX API",
@@ -74,6 +79,7 @@ def create_app(
     )
     app.state.settings = settings
     app.state.service = service
+    app.state.model_discovery = model_discovery
 
     @app.exception_handler(RunNotFoundError)
     async def not_found(_request: Request, exc: RunNotFoundError):
@@ -303,14 +309,19 @@ def create_app(
     )
     def capabilities():
         providers = {}
-        for provider, modes in MODEL_OPTIONS.items():
-            env_name = PROVIDER_API_KEY_ENV.get(provider)
+        custom_modes = {
+            "quick": [("Custom model ID", "custom")],
+            "deep": [("Custom model ID", "custom")],
+        }
+        for provider, (definition, availability) in model_discovery.providers().items():
+            modes = MODEL_OPTIONS.get(provider, custom_modes)
             model_ids = {
                 value
                 for mode in ("quick", "deep")
                 for _label, value in modes[mode]
             }
             providers[provider] = {
+                "label": definition.label,
                 "quick_models": [
                     {"label": label, "value": value}
                     for label, value in modes["quick"]
@@ -326,11 +337,12 @@ def create_app(
                     ]
                     for model in sorted(model_ids)
                 },
-                "api_key_configured": (
-                    None
-                    if env_name is None
-                    else bool(os.environ.get(env_name))
-                ),
+                "api_key_required": definition.api_key_required,
+                "api_key_configured": availability.api_key_configured,
+                "configured": availability.configured,
+                "selectable": availability.selectable,
+                "unavailable_reason": availability.reason,
+                "model_discovery_supported": definition.adapter != "custom",
             }
         defaults = settings.default_run_settings
         return CapabilitiesResponse(
@@ -350,6 +362,22 @@ def create_app(
                 "lan_enabled": settings.lan_enabled,
             },
         )
+
+    @app.get(
+        f"{API_PREFIX}/providers/{{provider}}/models",
+        response_model=ProviderModelCatalog,
+    )
+    def provider_models(
+        provider: str,
+        refresh: bool = False,
+    ):
+        try:
+            return model_discovery.discover(provider, refresh=refresh)
+        except UnknownProviderError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail="Unknown model provider",
+            ) from exc
 
     @app.get(f"{API_PREFIX}/health", response_model=HealthResponse)
     def health():

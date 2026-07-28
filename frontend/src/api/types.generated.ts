@@ -60,6 +60,13 @@ export interface components {
       quick_model: string;
       quick_reasoning_effort: string | null;
     };
+    DiscoveredModelView: {
+      compatibility: "supported" | "unknown";
+      default_roles: ("quick" | "deep")[];
+      id: string;
+      label: string;
+      reasoning_efforts: string[];
+    };
     HTTPValidationError: {
       detail?: components["schemas"]["ValidationError"][];
     };
@@ -91,15 +98,33 @@ export interface components {
       raw_return: number | null;
       status: "pending" | "resolved";
     };
+    ModelDiscoveryWarningView: {
+      code: string;
+      message: string;
+    };
     ModelOption: {
       label: string;
       value: string;
     };
     ProviderCapabilities: {
       api_key_configured: boolean | null;
+      api_key_required: boolean;
+      configured: boolean;
       deep_models: components["schemas"]["ModelOption"][];
+      label: string;
+      model_discovery_supported: boolean;
       quick_models: components["schemas"]["ModelOption"][];
       reasoning_efforts: Record<string, string[]>;
+      selectable: boolean;
+      unavailable_reason?: string | null;
+    };
+    ProviderModelCatalog: {
+      fetched_at: string;
+      models: components["schemas"]["DiscoveredModelView"][];
+      provider: string;
+      source: "live" | "cache" | "fallback";
+      stale: boolean;
+      warning?: components["schemas"]["ModelDiscoveryWarningView"] | null;
     };
     QueueHealth: {
       pending_outcomes: number;

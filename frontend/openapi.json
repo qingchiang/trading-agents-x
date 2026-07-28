@@ -398,6 +398,54 @@
         "title": "CapabilityDefaults",
         "type": "object"
       },
+      "DiscoveredModelView": {
+        "additionalProperties": false,
+        "properties": {
+          "compatibility": {
+            "enum": [
+              "supported",
+              "unknown"
+            ],
+            "title": "Compatibility",
+            "type": "string"
+          },
+          "default_roles": {
+            "items": {
+              "enum": [
+                "quick",
+                "deep"
+              ],
+              "type": "string"
+            },
+            "title": "Default Roles",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "reasoning_efforts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasoning Efforts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "compatibility",
+          "reasoning_efforts",
+          "default_roles"
+        ],
+        "title": "DiscoveredModelView",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -600,6 +648,25 @@
         "title": "MemoryOutcome",
         "type": "object"
       },
+      "ModelDiscoveryWarningView": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ModelDiscoveryWarningView",
+        "type": "object"
+      },
       "ModelOption": {
         "additionalProperties": false,
         "properties": {
@@ -633,12 +700,28 @@
             ],
             "title": "Api Key Configured"
           },
+          "api_key_required": {
+            "title": "Api Key Required",
+            "type": "boolean"
+          },
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
           "deep_models": {
             "items": {
               "$ref": "#/components/schemas/ModelOption"
             },
             "title": "Deep Models",
             "type": "array"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "model_discovery_supported": {
+            "title": "Model Discovery Supported",
+            "type": "boolean"
           },
           "quick_models": {
             "items": {
@@ -656,15 +739,88 @@
             },
             "title": "Reasoning Efforts",
             "type": "object"
+          },
+          "selectable": {
+            "title": "Selectable",
+            "type": "boolean"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable Reason"
           }
         },
         "required": [
+          "label",
           "quick_models",
           "deep_models",
           "reasoning_efforts",
-          "api_key_configured"
+          "api_key_required",
+          "api_key_configured",
+          "configured",
+          "selectable",
+          "model_discovery_supported"
         ],
         "title": "ProviderCapabilities",
+        "type": "object"
+      },
+      "ProviderModelCatalog": {
+        "additionalProperties": false,
+        "properties": {
+          "fetched_at": {
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/DiscoveredModelView"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "live",
+              "cache",
+              "fallback"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "stale": {
+            "title": "Stale",
+            "type": "boolean"
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelDiscoveryWarningView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "provider",
+          "models",
+          "source",
+          "fetched_at",
+          "stale"
+        ],
+        "title": "ProviderModelCatalog",
         "type": "object"
       },
       "QueueHealth": {
@@ -1304,6 +1460,55 @@
           }
         },
         "summary": "Memory"
+      }
+    },
+    "/api/v1/providers/{provider}/models": {
+      "get": {
+        "operationId": "provider_models_api_v1_providers__provider__models_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderModelCatalog"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Provider Models"
       }
     },
     "/api/v1/runs": {

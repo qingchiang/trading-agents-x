@@ -119,6 +119,7 @@ async def test_openapi_contains_versioned_run_center_contract(
         "/api/v1/runs/{run_id}/export",
         "/api/v1/memory",
         "/api/v1/capabilities",
+        "/api/v1/providers/{provider}/models",
         "/api/v1/health",
     } <= set(paths)
 
@@ -138,6 +139,30 @@ async def test_capabilities_expose_effective_non_sensitive_run_defaults(
         "quick_reasoning_effort": None,
         "deep_reasoning_effort": None,
     } == payload["defaults"]
+    assert payload["providers"]["openai"]["label"] == "OpenAI"
+    assert payload["providers"]["openai"]["api_key_required"] is True
+    assert payload["providers"]["openai"]["configured"] is True
+    assert payload["providers"]["openai"]["selectable"] is True
+
+
+@pytest.mark.anyio
+async def test_model_catalog_falls_back_without_leaking_configuration(
+    web_client: httpx.AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    response = await web_client.get("/api/v1/providers/openai/models")
+    unknown = await web_client.get("/api/v1/providers/not-real/models")
+
+    assert response.status_code == 200
+    assert response.json()["source"] == "fallback"
+    assert {model["id"] for model in response.json()["models"]} == {
+        "gpt-5.4-mini",
+        "gpt-5.5",
+    }
+    assert response.json()["warning"]["code"] == "provider_not_configured"
+    assert unknown.status_code == 404
 
 
 @pytest.mark.anyio

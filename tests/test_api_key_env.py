@@ -5,14 +5,14 @@ from __future__ import annotations
 import pytest
 
 from tradingagents.llm_clients.api_key_env import PROVIDER_API_KEY_ENV, get_api_key_env
-from tradingagents.llm_clients.model_catalog import MODEL_OPTIONS
+from tradingagents.llm_clients.provider_registry import PROVIDER_REGISTRY
 
 # ---- Mapping coverage -----------------------------------------------------
 
 
 def test_every_advertised_provider_has_an_api_key_policy():
     """The Web capabilities catalog must not advertise an unknown key policy."""
-    assert set(MODEL_OPTIONS).issubset(PROVIDER_API_KEY_ENV)
+    assert set(PROVIDER_REGISTRY).issubset(PROVIDER_API_KEY_ENV)
 
 
 @pytest.mark.parametrize(

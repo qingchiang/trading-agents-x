@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -49,10 +50,38 @@ class ModelOption(ApiModel):
 
 
 class ProviderCapabilities(ApiModel):
+    label: str
     quick_models: list[ModelOption]
     deep_models: list[ModelOption]
     reasoning_efforts: dict[str, list[str]]
+    api_key_required: bool
     api_key_configured: bool | None
+    configured: bool
+    selectable: bool
+    unavailable_reason: str | None = None
+    model_discovery_supported: bool
+
+
+class DiscoveredModelView(ApiModel):
+    id: str
+    label: str
+    compatibility: Literal["supported", "unknown"]
+    reasoning_efforts: list[str]
+    default_roles: list[Literal["quick", "deep"]]
+
+
+class ModelDiscoveryWarningView(ApiModel):
+    code: str
+    message: str
+
+
+class ProviderModelCatalog(ApiModel):
+    provider: str
+    models: list[DiscoveredModelView]
+    source: Literal["live", "cache", "fallback"]
+    fetched_at: datetime
+    stale: bool
+    warning: ModelDiscoveryWarningView | None = None
 
 
 class CapabilityDefaults(ApiModel):

@@ -193,6 +193,21 @@ def model_effort_levels(provider: str, model: str) -> tuple[str, ...]:
     return ()
 
 
+def known_model_effort_levels(provider: str, model: str) -> tuple[str, ...]:
+    """Return explicit levels only when model support is known.
+
+    Dynamic provider catalogs contain IDs that may be newer than this
+    capability policy. Those models must expose only ``provider_default`` in
+    the UI until support is understood instead of assuming the full provider
+    domain is safe.
+    """
+    normalized_provider = provider.strip().lower()
+    normalized_model = model.strip().lower()
+    if _model_status(normalized_provider, normalized_model) is not True:
+        return ()
+    return model_effort_levels(normalized_provider, normalized_model)
+
+
 def _model_status(provider: str, model: str) -> bool | None:
     """Return True for known support, False for known unsupported, else None."""
     if provider == "openai":
