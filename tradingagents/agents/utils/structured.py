@@ -1,7 +1,6 @@
-"""Shared helpers for invoking an agent with structured output and a graceful fallback.
+"""Helpers for one-shot structured agent output with a graceful fallback.
 
-The Portfolio Manager, Trader, and Research Manager all follow the same
-canonical pattern:
+The Sentiment Analyst follows this pattern:
 
 1. At agent creation, wrap the LLM with ``with_structured_output(Schema)``
    so the model returns a typed Pydantic instance. If the provider does
@@ -12,16 +11,18 @@ canonical pattern:
    (malformed JSON from a weak model, transient provider issue), fall
    back to a plain ``llm.invoke`` so the pipeline never blocks.
 
-Centralising the pattern here keeps the agent factories small and ensures
-all three agents log the same warnings when fallback fires.
+JSON-mode providers also receive an explicit schema contract without leaking
+that contract into the free-text fallback prompt.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Callable
 from typing import Any, TypeVar
 
+from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -45,8 +46,16 @@ def bind_structured(llm: Any, schema: type[T], agent_name: str) -> Any | None:
     Logs a warning when the binding fails so the user understands the agent
     will use free-text generation for every call instead of one-shot fallback.
     """
+    kwargs: dict[str, Any] = {}
+    max_tokens = getattr(llm, "structured_output_max_tokens", None)
+    if (
+        isinstance(max_tokens, int)
+        and not isinstance(max_tokens, bool)
+        and max_tokens > 0
+    ):
+        kwargs["max_tokens"] = max_tokens
     try:
-        return llm.with_structured_output(schema)
+        return llm.with_structured_output(schema, **kwargs)
     except (NotImplementedError, AttributeError) as exc:
         logger.warning(
             "%s: provider does not support with_structured_output (%s); "
@@ -56,23 +65,46 @@ def bind_structured(llm: Any, schema: type[T], agent_name: str) -> Any | None:
         return None
 
 
+def structured_prompt_for(
+    llm: Any,
+    schema: type[T],
+    prompt: Any,
+) -> Any:
+    """Add a JSON Schema contract only when the provider selects JSON mode."""
+    if getattr(llm, "preferred_structured_output_method", None) != "json_mode":
+        return prompt
+    contract = (
+        "Return exactly one JSON object and no Markdown, prose, or code fence. "
+        "The JSON object must satisfy this JSON Schema:\n"
+        f"{json.dumps(schema.model_json_schema(), ensure_ascii=False, sort_keys=True)}"
+    )
+    instruction = HumanMessage(content=contract)
+    if isinstance(prompt, list):
+        return [*prompt, instruction]
+    if isinstance(prompt, tuple):
+        return (*prompt, instruction)
+    return f"{prompt}\n\n{contract}"
+
+
 def invoke_structured_or_freetext(
     structured_llm: Any | None,
     plain_llm: Any,
     prompt: Any,
     render: Callable[[T], str],
     agent_name: str,
+    *,
+    structured_prompt: Any | None = None,
 ) -> str:
     """Run the structured call and render to markdown; fall back to free-text on any failure.
 
-    ``prompt`` is whatever the underlying LLM accepts (a string for chat
-    invocations, a list of message dicts for chat models that take that
-    shape). The same value is forwarded to the free-text path so the
-    fallback sees the same input the structured call did.
+    ``structured_prompt`` may add provider-specific output instructions. The
+    original ``prompt`` is always forwarded to the free-text fallback.
     """
     if structured_llm is not None:
         try:
-            result = structured_llm.invoke(prompt)
+            result = structured_llm.invoke(
+                prompt if structured_prompt is None else structured_prompt
+            )
             if result is None:
                 # A thinking model can answer in plain text instead of calling
                 # the tool, leaving the parser with nothing to return. Treat it

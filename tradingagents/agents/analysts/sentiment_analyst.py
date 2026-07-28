@@ -45,6 +45,7 @@ from tradingagents.agents.utils.structured import (
     NO_EXTERNAL_TOOLS,
     bind_structured,
     invoke_structured_or_freetext,
+    structured_prompt_for,
 )
 from tradingagents.dataflows.config import get_config
 from tradingagents.dataflows.lookahead import is_live, lookback_start_date
@@ -177,6 +178,11 @@ def create_sentiment_analyst(llm):
         # and free-text paths receive the same input. No bind_tools — the
         # data is already in the prompt.
         formatted_messages = prompt.format_messages(messages=state["messages"])
+        structured_messages = structured_prompt_for(
+            llm,
+            SentimentReport,
+            formatted_messages,
+        )
 
         report_text = invoke_structured_or_freetext(
             structured_llm,
@@ -184,6 +190,7 @@ def create_sentiment_analyst(llm):
             formatted_messages,
             render_sentiment_report,
             "Sentiment Analyst",
+            structured_prompt=structured_messages,
         )
 
         records = extract_provenance(news_block)

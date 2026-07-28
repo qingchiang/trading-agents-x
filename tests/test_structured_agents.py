@@ -17,6 +17,7 @@ from tradingagents.agents.schemas import (
     render_sentiment_report,
 )
 from tradingagents.agents.utils.structured import (
+    bind_structured,
     invoke_structured_or_freetext,
 )
 from tradingagents.dataflows.config import bind_config
@@ -100,10 +101,25 @@ def test_structured_none_falls_back_once_to_free_text():
         "prompt",
         render=lambda value: value.narrative,
         agent_name="sentiment",
+        structured_prompt="JSON prompt",
     )
 
     assert output == "FREETEXT"
-    plain.invoke.assert_called_once()
+    structured.invoke.assert_called_once_with("JSON prompt")
+    plain.invoke.assert_called_once_with("prompt")
+
+
+@pytest.mark.unit
+def test_structured_binding_applies_provider_output_limit():
+    llm = MagicMock()
+    llm.structured_output_max_tokens = 16_384
+
+    bind_structured(llm, SentimentReport, "Sentiment Analyst")
+
+    llm.with_structured_output.assert_called_once_with(
+        SentimentReport,
+        max_tokens=16_384,
+    )
 
 
 def _run(
@@ -181,6 +197,44 @@ def test_structured_report_is_persisted_in_state_and_messages():
 
     assert "Mildly Bearish" in result["sentiment_report"]
     assert result["messages"][0].content == result["sentiment_report"]
+
+
+@pytest.mark.unit
+def test_json_mode_receives_schema_contract_without_changing_fallback_prompt():
+    captured = {}
+    llm = _structured_llm(captured)
+    llm.preferred_structured_output_method = "json_mode"
+    llm.structured_output_max_tokens = 16_384
+
+    _run(llm=llm)
+
+    prompt = captured["prompt"]
+    contract = str(prompt[-1].content)
+    assert "Return exactly one JSON object" in contract
+    assert "JSON Schema" in contract
+    assert '"overall_band"' in contract
+    assert '"narrative"' in contract
+    llm.with_structured_output.assert_called_once_with(
+        SentimentReport,
+        max_tokens=16_384,
+    )
+
+
+@pytest.mark.unit
+def test_function_calling_keeps_the_original_sentiment_prompt():
+    captured = {}
+    llm = _structured_llm(captured)
+    llm.preferred_structured_output_method = "function_calling"
+    llm.structured_output_max_tokens = None
+
+    _run(llm=llm)
+
+    prompt_text = "\n".join(
+        str(getattr(message, "content", message))
+        for message in captured["prompt"]
+    )
+    assert "Return exactly one JSON object" not in prompt_text
+    llm.with_structured_output.assert_called_once_with(SentimentReport)
 
 
 @pytest.mark.unit
