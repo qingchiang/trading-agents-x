@@ -741,6 +741,13 @@ class RunRepository:
             if decision_record
             else None
         )
+        evidence = (
+            EvidenceBundle.model_validate(
+                decision_record.evidence_bundle_json
+            )
+            if decision_record
+            else None
+        )
         warnings = tuple(
             dict.fromkeys(
                 warning
@@ -755,6 +762,7 @@ class RunRepository:
             instrument=view.request.ticker,
             reports=reports,
             decision=decision,
+            evidence=evidence,
             metrics=view.metrics,
             warnings=warnings,
         )

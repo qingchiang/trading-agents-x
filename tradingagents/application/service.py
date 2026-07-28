@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import threading
 from collections.abc import Callable
@@ -31,8 +30,10 @@ from .contracts import (
     AnalysisResult,
     ResearchArtifactDraft,
     RunEvent,
+    RunExport,
     RunStatus,
 )
+from .exporting import render_run_export_markdown
 from .llms import create_run_llms
 from .metrics import MetricsCallback
 from .repository import RunRepository, RunView
@@ -290,39 +291,28 @@ class AnalysisService:
         *,
         format: str = "markdown",
     ) -> tuple[str, str]:
-        result = self.repository.get_result(run_id)
+        run_export = self.get_export(run_id)
         if format == "json":
             return (
                 "application/json",
-                result.model_dump_json(indent=2),
+                run_export.model_dump_json(indent=2),
             )
         if format != "markdown":
             raise ValueError("format must be 'markdown' or 'json'")
-        sections = [
-            f"# TradingAgentsX Research: {result.instrument}",
-            "",
-            f"- Run: `{result.run_id}`",
-            f"- Status: `{result.status.value}`",
-        ]
-        for name, report in result.reports.items():
-            narrative = getattr(report, "narrative", str(report))
-            sections.extend(["", f"## {name.title()}", "", narrative])
-        if result.decision:
-            sections.extend(
-                [
-                    "",
-                    "## Research Decision",
-                    "",
-                    "```json",
-                    json.dumps(
-                        result.decision.model_dump(mode="json"),
-                        ensure_ascii=False,
-                        indent=2,
-                    ),
-                    "```",
-                ]
-            )
-        return "text/markdown; charset=utf-8", "\n".join(sections)
+        return (
+            "text/markdown; charset=utf-8",
+            render_run_export_markdown(run_export),
+        )
+
+    def get_export(self, run_id: str) -> RunExport:
+        run = self.repository.get_run(run_id)
+        result = self.repository.get_result(run_id)
+        return RunExport(
+            run=run,
+            result=result,
+            evidence=result.evidence,
+            artifacts=tuple(self.repository.list_artifacts(run_id)),
+        )
 
     def backup_database(self, destination: Path) -> Path:
         return self.repository.backup(destination)
@@ -346,6 +336,7 @@ class AnalysisService:
             instrument=execution.evidence.instrument,
             reports=execution.reports,
             decision=execution.decision,
+            evidence=execution.evidence,
             metrics=metrics.snapshot(),
             warnings=warnings,
         )

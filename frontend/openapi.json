@@ -145,6 +145,16 @@
               }
             ]
           },
+          "evidence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvidenceBundle"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "instrument": {
             "title": "Instrument",
             "type": "string"
@@ -446,6 +456,180 @@
         "title": "DiscoveredModelView",
         "type": "object"
       },
+      "EvidenceBundle": {
+        "additionalProperties": false,
+        "description": "Versioned evidence snapshot shared by every agent in one run.",
+        "properties": {
+          "analysis_date": {
+            "format": "date",
+            "title": "Analysis Date",
+            "type": "string"
+          },
+          "digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Digest"
+          },
+          "instrument": {
+            "title": "Instrument",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "sealed_at": {
+            "format": "date-time",
+            "title": "Sealed At",
+            "type": "string"
+          },
+          "version": {
+            "const": "1",
+            "default": "1",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instrument",
+          "analysis_date",
+          "items"
+        ],
+        "title": "EvidenceBundle",
+        "type": "object"
+      },
+      "EvidenceItem": {
+        "additionalProperties": false,
+        "description": "One immutable, auditable evidence item in a run.",
+        "properties": {
+          "available_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Available At"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "effective_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Date"
+          },
+          "evidence_type": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Evidence Type",
+            "type": "string"
+          },
+          "fallback": {
+            "default": false,
+            "title": "Fallback",
+            "type": "boolean"
+          },
+          "provenance": {
+            "additionalProperties": true,
+            "title": "Provenance",
+            "type": "object"
+          },
+          "quality": {
+            "$ref": "#/components/schemas/EvidenceQuality",
+            "default": "medium"
+          },
+          "ref": {
+            "pattern": "^ev_[a-f0-9]{12}$",
+            "title": "Ref",
+            "type": "string"
+          },
+          "requested_date": {
+            "format": "date",
+            "title": "Requested Date",
+            "type": "string"
+          },
+          "source": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "ref",
+          "source",
+          "evidence_type",
+          "requested_date"
+        ],
+        "title": "EvidenceItem",
+        "type": "object"
+      },
+      "EvidenceQuality": {
+        "enum": [
+          "high",
+          "medium",
+          "low",
+          "unavailable"
+        ],
+        "title": "EvidenceQuality",
+        "type": "string"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -667,6 +851,57 @@
         "title": "ModelDiscoveryWarningView",
         "type": "object"
       },
+      "PerspectiveReview": {
+        "additionalProperties": false,
+        "properties": {
+          "claim_rebuttals": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Claim Rebuttals",
+            "type": "array"
+          },
+          "evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "new_evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "New Evidence Refs",
+            "type": "array"
+          },
+          "risks": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Risks",
+            "type": "array"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "thesis": {
+            "title": "Thesis",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "thesis"
+        ],
+        "title": "PerspectiveReview",
+        "type": "object"
+      },
       "ProviderCapabilities": {
         "additionalProperties": false,
         "properties": {
@@ -809,6 +1044,85 @@
         ],
         "title": "ReportLanguage",
         "type": "string"
+      },
+      "ResearchArtifact": {
+        "additionalProperties": false,
+        "description": "Durable, typed output from one visible research stage.",
+        "properties": {
+          "attempt": {
+            "minimum": 1.0,
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnalystReport"
+              },
+              {
+                "$ref": "#/components/schemas/PerspectiveReview"
+              },
+              {
+                "$ref": "#/components/schemas/ResearchDecision"
+              }
+            ],
+            "title": "Content"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "role": {
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Role",
+            "type": "string"
+          },
+          "round": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Round",
+            "type": "integer"
+          },
+          "run_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Run Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "1",
+            "default": "1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "stage": {
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Stage",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "attempt",
+          "stage",
+          "role",
+          "content",
+          "created_at"
+        ],
+        "title": "ResearchArtifact",
+        "type": "object"
       },
       "ResearchDecision": {
         "additionalProperties": false,
@@ -1630,6 +1944,66 @@
           }
         },
         "summary": "Get Run"
+      }
+    },
+    "/api/v1/runs/{run_id}/artifacts": {
+      "get": {
+        "operationId": "list_artifacts_api_v1_runs__run_id__artifacts_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "attempt",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Attempt"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ResearchArtifact"
+                  },
+                  "title": "Response List Artifacts Api V1 Runs  Run Id  Artifacts Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Artifacts"
       }
     },
     "/api/v1/runs/{run_id}/cancel": {

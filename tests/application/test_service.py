@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import operator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
@@ -230,12 +231,16 @@ def _reset_graph():
     _ResumableGraph.fail_second_once = True
 
 
-def _service(app_settings, repository: RunRepository) -> AnalysisService:
+def _service(
+    app_settings,
+    repository: RunRepository,
+    graph_factory=_Graph,
+) -> AnalysisService:
     return AnalysisService(
         app_settings,
         repository=repository,
         llm_factory=lambda *_args, **_kwargs: (object(), object()),
-        graph_factory=_Graph,
+        graph_factory=graph_factory,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
     )
 
@@ -265,6 +270,7 @@ def test_service_persists_events_before_callback_and_result(
     )
 
     assert result.status is RunStatus.SUCCEEDED
+    assert result.evidence is not None
     assert seen == ["run.started", "node.completed", "run.succeeded"]
     events = repository.list_events(result.run_id)
     assert events[0].event_type == "run.queued"
@@ -551,7 +557,11 @@ def test_service_export_reads_the_durable_result(
     app_settings,
     repository,
 ) -> None:
-    service = _service(app_settings, repository)
+    service = _service(
+        app_settings,
+        repository,
+        graph_factory=_ArtifactGraph,
+    )
     result = service.run(
         AnalysisRequest(
             ticker="NVDA",
@@ -567,6 +577,23 @@ def test_service_export_reads_the_durable_result(
     )
     assert result.run_id in body
     assert "Fixture thesis" in body
+    if format == "json":
+        payload = json.loads(body)
+        assert payload["schema_version"] == "1"
+        assert payload["run"]["id"] == result.run_id
+        assert payload["result"]["evidence"] == payload["evidence"]
+        assert payload["evidence"]["items"][0]["source"] == "fixture"
+        assert payload["artifacts"][0]["stage"] == "analyst"
+        assert payload["artifacts"][0]["content"]["narrative"] == (
+            "Fixture report."
+        )
+    else:
+        evidence_ref = result.evidence.items[0].ref
+        assert "## Research Process" in body
+        assert "### analyst · market · round 0" in body
+        assert "## Evidence Appendix" in body
+        assert f"### `{evidence_ref}`" in body
+        assert '"source": "fixture"' in body
 
 
 def test_service_export_rejects_unknown_format(

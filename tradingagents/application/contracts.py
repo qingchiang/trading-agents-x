@@ -472,6 +472,7 @@ class AnalysisResult(FrozenModel):
     instrument: str
     reports: dict[str, AnalystReport | str]
     decision: ResearchDecision | None
+    evidence: EvidenceBundle | None = None
     metrics: RunMetrics = Field(default_factory=RunMetrics)
     warnings: tuple[ResearchWarning, ...] = ()
 
@@ -496,3 +497,13 @@ class RunView(FrozenModel):
     started_at: datetime | None = None
     finished_at: datetime | None = None
     updated_at: datetime
+
+
+class RunExport(FrozenModel):
+    """Versioned, self-contained durable run export."""
+
+    schema_version: Literal["1"] = "1"
+    run: RunView
+    result: AnalysisResult
+    evidence: EvidenceBundle | None = None
+    artifacts: tuple[ResearchArtifact, ...] = ()

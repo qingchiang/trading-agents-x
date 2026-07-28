@@ -1,9 +1,21 @@
 from __future__ import annotations
 
+from datetime import date
+
 import httpx2 as httpx
 import pytest
 
-from tradingagents.application.contracts import AnalysisRequest
+from tradingagents.application.contracts import (
+    AnalysisRequest,
+    AnalysisResult,
+    AnalystReport,
+    EvidenceBundle,
+    EvidenceItem,
+    ResearchArtifactDraft,
+    ResearchDecision,
+    ResearchRating,
+    RunStatus,
+)
 from tradingagents.version import __version__
 
 
@@ -112,6 +124,7 @@ async def test_openapi_contains_versioned_run_center_contract(
     assert {
         "/api/v1/runs",
         "/api/v1/runs/{run_id}",
+        "/api/v1/runs/{run_id}/artifacts",
         "/api/v1/runs/{run_id}/events",
         "/api/v1/runs/{run_id}/cancel",
         "/api/v1/runs/{run_id}/retry",
@@ -122,6 +135,89 @@ async def test_openapi_contains_versioned_run_center_contract(
         "/api/v1/providers/{provider}/models",
         "/api/v1/health",
     } <= set(paths)
+
+
+@pytest.mark.anyio
+async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
+    web_client: httpx.AsyncClient,
+    web_service,
+    web_repository,
+) -> None:
+    queued = web_service.enqueue(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+    web_repository.claim_run(queued.id, "fixture-worker", 30)
+    evidence_item = EvidenceItem.create(
+        source="fixture",
+        evidence_type="price",
+        requested_date=date(2026, 7, 24),
+        effective_date=date(2026, 7, 24),
+        value=100.0,
+        unit="USD",
+    )
+    evidence = EvidenceBundle(
+        instrument="NVDA",
+        analysis_date=date(2026, 7, 24),
+        items=(evidence_item,),
+    )
+    report = AnalystReport(
+        analyst="market",
+        summary="Fixture summary.",
+        confidence=0.8,
+        evidence_refs=(evidence_item.ref,),
+        narrative="Fixture report.",
+    )
+    artifact, _ = web_repository.append_artifact(
+        queued.id,
+        ResearchArtifactDraft(
+            node="analyst.market",
+            stage="analyst",
+            role="market",
+            content=report,
+        ),
+    )
+    decision = ResearchDecision(
+        rating=ResearchRating.HOLD,
+        confidence=0.6,
+        thesis="Fixture thesis.",
+        evidence_refs=(evidence_item.ref,),
+        time_horizon="6-12 months",
+    )
+    web_repository.complete(
+        queued.id,
+        AnalysisResult(
+            run_id=queued.id,
+            status=RunStatus.SUCCEEDED,
+            instrument="NVDA",
+            reports={"market": report},
+            decision=decision,
+            evidence=evidence,
+        ),
+        evidence=evidence,
+        benchmark="SPY",
+    )
+
+    detail = await web_client.get(f"/api/v1/runs/{queued.id}")
+    artifacts = await web_client.get(
+        f"/api/v1/runs/{queued.id}/artifacts"
+    )
+    empty_attempt = await web_client.get(
+        f"/api/v1/runs/{queued.id}/artifacts?attempt=2"
+    )
+
+    assert detail.status_code == 200
+    assert detail.json()["result"]["evidence"]["digest"] == evidence.digest
+    assert detail.json()["result"]["evidence"]["items"][0]["ref"] == (
+        evidence_item.ref
+    )
+    assert artifacts.status_code == 200
+    assert artifacts.json()[0]["id"] == artifact.id
+    assert artifacts.json()[0]["content"]["narrative"] == "Fixture report."
+    assert empty_attempt.json() == []
 
 
 @pytest.mark.anyio

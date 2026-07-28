@@ -21,6 +21,7 @@ export interface components {
     };
     AnalysisResult: {
       decision: components["schemas"]["ResearchDecision"] | null;
+      evidence?: components["schemas"]["EvidenceBundle"] | null;
       instrument: string;
       metrics?: components["schemas"]["RunMetrics"];
       reports: Record<string, components["schemas"]["AnalystReport"] | string>;
@@ -67,6 +68,29 @@ export interface components {
       label: string;
       reasoning_efforts: string[];
     };
+    EvidenceBundle: {
+      analysis_date: string;
+      digest?: string | null;
+      instrument: string;
+      items: components["schemas"]["EvidenceItem"][];
+      sealed_at?: string;
+      version?: string;
+    };
+    EvidenceItem: {
+      available_at?: string | null;
+      content?: string | null;
+      effective_date?: string | null;
+      evidence_type: string;
+      fallback?: boolean;
+      provenance?: Record<string, unknown>;
+      quality?: components["schemas"]["EvidenceQuality"];
+      ref: string;
+      requested_date: string;
+      source: string;
+      unit?: string | null;
+      value?: number | string | null;
+    };
+    EvidenceQuality: "high" | "medium" | "low" | "unavailable";
     HTTPValidationError: {
       detail?: components["schemas"]["ValidationError"][];
     };
@@ -102,6 +126,14 @@ export interface components {
       code: string;
       message: string;
     };
+    PerspectiveReview: {
+      claim_rebuttals?: string[];
+      evidence_refs?: string[];
+      new_evidence_refs?: string[];
+      risks?: string[];
+      role: string;
+      thesis: string;
+    };
     ProviderCapabilities: {
       api_key_configured: boolean | null;
       api_key_required: boolean;
@@ -125,6 +157,17 @@ export interface components {
       running: number;
     };
     ReportLanguage: "en" | "zh-CN" | "ja";
+    ResearchArtifact: {
+      attempt: number;
+      content: components["schemas"]["AnalystReport"] | components["schemas"]["PerspectiveReview"] | components["schemas"]["ResearchDecision"];
+      created_at: string;
+      id: string;
+      role: string;
+      round?: number;
+      run_id: string;
+      schema_version?: string;
+      stage: string;
+    };
     ResearchDecision: {
       catalysts?: string[];
       confidence: number;

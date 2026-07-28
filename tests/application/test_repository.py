@@ -280,6 +280,7 @@ def test_complete_persists_result_and_resolved_memory(
 
     assert restored.status is RunStatus.SUCCEEDED
     assert restored.decision == decision
+    assert restored.evidence == evidence
     assert isinstance(restored.reports["market"], AnalystReport)
     assert restored.warnings[0].message == "Historical price was partial."
     context = repository.memory_context("NVDA", "stock")

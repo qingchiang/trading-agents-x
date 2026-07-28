@@ -23,6 +23,7 @@ from sqlalchemy import func, select
 
 from tradingagents.application.contracts import (
     AnalysisRequest,
+    ResearchArtifact,
     RunEvent,
     RunStatus,
     RunView,
@@ -192,6 +193,16 @@ def create_app(
             else None
         )
         return RunDetail(run=view, result=result)
+
+    @app.get(
+        f"{API_PREFIX}/runs/{{run_id}}/artifacts",
+        response_model=list[ResearchArtifact],
+    )
+    def list_artifacts(
+        run_id: str,
+        attempt: Annotated[int | None, Query(ge=1)] = None,
+    ):
+        return repository.list_artifacts(run_id, attempt=attempt)
 
     @app.get(
         f"{API_PREFIX}/runs/{{run_id}}/events",
