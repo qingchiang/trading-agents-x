@@ -351,10 +351,14 @@ const ja = {
   },
 };
 
-const saved = localStorage.getItem("tradingagents-locale") || "zh-Hans";
+const storedLocale = localStorage.getItem("tradingagents-locale");
+const saved = storedLocale === "zh-Hans" ? "zh-CN" : storedLocale || "zh-CN";
+if (storedLocale === "zh-Hans") {
+  localStorage.setItem("tradingagents-locale", "zh-CN");
+}
 
 void i18n.use(initReactI18next).init({
-  resources: { en, "zh-Hans": zhHans, ja },
+  resources: { en, "zh-CN": zhHans, ja },
   lng: saved,
   fallbackLng: "en",
   showSupportNotice: false,

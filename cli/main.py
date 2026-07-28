@@ -43,12 +43,6 @@ event_console = Console(stderr=True)
 _ANALYSTS = ("market", "social", "news", "fundamentals")
 
 
-class OutputLanguage(str, Enum):
-    ENGLISH = "en"
-    CHINESE = "zh-Hans"
-    JAPANESE = "ja"
-
-
 class ExportFormat(str, Enum):
     MARKDOWN = "markdown"
     JSON = "json"
@@ -103,13 +97,16 @@ def run_command(
         str | None, typer.Option("--deep-reasoning")
     ] = None,
     output_language: Annotated[
-        OutputLanguage,
-        typer.Option("--output-language"),
-    ] = OutputLanguage.ENGLISH,
+        str | None,
+        typer.Option(
+            "--output-language",
+            help="Report language: en, zh-CN, or ja; defaults to application config.",
+        ),
+    ] = None,
     provenance: Annotated[
-        bool,
+        bool | None,
         typer.Option("--provenance/--no-provenance"),
-    ] = True,
+    ] = None,
     json_output: Annotated[
         bool,
         typer.Option("--json", help="Print the typed result as JSON."),
@@ -136,7 +133,7 @@ def run_command(
         deep_model=deep_model,
         quick_reasoning_effort=quick_reasoning,
         deep_reasoning_effort=deep_reasoning,
-        output_language=output_language.value,
+        output_language=output_language,
         provenance=provenance,
     )
     application = _application()

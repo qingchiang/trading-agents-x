@@ -6,11 +6,11 @@ import StatusBadge from "./StatusBadge";
 
 describe("StatusBadge translations", () => {
   beforeEach(async () => {
-    await i18n.changeLanguage("zh-Hans");
+    await i18n.changeLanguage("zh-CN");
   });
 
   afterEach(async () => {
-    await act(() => i18n.changeLanguage("zh-Hans"));
+    await act(() => i18n.changeLanguage("zh-CN"));
   });
 
   test("uses the active UI locale independently of report language", async () => {

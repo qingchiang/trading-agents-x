@@ -20,7 +20,7 @@ vi.mock("../api/client", () => ({
 const capabilities = {
   profiles: ["fast", "standard", "deep"],
   analysts: ["market", "social", "news", "fundamentals"],
-  output_languages: ["en", "zh-Hans", "ja"],
+  output_languages: ["en", "zh-CN", "ja"],
   providers: {
     openai: {
       quick_models: [{ label: "Quick", value: "gpt-5.4-mini" }],
@@ -37,7 +37,10 @@ const capabilities = {
     llm_provider: "openai",
     quick_model: "gpt-5.4-mini",
     deep_model: "gpt-5.5",
-    output_language: "English",
+    quick_reasoning_effort: "low",
+    deep_reasoning_effort: "high",
+    output_language: "zh-CN",
+    provenance: false,
     lan_enabled: false,
   },
 } as Capabilities;
@@ -78,8 +81,10 @@ test("reuses the idempotency key when a browser submission is retried", async ()
   expect(secondKey).toBe(firstKey);
   expect(vi.mocked(api.createRun).mock.calls[1][0]).toMatchObject({
     ticker: "NVDA",
-    quick_reasoning_effort: "provider_default",
-    deep_reasoning_effort: "provider_default",
+    quick_reasoning_effort: "low",
+    deep_reasoning_effort: "high",
+    output_language: "zh-CN",
+    provenance: false,
   });
 });
 

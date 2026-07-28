@@ -60,7 +60,10 @@ class CapabilityDefaults(ApiModel):
     llm_provider: str
     quick_model: str
     deep_model: str
+    quick_reasoning_effort: str | None
+    deep_reasoning_effort: str | None
     output_language: str
+    provenance: bool
     lan_enabled: bool
 
 

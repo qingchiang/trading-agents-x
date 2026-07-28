@@ -241,7 +241,7 @@ class ResearchGraph:
             "analysis_date": request.analysis_date.isoformat(),
             "asset_type": request.asset_type.value,
             "profile": request.profile.value,
-            "output_language": context.settings.output_language,
+            "output_language": context.settings.output_language.prompt_label,
             "analysts": list(request.analysts),
             "analyst_reports": {},
             "evidence_items": [],

@@ -124,6 +124,23 @@ async def test_openapi_contains_versioned_run_center_contract(
 
 
 @pytest.mark.anyio
+async def test_capabilities_expose_effective_non_sensitive_run_defaults(
+    web_client: httpx.AsyncClient,
+) -> None:
+    response = await web_client.get("/api/v1/capabilities")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["output_languages"] == ["en", "zh-CN", "ja"]
+    assert payload["defaults"] | {
+        "output_language": "en",
+        "provenance": False,
+        "quick_reasoning_effort": None,
+        "deep_reasoning_effort": None,
+    } == payload["defaults"]
+
+
+@pytest.mark.anyio
 async def test_health_reports_database_and_queue_status(
     web_client: httpx.AsyncClient,
     web_service,

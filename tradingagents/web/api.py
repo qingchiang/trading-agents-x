@@ -336,14 +336,17 @@ def create_app(
         return CapabilitiesResponse(
             profiles=["fast", "standard", "deep"],
             analysts=["market", "social", "news", "fundamentals"],
-            output_languages=["en", "zh-Hans", "ja"],
+            output_languages=["en", "zh-CN", "ja"],
             providers=providers,
             defaults={
                 "profile": defaults.profile.value,
                 "llm_provider": defaults.llm_provider,
                 "quick_model": defaults.quick_model,
                 "deep_model": defaults.deep_model,
-                "output_language": defaults.output_language,
+                "quick_reasoning_effort": defaults.quick_reasoning_effort,
+                "deep_reasoning_effort": defaults.deep_reasoning_effort,
+                "output_language": defaults.output_language.value,
+                "provenance": defaults.provenance,
                 "lan_enabled": settings.lan_enabled,
             },
         )

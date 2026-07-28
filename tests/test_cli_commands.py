@@ -165,6 +165,8 @@ def test_run_defaults_to_the_instrument_market_date(monkeypatch) -> None:
     assert result.exit_code == 0
     assert captured["market_ticker"] == "AAPL"
     assert captured["request"].analysis_date.isoformat() == "2026-07-27"
+    assert captured["request"].output_language is None
+    assert captured["request"].provenance is None
 
 
 def test_run_prints_persisted_progress_events(monkeypatch) -> None:

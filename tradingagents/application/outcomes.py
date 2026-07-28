@@ -158,7 +158,7 @@ class OutcomeSettlement:
             reflector = OutcomeReflector(
                 quick,
                 output_language=(
-                    self.settings.default_run_settings.output_language
+                    self.settings.default_run_settings.output_language.prompt_label
                 ),
             )
             self._reflector = reflector

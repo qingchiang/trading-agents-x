@@ -12,9 +12,9 @@ export interface components {
       deep_model?: string | null;
       deep_reasoning_effort?: string | null;
       llm_provider?: string | null;
-      output_language?: "en" | "zh-Hans" | "ja";
+      output_language?: components["schemas"]["ReportLanguage"] | null;
       profile?: components["schemas"]["RunProfile"];
-      provenance?: boolean;
+      provenance?: boolean | null;
       quick_model?: string | null;
       quick_reasoning_effort?: string | null;
       ticker: string;
@@ -51,11 +51,14 @@ export interface components {
     };
     CapabilityDefaults: {
       deep_model: string;
+      deep_reasoning_effort: string | null;
       lan_enabled: boolean;
       llm_provider: string;
       output_language: string;
       profile: string;
+      provenance: boolean;
       quick_model: string;
+      quick_reasoning_effort: string | null;
     };
     HTTPValidationError: {
       detail?: components["schemas"]["ValidationError"][];
@@ -103,6 +106,7 @@ export interface components {
       queued: number;
       running: number;
     };
+    ReportLanguage: "en" | "zh-CN" | "ja";
     ResearchDecision: {
       catalysts?: string[];
       confidence: number;

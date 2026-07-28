@@ -46,7 +46,7 @@ or portfolio rebalancing.
   by ticker or market.
 - **Settings:** read-only capabilities, safe defaults, and whether provider
   credentials are configured.
-- **Locales:** `en`, `zh-Hans`, and `ja`; UI locale and report output language
+- **Locales:** `en`, `zh-CN`, and `ja`; UI locale and report output language
   are independent.
 
 Markdown is rendered without raw HTML and sanitized before display.

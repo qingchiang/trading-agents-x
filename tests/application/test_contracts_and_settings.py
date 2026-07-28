@@ -9,6 +9,7 @@ from tradingagents.application.contracts import (
     AnalysisRequest,
     EvidenceBundle,
     EvidenceItem,
+    ReportLanguage,
     ResearchDecision,
     ResearchRating,
     RunProfile,
@@ -82,7 +83,11 @@ def test_environment_is_loaded_only_from_explicit_mapping(tmp_path) -> None:
 
     assert settings.host == "0.0.0.0"
     assert resolved.llm_provider == "deepseek"
-    assert resolved.output_language == "Chinese"
+    assert resolved.output_language is ReportLanguage.SIMPLIFIED_CHINESE
+    assert resolved.output_language.prompt_label == (
+        "Simplified Chinese (简体中文，中国大陆，zh-CN)"
+    )
+    assert "zh-Hans" not in str(resolved.snapshot())
     assert "do-not-persist" not in str(resolved.snapshot())
 
 
@@ -122,3 +127,52 @@ def test_request_overrides_role_specific_environment_defaults(tmp_path) -> None:
     assert resolved.deep_model == "deep-request"
     assert resolved.quick_reasoning_effort == "low"
     assert resolved.deep_reasoning_effort == "max"
+
+
+@pytest.mark.parametrize(
+    "legacy",
+    [
+        "zh-Hans",
+        "Chinese",
+        "简体中文",
+        "Simplified Chinese (简体中文, zh-Hans)",
+    ],
+)
+def test_legacy_simplified_chinese_aliases_normalize_to_zh_cn(legacy) -> None:
+    request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date="2026-07-24",
+        output_language=legacy,
+    )
+
+    assert request.output_language is ReportLanguage.SIMPLIFIED_CHINESE
+    assert request.model_dump(mode="json")["output_language"] == "zh-CN"
+
+
+def test_omitted_request_values_inherit_and_materialize_environment_defaults(
+    tmp_path,
+) -> None:
+    settings = AppSettings.from_env(
+        environ={
+            "TRADINGAGENTS_HOME": str(tmp_path),
+            "TRADINGAGENTS_OUTPUT_LANGUAGE": (
+                "Simplified Chinese (简体中文，中国大陆，zh-CN)"
+            ),
+            "TRADINGAGENTS_QUICK_REASONING_EFFORT": "low",
+            "TRADINGAGENTS_DEEP_REASONING_EFFORT": "high",
+            "TRADINGAGENTS_PROVENANCE_APPENDIX": "false",
+        },
+        load_env_files=False,
+    )
+    request = AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
+
+    resolved = settings.resolve_run(request)
+    materialized = settings.materialize_request(
+        request,
+        run_settings=resolved,
+    )
+
+    assert materialized.output_language is ReportLanguage.SIMPLIFIED_CHINESE
+    assert materialized.quick_reasoning_effort == "low"
+    assert materialized.deep_reasoning_effort == "high"
+    assert materialized.provenance is False

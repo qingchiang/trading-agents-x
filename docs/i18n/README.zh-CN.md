@@ -30,7 +30,7 @@ TradingAgentsX 是一个面向本地单用户的投资研究运行中心。它�
   outcome 与 reflection。
 - **Settings：** 只读能力列表、非敏感默认值和 API key 是否已配置。
 
-UI 支持 `zh-Hans`、`en`、`ja`。界面语言与报告输出语言相互独立。
+UI 支持 `zh-CN`、`en`、`ja`。界面语言与报告输出语言相互独立。
 Markdown 禁用原始 HTML，并在显示前清洗。
 
 ## 快速开始

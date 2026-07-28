@@ -14,13 +14,13 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 from tradingagents.default_config import build_default_config
 
-from .contracts import AnalysisRequest, RunProfile
+from .contracts import (
+    AnalysisRequest,
+    ReportLanguage,
+    RunProfile,
+    normalize_report_language,
+)
 
-_LANGUAGE_MAP = {
-    "en": "English",
-    "zh-Hans": "Chinese",
-    "ja": "Japanese",
-}
 _SECRET_FRAGMENTS = ("key", "secret", "token", "password", "authorization")
 
 
@@ -60,9 +60,17 @@ class RunSettings(BaseModel):
     deep_reasoning_effort: str | None = None
     temperature: float | None = None
     llm_max_retries: int | None = Field(default=None, ge=0)
-    output_language: str = "English"
-    provenance: bool = True
+    output_language: ReportLanguage = ReportLanguage.ENGLISH
+    provenance: bool = False
     data_config: Mapping[str, Any]
+
+    @field_validator("output_language", mode="before")
+    @classmethod
+    def normalize_output_language(
+        cls,
+        value: str | ReportLanguage,
+    ) -> ReportLanguage:
+        return normalize_report_language(value)
 
     @field_validator("data_config", mode="before")
     @classmethod
@@ -90,7 +98,7 @@ class RunSettings(BaseModel):
                 "deep_reasoning_effort": self.deep_reasoning_effort,
                 "temperature": self.temperature,
                 "llm_max_retries": self.llm_max_retries,
-                "output_language": self.output_language,
+                "output_language": self.output_language.prompt_label,
                 "provenance_appendix": self.provenance,
             }
         )
@@ -153,6 +161,20 @@ class AppSettings(BaseModel):
         home = Path(env.get("TRADINGAGENTS_HOME", "~/.tradingagents")).expanduser()
         defaults = build_default_config(env)
         provider = env.get("TRADINGAGENTS_LLM_PROVIDER", defaults["llm_provider"])
+        output_language = normalize_report_language(
+            env.get(
+                "TRADINGAGENTS_OUTPUT_LANGUAGE",
+                defaults.get("output_language", "en"),
+            )
+        )
+        provenance = _env_bool(
+            env,
+            "TRADINGAGENTS_PROVENANCE_APPENDIX",
+            bool(defaults.get("provenance_appendix", False)),
+        )
+        data_config = deepcopy(defaults)
+        data_config["output_language"] = output_language.value
+        data_config["provenance_appendix"] = provenance
         run_settings = RunSettings(
             llm_provider=provider,
             quick_model=env.get(
@@ -182,19 +204,9 @@ class AppSettings(BaseModel):
                 if env.get("TRADINGAGENTS_LLM_MAX_RETRIES")
                 else defaults.get("llm_max_retries")
             ),
-            output_language=_LANGUAGE_MAP.get(
-                env.get("TRADINGAGENTS_OUTPUT_LANGUAGE", "en"),
-                env.get(
-                    "TRADINGAGENTS_OUTPUT_LANGUAGE",
-                    defaults.get("output_language", "English"),
-                ),
-            ),
-            provenance=_env_bool(
-                env,
-                "TRADINGAGENTS_PROVENANCE_APPENDIX",
-                bool(defaults.get("provenance_appendix", True)),
-            ),
-            data_config=defaults,
+            output_language=output_language,
+            provenance=provenance,
+            data_config=data_config,
         )
         lan_enabled = _env_bool(env, "TRADINGAGENTS_LAN_ENABLED", False)
         token = env.get("TRADINGAGENTS_LAN_TOKEN")
@@ -249,8 +261,32 @@ class AppSettings(BaseModel):
                     if request.deep_reasoning_effort is not None
                     else base.deep_reasoning_effort
                 ),
-                "output_language": _LANGUAGE_MAP[request.output_language],
-                "provenance": request.provenance,
+                "output_language": request.output_language or base.output_language,
+                "provenance": (
+                    request.provenance
+                    if request.provenance is not None
+                    else base.provenance
+                ),
+            }
+        )
+
+    def materialize_request(
+        self,
+        request: AnalysisRequest,
+        *,
+        run_settings: RunSettings | None = None,
+    ) -> AnalysisRequest:
+        """Persist the effective request instead of ambiguous omitted overrides."""
+        resolved = run_settings or self.resolve_run(request)
+        return request.model_copy(
+            update={
+                "llm_provider": resolved.llm_provider,
+                "quick_model": resolved.quick_model,
+                "deep_model": resolved.deep_model,
+                "quick_reasoning_effort": resolved.quick_reasoning_effort,
+                "deep_reasoning_effort": resolved.deep_reasoning_effort,
+                "output_language": resolved.output_language,
+                "provenance": resolved.provenance,
             }
         )
 

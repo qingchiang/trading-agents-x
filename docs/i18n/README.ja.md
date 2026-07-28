@@ -35,7 +35,7 @@ invalidation conditions、time horizon が含まれます。ポジション比�
 - **Settings:** provider/model capability、安全なデフォルト値、API key の
   設定有無を読み取り専用で表示。
 
-UI は `ja`、`en`、`zh-Hans` に対応します。UI locale とレポート出力言語は
+UI は `ja`、`en`、`zh-CN` に対応します。UI locale とレポート出力言語は
 独立しています。Markdown は raw HTML を無効化し、表示前に sanitize します。
 
 ## クイックスタート

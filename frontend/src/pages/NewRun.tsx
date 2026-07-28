@@ -27,9 +27,9 @@ export default function NewRun() {
   const [quickReasoning, setQuickReasoning] = useState("provider_default");
   const [deepReasoning, setDeepReasoning] = useState("provider_default");
   const [outputLanguage, setOutputLanguage] = useState<
-    "en" | "zh-Hans" | "ja"
+    "en" | "zh-CN" | "ja"
   >("en");
-  const [provenance, setProvenance] = useState(true);
+  const [provenance, setProvenance] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const submission = useRef<{ fingerprint: string; key: string } | null>(null);
@@ -45,13 +45,14 @@ export default function NewRun() {
         setProvider(data.defaults.llm_provider);
         setQuickModel(data.defaults.quick_model);
         setDeepModel(data.defaults.deep_model);
-        setOutputLanguage(
-          data.defaults.output_language === "Chinese"
-            ? "zh-Hans"
-            : data.defaults.output_language === "Japanese"
-              ? "ja"
-              : "en",
+        setQuickReasoning(
+          data.defaults.quick_reasoning_effort ?? "provider_default",
         );
+        setDeepReasoning(
+          data.defaults.deep_reasoning_effort ?? "provider_default",
+        );
+        setOutputLanguage(normalizeReportLanguage(data.defaults.output_language));
+        setProvenance(data.defaults.provenance);
       })
       .catch((cause) => {
         setError(cause instanceof Error ? cause.message : t("error"));
@@ -312,12 +313,14 @@ export default function NewRun() {
                   value={outputLanguage}
                   onChange={(event) =>
                     setOutputLanguage(
-                      event.target.value as "en" | "zh-Hans" | "ja",
+                      event.target.value as "en" | "zh-CN" | "ja",
                     )
                   }
                 >
                   <option value="en">English</option>
-                  <option value="zh-Hans">简体中文</option>
+                  <option value="zh-CN">
+                    Simplified Chinese (简体中文，中国大陆，zh-CN)
+                  </option>
                   <option value="ja">日本語</option>
                 </select>
               </label>
@@ -334,7 +337,10 @@ export default function NewRun() {
         </article>
         {error && <div className="alert">{error}</div>}
         <div className="form-actions">
-          <button className="button primary large" disabled={submitting}>
+          <button
+            className="button primary large"
+            disabled={submitting || capabilities === null}
+          >
             {submitting ? t("loading") : t("startResearch")} →
           </button>
         </div>
@@ -347,6 +353,21 @@ function today() {
   const now = new Date();
   const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
   return local.toISOString().slice(0, 10);
+}
+
+function normalizeReportLanguage(value: string): "en" | "zh-CN" | "ja" {
+  const normalized = value.trim().toLowerCase();
+  if (
+    normalized === "zh-cn" ||
+    normalized === "zh-hans" ||
+    normalized === "chinese" ||
+    normalized === "简体中文" ||
+    normalized.startsWith("simplified chinese")
+  ) {
+    return "zh-CN";
+  }
+  if (normalized === "ja" || normalized.startsWith("japanese")) return "ja";
+  return "en";
 }
 
 function ReasoningSelect({

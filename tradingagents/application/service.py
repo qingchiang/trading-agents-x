@@ -70,6 +70,10 @@ class AnalysisService:
         idempotency_key: str | None = None,
     ) -> RunView:
         run_settings = self.settings.resolve_run(request)
+        request = self.settings.materialize_request(
+            request,
+            run_settings=run_settings,
+        )
         view, created = self.repository.create_run(
             request,
             run_settings.snapshot(),

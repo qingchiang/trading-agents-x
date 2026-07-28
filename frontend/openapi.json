@@ -72,23 +72,29 @@
             "title": "Llm Provider"
           },
           "output_language": {
-            "default": "en",
-            "enum": [
-              "en",
-              "zh-Hans",
-              "ja"
-            ],
-            "title": "Output Language",
-            "type": "string"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportLanguage"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "profile": {
             "$ref": "#/components/schemas/RunProfile",
             "default": "standard"
           },
           "provenance": {
-            "default": true,
-            "title": "Provenance",
-            "type": "boolean"
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provenance"
           },
           "quick_model": {
             "anyOf": [
@@ -331,6 +337,17 @@
             "title": "Deep Model",
             "type": "string"
           },
+          "deep_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deep Reasoning Effort"
+          },
           "lan_enabled": {
             "title": "Lan Enabled",
             "type": "boolean"
@@ -347,9 +364,24 @@
             "title": "Profile",
             "type": "string"
           },
+          "provenance": {
+            "title": "Provenance",
+            "type": "boolean"
+          },
           "quick_model": {
             "title": "Quick Model",
             "type": "string"
+          },
+          "quick_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quick Reasoning Effort"
           }
         },
         "required": [
@@ -357,7 +389,10 @@
           "llm_provider",
           "quick_model",
           "deep_model",
+          "quick_reasoning_effort",
+          "deep_reasoning_effort",
           "output_language",
+          "provenance",
           "lan_enabled"
         ],
         "title": "CapabilityDefaults",
@@ -655,6 +690,15 @@
         ],
         "title": "QueueHealth",
         "type": "object"
+      },
+      "ReportLanguage": {
+        "enum": [
+          "en",
+          "zh-CN",
+          "ja"
+        ],
+        "title": "ReportLanguage",
+        "type": "string"
       },
       "ResearchDecision": {
         "additionalProperties": false,

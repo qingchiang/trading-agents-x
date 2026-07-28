@@ -43,6 +43,56 @@ class RunProfile(str, Enum):
     DEEP = "deep"
 
 
+class ReportLanguage(str, Enum):
+    ENGLISH = "en"
+    SIMPLIFIED_CHINESE = "zh-CN"
+    JAPANESE = "ja"
+
+    @property
+    def prompt_label(self) -> str:
+        return {
+            ReportLanguage.ENGLISH: "English (en)",
+            ReportLanguage.SIMPLIFIED_CHINESE: (
+                "Simplified Chinese (简体中文，中国大陆，zh-CN)"
+            ),
+            ReportLanguage.JAPANESE: "Japanese (日本語, ja)",
+        }[self]
+
+
+_REPORT_LANGUAGE_ALIASES = {
+    "en": ReportLanguage.ENGLISH,
+    "english": ReportLanguage.ENGLISH,
+    "english (en)": ReportLanguage.ENGLISH,
+    "zh-cn": ReportLanguage.SIMPLIFIED_CHINESE,
+    "zh-hans": ReportLanguage.SIMPLIFIED_CHINESE,
+    "chinese": ReportLanguage.SIMPLIFIED_CHINESE,
+    "simplified chinese": ReportLanguage.SIMPLIFIED_CHINESE,
+    "simplified chinese (简体中文, zh-hans)": (
+        ReportLanguage.SIMPLIFIED_CHINESE
+    ),
+    "simplified chinese (简体中文，中国大陆，zh-cn)": (
+        ReportLanguage.SIMPLIFIED_CHINESE
+    ),
+    "简体中文": ReportLanguage.SIMPLIFIED_CHINESE,
+    "ja": ReportLanguage.JAPANESE,
+    "japanese": ReportLanguage.JAPANESE,
+    "japanese (日本語, ja)": ReportLanguage.JAPANESE,
+    "日本語": ReportLanguage.JAPANESE,
+}
+
+
+def normalize_report_language(value: str | ReportLanguage) -> ReportLanguage:
+    """Normalize public and legacy language spellings to one locale tag."""
+    if isinstance(value, ReportLanguage):
+        return value
+    normalized = str(value).strip()
+    language = _REPORT_LANGUAGE_ALIASES.get(normalized.casefold())
+    if language is None:
+        supported = ", ".join(language.value for language in ReportLanguage)
+        raise ValueError(f"unsupported report language; expected one of {supported}")
+    return language
+
+
 class RunStatus(str, Enum):
     QUEUED = "queued"
     RUNNING = "running"
@@ -240,8 +290,8 @@ class AnalysisRequest(FrozenModel):
     deep_model: str | None = None
     quick_reasoning_effort: str | None = None
     deep_reasoning_effort: str | None = None
-    output_language: Literal["en", "zh-Hans", "ja"] = "en"
-    provenance: bool = True
+    output_language: ReportLanguage | None = None
+    provenance: bool | None = None
 
     @field_validator("ticker")
     @classmethod
@@ -265,6 +315,16 @@ class AnalysisRequest(FrozenModel):
             raise ValueError("analysts must not contain duplicates")
         order = ("market", "social", "news", "fundamentals")
         return tuple(key for key in order if key in value)
+
+    @field_validator("output_language", mode="before")
+    @classmethod
+    def normalize_output_language(
+        cls,
+        value: str | ReportLanguage | None,
+    ) -> ReportLanguage | None:
+        if value is None:
+            return None
+        return normalize_report_language(value)
 
     @model_validator(mode="after")
     def infer_asset_type(self) -> AnalysisRequest:
