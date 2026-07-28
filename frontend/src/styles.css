@@ -1338,66 +1338,6 @@ label small {
   margin: 0;
 }
 
-.legacy-diagnostic {
-  display: grid;
-  gap: 5px;
-  margin: 0 0 18px;
-  padding: 13px 15px;
-  color: #7a4211;
-  font-size: 13px;
-  background: #fff7e8;
-  border: 1px solid #edcc91;
-  border-radius: 9px;
-}
-
-.legacy-diagnostic strong {
-  color: #8a4707;
-  font-size: 14px;
-}
-
-.legacy-diagnostic small {
-  color: #9a4c05;
-  font-weight: 750;
-}
-
-.legacy-diagnostic code {
-  overflow-wrap: anywhere;
-  color: #8c663a;
-  font-size: 11px;
-}
-
-.diagnostic-label {
-  margin: 0 0 8px;
-  color: #86601c;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.legacy-canonical-payload {
-  margin: 0 0 18px;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.legacy-canonical-payload summary {
-  cursor: pointer;
-  font-weight: 750;
-}
-
-.legacy-canonical-payload pre {
-  max-height: 280px;
-  margin: 10px 0 0;
-  padding: 12px;
-  overflow: auto;
-  color: #d8e2f0;
-  font-size: 12px;
-  white-space: pre-wrap;
-  background: #101b2b;
-  border-radius: 8px;
-}
-
 .artifact-rating {
   margin: 0 0 18px;
   color: var(--muted);
@@ -1584,27 +1524,6 @@ label small {
   border: 1px solid #ccd9ef;
   border-radius: 6px;
   cursor: pointer;
-}
-
-.rating-conflict {
-  display: grid;
-  gap: 5px;
-  margin-bottom: 18px;
-  padding: 13px 15px;
-  color: #8a1724;
-  font-size: 13px;
-  background: var(--red-soft);
-  border: 1px solid #efbdc4;
-  border-radius: 9px;
-}
-
-.rating-conflict strong {
-  font-size: 14px;
-}
-
-.rating-conflict small {
-  color: #9e2431;
-  font-weight: 750;
 }
 
 .decision-panel {

@@ -280,100 +280,14 @@
         "title": "AnalystReport",
         "type": "object"
       },
-      "ArtifactDiagnostics": {
-        "additionalProperties": false,
-        "description": "Read-only diagnosis of a persisted artifact's visible typed content.",
-        "properties": {
-          "degraded_output": {
-            "default": false,
-            "title": "Degraded Output",
-            "type": "boolean"
-          },
-          "legacy_degraded_output": {
-            "default": false,
-            "title": "Legacy Degraded Output",
-            "type": "boolean"
-          },
-          "missing_fields": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Missing Fields",
-            "type": "array"
-          },
-          "nested_rating": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Nested Rating"
-          },
-          "outer_rating": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Outer Rating"
-          },
-          "parsed_thesis": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Parsed Thesis"
-          },
-          "rating_conflict": {
-            "default": false,
-            "title": "Rating Conflict",
-            "type": "boolean"
-          },
-          "reason_codes": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Reason Codes",
-            "type": "array"
-          },
-          "rerun_recommended": {
-            "default": false,
-            "title": "Rerun Recommended",
-            "type": "boolean"
-          },
-          "sentinel_fields": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Sentinel Fields",
-            "type": "array"
-          }
-        },
-        "title": "ArtifactDiagnostics",
-        "type": "object"
-      },
       "ArtifactGenerationMethod": {
         "description": "Auditable method that produced a typed research artifact.",
         "enum": [
           "tool_call",
           "json_mode",
+          "narrative_adapted",
           "raw_json_recovered",
-          "json_mode_recovered",
-          "legacy_unknown"
+          "json_mode_recovered"
         ],
         "title": "ArtifactGenerationMethod",
         "type": "string"
@@ -579,11 +493,8 @@
             "type": "string"
           },
           "version": {
-            "default": "2",
-            "enum": [
-              "1",
-              "2"
-            ],
+            "const": "1",
+            "default": "1",
             "title": "Version",
             "type": "string"
           }
@@ -1282,12 +1193,8 @@
             "title": "Created At",
             "type": "string"
           },
-          "diagnostics": {
-            "$ref": "#/components/schemas/ArtifactDiagnostics"
-          },
           "generation_method": {
-            "$ref": "#/components/schemas/ArtifactGenerationMethod",
-            "default": "legacy_unknown"
+            "$ref": "#/components/schemas/ArtifactGenerationMethod"
           },
           "id": {
             "maxLength": 64,
@@ -1334,6 +1241,7 @@
           "attempt",
           "stage",
           "role",
+          "generation_method",
           "content",
           "created_at"
         ],
@@ -1565,13 +1473,6 @@
               "$ref": "#/components/schemas/NodeMetrics"
             },
             "title": "Node Metrics",
-            "type": "object"
-          },
-          "node_wall_times": {
-            "additionalProperties": {
-              "type": "number"
-            },
-            "title": "Node Wall Times",
             "type": "object"
           },
           "output_tokens": {

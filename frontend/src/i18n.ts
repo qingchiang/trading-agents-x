@@ -130,7 +130,7 @@ const en = {
     openMemory: "Open memory",
     waitingForEvents: "Waiting for persisted run events.",
     noArtifactsRecorded:
-      "This historical run did not record typed research artifacts.",
+      "No typed research artifacts were recorded for this run.",
     noDeliberation: "This profile did not produce deliberation artifacts.",
     noEvidenceRecorded: "No sealed evidence bundle was recorded for this run.",
     noDecision: "No final research decision was recorded.",
@@ -145,19 +145,6 @@ const en = {
     canonicalEvidenceAndProvenance: "Canonical IDs and provenance",
     copyEvidenceId: "Copy evidence ID {{ref}}",
     copy: "Copy",
-    legacyDegradedOutput: "Legacy degraded output",
-    degradedStructuredOutput: "Degraded structured output",
-    legacyDegradedHint:
-      "This read-only diagnosis preserves the canonical artifact and exposes only recoverable visible fields.",
-    rerunRecommended: "This conclusion is not reliable; rerun is recommended.",
-    parsedLegacyPayload: "Parsed legacy payload (read-only diagnosis)",
-    canonicalLegacyPayload: "Canonical degraded payload",
-    ratingConflict: "Conflicting research ratings",
-    outerRating: "Stored outer rating",
-    nestedRating: "Nested payload rating",
-    unreliableConclusion:
-      "Do not treat this artifact as a reliable conclusion. Rerun the research.",
-    legacyFieldNotCaptured: "Legacy degraded output did not capture this field.",
     noCatalystsIdentified: "No catalysts were identified.",
     version: "Version",
     source: "Source",
@@ -319,7 +306,7 @@ const zhCN = {
     openEvidence: "查看证据",
     openMemory: "查看研究记忆",
     waitingForEvents: "正在等待已持久化的运行事件。",
-    noArtifactsRecorded: "该历史运行未记录结构化研究过程。",
+    noArtifactsRecorded: "该运行未记录结构化研究过程。",
     noDeliberation: "当前研究模式未生成辩论或复核产物。",
     noEvidenceRecorded: "该运行未记录已封存的证据包。",
     noDecision: "该运行未形成最终研究结论。",
@@ -333,18 +320,6 @@ const zhCN = {
     canonicalEvidenceAndProvenance: "完整证据 ID 与来源审计",
     copyEvidenceId: "复制证据 ID {{ref}}",
     copy: "复制",
-    legacyDegradedOutput: "旧版降级输出",
-    degradedStructuredOutput: "结构化输出已降级",
-    legacyDegradedHint:
-      "该只读诊断不会替换原始产物，仅展示可从现有可见字段恢复的内容。",
-    rerunRecommended: "该结论不可靠，建议重新运行研究。",
-    parsedLegacyPayload: "已解析的旧版载荷（只读诊断）",
-    canonicalLegacyPayload: "原始降级载荷",
-    ratingConflict: "研究评级冲突",
-    outerRating: "外层保存评级",
-    nestedRating: "内嵌载荷评级",
-    unreliableConclusion: "不可作为可靠研究结论，建议重新运行。",
-    legacyFieldNotCaptured: "旧版降级未捕获",
     noCatalystsIdentified: "未识别到催化因素",
     version: "版本",
     source: "来源",
@@ -506,7 +481,7 @@ const ja = {
     openMemory: "メモリーを開く",
     waitingForEvents: "永続化された実行イベントを待っています。",
     noArtifactsRecorded:
-      "この過去の実行には構造化されたリサーチ過程が記録されていません。",
+      "この実行には構造化されたリサーチ過程が記録されていません。",
     noDeliberation: "このモードでは検討成果物が生成されませんでした。",
     noEvidenceRecorded:
       "この実行には封印済みエビデンスバンドルがありません。",
@@ -522,19 +497,6 @@ const ja = {
     canonicalEvidenceAndProvenance: "完全な ID と出典監査",
     copyEvidenceId: "エビデンス ID {{ref}} をコピー",
     copy: "コピー",
-    legacyDegradedOutput: "旧版の劣化出力",
-    degradedStructuredOutput: "構造化出力の劣化",
-    legacyDegradedHint:
-      "この読み取り専用診断は原本を変更せず、可視フィールドから復元できる内容だけを示します。",
-    rerunRecommended: "信頼できる結論ではないため、再実行を推奨します。",
-    parsedLegacyPayload: "解析済み旧版ペイロード（読み取り専用）",
-    canonicalLegacyPayload: "原本の劣化ペイロード",
-    ratingConflict: "リサーチ評価の不一致",
-    outerRating: "保存された外側の評価",
-    nestedRating: "内側ペイロードの評価",
-    unreliableConclusion:
-      "信頼できる結論として扱わず、リサーチを再実行してください。",
-    legacyFieldNotCaptured: "旧版の劣化出力では取得されていません",
     noCatalystsIdentified: "カタリストは特定されませんでした",
     version: "バージョン",
     source: "ソース",
@@ -569,11 +531,7 @@ const ja = {
   },
 };
 
-const storedLocale = localStorage.getItem("tradingagents-locale");
-const saved = storedLocale === "zh-Hans" ? "zh-CN" : storedLocale || "zh-CN";
-if (storedLocale === "zh-Hans") {
-  localStorage.setItem("tradingagents-locale", "zh-CN");
-}
+const saved = localStorage.getItem("tradingagents-locale") || "zh-CN";
 
 void i18n.use(initReactI18next).init({
   resources: { en, "zh-CN": zhCN, ja },

@@ -126,7 +126,7 @@ class RunArtifactRecord(Base):
     round: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     schema_version: Mapped[str] = mapped_column(String(20), nullable=False)
     generation_method: Mapped[str] = mapped_column(
-        String(40), nullable=False, default="legacy_unknown"
+        String(40), nullable=False
     )
     content_type: Mapped[str] = mapped_column(String(40), nullable=False)
     content_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)

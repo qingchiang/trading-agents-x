@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 import {
   api,
   type AnalystReport,
-  type ArtifactDiagnostics,
   type EvidenceBundle,
   type PerspectiveReview,
   type ResearchArtifact,
@@ -167,17 +166,6 @@ export default function RunDetail() {
         detail?.result?.evidence ?? null,
       ),
     [detail?.result?.evidence],
-  );
-  const decisionDiagnostics = useMemo(
-    () =>
-      [...artifacts]
-        .reverse()
-        .find(
-          (artifact) =>
-            artifact.stage === "decision" &&
-            artifact.attempt === detail?.run.attempt,
-        )?.diagnostics ?? null,
-    [artifacts, detail?.run.attempt],
   );
   const runWarnings = useMemo(() => {
     const reportWarningKeys = new Set(
@@ -405,7 +393,6 @@ export default function RunDetail() {
       {activeView === "decision" && (
         <DecisionPanel
           decision={result?.decision ?? null}
-          diagnostics={decisionDiagnostics}
           onEvidence={openEvidence}
           evidenceIndex={evidenceIndex}
         />
@@ -556,22 +543,11 @@ function ArtifactCard({
   const content = artifact.content;
   const perspective = isPerspectiveReview(content) ? content : null;
   const decision = isResearchDecision(content) ? content : null;
-  const diagnostics = artifact.diagnostics;
-  const parsed = diagnostics?.parsed_thesis ?? null;
   const refs = content.evidence_refs ?? [];
   const primaryText =
-    parsedText(parsed, "thesis", "summary") ??
     perspective?.thesis ??
     decision?.thesis ??
     "";
-  const claimRebuttals =
-    perspective?.claim_rebuttals?.length
-      ? perspective.claim_rebuttals
-      : parsedStringArray(parsed, "claim_rebuttals", "challenged_claims");
-  const risks =
-    perspective?.risks?.length
-      ? perspective.risks
-      : parsedStringArray(parsed, "risks", "downside_mechanisms");
   return (
     <section className="artifact-card">
       <header className="artifact-header">
@@ -582,30 +558,16 @@ function ArtifactCard({
         <small>
           {t("round")} {artifact.round} · {t("attempt")} {artifact.attempt}
           {" · "}
-          {artifact.generation_method ?? "legacy_unknown"}
+          {artifact.generation_method}
         </small>
       </header>
       <div className="artifact-body">
-        {diagnostics?.degraded_output && (
-          <LegacyDiagnosticBanner diagnostics={diagnostics} />
-        )}
-        {parsed && (
-          <p className="diagnostic-label">{t("parsedLegacyPayload")}</p>
-        )}
         <Markdown
           evidenceAliases={evidenceIndex.aliases}
           onEvidence={onEvidence}
         >
           {primaryText}
         </Markdown>
-        {parsed && (
-          <details className="legacy-canonical-payload">
-            <summary>{t("canonicalLegacyPayload")}</summary>
-            <pre>
-              {perspective?.thesis ?? decision?.thesis ?? ""}
-            </pre>
-          </details>
-        )}
         {decision && (
           <p className="artifact-rating">
             <strong>{decision.rating}</strong> · {t("confidence")}{" "}
@@ -616,25 +578,13 @@ function ArtifactCard({
           <>
             <List
               title={t("claimRebuttals")}
-              items={claimRebuttals}
-              emptyLabel={
-                diagnostics?.missing_fields?.includes(
-                  "claim_rebuttals",
-                )
-                  ? t("legacyFieldNotCaptured")
-                  : undefined
-              }
+              items={perspective.claim_rebuttals ?? []}
               evidenceIndex={evidenceIndex}
               onEvidence={onEvidence}
             />
             <List
               title={t("risks")}
-              items={risks}
-              emptyLabel={
-                diagnostics?.missing_fields?.includes("risks")
-                  ? t("legacyFieldNotCaptured")
-                  : undefined
-              }
+              items={perspective.risks ?? []}
               evidenceIndex={evidenceIndex}
               onEvidence={onEvidence}
             />
@@ -925,12 +875,10 @@ function ReportsPanel({
 
 function DecisionPanel({
   decision,
-  diagnostics,
   onEvidence,
   evidenceIndex,
 }: {
   decision: ResearchDecision | null;
-  diagnostics: ArtifactDiagnostics | null;
   onEvidence: (ref: string) => void;
   evidenceIndex: EvidenceReferenceIndex;
 }) {
@@ -946,26 +894,6 @@ function DecisionPanel({
       </article>
     );
   }
-  const parsed = diagnostics?.parsed_thesis ?? null;
-  const thesis = parsedText(parsed, "thesis") ?? decision.thesis;
-  const catalysts =
-    parsedStringArray(parsed, "catalysts").length > 0
-      ? parsedStringArray(parsed, "catalysts")
-      : (decision.catalysts ?? []);
-  const risks =
-    parsedStringArray(parsed, "risks").length > 0
-      ? parsedStringArray(parsed, "risks")
-      : (decision.risks ?? []);
-  const invalidation =
-    parsedStringArray(parsed, "invalidation_conditions").length > 0
-      ? parsedStringArray(parsed, "invalidation_conditions")
-      : (decision.invalidation_conditions ?? []);
-  const parsedHorizon = parsedText(parsed, "time_horizon");
-  const horizon =
-    parsedHorizon ??
-    (diagnostics?.sentinel_fields?.includes("time_horizon")
-      ? t("legacyFieldNotCaptured")
-      : decision.time_horizon);
   return (
     <article
       className="panel audit-panel decision-panel"
@@ -980,38 +908,16 @@ function DecisionPanel({
         </small>
       </div>
       <div className="decision-body">
-        {diagnostics?.degraded_output && (
-          <LegacyDiagnosticBanner diagnostics={diagnostics} />
-        )}
-        {diagnostics?.rating_conflict && (
-          <div className="rating-conflict">
-            <strong>{t("ratingConflict")}</strong>
-            <span>
-              {t("outerRating")}: {diagnostics.outer_rating} ·{" "}
-              {t("nestedRating")}: {diagnostics.nested_rating}
-            </span>
-            <small>{t("unreliableConclusion")}</small>
-          </div>
-        )}
         <h2>{t("decision")}</h2>
         <h3>{t("thesis")}</h3>
-        {parsed && (
-          <p className="diagnostic-label">{t("parsedLegacyPayload")}</p>
-        )}
         <div className="decision-thesis">
           <Markdown
             evidenceAliases={evidenceIndex.aliases}
             onEvidence={onEvidence}
           >
-            {thesis}
+            {decision.thesis}
           </Markdown>
         </div>
-        {parsed && (
-          <details className="legacy-canonical-payload">
-            <summary>{t("canonicalLegacyPayload")}</summary>
-            <pre>{decision.thesis}</pre>
-          </details>
-        )}
         <EvidenceRefs
           refs={decision.evidence_refs ?? []}
           onEvidence={onEvidence}
@@ -1021,76 +927,38 @@ function DecisionPanel({
         <div className="decision-columns">
           <List
             title={t("catalysts")}
-            items={catalysts}
+            items={decision.catalysts ?? []}
             emptyLabel={t("noCatalystsIdentified")}
             evidenceIndex={evidenceIndex}
             onEvidence={onEvidence}
           />
           <List
             title={t("risks")}
-            items={risks}
-            emptyLabel={
-              diagnostics?.sentinel_fields?.includes("risks")
-                ? t("legacyFieldNotCaptured")
-                : undefined
-            }
+            items={decision.risks ?? []}
             evidenceIndex={evidenceIndex}
             onEvidence={onEvidence}
           />
           <List
             title={t("invalidation")}
-            items={invalidation}
-            emptyLabel={
-              diagnostics?.sentinel_fields?.includes(
-                "invalidation_conditions",
-              )
-                ? t("legacyFieldNotCaptured")
-                : undefined
-            }
+            items={decision.invalidation_conditions ?? []}
             evidenceIndex={evidenceIndex}
             onEvidence={onEvidence}
           />
         </div>
         <p className="horizon">
-          <strong>{t("horizon")}:</strong> {horizon}
+          <strong>{t("horizon")}:</strong> {decision.time_horizon}
         </p>
       </div>
     </article>
   );
 }
 
-function LegacyDiagnosticBanner({
-  diagnostics,
-}: {
-  diagnostics: ArtifactDiagnostics;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div className="legacy-diagnostic" role="alert">
-      <strong>
-        {diagnostics.legacy_degraded_output
-          ? t("legacyDegradedOutput")
-          : t("degradedStructuredOutput")}
-      </strong>
-      <span>{t("legacyDegradedHint")}</span>
-      {diagnostics.rerun_recommended && (
-        <small>{t("rerunRecommended")}</small>
-      )}
-      {(diagnostics.reason_codes ?? []).length > 0 && (
-        <code>{(diagnostics.reason_codes ?? []).join(", ")}</code>
-      )}
-    </div>
-  );
-}
-
 function reportNarrative(value: unknown): string {
   if (typeof value === "string") {
-    return stripLegacyReportAuditSections(value);
+    return value;
   }
   if (value && typeof value === "object" && "narrative" in value) {
-    return stripLegacyReportAuditSections(
-      String((value as { narrative: unknown }).narrative),
-    );
+    return String((value as { narrative: unknown }).narrative);
   }
   return JSON.stringify(value, null, 2);
 }
@@ -1261,25 +1129,6 @@ function evidenceDates(group: EvidenceDisplayGroup): string[] {
       ),
     ),
   );
-}
-
-function stripLegacyReportAuditSections(value: string): string {
-  let text = value.replace(
-    /<!--\s*tradingagents-data-provenance:start\s*-->[\s\S]*?<!--\s*tradingagents-data-provenance:end\s*-->/gi,
-    "",
-  );
-  const heading =
-    /^\s*##\s+Data\s+(?:Quality\s+Warnings|Provenance)\s*$/im.exec(
-      text,
-    );
-  if (heading?.index !== undefined) {
-    text = text.slice(0, heading.index);
-  }
-  text = text.trimEnd();
-  if (text.endsWith("---")) {
-    text = text.slice(0, -3).trimEnd();
-  }
-  return text;
 }
 
 function readAuditDetailsOpen(): boolean {
@@ -1476,24 +1325,16 @@ type NodeMetricRow = {
 
 function nodeMetricRows(metrics: RunMetrics | undefined): NodeMetricRow[] {
   const nodeMetrics = metrics?.node_metrics ?? {};
-  const wallTimes = metrics?.node_wall_times ?? {};
-  const names = new Set([
-    ...Object.keys(nodeMetrics),
-    ...Object.keys(wallTimes),
-  ]);
-  return [...names]
+  return Object.keys(nodeMetrics)
     .map((node) => {
       const usage = nodeMetrics[node];
       return {
         node,
-        llmCalls: usage ? (usage.llm_calls ?? 0) : null,
-        toolCalls: usage ? (usage.tool_calls ?? 0) : null,
-        inputTokens: usage ? (usage.input_tokens ?? 0) : null,
-        outputTokens: usage ? (usage.output_tokens ?? 0) : null,
-        wallTime:
-          usage?.wall_time_seconds ??
-          wallTimes[node] ??
-          0,
+        llmCalls: usage.llm_calls ?? 0,
+        toolCalls: usage.tool_calls ?? 0,
+        inputTokens: usage.input_tokens ?? 0,
+        outputTokens: usage.output_tokens ?? 0,
+        wallTime: usage.wall_time_seconds ?? 0,
       };
     })
     .sort(
@@ -1523,70 +1364,6 @@ function isResearchDecision(
   return "rating" in content && "time_horizon" in content;
 }
 
-function parsedText(
-  parsed: Record<string, unknown> | null | undefined,
-  ...fields: string[]
-): string | null {
-  for (const field of fields) {
-    const value = parsed?.[field];
-    if (typeof value === "string" && value.trim()) {
-      return value;
-    }
-  }
-  return null;
-}
-
-function parsedStringArray(
-  parsed: Record<string, unknown> | null | undefined,
-  ...fields: string[]
-): string[] {
-  for (const field of fields) {
-    const value = parsed?.[field];
-    if (Array.isArray(value)) {
-      return value
-        .map(parsedArrayItem)
-        .filter((item): item is string => Boolean(item));
-    }
-  }
-  return [];
-}
-
-function parsedArrayItem(value: unknown): string | null {
-  if (typeof value === "string") {
-    return value.trim() || null;
-  }
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-  const record = value as Record<string, unknown>;
-  const heading = parsedText(
-    record,
-    "mechanism",
-    "claim_text",
-    "title",
-    "name",
-  );
-  const detail = parsedText(
-    record,
-    "detail",
-    "challenge_text",
-    "description",
-    "text",
-    "summary",
-  );
-  const refs = Array.isArray(record.evidence_refs)
-    ? record.evidence_refs.filter(
-        (item): item is string => typeof item === "string",
-      )
-    : [];
-  const parts = [
-    heading ? `**${heading}**` : null,
-    detail,
-    refs.length ? refs.join(", ") : null,
-  ].filter((item): item is string => Boolean(item));
-  return parts.length ? parts.join("\n\n") : null;
-}
-
 function uniqueStrings(values: string[]): string[] {
   return Array.from(new Set(values));
 }
@@ -1611,10 +1388,10 @@ function isReturnViewName(value: string | null): value is ReturnViewName {
 
 function orderReportNames(names: string[]): string[] {
   const known = reportOrder.filter((name) => names.includes(name));
-  const legacy = names
+  const extensions = names
     .filter((name) => !(reportOrder as readonly string[]).includes(name))
     .sort();
-  return [...known, ...legacy];
+  return [...known, ...extensions];
 }
 
 function reportLabel(t: TFunction, name: string): string {

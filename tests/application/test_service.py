@@ -108,6 +108,9 @@ class _ArtifactGraph:
                 node="analyst.market",
                 stage="analyst",
                 role="market",
+                generation_method=(
+                    ArtifactGenerationMethod.NARRATIVE_ADAPTED
+                ),
                 content=execution.reports["market"],
             )
         )

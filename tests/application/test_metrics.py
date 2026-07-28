@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+import pytest
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, LLMResult
 
@@ -124,14 +125,12 @@ def test_missing_metadata_and_provider_usage_are_explicit() -> None:
     assert snapshot.node_metrics["unattributed"].input_tokens == 0
 
 
-def test_legacy_metrics_parse_without_node_usage() -> None:
-    metrics = RunMetrics.model_validate(
-        {
-            "llm_calls": 2,
-            "input_tokens": 100,
-            "node_wall_times": {"analyst.market": 1.25},
-        }
-    )
-
-    assert metrics.node_metrics == {}
-    assert metrics.node_wall_times == {"analyst.market": 1.25}
+def test_metrics_reject_removed_duplicate_node_wall_times() -> None:
+    with pytest.raises(ValueError, match="node_wall_times"):
+        RunMetrics.model_validate(
+            {
+                "llm_calls": 2,
+                "input_tokens": 100,
+                "node_wall_times": {"analyst.market": 1.25},
+            }
+        )

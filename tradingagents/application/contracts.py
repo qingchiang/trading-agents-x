@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Mapping
 from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Any, Literal, TypeAlias
@@ -126,9 +125,9 @@ class ArtifactGenerationMethod(str, Enum):
 
     TOOL_CALL = "tool_call"
     JSON_MODE = "json_mode"
+    NARRATIVE_ADAPTED = "narrative_adapted"
     RAW_JSON_RECOVERED = "raw_json_recovered"
     JSON_MODE_RECOVERED = "json_mode_recovered"
-    LEGACY_UNKNOWN = "legacy_unknown"
 
 
 class EvidenceQuality(str, Enum):
@@ -224,7 +223,7 @@ class EvidenceItem(FrozenModel):
 class EvidenceBundle(FrozenModel):
     """Versioned evidence snapshot shared by every agent in one run."""
 
-    version: Literal["1", "2"] = "2"
+    version: Literal["1"] = "1"
     instrument: str
     analysis_date: date
     items: tuple[EvidenceItem, ...]
@@ -254,11 +253,7 @@ class EvidenceBundle(FrozenModel):
                         f"{item.ref} available_at is after the analysis cutoff"
                     )
         serialized_items = [
-            item.model_dump(
-                mode="json",
-                exclude={"origins"} if self.version == "1" else None,
-            )
-            for item in self.items
+            item.model_dump(mode="json") for item in self.items
         ]
         canonical = json.dumps(
             serialized_items,
@@ -511,21 +506,6 @@ def _artifact_content_type(content: ResearchArtifactContent) -> str:
     return "research_decision"
 
 
-class ArtifactDiagnostics(FrozenModel):
-    """Read-only diagnosis of a persisted artifact's visible typed content."""
-
-    degraded_output: bool = False
-    legacy_degraded_output: bool = False
-    reason_codes: tuple[str, ...] = ()
-    missing_fields: tuple[str, ...] = ()
-    sentinel_fields: tuple[str, ...] = ()
-    parsed_thesis: dict[str, Any] | None = None
-    outer_rating: str | None = None
-    nested_rating: str | None = None
-    rating_conflict: bool = False
-    rerun_recommended: bool = False
-
-
 class ResearchArtifactDraft(FrozenModel):
     """Typed graph output awaiting application-owned persistence metadata."""
 
@@ -542,9 +522,7 @@ class ResearchArtifactDraft(FrozenModel):
     )
     round: int = Field(default=0, ge=0)
     schema_version: Literal["1"] = "1"
-    generation_method: ArtifactGenerationMethod = (
-        ArtifactGenerationMethod.LEGACY_UNKNOWN
-    )
+    generation_method: ArtifactGenerationMethod
     content: ResearchArtifactContent
 
     @property
@@ -580,13 +558,8 @@ class ResearchArtifact(FrozenModel):
     )
     round: int = Field(default=0, ge=0)
     schema_version: Literal["1"] = "1"
-    generation_method: ArtifactGenerationMethod = (
-        ArtifactGenerationMethod.LEGACY_UNKNOWN
-    )
+    generation_method: ArtifactGenerationMethod
     content: ResearchArtifactContent
-    diagnostics: ArtifactDiagnostics = Field(
-        default_factory=ArtifactDiagnostics
-    )
     created_at: datetime
 
     @property
@@ -610,7 +583,6 @@ class RunMetrics(FrozenModel):
     input_tokens: int = Field(default=0, ge=0)
     output_tokens: int = Field(default=0, ge=0)
     wall_time_seconds: float = Field(default=0.0, ge=0.0)
-    node_wall_times: dict[str, float] = Field(default_factory=dict)
     node_metrics: dict[str, NodeMetrics] = Field(default_factory=dict)
 
 
@@ -628,16 +600,6 @@ class AnalysisRequest(FrozenModel):
     quick_reasoning_effort: str | None = None
     deep_reasoning_effort: str | None = None
     output_language: OutputLanguage | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def discard_legacy_provenance(cls, value: Any) -> Any:
-        """Accept the removed run option in historical and older client payloads."""
-        if not isinstance(value, Mapping) or "provenance" not in value:
-            return value
-        payload = dict(value)
-        payload.pop("provenance", None)
-        return payload
 
     @field_validator("ticker")
     @classmethod

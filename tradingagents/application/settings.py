@@ -16,7 +16,6 @@ from pydantic import (
     Field,
     SecretStr,
     field_validator,
-    model_validator,
 )
 
 from tradingagents.default_config import build_default_config
@@ -72,21 +71,6 @@ class RunSettings(BaseModel):
     llm_max_retries: int | None = Field(default=None, ge=0)
     output_language: OutputLanguage = ReportLanguage.ENGLISH
     data_config: Mapping[str, Any]
-
-    @model_validator(mode="before")
-    @classmethod
-    def discard_legacy_provenance(cls, value: Any) -> Any:
-        """Load old config snapshots without retaining the removed UI option."""
-        if not isinstance(value, Mapping):
-            return value
-        payload = dict(value)
-        payload.pop("provenance", None)
-        data_config = payload.get("data_config")
-        if isinstance(data_config, Mapping):
-            clean_data_config = dict(data_config)
-            clean_data_config.pop("provenance_appendix", None)
-            payload["data_config"] = clean_data_config
-        return payload
 
     @field_validator("output_language", mode="before")
     @classmethod

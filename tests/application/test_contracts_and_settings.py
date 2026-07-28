@@ -233,24 +233,19 @@ def test_omitted_request_values_inherit_and_materialize_environment_defaults(
     assert resolved.dataflow_config(settings)["provenance_appendix"] is False
 
 
-def test_legacy_provenance_options_are_accepted_then_discarded() -> None:
-    request = AnalysisRequest.model_validate(
-        {
-            "ticker": "NVDA",
-            "analysis_date": "2026-07-24",
-            "provenance": True,
-        }
-    )
-    settings = RunSettings.model_validate(
-        {
-            "provenance": True,
-            "data_config": {
-                "provenance_appendix": True,
-                "news_article_limit": 30,
-            },
-        }
-    )
-
-    assert "provenance" not in request.model_dump(mode="json")
-    assert "provenance" not in settings.model_dump(mode="json")
-    assert "provenance_appendix" not in settings.data_config
+def test_removed_provenance_options_are_rejected() -> None:
+    with pytest.raises(ValidationError, match="provenance"):
+        AnalysisRequest.model_validate(
+            {
+                "ticker": "NVDA",
+                "analysis_date": "2026-07-24",
+                "provenance": True,
+            }
+        )
+    with pytest.raises(ValidationError, match="provenance"):
+        RunSettings.model_validate(
+            {
+                "provenance": True,
+                "data_config": {"news_article_limit": 30},
+            }
+        )

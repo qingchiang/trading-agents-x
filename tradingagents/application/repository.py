@@ -17,7 +17,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from tradingagents.dataflows.symbol_utils import market_timezone
 from tradingagents.version import __version__
 
-from .artifact_diagnostics import diagnose_artifact
 from .contracts import (
     AnalysisRequest,
     AnalysisResult,
@@ -834,7 +833,6 @@ class RunRepository:
             schema_version=record["schema_version"],
             generation_method=generation_method,
             content=content,
-            diagnostics=diagnose_artifact(content, generation_method),
             created_at=_aware(record["created_at"]),
         )
 
@@ -1218,7 +1216,6 @@ class RunRepository:
                 confidence=decision.confidence,
                 decision_json=decision.model_dump(mode="json"),
                 evidence_bundle_json=EvidenceBundle(
-                    version="1",
                     instrument=request.ticker,
                     analysis_date=request.analysis_date,
                     items=(),

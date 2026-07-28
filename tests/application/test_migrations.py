@@ -30,7 +30,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     finally:
         engine.dispose()
 
-    assert revision == "0003_artifact_generation_method"
+    assert revision == "0001_application_core"
     assert {
         "id",
         "run_id",

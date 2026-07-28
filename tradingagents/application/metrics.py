@@ -155,7 +155,6 @@ class MetricsCallback(BaseCallbackHandler):
                 input_tokens=self.input_tokens,
                 output_tokens=self.output_tokens,
                 wall_time_seconds=max(0.0, now - self._started_at),
-                node_wall_times=node_times,
                 node_metrics=node_metrics,
             )
 

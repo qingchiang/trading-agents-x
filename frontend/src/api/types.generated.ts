@@ -41,19 +41,7 @@ export interface components {
       summary: string;
       warnings?: components["schemas"]["ResearchWarning"][];
     };
-    ArtifactDiagnostics: {
-      degraded_output?: boolean;
-      legacy_degraded_output?: boolean;
-      missing_fields?: string[];
-      nested_rating?: string | null;
-      outer_rating?: string | null;
-      parsed_thesis?: Record<string, unknown> | null;
-      rating_conflict?: boolean;
-      reason_codes?: string[];
-      rerun_recommended?: boolean;
-      sentinel_fields?: string[];
-    };
-    ArtifactGenerationMethod: "tool_call" | "json_mode" | "raw_json_recovered" | "json_mode_recovered" | "legacy_unknown";
+    ArtifactGenerationMethod: "tool_call" | "json_mode" | "narrative_adapted" | "raw_json_recovered" | "json_mode_recovered";
     AssetType: "stock" | "crypto";
     CapabilitiesResponse: {
       analysts: string[];
@@ -85,7 +73,7 @@ export interface components {
       instrument: string;
       items: components["schemas"]["EvidenceItem"][];
       sealed_at?: string;
-      version?: "1" | "2";
+      version?: string;
     };
     EvidenceItem: {
       available_at?: string | null;
@@ -191,8 +179,7 @@ export interface components {
       attempt: number;
       content: components["schemas"]["AnalystReport"] | components["schemas"]["PerspectiveReview"] | components["schemas"]["ResearchDecision"];
       created_at: string;
-      diagnostics?: components["schemas"]["ArtifactDiagnostics"];
-      generation_method?: components["schemas"]["ArtifactGenerationMethod"];
+      generation_method: components["schemas"]["ArtifactGenerationMethod"];
       id: string;
       role: string;
       round?: number;
@@ -235,7 +222,6 @@ export interface components {
       input_tokens?: number;
       llm_calls?: number;
       node_metrics?: Record<string, components["schemas"]["NodeMetrics"]>;
-      node_wall_times?: Record<string, number>;
       output_tokens?: number;
       tool_calls?: number;
       wall_time_seconds?: number;

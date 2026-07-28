@@ -12,7 +12,6 @@ from .contracts import (
     RunExport,
 )
 from .evidence import group_evidence_by_content
-from .reporting import strip_report_audit_sections
 
 
 def render_run_export_markdown(run_export: RunExport) -> str:
@@ -81,7 +80,7 @@ def render_run_export_markdown(run_export: RunExport) -> str:
                 "",
                 f"### {name.title()}",
                 "",
-                strip_report_audit_sections(narrative),
+                narrative,
             ]
         )
 
@@ -133,7 +132,7 @@ def render_run_export_markdown(run_export: RunExport) -> str:
             f"- Wall time: `{metrics.wall_time_seconds:.3f}s`",
         ]
     )
-    node_names = set(metrics.node_metrics) | set(metrics.node_wall_times)
+    node_names = set(metrics.node_metrics)
     if node_names:
         sections.extend(
             [
@@ -146,33 +145,16 @@ def render_run_export_markdown(run_export: RunExport) -> str:
         for node in sorted(
             node_names,
             key=lambda name: (
-                -(
-                    metrics.node_metrics.get(name).wall_time_seconds
-                    if name in metrics.node_metrics
-                    else metrics.node_wall_times.get(name, 0.0)
-                ),
+                -metrics.node_metrics[name].wall_time_seconds,
                 name,
             ),
         ):
-            node_usage = metrics.node_metrics.get(node)
-            wall_time = (
-                node_usage.wall_time_seconds
-                if node_usage is not None
-                else metrics.node_wall_times.get(node, 0.0)
-            )
-            values = (
-                (
-                    str(node_usage.llm_calls),
-                    str(node_usage.tool_calls),
-                    str(node_usage.input_tokens),
-                    str(node_usage.output_tokens),
-                )
-                if node_usage is not None
-                else ("—", "—", "—", "—")
-            )
+            node_usage = metrics.node_metrics[node]
             sections.append(
-                f"| `{node}` | {values[0]} | {values[1]} | "
-                f"{values[2]} | {values[3]} | {wall_time:.3f}s |"
+                f"| `{node}` | {node_usage.llm_calls} | "
+                f"{node_usage.tool_calls} | {node_usage.input_tokens} | "
+                f"{node_usage.output_tokens} | "
+                f"{node_usage.wall_time_seconds:.3f}s |"
             )
 
     sections.extend(["", "## Evidence Appendix"])
@@ -251,7 +233,7 @@ def _artifact_human_text(
     content: AnalystReport | PerspectiveReview | ResearchDecision,
 ) -> str:
     if isinstance(content, AnalystReport):
-        return strip_report_audit_sections(content.narrative)
+        return content.narrative
     return content.thesis
 
 

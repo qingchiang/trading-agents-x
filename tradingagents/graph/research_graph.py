@@ -66,10 +66,7 @@ from tradingagents.application.contracts import (
 )
 from tradingagents.application.evidence import group_evidence_by_content
 from tradingagents.application.metrics import MetricsCallback
-from tradingagents.application.reporting import (
-    order_reports,
-    strip_report_audit_sections,
-)
+from tradingagents.application.reporting import order_reports
 from tradingagents.application.runtime import RunContext, check_cancelled
 from tradingagents.dataflows.config import use_config
 from tradingagents.graph.structured_output import (
@@ -87,12 +84,7 @@ _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _CONTROL_COMMENT_RE = re.compile(
     r"<!--\s*tradingagents-data-provenance:(?:start|end)\s*-->"
 )
-_WARNING_HEADING = "## Data Quality Warnings"
 _PROVENANCE_HEADING = "## Data Provenance"
-_WARNING_ITEM_RE = re.compile(
-    r"^\s*-\s+\*\*(?P<evidence>.+?)\*\*\s+"
-    r"\(source:\s*(?P<source>.+?)\):\s*(?P<reason>.+?)\s*$"
-)
 _STRUCTURED_SENTINELS = {
     "n/a",
     "none",
@@ -487,6 +479,7 @@ class ResearchGraph:
                 stage="analyst",
                 role=analyst,
                 content=typed,
+                generation_method=ArtifactGenerationMethod.NARRATIVE_ADAPTED,
             )
             self._finish_node(
                 runtime,
@@ -525,7 +518,6 @@ class ResearchGraph:
             item = EvidenceItem.model_validate(raw)
             deduped[item.ref] = item
         bundle = EvidenceBundle(
-            version="2",
             instrument=state["ticker"],
             analysis_date=date.fromisoformat(state["analysis_date"]),
             items=tuple(deduped.values()),
@@ -843,9 +835,7 @@ class ResearchGraph:
         stage: str,
         role: str,
         content: ResearchArtifactContent,
-        generation_method: ArtifactGenerationMethod = (
-            ArtifactGenerationMethod.LEGACY_UNKNOWN
-        ),
+        generation_method: ArtifactGenerationMethod,
         round: int = 0,
     ) -> None:
         runtime.context.artifact_writer(
@@ -1214,40 +1204,8 @@ def _adapt_analyst_report(
     evidence: list[EvidenceItem],
 ) -> AnalystReport:
     refs = tuple(item.ref for item in evidence)
-    narrative, warning_lines = _separate_warning_section(narrative)
     warnings: list[ResearchWarning] = []
-    for line in warning_lines:
-        match = _WARNING_ITEM_RE.match(line)
-        evidence_name = match.group("evidence") if match else ""
-        source = match.group("source") if match else None
-        reason = match.group("reason") if match else line.removeprefix("- ").strip()
-        item = next(
-            (
-                candidate
-                for candidate in evidence
-                if _evidence_matches_warning(
-                    candidate,
-                    evidence_name=evidence_name,
-                    source=source,
-                )
-            ),
-            None,
-        )
-        warnings.append(
-            ResearchWarning(
-                code="evidence.degraded",
-                message=(
-                    f"{evidence_name} ({source}): {reason}"
-                    if evidence_name and source
-                    else reason
-                ),
-                evidence_ref=item.ref if item else None,
-                source=source,
-            )
-        )
     for item in evidence:
-        if any(warning.evidence_ref == item.ref for warning in warnings):
-            continue
         origin_records = tuple(
             ProvenanceRecord(
                 evidence=origin.evidence_type,
@@ -1319,45 +1277,6 @@ def _adapt_analyst_report(
         warnings=tuple(dict.fromkeys(warnings)),
         narrative=narrative,
     )
-
-
-def _evidence_matches_warning(
-    item: EvidenceItem,
-    *,
-    evidence_name: str,
-    source: str | None,
-) -> bool:
-    candidates = (
-        tuple(
-            (origin.evidence_type, origin.source)
-            for origin in item.origins
-        )
-        or ((item.evidence_type, item.source),)
-    )
-    return any(
-        evidence_type.casefold() == evidence_name.casefold()
-        and (source is None or origin_source.casefold() == source.casefold())
-        for evidence_type, origin_source in candidates
-    )
-
-
-def _separate_warning_section(value: str) -> tuple[str, list[str]]:
-    """Extract legacy warning bullets and return a clean report narrative."""
-    if _WARNING_HEADING not in value:
-        return strip_report_audit_sections(value), []
-    before, section = value.split(_WARNING_HEADING, 1)
-    warning_section = section
-    if _PROVENANCE_HEADING in section:
-        warning_section, _provenance_body = section.split(
-            _PROVENANCE_HEADING,
-            1,
-        )
-    warnings = [
-        line.strip()
-        for line in warning_section.splitlines()
-        if line.strip().startswith("- ")
-    ]
-    return strip_report_audit_sections(before), warnings
 
 
 def _research_prompt(

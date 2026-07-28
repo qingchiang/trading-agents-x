@@ -9,6 +9,7 @@ from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
     AnalystReport,
+    ArtifactGenerationMethod,
     EvidenceBundle,
     EvidenceItem,
     PerspectiveReview,
@@ -146,20 +147,14 @@ async def test_openapi_contains_versioned_run_center_contract(
 
 
 @pytest.mark.anyio
-async def test_legacy_provenance_request_is_accepted_and_discarded(
+async def test_removed_provenance_request_is_rejected(
     web_client: httpx.AsyncClient,
 ) -> None:
     response = await web_client.post(
         "/api/v1/runs",
         json={**_payload(), "provenance": True},
     )
-    detail = await web_client.get(
-        f"/api/v1/runs/{response.json()['id']}"
-    )
-
-    assert response.status_code == 202
-    assert "provenance" not in detail.json()["run"]["request"]
-    assert "provenance" not in detail.json()["run"]["config_snapshot"]
+    assert response.status_code == 422
 
 
 @pytest.mark.anyio
@@ -242,19 +237,23 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
             node="analyst.market",
             stage="analyst",
             role="market",
+            generation_method=ArtifactGenerationMethod.NARRATIVE_ADAPTED,
             content=report,
         ),
     )
-    degraded, _ = web_repository.append_artifact(
+    review, _ = web_repository.append_artifact(
         queued.id,
         ResearchArtifactDraft(
             node="perspective.bear",
             stage="perspective",
             role="bear",
+            generation_method=ArtifactGenerationMethod.TOOL_CALL,
             content=PerspectiveReview(
                 role="bear",
-                thesis='{"summary": "Legacy JSON payload"}',
+                thesis="Fixture bearish review.",
+                claim_rebuttals=("Valuation may already reflect growth.",),
                 evidence_refs=(evidence_item.ref,),
+                risks=("Demand may weaken.",),
             ),
         ),
     )
@@ -301,19 +300,12 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
     assert artifacts.status_code == 200
     assert artifacts.json()[0]["id"] == artifact.id
     assert artifacts.json()[0]["content"]["narrative"] == "Fixture report."
-    degraded_payload = next(
-        item for item in artifacts.json() if item["id"] == degraded.id
+    review_payload = next(
+        item for item in artifacts.json() if item["id"] == review.id
     )
-    assert degraded_payload["generation_method"] == "legacy_unknown"
-    assert degraded_payload["diagnostics"]["legacy_degraded_output"] is True
-    assert degraded_payload["diagnostics"]["missing_fields"] == [
-        "claim_rebuttals",
-        "risks",
-    ]
-    assert degraded_payload["diagnostics"]["rerun_recommended"] is True
-    assert degraded_payload["diagnostics"]["parsed_thesis"] == {
-        "summary": "Legacy JSON payload"
-    }
+    assert review_payload["generation_method"] == "tool_call"
+    assert "diagnostics" not in review_payload
+    assert review_payload["content"]["risks"] == ["Demand may weaken."]
     assert empty_attempt.json() == []
 
 

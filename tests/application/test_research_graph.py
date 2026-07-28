@@ -246,7 +246,7 @@ def test_profiles_share_contract_but_use_distinct_topologies(
     assert required_nodes <= completed
     assert not forbidden_nodes & completed
     assert set(execution.reports) == {"market", "news"}
-    assert execution.evidence.version == "2"
+    assert execution.evidence.version == "1"
     assert execution.evidence.digest
     assert execution.decision.rating is ResearchRating.HOLD
     valid_refs = {item.ref for item in execution.evidence.items}
@@ -421,7 +421,7 @@ def test_future_dated_provenance_is_withheld_before_bundle_sealing() -> None:
     assert "future-dated evidence withheld" in item.provenance["timing"]
 
 
-def test_analyst_warning_appendix_is_structured_deduplicated_and_removed() -> None:
+def test_analyst_warning_is_derived_from_evidence_quality() -> None:
     item = EvidenceItem.create(
         source="fixture",
         evidence_type="historical price",
@@ -430,27 +430,13 @@ def test_analyst_warning_appendix_is_structured_deduplicated_and_removed() -> No
         content="Fixture data.",
         quality=EvidenceQuality.LOW,
     )
-    narrative = """Evidence-grounded report.
-
----
-
-## Data Quality Warnings
-
-- **historical price** (source: fixture): **partial coverage**
-
-## Data Provenance
-
-| Evidence | Source | Requested / cutoff | Effective date / window | Timing status |
-|---|---|---|---|---|
-| historical price | fixture | 2026-07-24 | 2026-07-24 | partial |
-"""
+    narrative = "Evidence-grounded report."
 
     report = _adapt_analyst_report("market", narrative, [item])
 
-    assert "Data Quality Warnings" not in report.narrative
-    assert "Data Provenance" not in report.narrative
+    assert report.narrative == narrative
     assert len(report.warnings) == 1
     assert report.warnings[0].message == (
-        "historical price (fixture): partial coverage"
+        "historical price from fixture has low evidence quality."
     )
     assert report.warnings[0].evidence_ref == item.ref

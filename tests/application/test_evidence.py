@@ -1,3 +1,5 @@
+"""Canonical evidence bundle and audit export coverage."""
+
 from __future__ import annotations
 
 import hashlib
@@ -10,6 +12,7 @@ from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
     AnalystReport,
+    ArtifactGenerationMethod,
     EvidenceBundle,
     EvidenceItem,
     EvidenceQuality,
@@ -187,7 +190,7 @@ def test_any_future_origin_withholds_the_entire_composite_body() -> None:
     assert "future-dated evidence withheld" in item.origins[1].timing
 
 
-def test_prompt_groups_exact_v1_bodies_without_rewriting_refs() -> None:
+def test_prompt_groups_exact_bodies_without_rewriting_refs() -> None:
     first = EvidenceItem.create(
         source="source-a",
         evidence_type="filing",
@@ -203,7 +206,6 @@ def test_prompt_groups_exact_v1_bodies_without_rewriting_refs() -> None:
         content="EXACT HISTORICAL BODY",
     )
     bundle = EvidenceBundle(
-        version="1",
         instrument="7203.T",
         analysis_date=date(2026, 7, 24),
         items=(first, second),
@@ -221,7 +223,7 @@ def test_prompt_groups_exact_v1_bodies_without_rewriting_refs() -> None:
     assert json.dumps(index).count("EXACT HISTORICAL BODY") == 1
 
 
-def test_v1_digest_remains_compatible_when_origins_are_absent() -> None:
+def test_bundle_digest_includes_canonical_origins_field() -> None:
     item_payload = {
         "ref": "ev_0123456789ab",
         "source": "legacy",
@@ -234,6 +236,7 @@ def test_v1_digest_remains_compatible_when_origins_are_absent() -> None:
         "unit": None,
         "quality": "high",
         "fallback": False,
+        "origins": [],
         "provenance": {"timing": "point-in-time available"},
     }
     canonical = json.dumps(
@@ -274,7 +277,6 @@ def test_markdown_export_renders_an_exact_body_once_with_all_refs() -> None:
         content="ONE EXPORTED BODY",
     )
     evidence = EvidenceBundle(
-        version="1",
         instrument="7203.T",
         analysis_date=date(2026, 7, 24),
         items=(first, second),
@@ -366,10 +368,6 @@ def test_markdown_export_includes_total_and_per_node_metrics() -> None:
         input_tokens=1200,
         output_tokens=300,
         wall_time_seconds=9.5,
-        node_wall_times={
-            "analyst.market": 2.5,
-            "legacy.node": 1.0,
-        },
         node_metrics={
             "analyst.market": NodeMetrics(
                 llm_calls=2,
@@ -417,32 +415,17 @@ def test_markdown_export_includes_total_and_per_node_metrics() -> None:
     assert "- Input tokens: `1200`" in markdown
     assert "| `committee.final` | 1 | 0 | 300 | 100 | 4.000s |" in markdown
     assert "| `analyst.market` | 2 | 2 | 900 | 200 | 2.500s |" in markdown
-    assert "| `legacy.node` | — | — | — | — | 1.000s |" in markdown
     assert markdown.index("committee.final") < markdown.index("analyst.market")
 
 
-def test_markdown_export_cleans_reports_and_emits_each_audit_section_once() -> None:
+def test_markdown_export_emits_each_audit_section_once() -> None:
     now = datetime(2026, 7, 24, 12, tzinfo=timezone.utc)
     warning = ResearchWarning(
         code="evidence.partial",
         message="Historical coverage is partial.",
         source="fixture",
     )
-    narrative = """MODEL REPORT
-
-<!-- tradingagents-data-provenance:start -->
----
-
-## Data Quality Warnings
-
-- **price** (source: fixture): partial coverage
-
-## Data Provenance
-
-| Evidence | Source |
-|---|---|
-| price | fixture |
-<!-- tradingagents-data-provenance:end -->"""
+    narrative = "MODEL REPORT"
     report = AnalystReport(
         analyst="market",
         summary="Summary.",
@@ -465,6 +448,7 @@ def test_markdown_export_cleans_reports_and_emits_each_audit_section_once() -> N
             attempt=1,
             stage="analyst",
             role="market",
+            generation_method=ArtifactGenerationMethod.NARRATIVE_ADAPTED,
             content=report,
             created_at=now,
         ),
@@ -474,6 +458,7 @@ def test_markdown_export_cleans_reports_and_emits_each_audit_section_once() -> N
             attempt=1,
             stage="perspective",
             role="bear",
+            generation_method=ArtifactGenerationMethod.TOOL_CALL,
             content=PerspectiveReview(
                 role="bear",
                 thesis="REVIEW THESIS",
@@ -488,6 +473,7 @@ def test_markdown_export_cleans_reports_and_emits_each_audit_section_once() -> N
             attempt=1,
             stage="decision",
             role="final_committee",
+            generation_method=ArtifactGenerationMethod.TOOL_CALL,
             content=decision,
             created_at=now,
         ),
@@ -527,8 +513,6 @@ def test_markdown_export_cleans_reports_and_emits_each_audit_section_once() -> N
     assert markdown.count("## Evidence Appendix") == 1
     assert markdown.count("MODEL REPORT") == 1
     assert markdown.count("Historical coverage is partial.") == 1
-    assert "Data Quality Warnings" not in markdown
-    assert "Data Provenance" not in markdown
     assert "review-artifact" in markdown
     assert "analyst-artifact" not in markdown
     assert "decision-artifact" not in markdown
