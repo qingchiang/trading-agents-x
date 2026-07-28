@@ -198,11 +198,12 @@ def list_runs(
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     """List persisted runs, newest first."""
-    items = _service().repository.list_runs(
+    page = _service().repository.list_runs(
         status=status,
         limit=limit,
         offset=offset,
     )
+    items = page.items
     if json_output:
         _echo_json([item.model_dump(mode="json") for item in items])
         return
