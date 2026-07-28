@@ -313,3 +313,71 @@ def test_memory_context_skips_malformed_decisions_and_empty_reflections(
         empty.text = "   "
 
     assert repository.memory_context("NVDA", "stock").items == ()
+
+
+def test_memory_entries_support_fuzzy_filters_and_full_field_search(
+    repository: RunRepository,
+) -> None:
+    nvda_run_id = _seed_memory(
+        repository,
+        content_hash="search-nvda",
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 1),
+        reflection="Valuation lesson: demand quality mattered.",
+        thesis="Data center demand is accelerating.",
+    )
+    _seed_memory(
+        repository,
+        content_hash="search-aapl",
+        ticker="AAPL",
+        analysis_date=date(2026, 7, 2),
+        reflection="Margin durability was underestimated.",
+        thesis="Services growth supports margins.",
+    )
+    _seed_memory(
+        repository,
+        content_hash="search-tokyo",
+        ticker="7203.T",
+        analysis_date=date(2026, 7, 3),
+        reflection="Japan-specific currency lesson.",
+        thesis="Hybrid demand remains resilient.",
+    )
+    _seed_memory(
+        repository,
+        content_hash="search-pending",
+        ticker="MSFT",
+        analysis_date=date(2026, 7, 4),
+        reflection="Pending cloud lesson.",
+        thesis="Cloud growth needs confirmation.",
+        resolved=False,
+    )
+
+    assert [
+        entry["ticker"] for entry in repository.memory_entries(ticker="vd")
+    ] == ["NVDA"]
+    assert {
+        entry["ticker"]
+        for entry in repository.memory_entries(market="america/new")
+    } == {"NVDA", "AAPL", "MSFT"}
+    assert [
+        entry["ticker"]
+        for entry in repository.memory_entries(q="DATA CENTER")
+    ] == ["NVDA"]
+    assert [
+        entry["ticker"]
+        for entry in repository.memory_entries(q="valuation LESSON")
+    ] == ["NVDA"]
+    assert [
+        entry["ticker"]
+        for entry in repository.memory_entries(q=nvda_run_id[:12])
+    ] == ["NVDA"]
+    assert [
+        entry["ticker"]
+        for entry in repository.memory_entries(q="asia/tokyo")
+    ] == ["7203.T"]
+    assert [
+        entry["ticker"]
+        for entry in repository.memory_entries(status="pending")
+    ] == ["MSFT"]
+    assert repository.memory_entries(q="pending cloud", status="resolved") == []
+    assert repository.memory_entries(q="%") == []

@@ -104,6 +104,7 @@ const detail = {
       confidence: 0.65,
       thesis: "Evidence is balanced.",
       evidence_refs: ["ev_0123456789ab"],
+      memory_refs: ["memory:legacy-run"],
       catalysts: [],
       risks: ["Demand slows"],
       invalidation_conditions: ["New filing changes the thesis"],
@@ -233,6 +234,14 @@ test("restores deliberation and resolves evidence references across run views", 
 
   fireEvent.click(screen.getByRole("tab", { name: "Decision" }));
   expect(await screen.findByText("Evidence is balanced.")).toBeVisible();
+  expect(
+    screen.getByRole("link", {
+      name: "Open memory memory:legacy-run",
+    }),
+  ).toHaveAttribute(
+    "href",
+    "/memory?q=legacy-run#memory-legacy-run",
+  );
 
   const artifactEvent = {
     run_id: "run-1",

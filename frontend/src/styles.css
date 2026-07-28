@@ -1043,16 +1043,20 @@ label small {
   margin-top: 8px;
 }
 
-.evidence-chips button {
+.evidence-chips button,
+.evidence-chips a {
   padding: 0;
   background: transparent;
   border: 0;
   border-radius: 5px;
   cursor: pointer;
+  text-decoration: none;
 }
 
 .evidence-chips button:hover,
-.evidence-chips button:focus-visible {
+.evidence-chips button:focus-visible,
+.evidence-chips a:hover,
+.evidence-chips a:focus-visible {
   box-shadow: 0 0 0 2px #9db7ed;
   outline: none;
 }
@@ -1413,7 +1417,7 @@ label small {
 
 .filter-bar {
   display: grid;
-  grid-template-columns: 1fr 1.3fr 0.8fr auto;
+  grid-template-columns: 1.5fr 0.75fr 1.1fr 0.7fr auto;
   gap: 14px;
   align-items: end;
   margin-bottom: 18px;
@@ -1427,6 +1431,14 @@ label small {
 
 .memory-card {
   padding: 21px 23px;
+  scroll-margin-top: 24px;
+}
+
+.memory-card:target,
+.memory-card:focus {
+  border-color: #7b9ddd;
+  box-shadow: 0 0 0 3px rgb(91 127 202 / 18%);
+  outline: none;
 }
 
 .memory-meta {

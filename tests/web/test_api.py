@@ -138,6 +138,42 @@ async def test_openapi_contains_versioned_run_center_contract(
 
 
 @pytest.mark.anyio
+async def test_memory_api_forwards_audited_search_filters(
+    web_client: httpx.AsyncClient,
+    web_repository,
+    monkeypatch,
+) -> None:
+    captured = {}
+
+    def memory_entries(**filters):
+        captured.update(filters)
+        return []
+
+    monkeypatch.setattr(web_repository, "memory_entries", memory_entries)
+
+    response = await web_client.get(
+        "/api/v1/memory",
+        params={
+            "q": "demand lesson",
+            "ticker": "vd",
+            "market": "america/new",
+            "status": "resolved",
+            "limit": 25,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == []
+    assert captured == {
+        "q": "demand lesson",
+        "ticker": "vd",
+        "market": "america/new",
+        "status": "resolved",
+        "limit": 25,
+    }
+
+
+@pytest.mark.anyio
 async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
     web_client: httpx.AsyncClient,
     web_service,

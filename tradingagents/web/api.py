@@ -302,12 +302,14 @@ def create_app(
     def memory(
         ticker: str | None = None,
         market: str | None = None,
+        q: Annotated[str | None, Query(max_length=500)] = None,
         status: Literal["pending", "resolved"] | None = None,
         limit: Annotated[int, Query(ge=1, le=500)] = 100,
     ):
         return repository.memory_entries(
             ticker=ticker,
             market=market,
+            q=q,
             status=status,
             limit=limit,
         )

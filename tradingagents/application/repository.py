@@ -967,6 +967,7 @@ class RunRepository:
         *,
         ticker: str | None = None,
         market: str | None = None,
+        q: str | None = None,
         status: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
@@ -983,10 +984,57 @@ class RunRepository:
             )
             .limit(min(max(1, limit), 500))
         )
-        if ticker:
-            stmt = stmt.where(DecisionRecord.ticker == ticker)
-        if market:
-            stmt = stmt.where(DecisionRecord.market == market)
+        if ticker and (ticker_query := ticker.strip().casefold()):
+            stmt = stmt.where(
+                func.lower(DecisionRecord.ticker).contains(
+                    ticker_query,
+                    autoescape=True,
+                )
+            )
+        if market and (market_query := market.strip().casefold()):
+            stmt = stmt.where(
+                func.lower(func.coalesce(DecisionRecord.market, "")).contains(
+                    market_query,
+                    autoescape=True,
+                )
+            )
+        if q and (query := q.strip().casefold()):
+            stmt = stmt.where(
+                or_(
+                    func.lower(DecisionRecord.run_id).contains(
+                        query,
+                        autoescape=True,
+                    ),
+                    func.lower(DecisionRecord.ticker).contains(
+                        query,
+                        autoescape=True,
+                    ),
+                    func.lower(
+                        func.coalesce(DecisionRecord.market, "")
+                    ).contains(
+                        query,
+                        autoescape=True,
+                    ),
+                    func.lower(
+                        func.coalesce(
+                            func.json_extract(
+                                DecisionRecord.decision_json,
+                                "$.thesis",
+                            ),
+                            "",
+                        )
+                    ).contains(
+                        query,
+                        autoescape=True,
+                    ),
+                    func.lower(
+                        func.coalesce(ReflectionRecord.text, "")
+                    ).contains(
+                        query,
+                        autoescape=True,
+                    ),
+                )
+            )
         if status:
             stmt = stmt.where(OutcomeRecord.status == status)
         with self.sessions() as session:

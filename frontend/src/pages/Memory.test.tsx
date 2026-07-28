@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import { api, type MemoryEntry } from "../api/client";
@@ -41,6 +41,7 @@ const entry = {
 
 beforeEach(async () => {
   vi.resetAllMocks();
+  window.history.replaceState(null, "", "/memory");
   await i18n.changeLanguage("en");
   vi.mocked(api.memory).mockResolvedValue([entry]);
 });
@@ -55,4 +56,53 @@ test("renders imported thesis and reflection as sanitized Markdown", async () =>
   expect(screen.getByText("Preserve the lesson.")).toBeInTheDocument();
   expect(container.querySelector("script")).toBeNull();
   expect(container.textContent).not.toContain("<script>");
+});
+
+test("submits fuzzy and full-field filters without rewriting ticker case", async () => {
+  render(<Memory />);
+  await screen.findByText("Imported thesis");
+
+  fireEvent.change(screen.getByLabelText("Keyword search"), {
+    target: { value: "demand lesson" },
+  });
+  fireEvent.change(screen.getByLabelText("Ticker"), {
+    target: { value: "vd" },
+  });
+  fireEvent.change(screen.getByLabelText("Market"), {
+    target: { value: "america/new" },
+  });
+  fireEvent.change(screen.getByLabelText("Status"), {
+    target: { value: "resolved" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+  await waitFor(() => expect(api.memory).toHaveBeenCalledTimes(2));
+  const query = vi.mocked(api.memory).mock.calls[1][0] ?? "";
+  const params = new URLSearchParams(query.replace(/^\?/, ""));
+  expect(Object.fromEntries(params)).toEqual({
+    q: "demand lesson",
+    ticker: "vd",
+    market: "america/new",
+    status: "resolved",
+  });
+  expect(window.location.search).toBe(query);
+});
+
+test("restores a linked memory query and focuses the referenced record", async () => {
+  window.history.replaceState(
+    null,
+    "",
+    "/memory?q=legacy-run#memory-legacy-run",
+  );
+
+  const { container } = render(<Memory />);
+
+  await waitFor(() =>
+    expect(api.memory).toHaveBeenCalledWith("?q=legacy-run"),
+  );
+  await waitFor(() =>
+    expect(container.querySelector("#memory-legacy-run")).not.toBeNull(),
+  );
+  const card = container.querySelector<HTMLElement>("#memory-legacy-run");
+  await waitFor(() => expect(document.activeElement).toBe(card));
 });

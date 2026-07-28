@@ -650,6 +650,7 @@ function DecisionPanel({
           refs={decision.evidence_refs ?? []}
           onEvidence={onEvidence}
         />
+        <MemoryRefs refs={decision.memory_refs ?? []} />
         <div className="decision-columns">
           <List title={t("catalysts")} items={decision.catalysts ?? []} />
           <List title={t("risks")} items={decision.risks ?? []} />
@@ -751,6 +752,31 @@ function EvidenceRefs({
             <code>{ref}</code>
           </button>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function MemoryRefs({ refs }: { refs: string[] }) {
+  const { t } = useTranslation();
+  if (!refs.length) return null;
+  return (
+    <div className="evidence-ref-group memory-ref-group">
+      <strong>{t("memoryRefs")}</strong>
+      <div className="evidence-chips">
+        {refs.map((ref) => {
+          const runId = ref.startsWith("memory:") ? ref.slice(7) : ref;
+          const encoded = encodeURIComponent(runId);
+          return (
+            <a
+              href={`/memory?q=${encoded}#memory-${encoded}`}
+              aria-label={`${t("openMemory")} ${ref}`}
+              key={ref}
+            >
+              <code>{ref}</code>
+            </a>
+          );
+        })}
       </div>
     </div>
   );
