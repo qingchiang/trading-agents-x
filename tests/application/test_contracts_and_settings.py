@@ -104,7 +104,7 @@ def test_environment_is_loaded_only_from_explicit_mapping(tmp_path) -> None:
     assert resolved.llm_provider == "deepseek"
     assert resolved.output_language is ReportLanguage.SIMPLIFIED_CHINESE
     assert resolved.output_language.prompt_label == (
-        "Simplified Chinese (简体中文，中国大陆，zh-CN)"
+        "Simplified Chinese (简体中文, zh-CN)"
     )
     assert "zh-Hans" not in str(resolved.snapshot())
     assert "do-not-persist" not in str(resolved.snapshot())
@@ -153,8 +153,8 @@ def test_request_overrides_role_specific_environment_defaults(tmp_path) -> None:
     [
         "zh-Hans",
         "Chinese",
+        "simplified chinese",
         "简体中文",
-        "Simplified Chinese (简体中文, zh-Hans)",
     ],
 )
 def test_legacy_simplified_chinese_aliases_normalize_to_zh_cn(legacy) -> None:
@@ -168,15 +168,42 @@ def test_legacy_simplified_chinese_aliases_normalize_to_zh_cn(legacy) -> None:
     assert request.model_dump(mode="json")["output_language"] == "zh-CN"
 
 
+@pytest.mark.parametrize(
+    "custom",
+    [
+        "cn",
+        "Simplified Chinese (简体中文, zh-CN)",
+        "Write all prose in concise Simplified Chinese; retain source names.",
+    ],
+)
+def test_custom_output_language_instructions_are_preserved(custom) -> None:
+    request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date="2026-07-24",
+        output_language=f"  {custom}  ",
+    )
+
+    assert request.output_language == custom
+    assert request.model_dump(mode="json")["output_language"] == custom
+
+
+def test_empty_output_language_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="must not be empty"):
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date="2026-07-24",
+            output_language="  ",
+        )
+
+
 def test_omitted_request_values_inherit_and_materialize_environment_defaults(
     tmp_path,
 ) -> None:
+    custom_language = "Simplified Chinese (简体中文, zh-CN)"
     settings = AppSettings.from_env(
         environ={
             "TRADINGAGENTS_HOME": str(tmp_path),
-            "TRADINGAGENTS_OUTPUT_LANGUAGE": (
-                "Simplified Chinese (简体中文，中国大陆，zh-CN)"
-            ),
+            "TRADINGAGENTS_OUTPUT_LANGUAGE": custom_language,
             "TRADINGAGENTS_QUICK_REASONING_EFFORT": "low",
             "TRADINGAGENTS_DEEP_REASONING_EFFORT": "high",
             "TRADINGAGENTS_PROVENANCE_APPENDIX": "false",
@@ -191,7 +218,13 @@ def test_omitted_request_values_inherit_and_materialize_environment_defaults(
         run_settings=resolved,
     )
 
-    assert materialized.output_language is ReportLanguage.SIMPLIFIED_CHINESE
+    assert resolved.output_language == custom_language
+    assert resolved.snapshot()["output_language"] == custom_language
+    assert (
+        resolved.dataflow_config(settings)["output_language"]
+        == custom_language
+    )
+    assert materialized.output_language == custom_language
     assert materialized.quick_reasoning_effort == "low"
     assert materialized.deep_reasoning_effort == "high"
     assert materialized.provenance is False

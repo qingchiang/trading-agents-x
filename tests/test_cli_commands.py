@@ -169,6 +169,40 @@ def test_run_defaults_to_the_instrument_market_date(monkeypatch) -> None:
     assert captured["request"].provenance is None
 
 
+def test_run_preserves_custom_output_language(monkeypatch) -> None:
+    captured = {}
+    custom_language = "Use concise Simplified Chinese; retain source names."
+
+    class FakeApplication:
+        def run(self, request, *, on_event):
+            captured["request"] = request
+            return AnalysisResult(
+                run_id="run-language",
+                status=RunStatus.SUCCEEDED,
+                instrument=request.ticker,
+                reports={},
+                decision=None,
+            )
+
+    monkeypatch.setattr(cli, "_application", FakeApplication)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "run",
+            "AAPL",
+            "--date",
+            "2026-07-24",
+            "--output-language",
+            custom_language,
+            "--quiet",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured["request"].output_language == custom_language
+
+
 def test_run_prints_persisted_progress_events(monkeypatch) -> None:
     event = RunEvent(
         run_id="run-progress",

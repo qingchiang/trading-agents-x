@@ -62,6 +62,7 @@ from tradingagents.application.contracts import (
     ResearchDecision,
     ResearchWarning,
     RunProfile,
+    report_language_prompt_label,
 )
 from tradingagents.application.evidence import group_evidence_by_content
 from tradingagents.application.metrics import MetricsCallback
@@ -279,7 +280,9 @@ class ResearchGraph:
             "analysis_date": request.analysis_date.isoformat(),
             "asset_type": request.asset_type.value,
             "profile": request.profile.value,
-            "output_language": context.settings.output_language.prompt_label,
+            "output_language": report_language_prompt_label(
+                context.settings.output_language
+            ),
             "analysts": list(request.analysts),
             "analyst_reports": {},
             "evidence_items": [],

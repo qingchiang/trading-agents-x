@@ -161,6 +161,58 @@ test("keeps UI locale and report output language independent", async () => {
   expect(i18n.language).toBe("en");
 });
 
+test("shows a concise Simplified Chinese label", async () => {
+  render(
+    <Router initialPath="/runs/new">
+      <NewRunRoutes />
+    </Router>,
+  );
+
+  expect(
+    await screen.findByRole("option", { name: "简体中文" }),
+  ).toHaveValue("zh-CN");
+  expect(
+    screen.queryByRole("option", { name: /中国大陆/ }),
+  ).not.toBeInTheDocument();
+});
+
+test("preserves a configured custom report language", async () => {
+  const customLanguage = "Simplified Chinese (简体中文, zh-CN)";
+  vi.mocked(api.capabilities).mockResolvedValue({
+    ...capabilities,
+    defaults: {
+      ...capabilities.defaults,
+      output_language: customLanguage,
+    },
+  });
+  vi.mocked(api.createRun).mockResolvedValue({ id: "run-custom" } as RunView);
+
+  render(
+    <Router initialPath="/runs/new">
+      <NewRunRoutes />
+    </Router>,
+  );
+  await screen.findAllByRole("option", { name: "Quick" });
+
+  const language = screen.getByLabelText(/^Report language/);
+  expect(language).toHaveValue(customLanguage);
+  expect(
+    screen.getByRole("option", {
+      name: `Configured default: ${customLanguage}`,
+    }),
+  ).toHaveValue(customLanguage);
+
+  fireEvent.change(screen.getByLabelText(/^Ticker/), {
+    target: { value: "NVDA" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /Queue research/ }));
+
+  await waitFor(() => expect(api.createRun).toHaveBeenCalled());
+  expect(vi.mocked(api.createRun).mock.calls[0][0].output_language).toBe(
+    customLanguage,
+  );
+});
+
 test("shows only configured providers and discovers models lazily", async () => {
   render(
     <Router initialPath="/runs/new">

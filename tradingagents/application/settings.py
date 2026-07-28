@@ -16,9 +16,12 @@ from tradingagents.default_config import build_default_config
 
 from .contracts import (
     AnalysisRequest,
+    OutputLanguage,
     ReportLanguage,
     RunProfile,
     normalize_report_language,
+    report_language_prompt_label,
+    report_language_value,
 )
 
 _SECRET_FRAGMENTS = ("key", "secret", "token", "password", "authorization")
@@ -60,7 +63,7 @@ class RunSettings(BaseModel):
     deep_reasoning_effort: str | None = None
     temperature: float | None = None
     llm_max_retries: int | None = Field(default=None, ge=0)
-    output_language: ReportLanguage = ReportLanguage.ENGLISH
+    output_language: OutputLanguage = ReportLanguage.ENGLISH
     provenance: bool = False
     data_config: Mapping[str, Any]
 
@@ -68,8 +71,8 @@ class RunSettings(BaseModel):
     @classmethod
     def normalize_output_language(
         cls,
-        value: str | ReportLanguage,
-    ) -> ReportLanguage:
+        value: OutputLanguage,
+    ) -> OutputLanguage:
         return normalize_report_language(value)
 
     @field_validator("data_config", mode="before")
@@ -98,7 +101,9 @@ class RunSettings(BaseModel):
                 "deep_reasoning_effort": self.deep_reasoning_effort,
                 "temperature": self.temperature,
                 "llm_max_retries": self.llm_max_retries,
-                "output_language": self.output_language.prompt_label,
+                "output_language": report_language_prompt_label(
+                    self.output_language
+                ),
                 "provenance_appendix": self.provenance,
             }
         )
@@ -173,7 +178,7 @@ class AppSettings(BaseModel):
             bool(defaults.get("provenance_appendix", False)),
         )
         data_config = deepcopy(defaults)
-        data_config["output_language"] = output_language.value
+        data_config["output_language"] = report_language_value(output_language)
         data_config["provenance_appendix"] = provenance
         run_settings = RunSettings(
             llm_provider=provider,

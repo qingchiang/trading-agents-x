@@ -13,6 +13,7 @@ import yfinance as yf
 
 from tradingagents.dataflows.symbol_utils import market_today, normalize_symbol
 
+from .contracts import report_language_prompt_label
 from .llms import create_run_llms
 from .reflection import OutcomeReflector
 from .repository import RunRepository
@@ -157,8 +158,8 @@ class OutcomeSettlement:
             quick, _ = create_run_llms(self.settings.default_run_settings)
             reflector = OutcomeReflector(
                 quick,
-                output_language=(
-                    self.settings.default_run_settings.output_language.prompt_label
+                output_language=report_language_prompt_label(
+                    self.settings.default_run_settings.output_language
                 ),
             )
             self._reflector = reflector

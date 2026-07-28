@@ -90,6 +90,7 @@ const en = {
     deepReasoning: "Deep reasoning",
     providerDefault: "Provider default",
     customModel: "Custom model ID",
+    configuredOutputLanguage: "Configured default: {{value}}",
     discoveringModels: "Discovering available models…",
     noConfiguredProviders:
       "Configure at least one model provider before creating a run.",
@@ -267,6 +268,7 @@ const zhCN = {
     deepReasoning: "深度模型推理强度",
     providerDefault: "服务商默认",
     customModel: "自定义模型 ID",
+    configuredOutputLanguage: "当前配置：{{value}}",
     discoveringModels: "正在获取可用模型…",
     noConfiguredProviders: "请先配置至少一个模型服务商，再新建研究。",
     selectAnalystError: "请至少选择一个分析角色。",
@@ -439,6 +441,7 @@ const ja = {
     deepReasoning: "詳細モデルの推論強度",
     providerDefault: "プロバイダー既定",
     customModel: "カスタムモデル ID",
+    configuredOutputLanguage: "現在の設定: {{value}}",
     discoveringModels: "利用可能なモデルを取得しています…",
     noConfiguredProviders:
       "リサーチを作成する前にモデルプロバイダーを設定してください。",

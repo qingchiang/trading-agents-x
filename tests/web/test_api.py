@@ -17,7 +17,9 @@ from tradingagents.application.contracts import (
     ResearchRating,
     RunStatus,
 )
+from tradingagents.application.settings import AppSettings
 from tradingagents.version import __version__
+from tradingagents.web import create_app
 
 
 def _payload(ticker: str = "NVDA") -> dict:
@@ -313,6 +315,49 @@ async def test_capabilities_expose_effective_non_sensitive_run_defaults(
     assert payload["providers"]["openai"]["configured"] is True
     assert payload["providers"]["openai"]["selectable"] is True
     assert "quick_models" not in payload["providers"]["openai"]
+
+
+@pytest.mark.anyio
+async def test_capabilities_and_runs_preserve_custom_output_language(
+    tmp_path,
+) -> None:
+    custom_language = "Simplified Chinese (简体中文, zh-CN)"
+    settings = AppSettings.from_env(
+        environ={
+            "TRADINGAGENTS_HOME": str(tmp_path),
+            "TRADINGAGENTS_DATABASE_PATH": str(tmp_path / "custom-language.db"),
+            "TRADINGAGENTS_OUTPUT_LANGUAGE": custom_language,
+        },
+        load_env_files=False,
+    )
+    transport = httpx.ASGITransport(app=create_app(settings))
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+    ) as client:
+        capabilities = await client.get("/api/v1/capabilities")
+        created = await client.post(
+            "/api/v1/runs",
+            json={
+                "ticker": "NVDA",
+                "analysis_date": "2026-07-24",
+            },
+        )
+        detail = await client.get(
+            f"/api/v1/runs/{created.json()['id']}"
+        )
+
+    assert capabilities.status_code == 200
+    assert capabilities.json()["defaults"]["output_language"] == custom_language
+    assert created.status_code == 202
+    assert (
+        detail.json()["run"]["request"]["output_language"]
+        == custom_language
+    )
+    assert (
+        detail.json()["run"]["config_snapshot"]["output_language"]
+        == custom_language
+    )
 
 
 @pytest.mark.anyio

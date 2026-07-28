@@ -7,7 +7,7 @@ import json
 import re
 from datetime import date, datetime, timezone
 from enum import Enum
-from typing import Any, Literal
+from typing import Any, Literal, TypeAlias
 
 from pydantic import (
     BaseModel,
@@ -57,7 +57,7 @@ class ReportLanguage(str, Enum):
         return {
             ReportLanguage.ENGLISH: "English (en)",
             ReportLanguage.SIMPLIFIED_CHINESE: (
-                "Simplified Chinese (简体中文，中国大陆，zh-CN)"
+                "Simplified Chinese (简体中文, zh-CN)"
             ),
             ReportLanguage.JAPANESE: "Japanese (日本語, ja)",
         }[self]
@@ -66,35 +66,37 @@ class ReportLanguage(str, Enum):
 _REPORT_LANGUAGE_ALIASES = {
     "en": ReportLanguage.ENGLISH,
     "english": ReportLanguage.ENGLISH,
-    "english (en)": ReportLanguage.ENGLISH,
     "zh-cn": ReportLanguage.SIMPLIFIED_CHINESE,
     "zh-hans": ReportLanguage.SIMPLIFIED_CHINESE,
     "chinese": ReportLanguage.SIMPLIFIED_CHINESE,
     "simplified chinese": ReportLanguage.SIMPLIFIED_CHINESE,
-    "simplified chinese (简体中文, zh-hans)": (
-        ReportLanguage.SIMPLIFIED_CHINESE
-    ),
-    "simplified chinese (简体中文，中国大陆，zh-cn)": (
-        ReportLanguage.SIMPLIFIED_CHINESE
-    ),
     "简体中文": ReportLanguage.SIMPLIFIED_CHINESE,
     "ja": ReportLanguage.JAPANESE,
     "japanese": ReportLanguage.JAPANESE,
-    "japanese (日本語, ja)": ReportLanguage.JAPANESE,
     "日本語": ReportLanguage.JAPANESE,
 }
 
+OutputLanguage: TypeAlias = ReportLanguage | str
 
-def normalize_report_language(value: str | ReportLanguage) -> ReportLanguage:
-    """Normalize public and legacy language spellings to one locale tag."""
+
+def normalize_report_language(value: OutputLanguage) -> OutputLanguage:
+    """Normalize simple language aliases while preserving custom instructions."""
     if isinstance(value, ReportLanguage):
         return value
     normalized = str(value).strip()
-    language = _REPORT_LANGUAGE_ALIASES.get(normalized.casefold())
-    if language is None:
-        supported = ", ".join(language.value for language in ReportLanguage)
-        raise ValueError(f"unsupported report language; expected one of {supported}")
-    return language
+    if not normalized:
+        raise ValueError("output language must not be empty")
+    return _REPORT_LANGUAGE_ALIASES.get(normalized.casefold(), normalized)
+
+
+def report_language_value(value: OutputLanguage) -> str:
+    """Return the durable request/config representation."""
+    return value.value if isinstance(value, ReportLanguage) else value
+
+
+def report_language_prompt_label(value: OutputLanguage) -> str:
+    """Return a prompt-ready label without rewriting custom instructions."""
+    return value.prompt_label if isinstance(value, ReportLanguage) else value
 
 
 class RunStatus(str, Enum):
@@ -613,7 +615,7 @@ class AnalysisRequest(FrozenModel):
     deep_model: str | None = None
     quick_reasoning_effort: str | None = None
     deep_reasoning_effort: str | None = None
-    output_language: ReportLanguage | None = None
+    output_language: OutputLanguage | None = None
     provenance: bool | None = None
 
     @field_validator("ticker")
@@ -643,8 +645,8 @@ class AnalysisRequest(FrozenModel):
     @classmethod
     def normalize_output_language(
         cls,
-        value: str | ReportLanguage | None,
-    ) -> ReportLanguage | None:
+        value: OutputLanguage | None,
+    ) -> OutputLanguage | None:
         if value is None:
             return None
         return normalize_report_language(value)

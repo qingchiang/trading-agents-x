@@ -27,6 +27,7 @@ from tradingagents.application.contracts import (
     RunEvent,
     RunStatus,
     RunView,
+    report_language_value,
 )
 from tradingagents.application.database import OutcomeRecord, RunRecord
 from tradingagents.application.repository import (
@@ -343,7 +344,9 @@ def create_app(
                 "deep_model": defaults.deep_model,
                 "quick_reasoning_effort": defaults.quick_reasoning_effort,
                 "deep_reasoning_effort": defaults.deep_reasoning_effort,
-                "output_language": defaults.output_language.value,
+                "output_language": report_language_value(
+                    defaults.output_language
+                ),
                 "provenance": defaults.provenance,
                 "lan_enabled": settings.lan_enabled,
             },

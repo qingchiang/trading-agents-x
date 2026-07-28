@@ -6,13 +6,13 @@ from typing import Any
 
 _LANGUAGE_INSTRUCTIONS = {
     "English (en)": "Write the reflection in English.",
-    "Simplified Chinese (简体中文，中国大陆，zh-CN)": (
-        "Write the reflection in Simplified Chinese for mainland China."
+    "Simplified Chinese (简体中文, zh-CN)": (
+        "Write the reflection in Simplified Chinese."
     ),
     "Japanese (日本語, ja)": "Write the reflection in Japanese.",
     # Compatibility for persisted pre-zh-CN settings.
     "English": "Write the reflection in English.",
-    "Chinese": "Write the reflection in Simplified Chinese for mainland China.",
+    "Chinese": "Write the reflection in Simplified Chinese.",
     "Japanese": "Write the reflection in Japanese.",
 }
 

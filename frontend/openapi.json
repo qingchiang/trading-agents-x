@@ -77,9 +77,13 @@
                 "$ref": "#/components/schemas/ReportLanguage"
               },
               {
+                "type": "string"
+              },
+              {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Output Language"
           },
           "profile": {
             "$ref": "#/components/schemas/RunProfile",

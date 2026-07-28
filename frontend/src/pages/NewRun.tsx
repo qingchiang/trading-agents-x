@@ -33,9 +33,7 @@ export default function NewRun() {
   const [deepCustomModel, setDeepCustomModel] = useState("");
   const [quickReasoning, setQuickReasoning] = useState("provider_default");
   const [deepReasoning, setDeepReasoning] = useState("provider_default");
-  const [outputLanguage, setOutputLanguage] = useState<
-    "en" | "zh-CN" | "ja"
-  >("en");
+  const [outputLanguage, setOutputLanguage] = useState("en");
   const [provenance, setProvenance] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -71,7 +69,7 @@ export default function NewRun() {
           setQuickReasoning("provider_default");
           setDeepReasoning("provider_default");
         }
-        setOutputLanguage(normalizeReportLanguage(data.defaults.output_language));
+        setOutputLanguage(data.defaults.output_language);
         setProvenance(data.defaults.provenance);
         if (!nextProvider) setError(t("noConfiguredProviders"));
       })
@@ -164,6 +162,17 @@ export default function NewRun() {
     () => modelOptions(modelCatalog, deepModel),
     [modelCatalog, deepModel],
   );
+  const reportLanguageOptions = capabilities?.output_languages ?? [
+    "en",
+    "zh-CN",
+    "ja",
+  ];
+  const configuredOutputLanguage = capabilities?.defaults.output_language ?? "";
+  const customConfiguredLanguage =
+    configuredOutputLanguage &&
+    !reportLanguageOptions.includes(configuredOutputLanguage)
+      ? configuredOutputLanguage
+      : "";
 
   const changeProvider = (next: string) => {
     setProvider(next);
@@ -404,17 +413,20 @@ export default function NewRun() {
                 {t("reportLanguage")}
                 <select
                   value={outputLanguage}
-                  onChange={(event) =>
-                    setOutputLanguage(
-                      event.target.value as "en" | "zh-CN" | "ja",
-                    )
-                  }
+                  onChange={(event) => setOutputLanguage(event.target.value)}
                 >
-                  <option value="en">English</option>
-                  <option value="zh-CN">
-                    Simplified Chinese (简体中文，中国大陆，zh-CN)
-                  </option>
-                  <option value="ja">日本語</option>
+                  {customConfiguredLanguage && (
+                    <option value={customConfiguredLanguage}>
+                      {t("configuredOutputLanguage", {
+                        value: customConfiguredLanguage,
+                      })}
+                    </option>
+                  )}
+                  {reportLanguageOptions.map((language) => (
+                    <option key={language} value={language}>
+                      {reportLanguageLabel(language)}
+                    </option>
+                  ))}
                 </select>
               </label>
               <label className="toggle-row">
@@ -464,19 +476,11 @@ function today() {
   return local.toISOString().slice(0, 10);
 }
 
-function normalizeReportLanguage(value: string): "en" | "zh-CN" | "ja" {
-  const normalized = value.trim().toLowerCase();
-  if (
-    normalized === "zh-cn" ||
-    normalized === "zh-hans" ||
-    normalized === "chinese" ||
-    normalized === "简体中文" ||
-    normalized.startsWith("simplified chinese")
-  ) {
-    return "zh-CN";
-  }
-  if (normalized === "ja" || normalized.startsWith("japanese")) return "ja";
-  return "en";
+function reportLanguageLabel(value: string) {
+  if (value === "en") return "English";
+  if (value === "zh-CN") return "简体中文";
+  if (value === "ja") return "日本語";
+  return value;
 }
 
 type ModelRole = "quick" | "deep";

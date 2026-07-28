@@ -12,7 +12,7 @@ export interface components {
       deep_model?: string | null;
       deep_reasoning_effort?: string | null;
       llm_provider?: string | null;
-      output_language?: components["schemas"]["ReportLanguage"] | null;
+      output_language?: components["schemas"]["ReportLanguage"] | string | null;
       profile?: components["schemas"]["RunProfile"];
       provenance?: boolean | null;
       quick_model?: string | null;

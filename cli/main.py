@@ -100,7 +100,10 @@ def run_command(
         str | None,
         typer.Option(
             "--output-language",
-            help="Report language: en, zh-CN, or ja; defaults to application config.",
+            help=(
+                "Report language (en, zh-CN, ja, or a custom instruction); "
+                "defaults to application config."
+            ),
         ),
     ] = None,
     provenance: Annotated[
