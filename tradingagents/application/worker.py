@@ -5,8 +5,15 @@ from __future__ import annotations
 import logging
 import signal
 import threading
+from collections.abc import Callable
+from time import monotonic
 from uuid import uuid4
 
+from .maintenance import (
+    ARCHIVE_MAINTENANCE_INTERVAL_SECONDS,
+    ARCHIVE_MAINTENANCE_RETRY_SECONDS,
+    ArchiveMaintenance,
+)
 from .outcomes import OutcomeSettlement
 from .service import AnalysisService
 from .settings import AppSettings
@@ -21,6 +28,8 @@ class AnalysisWorker:
         *,
         service: AnalysisService | None = None,
         settlement: OutcomeSettlement | None = None,
+        maintenance: ArchiveMaintenance | None = None,
+        monotonic_clock: Callable[[], float] = monotonic,
         worker_id: str | None = None,
     ):
         self.settings = settings
@@ -30,10 +39,17 @@ class AnalysisWorker:
             settings,
             self.repository,
         )
+        self.maintenance = maintenance or ArchiveMaintenance(
+            settings,
+            self.repository,
+        )
+        self.monotonic_clock = monotonic_clock
+        self._next_maintenance_at = float("-inf")
         self.worker_id = worker_id or f"worker:{uuid4()}"
         self.stop_event = threading.Event()
 
     def run_once(self) -> bool:
+        self._run_maintenance_if_due()
         claimed = self.repository.claim_next(
             self.worker_id,
             self.settings.lease_seconds,
@@ -59,6 +75,27 @@ class AnalysisWorker:
 
     def stop(self) -> None:
         self.stop_event.set()
+
+    def _run_maintenance_if_due(self) -> None:
+        now = self.monotonic_clock()
+        if now < self._next_maintenance_at:
+            return
+        try:
+            self.maintenance.run_once()
+        except Exception as exc:
+            self._next_maintenance_at = (
+                self.monotonic_clock()
+                + ARCHIVE_MAINTENANCE_RETRY_SECONDS
+            )
+            logger.warning(
+                "archive maintenance failed; retry scheduled: %s",
+                type(exc).__name__,
+            )
+            return
+        self._next_maintenance_at = (
+            self.monotonic_clock()
+            + ARCHIVE_MAINTENANCE_INTERVAL_SECONDS
+        )
 
     def _install_signal_handlers(self) -> None:
         if threading.current_thread() is not threading.main_thread():

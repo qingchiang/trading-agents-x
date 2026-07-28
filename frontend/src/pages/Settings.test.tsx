@@ -53,6 +53,7 @@ const capabilities = {
     deep_reasoning_effort: null,
     output_language: "zh-CN",
     lan_enabled: false,
+    archive_retention_days: 30,
   },
 } as Capabilities;
 

@@ -348,6 +348,11 @@
       "CapabilityDefaults": {
         "additionalProperties": false,
         "properties": {
+          "archive_retention_days": {
+            "minimum": 0.0,
+            "title": "Archive Retention Days",
+            "type": "integer"
+          },
           "deep_model": {
             "title": "Deep Model",
             "type": "string"
@@ -403,7 +408,8 @@
           "quick_reasoning_effort",
           "deep_reasoning_effort",
           "output_language",
-          "lan_enabled"
+          "lan_enabled",
+          "archive_retention_days"
         ],
         "title": "CapabilityDefaults",
         "type": "object"

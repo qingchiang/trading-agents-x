@@ -121,6 +121,33 @@ def test_lan_mode_requires_token(tmp_path) -> None:
         )
 
 
+def test_archive_retention_defaults_can_be_disabled_and_reject_negatives(
+    tmp_path,
+) -> None:
+    defaults = AppSettings.from_env(
+        environ={"TRADINGAGENTS_HOME": str(tmp_path / "defaults")},
+        load_env_files=False,
+    )
+    disabled = AppSettings.from_env(
+        environ={
+            "TRADINGAGENTS_HOME": str(tmp_path / "disabled"),
+            "TRADINGAGENTS_ARCHIVE_RETENTION_DAYS": "0",
+        },
+        load_env_files=False,
+    )
+
+    assert defaults.archive_retention_days == 30
+    assert disabled.archive_retention_days == 0
+    with pytest.raises(ValueError, match="must be >= 0"):
+        AppSettings.from_env(
+            environ={
+                "TRADINGAGENTS_HOME": str(tmp_path / "invalid"),
+                "TRADINGAGENTS_ARCHIVE_RETENTION_DAYS": "-1",
+            },
+            load_env_files=False,
+        )
+
+
 def test_request_overrides_role_specific_environment_defaults(tmp_path) -> None:
     settings = AppSettings.from_env(
         environ={

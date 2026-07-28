@@ -104,6 +104,7 @@ class CapabilityDefaults(ApiModel):
     deep_reasoning_effort: str | None
     output_language: str
     lan_enabled: bool
+    archive_retention_days: int = Field(ge=0)
 
 
 class CapabilitiesResponse(ApiModel):

@@ -135,6 +135,7 @@ class AppSettings(BaseModel):
     worker_poll_seconds: float = Field(default=1.0, ge=0.05)
     lease_seconds: int = Field(default=300, ge=30)
     busy_timeout_ms: int = Field(default=5000, ge=100)
+    archive_retention_days: int = Field(default=30, ge=0)
     default_run_settings: RunSettings
 
     @field_validator("database_path", "data_cache_dir", mode="before")
@@ -243,6 +244,9 @@ class AppSettings(BaseModel):
             lease_seconds=_env_int(env, "TRADINGAGENTS_LEASE_SECONDS", 300),
             busy_timeout_ms=_env_int(
                 env, "TRADINGAGENTS_SQLITE_BUSY_TIMEOUT_MS", 5000
+            ),
+            archive_retention_days=_env_int(
+                env, "TRADINGAGENTS_ARCHIVE_RETENTION_DAYS", 30
             ),
             default_run_settings=run_settings,
         )

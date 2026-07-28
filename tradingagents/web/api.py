@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+from contextlib import asynccontextmanager
 from importlib import resources
 from pathlib import Path
 from typing import Annotated, Literal
@@ -36,6 +38,7 @@ from tradingagents.application.database import (
     OutcomeRecord,
     RunRecord,
 )
+from tradingagents.application.maintenance import ArchiveMaintenance
 from tradingagents.application.repository import (
     IdempotencyConflictError,
     InvalidRunTransitionError,
@@ -62,6 +65,7 @@ from .models import (
 )
 
 API_PREFIX = "/api/v1"
+logger = logging.getLogger(__name__)
 _TERMINAL = {
     RunStatus.SUCCEEDED,
     RunStatus.FAILED,
@@ -74,20 +78,36 @@ def create_app(
     *,
     service: AnalysisService | None = None,
     model_discovery: ModelDiscoveryService | None = None,
+    maintenance: ArchiveMaintenance | None = None,
 ) -> FastAPI:
     settings = settings or AppSettings.from_env()
     service = service or AnalysisService(settings)
     repository = service.repository
     model_discovery = model_discovery or ModelDiscoveryService(settings)
+    maintenance = maintenance or ArchiveMaintenance(settings, repository)
     auth = LanSessionManager(settings)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        try:
+            maintenance.run_once()
+        except Exception as exc:
+            logger.warning(
+                "archive maintenance failed during web startup: %s",
+                type(exc).__name__,
+            )
+        yield
+
     app = FastAPI(
         title="TradingAgentsX API",
         version=__version__,
         description="Local evidence-first investment research run center.",
+        lifespan=lifespan,
     )
     app.state.settings = settings
     app.state.service = service
     app.state.model_discovery = model_discovery
+    app.state.archive_maintenance = maintenance
 
     @app.exception_handler(RunNotFoundError)
     async def not_found(_request: Request, exc: RunNotFoundError):
@@ -376,6 +396,7 @@ def create_app(
                     defaults.output_language
                 ),
                 "lan_enabled": settings.lan_enabled,
+                "archive_retention_days": settings.archive_retention_days,
             },
         )
 

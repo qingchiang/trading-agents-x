@@ -51,6 +51,7 @@ export interface components {
       providers: Record<string, components["schemas"]["ProviderCapabilities"]>;
     };
     CapabilityDefaults: {
+      archive_retention_days: number;
       deep_model: string;
       deep_reasoning_effort: string | null;
       lan_enabled: boolean;

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -323,6 +323,69 @@ class RunRepository:
             session.flush()
             views = tuple(self._view(records[run_id]) for run_id in run_ids)
         return views, changed
+
+    def purge_expired_archives(
+        self,
+        *,
+        cutoff: datetime,
+        batch_size: int = 50,
+    ) -> int:
+        """Permanently remove one bounded batch of expired archived runs.
+
+        Checkpoint rows and application-owned rows are deleted in the same
+        SQLite write transaction. A checkpoint failure therefore preserves the
+        run and all of its application data for a later retry.
+        """
+        if cutoff.tzinfo is not None:
+            cutoff = cutoff.astimezone(timezone.utc).replace(tzinfo=None)
+        batch_size = min(max(1, batch_size), 200)
+        with self.engine.connect() as connection:
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+            try:
+                run_ids = tuple(
+                    connection.scalars(
+                        select(RunRecord.id)
+                        .where(
+                            RunRecord.archived_at.is_not(None),
+                            RunRecord.archived_at <= cutoff,
+                        )
+                        .order_by(RunRecord.archived_at, RunRecord.id)
+                        .limit(batch_size)
+                    )
+                )
+                if not run_ids:
+                    connection.commit()
+                    return 0
+                checkpoint_threads = tuple(
+                    dict.fromkeys(
+                        connection.scalars(
+                            select(RunAttemptRecord.checkpoint_thread_id)
+                            .where(RunAttemptRecord.run_id.in_(run_ids))
+                            .order_by(RunAttemptRecord.id)
+                        )
+                    )
+                )
+                for checkpoint_thread in checkpoint_threads:
+                    connection.exec_driver_sql(
+                        "DELETE FROM writes WHERE thread_id = ?",
+                        (checkpoint_thread,),
+                    )
+                    connection.exec_driver_sql(
+                        "DELETE FROM checkpoints WHERE thread_id = ?",
+                        (checkpoint_thread,),
+                    )
+                deleted = connection.execute(
+                    delete(RunRecord).where(
+                        RunRecord.id.in_(run_ids),
+                        RunRecord.archived_at.is_not(None),
+                        RunRecord.archived_at <= cutoff,
+                    )
+                ).rowcount
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        return int(deleted or 0)
 
     def claim_next(self, worker_id: str, lease_seconds: int) -> RunView | None:
         """Atomically claim queued work or recover an expired running lease."""
