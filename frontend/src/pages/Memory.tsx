@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, type MemoryEntry } from "../api/client";
+import Markdown from "../components/Markdown";
 import StatusBadge from "../components/StatusBadge";
 
 export default function Memory() {
@@ -79,7 +80,7 @@ export default function Memory() {
             <div className="memory-decision">
               <strong>{entry.decision.rating}</strong>
               <span>{Math.round(entry.decision.confidence * 100)}%</span>
-              <p>{entry.decision.thesis}</p>
+              <Markdown>{entry.decision.thesis}</Markdown>
             </div>
             {entry.outcome.status === "resolved" && (
               <div className="returns">
@@ -99,7 +100,7 @@ export default function Memory() {
             {entry.reflection && (
               <blockquote>
                 <strong>{t("reflection")}</strong>
-                {entry.reflection}
+                <Markdown>{entry.reflection}</Markdown>
               </blockquote>
             )}
           </article>

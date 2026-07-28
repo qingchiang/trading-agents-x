@@ -47,6 +47,8 @@ body {
   min-width: 320px;
   min-height: 100vh;
   margin: 0;
+  font-size: 16px;
+  line-height: 1.5;
   background:
     radial-gradient(circle at 72% 0%, rgb(48 104 232 / 6%), transparent 30rem),
     #f4f6f9;
@@ -111,7 +113,7 @@ select:focus-visible {
   height: 38px;
   place-items: center;
   color: white;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 800;
   letter-spacing: -0.04em;
   background: linear-gradient(145deg, #4d82f5, #2453c3);
@@ -127,7 +129,7 @@ select:focus-visible {
 
 .brand strong {
   color: #fff;
-  font-size: 15px;
+  font-size: 16px;
   letter-spacing: -0.02em;
 }
 
@@ -136,7 +138,7 @@ select:focus-visible {
   margin-top: 3px;
   overflow: hidden;
   color: #8390a4;
-  font-size: 10px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -153,7 +155,7 @@ select:focus-visible {
   min-height: 44px;
   padding: 0 13px;
   color: #98a6b9;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   border: 1px solid transparent;
   border-radius: 10px;
@@ -193,7 +195,7 @@ select:focus-visible {
   margin-top: auto;
   padding: 20px 8px 0;
   color: #78869a;
-  font-size: 11px;
+  font-size: 13px;
   border-top: 1px solid rgb(255 255 255 / 7%);
 }
 
@@ -234,7 +236,7 @@ select:focus-visible {
 .eyebrow {
   margin: 0;
   color: var(--blue);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -244,7 +246,7 @@ select:focus-visible {
   max-width: 680px;
   margin: 0;
   color: var(--muted);
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.6;
 }
 
@@ -254,7 +256,7 @@ select:focus-visible {
   align-items: center;
   padding: 8px 12px;
   color: var(--red);
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   background: var(--red-soft);
   border: 1px solid #f5cbd0;
@@ -320,7 +322,7 @@ select:focus-visible {
 
 .metric-card span {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -364,7 +366,7 @@ button.primary {
   min-height: 38px;
   padding: 0 14px;
   color: #344054;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
   background: #fff;
   border: 1px solid #d6dce5;
@@ -404,7 +406,7 @@ button.primary:hover {
 .button.large {
   min-height: 46px;
   padding: 0 22px;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .button:disabled,
@@ -432,7 +434,7 @@ td {
 
 th {
   color: var(--muted-2);
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -441,7 +443,7 @@ th {
 
 td {
   color: #4e596b;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 tbody tr:last-child td {
@@ -454,7 +456,7 @@ tbody tr:hover {
 
 .ticker {
   color: var(--ink);
-  font-size: 13px;
+  font-size: 14px;
   letter-spacing: 0.015em;
 }
 
@@ -484,7 +486,7 @@ tbody tr:hover {
   min-height: 25px;
   padding: 0 9px;
   color: #566176;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -533,7 +535,7 @@ tbody tr:hover {
   margin: 0 0 18px;
   padding: 12px 15px;
   color: #8b2f3a;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.5;
   background: var(--red-soft);
   border: 1px solid #f1c8cd;
@@ -547,7 +549,7 @@ tbody tr:hover {
   place-items: center;
   padding: 24px;
   color: var(--muted-2);
-  font-size: 13px;
+  font-size: 14px;
   text-align: center;
 }
 
@@ -568,7 +570,7 @@ tbody tr:hover {
   padding-top: 24px;
   color: var(--blue);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 800;
   background: #f8faff;
   border-right: 1px solid var(--line-soft);
@@ -587,7 +589,7 @@ tbody tr:hover {
 .form-section-body h3 {
   margin: 24px 0 12px;
   color: #485366;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .form-grid {
@@ -605,7 +607,7 @@ tbody tr:hover {
 
 label {
   color: #4a5669;
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 700;
 }
 
@@ -645,7 +647,7 @@ label small {
   display: block;
   margin-top: 6px;
   color: var(--muted-2);
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 500;
   line-height: 1.4;
 }
@@ -675,13 +677,13 @@ label small {
 .profile-card strong {
   margin-bottom: 8px;
   color: var(--ink);
-  font-size: 13px;
+  font-size: 14px;
   text-transform: capitalize;
 }
 
 .profile-card span {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 13px;
   line-height: 1.45;
 }
 
@@ -734,7 +736,7 @@ label small {
   margin-top: 2px;
   color: var(--muted-2);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 500;
 }
 
@@ -760,7 +762,7 @@ label small {
 .back-link {
   display: inline-block;
   margin-bottom: 12px;
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .run-title {
@@ -798,7 +800,7 @@ label small {
   height: 28px;
   place-items: center;
   color: var(--blue);
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 800;
   background: var(--blue-soft);
   border-radius: 8px;
@@ -852,13 +854,13 @@ label small {
 
 .timeline-item strong {
   color: #39465a;
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .timeline-item small {
   margin-top: 4px;
   color: var(--muted-2);
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .timeline-item code {
@@ -867,7 +869,7 @@ label small {
   padding: 6px 8px;
   overflow: hidden;
   color: #56647a;
-  font-size: 9px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
   background: #f5f7fa;
@@ -885,7 +887,7 @@ label small {
 .tabs button {
   padding: 9px 11px 10px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 750;
   text-transform: capitalize;
   background: transparent;
@@ -904,8 +906,8 @@ label small {
   padding: 22px 26px;
   overflow-y: auto;
   color: #3e495b;
-  font-size: 12px;
-  line-height: 1.75;
+  font-size: 16px;
+  line-height: 1.7;
 }
 
 .markdown > :first-child {
@@ -925,17 +927,17 @@ label small {
 
 .markdown h1 {
   margin: 1.5em 0 0.65em;
-  font-size: 20px;
+  font-size: 26px;
 }
 
 .markdown h2 {
   margin: 1.5em 0 0.6em;
-  font-size: 16px;
+  font-size: 21px;
 }
 
 .markdown h3 {
   margin: 1.35em 0 0.5em;
-  font-size: 13px;
+  font-size: 17px;
 }
 
 .markdown table {
@@ -947,7 +949,7 @@ label small {
 .markdown td {
   min-width: 110px;
   padding: 8px 10px;
-  font-size: 10px;
+  font-size: 13px;
 }
 
 .markdown code {
@@ -985,7 +987,7 @@ label small {
   gap: 14px;
   padding: 18px 26px 22px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 13px;
   background: #fafbfd;
   border-top: 1px solid var(--line-soft);
 }
@@ -1009,7 +1011,7 @@ label small {
 .evidence-chips code {
   padding: 4px 7px;
   color: #405f9f;
-  font-size: 9px;
+  font-size: 12px;
   background: #edf3ff;
   border-radius: 5px;
 }
@@ -1036,7 +1038,7 @@ label small {
 
 .decision-rating span {
   color: #8fa4bf;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.11em;
   text-transform: uppercase;
@@ -1051,7 +1053,7 @@ label small {
 
 .decision-rating small {
   color: #a9b7c9;
-  font-size: 10px;
+  font-size: 13px;
 }
 
 .decision-body {
@@ -1066,7 +1068,7 @@ label small {
 .decision-body h3 {
   margin: 0 0 7px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -1074,8 +1076,20 @@ label small {
 .decision-body p,
 .decision-body li {
   color: #4a5668;
-  font-size: 11px;
+  font-size: 15px;
   line-height: 1.65;
+}
+
+.decision-thesis .markdown {
+  max-height: none;
+  padding: 0;
+  overflow: visible;
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.decision-thesis .markdown p {
+  margin: 0;
 }
 
 .decision-columns {
@@ -1122,7 +1136,7 @@ label small {
 
 .metrics-strip span {
   color: var(--muted-2);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
 }
@@ -1163,7 +1177,7 @@ label small {
   display: block;
   margin-top: 4px;
   color: var(--muted-2);
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .memory-decision {
@@ -1180,14 +1194,20 @@ label small {
 
 .memory-decision > span {
   color: var(--muted-2);
-  font-size: 10px;
+  font-size: 13px;
 }
 
-.memory-decision p {
+.memory-decision .markdown {
   margin: 0;
+  padding: 0;
+  overflow: visible;
   color: #455165;
-  font-size: 11px;
+  font-size: 15px;
   line-height: 1.55;
+}
+
+.memory-decision .markdown p {
+  margin: 0;
 }
 
 .returns {
@@ -1197,7 +1217,7 @@ label small {
   margin-top: 16px;
   padding: 11px 13px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 13px;
   background: var(--surface-soft);
   border-radius: 8px;
 }
@@ -1213,11 +1233,25 @@ label small {
   margin: 16px 0 0;
   padding: 12px 14px;
   color: #596579;
-  font-size: 10px;
+  font-size: 14px;
   line-height: 1.55;
   background: #f7f9fc;
   border-left: 3px solid #9ab5ed;
   border-radius: 0 8px 8px 0;
+}
+
+.memory-card blockquote .markdown {
+  max-height: none;
+  padding: 0;
+  overflow: visible;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.memory-card blockquote .markdown > :first-child,
+.memory-card blockquote .markdown > :last-child {
+  margin: 0;
 }
 
 .settings-grid {
@@ -1248,7 +1282,7 @@ label small {
 
 .definition-list dt {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 13px;
   text-transform: capitalize;
 }
 
@@ -1256,7 +1290,7 @@ label small {
   margin: 0;
   color: var(--ink);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
+  font-size: 13px;
 }
 
 .provider-list {
@@ -1265,13 +1299,13 @@ label small {
 
 .provider-list strong {
   color: #465267;
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .provider-list span {
   padding: 4px 8px;
   color: var(--green);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 800;
   background: var(--green-soft);
   border-radius: 999px;
@@ -1313,7 +1347,7 @@ label small {
 .login-card p {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.55;
 }
 

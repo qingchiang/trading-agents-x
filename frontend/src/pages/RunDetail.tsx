@@ -217,7 +217,9 @@ export default function RunDetail() {
           <div className="decision-body">
             <h2>{t("decision")}</h2>
             <h3>{t("thesis")}</h3>
-            <p>{decision.thesis}</p>
+            <div className="decision-thesis">
+              <Markdown>{decision.thesis}</Markdown>
+            </div>
             <div className="decision-columns">
               <List title={t("catalysts")} items={decision.catalysts ?? []} />
               <List title={t("risks")} items={decision.risks ?? []} />
