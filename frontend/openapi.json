@@ -152,6 +152,17 @@
             "title": "Instrument",
             "type": "string"
           },
+          "instrument_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Name"
+          },
           "metrics": {
             "$ref": "#/components/schemas/RunMetrics"
           },
@@ -797,6 +808,17 @@
           "decision": {
             "$ref": "#/components/schemas/ResearchDecision"
           },
+          "instrument_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Name"
+          },
           "market": {
             "anyOf": [
               {
@@ -1160,6 +1182,37 @@
           "pending_outcomes"
         ],
         "title": "QueueHealth",
+        "type": "object"
+      },
+      "RecentInstrument": {
+        "additionalProperties": false,
+        "properties": {
+          "instrument_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Name"
+          },
+          "last_used_at": {
+            "format": "date-time",
+            "title": "Last Used At",
+            "type": "string"
+          },
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticker",
+          "last_used_at"
+        ],
+        "title": "RecentInstrument",
         "type": "object"
       },
       "ReportLanguage": {
@@ -1681,6 +1734,17 @@
             "title": "Id",
             "type": "string"
           },
+          "instrument_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Name"
+          },
           "metrics": {
             "$ref": "#/components/schemas/RunMetrics"
           },
@@ -1867,6 +1931,52 @@
           }
         },
         "summary": "Health"
+      }
+    },
+    "/api/v1/instruments/recent": {
+      "get": {
+        "operationId": "recent_instruments_api_v1_instruments_recent_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RecentInstrument"
+                  },
+                  "title": "Response Recent Instruments Api V1 Instruments Recent Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Recent Instruments"
       }
     },
     "/api/v1/memory": {

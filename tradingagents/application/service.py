@@ -45,6 +45,24 @@ logger = logging.getLogger(__name__)
 EventHandler = Callable[[RunEvent], None]
 
 
+def _instrument_display_name(identity: Any) -> str | None:
+    if not isinstance(identity, dict):
+        return None
+    for key in ("short_name", "company_name", "long_name", "name"):
+        value = identity.get(key)
+        if not isinstance(value, str):
+            continue
+        normalized = value.strip()
+        if normalized and normalized.casefold() not in {
+            "none",
+            "n/a",
+            "nan",
+            "null",
+        }:
+            return normalized[:300]
+    return None
+
+
 class AnalysisService:
     """The only component allowed to coordinate graph and durable state."""
 
@@ -131,14 +149,30 @@ class AnalysisService:
             on_event=on_event,
         )
         metrics = MetricsCallback()
+        instrument_name = run.instrument_name
 
         with self._heartbeat(run.id, worker_id):
             try:
                 with use_config(dataflow_config):
-                    identity = self.identity_resolver(
-                        run.request.ticker,
-                        run.request.analysis_date.isoformat(),
-                    )
+                    try:
+                        identity = self.identity_resolver(
+                            run.request.ticker,
+                            run.request.analysis_date.isoformat(),
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "instrument identity resolution failed for run %s: %s",
+                            run.id,
+                            type(exc).__name__,
+                        )
+                        identity = {}
+                    resolved_name = _instrument_display_name(identity)
+                    if resolved_name is not None:
+                        instrument_name = resolved_name
+                        self.repository.set_instrument_name(
+                            run.id,
+                            resolved_name,
+                        )
                     instrument_context = build_instrument_context(
                         run.request.ticker,
                         run.request.asset_type.value,
@@ -204,7 +238,12 @@ class AnalysisService:
                                 run.id, raw, on_event
                             ),
                         )
-                    result = self._result(run.id, execution, metrics)
+                    result = self._result(
+                        run.id,
+                        execution,
+                        metrics,
+                        instrument_name=instrument_name,
+                    )
                     benchmark = self._benchmark(
                         run.request.ticker,
                         dataflow_config,
@@ -236,6 +275,7 @@ class AnalysisService:
                     run_id=run.id,
                     status=RunStatus.CANCELLED,
                     instrument=run.request.ticker,
+                    instrument_name=instrument_name,
                     reports={},
                     decision=None,
                     metrics=metrics.snapshot(),
@@ -322,6 +362,8 @@ class AnalysisService:
         run_id: str,
         execution: GraphExecution,
         metrics: MetricsCallback,
+        *,
+        instrument_name: str | None,
     ) -> AnalysisResult:
         warnings = tuple(
             dict.fromkeys(
@@ -339,6 +381,7 @@ class AnalysisService:
             run_id=run_id,
             status=RunStatus.SUCCEEDED,
             instrument=execution.evidence.instrument,
+            instrument_name=instrument_name,
             reports=execution.reports,
             decision=execution.decision,
             evidence=execution.evidence,

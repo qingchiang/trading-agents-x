@@ -22,6 +22,7 @@ export interface components {
       decision: components["schemas"]["ResearchDecision"] | null;
       evidence?: components["schemas"]["EvidenceBundle"] | null;
       instrument: string;
+      instrument_name?: string | null;
       metrics?: components["schemas"]["RunMetrics"];
       reports: Record<string, components["schemas"]["AnalystReport"] | string>;
       run_id: string;
@@ -119,6 +120,7 @@ export interface components {
       analysis_date: string;
       asset_type: string;
       decision: components["schemas"]["ResearchDecision"];
+      instrument_name?: string | null;
       market: string | null;
       outcome: components["schemas"]["MemoryOutcome"];
       reflection: string | null;
@@ -174,6 +176,11 @@ export interface components {
       pending_outcomes: number;
       queued: number;
       running: number;
+    };
+    RecentInstrument: {
+      instrument_name?: string | null;
+      last_used_at: string;
+      ticker: string;
     };
     ReportLanguage: "en" | "zh-CN" | "ja";
     ResearchArtifact: {
@@ -253,6 +260,7 @@ export interface components {
       error_message?: string | null;
       finished_at?: string | null;
       id: string;
+      instrument_name?: string | null;
       metrics?: components["schemas"]["RunMetrics"];
       parent_run_id?: string | null;
       request: components["schemas"]["AnalysisRequest"];

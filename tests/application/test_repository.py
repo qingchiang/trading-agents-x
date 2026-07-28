@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from threading import Barrier
 
@@ -23,7 +23,7 @@ from tradingagents.application.contracts import (
     RunArchiveState,
     RunStatus,
 )
-from tradingagents.application.database import RunAttemptRecord
+from tradingagents.application.database import RunAttemptRecord, RunRecord
 from tradingagents.application.repository import (
     IdempotencyConflictError,
     InvalidRunTransitionError,
@@ -198,6 +198,37 @@ def test_archive_restore_filters_are_atomic_and_idempotent(
     assert restored_again == 0
     assert restored[0].archived_at is None
     assert repository.list_runs().total == 2
+
+
+def test_recent_instruments_are_deduplicated_and_exclude_archives(
+    repository: RunRepository,
+    app_settings: AppSettings,
+) -> None:
+    older, _ = _create(repository, app_settings, "NVDA")
+    archived, _ = _create(repository, app_settings, "AAPL")
+    latest, _ = _create(repository, app_settings, "NVDA")
+    repository.set_instrument_name(older.id, "NVIDIA Corporation")
+    repository.set_instrument_name(archived.id, "Apple")
+    repository.set_instrument_name(latest.id, "NVIDIA")
+    with repository.sessions.begin() as session:
+        session.get(RunRecord, older.id).created_at = datetime(2026, 7, 1)
+        session.get(RunRecord, archived.id).created_at = datetime(2026, 7, 2)
+        session.get(RunRecord, latest.id).created_at = datetime(2026, 7, 3)
+    repository.request_cancel(archived.id)
+    repository.archive_runs((archived.id,))
+
+    recent = repository.recent_instruments()
+
+    assert [(item.ticker, item.instrument_name) for item in recent] == [
+        ("NVDA", "NVIDIA")
+    ]
+    assert recent[0].last_used_at == datetime(
+        2026,
+        7,
+        3,
+        tzinfo=timezone.utc,
+    )
+    assert repository.list_runs(q="nvidia").total == 2
 
 
 def test_artifacts_are_typed_retained_and_idempotent_across_retries(

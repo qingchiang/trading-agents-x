@@ -128,6 +128,7 @@ class MemoryOutcome(ApiModel):
 class MemoryEntry(ApiModel):
     run_id: str
     ticker: str
+    instrument_name: str | None = None
     market: str | None
     asset_type: str
     analysis_date: str

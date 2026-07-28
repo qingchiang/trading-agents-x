@@ -25,6 +25,7 @@ from sqlalchemy import func, select
 
 from tradingagents.application.contracts import (
     AnalysisRequest,
+    RecentInstrument,
     ResearchArtifact,
     RunArchiveState,
     RunEvent,
@@ -216,6 +217,15 @@ def create_app(
             limit=limit,
             offset=offset,
         )
+
+    @app.get(
+        f"{API_PREFIX}/instruments/recent",
+        response_model=list[RecentInstrument],
+    )
+    def recent_instruments(
+        limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    ):
+        return repository.recent_instruments(limit=limit)
 
     @app.post(
         f"{API_PREFIX}/runs/archive",

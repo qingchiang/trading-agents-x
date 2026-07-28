@@ -292,6 +292,81 @@ def test_service_persists_events_before_callback_and_result(
     assert events[2].payload["api_key"] == "[REDACTED]"
 
 
+@pytest.mark.parametrize(
+    ("identity", "expected"),
+    [
+        (
+            {
+                "short_name": "NVIDIA",
+                "company_name": "NVIDIA Corporation",
+                "long_name": "NVIDIA Corporation",
+                "name": "Fallback name",
+            },
+            "NVIDIA",
+        ),
+        ({"company_name": "Toyota Motor Corporation"}, "Toyota Motor Corporation"),
+        ({"long_name": "Mitsubishi Heavy Industries"}, "Mitsubishi Heavy Industries"),
+        ({"name": "Fallback name"}, "Fallback name"),
+        ({"short_name": " n/a ", "company_name": "  "}, None),
+    ],
+)
+def test_service_persists_preferred_instrument_display_name(
+    app_settings,
+    repository,
+    identity,
+    expected,
+) -> None:
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_Graph,
+        identity_resolver=lambda _ticker, _date: identity,
+    )
+
+    result = service.run(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+
+    assert result.instrument_name == expected
+    assert repository.get_run(result.run_id).instrument_name == expected
+    assert repository.get_result(result.run_id).instrument_name == expected
+
+
+def test_instrument_identity_failure_does_not_fail_research_run(
+    app_settings,
+    repository,
+    caplog,
+) -> None:
+    def fail_identity(_ticker, _date):
+        raise RuntimeError("private resolver details")
+
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_Graph,
+        identity_resolver=fail_identity,
+    )
+
+    result = service.run(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+
+    assert result.status is RunStatus.SUCCEEDED
+    assert result.instrument_name is None
+    assert "RuntimeError" in caplog.text
+    assert "private resolver details" not in caplog.text
+
+
 def test_service_commits_artifact_and_event_before_callback(
     app_settings,
     repository,

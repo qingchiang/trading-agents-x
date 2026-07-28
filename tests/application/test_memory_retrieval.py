@@ -336,6 +336,7 @@ def test_memory_entries_support_fuzzy_filters_and_full_field_search(
         invalidation_conditions=("Backlog contracts materially",),
         time_horizon="Three-year compound horizon",
     )
+    repository.set_instrument_name(nvda_run_id, "NVIDIA")
     _seed_memory(
         repository,
         content_hash="search-aapl",
@@ -373,6 +374,9 @@ def test_memory_entries_support_fuzzy_filters_and_full_field_search(
         entry["ticker"]
         for entry in repository.memory_entries(q="DATA CENTER")
     ] == ["NVDA"]
+    by_name = repository.memory_entries(q="nvidia")
+    assert [entry["ticker"] for entry in by_name] == ["NVDA"]
+    assert by_name[0]["instrument_name"] == "NVIDIA"
     assert [
         entry["ticker"]
         for entry in repository.memory_entries(q="valuation LESSON")

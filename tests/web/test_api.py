@@ -196,6 +196,7 @@ async def test_openapi_contains_versioned_run_center_contract(
         "/api/v1/runs/{run_id}/retry",
         "/api/v1/runs/{run_id}/rerun",
         "/api/v1/runs/{run_id}/export",
+        "/api/v1/instruments/recent",
         "/api/v1/memory",
         "/api/v1/capabilities",
         "/api/v1/providers/{provider}/models",
@@ -207,6 +208,35 @@ async def test_openapi_contains_versioned_run_center_contract(
     assert "provenance" not in schema["components"]["schemas"][
         "CapabilityDefaults"
     ]["properties"]
+
+
+@pytest.mark.anyio
+async def test_recent_instruments_exclude_archived_runs_and_include_names(
+    web_client: httpx.AsyncClient,
+    web_repository,
+) -> None:
+    active = (
+        await web_client.post("/api/v1/runs", json=_payload("NVDA"))
+    ).json()
+    archived = (
+        await web_client.post("/api/v1/runs", json=_payload("AAPL"))
+    ).json()
+    web_repository.set_instrument_name(active["id"], "NVIDIA")
+    web_repository.set_instrument_name(archived["id"], "Apple")
+    await web_client.post(f"/api/v1/runs/{archived['id']}/cancel")
+    await web_client.post(
+        "/api/v1/runs/archive",
+        json={"run_ids": [archived["id"]]},
+    )
+
+    response = await web_client.get(
+        "/api/v1/instruments/recent",
+        params={"limit": 1},
+    )
+
+    assert response.status_code == 200
+    assert response.json()[0]["ticker"] == "NVDA"
+    assert response.json()[0]["instrument_name"] == "NVIDIA"
 
 
 @pytest.mark.anyio

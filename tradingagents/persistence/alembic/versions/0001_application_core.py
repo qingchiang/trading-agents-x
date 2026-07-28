@@ -25,6 +25,7 @@ def upgrade() -> None:
         sa.Column("parent_run_id", sa.String(length=36), nullable=True),
         sa.Column("idempotency_key", sa.String(length=200), nullable=True),
         sa.Column("status", sa.String(length=20), nullable=False),
+        sa.Column("instrument_name", sa.String(length=300), nullable=True),
         sa.Column("request_json", sa.JSON(), nullable=False),
         sa.Column("config_json", sa.JSON(), nullable=False),
         sa.Column("version", sa.String(length=40), nullable=False),

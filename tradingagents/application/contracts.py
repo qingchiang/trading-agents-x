@@ -673,6 +673,7 @@ class AnalysisResult(FrozenModel):
     run_id: str
     status: RunStatus
     instrument: str
+    instrument_name: str | None = None
     reports: dict[str, AnalystReport | str]
     decision: ResearchDecision | None
     evidence: EvidenceBundle | None = None
@@ -696,6 +697,7 @@ class AnalysisResult(FrozenModel):
 class RunView(FrozenModel):
     id: str
     parent_run_id: str | None = None
+    instrument_name: str | None = None
     status: RunStatus
     request: AnalysisRequest
     config_snapshot: dict[str, Any]
@@ -716,6 +718,12 @@ class RunPage(FrozenModel):
     total: int = Field(ge=0)
     limit: int = Field(ge=1, le=200)
     offset: int = Field(ge=0)
+
+
+class RecentInstrument(FrozenModel):
+    ticker: str
+    instrument_name: str | None = None
+    last_used_at: datetime
 
 
 class RunExport(FrozenModel):

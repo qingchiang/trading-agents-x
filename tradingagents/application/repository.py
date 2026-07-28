@@ -27,6 +27,7 @@ from .contracts import (
     MemoryOutcome,
     MemoryRecord,
     PerspectiveReview,
+    RecentInstrument,
     ResearchArtifact,
     ResearchArtifactDraft,
     ResearchDecision,
@@ -239,6 +240,12 @@ class RunRepository:
                         query,
                         autoescape=True,
                     ),
+                    func.lower(
+                        func.coalesce(RunRecord.instrument_name, "")
+                    ).contains(
+                        query,
+                        autoescape=True,
+                    ),
                 )
             )
         stmt = (
@@ -323,6 +330,75 @@ class RunRepository:
             session.flush()
             views = tuple(self._view(records[run_id]) for run_id in run_ids)
         return views, changed
+
+    def set_instrument_name(
+        self,
+        run_id: str,
+        instrument_name: str | None,
+    ) -> RunView:
+        """Persist a best-effort display name without affecting run status."""
+        normalized = (
+            instrument_name.strip()[:300]
+            if isinstance(instrument_name, str) and instrument_name.strip()
+            else None
+        )
+        if normalized is None:
+            return self.get_run(run_id)
+        with self.sessions.begin() as session:
+            record = session.get(RunRecord, run_id)
+            if record is None:
+                raise RunNotFoundError(run_id)
+            record.instrument_name = normalized
+            record.updated_at = _utc_naive()
+        return self.get_run(run_id)
+
+    def recent_instruments(self, *, limit: int = 20) -> tuple[RecentInstrument, ...]:
+        """Return the latest non-archived use of each canonical ticker."""
+        limit = min(max(1, limit), 100)
+        ticker = func.json_extract(
+            RunRecord.request_json,
+            "$.ticker",
+        )
+        ranked = (
+            select(
+                ticker.label("ticker"),
+                RunRecord.instrument_name.label("instrument_name"),
+                RunRecord.created_at.label("last_used_at"),
+                func.row_number()
+                .over(
+                    partition_by=func.lower(ticker),
+                    order_by=(
+                        RunRecord.created_at.desc(),
+                        RunRecord.id.desc(),
+                    ),
+                )
+                .label("ticker_rank"),
+            )
+            .where(
+                RunRecord.archived_at.is_(None),
+                ticker.is_not(None),
+            )
+            .subquery()
+        )
+        stmt = (
+            select(
+                ranked.c.ticker,
+                ranked.c.instrument_name,
+                ranked.c.last_used_at,
+            )
+            .where(ranked.c.ticker_rank == 1)
+            .order_by(ranked.c.last_used_at.desc(), ranked.c.ticker)
+            .limit(limit)
+        )
+        with self.engine.connect() as connection:
+            return tuple(
+                RecentInstrument(
+                    ticker=str(row.ticker),
+                    instrument_name=row.instrument_name,
+                    last_used_at=_aware(row.last_used_at),
+                )
+                for row in connection.execute(stmt)
+            )
 
     def purge_expired_archives(
         self,
@@ -982,6 +1058,7 @@ class RunRepository:
             run_id=run_id,
             status=view.status,
             instrument=view.request.ticker,
+            instrument_name=view.instrument_name,
             reports=reports,
             decision=decision,
             evidence=evidence,
@@ -1213,7 +1290,12 @@ class RunRepository:
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         stmt = (
-            select(DecisionRecord, OutcomeRecord, ReflectionRecord)
+            select(
+                DecisionRecord,
+                OutcomeRecord,
+                ReflectionRecord,
+                RunRecord.instrument_name,
+            )
             .join(OutcomeRecord, OutcomeRecord.decision_id == DecisionRecord.id)
             .join(RunRecord, RunRecord.id == DecisionRecord.run_id)
             .outerjoin(
@@ -1261,6 +1343,12 @@ class RunRepository:
                         autoescape=True,
                     ),
                     func.lower(
+                        func.coalesce(RunRecord.instrument_name, "")
+                    ).contains(
+                        query,
+                        autoescape=True,
+                    ),
+                    func.lower(
                         func.coalesce(DecisionRecord.market, "")
                     ).contains(
                         query,
@@ -1296,6 +1384,7 @@ class RunRepository:
                 {
                     "run_id": decision.run_id,
                     "ticker": decision.ticker,
+                    "instrument_name": instrument_name,
                     "market": decision.market,
                     "asset_type": decision.asset_type,
                     "analysis_date": decision.analysis_date.isoformat(),
@@ -1319,7 +1408,9 @@ class RunRepository:
                     },
                     "reflection": reflection.text if reflection else None,
                 }
-                for decision, outcome, reflection in session.execute(stmt)
+                for decision, outcome, reflection, instrument_name in session.execute(
+                    stmt
+                )
             ]
 
     def record_legacy_import(
@@ -1505,6 +1596,7 @@ class RunRepository:
         return RunView(
             id=record.id,
             parent_run_id=record.parent_run_id,
+            instrument_name=record.instrument_name,
             status=RunStatus(record.status),
             request=AnalysisRequest.model_validate(record.request_json),
             config_snapshot=record.config_json,
