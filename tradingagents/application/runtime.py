@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from .contracts import AnalysisRequest, ResearchArtifactDraft
+from .contracts import AnalysisRequest, MemoryContext, ResearchArtifactDraft
 from .settings import RunSettings
 
 
@@ -20,7 +20,7 @@ class RunContext:
     request: AnalysisRequest
     settings: RunSettings
     dataflow_config: Mapping[str, Any]
-    past_context: str
+    memory: MemoryContext
     instrument_context: str
     cancel_requested: Callable[[], bool]
     artifact_writer: Callable[[ResearchArtifactDraft], None] = _discard_artifact

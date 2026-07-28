@@ -173,6 +173,7 @@ export interface components {
       confidence: number;
       evidence_refs?: string[];
       invalidation_conditions?: string[];
+      memory_refs?: string[];
       rating: components["schemas"]["ResearchRating"];
       risks?: string[];
       thesis: string;

@@ -1158,6 +1158,14 @@
             "title": "Invalidation Conditions",
             "type": "array"
           },
+          "memory_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Memory Refs",
+            "type": "array"
+          },
           "rating": {
             "$ref": "#/components/schemas/ResearchRating"
           },

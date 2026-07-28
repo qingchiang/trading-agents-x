@@ -164,7 +164,7 @@ class AnalysisService:
                     request=run.request,
                     settings=run_settings,
                     dataflow_config=dataflow_config,
-                    past_context=memory,
+                    memory=memory,
                     instrument_context=instrument_context,
                     cancel_requested=lambda: self.repository.cancel_requested(
                         run.id

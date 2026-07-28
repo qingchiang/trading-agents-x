@@ -22,6 +22,9 @@ from .contracts import (
     AnalysisResult,
     AnalystReport,
     EvidenceBundle,
+    MemoryContext,
+    MemoryOutcome,
+    MemoryRecord,
     PerspectiveReview,
     ResearchArtifact,
     ResearchArtifactDraft,
@@ -870,7 +873,7 @@ class RunRepository:
         *,
         same_limit: int = 5,
         cross_limit: int = 3,
-    ) -> str:
+    ) -> MemoryContext:
         market = self.market_bucket(ticker, asset_type)
         resolved = (
             select(
@@ -886,6 +889,8 @@ class RunRepository:
             .where(
                 OutcomeRecord.status == "resolved",
                 OutcomeRecord.holding_intervals >= 5,
+                OutcomeRecord.raw_return.is_not(None),
+                OutcomeRecord.alpha_return.is_not(None),
             )
             .order_by(
                 OutcomeRecord.resolved_at.desc(),
@@ -894,46 +899,68 @@ class RunRepository:
         )
         with self.sessions() as session:
             rows = list(session.execute(resolved))
-        same = [
-            row
-            for row in rows
-            if row[0].ticker == ticker
-        ][:same_limit]
-        cross = [
-            row
-            for row in rows
-            if row[0].ticker != ticker
-            and row[0].asset_type == asset_type
-            and market is not None
-            and row[0].market == market
-        ][:cross_limit]
-        sections: list[str] = []
-        if same:
-            sections.append(f"Past analyses of {ticker} (most recent first):")
-            for decision, outcome, reflection in same:
-                sections.append(
-                    "\n".join(
-                        [
-                            (
-                                f"[{decision.analysis_date} | {decision.ticker} | "
-                                f"{decision.rating} | {outcome.raw_return:+.1%} | "
-                                f"{outcome.alpha_return:+.1%} | "
-                                f"{outcome.holding_intervals}d]"
-                            ),
-                            f"DECISION:\n{json.dumps(decision.decision_json, ensure_ascii=False)}",
-                            f"REFLECTION:\n{reflection.text}",
-                        ]
+        same: list[MemoryRecord] = []
+        cross: list[MemoryRecord] = []
+        ticker_key = ticker.casefold()
+        asset_type_key = asset_type.casefold()
+        for decision_record, outcome_record, reflection_record in rows:
+            reflection = reflection_record.text.strip()
+            if not reflection:
+                continue
+            try:
+                decision = ResearchDecision.model_validate(
+                    decision_record.decision_json
+                )
+                outcome = MemoryOutcome(
+                    benchmark=outcome_record.benchmark,
+                    observation_start=outcome_record.observation_start,
+                    observation_end=outcome_record.observation_end,
+                    holding_intervals=outcome_record.holding_intervals,
+                    raw_return=outcome_record.raw_return,
+                    alpha_return=outcome_record.alpha_return,
+                )
+            except ValueError:
+                continue
+            if (
+                decision_record.ticker.casefold() == ticker_key
+                and len(same) < max(0, same_limit)
+            ):
+                same.append(
+                    MemoryRecord(
+                        ref=f"memory:{decision_record.run_id}",
+                        run_id=decision_record.run_id,
+                        scope="same_ticker",
+                        ticker=decision_record.ticker,
+                        market=decision_record.market,
+                        analysis_date=decision_record.analysis_date,
+                        decision=decision,
+                        outcome=outcome,
+                        reflection=reflection,
                     )
                 )
-        if cross:
-            sections.append("Recent cross-ticker lessons:")
-            for decision, outcome, reflection in cross:
-                sections.append(
-                    f"[{decision.analysis_date} | {decision.ticker} | "
-                    f"{decision.rating} | {outcome.raw_return:+.1%}]\n"
-                    f"{reflection.text}"
+            elif (
+                decision_record.ticker.casefold() != ticker_key
+                and decision_record.asset_type.casefold() == asset_type_key
+                and market is not None
+                and decision_record.market == market
+                and len(cross) < max(0, cross_limit)
+            ):
+                cross.append(
+                    MemoryRecord(
+                        ref=f"memory:{decision_record.run_id}",
+                        run_id=decision_record.run_id,
+                        scope="same_market",
+                        ticker=decision_record.ticker,
+                        market=decision_record.market,
+                        analysis_date=decision_record.analysis_date,
+                        reflection=reflection,
+                    )
                 )
-        return "\n\n".join(sections)
+        return MemoryContext(
+            instrument=ticker,
+            market=market,
+            items=(*same, *cross),
+        )
 
     def memory_entries(
         self,

@@ -44,7 +44,8 @@ def test_legacy_import_is_read_only_reported_and_idempotent(
     assert repeated.imported == 0
     assert repeated.backup is None
     assert source.read_text(encoding="utf-8") == original
-    assert "The evidence was useful" in repository.memory_context("NVDA", "stock")
+    memory = repository.memory_context("NVDA", "stock")
+    assert "The evidence was useful" in memory.prompt_text()
 
 
 def test_pending_legacy_entry_stays_pending_and_out_of_memory_context(
@@ -70,7 +71,7 @@ def test_pending_legacy_entry_stays_pending_and_out_of_memory_context(
     entries = repository.memory_entries(ticker="NVDA")
     assert entries[0]["outcome"]["status"] == "pending"
     assert entries[0]["reflection"] == "No completed observation yet."
-    assert repository.memory_context("NVDA", "stock") == ""
+    assert repository.memory_context("NVDA", "stock").items == ()
     assert source.read_text(encoding="utf-8") == original
 
 
@@ -112,9 +113,8 @@ def test_legacy_short_window_is_imported_but_not_used_as_memory(
 
     assert report.imported == 1
     assert report.backup is None
-    assert (
-        "Fixture reflection" in repository.memory_context("NVDA", "stock")
-    ) is expected_in_context
+    memory_text = repository.memory_context("NVDA", "stock").prompt_text()
+    assert ("Fixture reflection" in memory_text) is expected_in_context
     assert repository.memory_entries(ticker="NVDA")[0]["outcome"][
         "holding_intervals"
     ] == holding_intervals

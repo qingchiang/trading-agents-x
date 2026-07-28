@@ -284,8 +284,9 @@ def test_complete_persists_result_and_resolved_memory(
     assert isinstance(restored.reports["market"], AnalystReport)
     assert restored.warnings[0].message == "Historical price was partial."
     context = repository.memory_context("NVDA", "stock")
-    assert "The thesis worked" in context
-    assert "NVDA" in context
+    assert len(context.items) == 1
+    assert context.items[0].ticker == "NVDA"
+    assert "The thesis worked" in context.items[0].reflection
 
 
 def test_rerun_links_new_run_and_backup_is_consistent(

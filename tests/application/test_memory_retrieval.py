@@ -3,11 +3,17 @@ from __future__ import annotations
 from datetime import date, datetime
 
 import pytest
+from sqlalchemy import select
 
 from tradingagents.application.contracts import (
     AnalysisRequest,
     ResearchDecision,
     ResearchRating,
+)
+from tradingagents.application.database import (
+    DecisionRecord,
+    OutcomeRecord,
+    ReflectionRecord,
 )
 from tradingagents.application.repository import RunRepository
 
@@ -21,7 +27,7 @@ def _seed_memory(
     reflection: str,
     thesis: str,
     resolved: bool = True,
-) -> None:
+) -> str:
     request = AnalysisRequest(
         ticker=ticker,
         analysis_date=analysis_date,
@@ -37,7 +43,7 @@ def _seed_memory(
         invalidation_conditions=(),
         time_horizon="Fixture horizon",
     )
-    repository.import_legacy_memory(
+    run_id = repository.import_legacy_memory(
         source_path="/fixture/memory.md",
         content_hash=content_hash,
         request=request,
@@ -50,6 +56,8 @@ def _seed_memory(
         observation_end=date(2026, 7, 8) if resolved else None,
         reflection=reflection,
     )
+    assert run_id is not None
+    return run_id
 
 
 def test_memory_context_uses_deterministic_same_and_cross_ticker_limits(
@@ -61,23 +69,29 @@ def test_memory_context_uses_deterministic_same_and_cross_ticker_limits(
         "tradingagents.application.repository._utc_naive",
         lambda: fixed_now,
     )
+    same_run_ids = []
     for index in range(1, 7):
-        _seed_memory(
-            repository,
-            content_hash=f"nvda-{index}",
-            ticker="NVDA",
-            analysis_date=date(2026, 6, index),
-            reflection=f"same-reflection-{index}",
-            thesis=f"same-decision-{index}",
+        same_run_ids.append(
+            _seed_memory(
+                repository,
+                content_hash=f"nvda-{index}",
+                ticker="NVDA",
+                analysis_date=date(2026, 6, index),
+                reflection=f"same-reflection-{index}",
+                thesis=f"same-decision-{index}",
+            )
         )
+    cross_run_ids = []
     for index in range(1, 5):
-        _seed_memory(
-            repository,
-            content_hash=f"aapl-{index}",
-            ticker="AAPL",
-            analysis_date=date(2026, 5, index),
-            reflection=f"cross-reflection-{index}",
-            thesis=f"cross-decision-{index}",
+        cross_run_ids.append(
+            _seed_memory(
+                repository,
+                content_hash=f"aapl-{index}",
+                ticker="AAPL",
+                analysis_date=date(2026, 5, index),
+                reflection=f"cross-reflection-{index}",
+                thesis=f"cross-decision-{index}",
+            )
         )
     _seed_memory(
         repository,
@@ -107,21 +121,31 @@ def test_memory_context_uses_deterministic_same_and_cross_ticker_limits(
 
     context = repository.memory_context("NVDA", "stock")
 
-    assert "same-reflection-1" not in context
-    for index in range(2, 7):
-        assert f"same-reflection-{index}" in context
-        assert f"same-decision-{index}" in context
-    assert "cross-reflection-1" not in context
-    for index in range(2, 5):
-        assert f"cross-reflection-{index}" in context
-        assert f"cross-decision-{index}" not in context
-    assert "japan-reflection" not in context
-    assert "crypto-reflection" not in context
-    assert "pending-reflection" not in context
-    assert context.index("same-reflection-6") < context.index("same-reflection-2")
-    assert context.index("cross-reflection-4") < context.index(
-        "cross-reflection-2"
+    same = [item for item in context.items if item.scope == "same_ticker"]
+    cross = [item for item in context.items if item.scope == "same_market"]
+    assert [item.reflection for item in same] == [
+        f"same-reflection-{index}" for index in range(6, 1, -1)
+    ]
+    assert [item.decision.thesis for item in same if item.decision] == [
+        f"same-decision-{index}" for index in range(6, 1, -1)
+    ]
+    assert [item.reflection for item in cross] == [
+        f"cross-reflection-{index}" for index in range(4, 1, -1)
+    ]
+    assert all(item.decision is None and item.outcome is None for item in cross)
+    assert context.refs == tuple(
+        f"memory:{run_id}"
+        for run_id in (
+            *reversed(same_run_ids[1:]),
+            *reversed(cross_run_ids[1:]),
+        )
     )
+    prompt = context.prompt_text()
+    assert "same-reflection-1" not in prompt
+    assert "cross-decision-4" not in prompt
+    assert "japan-reflection" not in prompt
+    assert "crypto-reflection" not in prompt
+    assert "pending-reflection" not in prompt
 
 
 def test_china_cross_ticker_memory_shares_market_without_crossing_regions(
@@ -154,11 +178,12 @@ def test_china_cross_ticker_memory_shares_market_without_crossing_regions(
 
     context = repository.memory_context("600000.SS", "stock")
 
-    assert "Shanghai lesson" in context
-    assert "Shenzhen lesson" in context
-    assert "Tokyo lesson" not in context
-    assert "Shanghai decision" not in context
-    assert "Shenzhen decision" not in context
+    assert {item.reflection for item in context.items} == {
+        "Shanghai lesson",
+        "Shenzhen lesson",
+    }
+    assert all(item.scope == "same_market" for item in context.items)
+    assert all(item.decision is None and item.outcome is None for item in context.items)
 
 
 @pytest.mark.parametrize(
@@ -221,5 +246,70 @@ def test_memory_limits_can_disable_each_context_class(
         cross_limit=cross_limit,
     )
 
-    assert ("same lesson" in context) is same_present
-    assert ("cross lesson" in context) is cross_present
+    reflections = {item.reflection for item in context.items}
+    assert ("same lesson" in reflections) is same_present
+    assert ("cross lesson" in reflections) is cross_present
+
+
+def test_memory_prompt_is_bounded_per_item_and_in_total(
+    repository: RunRepository,
+) -> None:
+    for index in range(8):
+        _seed_memory(
+            repository,
+            content_hash=f"bounded-{index}",
+            ticker="NVDA" if index < 5 else "AAPL",
+            analysis_date=date(2026, 7, index + 1),
+            reflection=f"reflection-{index}-" + ("x" * 5_000),
+            thesis=f"thesis-{index}-" + ("y" * 5_000),
+        )
+
+    context = repository.memory_context("NVDA", "stock")
+    prompt = context.prompt_text()
+
+    assert len(context.items) == 8
+    assert len(prompt) <= 12_000
+    assert all(len(item.prompt_text()) <= 2_000 for item in context.items)
+
+
+def test_memory_context_skips_malformed_decisions_and_empty_reflections(
+    repository: RunRepository,
+) -> None:
+    malformed_run_id = _seed_memory(
+        repository,
+        content_hash="malformed-decision",
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 1),
+        reflection="Should be excluded with its malformed decision.",
+        thesis="Original valid decision.",
+    )
+    empty_run_id = _seed_memory(
+        repository,
+        content_hash="empty-reflection",
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 2),
+        reflection="Will become empty.",
+        thesis="Still valid.",
+    )
+    with repository.sessions.begin() as session:
+        malformed = session.scalar(
+            select(DecisionRecord).where(DecisionRecord.run_id == malformed_run_id)
+        )
+        empty = session.scalar(
+            select(ReflectionRecord)
+            .join(
+                OutcomeRecord,
+                OutcomeRecord.id == ReflectionRecord.outcome_id,
+            )
+            .join(
+                DecisionRecord,
+                DecisionRecord.id == OutcomeRecord.decision_id,
+            )
+            .where(DecisionRecord.run_id == empty_run_id)
+        )
+        assert malformed is not None
+        malformed.decision_json = {"rating": "not-a-rating"}
+        assert empty is not None
+        empty.text = "   "
+
+    assert repository.memory_context("NVDA", "stock").items == ()
