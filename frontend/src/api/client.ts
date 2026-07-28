@@ -19,6 +19,7 @@ export type ProviderModelCatalog =
 export type DiscoveredModel = components["schemas"]["DiscoveredModelView"];
 export type Health = components["schemas"]["HealthResponse"];
 export type MemoryEntry = components["schemas"]["MemoryEntry"];
+export type RunMetrics = components["schemas"]["RunMetrics"];
 
 export class ApiError extends Error {
   constructor(

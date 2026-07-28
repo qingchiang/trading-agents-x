@@ -90,6 +90,61 @@ def render_run_export_markdown(run_export: RunExport) -> str:
             ]
         )
 
+    metrics = result.metrics
+    sections.extend(
+        [
+            "",
+            "## Performance",
+            "",
+            f"- LLM calls: `{metrics.llm_calls}`",
+            f"- Tool calls: `{metrics.tool_calls}`",
+            f"- Input tokens: `{metrics.input_tokens}`",
+            f"- Output tokens: `{metrics.output_tokens}`",
+            f"- Wall time: `{metrics.wall_time_seconds:.3f}s`",
+        ]
+    )
+    node_names = set(metrics.node_metrics) | set(metrics.node_wall_times)
+    if node_names:
+        sections.extend(
+            [
+                "",
+                "| Node | LLM calls | Tool calls | Input tokens | "
+                "Output tokens | Wall time |",
+                "|---|---:|---:|---:|---:|---:|",
+            ]
+        )
+        for node in sorted(
+            node_names,
+            key=lambda name: (
+                -(
+                    metrics.node_metrics.get(name).wall_time_seconds
+                    if name in metrics.node_metrics
+                    else metrics.node_wall_times.get(name, 0.0)
+                ),
+                name,
+            ),
+        ):
+            node_usage = metrics.node_metrics.get(node)
+            wall_time = (
+                node_usage.wall_time_seconds
+                if node_usage is not None
+                else metrics.node_wall_times.get(node, 0.0)
+            )
+            values = (
+                (
+                    str(node_usage.llm_calls),
+                    str(node_usage.tool_calls),
+                    str(node_usage.input_tokens),
+                    str(node_usage.output_tokens),
+                )
+                if node_usage is not None
+                else ("—", "—", "—", "—")
+            )
+            sections.append(
+                f"| `{node}` | {values[0]} | {values[1]} | "
+                f"{values[2]} | {values[3]} | {wall_time:.3f}s |"
+            )
+
     sections.extend(["", "## Evidence Appendix"])
     if run_export.evidence is None:
         sections.extend(

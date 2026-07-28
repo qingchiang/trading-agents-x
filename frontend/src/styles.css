@@ -1600,10 +1600,14 @@ label small {
   color: var(--muted-2);
 }
 
+.run-metrics {
+  padding: 0;
+  overflow: hidden;
+}
+
 .metrics-strip {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  padding: 0;
 }
 
 .metrics-strip > div {
@@ -1631,6 +1635,46 @@ label small {
   margin-top: 7px;
   color: var(--ink);
   font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.node-metrics {
+  border-top: 1px solid var(--line-soft);
+}
+
+.node-metrics > summary {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 14px 20px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.node-metrics > summary span {
+  min-width: 24px;
+  padding: 2px 7px;
+  color: var(--blue-dark);
+  font-size: 12px;
+  text-align: center;
+  background: var(--blue-soft);
+  border-radius: 999px;
+}
+
+.node-metrics[open] > summary {
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.node-metrics td,
+.node-metrics th {
+  padding: 12px 20px;
+}
+
+.node-metrics td:not(:first-child),
+.node-metrics th:not(:first-child) {
+  text-align: right;
   font-variant-numeric: tabular-nums;
 }
 

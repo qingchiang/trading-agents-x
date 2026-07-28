@@ -151,6 +151,13 @@ export interface components {
       code: string;
       message: string;
     };
+    NodeMetrics: {
+      input_tokens?: number;
+      llm_calls?: number;
+      output_tokens?: number;
+      tool_calls?: number;
+      wall_time_seconds?: number;
+    };
     PerspectiveReview: {
       claim_rebuttals?: string[];
       evidence_refs?: string[];
@@ -229,6 +236,7 @@ export interface components {
     RunMetrics: {
       input_tokens?: number;
       llm_calls?: number;
+      node_metrics?: Record<string, components["schemas"]["NodeMetrics"]>;
       node_wall_times?: Record<string, number>;
       output_tokens?: number;
       tool_calls?: number;

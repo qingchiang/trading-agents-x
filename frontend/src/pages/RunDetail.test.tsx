@@ -188,7 +188,26 @@ const detail = {
       input_tokens: 1200,
       output_tokens: 400,
       wall_time_seconds: 12.4,
-      node_wall_times: {},
+      node_wall_times: {
+        "analyst.market": 2.1,
+        "legacy.node": 1.2,
+      },
+      node_metrics: {
+        "analyst.market": {
+          llm_calls: 2,
+          tool_calls: 3,
+          input_tokens: 800,
+          output_tokens: 220,
+          wall_time_seconds: 2.1,
+        },
+        "committee.final": {
+          llm_calls: 2,
+          tool_calls: 0,
+          input_tokens: 400,
+          output_tokens: 180,
+          wall_time_seconds: 4.5,
+        },
+      },
     },
     warnings: [],
   },
@@ -403,6 +422,34 @@ test("labels historical runs that have no recorded artifacts", async () => {
       "This historical run did not record typed research artifacts.",
     ),
   ).toBeVisible();
+});
+
+test("shows a collapsed per-node metrics table with legacy fallback", async () => {
+  render(
+    <Router initialPath="/runs/run-1">
+      <RunDetail />
+    </Router>,
+  );
+
+  expect(await screen.findByRole("heading", { name: "NVDA" })).toBeVisible();
+  const summary = screen.getByText("Per-node metrics", { exact: false });
+  const details = summary.closest("details");
+  expect(details).not.toHaveAttribute("open");
+
+  fireEvent.click(summary);
+
+  expect(details).toHaveAttribute("open");
+  const committee = screen.getByText("committee.final").closest("tr");
+  const analyst = screen.getByText("analyst.market").closest("tr");
+  const legacy = screen.getByText("legacy.node").closest("tr");
+  expect(committee).toHaveTextContent("400");
+  expect(committee).toHaveTextContent("4.5s");
+  expect(analyst).toHaveTextContent("800");
+  expect(legacy).toHaveTextContent("—");
+  expect(
+    committee!.compareDocumentPosition(analyst!) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).not.toBe(0);
 });
 
 test("restores report and evidence navigation from the URL", async () => {

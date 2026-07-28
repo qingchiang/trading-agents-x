@@ -12,7 +12,9 @@ from tradingagents.application.contracts import (
     EvidenceBundle,
     EvidenceItem,
     EvidenceQuality,
+    NodeMetrics,
     RunExport,
+    RunMetrics,
     RunStatus,
     RunView,
 )
@@ -348,3 +350,66 @@ def test_markdown_export_uses_canonical_report_order() -> None:
         < markdown.index("NEWS BODY")
         < markdown.index("SOCIAL BODY")
     )
+
+
+def test_markdown_export_includes_total_and_per_node_metrics() -> None:
+    now = datetime(2026, 7, 24, 12, tzinfo=timezone.utc)
+    metrics = RunMetrics(
+        llm_calls=3,
+        tool_calls=2,
+        input_tokens=1200,
+        output_tokens=300,
+        wall_time_seconds=9.5,
+        node_wall_times={
+            "analyst.market": 2.5,
+            "legacy.node": 1.0,
+        },
+        node_metrics={
+            "analyst.market": NodeMetrics(
+                llm_calls=2,
+                tool_calls=2,
+                input_tokens=900,
+                output_tokens=200,
+                wall_time_seconds=2.5,
+            ),
+            "committee.final": NodeMetrics(
+                llm_calls=1,
+                input_tokens=300,
+                output_tokens=100,
+                wall_time_seconds=4.0,
+            ),
+        },
+    )
+    run_export = RunExport(
+        run=RunView(
+            id="fixture-run",
+            status=RunStatus.SUCCEEDED,
+            request=AnalysisRequest(
+                ticker="7203.T",
+                analysis_date="2026-07-24",
+            ),
+            config_snapshot={},
+            attempt=1,
+            cancel_requested=False,
+            metrics=metrics,
+            created_at=now,
+            updated_at=now,
+        ),
+        result=AnalysisResult(
+            run_id="fixture-run",
+            status=RunStatus.SUCCEEDED,
+            instrument="7203.T",
+            reports={},
+            decision=None,
+            metrics=metrics,
+        ),
+    )
+
+    markdown = render_run_export_markdown(run_export)
+
+    assert "## Performance" in markdown
+    assert "- Input tokens: `1200`" in markdown
+    assert "| `committee.final` | 1 | 0 | 300 | 100 | 4.000s |" in markdown
+    assert "| `analyst.market` | 2 | 2 | 900 | 200 | 2.500s |" in markdown
+    assert "| `legacy.node` | — | — | — | — | 1.000s |" in markdown
+    assert markdown.index("committee.final") < markdown.index("analyst.market")

@@ -593,6 +593,16 @@ class ResearchArtifact(FrozenModel):
         return _artifact_content_type(self.content)
 
 
+class NodeMetrics(FrozenModel):
+    """Resource usage attributed to one research graph node."""
+
+    llm_calls: int = Field(default=0, ge=0)
+    tool_calls: int = Field(default=0, ge=0)
+    input_tokens: int = Field(default=0, ge=0)
+    output_tokens: int = Field(default=0, ge=0)
+    wall_time_seconds: float = Field(default=0.0, ge=0.0)
+
+
 class RunMetrics(FrozenModel):
     llm_calls: int = Field(default=0, ge=0)
     tool_calls: int = Field(default=0, ge=0)
@@ -600,6 +610,7 @@ class RunMetrics(FrozenModel):
     output_tokens: int = Field(default=0, ge=0)
     wall_time_seconds: float = Field(default=0.0, ge=0.0)
     node_wall_times: dict[str, float] = Field(default_factory=dict)
+    node_metrics: dict[str, NodeMetrics] = Field(default_factory=dict)
 
 
 class AnalysisRequest(FrozenModel):

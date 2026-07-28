@@ -464,6 +464,7 @@ class ResearchGraph:
                     config={
                         "recursion_limit": 40,
                         "callbacks": [self.metrics],
+                        "metadata": {"research_node": node_name},
                     },
                     context=context,
                 )

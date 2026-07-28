@@ -11,6 +11,7 @@ import {
   type ResearchDecision,
   type RunDetail as RunDetailType,
   type RunEvent,
+  type RunMetrics,
 } from "../api/client";
 import Markdown from "../components/Markdown";
 import {
@@ -395,24 +396,7 @@ export default function RunDetail() {
         />
       )}
 
-      {result && (
-        <article className="panel metrics-strip">
-          <Metric label={t("llmCalls")} value={result.metrics?.llm_calls ?? 0} />
-          <Metric label={t("toolCalls")} value={result.metrics?.tool_calls ?? 0} />
-          <Metric
-            label={t("inputTokens")}
-            value={result.metrics?.input_tokens ?? 0}
-          />
-          <Metric
-            label={t("outputTokens")}
-            value={result.metrics?.output_tokens ?? 0}
-          />
-          <Metric
-            label={t("wallTime")}
-            value={`${(result.metrics?.wall_time_seconds ?? 0).toFixed(1)}s`}
-          />
-        </article>
-      )}
+      {result && <MetricsPanel metrics={result.metrics} />}
     </section>
   );
 }
@@ -1269,6 +1253,102 @@ function Metric({ label, value }: { label: string; value: number | string }) {
       <strong>{typeof value === "number" ? value.toLocaleString() : value}</strong>
     </div>
   );
+}
+
+function MetricsPanel({ metrics }: { metrics: RunMetrics | undefined }) {
+  const { t } = useTranslation();
+  const rows = useMemo(() => nodeMetricRows(metrics), [metrics]);
+  return (
+    <article className="panel run-metrics">
+      <div className="metrics-strip">
+        <Metric label={t("llmCalls")} value={metrics?.llm_calls ?? 0} />
+        <Metric label={t("toolCalls")} value={metrics?.tool_calls ?? 0} />
+        <Metric label={t("inputTokens")} value={metrics?.input_tokens ?? 0} />
+        <Metric label={t("outputTokens")} value={metrics?.output_tokens ?? 0} />
+        <Metric
+          label={t("wallTime")}
+          value={`${(metrics?.wall_time_seconds ?? 0).toFixed(1)}s`}
+        />
+      </div>
+      {rows.length > 0 && (
+        <details className="node-metrics">
+          <summary>
+            {t("nodeMetrics")} <span>{rows.length}</span>
+          </summary>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>{t("node")}</th>
+                  <th>{t("llmCalls")}</th>
+                  <th>{t("toolCalls")}</th>
+                  <th>{t("inputTokens")}</th>
+                  <th>{t("outputTokens")}</th>
+                  <th>{t("wallTime")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr key={row.node}>
+                    <td>
+                      <code>{row.node}</code>
+                    </td>
+                    <td>{metricCell(row.llmCalls)}</td>
+                    <td>{metricCell(row.toolCalls)}</td>
+                    <td>{metricCell(row.inputTokens)}</td>
+                    <td>{metricCell(row.outputTokens)}</td>
+                    <td>{row.wallTime.toFixed(1)}s</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
+    </article>
+  );
+}
+
+type NodeMetricRow = {
+  node: string;
+  llmCalls: number | null;
+  toolCalls: number | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  wallTime: number;
+};
+
+function nodeMetricRows(metrics: RunMetrics | undefined): NodeMetricRow[] {
+  const nodeMetrics = metrics?.node_metrics ?? {};
+  const wallTimes = metrics?.node_wall_times ?? {};
+  const names = new Set([
+    ...Object.keys(nodeMetrics),
+    ...Object.keys(wallTimes),
+  ]);
+  return [...names]
+    .map((node) => {
+      const usage = nodeMetrics[node];
+      return {
+        node,
+        llmCalls: usage ? (usage.llm_calls ?? 0) : null,
+        toolCalls: usage ? (usage.tool_calls ?? 0) : null,
+        inputTokens: usage ? (usage.input_tokens ?? 0) : null,
+        outputTokens: usage ? (usage.output_tokens ?? 0) : null,
+        wallTime:
+          usage?.wall_time_seconds ??
+          wallTimes[node] ??
+          0,
+      };
+    })
+    .sort(
+      (left, right) =>
+        right.wallTime - left.wallTime ||
+        left.node.localeCompare(right.node),
+    );
+}
+
+function metricCell(value: number | null): string {
+  return value === null ? "—" : value.toLocaleString();
 }
 
 function isAnalystReport(content: ArtifactContent): content is AnalystReport {

@@ -94,6 +94,9 @@ class _AnalystSubgraph:
 
     def invoke(self, state, **_kwargs):
         assert state["past_context"] == ""
+        assert _kwargs["config"]["metadata"] == {
+            "research_node": f"analyst.{self.analyst}"
+        }
         return {
             **state,
             self._REPORT_KEYS[self.analyst]: (
