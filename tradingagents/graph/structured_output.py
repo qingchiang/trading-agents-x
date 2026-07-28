@@ -47,7 +47,7 @@ class _InvalidOutput(ValueError):
 
 
 class StructuredOutputRunner(Generic[StructuredModel]):
-    """Run schema-tool output, local JSON recovery, then one JSON-only retry."""
+    """Run the preferred typed transport, local recovery, then one JSON retry."""
 
     def __init__(
         self,
@@ -73,6 +73,7 @@ class StructuredOutputRunner(Generic[StructuredModel]):
         allowed_memory_refs: tuple[str, ...] = (),
     ) -> StructuredOutputResult[StructuredModel]:
         primary_reason = "structured_binding_error"
+        primary_generation_method = _primary_generation_method(self.llm)
         try:
             primary = self.llm.with_structured_output(
                 self.schema,
@@ -95,9 +96,7 @@ class StructuredOutputRunner(Generic[StructuredModel]):
                     else:
                         return StructuredOutputResult(
                             value=value,
-                            generation_method=(
-                                ArtifactGenerationMethod.TOOL_CALL
-                            ),
+                            generation_method=primary_generation_method,
                         )
                 else:
                     try:
@@ -218,6 +217,13 @@ class StructuredOutputRunner(Generic[StructuredModel]):
                 },
             }
         )
+
+
+def _primary_generation_method(llm: Any) -> ArtifactGenerationMethod:
+    preferred = getattr(llm, "preferred_structured_output_method", None)
+    if preferred == "json_mode":
+        return ArtifactGenerationMethod.JSON_MODE
+    return ArtifactGenerationMethod.TOOL_CALL
 
 
 def _unpack_response(

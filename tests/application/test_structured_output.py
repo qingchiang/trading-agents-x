@@ -14,7 +14,10 @@ from tradingagents.application.contracts import (
     MemoryContext,
     PerspectiveReview,
 )
-from tradingagents.graph.research_graph import _invoke_decision
+from tradingagents.graph.research_graph import (
+    _invoke_decision,
+    _structured_recovery_warnings,
+)
 from tradingagents.graph.structured_output import (
     StructuredOutputError,
     StructuredOutputRunner,
@@ -65,11 +68,13 @@ class _FakeLLM:
         recovery: Any,
         plain_recovery: Any | None = None,
         reject_json_binding: bool = False,
+        preferred_method: str = "function_calling",
     ):
         self.primary = primary
         self.recovery = recovery
         self.plain_recovery = plain_recovery
         self.reject_json_binding = reject_json_binding
+        self.preferred_structured_output_method = preferred_method
         self.calls: list[tuple[str, str]] = []
 
     def with_structured_output(
@@ -81,7 +86,11 @@ class _FakeLLM:
     ) -> _Invoker:
         if method == "json_mode" and self.reject_json_binding:
             raise ValueError("json mode unsupported")
-        resolved = method or "tool_call"
+        resolved = method or (
+            "json_mode"
+            if self.preferred_structured_output_method == "json_mode"
+            else "tool_call"
+        )
         response = self.recovery if method == "json_mode" else self.primary
         return _Invoker(self, resolved, response)
 
@@ -126,6 +135,27 @@ def test_first_typed_output_succeeds_with_one_logical_call() -> None:
     assert result.value == _review()
     assert result.generation_method is ArtifactGenerationMethod.TOOL_CALL
     assert [method for method, _ in llm.calls] == ["tool_call"]
+    assert events == []
+
+
+def test_primary_json_mode_is_a_normal_validated_output() -> None:
+    events: list[dict[str, Any]] = []
+    llm = _FakeLLM(
+        primary={
+            "raw": AIMessage(content=""),
+            "parsed": _review(),
+            "parsing_error": None,
+        },
+        recovery=AssertionError("recovery must not run"),
+        preferred_method="json_mode",
+    )
+
+    result = _invoke(_runner(llm, events))
+
+    assert result.value == _review()
+    assert result.generation_method is ArtifactGenerationMethod.JSON_MODE
+    assert [method for method, _ in llm.calls] == ["json_mode"]
+    assert _structured_recovery_warnings("review.bear", result) == []
     assert events == []
 
 

@@ -1545,7 +1545,10 @@ def _structured_recovery_warnings(
     node: str,
     output: StructuredOutputResult[Any],
 ) -> list[dict[str, Any]]:
-    if output.generation_method is ArtifactGenerationMethod.TOOL_CALL:
+    if output.generation_method in {
+        ArtifactGenerationMethod.TOOL_CALL,
+        ArtifactGenerationMethod.JSON_MODE,
+    }:
         return []
     warning = ResearchWarning(
         code="structured_output.recovered",

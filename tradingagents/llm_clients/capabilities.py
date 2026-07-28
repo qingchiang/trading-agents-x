@@ -55,13 +55,15 @@ _DEEPSEEK_REASONER = ModelCapabilities(
     requires_reasoning_content_roundtrip=True,
 )
 
-# DeepSeek V4 documents forced tool selection and JSON Output. Thinking-mode
-# responses still require reasoning_content to be echoed on subsequent turns.
+# DeepSeek V4 exposes tool selection and JSON Output, but the live
+# thinking-mode endpoint rejects a forced schema tool with
+# ``Thinking mode does not support this tool_choice``. Prefer JSON mode so
+# post-analyst nodes never depend on an optional tool call.
 _DEEPSEEK_V4 = ModelCapabilities(
-    supports_tool_choice=True,
+    supports_tool_choice=False,
     supports_json_mode=True,
     supports_json_schema=False,
-    preferred_structured_method="function_calling",
+    preferred_structured_method="json_mode",
     requires_reasoning_content_roundtrip=True,
 )
 

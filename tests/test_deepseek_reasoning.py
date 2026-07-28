@@ -5,9 +5,9 @@ Two pieces verified:
 1. ``reasoning_content`` is captured on receive into the AIMessage's
    ``additional_kwargs`` and re-attached on send so DeepSeek's API
    sees the same value across turns.
-2. ``with_structured_output`` consults the capability table: V4 forces the
-   schema tool, while the legacy reasoner endpoint suppresses unsupported
-   ``tool_choice``.
+2. ``with_structured_output`` consults the capability table: V4 thinking
+   models prefer JSON mode, while the legacy reasoner endpoint binds an
+   unforced schema tool.
 """
 
 import os
@@ -138,7 +138,7 @@ def _bound_kwargs(runnable):
 
 @pytest.mark.unit
 class TestStructuredOutputCapabilityDispatch:
-    """V4 forces schema tools; the legacy reasoner keeps its compatibility."""
+    """V4 prefers JSON mode; legacy DeepSeek compatibility stays isolated."""
 
     class _Sample(BaseModel):
         answer: str
@@ -159,13 +159,17 @@ class TestStructuredOutputCapabilityDispatch:
         assert _bound_kwargs(bound).get("tool_choice") in (None, ...) or \
             "tool_choice" not in _bound_kwargs(bound)
 
-    def test_v4_flash_forces_tool_choice(self):
+    def test_v4_flash_defaults_to_json_mode(self):
         bound = self._client("deepseek-v4-flash").with_structured_output(self._Sample)
-        assert _bound_kwargs(bound).get("tool_choice") is not None
+        assert _bound_kwargs(bound)["response_format"] == {
+            "type": "json_object"
+        }
 
-    def test_v4_pro_forces_tool_choice(self):
+    def test_v4_pro_defaults_to_json_mode(self):
         bound = self._client("deepseek-v4-pro").with_structured_output(self._Sample)
-        assert _bound_kwargs(bound).get("tool_choice") is not None
+        assert _bound_kwargs(bound)["response_format"] == {
+            "type": "json_object"
+        }
 
     def test_v4_json_mode_sets_response_format(self):
         bound = self._client("deepseek-v4-flash").with_structured_output(
@@ -179,7 +183,9 @@ class TestStructuredOutputCapabilityDispatch:
     def test_future_v_variant_via_regex(self):
         """Forward-compat: unknown deepseek-v\\d-* IDs inherit V4 support."""
         bound = self._client("deepseek-v5-hypothetical").with_structured_output(self._Sample)
-        assert _bound_kwargs(bound).get("tool_choice") is not None
+        assert _bound_kwargs(bound)["response_format"] == {
+            "type": "json_object"
+        }
 
     def test_schema_is_still_bound_as_tool(self):
         """tool_choice is suppressed, but the schema is still bound as a tool —
@@ -209,22 +215,20 @@ def _live_deepseek_enabled():
 @pytest.mark.integration
 @pytest.mark.live_llm
 class TestDeepSeekLiveStructuredOutput:
-    """Explicit opt-in probes for V4 schema tools and JSON Output."""
+    """Explicit opt-in probes for the V4 default JSON transport."""
 
     class _Pick(BaseModel):
         action: str
         confidence: float
 
     @pytest.mark.parametrize(
-        ("model", "method"),
+        "model",
         (
-            ("deepseek-v4-flash", "function_calling"),
-            ("deepseek-v4-flash", "json_mode"),
-            ("deepseek-v4-pro", "function_calling"),
-            ("deepseek-v4-pro", "json_mode"),
+            "deepseek-v4-flash",
+            "deepseek-v4-pro",
         ),
     )
-    def test_v4_returns_structured_output(self, model, method):
+    def test_v4_default_returns_structured_output(self, model):
         if not _live_deepseek_enabled():
             pytest.skip(
                 "Set RUN_LIVE_LLM_TESTS=1 and export DEEPSEEK_API_KEY to run live"
@@ -235,10 +239,7 @@ class TestDeepSeekLiveStructuredOutput:
             base_url="https://api.deepseek.com",
             timeout=60,
         )
-        bound = client.with_structured_output(
-            self._Pick,
-            method=method,
-        )
+        bound = client.with_structured_output(self._Pick)
         result = bound.invoke(
             "Pick BUY or SELL or HOLD for a tech stock with strong earnings. "
             "Confidence is a float between 0 and 1. Return a JSON object with "

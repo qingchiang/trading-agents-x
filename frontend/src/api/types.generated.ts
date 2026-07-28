@@ -54,7 +54,7 @@ export interface components {
       rerun_recommended?: boolean;
       sentinel_fields?: string[];
     };
-    ArtifactGenerationMethod: "tool_call" | "raw_json_recovered" | "json_mode_recovered" | "legacy_unknown";
+    ArtifactGenerationMethod: "tool_call" | "json_mode" | "raw_json_recovered" | "json_mode_recovered" | "legacy_unknown";
     AssetType: "stock" | "crypto";
     CapabilitiesResponse: {
       analysts: string[];

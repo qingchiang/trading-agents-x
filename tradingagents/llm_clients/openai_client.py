@@ -34,6 +34,11 @@ class NormalizedChatOpenAI(ChatOpenAI):
     def invoke(self, input, config=None, **kwargs):
         return normalize_content(super().invoke(input, config, **kwargs))
 
+    @property
+    def preferred_structured_output_method(self) -> str:
+        """Expose the selected transport for application-level auditing."""
+        return get_capabilities(self.model_name).preferred_structured_method
+
     def with_structured_output(self, schema, *, method=None, **kwargs):
         caps = get_capabilities(self.model_name)
         if caps.preferred_structured_method == "none":
@@ -102,9 +107,9 @@ class DeepSeekChatOpenAI(NormalizedChatOpenAI):
     ``_create_chat_result`` captures it on receive and
     ``_get_request_payload`` re-attaches it on send.
 
-    Tool-choice handling is delegated to the capability dispatch in
-    ``NormalizedChatOpenAI.with_structured_output``. V4 forces the schema tool;
-    the legacy reasoner endpoint continues to suppress ``tool_choice``.
+    Structured-output handling is delegated to the capability dispatch in
+    ``NormalizedChatOpenAI.with_structured_output``. V4 thinking models prefer
+    JSON mode; the legacy reasoner endpoint continues to bind an unforced tool.
     """
 
     def _get_request_payload(self, input_, *, stop=None, **kwargs):
