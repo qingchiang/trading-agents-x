@@ -176,7 +176,7 @@
           "warnings": {
             "default": [],
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/ResearchWarning"
             },
             "title": "Warnings",
             "type": "array"
@@ -262,7 +262,7 @@
           "warnings": {
             "default": [],
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/ResearchWarning"
             },
             "title": "Warnings",
             "type": "array"
@@ -773,6 +773,53 @@
         ],
         "title": "ResearchRating",
         "type": "string"
+      },
+      "ResearchWarning": {
+        "additionalProperties": false,
+        "description": "Structured, plain-text warning suitable for APIs and audit exports.",
+        "properties": {
+          "code": {
+            "default": "legacy.warning",
+            "pattern": "^[a-z0-9_.-]+$",
+            "title": "Code",
+            "type": "string"
+          },
+          "evidence_ref": {
+            "anyOf": [
+              {
+                "pattern": "^ev_[a-f0-9]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Ref"
+          },
+          "message": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "ResearchWarning",
+        "type": "object"
       },
       "RunDetail": {
         "additionalProperties": false,

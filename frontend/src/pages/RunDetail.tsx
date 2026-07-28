@@ -275,7 +275,15 @@ function ReportMetadata({
 }) {
   if (!report || typeof report !== "object") return null;
   const typed = report as {
-    warnings?: string[];
+    warnings?: Array<
+      | string
+      | {
+          code: string;
+          message: string;
+          evidence_ref?: string | null;
+          source?: string | null;
+        }
+    >;
     evidence_refs?: string[];
   };
   const warnings = typed.warnings ?? [];
@@ -287,9 +295,20 @@ function ReportMetadata({
         <div>
           <strong>{warningsLabel}</strong>
           <ul>
-            {warnings.map((warning) => (
-              <li key={warning}>{warning}</li>
-            ))}
+            {warnings.map((warning) => {
+              const message =
+                typeof warning === "string" ? warning : warning.message;
+              const key =
+                typeof warning === "string"
+                  ? warning
+                  : [
+                      warning.code,
+                      warning.evidence_ref,
+                      warning.source,
+                      warning.message,
+                    ].join(":");
+              return <li key={key}>{message}</li>;
+            })}
           </ul>
         </div>
       )}

@@ -8,6 +8,7 @@ import pytest
 
 from tradingagents.application.contracts import (
     AnalysisRequest,
+    EvidenceItem,
     EvidenceQuality,
     PerspectiveReview,
     ResearchDecision,
@@ -18,6 +19,7 @@ from tradingagents.application.metrics import MetricsCallback
 from tradingagents.application.runtime import RunContext
 from tradingagents.graph.research_graph import (
     ResearchGraph,
+    _adapt_analyst_report,
     _evidence_from_record,
 )
 from tradingagents.provenance import ProvenanceRecord
@@ -232,3 +234,38 @@ def test_future_dated_provenance_is_withheld_before_bundle_sealing() -> None:
     assert item.content is None
     assert item.quality is EvidenceQuality.UNAVAILABLE
     assert "future-dated evidence withheld" in item.provenance["timing"]
+
+
+def test_analyst_warning_appendix_is_structured_deduplicated_and_removed() -> None:
+    item = EvidenceItem.create(
+        source="fixture",
+        evidence_type="historical price",
+        requested_date=date(2026, 7, 24),
+        effective_date=date(2026, 7, 24),
+        content="Fixture data.",
+        quality=EvidenceQuality.LOW,
+    )
+    narrative = """Evidence-grounded report.
+
+---
+
+## Data Quality Warnings
+
+- **historical price** (source: fixture): **partial coverage**
+
+## Data Provenance
+
+| Evidence | Source | Requested / cutoff | Effective date / window | Timing status |
+|---|---|---|---|---|
+| historical price | fixture | 2026-07-24 | 2026-07-24 | partial |
+"""
+
+    report = _adapt_analyst_report("market", narrative, [item])
+
+    assert "Data Quality Warnings" not in report.narrative
+    assert "Data Provenance" in report.narrative
+    assert len(report.warnings) == 1
+    assert report.warnings[0].message == (
+        "historical price (fixture): partial coverage"
+    )
+    assert report.warnings[0].evidence_ref == item.ref

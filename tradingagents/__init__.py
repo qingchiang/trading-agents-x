@@ -6,6 +6,7 @@ from .application.contracts import (
     AnalysisResult,
     ReportLanguage,
     ResearchDecision,
+    ResearchWarning,
     RunProfile,
 )
 from .client import TradingAgents
@@ -16,6 +17,7 @@ __all__ = [
     "AnalysisResult",
     "ReportLanguage",
     "ResearchDecision",
+    "ResearchWarning",
     "RunProfile",
     "TradingAgents",
     "__version__",

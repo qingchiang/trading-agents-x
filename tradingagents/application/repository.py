@@ -611,6 +611,14 @@ class RunRepository:
             if decision_record
             else None
         )
+        warnings = tuple(
+            dict.fromkeys(
+                warning
+                for report in reports.values()
+                if isinstance(report, AnalystReport)
+                for warning in report.warnings
+            )
+        )
         return AnalysisResult(
             run_id=run_id,
             status=view.status,
@@ -618,7 +626,7 @@ class RunRepository:
             reports=reports,
             decision=decision,
             metrics=view.metrics,
-            warnings=(),
+            warnings=warnings,
         )
 
     def pending_outcomes(self, limit: int = 20) -> list[dict[str, Any]]:

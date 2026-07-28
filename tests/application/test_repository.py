@@ -180,6 +180,7 @@ def test_complete_persists_result_and_resolved_memory(
         ),
         confidence=0.7,
         evidence_refs=(evidence_item.ref,),
+        warnings=("**Historical price** was `partial`.",),
         narrative="Market report.",
     )
     decision = ResearchDecision(
@@ -215,6 +216,7 @@ def test_complete_persists_result_and_resolved_memory(
     assert restored.status is RunStatus.SUCCEEDED
     assert restored.decision == decision
     assert isinstance(restored.reports["market"], AnalystReport)
+    assert restored.warnings[0].message == "Historical price was partial."
     context = repository.memory_context("NVDA", "stock")
     assert "The thesis worked" in context
     assert "NVDA" in context

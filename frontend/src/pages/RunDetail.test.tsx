@@ -86,7 +86,14 @@ const detail = {
         claims: [],
         confidence: 0.7,
         evidence_refs: ["ev_0123456789ab"],
-        warnings: ["Historical source was partial."],
+        warnings: [
+          {
+            code: "evidence.degraded",
+            message: "Historical source was partial.",
+            evidence_ref: "ev_0123456789ab",
+            source: "fixture",
+          },
+        ],
         narrative: "# Market report\n\nEvidence-grounded narrative.",
       },
     },

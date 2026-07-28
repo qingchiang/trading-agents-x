@@ -26,7 +26,7 @@ export interface components {
       reports: Record<string, components["schemas"]["AnalystReport"] | string>;
       run_id: string;
       status: components["schemas"]["RunStatus"];
-      warnings?: string[];
+      warnings?: components["schemas"]["ResearchWarning"][];
     };
     AnalystClaim: {
       evidence_refs?: string[];
@@ -39,7 +39,7 @@ export interface components {
       evidence_refs?: string[];
       narrative: string;
       summary: string;
-      warnings?: string[];
+      warnings?: components["schemas"]["ResearchWarning"][];
     };
     AssetType: "stock" | "crypto";
     CapabilitiesResponse: {
@@ -118,6 +118,12 @@ export interface components {
       time_horizon: string;
     };
     ResearchRating: "Buy" | "Overweight" | "Hold" | "Underweight" | "Sell";
+    ResearchWarning: {
+      code?: string;
+      evidence_ref?: string | null;
+      message: string;
+      source?: string | null;
+    };
     RunDetail: {
       result?: components["schemas"]["AnalysisResult"] | null;
       run: components["schemas"]["RunView"];

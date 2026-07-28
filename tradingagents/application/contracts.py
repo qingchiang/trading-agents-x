@@ -234,6 +234,42 @@ class AnalystClaim(FrozenModel):
     evidence_refs: tuple[str, ...] = ()
 
 
+class ResearchWarning(FrozenModel):
+    """Structured, plain-text warning suitable for APIs and audit exports."""
+
+    code: str = Field(default="legacy.warning", pattern=r"^[a-z0-9_.-]+$")
+    message: str = Field(min_length=1, max_length=2000)
+    evidence_ref: str | None = Field(
+        default=None,
+        pattern=r"^ev_[a-f0-9]{12}$",
+    )
+    source: str | None = Field(default=None, max_length=200)
+
+    @field_validator("message", mode="before")
+    @classmethod
+    def normalize_message(cls, value: Any) -> str:
+        text = str(value)
+        text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+        text = re.sub(r"(\*\*|__|`)", "", text)
+        return " ".join(text.split()).strip()
+
+
+def _coerce_warnings(value: Any) -> tuple[ResearchWarning, ...]:
+    if value is None:
+        return ()
+    items = (value,) if isinstance(value, (str, dict, ResearchWarning)) else value
+    warnings = []
+    for item in items:
+        if isinstance(item, ResearchWarning):
+            warning = item
+        elif isinstance(item, str):
+            warning = ResearchWarning(message=item)
+        else:
+            warning = ResearchWarning.model_validate(item)
+        warnings.append(warning)
+    return tuple(dict.fromkeys(warnings))
+
+
 class AnalystReport(FrozenModel):
     """Typed analyst hand-off; narrative remains available for human readers."""
 
@@ -242,8 +278,13 @@ class AnalystReport(FrozenModel):
     claims: tuple[AnalystClaim, ...] = ()
     confidence: float = Field(ge=0.0, le=1.0)
     evidence_refs: tuple[str, ...] = ()
-    warnings: tuple[str, ...] = ()
+    warnings: tuple[ResearchWarning, ...] = ()
     narrative: str
+
+    @field_validator("warnings", mode="before")
+    @classmethod
+    def coerce_warnings(cls, value: Any) -> tuple[ResearchWarning, ...]:
+        return _coerce_warnings(value)
 
 
 class PerspectiveReview(FrozenModel):
@@ -362,7 +403,12 @@ class AnalysisResult(FrozenModel):
     reports: dict[str, AnalystReport | str]
     decision: ResearchDecision | None
     metrics: RunMetrics = Field(default_factory=RunMetrics)
-    warnings: tuple[str, ...] = ()
+    warnings: tuple[ResearchWarning, ...] = ()
+
+    @field_validator("warnings", mode="before")
+    @classmethod
+    def coerce_warnings(cls, value: Any) -> tuple[ResearchWarning, ...]:
+        return _coerce_warnings(value)
 
 
 class RunView(FrozenModel):

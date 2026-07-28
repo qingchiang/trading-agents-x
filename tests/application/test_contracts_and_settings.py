@@ -7,11 +7,13 @@ from pydantic import ValidationError
 
 from tradingagents.application.contracts import (
     AnalysisRequest,
+    AnalystReport,
     EvidenceBundle,
     EvidenceItem,
     ReportLanguage,
     ResearchDecision,
     ResearchRating,
+    ResearchWarning,
     RunProfile,
 )
 from tradingagents.application.settings import AppSettings
@@ -43,6 +45,23 @@ def test_research_decision_rejects_account_level_fields() -> None:
 
     with pytest.raises(ValidationError, match="position_size"):
         ResearchDecision.model_validate(payload)
+
+
+def test_legacy_warning_strings_become_plain_structured_records() -> None:
+    report = AnalystReport(
+        analyst="market",
+        summary="Summary",
+        confidence=0.5,
+        warnings=("**Historical source** was `partial`.",),
+        narrative="Narrative",
+    )
+
+    assert report.warnings == (
+        ResearchWarning(
+            code="legacy.warning",
+            message="Historical source was partial.",
+        ),
+    )
 
 
 def test_evidence_bundle_rejects_future_information() -> None:

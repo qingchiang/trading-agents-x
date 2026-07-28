@@ -57,6 +57,7 @@ from tradingagents.application.contracts import (
     PerspectiveReview,
     ResearchDecision,
     ResearchRating,
+    ResearchWarning,
     RunProfile,
 )
 from tradingagents.application.metrics import MetricsCallback
@@ -74,6 +75,10 @@ _CONTROL_COMMENT_RE = re.compile(
 )
 _WARNING_HEADING = "## Data Quality Warnings"
 _PROVENANCE_HEADING = "## Data Provenance"
+_WARNING_ITEM_RE = re.compile(
+    r"^\s*-\s+\*\*(?P<evidence>.+?)\*\*\s+"
+    r"\(source:\s*(?P<source>.+?)\):\s*(?P<reason>.+?)\s*$"
+)
 
 
 def _merge_dicts(
@@ -99,7 +104,7 @@ class ResearchState(TypedDict, total=False):
     final_decision: dict[str, Any]
     rebuttal_round: int
     debate_continue: bool
-    warnings: Annotated[list[str], operator.add]
+    warnings: Annotated[list[dict[str, Any]], operator.add]
 
 
 @dataclass(frozen=True)
@@ -449,7 +454,10 @@ class ResearchGraph:
                 "evidence_items": [
                     item.model_dump(mode="json") for item in evidence
                 ],
-                "warnings": list(typed.warnings),
+                "warnings": [
+                    warning.model_dump(mode="json")
+                    for warning in typed.warnings
+                ],
             }
 
         return analyst_node
@@ -896,21 +904,64 @@ def _adapt_analyst_report(
     evidence: list[EvidenceItem],
 ) -> AnalystReport:
     refs = tuple(item.ref for item in evidence)
-    warnings = []
-    if _WARNING_HEADING in narrative:
-        warning_section = narrative.split(_WARNING_HEADING, 1)[1]
-        if _PROVENANCE_HEADING in warning_section:
-            warning_section = warning_section.split(_PROVENANCE_HEADING, 1)[0]
-        warnings.extend(
-            line.removeprefix("- ").strip()
-            for line in warning_section.splitlines()
-            if line.strip().startswith("- ")
+    narrative, warning_lines = _separate_warning_section(narrative)
+    warnings: list[ResearchWarning] = []
+    for line in warning_lines:
+        match = _WARNING_ITEM_RE.match(line)
+        evidence_name = match.group("evidence") if match else ""
+        source = match.group("source") if match else None
+        reason = match.group("reason") if match else line.removeprefix("- ").strip()
+        item = next(
+            (
+                candidate
+                for candidate in evidence
+                if candidate.evidence_type.casefold() == evidence_name.casefold()
+                and (
+                    source is None
+                    or candidate.source.casefold() == source.casefold()
+                )
+            ),
+            None,
         )
-    warnings.extend(
-        f"{item.evidence_type}: {item.quality.value}"
-        for item in evidence
-        if item.quality in {EvidenceQuality.LOW, EvidenceQuality.UNAVAILABLE}
-    )
+        warnings.append(
+            ResearchWarning(
+                code="evidence.degraded",
+                message=(
+                    f"{evidence_name} ({source}): {reason}"
+                    if evidence_name and source
+                    else reason
+                ),
+                evidence_ref=item.ref if item else None,
+                source=source,
+            )
+        )
+    for item in evidence:
+        if item.quality not in {
+            EvidenceQuality.LOW,
+            EvidenceQuality.UNAVAILABLE,
+        }:
+            continue
+        already_described = any(
+            warning.evidence_ref == item.ref
+            or (
+                warning.source
+                and warning.source.casefold() == item.source.casefold()
+                and item.evidence_type.casefold() in warning.message.casefold()
+            )
+            for warning in warnings
+        )
+        if not already_described:
+            warnings.append(
+                ResearchWarning(
+                    code=f"evidence.{item.quality.value}",
+                    message=(
+                        f"{item.evidence_type} from {item.source} has "
+                        f"{item.quality.value} evidence quality."
+                    ),
+                    evidence_ref=item.ref,
+                    source=item.source,
+                )
+            )
     paragraphs = [
         paragraph.strip()
         for paragraph in re.split(r"\n\s*\n", narrative)
@@ -943,6 +994,31 @@ def _adapt_analyst_report(
         warnings=tuple(dict.fromkeys(warnings)),
         narrative=narrative,
     )
+
+
+def _separate_warning_section(value: str) -> tuple[str, list[str]]:
+    """Remove the generated warning appendix while retaining provenance."""
+    if _WARNING_HEADING not in value:
+        return value, []
+    before, section = value.split(_WARNING_HEADING, 1)
+    warning_section = section
+    provenance = ""
+    if _PROVENANCE_HEADING in section:
+        warning_section, provenance_body = section.split(
+            _PROVENANCE_HEADING,
+            1,
+        )
+        provenance = f"{_PROVENANCE_HEADING}{provenance_body}".strip()
+    clean_before = before.rstrip()
+    if clean_before.endswith("---"):
+        clean_before = clean_before[:-3].rstrip()
+    clean_parts = [part for part in (clean_before, provenance) if part]
+    warnings = [
+        line.strip()
+        for line in warning_section.splitlines()
+        if line.strip().startswith("- ")
+    ]
+    return "\n\n".join(clean_parts).strip(), warnings
 
 
 def _research_prompt(
