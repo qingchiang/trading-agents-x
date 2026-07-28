@@ -3,11 +3,13 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
 } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import {
   api,
+  type Capabilities,
   type ResearchArtifact,
   type RunDetail as RunDetailType,
   type RunEvent,
@@ -21,6 +23,8 @@ vi.mock("../api/client", () => ({
     run: vi.fn(),
     artifacts: vi.fn(),
     action: vi.fn(),
+    capabilities: vi.fn(),
+    restoreRuns: vi.fn(),
   },
 }));
 
@@ -80,6 +84,8 @@ const detail = {
   run: {
     id: "run-1",
     source_run_id: null,
+    instrument_name: "NVIDIA Corporation",
+    archived_at: null,
     status: "succeeded",
     request: {
       ticker: "NVDA",
@@ -269,6 +275,9 @@ beforeEach(async () => {
   await i18n.changeLanguage("en");
   vi.mocked(api.run).mockResolvedValue(detail);
   vi.mocked(api.artifacts).mockResolvedValue(artifacts);
+  vi.mocked(api.capabilities).mockResolvedValue({
+    defaults: { archive_retention_days: 30 },
+  } as Capabilities);
   vi.stubGlobal("EventSource", FakeEventSource);
 });
 
@@ -437,6 +446,40 @@ test("opens an editable new-run template instead of rerunning immediately", asyn
     "/runs/new?from_run=run-1",
   );
   expect(api.action).not.toHaveBeenCalled();
+});
+
+test("shows archived retention details and restores without deleting data", async () => {
+  vi.mocked(api.run)
+    .mockResolvedValueOnce({
+      ...detail,
+      run: {
+        ...detail.run,
+        archived_at: "2026-07-01T00:00:00Z",
+      },
+    } as RunDetailType)
+    .mockResolvedValue({
+      ...detail,
+      run: { ...detail.run, archived_at: null },
+    } as RunDetailType);
+  vi.mocked(api.restoreRuns).mockResolvedValue({
+    runs: [],
+    changed: 1,
+  });
+
+  render(
+    <Router initialPath="/runs/run-1">
+      <RunDetail />
+    </Router>,
+  );
+
+  expect(await screen.findByText("NVIDIA Corporation")).toBeVisible();
+  expect(screen.getByText("Archived run")).toBeVisible();
+  expect(screen.getByText(/Scheduled permanent cleanup/)).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+  await waitFor(() =>
+    expect(api.restoreRuns).toHaveBeenCalledWith(["run-1"]),
+  );
 });
 
 test("persists the collapsed audit-details display preference", async () => {

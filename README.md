@@ -36,14 +36,19 @@ or portfolio rebalancing.
 
 ## Product surface
 
-- **Dashboard:** queued and recent runs, statuses, and pending outcomes.
+- **Dashboard:** queued and recent runs with ticker display names, statuses,
+  and pending outcomes.
 - **New Run:** instrument, point-in-time date, analysts, profile,
-  provider/models, reasoning effort, and report language.
+  provider/models, reasoning effort, report language, and recent-instrument
+  suggestions.
+- **Runs:** active/archived filters, search, pagination, and recoverable batch
+  archive management.
 - **Run Detail:** persistent event timeline, analyst reports, structured
   decision, collapsible audit details, token/tool metrics, cancellation,
-  retry, editable run templates, and export.
+  retry, restore, editable run templates, and export.
 - **Memory:** search complete decisions, outcomes, and reflections, expand
-  catalysts/risks/invalidation, and reopen the originating run.
+  catalysts/risks/invalidation, see instrument names, and reopen the
+  originating run.
 - **Settings:** read-only capabilities, safe defaults, and whether provider
   credentials are configured.
 - **Locales:** `en`, `zh-CN`, and `ja`; UI locale and report output language
@@ -166,6 +171,14 @@ graph-node boundaries and does not force-kill an in-flight provider request.
 Successful and cancelled runs delete their checkpoints; failed runs retain
 them for retry or later archive cleanup.
 
+Terminal runs can be archived and restored from the Runs page. Archived data is
+immediately excluded from the Dashboard, Memory, outcome settlement, and
+recent-instrument suggestions. The Web process checks for expired archives at
+startup; the worker checks before claiming work and then every 24 hours,
+retrying failed maintenance after one hour. The default 30-day retention can
+be changed with `TRADINGAGENTS_ARCHIVE_RETENTION_DAYS`; `0` disables permanent
+cleanup.
+
 See [architecture.md](docs/architecture.md) for subsystem and data-integrity
 contracts.
 
@@ -230,6 +243,8 @@ GET  /api/v1/runs/{id}
 GET  /api/v1/runs/{id}/events
 POST /api/v1/runs/{id}/cancel
 POST /api/v1/runs/{id}/retry
+POST /api/v1/runs/archive
+POST /api/v1/runs/restore
 GET  /api/v1/runs/{id}/export
 GET  /api/v1/instruments/recent
 GET  /api/v1/memory

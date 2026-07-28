@@ -1,6 +1,12 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, type MemoryEntry } from "../api/client";
+import {
+  InstrumentIdentity,
+  RecentInstrumentDatalist,
+  recentInstrumentListId,
+  useRecentInstruments,
+} from "../components/Instruments";
 import Markdown from "../components/Markdown";
 import StatusBadge from "../components/StatusBadge";
 import { Link } from "../router";
@@ -20,6 +26,7 @@ export default function Memory() {
     () => initialParams.get("status") ?? "",
   );
   const [error, setError] = useState("");
+  const recentInstruments = useRecentInstruments();
 
   const load = async (query = "") => {
     try {
@@ -71,6 +78,9 @@ export default function Memory() {
         <label>
           {t("memorySearch")}
           <input
+            id="memory-search"
+            name="q"
+            autoComplete="on"
             value={q}
             onChange={(event) => setQ(event.target.value)}
             placeholder={t("memorySearchPlaceholder")}
@@ -78,11 +88,23 @@ export default function Memory() {
         </label>
         <label>
           {t("ticker")}
-          <input value={ticker} onChange={(event) => setTicker(event.target.value)} />
+          <input
+            id="memory-ticker"
+            name="ticker"
+            autoComplete="on"
+            list={recentInstrumentListId}
+            spellCheck={false}
+            value={ticker}
+            onChange={(event) => setTicker(event.target.value)}
+          />
+          <RecentInstrumentDatalist instruments={recentInstruments} />
         </label>
         <label>
           {t("market")}
           <input
+            id="memory-market"
+            name="market"
+            autoComplete="on"
             value={market}
             onChange={(event) => setMarket(event.target.value)}
             placeholder="Asia/Tokyo"
@@ -90,7 +112,12 @@ export default function Memory() {
         </label>
         <label>
           {t("status")}
-          <select value={status} onChange={(event) => setStatus(event.target.value)}>
+          <select
+            id="memory-status"
+            name="status"
+            value={status}
+            onChange={(event) => setStatus(event.target.value)}
+          >
             <option value="">{t("all")}</option>
             <option value="pending">{t("statusPending")}</option>
             <option value="resolved">{t("statusResolved")}</option>
@@ -114,7 +141,10 @@ export default function Memory() {
                   to={runDecisionPath(entry.run_id)}
                   aria-label={`${t("openResearchDecision")} ${entry.ticker}`}
                 >
-                  <strong className="ticker">{entry.ticker}</strong>
+                  <InstrumentIdentity
+                    ticker={entry.ticker}
+                    instrumentName={entry.instrument_name}
+                  />
                 </Link>
                 <span>{entry.analysis_date} · {entry.market || "—"}</span>
               </div>

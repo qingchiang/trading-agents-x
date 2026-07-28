@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, type Health, type RunView } from "../api/client";
+import { InstrumentIdentity } from "../components/Instruments";
 import StatusBadge from "../components/StatusBadge";
 import { Link } from "../router";
 
@@ -84,9 +85,14 @@ export default function Dashboard() {
             <p className="eyebrow">{t("runHistory")}</p>
             <h2>{t("recentRuns")}</h2>
           </div>
-          <Link className="button primary" to="/runs/new">
-            + {t("newRun")}
-          </Link>
+          <div className="action-row">
+            <Link className="button" to="/runs">
+              {t("manageRuns")}
+            </Link>
+            <Link className="button primary" to="/runs/new">
+              + {t("newRun")}
+            </Link>
+          </div>
         </div>
         {runs.length === 0 ? (
           <div className="empty-state">{t("noRuns")}</div>
@@ -107,7 +113,10 @@ export default function Dashboard() {
                 {runs.map((run) => (
                   <tr key={run.id}>
                     <td>
-                      <strong className="ticker">{run.request.ticker}</strong>
+                      <InstrumentIdentity
+                        ticker={run.request.ticker}
+                        instrumentName={run.instrument_name}
+                      />
                     </td>
                     <td className="capitalize">{run.request.profile}</td>
                     <td>{run.request.analysis_date}</td>

@@ -15,9 +15,10 @@ version numbers.
 ### Added
 
 - **Local Web research run center.** Added a React/TypeScript application with
-  Dashboard, New Run, Run Detail, Memory, and Settings views; persistent SSE
-  timelines; sanitized Markdown; and independent English, Simplified Chinese,
-  and Japanese UI locales.
+  Dashboard, New Run, Runs, Run Detail, Memory, and Settings views; persistent
+  SSE timelines; recoverable archive management; recent-instrument
+  suggestions and display names; sanitized Markdown; and independent English,
+  Simplified Chinese, and Japanese UI locales.
 - **Durable application platform.** Added immutable app/run context, a central
   `AnalysisService`, SQLite/Alembic repositories for runs, attempts, events,
   reports, typed decisions, outcomes, reflections, and legacy-import audit

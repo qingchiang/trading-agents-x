@@ -9,12 +9,14 @@ import Memory from "./Memory";
 vi.mock("../api/client", () => ({
   api: {
     memory: vi.fn(),
+    recentInstruments: vi.fn(),
   },
 }));
 
 const entry = {
   run_id: "legacy-run",
   ticker: "7203.T",
+  instrument_name: "Toyota Motor Corporation",
   market: "Asia/Tokyo",
   asset_type: "stock",
   analysis_date: "2026-07-24",
@@ -45,6 +47,7 @@ beforeEach(async () => {
   window.history.replaceState(null, "", "/memory");
   await i18n.changeLanguage("en");
   vi.mocked(api.memory).mockResolvedValue([entry]);
+  vi.mocked(api.recentInstruments).mockResolvedValue([]);
 });
 
 function renderMemory() {
@@ -65,6 +68,31 @@ test("renders imported thesis and reflection as sanitized Markdown", async () =>
   expect(screen.getByText("Preserve the lesson.")).toBeInTheDocument();
   expect(container.querySelector("script")).toBeNull();
   expect(container.textContent).not.toContain("<script>");
+  expect(screen.getByText("Toyota Motor Corporation")).toBeVisible();
+});
+
+test("uses recent ticker suggestions and stable autocomplete fields", async () => {
+  vi.mocked(api.recentInstruments).mockResolvedValue([
+    {
+      ticker: "7203.T",
+      instrument_name: "Toyota Motor Corporation",
+      last_used_at: "2026-07-28T00:00:00Z",
+    },
+  ]);
+  renderMemory();
+
+  const ticker = screen.getByLabelText("Ticker");
+  expect(ticker).toHaveAttribute("id", "memory-ticker");
+  expect(ticker).toHaveAttribute("name", "ticker");
+  expect(ticker).toHaveAttribute("autocomplete", "on");
+  expect(ticker).toHaveAttribute("list", "recent-instruments");
+  await waitFor(() =>
+    expect(
+      document.querySelector(
+        'datalist#recent-instruments option[value="7203.T"]',
+      ),
+    ).toHaveAttribute("label", "Toyota Motor Corporation"),
+  );
 });
 
 test("submits fuzzy and full-field filters without rewriting ticker case", async () => {

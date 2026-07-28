@@ -10,15 +10,28 @@ beforeEach(async () => {
   await i18n.changeLanguage("en");
 });
 
-function renderLayout() {
+function renderLayout(initialPath = "/") {
   return render(
-    <Router initialPath="/">
+    <Router initialPath={initialPath}>
       <Layout>
         <div>content</div>
       </Layout>
     </Router>,
   );
 }
+
+test("distinguishes new-run and run-management navigation", () => {
+  const newRun = renderLayout("/runs/new");
+  expect(screen.getByRole("link", { name: "New run" })).toHaveClass("active");
+  expect(screen.getByRole("link", { name: "Runs" })).not.toHaveClass("active");
+  newRun.unmount();
+
+  renderLayout("/runs/run-1");
+  expect(screen.getByRole("link", { name: "Runs" })).toHaveClass("active");
+  expect(screen.getByRole("link", { name: "New run" })).not.toHaveClass(
+    "active",
+  );
+});
 
 test("shows the concise Simplified Chinese locale label", () => {
   renderLayout();

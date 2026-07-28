@@ -21,6 +21,7 @@ export type DiscoveredModel = components["schemas"]["DiscoveredModelView"];
 export type Health = components["schemas"]["HealthResponse"];
 export type MemoryEntry = components["schemas"]["MemoryEntry"];
 export type RunMetrics = components["schemas"]["RunMetrics"];
+export type RecentInstrument = components["schemas"]["RecentInstrument"];
 
 export class ApiError extends Error {
   constructor(
@@ -77,6 +78,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ run_ids: runIds }),
     }),
+  recentInstruments: (limit = 50) =>
+    request<RecentInstrument[]>(
+      `/api/v1/instruments/recent?limit=${encodeURIComponent(limit)}`,
+    ),
   run: (id: string) => request<RunDetail>(`/api/v1/runs/${id}`),
   artifacts: (id: string, attempt?: number) =>
     request<ResearchArtifact[]>(

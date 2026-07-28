@@ -25,14 +25,16 @@ invalidation conditions、time horizon が含まれます。ポジション比�
 
 ## Web 実行センター
 
-- **Dashboard:** キュー、最近の run、状態、未確定 outcome。
+- **Dashboard:** キュー、銘柄名付きの最近の run、状態、未確定 outcome。
 - **New Run:** ticker、PIT 日付、analysts、Fast/Standard/Deep、
-  provider/model、reasoning、レポート言語。
+  provider/model、reasoning、レポート言語、最近使った銘柄候補。
+- **Runs:** 現在/アーカイブの切替、検索、フィルター、ページング、
+  復元可能な一括アーカイブ管理。
 - **Run Detail:** 永続イベントタイムライン、レポート、構造化 decision、
   折りたたみ可能な監査詳細、token/tool/wall-time 指標、cancel/retry、
-  現在の run をもとにした新規作成、export。
+  アーカイブ復元、現在の run をもとにした新規作成、export。
 - **Memory:** 完全な decision、outcome、reflection を検索し、catalyst、
-  risk、invalidation を展開して元の run の判断へ戻る。
+  risk、invalidation と銘柄名を表示して元の run の判断へ戻る。
 - **Settings:** provider/model capability、安全なデフォルト値、API key の
   設定有無を読み取り専用で表示。
 
@@ -134,6 +136,12 @@ worker は database lease で run を原子的に claim します。lease が期
 - cancel は node 境界で協調的に処理し、実行中の provider request は強制終了
   しない。
 - success/cancel 後は checkpoint を削除し、failure 時は次の判断まで保持。
+
+終端状態の run は Runs ページからアーカイブ・復元できます。アーカイブ後は
+Dashboard、Memory、outcome 評価、最近の銘柄候補から直ちに除外されます。
+Web 起動時に一度、worker は work claim 前と成功後 24 時間ごとに期限切れを
+確認し、失敗時は 1 時間後に再試行します。既定の保持期間は 30 日で、
+`TRADINGAGENTS_ARCHIVE_RETENTION_DAYS=0` にすると完全削除を無効化します。
 
 event はクライアント送信前に database へ commit されます。SSE は
 `Last-Event-ID` から欠落イベントを replay するため、ページ更新でも進捗を

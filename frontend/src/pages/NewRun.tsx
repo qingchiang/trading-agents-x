@@ -8,6 +8,11 @@ import {
   type ProviderModelCatalog,
   type RunCreateRequest,
 } from "../api/client";
+import {
+  RecentInstrumentDatalist,
+  recentInstrumentListId,
+  useRecentInstruments,
+} from "../components/Instruments";
 import { Link, useLocation, useNavigate } from "../router";
 
 const analystKeys = ["market", "social", "news", "fundamentals"] as const;
@@ -44,6 +49,7 @@ export default function NewRun() {
   const [templateWarning, setTemplateWarning] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const recentInstruments = useRecentInstruments();
   const submission = useRef<{ fingerprint: string; key: string } | null>(null);
 
   useEffect(() => {
@@ -353,19 +359,28 @@ export default function NewRun() {
               <label>
                 {t("ticker")}
                 <input
+                  id="new-run-ticker"
+                  name="ticker"
                   required
                   autoFocus
+                  autoComplete="on"
+                  list={recentInstrumentListId}
+                  spellCheck={false}
                   value={ticker}
                   onChange={(event) => setTicker(event.target.value)}
                   placeholder="7203.T"
                 />
+                <RecentInstrumentDatalist instruments={recentInstruments} />
                 <small>{t("tickerHint")}</small>
               </label>
               <label>
                 {t("analysisDate")}
                 <input
+                  id="new-run-analysis-date"
+                  name="analysis_date"
                   required
                   type="date"
+                  autoComplete="off"
                   value={analysisDate}
                   onChange={(event) => setAnalysisDate(event.target.value)}
                 />

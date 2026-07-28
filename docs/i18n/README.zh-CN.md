@@ -21,14 +21,15 @@ TradingAgentsX 是一个面向本地单用户的投资研究运行中心。它�
 
 ## Web 运行中心
 
-- **Dashboard：** 队列、最近运行、状态和待结算 outcome。
+- **Dashboard：** 队列、带标的简称的最近运行、状态和待结算 outcome。
 - **New Run：** 标的、PIT 日期、analysts、Fast/Standard/Deep、
-  provider/model、reasoning 与报告语言。
+  provider/model、reasoning、报告语言和近期标的建议。
+- **Runs：** 当前/归档切换、筛选、搜索、分页，以及可恢复的批量归档管理。
 - **Run Detail：** 可恢复的事件时间线、报告 tabs、结构化决策、warning、
   可折叠审计详情、token/tool/wall-time 指标，以及取消、retry、
-  基于当前运行新建和导出。
+  恢复归档、基于当前运行新建和导出。
 - **Memory：** 检索完整 decision、outcome 与 reflection，展开催化因素、
-  风险和失效条件，并返回对应运行的研究结论。
+  风险和失效条件，同时显示标的简称并返回对应运行的研究结论。
 - **Settings：** 只读能力列表、非敏感默认值和 API key 是否已配置。
 
 UI 支持 `zh-CN`、`en`、`ja`。界面语言与报告输出语言相互独立。
@@ -124,6 +125,12 @@ checkpoint 恢复：
   并重新获取证据；
 - cancel 在 graph node 边界协作完成，不会强杀正在执行的 provider 请求；
 - 成功或取消后删除 checkpoint，失败时保留到后续处理。
+
+终态运行可在 Runs 页面归档和恢复。归档后会立即退出 Dashboard、Memory、
+outcome 结算和近期标的建议。Web 启动时检查一次到期归档；worker 在领取任务前
+检查，并在成功后每 24 小时再次执行，失败则 1 小时后重试。默认 30 天后永久
+清理，可通过 `TRADINGAGENTS_ARCHIVE_RETENTION_DAYS` 修改；设为 `0` 时关闭
+永久清理。
 
 事件先写入数据库，再发送给客户端。SSE 使用 `Last-Event-ID` 回放刷新或断线
 期间遗漏的事件，因此浏览器刷新不会丢失进度。

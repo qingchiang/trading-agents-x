@@ -5,6 +5,7 @@ import Dashboard from "./pages/Dashboard";
 import Memory from "./pages/Memory";
 import NewRun from "./pages/NewRun";
 import RunDetail from "./pages/RunDetail";
+import Runs from "./pages/Runs";
 import Settings from "./pages/Settings";
 import { usePathname } from "./router";
 
@@ -21,6 +22,8 @@ export default function App() {
   const page =
     pathname === "/runs/new" ? (
       <NewRun />
+    ) : pathname === "/runs" ? (
+      <Runs />
     ) : /^\/runs\/[^/]+\/?$/.test(pathname) ? (
       <RunDetail />
     ) : pathname === "/memory" ? (

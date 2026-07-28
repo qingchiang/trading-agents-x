@@ -1,18 +1,20 @@
 import { PropsWithChildren, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import i18n from "../i18n";
-import { NavLink } from "../router";
+import { Link, usePathname } from "../router";
 
 const sidebarPreferenceKey = "tradingagents-sidebar-collapsed";
 const nav = [
   { to: "/", key: "dashboard", icon: "⌁" },
   { to: "/runs/new", key: "newRun", icon: "+" },
+  { to: "/runs", key: "runManagement", icon: "≡" },
   { to: "/memory", key: "memory", icon: "◫" },
   { to: "/settings", key: "settings", icon: "◇" },
 ];
 
 export default function Layout({ children }: PropsWithChildren) {
   const { t } = useTranslation();
+  const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem(sidebarPreferenceKey) === "true",
   );
@@ -74,11 +76,10 @@ export default function Layout({ children }: PropsWithChildren) {
         </div>
         <nav aria-label={t("primaryNavigation")}>
           {nav.map((item) => (
-            <NavLink
+            <Link
               key={item.to}
               to={item.to}
-              end={item.to === "/"}
-              className={({ isActive }) => (isActive ? "active" : "")}
+              className={isNavActive(pathname, item.to) ? "active" : ""}
               onClick={() => setDrawerOpen(false)}
               title={collapsed ? t(item.key) : undefined}
             >
@@ -86,7 +87,7 @@ export default function Layout({ children }: PropsWithChildren) {
                 {item.icon}
               </span>
               <span className="nav-label">{t(item.key)}</span>
-            </NavLink>
+            </Link>
           ))}
         </nav>
         <button
@@ -126,4 +127,16 @@ export default function Layout({ children }: PropsWithChildren) {
       <main className="main-content">{children}</main>
     </div>
   );
+}
+
+function isNavActive(pathname: string, target: string) {
+  if (target === "/") return pathname === "/";
+  if (target === "/runs/new") return pathname === target;
+  if (target === "/runs") {
+    return (
+      pathname === target ||
+      (pathname.startsWith("/runs/") && pathname !== "/runs/new")
+    );
+  }
+  return pathname === target || pathname.startsWith(`${target}/`);
 }

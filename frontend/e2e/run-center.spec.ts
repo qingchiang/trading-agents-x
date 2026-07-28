@@ -2,15 +2,26 @@ import { expect, test } from "@playwright/test";
 
 const timestamp = "2026-07-24T00:00:00Z";
 
-function run(id: string, status: string) {
+type MockRun = ReturnType<typeof makeRun>;
+
+function makeRun(
+  id: string,
+  status: string,
+  options: {
+    ticker?: string;
+    instrumentName?: string;
+    archivedAt?: string | null;
+    sourceRunId?: string | null;
+  } = {},
+) {
   return {
     id,
-    source_run_id: id === "run-2" ? "run-1" : null,
-    instrument_name: "NVIDIA Corporation",
-    archived_at: null,
+    source_run_id: options.sourceRunId ?? null,
+    instrument_name: options.instrumentName ?? null,
+    archived_at: options.archivedAt ?? null,
     status,
     request: {
-      ticker: "NVDA",
+      ticker: options.ticker ?? "NVDA",
       analysis_date: "2026-07-24",
       asset_type: "stock",
       profile: "standard",
@@ -25,6 +36,8 @@ function run(id: string, status: string) {
     config_snapshot: {},
     attempt: 1,
     cancel_requested: false,
+    error_code: null,
+    error_message: null,
     metrics: {
       llm_calls: 0,
       tool_calls: 0,
@@ -35,7 +48,7 @@ function run(id: string, status: string) {
     },
     created_at: timestamp,
     started_at: null,
-    finished_at: null,
+    finished_at: status === "queued" || status === "running" ? null : timestamp,
     updated_at: timestamp,
   };
 }
@@ -45,6 +58,7 @@ function result(id: string) {
     run_id: id,
     status: "succeeded",
     instrument: "NVDA",
+    instrument_name: "NVIDIA Corporation",
     reports: {
       market: {
         analyst: "market",
@@ -53,7 +67,8 @@ function result(id: string) {
         confidence: 0.7,
         evidence_refs: ["ev_0123456789ab"],
         warnings: ["Partial historical source"],
-        narrative: "# Market report\n\nMarket evidence.",
+        narrative:
+          "# Market report\n\nMarket evidence cites ev_0123456789ab.",
       },
       news: {
         analyst: "news",
@@ -70,13 +85,14 @@ function result(id: string) {
       confidence: 0.65,
       thesis: "Evidence is balanced.",
       evidence_refs: ["ev_0123456789ab"],
+      memory_refs: [],
       catalysts: ["Demand improves"],
       risks: ["Demand slows"],
       invalidation_conditions: ["New filing changes the thesis"],
       time_horizon: "6-12 months",
     },
     evidence: {
-      version: "1",
+      version: "2",
       instrument: "NVDA",
       analysis_date: "2026-07-24",
       sealed_at: timestamp,
@@ -94,6 +110,7 @@ function result(id: string) {
           unit: "USD",
           quality: "high",
           fallback: false,
+          origins: [],
           provenance: { vendor: "fixture-feed" },
         },
       ],
@@ -104,154 +121,64 @@ function result(id: string) {
       input_tokens: 1200,
       output_tokens: 400,
       wall_time_seconds: 12.4,
-      node_wall_times: {},
+      node_metrics: {},
     },
     warnings: [],
   };
 }
 
-function legacyResult(id: string) {
-  const payload = result(id);
-  const nested = {
-    rating: "Overweight",
-    confidence: 0.4,
-    thesis: "Parsed legacy final thesis.",
-    evidence_refs: ["ev_0123456789ab"],
-    catalysts: ["Order growth"],
-    risks: ["Valuation compression"],
-    invalidation_conditions: ["Guidance misses"],
-    time_horizon: "6-12 months",
-  };
-  payload.decision = {
-    rating: "Hold",
-    confidence: 0.3,
-    thesis: JSON.stringify(nested),
-    evidence_refs: ["ev_0123456789ab"],
-    catalysts: [],
-    risks: ["Structured decision output was unavailable."],
-    invalidation_conditions: [
-      "Reassess when higher-quality evidence becomes available.",
-    ],
-    time_horizon: "Unspecified research horizon",
-  };
-  return payload;
-}
-
-function legacyArtifacts(id: string) {
+function artifacts(id: string) {
   return [
     {
-      id: "artifact-legacy-bear",
+      id: "artifact-bull",
       run_id: id,
       attempt: 1,
       stage: "perspective",
-      role: "bear",
+      role: "bull",
       round: 0,
       schema_version: "1",
-      generation_method: "legacy_unknown",
-      diagnostics: {
-        degraded_output: true,
-        legacy_degraded_output: true,
-        reason_codes: [
-          "nested_json_thesis",
-          "missing_structured_fields",
-        ],
-        missing_fields: ["claim_rebuttals", "risks"],
-        sentinel_fields: [],
-        parsed_thesis: {
-          summary: "Parsed legacy bear summary.",
-          challenged_claims: ["Guidance remains untested."],
-          downside_mechanisms: ["Multiple compression."],
-        },
-        rating_conflict: false,
-        rerun_recommended: true,
-      },
+      generation_method: "tool_call",
       created_at: timestamp,
       content: {
-        role: "bear",
-        thesis: '{"summary":"Parsed legacy bear summary."}',
-        claim_rebuttals: [],
+        role: "bull",
+        thesis: "Demand remains **constructive**.",
+        claim_rebuttals: ["Valuation risk is reflected."],
         evidence_refs: ["ev_0123456789ab"],
         new_evidence_refs: [],
-        risks: [],
+        risks: ["Demand could slow."],
       },
-    },
-    {
-      id: "artifact-legacy-risk",
-      run_id: id,
-      attempt: 1,
-      stage: "risk",
-      role: "risk",
-      round: 0,
-      schema_version: "1",
-      generation_method: "legacy_unknown",
-      diagnostics: {
-        degraded_output: true,
-        legacy_degraded_output: true,
-        reason_codes: ["missing_structured_fields"],
-        missing_fields: ["claim_rebuttals", "risks"],
-        sentinel_fields: [],
-        parsed_thesis: null,
-        rating_conflict: false,
-        rerun_recommended: true,
-      },
-      created_at: timestamp,
-      content: {
-        role: "risk",
-        thesis: "## Legacy risk markdown\n\nVisible narrative.",
-        claim_rebuttals: [],
-        evidence_refs: ["ev_0123456789ab"],
-        new_evidence_refs: [],
-        risks: [],
-      },
-    },
-    {
-      id: "artifact-legacy-final",
-      run_id: id,
-      attempt: 1,
-      stage: "decision",
-      role: "final_committee",
-      round: 0,
-      schema_version: "1",
-      generation_method: "legacy_unknown",
-      diagnostics: {
-        degraded_output: true,
-        legacy_degraded_output: true,
-        reason_codes: [
-          "nested_json_thesis",
-          "fallback_sentinel_fields",
-          "rating_conflict",
-        ],
-        missing_fields: [],
-        sentinel_fields: [
-          "risks",
-          "invalidation_conditions",
-          "time_horizon",
-        ],
-        parsed_thesis: JSON.parse(legacyResult(id).decision.thesis),
-        outer_rating: "Hold",
-        nested_rating: "Overweight",
-        rating_conflict: true,
-        rerun_recommended: true,
-      },
-      created_at: timestamp,
-      content: legacyResult(id).decision,
     },
   ];
 }
 
-test("runs the local research workflow across UI locales", async ({ page }) => {
+test("runs, templates, archives, and restores local research", async ({
+  page,
+}) => {
   test.setTimeout(60_000);
-  let current = run("run-1", "queued");
+  const runs = new Map<string, MockRun>([
+    [
+      "run-report",
+      makeRun("run-report", "succeeded", {
+        ticker: "NVDA",
+        instrumentName: "NVIDIA Corporation",
+      }),
+    ],
+  ]);
+  const purged = new Set<string>();
+  let createdSequence = 0;
+  let lastCreatePayload: Record<string, unknown> | null = null;
+
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     const path = url.pathname;
+
     if (path === "/api/v1/health") {
       return route.fulfill({
         json: {
           status: "ok",
           database: "ok",
-          queue: { queued: 1, running: 0, pending_outcomes: 1 },
+          queue: { queued: 0, running: 0, pending_outcomes: 1 },
           version: "0.5.0",
         },
       });
@@ -278,10 +205,11 @@ test("runs the local research workflow across UI locales", async ({ page }) => {
             llm_provider: "openai",
             quick_model: "gpt-5.4-mini",
             deep_model: "gpt-5.5",
-            quick_reasoning_effort: null,
-            deep_reasoning_effort: null,
+            quick_reasoning_effort: "provider_default",
+            deep_reasoning_effort: "provider_default",
             output_language: "zh-CN",
             lan_enabled: false,
+            archive_retention_days: 30,
           },
         },
       });
@@ -313,23 +241,108 @@ test("runs the local research workflow across UI locales", async ({ page }) => {
         },
       });
     }
+    if (path === "/api/v1/instruments/recent") {
+      const active = [...runs.values()].filter(
+        (run) => !run.archived_at && !purged.has(run.id),
+      );
+      return route.fulfill({
+        json: active.map((run) => ({
+          ticker: run.request.ticker,
+          instrument_name: run.instrument_name,
+          last_used_at: run.updated_at,
+        })),
+      });
+    }
     if (path === "/api/v1/runs" && request.method() === "GET") {
-      return route.fulfill({ json: [current] });
+      const archiveState = url.searchParams.get("archive_state") ?? "active";
+      const q = (url.searchParams.get("q") ?? "").toLowerCase();
+      const status = url.searchParams.get("status");
+      const offset = Number(url.searchParams.get("offset") ?? 0);
+      const limit = Number(url.searchParams.get("limit") ?? 20);
+      const visible = [...runs.values()]
+        .filter((run) => !purged.has(run.id))
+        .filter((run) =>
+          archiveState === "archived" ? run.archived_at : !run.archived_at,
+        )
+        .filter((run) => !status || run.status === status)
+        .filter(
+          (run) =>
+            !q ||
+            run.request.ticker.toLowerCase().includes(q) ||
+            (run.instrument_name ?? "").toLowerCase().includes(q),
+        );
+      return route.fulfill({
+        json: {
+          items: visible.slice(offset, offset + limit),
+          total: visible.length,
+          limit,
+          offset,
+        },
+      });
     }
     if (path === "/api/v1/runs" && request.method() === "POST") {
-      current = run("run-1", "queued");
-      return route.fulfill({ status: 202, json: current });
+      lastCreatePayload = request.postDataJSON() as Record<string, unknown>;
+      createdSequence += 1;
+      const id = createdSequence === 1 ? "run-created" : "run-template";
+      const created = makeRun(id, "queued", {
+        ticker: String(lastCreatePayload.ticker),
+        instrumentName:
+          lastCreatePayload.ticker === "7203.T"
+            ? "Toyota Motor Corporation"
+            : null,
+        sourceRunId:
+          (lastCreatePayload.source_run_id as string | null) ?? null,
+      });
+      created.request = {
+        ...created.request,
+        ...(lastCreatePayload as typeof created.request),
+      };
+      runs.set(id, created);
+      return route.fulfill({ status: 202, json: created });
+    }
+    if (path === "/api/v1/runs/archive") {
+      const ids = (request.postDataJSON() as { run_ids: string[] }).run_ids;
+      const changed: MockRun[] = [];
+      for (const id of ids) {
+        const current = runs.get(id);
+        if (current && !current.archived_at) {
+          current.archived_at = "2026-07-29T00:00:00Z";
+          changed.push(current);
+        }
+      }
+      return route.fulfill({
+        json: { runs: ids.flatMap((id) => runs.get(id) ?? []), changed: changed.length },
+      });
+    }
+    if (path === "/api/v1/runs/restore") {
+      const ids = (request.postDataJSON() as { run_ids: string[] }).run_ids;
+      let changed = 0;
+      for (const id of ids) {
+        const current = runs.get(id);
+        if (current?.archived_at) {
+          current.archived_at = null;
+          changed += 1;
+        }
+      }
+      return route.fulfill({
+        json: { runs: ids.flatMap((id) => runs.get(id) ?? []), changed },
+      });
     }
     if (path === "/api/v1/memory") {
+      const report = runs.get("run-report");
+      if (!report || report.archived_at || purged.has(report.id)) {
+        return route.fulfill({ json: [] });
+      }
       return route.fulfill({
         json: [
           {
-            run_id: "run-report",
-            ticker: "NVDA",
+            run_id: report.id,
+            ticker: report.request.ticker,
+            instrument_name: report.instrument_name,
             market: "America/New_York",
             asset_type: "stock",
             analysis_date: "2026-07-24",
-            decision: result("run-report").decision,
+            decision: result(report.id).decision,
             outcome: {
               status: "resolved",
               benchmark: "SPY",
@@ -344,181 +357,135 @@ test("runs the local research workflow across UI locales", async ({ page }) => {
         ],
       });
     }
+
     const artifactMatch = path.match(
       /^\/api\/v1\/runs\/([^/]+)\/artifacts$/,
     );
     if (artifactMatch) {
-      const id = artifactMatch[1];
       return route.fulfill({
-        json:
-          id === "run-report"
-            ? [
-                {
-                  id: "artifact-bull",
-                  run_id: id,
-                  attempt: 1,
-                  stage: "perspective",
-                  role: "bull",
-                  round: 0,
-                  schema_version: "1",
-                  created_at: timestamp,
-                  content: {
-                    role: "bull",
-                    thesis: "Demand remains **constructive**.",
-                    claim_rebuttals: ["Valuation risk is reflected."],
-                    evidence_refs: ["ev_0123456789ab"],
-                    new_evidence_refs: [],
-                    risks: ["Demand could slow."],
-                  },
-                },
-              ]
-            : id === "run-legacy"
-              ? legacyArtifacts(id)
-            : [],
+        json: artifactMatch[1] === "run-report"
+          ? artifacts(artifactMatch[1])
+          : [],
       });
     }
     const eventMatch = path.match(/^\/api\/v1\/runs\/([^/]+)\/events$/);
     if (eventMatch) {
-      const id = eventMatch[1];
-      const first = {
-        run_id: id,
+      const run = runs.get(eventMatch[1]);
+      const event = {
+        run_id: eventMatch[1],
         sequence: 1,
         attempt: 1,
-        event_type: "run.queued",
+        event_type: `run.${run?.status ?? "failed"}`,
         node: null,
         payload: {},
         created_at: timestamp,
       };
-      const second = {
-        ...first,
-        sequence: 2,
-        event_type: id === "run-report" ? "run.succeeded" : "run.cancelled",
-      };
       return route.fulfill({
         headers: { "Content-Type": "text/event-stream" },
-        body:
-          `id: 1\nevent: ${first.event_type}\ndata: ${JSON.stringify(first)}\n\n` +
-          `id: 2\nevent: ${second.event_type}\ndata: ${JSON.stringify(second)}\n\n`,
+        body: `id: 1\nevent: ${event.event_type}\ndata: ${JSON.stringify(event)}\n\n`,
       });
     }
     const actionMatch = path.match(
-      /^\/api\/v1\/runs\/([^/]+)\/(cancel|retry|rerun)$/,
+      /^\/api\/v1\/runs\/([^/]+)\/(cancel|retry)$/,
     );
     if (actionMatch) {
-      const action = actionMatch[2];
-      if (action === "cancel") current = run(actionMatch[1], "cancelled");
-      if (action === "retry") current = run(actionMatch[1], "queued");
-      if (action === "rerun") current = run("run-2", "failed");
+      const current = runs.get(actionMatch[1]);
+      if (!current) {
+        return route.fulfill({ status: 404, json: { detail: "Run not found" } });
+      }
+      current.status = actionMatch[2] === "cancel" ? "cancelled" : "queued";
       return route.fulfill({ json: current });
     }
     const detailMatch = path.match(/^\/api\/v1\/runs\/([^/]+)$/);
     if (detailMatch) {
       const id = detailMatch[1];
-      if (id === "run-report" || id === "run-legacy") {
-        return route.fulfill({
-          json: {
-            run: run(id, "succeeded"),
-            result: id === "run-legacy" ? legacyResult(id) : result(id),
-          },
-        });
+      if (purged.has(id) || !runs.has(id)) {
+        return route.fulfill({ status: 404, json: { detail: "Run not found" } });
       }
-      return route.fulfill({ json: { run: current, result: null } });
+      const run = runs.get(id)!;
+      return route.fulfill({
+        json: {
+          run,
+          result: id === "run-report" ? result(id) : null,
+        },
+      });
     }
-    return route.fulfill({ status: 404, json: { error: "not found" } });
+    return route.fulfill({ status: 404, json: { detail: "Not found" } });
   });
 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "运行概览" })).toBeVisible();
-  await page.getByLabel("界面语言").selectOption("ja");
-  await expect(
-    page.getByRole("heading", { name: "ダッシュボード" }),
-  ).toBeVisible();
-  await page.getByLabel("UI 言語").selectOption("en");
+  await expect(page.getByText("NVIDIA Corporation")).toBeVisible();
+  await page.getByLabel("界面语言").selectOption("en");
 
-  await page.locator("nav").getByRole("link", { name: /New run/ }).click();
-  await page.getByLabel(/^Ticker/).fill("NVDA");
+  await page.getByRole("link", { name: "New run", exact: true }).click();
+  const ticker = page.getByLabel(/^Ticker/);
+  await expect(ticker).toHaveAttribute("name", "ticker");
+  await expect(ticker).toHaveAttribute("list", "recent-instruments");
+  await ticker.fill("7203.T");
   await page.getByRole("button", { name: /Queue research/ }).click();
-  await expect(page).toHaveURL(/\/runs\/run-1$/);
+  await expect(page).toHaveURL(/\/runs\/run-created$/);
   await page.getByRole("button", { name: "Cancel" }).click();
   await expect(page.getByText("Cancelled")).toBeVisible();
-  await page.getByRole("button", { name: "Rerun" }).click();
-  await expect(page).toHaveURL(/\/runs\/run-2$/);
-  await page.getByRole("button", { name: "Retry" }).click();
-  await expect(page.getByText("Queued")).toBeVisible();
 
-  await page.goto("/runs/run-report");
-  await page.getByRole("tab", { name: "Deliberation" }).click();
+  await page.getByRole("link", { name: "New from this run" }).click();
+  await expect(ticker).toHaveValue("7203.T");
+  await ticker.fill("MSFT");
+  await page.getByRole("button", { name: /Queue research/ }).click();
+  await expect(page).toHaveURL(/\/runs\/run-template$/);
+  expect(lastCreatePayload).toMatchObject({
+    ticker: "MSFT",
+    source_run_id: "run-created",
+  });
+
+  await page.goto("/runs/run-report?view=deliberation");
   await expect(page.getByText("constructive")).toBeVisible();
   await page
-    .getByRole("button", {
-      name: "Open evidence ev_0123456789ab",
-    })
+    .getByRole("button", { name: "Open evidence ev_0123456789ab" })
     .click();
   await expect(
     page.getByRole("heading", { name: "Price snapshot" }),
   ).toBeVisible();
   await page.getByRole("button", { name: /Return to deliberation/ }).click();
-  await expect(page.getByText("constructive")).toBeVisible();
   await page.getByRole("tab", { name: "Reports" }).click();
   await expect(page.getByRole("heading", { name: "Market report" })).toBeVisible();
-  await page.getByRole("button", { name: "News" }).click();
-  await expect(page.getByRole("heading", { name: "News report" })).toBeVisible();
-  await page.reload();
-  await expect(page.getByRole("heading", { name: "News report" })).toBeVisible();
-  await page.getByText("Audit details").click();
-  await page
-    .getByRole("button", {
-      name: "Open evidence ev_0123456789ab",
-    })
-    .click();
-  await expect(page).toHaveURL(
-    /view=evidence.*ref=ev_0123456789ab.*return_view=reports.*return_report=news/,
-  );
-  await page.goBack();
-  await expect(page).toHaveURL(/view=reports.*report=news/);
-  await expect(page.getByRole("heading", { name: "News report" })).toBeVisible();
-  await page
-    .getByRole("button", {
-      name: "Open evidence ev_0123456789ab",
-    })
-    .click();
-  await page.getByRole("button", { name: /Return to reports/ }).click();
-  await expect(page.getByRole("heading", { name: "News report" })).toBeVisible();
-  await page.getByRole("tab", { name: "Agent timeline" }).click();
-  await expect(page.getByText(/#2/)).toBeVisible();
-  await expect(page.locator(".timeline-item small").first()).toContainText("#2");
-  await page.getByRole("button", { name: "Earliest first" }).click();
-  await expect(page.locator(".timeline-item small").first()).toContainText("#1");
-  await page.reload();
-  await expect(page.locator(".timeline-item small").first()).toContainText("#1");
 
-  await page.goto("/runs/run-legacy?view=deliberation");
-  await expect(
-    page.getByText("Parsed legacy bear summary.", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "Legacy risk markdown" }),
-  ).toBeVisible();
-  await page.getByRole("tab", { name: "Decision" }).click();
-  await expect(page.getByText("Conflicting research ratings")).toBeVisible();
-  await expect(
-    page.getByText("Parsed legacy final thesis.", { exact: true }),
-  ).toBeVisible();
-
-  await page.getByRole("link", { name: "Memory" }).click();
-  await expect(
-    page.getByText("The evidence was directionally useful."),
-  ).toBeVisible();
+  await page.goto("/memory");
+  await expect(page.getByText("NVIDIA Corporation")).toBeVisible();
   await page.getByText("Decision details").click();
   await expect(page.getByText("Demand improves")).toBeVisible();
-  await expect(page.getByText("Demand slows")).toBeVisible();
   await page
     .getByRole("link", { name: "Open research decision", exact: true })
     .click();
   await expect(page).toHaveURL(/\/runs\/run-report\?view=decision/);
-  await expect(page.getByText("Evidence is balanced.")).toBeVisible();
+
+  await page.goto("/runs");
+  const reportRow = page.getByRole("row").filter({ hasText: "NVDA" });
+  await reportRow.getByRole("checkbox").check();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Archive selected (1)" }).click();
+  await expect(page.getByText("Archived 1 run(s).")).toBeVisible();
+
+  await page.goto("/memory");
+  await expect(page.getByText("No memory entries.")).toBeVisible();
+
+  await page.goto("/runs?archive_state=archived");
+  const archivedRow = page.getByRole("row").filter({ hasText: "NVDA" });
+  await archivedRow.getByRole("checkbox").check();
+  await page.getByRole("button", { name: "Restore selected (1)" }).click();
+  await expect(page.getByText("Restored 1 run(s).")).toBeVisible();
+  await page.goto("/memory");
+  await expect(page.getByText("NVIDIA Corporation")).toBeVisible();
+
+  const restored = runs.get("run-report")!;
+  restored.archived_at = "2026-06-01T00:00:00Z";
+  purged.add("run-report");
+  await page.goto("/runs/run-report");
+  await expect(page.getByText("Run not found")).toBeVisible();
 
   await page.setViewportSize({ width: 1080, height: 1920 });
+  purged.delete("run-report");
+  restored.archived_at = null;
   await page.goto("/runs/run-report?view=reports&report=market");
   const reportMaxHeight = await page
     .locator(".report-panel > .markdown")
@@ -528,17 +495,11 @@ test("runs the local research workflow across UI locales", async ({ page }) => {
   expect(reportMaxHeight).toBeGreaterThan(660);
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/memory");
+  await page.goto("/runs");
   const shell = page.locator(".app-shell");
   await page.getByRole("button", { name: "Open navigation" }).click();
   await expect(shell).toHaveClass(/sidebar-open/);
-  await page.locator(".sidebar-backdrop").click({ position: { x: 380, y: 20 } });
-  await expect(shell).not.toHaveClass(/sidebar-open/);
-  await page.getByRole("button", { name: "Open navigation" }).click();
   await page.getByRole("link", { name: "Settings" }).click();
   await expect(page).toHaveURL(/\/settings$/);
-  await expect(shell).not.toHaveClass(/sidebar-open/);
-  await page.getByRole("button", { name: "Open navigation" }).click();
-  await page.keyboard.press("Escape");
   await expect(shell).not.toHaveClass(/sidebar-open/);
 });

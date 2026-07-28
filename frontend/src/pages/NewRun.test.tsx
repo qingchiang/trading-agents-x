@@ -18,6 +18,7 @@ vi.mock("../api/client", () => ({
     providerModels: vi.fn(),
     createRun: vi.fn(),
     run: vi.fn(),
+    recentInstruments: vi.fn(),
   },
 }));
 
@@ -108,6 +109,7 @@ beforeEach(async () => {
   await i18n.changeLanguage("en");
   vi.mocked(api.capabilities).mockResolvedValue(capabilities);
   vi.mocked(api.providerModels).mockResolvedValue(modelCatalog);
+  vi.mocked(api.recentInstruments).mockResolvedValue([]);
 });
 
 test("reuses the idempotency key when a browser submission is retried", async () => {
@@ -163,6 +165,34 @@ test("keeps UI locale and report output language independent", async () => {
   await waitFor(() => expect(api.createRun).toHaveBeenCalled());
   expect(vi.mocked(api.createRun).mock.calls[0][0].output_language).toBe("ja");
   expect(i18n.language).toBe("en");
+});
+
+test("offers recent instruments with stable browser-autocomplete metadata", async () => {
+  vi.mocked(api.recentInstruments).mockResolvedValue([
+    {
+      ticker: "7203.T",
+      instrument_name: "Toyota Motor Corporation",
+      last_used_at: "2026-07-28T00:00:00Z",
+    },
+  ]);
+  render(
+    <Router initialPath="/runs/new">
+      <NewRunRoutes />
+    </Router>,
+  );
+
+  const ticker = await screen.findByLabelText(/^Ticker/);
+  expect(ticker).toHaveAttribute("id", "new-run-ticker");
+  expect(ticker).toHaveAttribute("name", "ticker");
+  expect(ticker).toHaveAttribute("autocomplete", "on");
+  expect(ticker).toHaveAttribute("list", "recent-instruments");
+  await waitFor(() =>
+    expect(
+      document.querySelector(
+        'datalist#recent-instruments option[value="7203.T"]',
+      ),
+    ).toHaveAttribute("label", "Toyota Motor Corporation"),
+  );
 });
 
 test("loads a terminal run as an editable template and preserves custom values", async () => {

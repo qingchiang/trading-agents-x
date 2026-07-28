@@ -498,6 +498,23 @@ tbody tr:hover {
   letter-spacing: 0.015em;
 }
 
+.instrument-identity {
+  display: inline-grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.instrument-name {
+  max-width: 280px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .right {
   text-align: right;
 }
@@ -822,6 +839,16 @@ label small {
 
 .run-title h1 {
   margin: 0;
+}
+
+.run-instrument-name {
+  max-width: min(420px, 50vw);
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 16px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .action-row {
@@ -1711,6 +1738,87 @@ label small {
   padding: 18px 20px;
 }
 
+.run-filter-bar {
+  grid-template-columns: minmax(260px, 1fr) minmax(180px, 0.35fr) auto;
+}
+
+.archive-state-tabs {
+  display: inline-flex;
+  gap: 4px;
+  margin-bottom: 14px;
+  padding: 5px;
+}
+
+.archive-state-tabs button {
+  min-height: 36px;
+  padding: 0 15px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 750;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.archive-state-tabs button.active {
+  color: var(--blue);
+  background: var(--blue-soft);
+}
+
+.run-management-panel {
+  margin-top: 18px;
+}
+
+.selection-cell {
+  width: 52px;
+  padding-right: 8px;
+  text-align: center;
+}
+
+.selection-cell input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--blue);
+}
+
+.pagination {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 66px;
+  padding: 12px 20px;
+  color: var(--muted);
+  font-size: 13px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.notice,
+.archive-notice {
+  margin: 0 0 18px;
+  padding: 12px 15px;
+  color: var(--green);
+  font-size: 14px;
+  line-height: 1.5;
+  background: var(--green-soft);
+  border: 1px solid #ccebd9;
+  border-radius: 10px;
+}
+
+.archive-notice {
+  display: flex;
+  gap: 8px 18px;
+  align-items: baseline;
+  color: #6c541d;
+  background: var(--amber-soft);
+  border-color: #f2ddb2;
+}
+
+.archive-notice span {
+  color: #806b3c;
+}
+
 .memory-list {
   display: grid;
   gap: 13px;
@@ -2226,6 +2334,36 @@ label small {
 
   .filter-bar {
     grid-template-columns: 1fr;
+  }
+
+  .archive-state-tabs {
+    display: flex;
+  }
+
+  .archive-state-tabs button {
+    flex: 1;
+  }
+
+  .pagination {
+    justify-content: space-between;
+  }
+
+  .pagination span {
+    text-align: center;
+  }
+
+  .archive-notice {
+    display: grid;
+  }
+
+  .run-title {
+    flex-wrap: wrap;
+  }
+
+  .run-instrument-name {
+    order: 3;
+    width: 100%;
+    max-width: 100%;
   }
 
   .memory-decision {

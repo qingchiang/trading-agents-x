@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import {
   api,
   type AnalystReport,
+  type Capabilities,
   type EvidenceBundle,
   type PerspectiveReview,
   type ResearchArtifact,
@@ -71,6 +72,7 @@ export default function RunDetail() {
   const [detail, setDetail] = useState<RunDetailType | null>(null);
   const [artifacts, setArtifacts] = useState<ResearchArtifact[]>([]);
   const [events, setEvents] = useState<RunEvent[]>([]);
+  const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   const [error, setError] = useState("");
   const searchParams = useMemo(
     () => new URLSearchParams(location.search),
@@ -136,6 +138,21 @@ export default function RunDetail() {
     };
     return () => source.close();
   }, [runId, refresh]);
+
+  useEffect(() => {
+    let active = true;
+    void api
+      .capabilities()
+      .then((value) => {
+        if (active) setCapabilities(value);
+      })
+      .catch(() => {
+        if (active) setCapabilities(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const reports = useMemo<Record<string, AnalystReport | string>>(() => {
     const completed = detail?.result?.reports ?? {};
@@ -285,6 +302,15 @@ export default function RunDetail() {
     }
   };
 
+  const restore = async () => {
+    try {
+      await api.restoreRuns([runId]);
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t("error"));
+    }
+  };
+
   if (!detail) {
     return <div className="loading">{error || t("loading")}</div>;
   }
@@ -299,6 +325,9 @@ export default function RunDetail() {
           </Link>
           <div className="run-title">
             <h1>{run.request.ticker}</h1>
+            {run.instrument_name && (
+              <span className="run-instrument-name">{run.instrument_name}</span>
+            )}
             <StatusBadge status={run.status} />
           </div>
           <p className="subtitle">
@@ -315,14 +344,20 @@ export default function RunDetail() {
           )}
         </div>
         <div className="action-row">
-          {(run.status === "queued" || run.status === "running") && (
+          {!run.archived_at &&
+            (run.status === "queued" || run.status === "running") && (
             <button className="button danger" onClick={() => void act("cancel")}>
               {t("cancel")}
             </button>
           )}
-          {run.status === "failed" && (
+          {!run.archived_at && run.status === "failed" && (
             <button className="button" onClick={() => void act("retry")}>
               {t("retry")}
+            </button>
+          )}
+          {run.archived_at && (
+            <button className="button primary" onClick={() => void restore()}>
+              {t("restore")}
             </button>
           )}
           {terminal.has(run.status) && (
@@ -348,6 +383,20 @@ export default function RunDetail() {
         </div>
       </header>
       {error && <div className="alert">{error}</div>}
+      {run.archived_at && (
+        <div className="archive-notice">
+          <strong>{t("archivedRun")}</strong>
+          <span>
+            {t("scheduledCleanup", {
+              date: cleanupDateLabel(
+                run.archived_at,
+                capabilities?.defaults.archive_retention_days ?? 30,
+                t("permanentCleanupDisabled"),
+              ),
+            })}
+          </span>
+        </div>
+      )}
       {run.error_message && <div className="alert">{run.error_message}</div>}
       <RunWarnings warnings={runWarnings} />
 
@@ -1446,6 +1495,22 @@ function readTimelineOrder(): TimelineOrder {
   return localStorage.getItem(timelineOrderStorageKey) === "oldest"
     ? "oldest"
     : "newest";
+}
+
+function cleanupDateLabel(
+  archivedAt: string,
+  retentionDays: number,
+  disabledLabel: string,
+) {
+  if (retentionDays === 0) return disabledLabel;
+  const date = new Date(archivedAt);
+  date.setUTCDate(date.getUTCDate() + retentionDays);
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "long",
+    day: "2-digit",
+    timeZone: "UTC",
+  }).format(date);
 }
 
 function formatTime(value: string): string {
