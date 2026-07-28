@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { api, type MemoryEntry } from "../api/client";
 import Markdown from "../components/Markdown";
 import StatusBadge from "../components/StatusBadge";
+import { Link } from "../router";
 
 export default function Memory() {
   const { t } = useTranslation();
@@ -108,16 +109,52 @@ export default function Memory() {
           >
             <div className="memory-meta">
               <div>
-                <strong className="ticker">{entry.ticker}</strong>
+                <Link
+                  className="memory-title-link"
+                  to={runDecisionPath(entry.run_id)}
+                  aria-label={`${t("openResearchDecision")} ${entry.ticker}`}
+                >
+                  <strong className="ticker">{entry.ticker}</strong>
+                </Link>
                 <span>{entry.analysis_date} · {entry.market || "—"}</span>
               </div>
-              <StatusBadge status={entry.outcome.status} />
+              <div className="memory-actions">
+                <StatusBadge status={entry.outcome.status} />
+                <Link
+                  className="button compact-button"
+                  to={runDecisionPath(entry.run_id)}
+                >
+                  {t("openResearchDecision")}
+                </Link>
+              </div>
             </div>
             <div className="memory-decision">
               <strong>{entry.decision.rating}</strong>
               <span>{Math.round(entry.decision.confidence * 100)}%</span>
               <Markdown>{entry.decision.thesis}</Markdown>
             </div>
+            <details className="memory-decision-details">
+              <summary>{t("decisionDetails")}</summary>
+              <div className="memory-decision-grid">
+                <MemoryDecisionList
+                  title={t("catalysts")}
+                  items={entry.decision.catalysts ?? []}
+                  emptyLabel={t("noCatalystsIdentified")}
+                />
+                <MemoryDecisionList
+                  title={t("risks")}
+                  items={entry.decision.risks ?? []}
+                />
+                <MemoryDecisionList
+                  title={t("invalidation")}
+                  items={entry.decision.invalidation_conditions ?? []}
+                />
+                <div className="memory-decision-field">
+                  <strong>{t("horizon")}</strong>
+                  <Markdown>{entry.decision.time_horizon || "—"}</Markdown>
+                </div>
+              </div>
+            </details>
             {entry.outcome.status === "resolved" && (
               <div className="returns">
                 <span>
@@ -149,6 +186,37 @@ export default function Memory() {
   );
 }
 
+function MemoryDecisionList({
+  title,
+  items,
+  emptyLabel = "—",
+}: {
+  title: string;
+  items: string[];
+  emptyLabel?: string;
+}) {
+  return (
+    <div className="memory-decision-field">
+      <strong>{title}</strong>
+      {items.length ? (
+        <ul>
+          {items.map((item, index) => (
+            <li key={`${index}-${item}`}>
+              <Markdown>{item}</Markdown>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <span>{emptyLabel}</span>
+      )}
+    </div>
+  );
+}
+
 function percent(value: number | null) {
   return value == null ? "—" : `${value >= 0 ? "+" : ""}${(value * 100).toFixed(1)}%`;
+}
+
+function runDecisionPath(runId: string): string {
+  return `/runs/${encodeURIComponent(runId)}?view=decision`;
 }

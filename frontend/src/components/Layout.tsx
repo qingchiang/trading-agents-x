@@ -1,8 +1,9 @@
-import { PropsWithChildren } from "react";
+import { PropsWithChildren, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import i18n from "../i18n";
 import { NavLink } from "../router";
 
+const sidebarPreferenceKey = "tradingagents-sidebar-collapsed";
 const nav = [
   { to: "/", key: "dashboard", icon: "⌁" },
   { to: "/runs/new", key: "newRun", icon: "+" },
@@ -12,33 +13,94 @@ const nav = [
 
 export default function Layout({ children }: PropsWithChildren) {
   const { t } = useTranslation();
+  const [collapsed, setCollapsed] = useState(
+    () => localStorage.getItem(sidebarPreferenceKey) === "true",
+  );
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setDrawerOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [drawerOpen]);
+
   const changeLocale = (locale: string) => {
     localStorage.setItem("tradingagents-locale", locale);
     void i18n.changeLanguage(locale);
   };
+  const toggleCollapsed = () => {
+    const next = !collapsed;
+    setCollapsed(next);
+    localStorage.setItem(sidebarPreferenceKey, String(next));
+  };
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
+    <div
+      className={[
+        "app-shell",
+        collapsed ? "sidebar-collapsed" : "",
+        drawerOpen ? "sidebar-open" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      <button
+        type="button"
+        className="mobile-menu-button"
+        aria-label={t("openNavigation")}
+        aria-controls="primary-sidebar"
+        aria-expanded={drawerOpen}
+        onClick={() => setDrawerOpen(true)}
+      >
+        ☰
+      </button>
+      <aside className="sidebar" id="primary-sidebar">
+        <button
+          type="button"
+          className="mobile-sidebar-close"
+          aria-label={t("closeNavigation")}
+          onClick={() => setDrawerOpen(false)}
+        >
+          ×
+        </button>
         <div className="brand">
           <div className="brand-mark">TX</div>
-          <div>
+          <div className="brand-copy">
             <strong>TradingAgentsX</strong>
             <small>{t("brandTagline")}</small>
           </div>
         </div>
-        <nav>
+        <nav aria-label={t("primaryNavigation")}>
           {nav.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
               end={item.to === "/"}
               className={({ isActive }) => (isActive ? "active" : "")}
+              onClick={() => setDrawerOpen(false)}
+              title={collapsed ? t(item.key) : undefined}
             >
-              <span>{item.icon}</span>
-              {t(item.key)}
+              <span className="nav-icon" aria-hidden="true">
+                {item.icon}
+              </span>
+              <span className="nav-label">{t(item.key)}</span>
             </NavLink>
           ))}
         </nav>
+        <button
+          type="button"
+          className="sidebar-collapse-button"
+          aria-label={t(collapsed ? "expandSidebar" : "collapseSidebar")}
+          aria-expanded={!collapsed}
+          onClick={toggleCollapsed}
+        >
+          <span aria-hidden="true">{collapsed ? "›" : "‹"}</span>
+          <span className="nav-label">
+            {t(collapsed ? "expandSidebar" : "collapseSidebar")}
+          </span>
+        </button>
         <div className="sidebar-foot">
           <label htmlFor="locale">{t("language")}</label>
           <select
@@ -53,6 +115,14 @@ export default function Layout({ children }: PropsWithChildren) {
           <small>{t("researchOnly")}</small>
         </div>
       </aside>
+      {drawerOpen && (
+        <button
+          type="button"
+          className="sidebar-backdrop"
+          aria-label={t("closeNavigation")}
+          onClick={() => setDrawerOpen(false)}
+        />
+      )}
       <main className="main-content">{children}</main>
     </div>
   );

@@ -27,6 +27,11 @@ def _seed_memory(
     reflection: str,
     thesis: str,
     resolved: bool = True,
+    rating: ResearchRating = ResearchRating.HOLD,
+    catalysts: tuple[str, ...] = (),
+    risks: tuple[str, ...] = (),
+    invalidation_conditions: tuple[str, ...] = (),
+    time_horizon: str = "Fixture horizon",
 ) -> str:
     request = AnalysisRequest(
         ticker=ticker,
@@ -34,14 +39,14 @@ def _seed_memory(
         analysts=("market",),
     )
     decision = ResearchDecision(
-        rating=ResearchRating.HOLD,
+        rating=rating,
         confidence=0.5,
         thesis=thesis,
         evidence_refs=(),
-        catalysts=(),
-        risks=(),
-        invalidation_conditions=(),
-        time_horizon="Fixture horizon",
+        catalysts=catalysts,
+        risks=risks,
+        invalidation_conditions=invalidation_conditions,
+        time_horizon=time_horizon,
     )
     run_id = repository.import_legacy_memory(
         source_path="/fixture/memory.md",
@@ -325,6 +330,11 @@ def test_memory_entries_support_fuzzy_filters_and_full_field_search(
         analysis_date=date(2026, 7, 1),
         reflection="Valuation lesson: demand quality mattered.",
         thesis="Data center demand is accelerating.",
+        rating=ResearchRating.OVERWEIGHT,
+        catalysts=("Next-generation accelerator launch",),
+        risks=("Power supply constraints",),
+        invalidation_conditions=("Backlog contracts materially",),
+        time_horizon="Three-year compound horizon",
     )
     _seed_memory(
         repository,
@@ -367,6 +377,17 @@ def test_memory_entries_support_fuzzy_filters_and_full_field_search(
         entry["ticker"]
         for entry in repository.memory_entries(q="valuation LESSON")
     ] == ["NVDA"]
+    for decision_query in (
+        "overweight",
+        "accelerator launch",
+        "power supply",
+        "backlog contracts",
+        "three-year compound",
+    ):
+        assert [
+            entry["ticker"]
+            for entry in repository.memory_entries(q=decision_query)
+        ] == ["NVDA"]
     assert [
         entry["ticker"]
         for entry in repository.memory_entries(q=nvda_run_id[:12])

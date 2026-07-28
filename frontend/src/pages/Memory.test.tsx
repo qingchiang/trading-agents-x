@@ -3,6 +3,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 
 import { api, type MemoryEntry } from "../api/client";
 import i18n from "../i18n";
+import { Router } from "../router";
 import Memory from "./Memory";
 
 vi.mock("../api/client", () => ({
@@ -22,9 +23,9 @@ const entry = {
     confidence: 0.6,
     thesis: "**Imported thesis** with <script>unsafe()</script> markup.",
     evidence_refs: [],
-    catalysts: [],
-    risks: [],
-    invalidation_conditions: [],
+    catalysts: ["**Volume growth** accelerates."],
+    risks: ["Input costs remain elevated."],
+    invalidation_conditions: ["Demand falls below the base case."],
     time_horizon: "6-12 months",
   },
   outcome: {
@@ -46,8 +47,16 @@ beforeEach(async () => {
   vi.mocked(api.memory).mockResolvedValue([entry]);
 });
 
+function renderMemory() {
+  return render(
+    <Router>
+      <Memory />
+    </Router>,
+  );
+}
+
 test("renders imported thesis and reflection as sanitized Markdown", async () => {
-  const { container } = render(<Memory />);
+  const { container } = renderMemory();
 
   expect((await screen.findByText("Imported thesis")).tagName).toBe("STRONG");
   expect(
@@ -59,7 +68,7 @@ test("renders imported thesis and reflection as sanitized Markdown", async () =>
 });
 
 test("submits fuzzy and full-field filters without rewriting ticker case", async () => {
-  render(<Memory />);
+  renderMemory();
   await screen.findByText("Imported thesis");
 
   fireEvent.change(screen.getByLabelText("Keyword search"), {
@@ -95,7 +104,7 @@ test("restores a linked memory query and focuses the referenced record", async (
     "/memory?q=legacy-run#memory-legacy-run",
   );
 
-  const { container } = render(<Memory />);
+  const { container } = renderMemory();
 
   await waitFor(() =>
     expect(api.memory).toHaveBeenCalledWith("?q=legacy-run"),
@@ -105,4 +114,30 @@ test("restores a linked memory query and focuses the referenced record", async (
   );
   const card = container.querySelector<HTMLElement>("#memory-legacy-run");
   await waitFor(() => expect(document.activeElement).toBe(card));
+});
+
+test("expands the full decision and navigates to its run conclusion", async () => {
+  renderMemory();
+
+  await screen.findByText("Imported thesis");
+  expect(screen.getByText("Volume growth")).not.toBeVisible();
+  fireEvent.click(screen.getByText("Decision details"));
+  expect(screen.getByText("Volume growth")).toBeVisible();
+  expect(screen.getByText("Input costs remain elevated.")).toBeVisible();
+  expect(screen.getByText("Demand falls below the base case.")).toBeVisible();
+  expect(screen.getByText("6-12 months")).toBeVisible();
+
+  expect(
+    screen.getByRole("link", {
+      name: "Open research decision 7203.T",
+    }),
+  ).toHaveAttribute("href", "/runs/legacy-run?view=decision");
+  fireEvent.click(
+    screen.getByRole("link", {
+      name: "Open research decision",
+    }),
+  );
+  expect(`${window.location.pathname}${window.location.search}`).toBe(
+    "/runs/legacy-run?view=decision",
+  );
 });

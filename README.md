@@ -42,8 +42,8 @@ or portfolio rebalancing.
 - **Run Detail:** persistent event timeline, analyst reports, structured
   decision, collapsible audit details, token/tool metrics, cancellation,
   retry, rerun, and export.
-- **Memory:** filter pending and resolved decisions, outcomes, and reflections
-  by ticker or market.
+- **Memory:** search complete decisions, outcomes, and reflections, expand
+  catalysts/risks/invalidation, and reopen the originating run.
 - **Settings:** read-only capabilities, safe defaults, and whether provider
   credentials are configured.
 - **Locales:** `en`, `zh-CN`, and `ja`; UI locale and report output language

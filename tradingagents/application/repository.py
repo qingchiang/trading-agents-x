@@ -1034,6 +1034,14 @@ class RunRepository:
                 )
             )
         if q and (query := q.strip().casefold()):
+            decision_fields = (
+                "$.rating",
+                "$.thesis",
+                "$.catalysts",
+                "$.risks",
+                "$.invalidation_conditions",
+                "$.time_horizon",
+            )
             stmt = stmt.where(
                 or_(
                     func.lower(DecisionRecord.run_id).contains(
@@ -1050,17 +1058,20 @@ class RunRepository:
                         query,
                         autoescape=True,
                     ),
-                    func.lower(
-                        func.coalesce(
-                            func.json_extract(
-                                DecisionRecord.decision_json,
-                                "$.thesis",
-                            ),
-                            "",
+                    *(
+                        func.lower(
+                            func.coalesce(
+                                func.json_extract(
+                                    DecisionRecord.decision_json,
+                                    path,
+                                ),
+                                "",
+                            )
+                        ).contains(
+                            query,
+                            autoescape=True,
                         )
-                    ).contains(
-                        query,
-                        autoescape=True,
+                        for path in decision_fields
                     ),
                     func.lower(
                         func.coalesce(ReflectionRecord.text, "")

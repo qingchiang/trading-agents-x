@@ -238,6 +238,7 @@ function legacyArtifacts(id: string) {
 }
 
 test("runs the local research workflow across UI locales", async ({ page }) => {
+  test.setTimeout(60_000);
   let current = run("run-1", "queued");
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
@@ -462,6 +463,7 @@ test("runs the local research workflow across UI locales", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "News report" })).toBeVisible();
   await page.reload();
   await expect(page.getByRole("heading", { name: "News report" })).toBeVisible();
+  await page.getByText("Audit details").click();
   await page
     .getByRole("button", {
       name: "Open evidence ev_0123456789ab",
@@ -505,4 +507,36 @@ test("runs the local research workflow across UI locales", async ({ page }) => {
   await expect(
     page.getByText("The evidence was directionally useful."),
   ).toBeVisible();
+  await page.getByText("Decision details").click();
+  await expect(page.getByText("Demand improves")).toBeVisible();
+  await expect(page.getByText("Demand slows")).toBeVisible();
+  await page
+    .getByRole("link", { name: "Open research decision", exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/runs\/run-report\?view=decision/);
+  await expect(page.getByText("Evidence is balanced.")).toBeVisible();
+
+  await page.setViewportSize({ width: 1080, height: 1920 });
+  await page.goto("/runs/run-report?view=reports&report=market");
+  const reportMaxHeight = await page
+    .locator(".report-panel > .markdown")
+    .evaluate((element) =>
+      Number.parseFloat(getComputedStyle(element).maxHeight),
+    );
+  expect(reportMaxHeight).toBeGreaterThan(660);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/memory");
+  const shell = page.locator(".app-shell");
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  await expect(shell).toHaveClass(/sidebar-open/);
+  await page.locator(".sidebar-backdrop").click({ position: { x: 380, y: 20 } });
+  await expect(shell).not.toHaveClass(/sidebar-open/);
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  await page.getByRole("link", { name: "Settings" }).click();
+  await expect(page).toHaveURL(/\/settings$/);
+  await expect(shell).not.toHaveClass(/sidebar-open/);
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  await page.keyboard.press("Escape");
+  await expect(shell).not.toHaveClass(/sidebar-open/);
 });

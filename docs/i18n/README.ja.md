@@ -30,8 +30,8 @@ invalidation conditions、time horizon が含まれます。ポジション比�
   provider/model、reasoning、レポート言語。
 - **Run Detail:** 永続イベントタイムライン、レポート、構造化 decision、
   折りたたみ可能な監査詳細、token/tool/wall-time 指標、cancel/retry/rerun/export。
-- **Memory:** ticker、市場、pending/resolved で decision、outcome、
-  reflection を検索。
+- **Memory:** 完全な decision、outcome、reflection を検索し、catalyst、
+  risk、invalidation を展開して元の run の判断へ戻る。
 - **Settings:** provider/model capability、安全なデフォルト値、API key の
   設定有無を読み取り専用で表示。
 
