@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 from tradingagents.application.database import create_sqlite_engine
 from tradingagents.persistence import upgrade_database
@@ -19,7 +19,35 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
             revision = connection.scalar(
                 text("SELECT version_num FROM alembic_version")
             )
+        inspector = inspect(engine)
+        artifact_columns = {
+            column["name"] for column in inspector.get_columns("run_artifacts")
+        }
+        artifact_uniques = {
+            tuple(constraint["column_names"])
+            for constraint in inspector.get_unique_constraints("run_artifacts")
+        }
     finally:
         engine.dispose()
 
-    assert revision == "0001_application_core"
+    assert revision == "0002_research_artifacts"
+    assert {
+        "id",
+        "run_id",
+        "attempt",
+        "stage",
+        "role",
+        "round",
+        "schema_version",
+        "content_type",
+        "content_json",
+        "content_hash",
+        "created_at",
+    } == artifact_columns
+    assert (
+        "run_id",
+        "stage",
+        "role",
+        "round",
+        "content_hash",
+    ) in artifact_uniques

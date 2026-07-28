@@ -113,6 +113,41 @@ class RunEventRecord(Base):
     )
 
 
+class RunArtifactRecord(Base):
+    __tablename__ = "run_artifacts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    run_id: Mapped[str] = mapped_column(
+        ForeignKey("runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False)
+    stage: Mapped[str] = mapped_column(String(80), nullable=False)
+    role: Mapped[str] = mapped_column(String(80), nullable=False)
+    round: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    schema_version: Mapped[str] = mapped_column(String(20), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    content_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "stage",
+            "role",
+            "round",
+            "content_hash",
+            name="uq_run_artifact_identity",
+        ),
+        Index(
+            "ix_run_artifacts_order",
+            "run_id",
+            "attempt",
+            "created_at",
+        ),
+    )
+
+
 class ReportRecord(Base):
     __tablename__ = "reports"
 

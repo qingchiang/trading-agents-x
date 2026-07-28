@@ -11,6 +11,7 @@ from tradingagents.application.contracts import (
     EvidenceItem,
     EvidenceQuality,
     PerspectiveReview,
+    ResearchArtifactDraft,
     ResearchDecision,
     ResearchRating,
     RunProfile,
@@ -91,6 +92,7 @@ def _context(
     app_settings,
     profile: RunProfile,
     analysts=("market", "news"),
+    artifact_writer=None,
 ) -> RunContext:
     request = AnalysisRequest(
         ticker="NVDA",
@@ -107,6 +109,7 @@ def _context(
         past_context="",
         instrument_context="The instrument is NVDA.",
         cancel_requested=lambda: False,
+        **({"artifact_writer": artifact_writer} if artifact_writer else {}),
     )
 
 
@@ -187,6 +190,57 @@ def test_profiles_share_contract_but_use_distinct_topologies(
     assert execution.decision.rating is ResearchRating.HOLD
     valid_refs = {item.ref for item in execution.evidence.items}
     assert set(execution.decision.evidence_refs) <= valid_refs
+
+
+def test_graph_emits_only_typed_visible_research_artifacts(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _AnalystSubgraph(analyst)
+            for analyst in self.selected_analysts
+        },
+    )
+    llm = _FakeLLM()
+    artifacts: list[ResearchArtifactDraft] = []
+    graph = ResearchGraph(
+        quick_llm=llm,
+        deep_llm=llm,
+        profile=RunProfile.STANDARD,
+        selected_analysts=("market", "news"),
+    )
+
+    graph.execute(
+        _context(
+            app_settings,
+            RunProfile.STANDARD,
+            artifact_writer=artifacts.append,
+        ),
+        checkpoint_thread_id="typed-artifacts",
+    )
+
+    assert {(artifact.stage, artifact.role) for artifact in artifacts} == {
+        ("analyst", "market"),
+        ("analyst", "news"),
+        ("perspective", "bull"),
+        ("perspective", "bear"),
+        ("judge", "research_judge"),
+        ("risk", "risk"),
+        ("decision", "final_committee"),
+    }
+    assert all(
+        artifact.content_type
+        in {
+            "analyst_report",
+            "perspective_review",
+            "research_decision",
+        }
+        for artifact in artifacts
+    )
+    assert all("messages" not in artifact.content.model_fields for artifact in artifacts)
 
 
 def test_deep_debate_stops_when_rebuttals_add_no_new_information(

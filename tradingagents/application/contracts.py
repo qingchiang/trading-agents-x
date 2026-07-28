@@ -309,6 +309,76 @@ class ResearchDecision(FrozenModel):
     time_horizon: str
 
 
+ResearchArtifactContent = AnalystReport | PerspectiveReview | ResearchDecision
+
+
+def _artifact_content_type(content: ResearchArtifactContent) -> str:
+    if isinstance(content, AnalystReport):
+        return "analyst_report"
+    if isinstance(content, PerspectiveReview):
+        return "perspective_review"
+    return "research_decision"
+
+
+class ResearchArtifactDraft(FrozenModel):
+    """Typed graph output awaiting application-owned persistence metadata."""
+
+    node: str = Field(min_length=1, max_length=160)
+    stage: str = Field(
+        min_length=1,
+        max_length=80,
+        pattern=r"^[a-z][a-z0-9_.-]*$",
+    )
+    role: str = Field(
+        min_length=1,
+        max_length=80,
+        pattern=r"^[a-z][a-z0-9_.-]*$",
+    )
+    round: int = Field(default=0, ge=0)
+    schema_version: Literal["1"] = "1"
+    content: ResearchArtifactContent
+
+    @property
+    def content_type(self) -> str:
+        return _artifact_content_type(self.content)
+
+    @property
+    def content_hash(self) -> str:
+        canonical = json.dumps(
+            self.content.model_dump(mode="json"),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+class ResearchArtifact(FrozenModel):
+    """Durable, typed output from one visible research stage."""
+
+    id: str = Field(min_length=1, max_length=64)
+    run_id: str = Field(min_length=1, max_length=64)
+    attempt: int = Field(ge=1)
+    stage: str = Field(
+        min_length=1,
+        max_length=80,
+        pattern=r"^[a-z][a-z0-9_.-]*$",
+    )
+    role: str = Field(
+        min_length=1,
+        max_length=80,
+        pattern=r"^[a-z][a-z0-9_.-]*$",
+    )
+    round: int = Field(default=0, ge=0)
+    schema_version: Literal["1"] = "1"
+    content: ResearchArtifactContent
+    created_at: datetime
+
+    @property
+    def content_type(self) -> str:
+        return _artifact_content_type(self.content)
+
+
 class RunMetrics(FrozenModel):
     llm_calls: int = Field(default=0, ge=0)
     tool_calls: int = Field(default=0, ge=0)

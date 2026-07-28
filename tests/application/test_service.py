@@ -16,6 +16,7 @@ from tradingagents.application.contracts import (
     AnalystReport,
     EvidenceBundle,
     EvidenceItem,
+    ResearchArtifactDraft,
     ResearchDecision,
     ResearchRating,
     RunStatus,
@@ -92,6 +93,23 @@ class _Graph:
         if self.error is not None:
             raise self.error
         return _execution(context.request.ticker)
+
+
+class _ArtifactGraph:
+    def __init__(self, **_kwargs):
+        pass
+
+    def execute(self, context, **_kwargs):
+        execution = _execution(context.request.ticker)
+        context.artifact_writer(
+            ResearchArtifactDraft(
+                node="analyst.market",
+                stage="analyst",
+                role="market",
+                content=execution.reports["market"],
+            )
+        )
+        return execution
 
 
 class _CheckpointState(TypedDict):
@@ -252,6 +270,89 @@ def test_service_persists_events_before_callback_and_result(
     assert events[0].event_type == "run.queued"
     assert events[-1].event_type == "run.succeeded"
     assert events[2].payload["api_key"] == "[REDACTED]"
+
+
+def test_service_commits_artifact_and_event_before_callback(
+    app_settings,
+    repository,
+) -> None:
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_ArtifactGraph,
+        identity_resolver=lambda ticker, _date: {"company_name": ticker},
+    )
+    observed = []
+
+    def callback(event):
+        if event.event_type != "artifact.created":
+            return
+        artifacts = repository.list_artifacts(event.run_id)
+        assert [artifact.id for artifact in artifacts] == [
+            event.payload["artifact_id"]
+        ]
+        persisted = repository.list_events(
+            event.run_id,
+            after_sequence=event.sequence - 1,
+        )
+        assert persisted[0] == event
+        observed.append(event)
+
+    result = service.run(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        ),
+        on_event=callback,
+    )
+
+    assert result.status is RunStatus.SUCCEEDED
+    assert len(observed) == 1
+    assert set(observed[0].payload) == {
+        "artifact_id",
+        "attempt",
+        "stage",
+        "role",
+        "round",
+        "schema_version",
+        "content_type",
+    }
+
+
+def test_artifact_persistence_failure_fails_attempt_and_retains_checkpoint(
+    app_settings,
+    repository,
+    monkeypatch,
+) -> None:
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_ArtifactGraph,
+        identity_resolver=lambda ticker, _date: {"company_name": ticker},
+    )
+    queued = service.enqueue(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+    claimed = repository.claim_run(queued.id, "worker", 30)
+    checkpoint = repository.checkpoint_thread(queued.id)
+
+    def fail_write(*_args, **_kwargs):
+        raise OSError("artifact database unavailable")
+
+    monkeypatch.setattr(repository, "append_artifact", fail_write)
+
+    with pytest.raises(OSError, match="artifact database unavailable"):
+        service.execute_claimed(claimed, worker_id="worker")
+
+    assert repository.get_run(queued.id).status is RunStatus.FAILED
+    assert repository.checkpoint_thread(queued.id) == checkpoint
 
 
 def test_concurrent_runs_do_not_cross_provider_configuration(

@@ -16,6 +16,7 @@ from tradingagents.application.contracts import (
     AnalystReport,
     EvidenceBundle,
     EvidenceItem,
+    ResearchArtifactDraft,
     ResearchDecision,
     ResearchRating,
     RunStatus,
@@ -148,6 +149,70 @@ def test_events_are_monotonic_replayable_and_redacted(
     stored = repository.list_events(run.id)[0].payload
     assert stored["api_key"] == "[REDACTED]"
     assert "private" not in stored["message"]
+
+
+def test_artifacts_are_typed_retained_and_idempotent_across_retries(
+    repository: RunRepository,
+    app_settings: AppSettings,
+) -> None:
+    run, _ = _create(repository, app_settings)
+    repository.claim_run(run.id, "worker-1", 30)
+    report = AnalystReport(
+        analyst="market",
+        summary="Fixture summary.",
+        confidence=0.8,
+        narrative="Fixture narrative must not enter event payloads.",
+    )
+    draft = ResearchArtifactDraft(
+        node="analyst.market",
+        stage="analyst",
+        role="market",
+        content=report,
+    )
+
+    first, first_event = repository.append_artifact(run.id, draft)
+    duplicate, duplicate_event = repository.append_artifact(run.id, draft)
+    repository.fail(run.id, RuntimeError("retry fixture"))
+    repository.retry(run.id)
+    repository.claim_run(run.id, "worker-2", 30)
+    retried, retried_event = repository.append_artifact(run.id, draft)
+    changed, changed_event = repository.append_artifact(
+        run.id,
+        draft.model_copy(
+            update={
+                "content": report.model_copy(
+                    update={"summary": "Recomputed summary."}
+                )
+            }
+        ),
+    )
+
+    assert first == duplicate == retried
+    assert first.attempt == 1
+    assert duplicate_event is None
+    assert retried_event is None
+    assert changed.attempt == 2
+    assert first_event is not None
+    assert changed_event is not None
+    assert [artifact.id for artifact in repository.list_artifacts(run.id)] == [
+        first.id,
+        changed.id,
+    ]
+    events = repository.list_events(run.id)
+    assert [event.event_type for event in events] == [
+        "artifact.created",
+        "artifact.created",
+    ]
+    assert events[0].payload == {
+        "artifact_id": first.id,
+        "attempt": 1,
+        "stage": "analyst",
+        "role": "market",
+        "round": 0,
+        "schema_version": "1",
+        "content_type": "analyst_report",
+    }
+    assert "Fixture narrative" not in str(events[0].payload)
 
 
 def test_complete_persists_result_and_resolved_memory(

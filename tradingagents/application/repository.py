@@ -22,6 +22,9 @@ from .contracts import (
     AnalysisResult,
     AnalystReport,
     EvidenceBundle,
+    PerspectiveReview,
+    ResearchArtifact,
+    ResearchArtifactDraft,
     ResearchDecision,
     RunEvent,
     RunMetrics,
@@ -35,6 +38,7 @@ from .database import (
     OutcomeRecord,
     ReflectionRecord,
     ReportRecord,
+    RunArtifactRecord,
     RunAttemptRecord,
     RunEventRecord,
     RunRecord,
@@ -470,6 +474,132 @@ class RunRepository:
             for record in records
         ]
 
+    def append_artifact(
+        self,
+        run_id: str,
+        draft: ResearchArtifactDraft,
+    ) -> tuple[ResearchArtifact, RunEvent | None]:
+        """Persist one artifact and its metadata event in one transaction.
+
+        A replay that emits the same stage output returns the existing artifact
+        without creating another event, including when the replay is a later
+        retry attempt.
+        """
+        now = _utc_naive()
+        table = RunArtifactRecord.__table__
+        with self.engine.connect() as connection:
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+            run_row = connection.execute(
+                select(
+                    RunRecord.current_attempt,
+                    RunRecord.status,
+                ).where(RunRecord.id == run_id)
+            ).first()
+            if run_row is None:
+                connection.rollback()
+                raise RunNotFoundError(run_id)
+            if run_row.status != RunStatus.RUNNING.value:
+                connection.rollback()
+                raise InvalidRunTransitionError(run_row.status)
+            existing = (
+                connection.execute(
+                    select(table).where(
+                        table.c.run_id == run_id,
+                        table.c.stage == draft.stage,
+                        table.c.role == draft.role,
+                        table.c.round == draft.round,
+                        table.c.content_hash == draft.content_hash,
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            if existing is not None:
+                connection.commit()
+                return self._artifact(existing), None
+
+            artifact_id = str(uuid4())
+            attempt = run_row.current_attempt
+            connection.execute(
+                table.insert().values(
+                    id=artifact_id,
+                    run_id=run_id,
+                    attempt=attempt,
+                    stage=draft.stage,
+                    role=draft.role,
+                    round=draft.round,
+                    schema_version=draft.schema_version,
+                    content_type=draft.content_type,
+                    content_json=draft.content.model_dump(mode="json"),
+                    content_hash=draft.content_hash,
+                    created_at=now,
+                )
+            )
+            sequence = connection.execute(
+                select(func.coalesce(func.max(RunEventRecord.sequence), 0) + 1)
+                .where(RunEventRecord.run_id == run_id)
+            ).scalar_one()
+            payload = {
+                "artifact_id": artifact_id,
+                "attempt": attempt,
+                "stage": draft.stage,
+                "role": draft.role,
+                "round": draft.round,
+                "schema_version": draft.schema_version,
+                "content_type": draft.content_type,
+            }
+            connection.execute(
+                RunEventRecord.__table__.insert().values(
+                    run_id=run_id,
+                    sequence=sequence,
+                    attempt=attempt,
+                    event_type="artifact.created",
+                    node=draft.node,
+                    payload_json=payload,
+                    created_at=now,
+                )
+            )
+            connection.commit()
+
+        artifact = ResearchArtifact(
+            id=artifact_id,
+            run_id=run_id,
+            attempt=attempt,
+            stage=draft.stage,
+            role=draft.role,
+            round=draft.round,
+            schema_version=draft.schema_version,
+            content=draft.content,
+            created_at=_aware(now),
+        )
+        event = RunEvent(
+            run_id=run_id,
+            sequence=sequence,
+            attempt=attempt,
+            event_type="artifact.created",
+            node=draft.node,
+            payload=payload,
+            created_at=_aware(now),
+        )
+        return artifact, event
+
+    def list_artifacts(
+        self,
+        run_id: str,
+        *,
+        attempt: int | None = None,
+    ) -> list[ResearchArtifact]:
+        table = RunArtifactRecord.__table__
+        stmt = select(table).where(table.c.run_id == run_id)
+        if attempt is not None:
+            stmt = stmt.where(table.c.attempt == attempt)
+        stmt = stmt.order_by(table.c.created_at, table.c.id)
+        with self.engine.connect() as connection:
+            records = list(connection.execute(stmt).mappings())
+        if not records and not self._run_exists(run_id):
+            raise RunNotFoundError(run_id)
+        return [self._artifact(record) for record in records]
+
     def complete(
         self,
         run_id: str,
@@ -627,6 +757,39 @@ class RunRepository:
             decision=decision,
             metrics=view.metrics,
             warnings=warnings,
+        )
+
+    def _run_exists(self, run_id: str) -> bool:
+        with self.engine.connect() as connection:
+            return (
+                connection.execute(
+                    select(RunRecord.id).where(RunRecord.id == run_id)
+                ).first()
+                is not None
+            )
+
+    @staticmethod
+    def _artifact(record: Any) -> ResearchArtifact:
+        content_models = {
+            "analyst_report": AnalystReport,
+            "perspective_review": PerspectiveReview,
+            "research_decision": ResearchDecision,
+        }
+        model = content_models.get(record["content_type"])
+        if model is None:
+            raise ValueError(
+                f"unsupported research artifact type: {record['content_type']}"
+            )
+        return ResearchArtifact(
+            id=record["id"],
+            run_id=record["run_id"],
+            attempt=record["attempt"],
+            stage=record["stage"],
+            role=record["role"],
+            round=record["round"],
+            schema_version=record["schema_version"],
+            content=model.model_validate(record["content_json"]),
+            created_at=_aware(record["created_at"]),
         )
 
     def pending_outcomes(self, limit: int = 20) -> list[dict[str, Any]]:

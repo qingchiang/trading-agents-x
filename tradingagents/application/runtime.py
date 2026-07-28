@@ -6,8 +6,12 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from .contracts import AnalysisRequest
+from .contracts import AnalysisRequest, ResearchArtifactDraft
 from .settings import RunSettings
+
+
+def _discard_artifact(_artifact: ResearchArtifactDraft) -> None:
+    """Default sink used by direct graph callers without persistence."""
 
 
 @dataclass(frozen=True)
@@ -19,6 +23,7 @@ class RunContext:
     past_context: str
     instrument_context: str
     cancel_requested: Callable[[], bool]
+    artifact_writer: Callable[[ResearchArtifactDraft], None] = _discard_artifact
 
 
 class RunCancelled(RuntimeError):

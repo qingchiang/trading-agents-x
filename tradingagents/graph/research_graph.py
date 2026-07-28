@@ -55,6 +55,8 @@ from tradingagents.application.contracts import (
     EvidenceItem,
     EvidenceQuality,
     PerspectiveReview,
+    ResearchArtifactContent,
+    ResearchArtifactDraft,
     ResearchDecision,
     ResearchRating,
     ResearchWarning,
@@ -438,6 +440,13 @@ class ResearchGraph:
             )
             typed = _adapt_analyst_report(analyst, narrative, evidence)
             check_cancelled(context)
+            self._write_artifact(
+                runtime,
+                node=node_name,
+                stage="analyst",
+                role=analyst,
+                content=typed,
+            )
             self._finish_node(
                 runtime,
                 node_name,
@@ -539,6 +548,18 @@ class ResearchGraph:
                 ),
             )
             review = _invoke_review(llm, spec, prompt, state)
+            self._write_artifact(
+                runtime,
+                node=node,
+                stage="rebuttal" if rebuttal else "perspective",
+                role=spec.key,
+                round=(
+                    int(state.get("rebuttal_round", 0))
+                    if rebuttal
+                    else 0
+                ),
+                content=review,
+            )
             self._finish_node(
                 runtime,
                 node,
@@ -607,6 +628,13 @@ class ResearchGraph:
             ),
         )
         decision = _invoke_decision(self.deep_llm, prompt, state)
+        self._write_artifact(
+            runtime,
+            node=node,
+            stage="judge",
+            role="research_judge",
+            content=decision,
+        )
         self._finish_node(
             runtime,
             node,
@@ -646,6 +674,13 @@ class ResearchGraph:
                 spec,
                 prompt,
                 state,
+            )
+            self._write_artifact(
+                runtime,
+                node=node,
+                stage="risk",
+                role=spec.key,
+                content=review,
             )
             self._finish_node(
                 runtime,
@@ -698,6 +733,13 @@ class ResearchGraph:
                 extra=extra,
             )
             decision = _invoke_decision(self.deep_llm, prompt, state)
+            self._write_artifact(
+                runtime,
+                node=node,
+                stage="decision",
+                role="final_committee",
+                content=decision,
+            )
             self._finish_node(
                 runtime,
                 node,
@@ -709,6 +751,26 @@ class ResearchGraph:
             return {"final_decision": decision.model_dump(mode="json")}
 
         return final_node
+
+    @staticmethod
+    def _write_artifact(
+        runtime: Runtime[RunContext],
+        *,
+        node: str,
+        stage: str,
+        role: str,
+        content: ResearchArtifactContent,
+        round: int = 0,
+    ) -> None:
+        runtime.context.artifact_writer(
+            ResearchArtifactDraft(
+                node=node,
+                stage=stage,
+                role=role,
+                round=round,
+                content=content,
+            )
+        )
 
     def _start_node(
         self,

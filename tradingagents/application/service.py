@@ -29,6 +29,7 @@ from tradingagents.persistence import upgrade_database
 from .contracts import (
     AnalysisRequest,
     AnalysisResult,
+    ResearchArtifactDraft,
     RunEvent,
     RunStatus,
 )
@@ -166,6 +167,11 @@ class AnalysisService:
                     instrument_context=instrument_context,
                     cancel_requested=lambda: self.repository.cancel_requested(
                         run.id
+                    ),
+                    artifact_writer=lambda artifact: self._persist_artifact(
+                        run.id,
+                        artifact,
+                        on_event,
                     ),
                 )
                 with SqliteSaver.from_conn_string(
@@ -357,6 +363,16 @@ class AnalysisService:
             payload=dict(raw.get("payload") or {}),
             on_event=on_event,
         )
+
+    def _persist_artifact(
+        self,
+        run_id: str,
+        draft: ResearchArtifactDraft,
+        on_event: EventHandler | None,
+    ) -> None:
+        _, event = self.repository.append_artifact(run_id, draft)
+        if event is not None and on_event is not None:
+            on_event(event)
 
     def _emit(
         self,
