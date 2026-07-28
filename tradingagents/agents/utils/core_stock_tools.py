@@ -1,9 +1,12 @@
 from typing import Annotated
 
 from langchain_core.tools import tool
-from langgraph.prebuilt import InjectedState, ToolRuntime
+from langgraph.prebuilt import InjectedState
 
-from tradingagents.agents.utils.runtime import tool_runtime_scope
+from tradingagents.agents.utils.runtime import (
+    AnalysisToolRuntime,
+    tool_runtime_scope,
+)
 from tradingagents.dataflows.interface import route_to_vendor
 
 
@@ -31,7 +34,7 @@ def get_stock_data_for_analysis(
     symbol: Annotated[str, "ticker symbol of the company"],
     start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
     end_date: Annotated[str, InjectedState("trade_date")],
-    runtime: ToolRuntime,
+    runtime: AnalysisToolRuntime,
 ) -> str:
     """Retrieve OHLCV ending at the workflow's immutable analysis date."""
     with tool_runtime_scope(runtime, end_date) as cutoff:

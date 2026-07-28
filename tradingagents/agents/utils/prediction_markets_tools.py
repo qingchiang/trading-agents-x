@@ -2,9 +2,12 @@ from datetime import datetime, timezone
 from typing import Annotated
 
 from langchain_core.tools import tool
-from langgraph.prebuilt import InjectedState, ToolRuntime
+from langgraph.prebuilt import InjectedState
 
-from tradingagents.agents.utils.runtime import tool_runtime_scope
+from tradingagents.agents.utils.runtime import (
+    AnalysisToolRuntime,
+    tool_runtime_scope,
+)
 from tradingagents.dataflows.interface import route_to_vendor
 from tradingagents.dataflows.lookahead import is_live
 from tradingagents.provenance import ProvenanceRecord, attach_provenance
@@ -43,7 +46,7 @@ def get_prediction_markets_for_analysis(
         "Event topic/keyword, e.g. 'Fed rate cut' or 'recession 2026'.",
     ],
     curr_date: Annotated[str, InjectedState("trade_date")],
-    runtime: ToolRuntime,
+    runtime: AnalysisToolRuntime,
     limit: Annotated[int | None, "Max markets to return; omit for 6"] = None,
 ) -> str:
     """Retrieve a live prediction-market snapshot only for near-live analysis."""

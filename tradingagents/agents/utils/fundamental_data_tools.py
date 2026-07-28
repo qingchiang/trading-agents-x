@@ -1,9 +1,12 @@
 from typing import Annotated
 
 from langchain_core.tools import tool
-from langgraph.prebuilt import InjectedState, ToolRuntime
+from langgraph.prebuilt import InjectedState
 
-from tradingagents.agents.utils.runtime import tool_runtime_scope
+from tradingagents.agents.utils.runtime import (
+    AnalysisToolRuntime,
+    tool_runtime_scope,
+)
 from tradingagents.dataflows.interface import route_to_vendor
 
 
@@ -89,7 +92,7 @@ def get_income_statement(
 def get_fundamentals_for_analysis(
     ticker: Annotated[str, "ticker symbol"],
     curr_date: Annotated[str, InjectedState("trade_date")],
-    runtime: ToolRuntime,
+    runtime: AnalysisToolRuntime,
 ) -> str:
     """Retrieve fundamentals using the workflow's immutable analysis date."""
     with tool_runtime_scope(runtime, curr_date) as cutoff:
@@ -102,7 +105,7 @@ def get_fundamentals_for_analysis(
 def get_balance_sheet_for_analysis(
     ticker: Annotated[str, "ticker symbol"],
     curr_date: Annotated[str, InjectedState("trade_date")],
-    runtime: ToolRuntime,
+    runtime: AnalysisToolRuntime,
     freq: Annotated[str, "reporting frequency: annual/quarterly"] = "quarterly",
 ) -> str:
     """Retrieve a balance sheet using the workflow's immutable analysis date."""
@@ -116,7 +119,7 @@ def get_balance_sheet_for_analysis(
 def get_cashflow_for_analysis(
     ticker: Annotated[str, "ticker symbol"],
     curr_date: Annotated[str, InjectedState("trade_date")],
-    runtime: ToolRuntime,
+    runtime: AnalysisToolRuntime,
     freq: Annotated[str, "reporting frequency: annual/quarterly"] = "quarterly",
 ) -> str:
     """Retrieve cash flow using the workflow's immutable analysis date."""
@@ -130,7 +133,7 @@ def get_cashflow_for_analysis(
 def get_income_statement_for_analysis(
     ticker: Annotated[str, "ticker symbol"],
     curr_date: Annotated[str, InjectedState("trade_date")],
-    runtime: ToolRuntime,
+    runtime: AnalysisToolRuntime,
     freq: Annotated[str, "reporting frequency: annual/quarterly"] = "quarterly",
 ) -> str:
     """Retrieve an income statement using the workflow's immutable analysis date."""

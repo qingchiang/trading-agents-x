@@ -1,9 +1,12 @@
 from typing import Annotated, Literal
 
 from langchain_core.tools import tool
-from langgraph.prebuilt import InjectedState, ToolRuntime
+from langgraph.prebuilt import InjectedState
 
-from tradingagents.agents.utils.runtime import tool_runtime_scope
+from tradingagents.agents.utils.runtime import (
+    AnalysisToolRuntime,
+    tool_runtime_scope,
+)
 from tradingagents.dataflows.config import get_config
 from tradingagents.dataflows.interface import route_to_vendor
 from tradingagents.dataflows.lookahead import lookback_start_date
@@ -39,7 +42,7 @@ def get_news(
 def get_news_for_analysis(
     ticker: Annotated[str, "Ticker symbol"],
     end_date: Annotated[str, InjectedState("trade_date")],
-    runtime: ToolRuntime,
+    runtime: AnalysisToolRuntime,
     window: Annotated[
         Literal["recent", "extended"],
         "Use 'recent' first; use 'extended' only to investigate an older catalyst",
@@ -91,7 +94,7 @@ def get_global_news(
 @tool("get_global_news")
 def get_global_news_for_analysis(
     curr_date: Annotated[str, InjectedState("trade_date")],
-    runtime: ToolRuntime,
+    runtime: AnalysisToolRuntime,
     look_back_days: Annotated[
         int | None, "Days to look back; omit to use the configured default"
     ] = None,

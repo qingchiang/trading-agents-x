@@ -7,12 +7,16 @@ from contextlib import contextmanager, nullcontext
 
 from langgraph.prebuilt import ToolRuntime
 
+from tradingagents.agents.utils.agent_states import AgentState
+from tradingagents.application.runtime import RunContext
 from tradingagents.dataflows.config import use_config
+
+AnalysisToolRuntime = ToolRuntime[RunContext, AgentState]
 
 
 @contextmanager
 def tool_runtime_scope(
-    runtime: ToolRuntime,
+    runtime: AnalysisToolRuntime,
     injected_date: str,
 ) -> Iterator[str]:
     """Validate the state-injected cutoff and bind this tool's run config."""

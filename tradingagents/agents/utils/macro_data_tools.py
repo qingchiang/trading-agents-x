@@ -1,9 +1,12 @@
 from typing import Annotated
 
 from langchain_core.tools import tool
-from langgraph.prebuilt import InjectedState, ToolRuntime
+from langgraph.prebuilt import InjectedState
 
-from tradingagents.agents.utils.runtime import tool_runtime_scope
+from tradingagents.agents.utils.runtime import (
+    AnalysisToolRuntime,
+    tool_runtime_scope,
+)
 from tradingagents.dataflows.interface import route_to_vendor
 
 
@@ -47,7 +50,7 @@ def get_macro_indicators_for_analysis(
         "Macro indicator alias or raw FRED series ID.",
     ],
     curr_date: Annotated[str, InjectedState("trade_date")],
-    runtime: ToolRuntime,
+    runtime: AnalysisToolRuntime,
     look_back_days: Annotated[
         int | None, "Trailing window length in days; omit for a 1-year window"
     ] = None,

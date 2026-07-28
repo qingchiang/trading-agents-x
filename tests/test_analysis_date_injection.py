@@ -1,5 +1,6 @@
 """Graph tools must use AgentState.trade_date instead of model-supplied dates."""
 
+import warnings
 from typing import TypedDict
 from unittest import mock
 
@@ -27,6 +28,8 @@ from tradingagents.agents.utils.prediction_markets_tools import (
 from tradingagents.agents.utils.technical_indicators_tools import (
     get_indicators_for_analysis,
 )
+from tradingagents.application.contracts import AnalysisRequest, MemoryContext
+from tradingagents.application.runtime import RunContext
 from tradingagents.provenance import extract_provenance, strip_provenance_markers
 
 
@@ -35,8 +38,11 @@ class _ToolState(TypedDict):
     trade_date: str
 
 
-def _invoke_tool(tool, args, trade_date="2020-01-15"):
-    workflow = StateGraph(_ToolState)
+def _invoke_tool(tool, args, trade_date="2020-01-15", context=None):
+    workflow = StateGraph(
+        _ToolState,
+        **({"context_schema": RunContext} if context is not None else {}),
+    )
     workflow.add_node("tools", ToolNode([tool]))
     workflow.add_edge(START, "tools")
     workflow.add_edge("tools", END)
@@ -57,7 +63,8 @@ def _invoke_tool(tool, args, trade_date="2020-01-15"):
                     ],
                 )
             ],
-        }
+        },
+        **({"context": context} if context is not None else {}),
     )
 
 
@@ -100,6 +107,57 @@ def test_market_tool_node_injects_trade_date_as_end_date():
         _provenance=True,
     )
     assert result["messages"][0].content == "SAFE"
+
+
+@pytest.mark.unit
+def test_tool_node_accepts_typed_run_context_without_serialization_warning(
+    app_settings,
+):
+    request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date="2020-01-15",
+    )
+    settings = app_settings.resolve_run(request)
+    context = RunContext(
+        run_id="typed-tool-runtime",
+        request=request,
+        settings=settings,
+        dataflow_config=settings.dataflow_config(app_settings),
+        memory=MemoryContext(
+            instrument="NVDA",
+            market="America/New_York",
+        ),
+        instrument_context="The instrument is NVDA.",
+        cancel_requested=lambda: False,
+    )
+
+    with (
+        mock.patch(
+            "tradingagents.agents.utils.core_stock_tools.route_to_vendor",
+            return_value="SAFE",
+        ) as router,
+        warnings.catch_warnings(record=True) as caught,
+    ):
+        warnings.simplefilter("always")
+        result = _invoke_tool(
+            get_stock_data_for_analysis,
+            {"symbol": "NVDA", "start_date": "2019-12-01"},
+            context=context,
+        )
+
+    router.assert_called_once_with(
+        "get_stock_data",
+        "NVDA",
+        "2019-12-01",
+        "2020-01-15",
+        _provenance=True,
+    )
+    assert result["messages"][0].content == "SAFE"
+    assert not any(
+        "PydanticSerializationUnexpectedValue" in str(item.message)
+        or "Expected `none`" in str(item.message)
+        for item in caught
+    )
 
 
 @pytest.mark.unit
