@@ -35,12 +35,10 @@ from tradingagents.application.repository import (
 )
 from tradingagents.application.service import AnalysisService
 from tradingagents.application.settings import AppSettings
-from tradingagents.llm_clients.model_catalog import MODEL_OPTIONS
 from tradingagents.llm_clients.model_discovery import (
     ModelDiscoveryService,
     UnknownProviderError,
 )
-from tradingagents.llm_clients.reasoning_effort import model_effort_levels
 from tradingagents.version import __version__
 
 from .auth import COOKIE_NAME, SESSION_MAX_AGE, LanSessionManager
@@ -309,34 +307,9 @@ def create_app(
     )
     def capabilities():
         providers = {}
-        custom_modes = {
-            "quick": [("Custom model ID", "custom")],
-            "deep": [("Custom model ID", "custom")],
-        }
         for provider, (definition, availability) in model_discovery.providers().items():
-            modes = MODEL_OPTIONS.get(provider, custom_modes)
-            model_ids = {
-                value
-                for mode in ("quick", "deep")
-                for _label, value in modes[mode]
-            }
             providers[provider] = {
                 "label": definition.label,
-                "quick_models": [
-                    {"label": label, "value": value}
-                    for label, value in modes["quick"]
-                ],
-                "deep_models": [
-                    {"label": label, "value": value}
-                    for label, value in modes["deep"]
-                ],
-                "reasoning_efforts": {
-                    model: [
-                        "provider_default",
-                        *model_effort_levels(provider, model),
-                    ]
-                    for model in sorted(model_ids)
-                },
                 "api_key_required": definition.api_key_required,
                 "api_key_configured": availability.api_key_configured,
                 "configured": availability.configured,

@@ -4,7 +4,6 @@ import warnings
 import pytest
 
 from tradingagents.llm_clients.base_client import BaseLLMClient
-from tradingagents.llm_clients.model_catalog import get_known_models
 from tradingagents.llm_clients.validators import validate_model
 
 
@@ -23,28 +22,17 @@ class DummyLLMClient(BaseLLMClient):
 
 @pytest.mark.unit
 class ModelValidationTests(unittest.TestCase):
-    def test_cli_catalog_models_are_all_validator_approved(self):
-        for provider, models in get_known_models().items():
-            if provider in ("ollama", "openrouter"):
-                continue
-
-            for model in models:
-                with self.subTest(provider=provider, model=model):
-                    self.assertTrue(validate_model(provider, model))
-
-    def test_unknown_model_emits_warning_for_strict_provider(self):
+    def test_new_provider_models_are_accepted_without_a_package_release(self):
         client = DummyLLMClient("openai", "not-a-real-openai-model")
 
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             client.get_llm()
 
-        self.assertEqual(len(caught), 1)
-        self.assertIn("not-a-real-openai-model", str(caught[0].message))
-        self.assertIn("openai", str(caught[0].message))
+        self.assertEqual(caught, [])
 
-    def test_openrouter_and_ollama_accept_custom_models_without_warning(self):
-        for provider in ("openrouter", "ollama"):
+    def test_all_providers_accept_custom_models_without_warning(self):
+        for provider in ("openai", "anthropic", "google", "openrouter", "ollama"):
             client = DummyLLMClient(provider, "custom-model-name")
 
             with self.subTest(provider=provider):
@@ -53,3 +41,7 @@ class ModelValidationTests(unittest.TestCase):
                     client.get_llm()
 
                 self.assertEqual(caught, [])
+
+    def test_blank_provider_or_model_is_rejected(self):
+        self.assertFalse(validate_model("", "model"))
+        self.assertFalse(validate_model("openai", " "))

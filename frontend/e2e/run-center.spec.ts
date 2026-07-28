@@ -107,16 +107,16 @@ test("runs the local research workflow across UI locales", async ({ page }) => {
         json: {
           profiles: ["fast", "standard", "deep"],
           analysts: ["market", "social", "news", "fundamentals"],
-          output_languages: ["en", "zh-Hans", "ja"],
+          output_languages: ["en", "zh-CN", "ja"],
           providers: {
             openai: {
-              quick_models: [{ label: "Quick", value: "gpt-5.4-mini" }],
-              deep_models: [{ label: "Deep", value: "gpt-5.5" }],
-              reasoning_efforts: {
-                "gpt-5.4-mini": ["provider_default", "low"],
-                "gpt-5.5": ["provider_default", "high"],
-              },
+              label: "OpenAI",
+              api_key_required: true,
               api_key_configured: true,
+              configured: true,
+              selectable: true,
+              unavailable_reason: null,
+              model_discovery_supported: true,
             },
           },
           defaults: {
@@ -124,9 +124,39 @@ test("runs the local research workflow across UI locales", async ({ page }) => {
             llm_provider: "openai",
             quick_model: "gpt-5.4-mini",
             deep_model: "gpt-5.5",
-            output_language: "English",
+            quick_reasoning_effort: null,
+            deep_reasoning_effort: null,
+            output_language: "zh-CN",
+            provenance: false,
             lan_enabled: false,
           },
+        },
+      });
+    }
+    if (path === "/api/v1/providers/openai/models") {
+      return route.fulfill({
+        json: {
+          provider: "openai",
+          models: [
+            {
+              id: "gpt-5.4-mini",
+              label: "GPT quick",
+              compatibility: "supported",
+              reasoning_efforts: ["provider_default", "low"],
+              default_roles: ["quick"],
+            },
+            {
+              id: "gpt-5.5",
+              label: "GPT deep",
+              compatibility: "supported",
+              reasoning_efforts: ["provider_default", "high"],
+              default_roles: ["deep"],
+            },
+          ],
+          source: "live",
+          fetched_at: timestamp,
+          stale: false,
+          warning: null,
         },
       });
     }

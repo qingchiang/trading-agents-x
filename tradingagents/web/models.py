@@ -44,16 +44,8 @@ class QueueHealth(ApiModel):
     pending_outcomes: int
 
 
-class ModelOption(ApiModel):
-    label: str
-    value: str
-
-
 class ProviderCapabilities(ApiModel):
     label: str
-    quick_models: list[ModelOption]
-    deep_models: list[ModelOption]
-    reasoning_efforts: dict[str, list[str]]
     api_key_required: bool
     api_key_configured: bool | None
     configured: bool

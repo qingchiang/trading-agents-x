@@ -40,17 +40,20 @@ export default function Settings() {
           <div className="provider-list">
             {Object.entries(capabilities.providers).map(([name, config]) => (
               <div key={name}>
-                <strong>{name}</strong>
+                <strong>
+                  {config.label}
+                  <small>{name}</small>
+                </strong>
                 <span
                   className={
-                    config.api_key_configured === false ? "missing" : "configured"
+                    config.configured ? "configured" : "missing"
                   }
                 >
-                  {config.api_key_configured == null
-                    ? t("notRequired")
-                    : config.api_key_configured
+                  {config.configured
+                    ? config.api_key_required
                       ? t("configured")
-                      : t("missing")}
+                      : t("ready")
+                    : t("missing")}
                 </span>
               </div>
             ))}

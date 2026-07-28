@@ -143,6 +143,7 @@ async def test_capabilities_expose_effective_non_sensitive_run_defaults(
     assert payload["providers"]["openai"]["api_key_required"] is True
     assert payload["providers"]["openai"]["configured"] is True
     assert payload["providers"]["openai"]["selectable"] is True
+    assert "quick_models" not in payload["providers"]["openai"]
 
 
 @pytest.mark.anyio

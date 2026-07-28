@@ -667,25 +667,6 @@
         "title": "ModelDiscoveryWarningView",
         "type": "object"
       },
-      "ModelOption": {
-        "additionalProperties": false,
-        "properties": {
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
-          "value": {
-            "title": "Value",
-            "type": "string"
-          }
-        },
-        "required": [
-          "label",
-          "value"
-        ],
-        "title": "ModelOption",
-        "type": "object"
-      },
       "ProviderCapabilities": {
         "additionalProperties": false,
         "properties": {
@@ -708,13 +689,6 @@
             "title": "Configured",
             "type": "boolean"
           },
-          "deep_models": {
-            "items": {
-              "$ref": "#/components/schemas/ModelOption"
-            },
-            "title": "Deep Models",
-            "type": "array"
-          },
           "label": {
             "title": "Label",
             "type": "string"
@@ -722,23 +696,6 @@
           "model_discovery_supported": {
             "title": "Model Discovery Supported",
             "type": "boolean"
-          },
-          "quick_models": {
-            "items": {
-              "$ref": "#/components/schemas/ModelOption"
-            },
-            "title": "Quick Models",
-            "type": "array"
-          },
-          "reasoning_efforts": {
-            "additionalProperties": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "title": "Reasoning Efforts",
-            "type": "object"
           },
           "selectable": {
             "title": "Selectable",
@@ -758,9 +715,6 @@
         },
         "required": [
           "label",
-          "quick_models",
-          "deep_models",
-          "reasoning_efforts",
           "api_key_required",
           "api_key_configured",
           "configured",

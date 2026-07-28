@@ -6,6 +6,9 @@ export type RunDetail = components["schemas"]["RunDetail"];
 export type AnalysisResult = components["schemas"]["AnalysisResult"];
 export type RunEvent = components["schemas"]["RunEvent"];
 export type Capabilities = components["schemas"]["CapabilitiesResponse"];
+export type ProviderModelCatalog =
+  components["schemas"]["ProviderModelCatalog"];
+export type DiscoveredModel = components["schemas"]["DiscoveredModelView"];
 export type Health = components["schemas"]["HealthResponse"];
 export type MemoryEntry = components["schemas"]["MemoryEntry"];
 
@@ -47,6 +50,12 @@ export const api = {
   health: () => request<Health>("/api/v1/health"),
   capabilities: () =>
     request<Capabilities>("/api/v1/capabilities"),
+  providerModels: (provider: string, refresh = false) =>
+    request<ProviderModelCatalog>(
+      `/api/v1/providers/${encodeURIComponent(provider)}/models${
+        refresh ? "?refresh=true" : ""
+      }`,
+    ),
   runs: (query = "") => request<RunView[]>(`/api/v1/runs${query}`),
   run: (id: string) => request<RunDetail>(`/api/v1/runs/${id}`),
   createRun: (payload: AnalysisRequest, idempotencyKey: string) =>

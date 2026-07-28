@@ -652,6 +652,17 @@ label small {
   line-height: 1.4;
 }
 
+.model-catalog-note {
+  margin: 14px 0 0;
+  color: var(--muted-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.model-catalog-note.warning {
+  color: var(--amber);
+}
+
 .profile-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1298,8 +1309,17 @@ label small {
 }
 
 .provider-list strong {
+  display: grid;
+  gap: 2px;
   color: #465267;
   font-size: 14px;
+}
+
+.provider-list strong small {
+  color: var(--muted-2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .provider-list span {

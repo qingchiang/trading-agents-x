@@ -102,19 +102,12 @@ export interface components {
       code: string;
       message: string;
     };
-    ModelOption: {
-      label: string;
-      value: string;
-    };
     ProviderCapabilities: {
       api_key_configured: boolean | null;
       api_key_required: boolean;
       configured: boolean;
-      deep_models: components["schemas"]["ModelOption"][];
       label: string;
       model_discovery_supported: boolean;
-      quick_models: components["schemas"]["ModelOption"][];
-      reasoning_efforts: Record<string, string[]>;
       selectable: boolean;
       unavailable_reason?: string | null;
     };

@@ -4,15 +4,22 @@ import {
   api,
   type AnalysisRequest,
   type Capabilities,
+  type DiscoveredModel,
+  type ProviderModelCatalog,
 } from "../api/client";
 import { useNavigate } from "../router";
 
 const analystKeys = ["market", "social", "news", "fundamentals"] as const;
+const customModelValue = "__custom_model_id__";
 
 export default function NewRun() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
+  const [modelCatalog, setModelCatalog] =
+    useState<ProviderModelCatalog | null>(null);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelWarning, setModelWarning] = useState("");
   const [ticker, setTicker] = useState("");
   const [analysisDate, setAnalysisDate] = useState(today());
   const [profile, setProfile] = useState<"fast" | "standard" | "deep">(
@@ -39,41 +46,131 @@ export default function NewRun() {
       .capabilities()
       .then((data) => {
         setCapabilities(data);
+        const selectableProviders = Object.entries(data.providers).filter(
+          ([, config]) => config.selectable,
+        );
+        const nextProvider = data.providers[data.defaults.llm_provider]?.selectable
+          ? data.defaults.llm_provider
+          : (selectableProviders[0]?.[0] ?? "");
         setProfile(
           data.defaults.profile as "fast" | "standard" | "deep",
         );
-        setProvider(data.defaults.llm_provider);
-        setQuickModel(data.defaults.quick_model);
-        setDeepModel(data.defaults.deep_model);
-        setQuickReasoning(
-          data.defaults.quick_reasoning_effort ?? "provider_default",
-        );
-        setDeepReasoning(
-          data.defaults.deep_reasoning_effort ?? "provider_default",
-        );
+        setProvider(nextProvider);
+        if (nextProvider === data.defaults.llm_provider) {
+          setQuickModel(data.defaults.quick_model);
+          setDeepModel(data.defaults.deep_model);
+          setQuickReasoning(
+            data.defaults.quick_reasoning_effort ?? "provider_default",
+          );
+          setDeepReasoning(
+            data.defaults.deep_reasoning_effort ?? "provider_default",
+          );
+        } else {
+          setQuickModel("");
+          setDeepModel("");
+          setQuickReasoning("provider_default");
+          setDeepReasoning("provider_default");
+        }
         setOutputLanguage(normalizeReportLanguage(data.defaults.output_language));
         setProvenance(data.defaults.provenance);
+        if (!nextProvider) setError(t("noConfiguredProviders"));
       })
       .catch((cause) => {
         setError(cause instanceof Error ? cause.message : t("error"));
       });
   }, [t]);
 
-  const providerConfig = capabilities?.providers[provider];
+  useEffect(() => {
+    if (!capabilities || !provider) return;
+    let active = true;
+    setModelsLoading(true);
+    setModelCatalog(null);
+    setModelWarning("");
+    void api
+      .providerModels(provider)
+      .then((catalog) => {
+        if (!active) return;
+        setModelCatalog(catalog);
+        setModelWarning(catalog.warning?.message ?? "");
+        const isDefaultProvider =
+          provider === capabilities.defaults.llm_provider;
+        const selectedQuick = chooseModel(
+          catalog,
+          quickModel,
+          isDefaultProvider ? capabilities.defaults.quick_model : "",
+          "quick",
+        );
+        const selectedDeep = chooseModel(
+          catalog,
+          deepModel,
+          isDefaultProvider ? capabilities.defaults.deep_model : "",
+          "deep",
+        );
+        setQuickModel(selectedQuick);
+        setDeepModel(selectedDeep);
+        setQuickReasoning((current) =>
+          reasoningOptions(catalog, selectedQuick).includes(current)
+            ? current
+            : "provider_default",
+        );
+        setDeepReasoning((current) =>
+          reasoningOptions(catalog, selectedDeep).includes(current)
+            ? current
+            : "provider_default",
+        );
+      })
+      .catch((cause) => {
+        if (!active) return;
+        setModelWarning(
+          cause instanceof Error ? cause.message : "Model discovery failed",
+        );
+        const isDefaultProvider =
+          provider === capabilities.defaults.llm_provider;
+        setQuickModel((current) =>
+          current ||
+          (isDefaultProvider
+            ? capabilities.defaults.quick_model
+            : customModelValue),
+        );
+        setDeepModel((current) =>
+          current ||
+          (isDefaultProvider
+            ? capabilities.defaults.deep_model
+            : customModelValue),
+        );
+        setQuickReasoning("provider_default");
+        setDeepReasoning("provider_default");
+      })
+      .finally(() => {
+        if (active) setModelsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [capabilities, provider]);
+
+  const selectableProviders = useMemo(
+    () =>
+      Object.entries(capabilities?.providers ?? {}).filter(
+        ([, config]) => config.selectable,
+      ),
+    [capabilities],
+  );
   const quickOptions = useMemo(
-    () => providerConfig?.quick_models ?? [],
-    [providerConfig],
+    () => modelOptions(modelCatalog, quickModel),
+    [modelCatalog, quickModel],
   );
   const deepOptions = useMemo(
-    () => providerConfig?.deep_models ?? [],
-    [providerConfig],
+    () => modelOptions(modelCatalog, deepModel),
+    [modelCatalog, deepModel],
   );
 
   const changeProvider = (next: string) => {
     setProvider(next);
-    const config = capabilities?.providers[next];
-    setQuickModel(String(config?.quick_models?.[0]?.value ?? ""));
-    setDeepModel(String(config?.deep_models?.[0]?.value ?? ""));
+    setModelCatalog(null);
+    setModelWarning("");
+    setQuickModel("");
+    setDeepModel("");
     setQuickCustomModel("");
     setDeepCustomModel("");
     setQuickReasoning("provider_default");
@@ -95,8 +192,8 @@ export default function NewRun() {
       return;
     }
     if (
-      (quickModel === "custom" && !quickCustomModel.trim()) ||
-      (deepModel === "custom" && !deepCustomModel.trim())
+      (quickModel === customModelValue && !quickCustomModel.trim()) ||
+      (deepModel === customModelValue && !deepCustomModel.trim())
     ) {
       setError(t("customModel"));
       return;
@@ -104,9 +201,9 @@ export default function NewRun() {
     setSubmitting(true);
     setError("");
     const resolvedQuickModel =
-      quickModel === "custom" ? quickCustomModel.trim() : quickModel;
+      quickModel === customModelValue ? quickCustomModel.trim() : quickModel;
     const resolvedDeepModel =
-      deepModel === "custom" ? deepCustomModel.trim() : deepModel;
+      deepModel === customModelValue ? deepCustomModel.trim() : deepModel;
     const payload: AnalysisRequest = {
       ticker,
       analysis_date: analysisDate,
@@ -230,9 +327,9 @@ export default function NewRun() {
                   value={provider}
                   onChange={(event) => changeProvider(event.target.value)}
                 >
-                  {Object.keys(capabilities?.providers ?? {}).map((key) => (
+                  {selectableProviders.map(([key, config]) => (
                     <option key={key} value={key}>
-                      {key}
+                      {config.label}
                     </option>
                   ))}
                 </select>
@@ -247,12 +344,14 @@ export default function NewRun() {
                   }}
                 >
                   {quickOptions.map((option) => (
-                    <option key={String(option.value)} value={String(option.value)}>
-                      {String(option.label)}
+                    <option key={option.id} value={option.id}>
+                      {option.id === customModelValue
+                        ? t("customModel")
+                        : option.label}
                     </option>
                   ))}
                 </select>
-                {quickModel === "custom" && (
+                {quickModel === customModelValue && (
                   <input
                     required
                     value={quickCustomModel}
@@ -271,12 +370,14 @@ export default function NewRun() {
                   }}
                 >
                   {deepOptions.map((option) => (
-                    <option key={String(option.value)} value={String(option.value)}>
-                      {String(option.label)}
+                    <option key={option.id} value={option.id}>
+                      {option.id === customModelValue
+                        ? t("customModel")
+                        : option.label}
                     </option>
                   ))}
                 </select>
-                {deepModel === "custom" && (
+                {deepModel === customModelValue && (
                   <input
                     required
                     value={deepCustomModel}
@@ -288,22 +389,14 @@ export default function NewRun() {
               <ReasoningSelect
                 label={t("quickReasoning")}
                 value={quickReasoning}
-                options={
-                  providerConfig?.reasoning_efforts[
-                    quickModel === "custom" ? "custom" : quickModel
-                  ] ?? ["provider_default"]
-                }
+                options={reasoningOptions(modelCatalog, quickModel)}
                 onChange={setQuickReasoning}
                 providerDefault={t("providerDefault")}
               />
               <ReasoningSelect
                 label={t("deepReasoning")}
                 value={deepReasoning}
-                options={
-                  providerConfig?.reasoning_efforts[
-                    deepModel === "custom" ? "custom" : deepModel
-                  ] ?? ["provider_default"]
-                }
+                options={reasoningOptions(modelCatalog, deepModel)}
                 onChange={setDeepReasoning}
                 providerDefault={t("providerDefault")}
               />
@@ -333,13 +426,29 @@ export default function NewRun() {
                 <span>{t("provenance")}</span>
               </label>
             </div>
+            {(modelsLoading || modelWarning) && (
+              <p
+                className={`model-catalog-note ${
+                  modelWarning ? "warning" : ""
+                }`}
+              >
+                {modelsLoading ? t("discoveringModels") : modelWarning}
+              </p>
+            )}
           </div>
         </article>
         {error && <div className="alert">{error}</div>}
         <div className="form-actions">
           <button
             className="button primary large"
-            disabled={submitting || capabilities === null}
+            disabled={
+              submitting ||
+              capabilities === null ||
+              modelsLoading ||
+              !provider ||
+              !quickModel ||
+              !deepModel
+            }
           >
             {submitting ? t("loading") : t("startResearch")} →
           </button>
@@ -368,6 +477,63 @@ function normalizeReportLanguage(value: string): "en" | "zh-CN" | "ja" {
   }
   if (normalized === "ja" || normalized.startsWith("japanese")) return "ja";
   return "en";
+}
+
+type ModelRole = "quick" | "deep";
+
+function chooseModel(
+  catalog: ProviderModelCatalog,
+  current: string,
+  configuredDefault: string,
+  role: ModelRole,
+) {
+  const ids = new Set(catalog.models.map((model) => model.id));
+  if (current && current !== customModelValue && ids.has(current)) return current;
+  if (configuredDefault && ids.has(configuredDefault)) return configuredDefault;
+  return (
+    catalog.models.find((model) => model.default_roles.includes(role))?.id ??
+    catalog.models[0]?.id ??
+    customModelValue
+  );
+}
+
+function modelOptions(
+  catalog: ProviderModelCatalog | null,
+  current: string,
+): DiscoveredModel[] {
+  const options = [...(catalog?.models ?? [])];
+  if (
+    current &&
+    current !== customModelValue &&
+    !options.some((model) => model.id === current)
+  ) {
+    options.unshift({
+      id: current,
+      label: current,
+      compatibility: "unknown",
+      reasoning_efforts: ["provider_default"],
+      default_roles: [],
+    });
+  }
+  options.push({
+    id: customModelValue,
+    label: "Custom model ID",
+    compatibility: "unknown",
+    reasoning_efforts: ["provider_default"],
+    default_roles: [],
+  });
+  return options;
+}
+
+function reasoningOptions(
+  catalog: ProviderModelCatalog | null,
+  model: string,
+) {
+  if (!model || model === customModelValue) return ["provider_default"];
+  return (
+    catalog?.models.find((option) => option.id === model)?.reasoning_efforts ??
+    ["provider_default"]
+  );
 }
 
 function ReasoningSelect({

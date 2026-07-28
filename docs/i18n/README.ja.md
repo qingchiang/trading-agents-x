@@ -36,7 +36,10 @@ invalidation conditions、time horizon が含まれます。ポジション比�
   設定有無を読み取り専用で表示。
 
 UI は `ja`、`en`、`zh-CN` に対応します。UI locale とレポート出力言語は
-独立しています。Markdown は raw HTML を無効化し、表示前に sanitize します。
+独立しています。New Run は設定済み provider のみを表示し、選択時に現在の
+model catalog を取得します。取得失敗時も環境のデフォルト値と quick/deep
+それぞれの custom model ID を利用できます。Markdown は raw HTML を無効化し、
+表示前に sanitize します。
 
 ## クイックスタート
 

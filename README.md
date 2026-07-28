@@ -49,6 +49,10 @@ or portfolio rebalancing.
 - **Locales:** `en`, `zh-CN`, and `ja`; UI locale and report output language
   are independent.
 
+New Run lists only configured providers and discovers their current model
+catalog on demand. If discovery is unavailable, configured defaults and an
+independent custom model ID for each role remain usable.
+
 Markdown is rendered without raw HTML and sanitized before display.
 
 ## Quick start
