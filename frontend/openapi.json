@@ -504,8 +504,11 @@
             "type": "string"
           },
           "version": {
-            "const": "1",
-            "default": "1",
+            "default": "2",
+            "enum": [
+              "1",
+              "2"
+            ],
             "title": "Version",
             "type": "string"
           }
@@ -568,6 +571,14 @@
             "title": "Fallback",
             "type": "boolean"
           },
+          "origins": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/EvidenceOrigin"
+            },
+            "title": "Origins",
+            "type": "array"
+          },
           "provenance": {
             "additionalProperties": true,
             "title": "Provenance",
@@ -629,6 +640,80 @@
           "requested_date"
         ],
         "title": "EvidenceItem",
+        "type": "object"
+      },
+      "EvidenceOrigin": {
+        "additionalProperties": false,
+        "description": "One source record contributing to an evidence payload.",
+        "properties": {
+          "effective": {
+            "default": "unknown",
+            "minLength": 1,
+            "title": "Effective",
+            "type": "string"
+          },
+          "effective_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Date"
+          },
+          "evidence_type": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Evidence Type",
+            "type": "string"
+          },
+          "fallback": {
+            "default": false,
+            "title": "Fallback",
+            "type": "boolean"
+          },
+          "quality": {
+            "$ref": "#/components/schemas/EvidenceQuality",
+            "default": "medium"
+          },
+          "requested": {
+            "default": "unknown",
+            "minLength": 1,
+            "title": "Requested",
+            "type": "string"
+          },
+          "retrieved_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retrieved At"
+          },
+          "source": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          },
+          "timing": {
+            "default": "unknown",
+            "minLength": 1,
+            "title": "Timing",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "evidence_type"
+        ],
+        "title": "EvidenceOrigin",
         "type": "object"
       },
       "EvidenceQuality": {

@@ -53,6 +53,7 @@ from tradingagents.application.contracts import (
     ArtifactGenerationMethod,
     EvidenceBundle,
     EvidenceItem,
+    EvidenceOrigin,
     EvidenceQuality,
     MemoryContext,
     PerspectiveReview,
@@ -62,6 +63,7 @@ from tradingagents.application.contracts import (
     ResearchWarning,
     RunProfile,
 )
+from tradingagents.application.evidence import group_evidence_by_content
 from tradingagents.application.metrics import MetricsCallback
 from tradingagents.application.runtime import RunContext, check_cancelled
 from tradingagents.dataflows.config import use_config
@@ -510,6 +512,7 @@ class ResearchGraph:
             item = EvidenceItem.model_validate(raw)
             deduped[item.ref] = item
         bundle = EvidenceBundle(
+            version="2",
             instrument=state["ticker"],
             analysis_date=date.fromisoformat(state["analysis_date"]),
             items=tuple(deduped.values()),
@@ -888,6 +891,7 @@ def _collect_evidence(
     analyst: str,
 ) -> list[EvidenceItem]:
     items: dict[str, EvidenceItem] = {}
+    tool_origin_keys: set[tuple[str, ...]] = set()
     tool_messages = [
         message for message in messages if isinstance(message, ToolMessage)
     ]
@@ -907,14 +911,16 @@ def _collect_evidence(
                 )
             ]
         clean_content = strip_provenance_markers(content)
-        for record in records:
-            item = _evidence_from_record(
-                record,
-                requested_date=requested_date,
-                content=clean_content,
-            )
-            items[item.ref] = item
+        item = _evidence_from_records(
+            records,
+            requested_date=requested_date,
+            content=clean_content,
+        )
+        items[item.ref] = item
+        tool_origin_keys.update(_record_identity(record) for record in records)
     for record in _parse_provenance_table(narrative):
+        if _record_identity(record) in tool_origin_keys:
+            continue
         item = _evidence_from_record(
             record,
             requested_date=requested_date,
@@ -922,15 +928,16 @@ def _collect_evidence(
         )
         items[item.ref] = item
     if not items:
-        item = EvidenceItem.create(
-            source="unknown",
-            evidence_type=f"{analyst} analyst evidence",
+        item = _evidence_from_record(
+            ProvenanceRecord(
+                evidence=f"{analyst} analyst evidence",
+                source="unknown",
+                requested=requested_date.isoformat(),
+                effective="unknown",
+                timing="no auditable source metadata captured",
+            ),
             requested_date=requested_date,
             content=None,
-            quality=EvidenceQuality.UNAVAILABLE,
-            provenance={
-                "timing": "no auditable source metadata captured",
-            },
         )
         items[item.ref] = item
     return list(items.values())
@@ -942,14 +949,107 @@ def _evidence_from_record(
     requested_date: date,
     content: str | None,
 ) -> EvidenceItem:
+    return _evidence_from_records(
+        (record,),
+        requested_date=requested_date,
+        content=content,
+    )
+
+
+def _evidence_from_records(
+    records: Iterable[ProvenanceRecord],
+    *,
+    requested_date: date,
+    content: str | None,
+) -> EvidenceItem:
+    records = tuple(records)
+    if not records:
+        raise ValueError("at least one provenance record is required")
+    origin_pairs = tuple(
+        _origin_from_record(record, requested_date=requested_date)
+        for record in records
+    )
+    origins = tuple(origin for origin, _future in origin_pairs)
+    future_dated = any(future for _origin, future in origin_pairs)
+    valid_effective_dates = [
+        origin.effective_date
+        for origin in origins
+        if origin.effective_date is not None
+        and origin.effective_date <= requested_date
+    ]
+    effective = (
+        max(valid_effective_dates) if valid_effective_dates else None
+    )
+    all_unavailable = all(
+        origin.quality is EvidenceQuality.UNAVAILABLE for origin in origins
+    )
+    all_reliable = all(
+        origin.quality is EvidenceQuality.HIGH and not origin.fallback
+        for origin in origins
+    )
+    quality = (
+        EvidenceQuality.UNAVAILABLE
+        if all_unavailable
+        else EvidenceQuality.HIGH
+        if all_reliable
+        else EvidenceQuality.LOW
+    )
+    sources = tuple(dict.fromkeys(origin.source for origin in origins))
+    evidence_types = tuple(
+        dict.fromkeys(origin.evidence_type for origin in origins)
+    )
+    composite = len(origins) > 1
+    source = sources[0] if not composite else "composite"
+    evidence_type = (
+        evidence_types[0]
+        if len(evidence_types) == 1
+        else "composite tool response"
+    )
+    fallback = any(origin.fallback for origin in origins)
+    provenance = (
+        {
+            "requested": origins[0].requested,
+            "effective": origins[0].effective,
+            "timing": origins[0].timing,
+            "retrieved_at": origins[0].retrieved_at,
+        }
+        if not composite
+        else {
+            "composite": True,
+            "origin_count": len(origins),
+        }
+    )
+    return EvidenceItem.create(
+        source=source,
+        evidence_type=evidence_type,
+        requested_date=requested_date,
+        effective_date=effective,
+        content=None if future_dated else content,
+        quality=quality,
+        fallback=fallback,
+        origins=origins,
+        provenance=provenance,
+    )
+
+
+def _origin_from_record(
+    record: ProvenanceRecord,
+    *,
+    requested_date: date,
+) -> tuple[EvidenceOrigin, bool]:
     effective = _last_date(record.effective)
     future_dated = bool(effective and effective > requested_date)
-    if future_dated:
-        effective = None
     timing = record.timing.casefold()
     unavailable = any(
         token in timing
-        for token in ("unavailable", "failed", "not requested", "no usable data")
+        for token in (
+            "unavailable",
+            "failed",
+            "not requested",
+            "not queried",
+            "no usable data",
+            "no auditable source metadata",
+        )
     ) or future_dated
     degraded = any(
         token in timing
@@ -962,31 +1062,53 @@ def _evidence_from_record(
             "non-vintage",
         )
     )
+    successful_empty = timing.startswith("available;") and (
+        "; no " in timing or "contained no values" in timing
+    )
+    missing_effective = effective is None and not successful_empty
     quality = (
         EvidenceQuality.UNAVAILABLE
         if unavailable
         else EvidenceQuality.LOW
-        if degraded or record.source.casefold() in {"unknown", "—", ""}
+        if (
+            degraded
+            or missing_effective
+            or record.source.casefold() in {"unknown", "—", ""}
+        )
         else EvidenceQuality.HIGH
     )
-    return EvidenceItem.create(
-        source=record.source or "unknown",
-        evidence_type=record.evidence or "unknown evidence",
-        requested_date=requested_date,
-        effective_date=effective,
-        content=None if future_dated else content,
-        quality=quality,
-        fallback="fallback" in timing,
-        provenance={
-            "requested": record.requested,
-            "effective": record.effective,
-            "timing": (
-                f"{record.timing}; future-dated evidence withheld"
-                if future_dated
-                else record.timing
-            ),
-            "retrieved_at": record.retrieved_at,
-        },
+    display_timing = (
+        f"{record.timing}; future-dated evidence withheld"
+        if future_dated
+        else record.timing
+    )
+    return (
+        EvidenceOrigin(
+            source=record.source or "unknown",
+            evidence_type=record.evidence or "unknown evidence",
+            requested=record.requested or "unknown",
+            effective=record.effective or "unknown",
+            effective_date=effective,
+            timing=display_timing or "unknown",
+            retrieved_at=record.retrieved_at,
+            quality=quality,
+            fallback="fallback" in timing,
+        ),
+        future_dated,
+    )
+
+
+def _record_identity(record: ProvenanceRecord) -> tuple[str, ...]:
+    timing = record.timing.split("; retrieved ", 1)[0]
+    return tuple(
+        value.strip().casefold()
+        for value in (
+            record.evidence,
+            record.source,
+            record.requested,
+            record.effective,
+            timing,
+        )
     )
 
 
@@ -1048,10 +1170,10 @@ def _adapt_analyst_report(
             (
                 candidate
                 for candidate in evidence
-                if candidate.evidence_type.casefold() == evidence_name.casefold()
-                and (
-                    source is None
-                    or candidate.source.casefold() == source.casefold()
+                if _evidence_matches_warning(
+                    candidate,
+                    evidence_name=evidence_name,
+                    source=source,
                 )
             ),
             None,
@@ -1129,6 +1251,26 @@ def _adapt_analyst_report(
     )
 
 
+def _evidence_matches_warning(
+    item: EvidenceItem,
+    *,
+    evidence_name: str,
+    source: str | None,
+) -> bool:
+    candidates = (
+        tuple(
+            (origin.evidence_type, origin.source)
+            for origin in item.origins
+        )
+        or ((item.evidence_type, item.source),)
+    )
+    return any(
+        evidence_type.casefold() == evidence_name.casefold()
+        and (source is None or origin_source.casefold() == source.casefold())
+        for evidence_type, origin_source in candidates
+    )
+
+
 def _separate_warning_section(value: str) -> tuple[str, list[str]]:
     """Remove the generated warning appendix while retaining provenance."""
     if _WARNING_HEADING not in value:
@@ -1163,20 +1305,7 @@ def _research_prompt(
     memory: MemoryContext | None = None,
 ) -> str:
     bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
-    evidence_index = [
-        {
-            "ref": item.ref,
-            "source": item.source,
-            "type": item.evidence_type,
-            "effective_date": (
-                item.effective_date.isoformat() if item.effective_date else None
-            ),
-            "quality": item.quality.value,
-            "fallback": item.fallback,
-            "content_excerpt": item.content[:1200] if item.content else None,
-        }
-        for item in bundle.items
-    ]
+    evidence_index = _evidence_prompt_index(bundle)
     reports = {
         key: {
             "summary": value.get("summary"),
@@ -1201,6 +1330,8 @@ Rules:
 - Use only the sealed evidence and typed analyst reports below for current facts.
 - Every exact figure or factual assertion must be traceable to an existing
   evidence ref such as ev_0123456789ab.
+- When equivalent_refs are listed for identical content, prefer canonical_ref.
+  Every listed ref remains valid for historical compatibility.
 - Never invent evidence refs, sources, dates, prices, or portfolio context.
 - Missing evidence is uncertainty, not a neutral or bearish signal.
 - Historical memory may only calibrate confidence, risks, and invalidation
@@ -1228,6 +1359,52 @@ SEALED EVIDENCE INDEX:
 
 {extra}
 """
+
+
+def _evidence_prompt_index(
+    bundle: EvidenceBundle,
+) -> list[dict[str, Any]]:
+    """Render each exact evidence body once without discarding audit metadata."""
+    index: list[dict[str, Any]] = []
+    for group in group_evidence_by_content(bundle.items):
+        origins = []
+        for item in group.items:
+            if item.origins:
+                origins.extend(
+                    {
+                        "source": origin.source,
+                        "type": origin.evidence_type,
+                        "effective": origin.effective,
+                        "quality": origin.quality.value,
+                        "fallback": origin.fallback,
+                    }
+                    for origin in item.origins
+                )
+            else:
+                origins.append(
+                    {
+                        "source": item.source,
+                        "type": item.evidence_type,
+                        "effective": (
+                            item.effective_date.isoformat()
+                            if item.effective_date
+                            else None
+                        ),
+                        "quality": item.quality.value,
+                        "fallback": item.fallback,
+                    }
+                )
+        entry = {
+            "canonical_ref": group.canonical.ref,
+            "origins": origins,
+            "content_excerpt": (
+                group.content[:1200] if group.content else None
+            ),
+        }
+        if len(group.refs) > 1:
+            entry["equivalent_refs"] = list(group.refs)
+        index.append(entry)
+    return index
 
 
 def _invoke_review(

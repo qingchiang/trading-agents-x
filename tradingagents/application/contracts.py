@@ -133,6 +133,20 @@ class EvidenceQuality(str, Enum):
     UNAVAILABLE = "unavailable"
 
 
+class EvidenceOrigin(FrozenModel):
+    """One source record contributing to an evidence payload."""
+
+    source: str = Field(min_length=1, max_length=200)
+    evidence_type: str = Field(min_length=1, max_length=120)
+    requested: str = Field(default="unknown", min_length=1)
+    effective: str = Field(default="unknown", min_length=1)
+    effective_date: date | None = None
+    timing: str = Field(default="unknown", min_length=1)
+    retrieved_at: str | None = None
+    quality: EvidenceQuality = EvidenceQuality.MEDIUM
+    fallback: bool = False
+
+
 class EvidenceItem(FrozenModel):
     """One immutable, auditable evidence item in a run."""
 
@@ -147,6 +161,7 @@ class EvidenceItem(FrozenModel):
     unit: str | None = None
     quality: EvidenceQuality = EvidenceQuality.MEDIUM
     fallback: bool = False
+    origins: tuple[EvidenceOrigin, ...] = ()
     provenance: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
@@ -163,6 +178,7 @@ class EvidenceItem(FrozenModel):
         unit: str | None = None,
         quality: EvidenceQuality = EvidenceQuality.MEDIUM,
         fallback: bool = False,
+        origins: tuple[EvidenceOrigin, ...] = (),
         provenance: dict[str, Any] | None = None,
     ) -> EvidenceItem:
         payload = {
@@ -176,6 +192,10 @@ class EvidenceItem(FrozenModel):
             "unit": unit,
             "provenance": provenance or {},
         }
+        if origins:
+            payload["origins"] = [
+                origin.model_dump(mode="json") for origin in origins
+            ]
         digest = hashlib.sha256(
             json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode()
         ).hexdigest()[:12]
@@ -191,6 +211,7 @@ class EvidenceItem(FrozenModel):
             unit=unit,
             quality=quality,
             fallback=fallback,
+            origins=origins,
             provenance=provenance or {},
         )
 
@@ -198,7 +219,7 @@ class EvidenceItem(FrozenModel):
 class EvidenceBundle(FrozenModel):
     """Versioned evidence snapshot shared by every agent in one run."""
 
-    version: Literal["1"] = "1"
+    version: Literal["1", "2"] = "2"
     instrument: str
     analysis_date: date
     items: tuple[EvidenceItem, ...]
@@ -227,8 +248,15 @@ class EvidenceBundle(FrozenModel):
                     raise ValueError(
                         f"{item.ref} available_at is after the analysis cutoff"
                     )
+        serialized_items = [
+            item.model_dump(
+                mode="json",
+                exclude={"origins"} if self.version == "1" else None,
+            )
+            for item in self.items
+        ]
         canonical = json.dumps(
-            [item.model_dump(mode="json") for item in self.items],
+            serialized_items,
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),

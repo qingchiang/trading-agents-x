@@ -75,7 +75,7 @@ export interface components {
       instrument: string;
       items: components["schemas"]["EvidenceItem"][];
       sealed_at?: string;
-      version?: string;
+      version?: "1" | "2";
     };
     EvidenceItem: {
       available_at?: string | null;
@@ -83,6 +83,7 @@ export interface components {
       effective_date?: string | null;
       evidence_type: string;
       fallback?: boolean;
+      origins?: components["schemas"]["EvidenceOrigin"][];
       provenance?: Record<string, unknown>;
       quality?: components["schemas"]["EvidenceQuality"];
       ref: string;
@@ -90,6 +91,17 @@ export interface components {
       source: string;
       unit?: string | null;
       value?: number | string | null;
+    };
+    EvidenceOrigin: {
+      effective?: string;
+      effective_date?: string | null;
+      evidence_type: string;
+      fallback?: boolean;
+      quality?: components["schemas"]["EvidenceQuality"];
+      requested?: string;
+      retrieved_at?: string | null;
+      source: string;
+      timing?: string;
     };
     EvidenceQuality: "high" | "medium" | "low" | "unavailable";
     HTTPValidationError: {

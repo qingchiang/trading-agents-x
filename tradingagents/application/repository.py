@@ -1201,6 +1201,7 @@ class RunRepository:
                 confidence=decision.confidence,
                 decision_json=decision.model_dump(mode="json"),
                 evidence_bundle_json=EvidenceBundle(
+                    version="1",
                     instrument=request.ticker,
                     analysis_date=request.analysis_date,
                     items=(),

@@ -10,6 +10,7 @@ from .contracts import (
     ResearchDecision,
     RunExport,
 )
+from .evidence import group_evidence_by_content
 
 
 def render_run_export_markdown(run_export: RunExport) -> str:
@@ -103,20 +104,55 @@ def render_run_export_markdown(run_export: RunExport) -> str:
                 f"- Analysis date: `{run_export.evidence.analysis_date}`",
             ]
         )
-        for item in run_export.evidence.items:
+        for group in group_evidence_by_content(run_export.evidence.items):
+            item = group.canonical
+            sources = tuple(
+                dict.fromkeys(
+                    origin.source
+                    for grouped_item in group.items
+                    for origin in grouped_item.origins
+                )
+            ) or tuple(
+                dict.fromkeys(
+                    grouped_item.source for grouped_item in group.items
+                )
+            )
             sections.extend(
                 [
                     "",
                     f"### `{item.ref}`",
                     "",
-                    f"- Source: {item.source}",
+                    "- Refs: "
+                    + ", ".join(f"`{ref}`" for ref in group.refs),
+                    f"- Sources: {', '.join(sources)}",
                     f"- Type: {item.evidence_type}",
                     f"- Quality: `{item.quality.value}`",
                     f"- Fallback: `{str(item.fallback).lower()}`",
+                ]
+            )
+            if group.content:
+                sections.extend(
+                    [
+                        "",
+                        "#### Content",
+                        "",
+                        group.content,
+                    ]
+                )
+            sections.extend(
+                [
+                    "",
+                    "#### Audit records",
                     "",
                     "```json",
                     json.dumps(
-                        item.model_dump(mode="json"),
+                        [
+                            grouped_item.model_dump(
+                                mode="json",
+                                exclude={"content"},
+                            )
+                            for grouped_item in group.items
+                        ],
                         ensure_ascii=False,
                         indent=2,
                     ),
