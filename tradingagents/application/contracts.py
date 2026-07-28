@@ -117,6 +117,15 @@ class ResearchRating(str, Enum):
     SELL = "Sell"
 
 
+class ArtifactGenerationMethod(str, Enum):
+    """Auditable method that produced a typed research artifact."""
+
+    TOOL_CALL = "tool_call"
+    RAW_JSON_RECOVERED = "raw_json_recovered"
+    JSON_MODE_RECOVERED = "json_mode_recovered"
+    LEGACY_UNKNOWN = "legacy_unknown"
+
+
 class EvidenceQuality(str, Enum):
     HIGH = "high"
     MEDIUM = "medium"
@@ -485,6 +494,9 @@ class ResearchArtifactDraft(FrozenModel):
     )
     round: int = Field(default=0, ge=0)
     schema_version: Literal["1"] = "1"
+    generation_method: ArtifactGenerationMethod = (
+        ArtifactGenerationMethod.LEGACY_UNKNOWN
+    )
     content: ResearchArtifactContent
 
     @property
@@ -520,6 +532,9 @@ class ResearchArtifact(FrozenModel):
     )
     round: int = Field(default=0, ge=0)
     schema_version: Literal["1"] = "1"
+    generation_method: ArtifactGenerationMethod = (
+        ArtifactGenerationMethod.LEGACY_UNKNOWN
+    )
     content: ResearchArtifactContent
     created_at: datetime
 

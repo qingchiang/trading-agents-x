@@ -30,7 +30,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     finally:
         engine.dispose()
 
-    assert revision == "0002_research_artifacts"
+    assert revision == "0003_artifact_generation_method"
     assert {
         "id",
         "run_id",
@@ -39,6 +39,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
         "role",
         "round",
         "schema_version",
+        "generation_method",
         "content_type",
         "content_json",
         "content_hash",

@@ -42,6 +42,7 @@ export interface components {
       summary: string;
       warnings?: components["schemas"]["ResearchWarning"][];
     };
+    ArtifactGenerationMethod: "tool_call" | "raw_json_recovered" | "json_mode_recovered" | "legacy_unknown";
     AssetType: "stock" | "crypto";
     CapabilitiesResponse: {
       analysts: string[];
@@ -161,6 +162,7 @@ export interface components {
       attempt: number;
       content: components["schemas"]["AnalystReport"] | components["schemas"]["PerspectiveReview"] | components["schemas"]["ResearchDecision"];
       created_at: string;
+      generation_method?: components["schemas"]["ArtifactGenerationMethod"];
       id: string;
       role: string;
       round?: number;

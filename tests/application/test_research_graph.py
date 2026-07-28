@@ -46,33 +46,35 @@ class _StructuredInvoker:
             )
         )
         if self.schema is PerspectiveReview:
-            return PerspectiveReview(
+            parsed = PerspectiveReview(
                 role="fixture",
                 thesis="Structured review grounded in the sealed evidence.",
                 claim_rebuttals=("The opposing claim needs stronger support.",),
-                evidence_refs=refs[:1],
+                evidence_refs=refs[-1:],
                 risks=("Evidence quality may deteriorate.",),
             )
-        if self.schema is ResearchDecision:
-            return ResearchDecision(
+        elif self.schema is ResearchDecision:
+            parsed = ResearchDecision(
                 rating=ResearchRating.HOLD,
                 confidence=0.65,
                 thesis="The available evidence supports a balanced conclusion.",
-                evidence_refs=refs[:1],
-                memory_refs=(*memory_refs[:1], "memory:invented"),
+                evidence_refs=refs[-1:],
+                memory_refs=memory_refs[:1],
                 catalysts=("Evidence improves",),
                 risks=("Evidence deteriorates",),
                 invalidation_conditions=("The cited evidence is superseded",),
                 time_horizon="6-12 months",
             )
-        raise AssertionError(self.schema)
+        else:
+            raise AssertionError(self.schema)
+        return {"raw": None, "parsed": parsed, "parsing_error": None}
 
 
 class _FakeLLM:
     def __init__(self):
         self.calls = []
 
-    def with_structured_output(self, schema):
+    def with_structured_output(self, schema, **_kwargs):
         return _StructuredInvoker(schema, self.calls)
 
     def invoke(self, _prompt):
@@ -361,6 +363,11 @@ def test_graph_emits_only_typed_visible_research_artifacts(
         for artifact in artifacts
     )
     assert all("messages" not in artifact.content.model_fields for artifact in artifacts)
+    assert {
+        artifact.generation_method.value
+        for artifact in artifacts
+        if artifact.stage != "analyst"
+    } == {"tool_call"}
 
 
 def test_deep_debate_stops_when_rebuttals_add_no_new_information(

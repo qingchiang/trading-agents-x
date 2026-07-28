@@ -20,14 +20,14 @@ class TestExactIdMatches:
         assert caps.supports_tool_choice is False
         assert caps.requires_reasoning_content_roundtrip is True
 
-    def test_deepseek_v4_flash_rejects_tool_choice(self):
+    def test_deepseek_v4_flash_supports_tool_choice(self):
         caps = get_capabilities("deepseek-v4-flash")
-        assert caps.supports_tool_choice is False
+        assert caps.supports_tool_choice is True
         assert caps.requires_reasoning_content_roundtrip is True
 
-    def test_deepseek_v4_pro_rejects_tool_choice(self):
+    def test_deepseek_v4_pro_supports_tool_choice(self):
         caps = get_capabilities("deepseek-v4-pro")
-        assert caps.supports_tool_choice is False
+        assert caps.supports_tool_choice is True
         assert caps.requires_reasoning_content_roundtrip is True
 
 
@@ -37,12 +37,12 @@ class TestPatternMatches:
 
     def test_future_deepseek_v5_inherits_thinking_quirks(self):
         caps = get_capabilities("deepseek-v5-flash")
-        assert caps.supports_tool_choice is False
+        assert caps.supports_tool_choice is True
         assert caps.requires_reasoning_content_roundtrip is True
 
     def test_future_deepseek_v9_inherits_thinking_quirks(self):
         caps = get_capabilities("deepseek-v9-anything")
-        assert caps.supports_tool_choice is False
+        assert caps.supports_tool_choice is True
 
     def test_reasoner_variant_inherits_thinking_quirks(self):
         caps = get_capabilities("deepseek-reasoner-pro")

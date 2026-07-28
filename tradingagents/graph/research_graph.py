@@ -14,7 +14,6 @@ from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 from langgraph.runtime import Runtime
-from pydantic import BaseModel
 from typing_extensions import TypedDict
 
 from tradingagents.agents import (
@@ -51,6 +50,7 @@ from tradingagents.agents.utils.technical_indicators_tools import (
 from tradingagents.application.contracts import (
     AnalystClaim,
     AnalystReport,
+    ArtifactGenerationMethod,
     EvidenceBundle,
     EvidenceItem,
     EvidenceQuality,
@@ -59,13 +59,16 @@ from tradingagents.application.contracts import (
     ResearchArtifactContent,
     ResearchArtifactDraft,
     ResearchDecision,
-    ResearchRating,
     ResearchWarning,
     RunProfile,
 )
 from tradingagents.application.metrics import MetricsCallback
 from tradingagents.application.runtime import RunContext, check_cancelled
 from tradingagents.dataflows.config import use_config
+from tradingagents.graph.structured_output import (
+    StructuredOutputResult,
+    StructuredOutputRunner,
+)
 from tradingagents.provenance import (
     ProvenanceRecord,
     extract_provenance,
@@ -82,6 +85,22 @@ _WARNING_ITEM_RE = re.compile(
     r"^\s*-\s+\*\*(?P<evidence>.+?)\*\*\s+"
     r"\(source:\s*(?P<source>.+?)\):\s*(?P<reason>.+?)\s*$"
 )
+_STRUCTURED_SENTINELS = {
+    "n/a",
+    "none",
+    "not available",
+    "unavailable",
+    "unknown",
+    "unspecified",
+    "unspecified research horizon",
+    "不可用",
+    "不明",
+    "未知",
+    "未定",
+    "未指定",
+    "利用不可",
+    "指定なし",
+}
 
 
 def _merge_dicts(
@@ -124,6 +143,7 @@ class GraphExecution:
     evidence: EvidenceBundle
     reports: dict[str, AnalystReport]
     decision: ResearchDecision
+    warnings: tuple[ResearchWarning, ...] = ()
 
 
 _PERSPECTIVE_SPECS = {
@@ -235,11 +255,16 @@ class ResearchGraph:
             for key, value in final_state["analyst_reports"].items()
         }
         decision = ResearchDecision.model_validate(final_state["final_decision"])
+        warnings = tuple(
+            ResearchWarning.model_validate(value)
+            for value in final_state.get("warnings", [])
+        )
         return GraphExecution(
             state=final_state,
             evidence=evidence,
             reports=reports,
             decision=decision,
+            warnings=tuple(dict.fromkeys(warnings)),
         )
 
     def _initial_state(self, context: RunContext) -> ResearchState:
@@ -548,7 +573,15 @@ class ResearchGraph:
                     )
                 ),
             )
-            review = _invoke_review(llm, spec, prompt, state)
+            output = _invoke_review(
+                llm,
+                spec,
+                prompt,
+                state,
+                node=node,
+                event_writer=runtime.stream_writer,
+            )
+            review = output.value
             self._write_artifact(
                 runtime,
                 node=node,
@@ -560,6 +593,7 @@ class ResearchGraph:
                     else 0
                 ),
                 content=review,
+                generation_method=output.generation_method,
             )
             self._finish_node(
                 runtime,
@@ -571,7 +605,8 @@ class ResearchGraph:
                 },
             )
             return {
-                "reviews": {spec.key: review.model_dump(mode="json")}
+                "reviews": {spec.key: review.model_dump(mode="json")},
+                "warnings": _structured_recovery_warnings(node, output),
             }
 
         return review_node
@@ -629,18 +664,22 @@ class ResearchGraph:
             ),
             memory=runtime.context.memory,
         )
-        decision = _invoke_decision(
+        output = _invoke_decision(
             self.deep_llm,
             prompt,
             state,
+            node=node,
+            event_writer=runtime.stream_writer,
             memory=runtime.context.memory,
         )
+        decision = output.value
         self._write_artifact(
             runtime,
             node=node,
             stage="judge",
             role="research_judge",
             content=decision,
+            generation_method=output.generation_method,
         )
         self._finish_node(
             runtime,
@@ -650,7 +689,10 @@ class ResearchGraph:
                 "confidence": decision.confidence,
             },
         )
-        return {"draft_decision": decision.model_dump(mode="json")}
+        return {
+            "draft_decision": decision.model_dump(mode="json"),
+            "warnings": _structured_recovery_warnings(node, output),
+        }
 
     def _create_risk_node(self, spec: RoleSpec):
         def risk_node(
@@ -676,18 +718,22 @@ class ResearchGraph:
                     )
                 ),
             )
-            review = _invoke_review(
+            output = _invoke_review(
                 self.quick_llm,
                 spec,
                 prompt,
                 state,
+                node=node,
+                event_writer=runtime.stream_writer,
             )
+            review = output.value
             self._write_artifact(
                 runtime,
                 node=node,
                 stage="risk",
                 role=spec.key,
                 content=review,
+                generation_method=output.generation_method,
             )
             self._finish_node(
                 runtime,
@@ -695,7 +741,8 @@ class ResearchGraph:
                 {"risks": len(review.risks)},
             )
             return {
-                "risk_reviews": {spec.key: review.model_dump(mode="json")}
+                "risk_reviews": {spec.key: review.model_dump(mode="json")},
+                "warnings": _structured_recovery_warnings(node, output),
             }
 
         return risk_node
@@ -740,18 +787,22 @@ class ResearchGraph:
                 extra=extra,
                 memory=runtime.context.memory,
             )
-            decision = _invoke_decision(
+            output = _invoke_decision(
                 self.deep_llm,
                 prompt,
                 state,
+                node=node,
+                event_writer=runtime.stream_writer,
                 memory=runtime.context.memory,
             )
+            decision = output.value
             self._write_artifact(
                 runtime,
                 node=node,
                 stage="decision",
                 role="final_committee",
                 content=decision,
+                generation_method=output.generation_method,
             )
             self._finish_node(
                 runtime,
@@ -761,7 +812,10 @@ class ResearchGraph:
                     "confidence": decision.confidence,
                 },
             )
-            return {"final_decision": decision.model_dump(mode="json")}
+            return {
+                "final_decision": decision.model_dump(mode="json"),
+                "warnings": _structured_recovery_warnings(node, output),
+            }
 
         return final_node
 
@@ -773,6 +827,9 @@ class ResearchGraph:
         stage: str,
         role: str,
         content: ResearchArtifactContent,
+        generation_method: ArtifactGenerationMethod = (
+            ArtifactGenerationMethod.LEGACY_UNKNOWN
+        ),
         round: int = 0,
     ) -> None:
         runtime.context.artifact_writer(
@@ -781,6 +838,7 @@ class ResearchGraph:
                 stage=stage,
                 role=role,
                 round=round,
+                generation_method=generation_method,
                 content=content,
             )
         )
@@ -1177,25 +1235,40 @@ def _invoke_review(
     spec: RoleSpec,
     prompt: str,
     state: ResearchState,
-) -> PerspectiveReview:
-    result, plain = _invoke_structured(llm, PerspectiveReview, prompt)
+    *,
+    node: str,
+    event_writer: Callable[[dict[str, Any]], None] | None = None,
+) -> StructuredOutputResult[PerspectiveReview]:
     bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
-    valid = {item.ref for item in bundle.items}
-    if result is None:
-        result = PerspectiveReview(
-            role=spec.key,
-            thesis=plain or "The model returned no structured review.",
-            evidence_refs=tuple(valid),
-            risks=(),
-        )
-    refs = tuple(ref for ref in result.evidence_refs if ref in valid)
-    new_refs = tuple(ref for ref in result.new_evidence_refs if ref in valid)
-    return result.model_copy(
-        update={
+    valid_refs = tuple(item.ref for item in bundle.items)
+    valid = set(valid_refs)
+
+    def validate(result: PerspectiveReview) -> PerspectiveReview:
+        result = result.model_copy(update={"role": spec.key})
+        _require_text(result.thesis)
+        _require_nonempty_texts(result.claim_rebuttals)
+        _require_nonempty_texts(result.risks)
+        _require_valid_refs(result.evidence_refs, valid, required=True)
+        _require_valid_refs(result.new_evidence_refs, valid, required=False)
+        return result
+
+    return StructuredOutputRunner(
+        llm=llm,
+        schema=PerspectiveReview,
+        validator=validate,
+        node=node,
+        event_writer=event_writer,
+    ).invoke(
+        prompt,
+        example={
             "role": spec.key,
-            "evidence_refs": refs,
-            "new_evidence_refs": new_refs,
-        }
+            "thesis": "Evidence-grounded review thesis.",
+            "claim_rebuttals": ["A material opposing claim is rebutted."],
+            "evidence_refs": list(valid_refs[:1]),
+            "new_evidence_refs": [],
+            "risks": ["A material uncertainty could invalidate the view."],
+        },
+        allowed_evidence_refs=valid_refs,
     )
 
 
@@ -1204,51 +1277,102 @@ def _invoke_decision(
     prompt: str,
     state: ResearchState,
     *,
+    node: str,
+    event_writer: Callable[[dict[str, Any]], None] | None = None,
     memory: MemoryContext | None = None,
-) -> ResearchDecision:
-    result, plain = _invoke_structured(llm, ResearchDecision, prompt)
+) -> StructuredOutputResult[ResearchDecision]:
     bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
-    valid = {item.ref for item in bundle.items}
-    if result is None:
-        result = ResearchDecision(
-            rating=ResearchRating.HOLD,
-            confidence=0.3,
-            thesis=plain or "Insufficient structured evidence for a directional view.",
-            evidence_refs=tuple(valid),
-            catalysts=(),
-            risks=("Structured decision output was unavailable.",),
-            invalidation_conditions=(
-                "Reassess when higher-quality evidence becomes available.",
-            ),
-            time_horizon="Unspecified research horizon",
+    valid_refs = tuple(item.ref for item in bundle.items)
+    valid = set(valid_refs)
+    valid_memory_refs = tuple(memory.refs if memory is not None else ())
+    valid_memory = set(valid_memory_refs)
+
+    def validate(result: ResearchDecision) -> ResearchDecision:
+        _require_text(result.thesis)
+        _require_nonempty_texts(result.risks)
+        _require_nonempty_texts(result.invalidation_conditions)
+        _require_text(result.time_horizon, reject_sentinel=True)
+        _require_valid_refs(result.evidence_refs, valid, required=True)
+        _require_valid_refs(
+            result.memory_refs,
+            valid_memory,
+            required=False,
         )
-    refs = tuple(ref for ref in result.evidence_refs if ref in valid)
-    if not refs and valid:
-        refs = tuple(sorted(valid))
-    valid_memory = set(memory.refs if memory is not None else ())
-    memory_refs = tuple(ref for ref in result.memory_refs if ref in valid_memory)
-    return result.model_copy(
-        update={
-            "evidence_refs": refs,
-            "memory_refs": memory_refs,
-        }
+        return result
+
+    return StructuredOutputRunner(
+        llm=llm,
+        schema=ResearchDecision,
+        validator=validate,
+        node=node,
+        event_writer=event_writer,
+    ).invoke(
+        prompt,
+        example={
+            "rating": "Hold",
+            "confidence": 0.5,
+            "thesis": "The evidence supports a balanced research conclusion.",
+            "evidence_refs": list(valid_refs[:1]),
+            "memory_refs": [],
+            "catalysts": [],
+            "risks": ["A material evidence-backed downside risk."],
+            "invalidation_conditions": [
+                "New evidence directly contradicts the thesis."
+            ],
+            "time_horizon": "6-12 months",
+        },
+        allowed_evidence_refs=valid_refs,
+        allowed_memory_refs=valid_memory_refs,
     )
 
 
-def _invoke_structured(
-    llm: Any,
-    schema: type[BaseModel],
-    prompt: str,
-) -> tuple[Any | None, str]:
+def _require_text(value: str, *, reject_sentinel: bool = True) -> None:
+    text = value.strip()
+    if not text or _looks_like_json_object(text):
+        raise ValueError("structured text field is empty or contains nested JSON")
+    normalized = text.casefold().strip(" .。!！?？-_")
+    if reject_sentinel and normalized in _STRUCTURED_SENTINELS:
+        raise ValueError("structured text field contains a fallback sentinel")
+
+
+def _require_nonempty_texts(values: tuple[str, ...]) -> None:
+    if not values:
+        raise ValueError("structured list field must not be empty")
+    for value in values:
+        _require_text(value)
+
+
+def _require_valid_refs(
+    refs: tuple[str, ...],
+    allowed: set[str],
+    *,
+    required: bool,
+) -> None:
+    if required and not refs:
+        raise ValueError("at least one evidence ref is required")
+    if len(refs) != len(set(refs)) or any(ref not in allowed for ref in refs):
+        raise ValueError("structured output contains an invalid reference")
+
+
+def _looks_like_json_object(value: str) -> bool:
     try:
-        structured = llm.with_structured_output(schema)
-        result = structured.invoke(prompt)
-        if result is not None:
-            return schema.model_validate(result), ""
-    except Exception:
-        pass
-    try:
-        response = llm.invoke(prompt)
-        return None, str(getattr(response, "content", response))
-    except Exception as exc:
-        return None, f"{type(exc).__name__}: model response unavailable"
+        return isinstance(json.loads(value), dict)
+    except (TypeError, ValueError):
+        return False
+
+
+def _structured_recovery_warnings(
+    node: str,
+    output: StructuredOutputResult[Any],
+) -> list[dict[str, Any]]:
+    if output.generation_method is ArtifactGenerationMethod.TOOL_CALL:
+        return []
+    warning = ResearchWarning(
+        code="structured_output.recovered",
+        message=(
+            "The model output required validated structured recovery "
+            f"({output.generation_method.value})."
+        ),
+        source=node,
+    )
+    return [warning.model_dump(mode="json")]

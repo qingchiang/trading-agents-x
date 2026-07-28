@@ -14,6 +14,7 @@ from tradingagents.application.contracts import (
     AnalysisResult,
     AnalystClaim,
     AnalystReport,
+    ArtifactGenerationMethod,
     EvidenceBundle,
     EvidenceItem,
     ResearchArtifactDraft,
@@ -167,6 +168,7 @@ def test_artifacts_are_typed_retained_and_idempotent_across_retries(
         node="analyst.market",
         stage="analyst",
         role="market",
+        generation_method=ArtifactGenerationMethod.TOOL_CALL,
         content=report,
     )
 
@@ -210,9 +212,41 @@ def test_artifacts_are_typed_retained_and_idempotent_across_retries(
         "role": "market",
         "round": 0,
         "schema_version": "1",
+        "generation_method": "tool_call",
         "content_type": "analyst_report",
     }
     assert "Fixture narrative" not in str(events[0].payload)
+
+
+def test_recovered_artifact_surfaces_a_top_level_result_warning(
+    repository: RunRepository,
+    app_settings: AppSettings,
+) -> None:
+    run, _ = _create(repository, app_settings)
+    repository.claim_run(run.id, "worker", 30)
+    repository.append_artifact(
+        run.id,
+        ResearchArtifactDraft(
+            node="review.bear",
+            stage="perspective",
+            role="bear",
+            generation_method=ArtifactGenerationMethod.RAW_JSON_RECOVERED,
+            content=ResearchDecision(
+                rating=ResearchRating.HOLD,
+                confidence=0.5,
+                thesis="Fixture recovered thesis.",
+                evidence_refs=(),
+                risks=("Fixture risk.",),
+                invalidation_conditions=("Fixture invalidation.",),
+                time_horizon="6-12 months",
+            ),
+        ),
+    )
+
+    result = repository.get_result(run.id)
+
+    assert result.warnings[0].code == "structured_output.recovered"
+    assert "raw_json_recovered" in result.warnings[0].message
 
 
 def test_complete_persists_result_and_resolved_memory(

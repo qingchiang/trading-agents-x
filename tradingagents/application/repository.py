@@ -21,6 +21,7 @@ from .contracts import (
     AnalysisRequest,
     AnalysisResult,
     AnalystReport,
+    ArtifactGenerationMethod,
     EvidenceBundle,
     MemoryContext,
     MemoryOutcome,
@@ -29,6 +30,7 @@ from .contracts import (
     ResearchArtifact,
     ResearchArtifactDraft,
     ResearchDecision,
+    ResearchWarning,
     RunEvent,
     RunMetrics,
     RunStatus,
@@ -532,6 +534,7 @@ class RunRepository:
                     role=draft.role,
                     round=draft.round,
                     schema_version=draft.schema_version,
+                    generation_method=draft.generation_method.value,
                     content_type=draft.content_type,
                     content_json=draft.content.model_dump(mode="json"),
                     content_hash=draft.content_hash,
@@ -549,6 +552,7 @@ class RunRepository:
                 "role": draft.role,
                 "round": draft.round,
                 "schema_version": draft.schema_version,
+                "generation_method": draft.generation_method.value,
                 "content_type": draft.content_type,
             }
             connection.execute(
@@ -572,6 +576,7 @@ class RunRepository:
             role=draft.role,
             round=draft.round,
             schema_version=draft.schema_version,
+            generation_method=draft.generation_method,
             content=draft.content,
             created_at=_aware(now),
         )
@@ -753,10 +758,31 @@ class RunRepository:
         )
         warnings = tuple(
             dict.fromkeys(
-                warning
-                for report in reports.values()
-                if isinstance(report, AnalystReport)
-                for warning in report.warnings
+                (
+                    *(
+                        warning
+                        for report in reports.values()
+                        if isinstance(report, AnalystReport)
+                        for warning in report.warnings
+                    ),
+                    *(
+                        ResearchWarning(
+                            code="structured_output.recovered",
+                            message=(
+                                "The model output required validated "
+                                "structured recovery "
+                                f"({artifact.generation_method.value})."
+                            ),
+                            source=f"{artifact.stage}.{artifact.role}",
+                        )
+                        for artifact in self.list_artifacts(run_id)
+                        if artifact.generation_method
+                        in {
+                            ArtifactGenerationMethod.RAW_JSON_RECOVERED,
+                            ArtifactGenerationMethod.JSON_MODE_RECOVERED,
+                        }
+                    ),
+                )
             )
         )
         return AnalysisResult(
@@ -799,6 +825,9 @@ class RunRepository:
             role=record["role"],
             round=record["round"],
             schema_version=record["schema_version"],
+            generation_method=ArtifactGenerationMethod(
+                record["generation_method"]
+            ),
             content=model.model_validate(record["content_json"]),
             created_at=_aware(record["created_at"]),
         )

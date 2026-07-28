@@ -325,9 +325,14 @@ class AnalysisService:
     ) -> AnalysisResult:
         warnings = tuple(
             dict.fromkeys(
-                warning
-                for report in execution.reports.values()
-                for warning in report.warnings
+                (
+                    *execution.warnings,
+                    *(
+                        warning
+                        for report in execution.reports.values()
+                        for warning in report.warnings
+                    ),
+                )
             )
         )
         return AnalysisResult(

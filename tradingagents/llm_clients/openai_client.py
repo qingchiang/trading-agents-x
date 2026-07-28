@@ -23,9 +23,8 @@ class NormalizedChatOpenAI(ChatOpenAI):
     ``with_structured_output`` consults the per-model capability table
     (``capabilities.get_capabilities``) to pick the method and to decide
     whether ``tool_choice`` may be sent. Models that reject ``tool_choice``
-    (e.g. DeepSeek V4 and reasoner — per their official tool-calling
-    guide) still bind the schema as a tool, but no ``tool_choice``
-    parameter is sent.
+    (for example the legacy DeepSeek reasoner endpoint) still bind the schema
+    as a tool, but no ``tool_choice`` parameter is sent.
 
     Provider-specific quirks beyond structured-output (e.g. DeepSeek's
     reasoning_content roundtrip) live in subclasses so this base class
@@ -43,6 +42,14 @@ class NormalizedChatOpenAI(ChatOpenAI):
                 f"agent factories will fall back to free-text generation."
             )
         method = method or caps.preferred_structured_method
+        if method == "json_mode" and not caps.supports_json_mode:
+            raise NotImplementedError(
+                f"{self.model_name} does not support provider-native JSON mode"
+            )
+        if method == "json_schema" and not caps.supports_json_schema:
+            raise NotImplementedError(
+                f"{self.model_name} does not support provider-native JSON Schema"
+            )
         # When the model rejects tool_choice, suppress langchain's hardcoded
         # value. The schema is still bound as a tool — exactly what
         # DeepSeek's official tool-calling examples do.
@@ -95,9 +102,9 @@ class DeepSeekChatOpenAI(NormalizedChatOpenAI):
     ``_create_chat_result`` captures it on receive and
     ``_get_request_payload`` re-attaches it on send.
 
-    Tool-choice handling for V4 and reasoner — those models reject the
-    ``tool_choice`` parameter — is handled by the capability dispatch in
-    ``NormalizedChatOpenAI.with_structured_output``, not here.
+    Tool-choice handling is delegated to the capability dispatch in
+    ``NormalizedChatOpenAI.with_structured_output``. V4 forces the schema tool;
+    the legacy reasoner endpoint continues to suppress ``tool_choice``.
     """
 
     def _get_request_payload(self, input_, *, stop=None, **kwargs):

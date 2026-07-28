@@ -287,6 +287,17 @@
         "title": "AnalystReport",
         "type": "object"
       },
+      "ArtifactGenerationMethod": {
+        "description": "Auditable method that produced a typed research artifact.",
+        "enum": [
+          "tool_call",
+          "raw_json_recovered",
+          "json_mode_recovered",
+          "legacy_unknown"
+        ],
+        "title": "ArtifactGenerationMethod",
+        "type": "string"
+      },
       "AssetType": {
         "enum": [
           "stock",
@@ -1072,6 +1083,10 @@
             "format": "date-time",
             "title": "Created At",
             "type": "string"
+          },
+          "generation_method": {
+            "$ref": "#/components/schemas/ArtifactGenerationMethod",
+            "default": "legacy_unknown"
           },
           "id": {
             "maxLength": 64,

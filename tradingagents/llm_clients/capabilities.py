@@ -45,14 +45,20 @@ class ModelCapabilities:
     requires_reasoning_split: bool = False
 
 
-# DeepSeek's thinking models accept the ``tools`` array but reject the
-# ``tool_choice`` parameter (official Oh My Pi integration guide and the
-# 400 response in issue #678). Their official tool-calling examples
-# (api-docs.deepseek.com/guides/tool_calls) pass ``tools=[...]`` without
-# ``tool_choice`` — we mirror that pattern by setting supports_tool_choice
-# to False and letting the client suppress the kwarg.
-_DEEPSEEK_THINKING = ModelCapabilities(
+# The legacy reasoner endpoint accepts ``tools`` but rejects forced
+# ``tool_choice``. Keep that compatibility quirk isolated from the V4 API.
+_DEEPSEEK_REASONER = ModelCapabilities(
     supports_tool_choice=False,
+    supports_json_mode=True,
+    supports_json_schema=False,
+    preferred_structured_method="function_calling",
+    requires_reasoning_content_roundtrip=True,
+)
+
+# DeepSeek V4 documents forced tool selection and JSON Output. Thinking-mode
+# responses still require reasoning_content to be echoed on subsequent turns.
+_DEEPSEEK_V4 = ModelCapabilities(
+    supports_tool_choice=True,
     supports_json_mode=True,
     supports_json_schema=False,
     preferred_structured_method="function_calling",
@@ -93,9 +99,9 @@ _DEFAULT = ModelCapabilities(
 # Exact-ID matches take precedence over pattern matches.
 _BY_ID: dict[str, ModelCapabilities] = {
     "deepseek-chat": _DEEPSEEK_CHAT,
-    "deepseek-reasoner": _DEEPSEEK_THINKING,
-    "deepseek-v4-flash": _DEEPSEEK_THINKING,
-    "deepseek-v4-pro": _DEEPSEEK_THINKING,
+    "deepseek-reasoner": _DEEPSEEK_REASONER,
+    "deepseek-v4-flash": _DEEPSEEK_V4,
+    "deepseek-v4-pro": _DEEPSEEK_V4,
     # MiniMax — full official model lineup per
     # platform.minimax.io/docs/api-reference/text-openai-api
     "MiniMax-M2.7": _MINIMAX_THINKING,
@@ -107,11 +113,11 @@ _BY_ID: dict[str, ModelCapabilities] = {
     "MiniMax-M2": _MINIMAX_THINKING,
 }
 
-# Forward-compat patterns. New ``deepseek-v5-*`` / ``deepseek-reasoner-*``
-# or ``MiniMax-M3*`` variants inherit the thinking-mode quirks automatically.
+# Forward-compat patterns. New ``deepseek-v5-*`` models inherit the V4 API
+# contract, while reasoner variants retain the legacy tool-choice restriction.
 _BY_PATTERN: list[tuple[re.Pattern[str], ModelCapabilities]] = [
-    (re.compile(r"^deepseek-v\d"), _DEEPSEEK_THINKING),
-    (re.compile(r"^deepseek-reasoner"), _DEEPSEEK_THINKING),
+    (re.compile(r"^deepseek-v\d"), _DEEPSEEK_V4),
+    (re.compile(r"^deepseek-reasoner"), _DEEPSEEK_REASONER),
     (re.compile(r"^MiniMax-M\d"), _MINIMAX_THINKING),
 ]
 

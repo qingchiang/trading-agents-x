@@ -15,6 +15,7 @@ from typing_extensions import TypedDict
 from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalystReport,
+    ArtifactGenerationMethod,
     EvidenceBundle,
     EvidenceItem,
     ResearchArtifactDraft,
@@ -136,6 +137,16 @@ class _ResumableGraph:
     ):
         def first_node(_state):
             type(self).first_calls += 1
+            execution = _execution(context.request.ticker)
+            context.artifact_writer(
+                ResearchArtifactDraft(
+                    node="fixture.first",
+                    stage="analyst",
+                    role="market",
+                    generation_method=ArtifactGenerationMethod.TOOL_CALL,
+                    content=execution.reports["market"],
+                )
+            )
             on_event(
                 {
                     "event_type": "node.completed",
@@ -323,6 +334,7 @@ def test_service_commits_artifact_and_event_before_callback(
         "role",
         "round",
         "schema_version",
+        "generation_method",
         "content_type",
     }
 
@@ -512,6 +524,9 @@ def test_retry_resumes_real_langgraph_checkpoint_and_success_cleans_it(
     assert result.status is RunStatus.SUCCEEDED
     assert _ResumableGraph.first_calls == 1
     assert _ResumableGraph.second_calls == 2
+    artifacts = repository.list_artifacts(queued.id)
+    assert len(artifacts) == 1
+    assert artifacts[0].attempt == 1
     assert "run.resumed" in {
         event.event_type for event in repository.list_events(queued.id)
     }
