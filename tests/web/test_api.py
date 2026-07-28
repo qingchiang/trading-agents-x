@@ -11,6 +11,7 @@ from tradingagents.application.contracts import (
     AnalystReport,
     EvidenceBundle,
     EvidenceItem,
+    PerspectiveReview,
     ResearchArtifactDraft,
     ResearchDecision,
     ResearchRating,
@@ -220,6 +221,19 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
             content=report,
         ),
     )
+    degraded, _ = web_repository.append_artifact(
+        queued.id,
+        ResearchArtifactDraft(
+            node="perspective.bear",
+            stage="perspective",
+            role="bear",
+            content=PerspectiveReview(
+                role="bear",
+                thesis='{"summary": "Legacy JSON payload"}',
+                evidence_refs=(evidence_item.ref,),
+            ),
+        ),
+    )
     decision = ResearchDecision(
         rating=ResearchRating.HOLD,
         confidence=0.6,
@@ -263,6 +277,19 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
     assert artifacts.status_code == 200
     assert artifacts.json()[0]["id"] == artifact.id
     assert artifacts.json()[0]["content"]["narrative"] == "Fixture report."
+    degraded_payload = next(
+        item for item in artifacts.json() if item["id"] == degraded.id
+    )
+    assert degraded_payload["generation_method"] == "legacy_unknown"
+    assert degraded_payload["diagnostics"]["legacy_degraded_output"] is True
+    assert degraded_payload["diagnostics"]["missing_fields"] == [
+        "claim_rebuttals",
+        "risks",
+    ]
+    assert degraded_payload["diagnostics"]["rerun_recommended"] is True
+    assert degraded_payload["diagnostics"]["parsed_thesis"] == {
+        "summary": "Legacy JSON payload"
+    }
     assert empty_attempt.json() == []
 
 

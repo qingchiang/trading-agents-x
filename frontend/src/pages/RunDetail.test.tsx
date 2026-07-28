@@ -116,14 +116,22 @@ const detail = {
     reports: {
       social: analystReport("social", "Social"),
       news: analystReport("news", "News"),
-      market: analystReport("market", "Market", [
-        {
-          code: "evidence.degraded",
-          message: "Historical source was partial.",
-          evidence_ref: "ev_0123456789ab",
-          source: "fixture",
-        },
-      ]),
+      market: {
+        ...analystReport("market", "Market", [
+          {
+            code: "evidence.degraded",
+            message: "Historical source was partial.",
+            evidence_ref: "ev_0123456789ab",
+            source: "fixture",
+          },
+        ]),
+        evidence_refs: [
+          "ev_0123456789ab",
+          "ev_fedcba987654",
+        ],
+        narrative:
+          "# Market report\n\nCompare ev_0123456789ab with ev_fedcba987654.",
+      },
       fundamentals: analystReport("fundamentals", "Fundamentals"),
     },
     decision: {
@@ -157,6 +165,20 @@ const detail = {
           quality: "high",
           fallback: false,
           provenance: { vendor: "fixture-feed" },
+        },
+        {
+          ref: "ev_fedcba987654",
+          source: "alternate-fixture",
+          evidence_type: "Composite snapshot",
+          requested_date: "2026-07-24",
+          effective_date: "2026-07-24",
+          available_at: "2026-07-24T00:00:01Z",
+          content: "**Close:** 100 USD",
+          value: 100,
+          unit: "USD",
+          quality: "low",
+          fallback: true,
+          provenance: { vendor: "alternate-feed" },
         },
       ],
     },
@@ -215,6 +237,10 @@ const artifacts = [
 
 beforeEach(async () => {
   vi.resetAllMocks();
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText: vi.fn().mockResolvedValue(undefined) },
+  });
   localStorage.removeItem("tradingagents-timeline-order");
   await i18n.changeLanguage("en");
   vi.mocked(api.run).mockResolvedValue(detail);
@@ -249,10 +275,28 @@ test("restores deliberation and resolves evidence references across run views", 
     screen.getByRole("tab", { name: "Evidence" }),
   ).toHaveAttribute("aria-selected", "true");
   expect(
-    await screen.findByRole("heading", { name: "Price snapshot" }),
+    await screen.findByRole("heading", {
+      name: "Price snapshot · Composite snapshot",
+    }),
   ).toBeVisible();
-  fireEvent.click(screen.getByText("Provenance details"));
+  expect(screen.getByText("E01")).toHaveAttribute(
+    "title",
+    "ev_0123456789ab\nev_fedcba987654",
+  );
+  expect(
+    screen.getByText("1 unique bodies · 2 audit records"),
+  ).toBeVisible();
+  fireEvent.click(screen.getByText("Canonical IDs and provenance"));
   expect(screen.getByText("fixture-feed", { exact: false })).toBeVisible();
+  expect(screen.getByText("ev_fedcba987654")).toBeVisible();
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: "Copy evidence ID ev_fedcba987654",
+    }),
+  );
+  expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+    "ev_fedcba987654",
+  );
 
   fireEvent.click(screen.getByRole("tab", { name: "Reports" }));
   const fundamentalsTab = screen.getByRole("button", {
@@ -280,7 +324,13 @@ test("restores deliberation and resolves evidence references across run views", 
   expect(
     await screen.findByText("Historical source was partial."),
   ).toBeVisible();
-  expect(await screen.findByText("ev_0123456789ab")).toBeVisible();
+  const inlineRefs = screen.getAllByRole("button", {
+    name: /Open evidence ev_/,
+  });
+  expect(inlineRefs.some((marker) => marker.textContent === "E01")).toBe(true);
+  expect(
+    screen.queryByText("ev_0123456789ab", { exact: true }),
+  ).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("tab", { name: "Decision" }));
   expect(await screen.findByText("Evidence is balanced.")).toBeVisible();
@@ -420,4 +470,193 @@ test("localizes canonical report labels for zh-CN", async () => {
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).not.toBe(0);
   });
+});
+
+test("diagnoses 7011.T-style legacy JSON, markdown, and rating conflicts", async () => {
+  const nestedDecision = {
+    rating: "Overweight",
+    confidence: 0.4,
+    thesis: "Parsed final thesis is constructive but uncertain.",
+    evidence_refs: ["ev_0123456789ab"],
+    memory_refs: [],
+    catalysts: ["Order growth"],
+    risks: ["Valuation compression"],
+    invalidation_conditions: ["Guidance misses"],
+    time_horizon: "6-12 months",
+  };
+  const degradedDetail = structuredClone(detail) as RunDetailType;
+  if (!degradedDetail.result) throw new Error("fixture result missing");
+  degradedDetail.result.decision = {
+    rating: "Hold",
+    confidence: 0.3,
+    thesis: JSON.stringify(nestedDecision),
+    evidence_refs: [
+      "ev_0123456789ab",
+      "ev_fedcba987654",
+    ],
+    memory_refs: [],
+    catalysts: [],
+    risks: ["Structured decision output was unavailable."],
+    invalidation_conditions: [
+      "Reassess when higher-quality evidence becomes available.",
+    ],
+    time_horizon: "Unspecified research horizon",
+  };
+  const degradedArtifacts = [
+    {
+      id: "artifact-bear",
+      run_id: "run-1",
+      attempt: 1,
+      stage: "perspective",
+      role: "bear",
+      round: 0,
+      schema_version: "1",
+      generation_method: "legacy_unknown",
+      diagnostics: {
+        degraded_output: true,
+        legacy_degraded_output: true,
+        reason_codes: [
+          "nested_json_thesis",
+          "missing_structured_fields",
+        ],
+        missing_fields: ["claim_rebuttals", "risks"],
+        sentinel_fields: [],
+        parsed_thesis: {
+          summary: "Legacy bear summary.",
+          challenged_claims: [
+            {
+              claim_text: "Guidance is reliable.",
+              challenge_text: "Guidance remains untested.",
+              evidence_refs: ["ev_0123456789ab"],
+            },
+          ],
+          downside_mechanisms: [
+            {
+              mechanism: "Multiple compression.",
+              detail: "Rates remain restrictive.",
+              evidence_refs: ["ev_fedcba987654"],
+            },
+          ],
+          evidence_refs: ["ev_0123456789ab"],
+        },
+        outer_rating: null,
+        nested_rating: null,
+        rating_conflict: false,
+        rerun_recommended: true,
+      },
+      created_at: "2026-07-24T00:00:40Z",
+      content: {
+        role: "bear",
+        thesis: JSON.stringify({
+          summary: "Legacy bear summary.",
+          challenged_claims: ["Guidance remains untested."],
+          downside_mechanisms: ["Multiple compression."],
+        }),
+        claim_rebuttals: [],
+        evidence_refs: ["ev_0123456789ab"],
+        new_evidence_refs: [],
+        risks: [],
+      },
+    },
+    {
+      id: "artifact-risk",
+      run_id: "run-1",
+      attempt: 1,
+      stage: "risk",
+      role: "risk",
+      round: 0,
+      schema_version: "1",
+      generation_method: "legacy_unknown",
+      diagnostics: {
+        degraded_output: true,
+        legacy_degraded_output: true,
+        reason_codes: ["missing_structured_fields"],
+        missing_fields: ["claim_rebuttals", "risks"],
+        sentinel_fields: [],
+        parsed_thesis: null,
+        outer_rating: null,
+        nested_rating: null,
+        rating_conflict: false,
+        rerun_recommended: true,
+      },
+      created_at: "2026-07-24T00:00:45Z",
+      content: {
+        role: "risk",
+        thesis: "## Risk reviewer markdown\n\nVisible legacy narrative.",
+        claim_rebuttals: [],
+        evidence_refs: ["ev_0123456789ab"],
+        new_evidence_refs: [],
+        risks: [],
+      },
+    },
+    {
+      id: "artifact-final",
+      run_id: "run-1",
+      attempt: 1,
+      stage: "decision",
+      role: "final_committee",
+      round: 0,
+      schema_version: "1",
+      generation_method: "legacy_unknown",
+      diagnostics: {
+        degraded_output: true,
+        legacy_degraded_output: true,
+        reason_codes: [
+          "nested_json_thesis",
+          "fallback_sentinel_fields",
+          "rating_conflict",
+        ],
+        missing_fields: [],
+        sentinel_fields: [
+          "risks",
+          "invalidation_conditions",
+          "time_horizon",
+        ],
+        parsed_thesis: nestedDecision,
+        outer_rating: "Hold",
+        nested_rating: "Overweight",
+        rating_conflict: true,
+        rerun_recommended: true,
+      },
+      created_at: "2026-07-24T00:00:50Z",
+      content: degradedDetail.result.decision,
+    },
+  ] as unknown as ResearchArtifact[];
+  vi.mocked(api.run).mockResolvedValue(degradedDetail);
+  vi.mocked(api.artifacts).mockResolvedValue(degradedArtifacts);
+
+  render(
+    <Router initialPath="/runs/run-1?view=deliberation">
+      <RunDetail />
+    </Router>,
+  );
+
+  expect(await screen.findByText("Legacy bear summary.")).toBeVisible();
+  expect(screen.getByText("Guidance remains untested.")).toBeVisible();
+  expect(screen.getByText("Multiple compression.")).toBeVisible();
+  expect(screen.getByText("Rates remain restrictive.")).toBeVisible();
+  expect(
+    screen.getByRole("heading", { name: "Risk reviewer markdown" }),
+  ).toBeVisible();
+  expect(
+    screen.getAllByText(
+      "Legacy degraded output did not capture this field.",
+    ),
+  ).toHaveLength(2);
+
+  fireEvent.click(screen.getByRole("tab", { name: "Decision" }));
+  expect(await screen.findByText("Conflicting research ratings")).toBeVisible();
+  expect(
+    screen.getByText(/Stored outer rating: Hold.*Nested payload rating: Overweight/),
+  ).toBeVisible();
+  expect(
+    screen.getByText("Parsed final thesis is constructive but uncertain."),
+  ).toBeVisible();
+  expect(screen.getByText("Order growth")).toBeVisible();
+  expect(
+    screen.getByText(
+      "Do not treat this artifact as a reliable conclusion. Rerun the research.",
+    ),
+  ).toBeVisible();
+  expect(screen.getByText("Canonical degraded payload")).toBeVisible();
 });

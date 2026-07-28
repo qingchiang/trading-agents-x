@@ -109,6 +109,135 @@ function result(id: string) {
   };
 }
 
+function legacyResult(id: string) {
+  const payload = result(id);
+  const nested = {
+    rating: "Overweight",
+    confidence: 0.4,
+    thesis: "Parsed legacy final thesis.",
+    evidence_refs: ["ev_0123456789ab"],
+    catalysts: ["Order growth"],
+    risks: ["Valuation compression"],
+    invalidation_conditions: ["Guidance misses"],
+    time_horizon: "6-12 months",
+  };
+  payload.decision = {
+    rating: "Hold",
+    confidence: 0.3,
+    thesis: JSON.stringify(nested),
+    evidence_refs: ["ev_0123456789ab"],
+    catalysts: [],
+    risks: ["Structured decision output was unavailable."],
+    invalidation_conditions: [
+      "Reassess when higher-quality evidence becomes available.",
+    ],
+    time_horizon: "Unspecified research horizon",
+  };
+  return payload;
+}
+
+function legacyArtifacts(id: string) {
+  return [
+    {
+      id: "artifact-legacy-bear",
+      run_id: id,
+      attempt: 1,
+      stage: "perspective",
+      role: "bear",
+      round: 0,
+      schema_version: "1",
+      generation_method: "legacy_unknown",
+      diagnostics: {
+        degraded_output: true,
+        legacy_degraded_output: true,
+        reason_codes: [
+          "nested_json_thesis",
+          "missing_structured_fields",
+        ],
+        missing_fields: ["claim_rebuttals", "risks"],
+        sentinel_fields: [],
+        parsed_thesis: {
+          summary: "Parsed legacy bear summary.",
+          challenged_claims: ["Guidance remains untested."],
+          downside_mechanisms: ["Multiple compression."],
+        },
+        rating_conflict: false,
+        rerun_recommended: true,
+      },
+      created_at: timestamp,
+      content: {
+        role: "bear",
+        thesis: '{"summary":"Parsed legacy bear summary."}',
+        claim_rebuttals: [],
+        evidence_refs: ["ev_0123456789ab"],
+        new_evidence_refs: [],
+        risks: [],
+      },
+    },
+    {
+      id: "artifact-legacy-risk",
+      run_id: id,
+      attempt: 1,
+      stage: "risk",
+      role: "risk",
+      round: 0,
+      schema_version: "1",
+      generation_method: "legacy_unknown",
+      diagnostics: {
+        degraded_output: true,
+        legacy_degraded_output: true,
+        reason_codes: ["missing_structured_fields"],
+        missing_fields: ["claim_rebuttals", "risks"],
+        sentinel_fields: [],
+        parsed_thesis: null,
+        rating_conflict: false,
+        rerun_recommended: true,
+      },
+      created_at: timestamp,
+      content: {
+        role: "risk",
+        thesis: "## Legacy risk markdown\n\nVisible narrative.",
+        claim_rebuttals: [],
+        evidence_refs: ["ev_0123456789ab"],
+        new_evidence_refs: [],
+        risks: [],
+      },
+    },
+    {
+      id: "artifact-legacy-final",
+      run_id: id,
+      attempt: 1,
+      stage: "decision",
+      role: "final_committee",
+      round: 0,
+      schema_version: "1",
+      generation_method: "legacy_unknown",
+      diagnostics: {
+        degraded_output: true,
+        legacy_degraded_output: true,
+        reason_codes: [
+          "nested_json_thesis",
+          "fallback_sentinel_fields",
+          "rating_conflict",
+        ],
+        missing_fields: [],
+        sentinel_fields: [
+          "risks",
+          "invalidation_conditions",
+          "time_horizon",
+        ],
+        parsed_thesis: JSON.parse(legacyResult(id).decision.thesis),
+        outer_rating: "Hold",
+        nested_rating: "Overweight",
+        rating_conflict: true,
+        rerun_recommended: true,
+      },
+      created_at: timestamp,
+      content: legacyResult(id).decision,
+    },
+  ];
+}
+
 test("runs the local research workflow across UI locales", async ({ page }) => {
   let current = run("run-1", "queued");
   await page.route("**/api/v1/**", async (route) => {
@@ -242,6 +371,8 @@ test("runs the local research workflow across UI locales", async ({ page }) => {
                   },
                 },
               ]
+            : id === "run-legacy"
+              ? legacyArtifacts(id)
             : [],
       });
     }
@@ -282,9 +413,12 @@ test("runs the local research workflow across UI locales", async ({ page }) => {
     const detailMatch = path.match(/^\/api\/v1\/runs\/([^/]+)$/);
     if (detailMatch) {
       const id = detailMatch[1];
-      if (id === "run-report") {
+      if (id === "run-report" || id === "run-legacy") {
         return route.fulfill({
-          json: { run: run(id, "succeeded"), result: result(id) },
+          json: {
+            run: run(id, "succeeded"),
+            result: id === "run-legacy" ? legacyResult(id) : result(id),
+          },
         });
       }
       return route.fulfill({ json: { run: current, result: null } });
@@ -355,6 +489,19 @@ test("runs the local research workflow across UI locales", async ({ page }) => {
   await expect(page.locator(".timeline-item small").first()).toContainText("#1");
   await page.reload();
   await expect(page.locator(".timeline-item small").first()).toContainText("#1");
+
+  await page.goto("/runs/run-legacy?view=deliberation");
+  await expect(
+    page.getByText("Parsed legacy bear summary.", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Legacy risk markdown" }),
+  ).toBeVisible();
+  await page.getByRole("tab", { name: "Decision" }).click();
+  await expect(page.getByText("Conflicting research ratings")).toBeVisible();
+  await expect(
+    page.getByText("Parsed legacy final thesis.", { exact: true }),
+  ).toBeVisible();
 
   await page.getByRole("link", { name: "Memory" }).click();
   await expect(

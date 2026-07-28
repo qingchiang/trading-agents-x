@@ -507,6 +507,21 @@ def _artifact_content_type(content: ResearchArtifactContent) -> str:
     return "research_decision"
 
 
+class ArtifactDiagnostics(FrozenModel):
+    """Read-only diagnosis of a persisted artifact's visible typed content."""
+
+    degraded_output: bool = False
+    legacy_degraded_output: bool = False
+    reason_codes: tuple[str, ...] = ()
+    missing_fields: tuple[str, ...] = ()
+    sentinel_fields: tuple[str, ...] = ()
+    parsed_thesis: dict[str, Any] | None = None
+    outer_rating: str | None = None
+    nested_rating: str | None = None
+    rating_conflict: bool = False
+    rerun_recommended: bool = False
+
+
 class ResearchArtifactDraft(FrozenModel):
     """Typed graph output awaiting application-owned persistence metadata."""
 
@@ -565,6 +580,9 @@ class ResearchArtifact(FrozenModel):
         ArtifactGenerationMethod.LEGACY_UNKNOWN
     )
     content: ResearchArtifactContent
+    diagnostics: ArtifactDiagnostics = Field(
+        default_factory=ArtifactDiagnostics
+    )
     created_at: datetime
 
     @property

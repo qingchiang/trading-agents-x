@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from tradingagents.dataflows.symbol_utils import market_timezone
 from tradingagents.version import __version__
 
+from .artifact_diagnostics import diagnose_artifact
 from .contracts import (
     AnalysisRequest,
     AnalysisResult,
@@ -819,6 +820,10 @@ class RunRepository:
             raise ValueError(
                 f"unsupported research artifact type: {record['content_type']}"
             )
+        generation_method = ArtifactGenerationMethod(
+            record["generation_method"]
+        )
+        content = model.model_validate(record["content_json"])
         return ResearchArtifact(
             id=record["id"],
             run_id=record["run_id"],
@@ -827,10 +832,9 @@ class RunRepository:
             role=record["role"],
             round=record["round"],
             schema_version=record["schema_version"],
-            generation_method=ArtifactGenerationMethod(
-                record["generation_method"]
-            ),
-            content=model.model_validate(record["content_json"]),
+            generation_method=generation_method,
+            content=content,
+            diagnostics=diagnose_artifact(content, generation_method),
             created_at=_aware(record["created_at"]),
         )
 

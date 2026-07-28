@@ -4,8 +4,8 @@ import { useTranslation } from "react-i18next";
 import {
   api,
   type AnalystReport,
+  type ArtifactDiagnostics,
   type EvidenceBundle,
-  type EvidenceItem,
   type PerspectiveReview,
   type ResearchArtifact,
   type ResearchDecision,
@@ -13,6 +13,12 @@ import {
   type RunEvent,
 } from "../api/client";
 import Markdown from "../components/Markdown";
+import {
+  buildEvidenceReferenceIndex,
+  groupEvidenceRefs,
+  type EvidenceDisplayGroup,
+  type EvidenceReferenceIndex,
+} from "../evidence";
 import StatusBadge from "../components/StatusBadge";
 import {
   Link,
@@ -150,6 +156,24 @@ export default function RunDetail() {
   const activeReport = reportNames.includes(requestedReport)
     ? requestedReport
     : (reportNames[0] ?? "");
+  const evidenceIndex = useMemo(
+    () =>
+      buildEvidenceReferenceIndex(
+        detail?.result?.evidence ?? null,
+      ),
+    [detail?.result?.evidence],
+  );
+  const decisionDiagnostics = useMemo(
+    () =>
+      [...artifacts]
+        .reverse()
+        .find(
+          (artifact) =>
+            artifact.stage === "decision" &&
+            artifact.attempt === detail?.run.attempt,
+        )?.diagnostics ?? null,
+    [artifacts, detail?.run.attempt],
+  );
 
   useEffect(() => {
     if (
@@ -170,13 +194,16 @@ export default function RunDetail() {
 
   useEffect(() => {
     if (activeView !== "evidence" || !focusedEvidence) return;
-    const target = document.getElementById(`evidence-${focusedEvidence}`);
+    const targetRef =
+      evidenceIndex.primaryRefs[focusedEvidence] ?? focusedEvidence;
+    const target = document.getElementById(`evidence-${targetRef}`);
     target?.focus();
     target?.scrollIntoView?.({ behavior: "smooth", block: "center" });
   }, [
     activeView,
     detail?.result?.evidence?.digest,
     detail?.result?.evidence?.items.length,
+    evidenceIndex.primaryRefs,
     focusedEvidence,
   ]);
 
@@ -337,6 +364,7 @@ export default function RunDetail() {
         <DeliberationPanel
           artifacts={artifacts}
           onEvidence={openEvidence}
+          evidenceIndex={evidenceIndex}
         />
       )}
       {activeView === "evidence" && (
@@ -345,6 +373,7 @@ export default function RunDetail() {
           focusedRef={focusedEvidence}
           onReturn={returnFromEvidence}
           returnLabel={returnViewLabel(t, returnView)}
+          evidenceIndex={evidenceIndex}
         />
       )}
       {activeView === "reports" && (
@@ -354,12 +383,15 @@ export default function RunDetail() {
           activeReport={activeReport}
           onReport={selectReport}
           onEvidence={openEvidence}
+          evidenceIndex={evidenceIndex}
         />
       )}
       {activeView === "decision" && (
         <DecisionPanel
           decision={result?.decision ?? null}
+          diagnostics={decisionDiagnostics}
           onEvidence={openEvidence}
+          evidenceIndex={evidenceIndex}
         />
       )}
 
@@ -466,9 +498,11 @@ function TimelinePanel({ events }: { events: RunEvent[] }) {
 function DeliberationPanel({
   artifacts,
   onEvidence,
+  evidenceIndex,
 }: {
   artifacts: ResearchArtifact[];
   onEvidence: (ref: string) => void;
+  evidenceIndex: EvidenceReferenceIndex;
 }) {
   const { t } = useTranslation();
   const deliberation = artifacts.filter(
@@ -500,6 +534,7 @@ function DeliberationPanel({
             <ArtifactCard
               artifact={artifact}
               onEvidence={onEvidence}
+              evidenceIndex={evidenceIndex}
               key={artifact.id}
             />
           ))}
@@ -512,15 +547,32 @@ function DeliberationPanel({
 function ArtifactCard({
   artifact,
   onEvidence,
+  evidenceIndex,
 }: {
   artifact: ResearchArtifact;
   onEvidence: (ref: string) => void;
+  evidenceIndex: EvidenceReferenceIndex;
 }) {
   const { t } = useTranslation();
   const content = artifact.content;
   const perspective = isPerspectiveReview(content) ? content : null;
   const decision = isResearchDecision(content) ? content : null;
+  const diagnostics = artifact.diagnostics;
+  const parsed = diagnostics?.parsed_thesis ?? null;
   const refs = content.evidence_refs ?? [];
+  const primaryText =
+    parsedText(parsed, "thesis", "summary") ??
+    perspective?.thesis ??
+    decision?.thesis ??
+    "";
+  const claimRebuttals =
+    perspective?.claim_rebuttals?.length
+      ? perspective.claim_rebuttals
+      : parsedStringArray(parsed, "claim_rebuttals", "challenged_claims");
+  const risks =
+    perspective?.risks?.length
+      ? perspective.risks
+      : parsedStringArray(parsed, "risks", "downside_mechanisms");
   return (
     <section className="artifact-card">
       <header className="artifact-header">
@@ -530,12 +582,31 @@ function ArtifactCard({
         </div>
         <small>
           {t("round")} {artifact.round} · {t("attempt")} {artifact.attempt}
+          {" · "}
+          {artifact.generation_method ?? "legacy_unknown"}
         </small>
       </header>
       <div className="artifact-body">
-        <Markdown>
-          {perspective?.thesis ?? decision?.thesis ?? ""}
+        {diagnostics?.degraded_output && (
+          <LegacyDiagnosticBanner diagnostics={diagnostics} />
+        )}
+        {parsed && (
+          <p className="diagnostic-label">{t("parsedLegacyPayload")}</p>
+        )}
+        <Markdown
+          evidenceAliases={evidenceIndex.aliases}
+          onEvidence={onEvidence}
+        >
+          {primaryText}
         </Markdown>
+        {parsed && (
+          <details className="legacy-canonical-payload">
+            <summary>{t("canonicalLegacyPayload")}</summary>
+            <pre>
+              {perspective?.thesis ?? decision?.thesis ?? ""}
+            </pre>
+          </details>
+        )}
         {decision && (
           <p className="artifact-rating">
             <strong>{decision.rating}</strong> · {t("confidence")}{" "}
@@ -546,28 +617,65 @@ function ArtifactCard({
           <>
             <List
               title={t("claimRebuttals")}
-              items={perspective.claim_rebuttals ?? []}
+              items={claimRebuttals}
+              emptyLabel={
+                diagnostics?.missing_fields?.includes(
+                  "claim_rebuttals",
+                )
+                  ? t("legacyFieldNotCaptured")
+                  : undefined
+              }
+              evidenceIndex={evidenceIndex}
+              onEvidence={onEvidence}
             />
-            <List title={t("risks")} items={perspective.risks ?? []} />
+            <List
+              title={t("risks")}
+              items={risks}
+              emptyLabel={
+                diagnostics?.missing_fields?.includes("risks")
+                  ? t("legacyFieldNotCaptured")
+                  : undefined
+              }
+              evidenceIndex={evidenceIndex}
+              onEvidence={onEvidence}
+            />
           </>
         )}
         {decision && (
           <div className="decision-columns compact">
-            <List title={t("catalysts")} items={decision.catalysts ?? []} />
-            <List title={t("risks")} items={decision.risks ?? []} />
+            <List
+              title={t("catalysts")}
+              items={decision.catalysts ?? []}
+              emptyLabel={t("noCatalystsIdentified")}
+              evidenceIndex={evidenceIndex}
+              onEvidence={onEvidence}
+            />
+            <List
+              title={t("risks")}
+              items={decision.risks ?? []}
+              evidenceIndex={evidenceIndex}
+              onEvidence={onEvidence}
+            />
             <List
               title={t("invalidation")}
               items={decision.invalidation_conditions ?? []}
+              evidenceIndex={evidenceIndex}
+              onEvidence={onEvidence}
             />
           </div>
         )}
-        <EvidenceRefs refs={refs} onEvidence={onEvidence} />
+        <EvidenceRefs
+          refs={refs}
+          onEvidence={onEvidence}
+          evidenceIndex={evidenceIndex}
+        />
         {perspective && (perspective.new_evidence_refs ?? []).length > 0 && (
           <div className="artifact-new-evidence">
             <strong>{t("newEvidenceRefs")}</strong>
             <EvidenceRefs
               refs={perspective.new_evidence_refs ?? []}
               onEvidence={onEvidence}
+              evidenceIndex={evidenceIndex}
               hideLabel
             />
           </div>
@@ -582,11 +690,13 @@ function EvidencePanel({
   focusedRef,
   onReturn,
   returnLabel,
+  evidenceIndex,
 }: {
   evidence: EvidenceBundle | null;
   focusedRef: string;
   onReturn: () => void;
   returnLabel: string;
+  evidenceIndex: EvidenceReferenceIndex;
 }) {
   const { t } = useTranslation();
   return (
@@ -608,7 +718,7 @@ function EvidencePanel({
           >
             ← {returnLabel}
           </button>
-          <span className="event-count">{evidence?.items.length ?? 0}</span>
+          <span className="event-count">{evidenceIndex.groups.length}</span>
         </div>
       </div>
       {!evidence ? (
@@ -628,13 +738,22 @@ function EvidencePanel({
               <dt>{t("version")}</dt>
               <dd>{evidence.version ?? "1"}</dd>
             </div>
+            <div>
+              <dt>{t("displayedEvidence")}</dt>
+              <dd>
+                {t("evidenceBodiesSummary", {
+                  groups: evidenceIndex.groups.length,
+                  items: evidence.items.length,
+                })}
+              </dd>
+            </div>
           </dl>
           <div className="evidence-list">
-            {evidence.items.map((item) => (
+            {evidenceIndex.groups.map((group) => (
               <EvidenceCard
-                item={item}
-                focused={item.ref === focusedRef}
-                key={item.ref}
+                group={group}
+                focused={group.refs.includes(focusedRef)}
+                key={group.alias}
               />
             ))}
           </div>
@@ -645,51 +764,67 @@ function EvidencePanel({
 }
 
 function EvidenceCard({
-  item,
+  group,
   focused,
 }: {
-  item: EvidenceItem;
+  group: EvidenceDisplayGroup;
   focused: boolean;
 }) {
   const { t } = useTranslation();
+  const item = group.canonical;
   const hasValue = item.value !== null && item.value !== undefined;
-  const provenance = item.provenance ?? {};
+  const requestedDates = uniqueStrings(
+    group.items.map((entry) => entry.requested_date),
+  );
+  const effectiveDates = uniqueStrings(
+    group.items.flatMap((entry) =>
+      entry.effective_date ? [entry.effective_date] : [],
+    ),
+  );
+  const availableDates = uniqueStrings(
+    group.items.flatMap((entry) =>
+      entry.available_at ? [entry.available_at] : [],
+    ),
+  );
+  const auditRecords = group.items.map(
+    ({ content: _content, ...entry }) => entry,
+  );
   return (
     <section
       className={`evidence-card ${focused ? "focused" : ""}`}
       id={`evidence-${item.ref}`}
-      data-evidence-ref={item.ref}
+      data-evidence-ref={group.refs.join(" ")}
       tabIndex={-1}
     >
       <header>
         <div>
-          <code>{item.ref}</code>
-          <h3>{item.evidence_type}</h3>
+          <code title={group.refs.join("\n")}>{group.alias}</code>
+          <h3>{group.evidenceTypes.join(" · ")}</h3>
         </div>
-        <span className={`quality quality-${item.quality}`}>
-          {item.quality}
+        <span className={`quality quality-${group.quality}`}>
+          {group.quality}
         </span>
       </header>
       <dl className="evidence-metadata">
         <div>
           <dt>{t("source")}</dt>
-          <dd>{item.source}</dd>
+          <dd>{group.sources.join(", ")}</dd>
         </div>
         <div>
           <dt>{t("requestedDate")}</dt>
-          <dd>{item.requested_date}</dd>
+          <dd>{requestedDates.join(", ")}</dd>
         </div>
         <div>
           <dt>{t("effectiveDate")}</dt>
-          <dd>{item.effective_date ?? "—"}</dd>
+          <dd>{effectiveDates.join(", ") || "—"}</dd>
         </div>
         <div>
           <dt>{t("availableAt")}</dt>
-          <dd>{item.available_at ?? "—"}</dd>
+          <dd>{availableDates.join(", ") || "—"}</dd>
         </div>
         <div>
           <dt>{t("fallback")}</dt>
-          <dd>{item.fallback ? t("yes") : t("no")}</dd>
+          <dd>{group.fallback ? t("yes") : t("no")}</dd>
         </div>
         {hasValue && (
           <div>
@@ -705,12 +840,26 @@ function EvidenceCard({
           <Markdown>{item.content}</Markdown>
         </div>
       )}
-      {Object.keys(provenance).length > 0 && (
-        <details className="provenance-details">
-          <summary>{t("provenanceDetails")}</summary>
-          <pre>{JSON.stringify(provenance, null, 2)}</pre>
-        </details>
-      )}
+      <details className="provenance-details evidence-audit-details">
+        <summary>{t("canonicalEvidenceAndProvenance")}</summary>
+        <div className="canonical-ref-list">
+          {group.refs.map((ref) => (
+            <div key={ref}>
+              <code>{ref}</code>
+              <button
+                type="button"
+                className="copy-ref-button"
+                title={ref}
+                aria-label={t("copyEvidenceId", { ref })}
+                onClick={() => void copyEvidenceRef(ref)}
+              >
+                {t("copy")}
+              </button>
+            </div>
+          ))}
+        </div>
+        <pre>{JSON.stringify(auditRecords, null, 2)}</pre>
+      </details>
     </section>
   );
 }
@@ -721,12 +870,14 @@ function ReportsPanel({
   activeReport,
   onReport,
   onEvidence,
+  evidenceIndex,
 }: {
   reports: Record<string, AnalystReport | string>;
   reportNames: string[];
   activeReport: string;
   onReport: (report: string) => void;
   onEvidence: (ref: string) => void;
+  evidenceIndex: EvidenceReferenceIndex;
 }) {
   const { t } = useTranslation();
   return (
@@ -756,10 +907,16 @@ function ReportsPanel({
               </button>
             ))}
           </div>
-          <Markdown>{reportNarrative(reports[activeReport])}</Markdown>
+          <Markdown
+            evidenceAliases={evidenceIndex.aliases}
+            onEvidence={onEvidence}
+          >
+            {reportNarrative(reports[activeReport])}
+          </Markdown>
           <ReportMetadata
             report={reports[activeReport]}
             onEvidence={onEvidence}
+            evidenceIndex={evidenceIndex}
           />
         </>
       )}
@@ -769,10 +926,14 @@ function ReportsPanel({
 
 function DecisionPanel({
   decision,
+  diagnostics,
   onEvidence,
+  evidenceIndex,
 }: {
   decision: ResearchDecision | null;
+  diagnostics: ArtifactDiagnostics | null;
   onEvidence: (ref: string) => void;
+  evidenceIndex: EvidenceReferenceIndex;
 }) {
   const { t } = useTranslation();
   if (!decision) {
@@ -786,6 +947,26 @@ function DecisionPanel({
       </article>
     );
   }
+  const parsed = diagnostics?.parsed_thesis ?? null;
+  const thesis = parsedText(parsed, "thesis") ?? decision.thesis;
+  const catalysts =
+    parsedStringArray(parsed, "catalysts").length > 0
+      ? parsedStringArray(parsed, "catalysts")
+      : (decision.catalysts ?? []);
+  const risks =
+    parsedStringArray(parsed, "risks").length > 0
+      ? parsedStringArray(parsed, "risks")
+      : (decision.risks ?? []);
+  const invalidation =
+    parsedStringArray(parsed, "invalidation_conditions").length > 0
+      ? parsedStringArray(parsed, "invalidation_conditions")
+      : (decision.invalidation_conditions ?? []);
+  const parsedHorizon = parsedText(parsed, "time_horizon");
+  const horizon =
+    parsedHorizon ??
+    (diagnostics?.sentinel_fields?.includes("time_horizon")
+      ? t("legacyFieldNotCaptured")
+      : decision.time_horizon);
   return (
     <article
       className="panel audit-panel decision-panel"
@@ -800,29 +981,106 @@ function DecisionPanel({
         </small>
       </div>
       <div className="decision-body">
+        {diagnostics?.degraded_output && (
+          <LegacyDiagnosticBanner diagnostics={diagnostics} />
+        )}
+        {diagnostics?.rating_conflict && (
+          <div className="rating-conflict">
+            <strong>{t("ratingConflict")}</strong>
+            <span>
+              {t("outerRating")}: {diagnostics.outer_rating} ·{" "}
+              {t("nestedRating")}: {diagnostics.nested_rating}
+            </span>
+            <small>{t("unreliableConclusion")}</small>
+          </div>
+        )}
         <h2>{t("decision")}</h2>
         <h3>{t("thesis")}</h3>
+        {parsed && (
+          <p className="diagnostic-label">{t("parsedLegacyPayload")}</p>
+        )}
         <div className="decision-thesis">
-          <Markdown>{decision.thesis}</Markdown>
+          <Markdown
+            evidenceAliases={evidenceIndex.aliases}
+            onEvidence={onEvidence}
+          >
+            {thesis}
+          </Markdown>
         </div>
+        {parsed && (
+          <details className="legacy-canonical-payload">
+            <summary>{t("canonicalLegacyPayload")}</summary>
+            <pre>{decision.thesis}</pre>
+          </details>
+        )}
         <EvidenceRefs
           refs={decision.evidence_refs ?? []}
           onEvidence={onEvidence}
+          evidenceIndex={evidenceIndex}
         />
         <MemoryRefs refs={decision.memory_refs ?? []} />
         <div className="decision-columns">
-          <List title={t("catalysts")} items={decision.catalysts ?? []} />
-          <List title={t("risks")} items={decision.risks ?? []} />
+          <List
+            title={t("catalysts")}
+            items={catalysts}
+            emptyLabel={t("noCatalystsIdentified")}
+            evidenceIndex={evidenceIndex}
+            onEvidence={onEvidence}
+          />
+          <List
+            title={t("risks")}
+            items={risks}
+            emptyLabel={
+              diagnostics?.sentinel_fields?.includes("risks")
+                ? t("legacyFieldNotCaptured")
+                : undefined
+            }
+            evidenceIndex={evidenceIndex}
+            onEvidence={onEvidence}
+          />
           <List
             title={t("invalidation")}
-            items={decision.invalidation_conditions ?? []}
+            items={invalidation}
+            emptyLabel={
+              diagnostics?.sentinel_fields?.includes(
+                "invalidation_conditions",
+              )
+                ? t("legacyFieldNotCaptured")
+                : undefined
+            }
+            evidenceIndex={evidenceIndex}
+            onEvidence={onEvidence}
           />
         </div>
         <p className="horizon">
-          <strong>{t("horizon")}:</strong> {decision.time_horizon}
+          <strong>{t("horizon")}:</strong> {horizon}
         </p>
       </div>
     </article>
+  );
+}
+
+function LegacyDiagnosticBanner({
+  diagnostics,
+}: {
+  diagnostics: ArtifactDiagnostics;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="legacy-diagnostic" role="alert">
+      <strong>
+        {diagnostics.legacy_degraded_output
+          ? t("legacyDegradedOutput")
+          : t("degradedStructuredOutput")}
+      </strong>
+      <span>{t("legacyDegradedHint")}</span>
+      {diagnostics.rerun_recommended && (
+        <small>{t("rerunRecommended")}</small>
+      )}
+      {(diagnostics.reason_codes ?? []).length > 0 && (
+        <code>{(diagnostics.reason_codes ?? []).join(", ")}</code>
+      )}
+    </div>
   );
 }
 
@@ -837,9 +1095,11 @@ function reportNarrative(value: unknown): string {
 function ReportMetadata({
   report,
   onEvidence,
+  evidenceIndex,
 }: {
   report: unknown;
   onEvidence: (ref: string) => void;
+  evidenceIndex: EvidenceReferenceIndex;
 }) {
   const { t } = useTranslation();
   if (!report || typeof report !== "object") return null;
@@ -881,7 +1141,11 @@ function ReportMetadata({
           </ul>
         </div>
       )}
-      <EvidenceRefs refs={refs} onEvidence={onEvidence} />
+      <EvidenceRefs
+        refs={refs}
+        onEvidence={onEvidence}
+        evidenceIndex={evidenceIndex}
+      />
     </div>
   );
 }
@@ -889,27 +1153,44 @@ function ReportMetadata({
 function EvidenceRefs({
   refs,
   onEvidence,
+  evidenceIndex,
   hideLabel = false,
 }: {
   refs: string[];
   onEvidence: (ref: string) => void;
+  evidenceIndex: EvidenceReferenceIndex;
   hideLabel?: boolean;
 }) {
   const { t } = useTranslation();
   if (!refs.length) return null;
+  const groupedRefs = groupEvidenceRefs(refs, evidenceIndex);
   return (
     <div className="evidence-ref-group">
       {!hideLabel && <strong>{t("evidenceRefs")}</strong>}
       <div className="evidence-chips">
-        {refs.map((ref) => (
-          <button
-            type="button"
-            onClick={() => onEvidence(ref)}
-            aria-label={`${t("openEvidence")} ${ref}`}
-            key={ref}
-          >
-            <code>{ref}</code>
-          </button>
+        {groupedRefs.map((group) => (
+          <span className="evidence-chip" key={group.alias}>
+            <button
+              type="button"
+              className="open-evidence-button"
+              onClick={() => onEvidence(group.targetRef)}
+              aria-label={`${t("openEvidence")} ${group.targetRef}`}
+              title={group.refs.join("\n")}
+            >
+              <code>{group.alias}</code>
+            </button>
+            <button
+              type="button"
+              className="copy-chip-button"
+              onClick={() => void copyEvidenceRef(group.targetRef)}
+              aria-label={t("copyEvidenceId", {
+                ref: group.targetRef,
+              })}
+              title={group.targetRef}
+            >
+              ⧉
+            </button>
+          </span>
         ))}
       </div>
     </div>
@@ -941,18 +1222,41 @@ function MemoryRefs({ refs }: { refs: string[] }) {
   );
 }
 
-function List({ title, items }: { title: string; items: string[] }) {
+function List({
+  title,
+  items,
+  emptyLabel = "—",
+  evidenceIndex,
+  onEvidence,
+}: {
+  title: string;
+  items: string[];
+  emptyLabel?: string;
+  evidenceIndex?: EvidenceReferenceIndex;
+  onEvidence?: (ref: string) => void;
+}) {
   return (
     <div className="artifact-list-section">
       <h3>{title}</h3>
       {items.length ? (
         <ul>
           {items.map((item) => (
-            <li key={item}>{item}</li>
+            <li key={item}>
+              {evidenceIndex && onEvidence ? (
+                <Markdown
+                  evidenceAliases={evidenceIndex.aliases}
+                  onEvidence={onEvidence}
+                >
+                  {item}
+                </Markdown>
+              ) : (
+                item
+              )}
+            </li>
           ))}
         </ul>
       ) : (
-        <span className="muted">—</span>
+        <span className="muted">{emptyLabel}</span>
       )}
     </div>
   );
@@ -981,6 +1285,84 @@ function isResearchDecision(
   content: ArtifactContent,
 ): content is ResearchDecision {
   return "rating" in content && "time_horizon" in content;
+}
+
+function parsedText(
+  parsed: Record<string, unknown> | null | undefined,
+  ...fields: string[]
+): string | null {
+  for (const field of fields) {
+    const value = parsed?.[field];
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function parsedStringArray(
+  parsed: Record<string, unknown> | null | undefined,
+  ...fields: string[]
+): string[] {
+  for (const field of fields) {
+    const value = parsed?.[field];
+    if (Array.isArray(value)) {
+      return value
+        .map(parsedArrayItem)
+        .filter((item): item is string => Boolean(item));
+    }
+  }
+  return [];
+}
+
+function parsedArrayItem(value: unknown): string | null {
+  if (typeof value === "string") {
+    return value.trim() || null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const heading = parsedText(
+    record,
+    "mechanism",
+    "claim_text",
+    "title",
+    "name",
+  );
+  const detail = parsedText(
+    record,
+    "detail",
+    "challenge_text",
+    "description",
+    "text",
+    "summary",
+  );
+  const refs = Array.isArray(record.evidence_refs)
+    ? record.evidence_refs.filter(
+        (item): item is string => typeof item === "string",
+      )
+    : [];
+  const parts = [
+    heading ? `**${heading}**` : null,
+    detail,
+    refs.length ? refs.join(", ") : null,
+  ].filter((item): item is string => Boolean(item));
+  return parts.length ? parts.join("\n\n") : null;
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values));
+}
+
+async function copyEvidenceRef(ref: string) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(ref);
+    }
+  } catch {
+    // Clipboard permission failures do not affect evidence navigation.
+  }
 }
 
 function isViewName(value: string | null): value is ViewName {

@@ -42,6 +42,18 @@ export interface components {
       summary: string;
       warnings?: components["schemas"]["ResearchWarning"][];
     };
+    ArtifactDiagnostics: {
+      degraded_output?: boolean;
+      legacy_degraded_output?: boolean;
+      missing_fields?: string[];
+      nested_rating?: string | null;
+      outer_rating?: string | null;
+      parsed_thesis?: Record<string, unknown> | null;
+      rating_conflict?: boolean;
+      reason_codes?: string[];
+      rerun_recommended?: boolean;
+      sentinel_fields?: string[];
+    };
     ArtifactGenerationMethod: "tool_call" | "raw_json_recovered" | "json_mode_recovered" | "legacy_unknown";
     AssetType: "stock" | "crypto";
     CapabilitiesResponse: {
@@ -174,6 +186,7 @@ export interface components {
       attempt: number;
       content: components["schemas"]["AnalystReport"] | components["schemas"]["PerspectiveReview"] | components["schemas"]["ResearchDecision"];
       created_at: string;
+      diagnostics?: components["schemas"]["ArtifactDiagnostics"];
       generation_method?: components["schemas"]["ArtifactGenerationMethod"];
       id: string;
       role: string;

@@ -1057,6 +1057,31 @@ label small {
   border-left: 3px solid #9eb9f2;
 }
 
+.inline-evidence-ref {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 2px;
+  padding: 1px 6px;
+  color: #2f5fb9;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82em;
+  font-weight: 800;
+  line-height: 1.45;
+  vertical-align: 0.08em;
+  background: #eaf1ff;
+  border: 1px solid #cbdcff;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.inline-evidence-ref:hover,
+.inline-evidence-ref:focus-visible {
+  color: #204b9b;
+  background: #dce8ff;
+  box-shadow: 0 0 0 2px #a9c2f4;
+  outline: none;
+}
+
 .report-metadata {
   display: grid;
   gap: 14px;
@@ -1081,6 +1106,14 @@ label small {
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 8px;
+}
+
+.evidence-chip {
+  display: inline-flex;
+  overflow: hidden;
+  background: #edf3ff;
+  border: 1px solid #d5e2fc;
+  border-radius: 6px;
 }
 
 .evidence-chips button,
@@ -1108,6 +1141,20 @@ label small {
   font-size: 12px;
   background: #edf3ff;
   border-radius: 5px;
+}
+
+.evidence-chip .open-evidence-button code {
+  border-radius: 5px 0 0 5px;
+}
+
+.evidence-chip .copy-chip-button {
+  min-width: 27px;
+  padding: 0 7px;
+  color: #5874aa;
+  font-size: 12px;
+  background: #e3edff;
+  border-left: 1px solid #cfddf8;
+  border-radius: 0;
 }
 
 .artifact-list,
@@ -1172,6 +1219,80 @@ label small {
   margin-bottom: 18px;
 }
 
+.artifact-list-section li > .markdown,
+.decision-columns li > .markdown {
+  max-height: none;
+  padding: 0;
+  overflow: visible;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.artifact-list-section li > .markdown p,
+.decision-columns li > .markdown p {
+  margin: 0;
+}
+
+.legacy-diagnostic {
+  display: grid;
+  gap: 5px;
+  margin: 0 0 18px;
+  padding: 13px 15px;
+  color: #7a4211;
+  font-size: 13px;
+  background: #fff7e8;
+  border: 1px solid #edcc91;
+  border-radius: 9px;
+}
+
+.legacy-diagnostic strong {
+  color: #8a4707;
+  font-size: 14px;
+}
+
+.legacy-diagnostic small {
+  color: #9a4c05;
+  font-weight: 750;
+}
+
+.legacy-diagnostic code {
+  overflow-wrap: anywhere;
+  color: #8c663a;
+  font-size: 11px;
+}
+
+.diagnostic-label {
+  margin: 0 0 8px;
+  color: #86601c;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.legacy-canonical-payload {
+  margin: 0 0 18px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.legacy-canonical-payload summary {
+  cursor: pointer;
+  font-weight: 750;
+}
+
+.legacy-canonical-payload pre {
+  max-height: 280px;
+  margin: 10px 0 0;
+  padding: 12px;
+  overflow: auto;
+  color: #d8e2f0;
+  font-size: 12px;
+  white-space: pre-wrap;
+  background: #101b2b;
+  border-radius: 8px;
+}
+
 .artifact-rating {
   margin: 0 0 18px;
   color: var(--muted);
@@ -1220,7 +1341,7 @@ label small {
 
 .bundle-summary {
   display: grid;
-  grid-template-columns: 1.4fr 0.8fr 0.4fr;
+  grid-template-columns: 1.2fr 0.7fr 0.4fr 1fr;
   gap: 16px;
   margin: 0;
   padding: 18px 22px;
@@ -1264,7 +1385,8 @@ label small {
 
 .evidence-card > header code {
   color: #405f9f;
-  font-size: 12px;
+  font-size: 15px;
+  font-weight: 850;
 }
 
 .quality {
@@ -1321,6 +1443,63 @@ label small {
   white-space: pre-wrap;
   background: #101b2b;
   border-radius: 8px;
+}
+
+.canonical-ref-list {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.canonical-ref-list > div {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 9px;
+  background: #f6f8fb;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+}
+
+.canonical-ref-list code {
+  overflow-wrap: anywhere;
+  color: #53627a;
+  font-size: 12px;
+}
+
+.copy-ref-button {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 0 9px;
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 750;
+  background: #fff;
+  border: 1px solid #ccd9ef;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.rating-conflict {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 18px;
+  padding: 13px 15px;
+  color: #8a1724;
+  font-size: 13px;
+  background: var(--red-soft);
+  border: 1px solid #efbdc4;
+  border-radius: 9px;
+}
+
+.rating-conflict strong {
+  font-size: 14px;
+}
+
+.rating-conflict small {
+  color: #9e2431;
+  font-weight: 750;
 }
 
 .decision-panel {
