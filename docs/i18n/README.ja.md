@@ -27,9 +27,9 @@ invalidation conditions、time horizon が含まれます。ポジション比�
 
 - **Dashboard:** キュー、最近の run、状態、未確定 outcome。
 - **New Run:** ticker、PIT 日付、analysts、Fast/Standard/Deep、
-  provider/model、reasoning、レポート言語、provenance。
+  provider/model、reasoning、レポート言語。
 - **Run Detail:** 永続イベントタイムライン、レポート、構造化 decision、
-  warning、provenance、token/tool/wall-time 指標、cancel/retry/rerun/export。
+  折りたたみ可能な監査詳細、token/tool/wall-time 指標、cancel/retry/rerun/export。
 - **Memory:** ticker、市場、pending/resolved で decision、outcome、
   reflection を検索。
 - **Settings:** provider/model capability、安全なデフォルト値、API key の

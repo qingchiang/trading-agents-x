@@ -448,7 +448,7 @@ def test_analyst_warning_appendix_is_structured_deduplicated_and_removed() -> No
     report = _adapt_analyst_report("market", narrative, [item])
 
     assert "Data Quality Warnings" not in report.narrative
-    assert "Data Provenance" in report.narrative
+    assert "Data Provenance" not in report.narrative
     assert len(report.warnings) == 1
     assert report.warnings[0].message == (
         "historical price (fixture): partial coverage"

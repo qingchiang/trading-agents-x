@@ -93,7 +93,6 @@ const detail = {
       quick_reasoning_effort: "provider_default",
       deep_reasoning_effort: "provider_default",
       output_language: "ja",
-      provenance: true,
     },
     config_snapshot: {},
     attempt: 1,
@@ -130,7 +129,11 @@ const detail = {
           "ev_fedcba987654",
         ],
         narrative:
-          "# Market report\n\nCompare ev_0123456789ab with ev_fedcba987654.",
+          "# Market report\n\nCompare ev_0123456789ab with ev_fedcba987654.\n\n" +
+          "<!-- tradingagents-data-provenance:start -->\n---\n\n" +
+          "## Data Provenance\n\n| Evidence | Source |\n|---|---|\n" +
+          "| price | fixture |\n" +
+          "<!-- tradingagents-data-provenance:end -->",
       },
       fundamentals: analystReport("fundamentals", "Fundamentals"),
     },
@@ -209,7 +212,14 @@ const detail = {
         },
       },
     },
-    warnings: [],
+    warnings: [
+      {
+        code: "structured_output.recovered",
+        message: "One structured output required recovery.",
+        evidence_ref: null,
+        source: "committee.final",
+      },
+    ],
   },
 } as unknown as RunDetailType;
 
@@ -261,6 +271,7 @@ beforeEach(async () => {
     value: { writeText: vi.fn().mockResolvedValue(undefined) },
   });
   localStorage.removeItem("tradingagents-timeline-order");
+  localStorage.removeItem("tradingagents-audit-details-open");
   await i18n.changeLanguage("en");
   vi.mocked(api.run).mockResolvedValue(detail);
   vi.mocked(api.artifacts).mockResolvedValue(artifacts);
@@ -275,6 +286,10 @@ test("restores deliberation and resolves evidence references across run views", 
   );
 
   expect(await screen.findByRole("heading", { name: "NVDA" })).toBeVisible();
+  expect(screen.getByText("Run warnings")).toBeVisible();
+  expect(
+    screen.getByText("One structured output required recovery."),
+  ).not.toBeVisible();
   expect(screen.getByRole("tab", { name: "Agent timeline" })).toHaveAttribute(
     "aria-selected",
     "true",
@@ -341,8 +356,14 @@ test("restores deliberation and resolves evidence references across run views", 
   ).toBeVisible();
   fireEvent.click(marketTab);
   expect(
+    screen.queryByRole("heading", { name: "Data Provenance" }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByText("Audit details")).toBeVisible();
+  expect(
     await screen.findByText("Historical source was partial."),
-  ).toBeVisible();
+  ).not.toBeVisible();
+  fireEvent.click(screen.getByText("Audit details"));
+  expect(screen.getByText("Historical source was partial.")).toBeVisible();
   const inlineRefs = screen.getAllByRole("button", {
     name: /Open evidence ev_/,
   });
@@ -404,6 +425,32 @@ test("restores deliberation and resolves evidence references across run views", 
   expect(localStorage.getItem("tradingagents-timeline-order")).toBe("oldest");
   expect(FakeEventSource.instance.closed).toBe(true);
   await vi.waitFor(() => expect(api.artifacts).toHaveBeenCalledTimes(3));
+});
+
+test("persists the collapsed audit-details display preference", async () => {
+  const first = render(
+    <Router initialPath="/runs/run-1?view=reports&report=market">
+      <RunDetail />
+    </Router>,
+  );
+
+  await screen.findByRole("heading", { name: "Market report" });
+  expect(screen.getByText("Historical source was partial.")).not.toBeVisible();
+  await act(async () => {
+    fireEvent.click(screen.getByText("Audit details"));
+  });
+  expect(localStorage.getItem("tradingagents-audit-details-open")).toBe("true");
+  first.unmount();
+
+  render(
+    <Router initialPath="/runs/run-1?view=reports&report=market">
+      <RunDetail />
+    </Router>,
+  );
+
+  expect(
+    await screen.findByText("Historical source was partial."),
+  ).toBeVisible();
 });
 
 test("labels historical runs that have no recorded artifacts", async () => {

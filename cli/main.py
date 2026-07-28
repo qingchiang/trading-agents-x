@@ -106,10 +106,6 @@ def run_command(
             ),
         ),
     ] = None,
-    provenance: Annotated[
-        bool | None,
-        typer.Option("--provenance/--no-provenance"),
-    ] = None,
     json_output: Annotated[
         bool,
         typer.Option("--json", help="Print the typed result as JSON."),
@@ -137,7 +133,6 @@ def run_command(
         quick_reasoning_effort=quick_reasoning,
         deep_reasoning_effort=deep_reasoning,
         output_language=output_language,
-        provenance=provenance,
     )
     application = _application()
     try:

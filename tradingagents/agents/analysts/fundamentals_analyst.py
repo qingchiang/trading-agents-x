@@ -1,5 +1,6 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
+from tradingagents.agents.utils.agent_states import missing_evidence_blocks
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
@@ -10,8 +11,7 @@ from tradingagents.agents.utils.fundamental_data_tools import (
     get_fundamentals_for_analysis,
     get_income_statement_for_analysis,
 )
-from tradingagents.dataflows.config import get_config
-from tradingagents.provenance import append_provenance_appendix, extract_provenance
+from tradingagents.provenance import extract_provenance
 
 
 def create_fundamentals_analyst(llm):
@@ -32,7 +32,7 @@ def create_fundamentals_analyst(llm):
             + " Use the available tools: `get_fundamentals` for comprehensive company analysis, `get_balance_sheet`, `get_cashflow`, and `get_income_statement` for specific financial statements."
             + " The workflow injects the exact analysis date into every fundamental tool call; do not attempt to supply or override `curr_date`."
             + " Treat missing or unprovided financial fields as unknown, never as zero. Data labelled `not point-in-time historical data` must not be presented as evidence that was available on a historical analysis date; explicitly state that limitation instead. Do not substitute EBIT, pretax income, or another subtotal for operating or ordinary profit unless the source itself defines that mapping."
-            + " Preserve source, requested-date, retrieval-time, and point-in-time limitation labels when citing exact figures. Do not create a data-provenance appendix yourself; the workflow may append one in audit mode."
+            + " Preserve source, requested-date, retrieval-time, and point-in-time limitation labels when citing exact figures. Do not create data-quality-warning or provenance sections; the workflow records source metadata separately."
             + get_language_instruction(),
         )
 
@@ -62,25 +62,30 @@ def create_fundamentals_analyst(llm):
         result = chain.invoke(state["messages"])
 
         report = ""
+        prefetched_evidence = []
 
         if len(result.tool_calls) == 0:
-            report = append_provenance_appendix(
-                result.content,
-                extract_provenance(state["messages"]),
-                expected=(
+            report = (
+                result.content
+                if isinstance(result.content, str)
+                else str(result.content)
+            )
+            records = extract_provenance(state["messages"])
+            prefetched_evidence = missing_evidence_blocks(
+                records,
+                (
                     ("get_fundamentals", "fundamentals overview"),
                     ("get_income_statement", "income statement"),
                     ("get_balance_sheet", "balance sheet"),
                     ("get_cashflow", "cash flow statement"),
                 ),
                 requested_date=current_date,
-                enabled=get_config()["provenance_appendix"],
             )
-            result = result.model_copy(update={"content": report})
 
         return {
             "messages": [result],
             "fundamentals_report": report,
+            "prefetched_evidence": prefetched_evidence,
         }
 
     return fundamentals_analyst_node

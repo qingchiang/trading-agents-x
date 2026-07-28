@@ -18,7 +18,7 @@ def test_no_env_uses_built_in_defaults():
     assert config["deep_think_llm"] == "gpt-5.5"
     assert config["quick_think_llm"] == "gpt-5.4-mini"
     assert config["backend_url"] is None
-    assert config["provenance_appendix"] is False
+    assert "provenance_appendix" not in config
     assert config["news_article_limit"] == 30
     assert config["sentiment_filing_limit"] == 20
 
@@ -47,29 +47,6 @@ def test_int_coercion():
 
     assert config["ticker_news_lookback_days"] == 14
     assert config["social_lookback_days"] == 7
-
-
-@pytest.mark.parametrize(
-    ("raw", "expected"),
-    [
-        ("true", True),
-        ("True", True),
-        ("1", True),
-        ("yes", True),
-        ("on", True),
-        ("false", False),
-        ("False", False),
-        ("0", False),
-        ("no", False),
-        ("off", False),
-    ],
-)
-def test_bool_coercion(raw: str, expected: bool):
-    config = _config(
-        TRADINGAGENTS_PROVENANCE_APPENDIX=raw,
-    )
-
-    assert config["provenance_appendix"] is expected
 
 
 def test_reasoning_thinking_overrides():
@@ -124,6 +101,7 @@ def test_invalid_int_raises():
         "TRADINGAGENTS_CHECKPOINT_ENABLED",
         "TRADINGAGENTS_MEMORY_LOG_MAX_ENTRIES",
         "TRADINGAGENTS_MEMORY_CROSS_TICKER_LIMIT",
+        "TRADINGAGENTS_PROVENANCE_APPENDIX",
     ],
 )
 def test_removed_legacy_environment_keys_are_ignored(env_name: str):
@@ -134,11 +112,7 @@ def test_removed_legacy_environment_keys_are_ignored(env_name: str):
     assert "memory_cross_ticker_limit" not in config
     assert "max_debate_rounds" not in config
     assert "max_risk_discuss_rounds" not in config
-
-@pytest.mark.parametrize("bad", ["treu", "flase", "maybe", "2", "enabled"])
-def test_invalid_bool_raises(bad: str):
-    with pytest.raises(ValueError, match="TRADINGAGENTS_PROVENANCE_APPENDIX"):
-        _config(TRADINGAGENTS_PROVENANCE_APPENDIX=bad)
+    assert "provenance_appendix" not in config
 
 
 def test_unknown_env_var_is_ignored():

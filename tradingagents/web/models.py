@@ -84,7 +84,6 @@ class CapabilityDefaults(ApiModel):
     quick_reasoning_effort: str | None
     deep_reasoning_effort: str | None
     output_language: str
-    provenance: bool
     lan_enabled: bool
 
 

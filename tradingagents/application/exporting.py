@@ -8,14 +8,21 @@ from .contracts import (
     AnalystReport,
     PerspectiveReview,
     ResearchDecision,
+    ResearchWarning,
     RunExport,
 )
 from .evidence import group_evidence_by_content
+from .reporting import strip_report_audit_sections
 
 
 def render_run_export_markdown(run_export: RunExport) -> str:
     """Render a human-readable audit document without hidden model messages."""
     result = run_export.result
+    process_artifacts = tuple(
+        artifact
+        for artifact in run_export.artifacts
+        if artifact.stage not in {"analyst", "decision"}
+    )
     sections = [
         f"# TradingAgentsX Research: {result.instrument}",
         "",
@@ -26,14 +33,14 @@ def render_run_export_markdown(run_export: RunExport) -> str:
         "",
         "## Research Process",
     ]
-    if not run_export.artifacts:
+    if not process_artifacts:
         sections.extend(
             [
                 "",
-                "_No typed research artifacts were recorded for this run._",
+                "_No deliberation artifacts were recorded for this run._",
             ]
         )
-    for artifact in run_export.artifacts:
+    for artifact in process_artifacts:
         sections.extend(
             [
                 "",
@@ -69,7 +76,14 @@ def render_run_export_markdown(run_export: RunExport) -> str:
         sections.extend(["", "_No final reports were recorded._"])
     for name, report in result.reports.items():
         narrative = getattr(report, "narrative", str(report))
-        sections.extend(["", f"### {name.title()}", "", narrative])
+        sections.extend(
+            [
+                "",
+                f"### {name.title()}",
+                "",
+                strip_report_audit_sections(narrative),
+            ]
+        )
 
     sections.extend(["", "## Research Decision"])
     if result.decision is None:
@@ -89,6 +103,22 @@ def render_run_export_markdown(run_export: RunExport) -> str:
                 "```",
             ]
         )
+
+    warnings = _export_warnings(run_export)
+    sections.extend(["", "## Warnings"])
+    if not warnings:
+        sections.extend(["", "_No structured warnings were recorded._"])
+    else:
+        for warning in warnings:
+            details = []
+            if warning.source:
+                details.append(f"source: {warning.source}")
+            if warning.evidence_ref:
+                details.append(f"evidence: `{warning.evidence_ref}`")
+            suffix = f" ({'; '.join(details)})" if details else ""
+            sections.append(
+                f"- **{warning.code}**: {warning.message}{suffix}"
+            )
 
     metrics = result.metrics
     sections.extend(
@@ -221,5 +251,26 @@ def _artifact_human_text(
     content: AnalystReport | PerspectiveReview | ResearchDecision,
 ) -> str:
     if isinstance(content, AnalystReport):
-        return content.narrative
+        return strip_report_audit_sections(content.narrative)
     return content.thesis
+
+
+def _export_warnings(run_export: RunExport) -> tuple[ResearchWarning, ...]:
+    """Collect each structured warning once across durable result/artifacts."""
+
+    warnings = [
+        *run_export.result.warnings,
+        *(
+            warning
+            for report in run_export.result.reports.values()
+            if isinstance(report, AnalystReport)
+            for warning in report.warnings
+        ),
+        *(
+            warning
+            for artifact in run_export.artifacts
+            if isinstance(artifact.content, AnalystReport)
+            for warning in artifact.content.warnings
+        ),
+    ]
+    return tuple(dict.fromkeys(warnings))

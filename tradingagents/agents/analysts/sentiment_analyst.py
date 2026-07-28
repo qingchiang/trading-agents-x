@@ -30,15 +30,13 @@ See: https://github.com/TauricResearch/TradingAgents/issues/796
 """
 
 import logging
-from collections.abc import Iterable
-from dataclasses import asdict
 from datetime import datetime, timezone
 
 from langchain_core.messages import AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.schemas import SentimentReport, render_sentiment_report
-from tradingagents.agents.utils.agent_states import PrefetchedEvidenceBlock
+from tradingagents.agents.utils.agent_states import prefetched_evidence_block
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
@@ -62,7 +60,6 @@ from tradingagents.dataflows.stocktwits import fetch_stocktwits_messages
 from tradingagents.provenance import (
     ProvenanceRecord,
     extract_provenance,
-    strip_provenance_markers,
 )
 
 logger = logging.getLogger(__name__)
@@ -259,12 +256,12 @@ def create_sentiment_analyst(llm):
             retrieved_at=reddit_retrieved,
         )
         prefetched_evidence = [
-            _prefetched_evidence_block(news_block, news_records),
-            _prefetched_evidence_block(
+            prefetched_evidence_block(news_block, news_records),
+            prefetched_evidence_block(
                 stocktwits_block,
                 (stocktwits_record,),
             ),
-            _prefetched_evidence_block(
+            prefetched_evidence_block(
                 reddit_block,
                 (reddit_record,),
             ),
@@ -306,7 +303,7 @@ def create_sentiment_analyst(llm):
                         )
                     ]
                 prefetched_evidence.append(
-                    _prefetched_evidence_block(body, body_records)
+                    prefetched_evidence_block(body, body_records)
                 )
 
         return {
@@ -316,21 +313,6 @@ def create_sentiment_analyst(llm):
         }
 
     return sentiment_analyst_node
-
-
-def _prefetched_evidence_block(
-    body: str,
-    records: Iterable[ProvenanceRecord],
-) -> PrefetchedEvidenceBlock:
-    """Serialize one prefetch response without coupling it to report rendering."""
-
-    content = strip_provenance_markers(body).strip()
-    if not content or (content.startswith("<") and content.endswith(">")):
-        content = None
-    return {
-        "content": content,
-        "records": [asdict(record) for record in records],
-    }
 
 
 def _optional_section(title: str, intro: str, tag: str, body: str) -> str:
@@ -449,7 +431,7 @@ Community discussion. Engagement signal via upvote score and comment count. Subr
 
 9. **Past sentiment is not predictive.** Frame conclusions as evidence for the research committee to weigh alongside fundamentals and market data, not as a price call or account instruction.
 
-10. **Preserve source and date boundaries.** Keep supplied source/window labels for exact claims. Do not create a data-provenance appendix yourself; the workflow may append one in audit mode.
+10. **Preserve source and date boundaries.** Keep supplied source/window labels for exact claims. Do not create data-quality-warning or provenance sections; the workflow records source metadata separately.
 
 ## Output fields
 

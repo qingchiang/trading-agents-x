@@ -347,7 +347,6 @@ def create_app(
                 "output_language": report_language_value(
                     defaults.output_language
                 ),
-                "provenance": defaults.provenance,
                 "lan_enabled": settings.lan_enabled,
             },
         )

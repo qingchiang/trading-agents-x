@@ -31,6 +31,7 @@ import {
 const terminal = new Set(["succeeded", "failed", "cancelled"]);
 const reportOrder = ["fundamentals", "market", "news", "social"] as const;
 const timelineOrderStorageKey = "tradingagents-timeline-order";
+const auditDetailsStorageKey = "tradingagents-audit-details-open";
 const eventNames = [
   "run.queued",
   "run.started",
@@ -59,6 +60,9 @@ type ViewName = (typeof viewNames)[number];
 type ReturnViewName = Exclude<ViewName, "evidence">;
 type TimelineOrder = "newest" | "oldest";
 type ArtifactContent = ResearchArtifact["content"];
+type VisibleWarning =
+  | string
+  | NonNullable<AnalystReport["warnings"]>[number];
 
 export default function RunDetail() {
   const { t } = useTranslation();
@@ -175,6 +179,16 @@ export default function RunDetail() {
         )?.diagnostics ?? null,
     [artifacts, detail?.run.attempt],
   );
+  const runWarnings = useMemo(() => {
+    const reportWarningKeys = new Set(
+      Object.values(reports)
+        .flatMap(reportWarnings)
+        .map(warningKey),
+    );
+    return dedupeWarnings(detail?.result?.warnings ?? []).filter(
+      (warning) => !reportWarningKeys.has(warningKey(warning)),
+    );
+  }, [detail?.result?.warnings, reports]);
 
   useEffect(() => {
     if (
@@ -337,6 +351,7 @@ export default function RunDetail() {
       </header>
       {error && <div className="alert">{error}</div>}
       {run.error_message && <div className="alert">{run.error_message}</div>}
+      <RunWarnings warnings={runWarnings} />
 
       <nav
         className="panel view-tabs"
@@ -1069,9 +1084,13 @@ function LegacyDiagnosticBanner({
 }
 
 function reportNarrative(value: unknown): string {
-  if (typeof value === "string") return value;
+  if (typeof value === "string") {
+    return stripLegacyReportAuditSections(value);
+  }
   if (value && typeof value === "object" && "narrative" in value) {
-    return String((value as { narrative: unknown }).narrative);
+    return stripLegacyReportAuditSections(
+      String((value as { narrative: unknown }).narrative),
+    );
   }
   return JSON.stringify(value, null, 2);
 }
@@ -1086,52 +1105,189 @@ function ReportMetadata({
   evidenceIndex: EvidenceReferenceIndex;
 }) {
   const { t } = useTranslation();
+  const [open, setOpen] = useState(readAuditDetailsOpen);
   if (!report || typeof report !== "object") return null;
   const typed = report as {
-    warnings?: Array<
-      | string
-      | {
-          code: string;
-          message: string;
-          evidence_ref?: string | null;
-          source?: string | null;
-        }
-    >;
+    warnings?: VisibleWarning[];
     evidence_refs?: string[];
   };
-  const warnings = typed.warnings ?? [];
+  const warnings = dedupeWarnings(typed.warnings ?? []);
   const refs = typed.evidence_refs ?? [];
-  if (!warnings.length && !refs.length) return null;
+  const groups = groupEvidenceRefs(refs, evidenceIndex)
+    .map((refGroup) =>
+      evidenceIndex.groups.find(
+        (group) => group.alias === refGroup.alias,
+      ),
+    )
+    .filter((group): group is EvidenceDisplayGroup => Boolean(group));
+  if (!warnings.length && !groups.length) return null;
   return (
-    <div className="report-metadata">
-      {warnings.length > 0 && (
-        <div>
-          <strong>{t("warnings")}</strong>
-          <ul>
-            {warnings.map((warning) => {
-              const message =
-                typeof warning === "string" ? warning : warning.message;
-              const key =
-                typeof warning === "string"
-                  ? warning
-                  : [
-                      warning.code,
-                      warning.evidence_ref,
-                      warning.source,
-                      warning.message,
-                    ].join(":");
-              return <li key={key}>{message}</li>;
-            })}
-          </ul>
-        </div>
-      )}
-      <EvidenceRefs
-        refs={refs}
-        onEvidence={onEvidence}
-        evidenceIndex={evidenceIndex}
-      />
-    </div>
+    <details
+      className="report-metadata audit-details"
+      open={open}
+    >
+      <summary
+        onClick={(event) => {
+          event.preventDefault();
+          const next = !open;
+          setOpen(next);
+          persistAuditDetailsOpen(next);
+        }}
+      >
+        <strong>{t("auditDetails")}</strong>
+        <span>
+          {t("auditSummary", {
+            warnings: warnings.length,
+            evidence: groups.length,
+          })}
+        </span>
+      </summary>
+      <div className="audit-details-body">
+        {warnings.length > 0 && (
+          <div>
+            <strong>{t("warnings")}</strong>
+            <ul>
+              {warnings.map((warning) => (
+                <li key={warningKey(warning)}>
+                  {warningMessage(warning)}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {groups.length > 0 && (
+          <div>
+            <strong>{t("evidenceRefs")}</strong>
+            <ul className="audit-evidence-list">
+              {groups.map((group) => (
+                <li key={group.alias}>
+                  <button
+                    type="button"
+                    className="open-evidence-button"
+                    onClick={() => onEvidence(group.canonical.ref)}
+                    title={group.refs.join("\n")}
+                    aria-label={`${t("openEvidence")} ${group.canonical.ref}`}
+                  >
+                    {group.alias}
+                  </button>
+                  <span>{group.sources.join(", ")}</span>
+                  <small>
+                    {group.quality}
+                    {" · "}
+                    {evidenceDates(group).join(", ") || "—"}
+                    {group.fallback ? ` · ${t("fallback")}` : ""}
+                  </small>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </details>
   );
+}
+
+function RunWarnings({ warnings }: { warnings: VisibleWarning[] }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(readAuditDetailsOpen);
+  if (!warnings.length) return null;
+  return (
+    <details
+      className="run-warning-details audit-details"
+      open={open}
+    >
+      <summary
+        onClick={(event) => {
+          event.preventDefault();
+          const next = !open;
+          setOpen(next);
+          persistAuditDetailsOpen(next);
+        }}
+      >
+        <strong>{t("runWarnings")}</strong>
+        <span>
+          {t("warningCount", { count: warnings.length })}
+        </span>
+      </summary>
+      <ul>
+        {warnings.map((warning) => (
+          <li key={warningKey(warning)}>{warningMessage(warning)}</li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+function reportWarnings(report: AnalystReport | string): VisibleWarning[] {
+  return typeof report === "string"
+    ? []
+    : [...(report.warnings ?? [])];
+}
+
+function warningMessage(warning: VisibleWarning): string {
+  return typeof warning === "string" ? warning : warning.message;
+}
+
+function warningKey(warning: VisibleWarning): string {
+  return typeof warning === "string"
+    ? warning
+    : [
+        warning.code,
+        warning.evidence_ref,
+        warning.source,
+        warning.message,
+      ].join(":");
+}
+
+function dedupeWarnings(warnings: VisibleWarning[]): VisibleWarning[] {
+  const seen = new Set<string>();
+  return warnings.filter((warning) => {
+    const key = warningKey(warning);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function evidenceDates(group: EvidenceDisplayGroup): string[] {
+  return Array.from(
+    new Set(
+      group.items.flatMap((item) =>
+        item.effective_date
+          ? [item.effective_date]
+          : item.requested_date
+            ? [item.requested_date]
+            : [],
+      ),
+    ),
+  );
+}
+
+function stripLegacyReportAuditSections(value: string): string {
+  let text = value.replace(
+    /<!--\s*tradingagents-data-provenance:start\s*-->[\s\S]*?<!--\s*tradingagents-data-provenance:end\s*-->/gi,
+    "",
+  );
+  const heading =
+    /^\s*##\s+Data\s+(?:Quality\s+Warnings|Provenance)\s*$/im.exec(
+      text,
+    );
+  if (heading?.index !== undefined) {
+    text = text.slice(0, heading.index);
+  }
+  text = text.trimEnd();
+  if (text.endsWith("---")) {
+    text = text.slice(0, -3).trimEnd();
+  }
+  return text;
+}
+
+function readAuditDetailsOpen(): boolean {
+  return localStorage.getItem(auditDetailsStorageKey) === "true";
+}
+
+function persistAuditDetailsOpen(open: boolean): void {
+  localStorage.setItem(auditDetailsStorageKey, String(open));
 }
 
 function EvidenceRefs({

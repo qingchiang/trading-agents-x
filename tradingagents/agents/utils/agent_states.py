@@ -1,8 +1,15 @@
 """Local state for one evidence-collection analyst subgraph."""
 
+from collections.abc import Iterable
+from dataclasses import asdict
 from typing import Annotated, TypedDict
 
 from langgraph.graph import MessagesState
+
+from tradingagents.provenance import (
+    ProvenanceRecord,
+    strip_provenance_markers,
+)
 
 
 class PrefetchedEvidenceBlock(TypedDict):
@@ -25,4 +32,63 @@ class AgentState(MessagesState):
     prefetched_evidence: Annotated[
         list[PrefetchedEvidenceBlock],
         "Evidence fetched before an analyst LLM call",
+    ]
+
+
+def prefetched_evidence_block(
+    body: str,
+    records: Iterable[ProvenanceRecord],
+) -> PrefetchedEvidenceBlock:
+    """Serialize one prefetch response independently from report rendering."""
+
+    records = tuple(records)
+    content = strip_provenance_markers(body).strip()
+    unavailable = records and all(
+        any(
+            token in record.timing.casefold()
+            for token in (
+                "unavailable",
+                "failed",
+                "not queried",
+                "no usable data",
+            )
+        )
+        for record in records
+    )
+    if (
+        not content
+        or unavailable
+        or (content.startswith("<") and content.endswith(">"))
+    ):
+        content = None
+    return {
+        "content": content,
+        "records": [asdict(record) for record in records],
+    }
+
+
+def missing_evidence_blocks(
+    records: Iterable[ProvenanceRecord],
+    expected: Iterable[tuple[str, str]],
+    *,
+    requested_date: str,
+) -> list[PrefetchedEvidenceBlock]:
+    """Represent expected tool evidence that was never requested."""
+
+    present = {record.evidence for record in records}
+    return [
+        prefetched_evidence_block(
+            "",
+            (
+                ProvenanceRecord(
+                    evidence=label,
+                    source="—",
+                    requested=requested_date,
+                    effective="—",
+                    timing="not requested",
+                ),
+            ),
+        )
+        for evidence, label in expected
+        if evidence not in present
     ]

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Mapping
 from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Any, Literal, TypeAlias
@@ -627,7 +628,16 @@ class AnalysisRequest(FrozenModel):
     quick_reasoning_effort: str | None = None
     deep_reasoning_effort: str | None = None
     output_language: OutputLanguage | None = None
-    provenance: bool | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def discard_legacy_provenance(cls, value: Any) -> Any:
+        """Accept the removed run option in historical and older client payloads."""
+        if not isinstance(value, Mapping) or "provenance" not in value:
+            return value
+        payload = dict(value)
+        payload.pop("provenance", None)
+        return payload
 
     @field_validator("ticker")
     @classmethod

@@ -1,5 +1,6 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
+from tradingagents.agents.utils.agent_states import missing_evidence_blocks
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
@@ -11,11 +12,7 @@ from tradingagents.agents.utils.market_data_validation_tools import (
 from tradingagents.agents.utils.technical_indicators_tools import (
     get_indicators_for_analysis,
 )
-from tradingagents.dataflows.config import get_config
-from tradingagents.provenance import (
-    append_provenance_appendix,
-    extract_provenance,
-)
+from tradingagents.provenance import extract_provenance
 
 
 def create_market_analyst(llm):
@@ -59,7 +56,7 @@ Volume-Based Indicators:
 
 Before writing the final report, call get_verified_market_snapshot for this ticker and the current date, and treat it as the source of truth for any exact OHLCV, price-level, or indicator-value claim. If another tool's output conflicts with the verified snapshot, flag the discrepancy rather than inventing a reconciled number. Do not claim historical validation, support/resistance bounces, or exact percentage moves unless they are directly supported by tool output with concrete dates and prices.
 
-Preserve source and effective-date labels for exact numeric claims. Do not create a data-provenance appendix yourself; the workflow may append one in audit mode.
+Preserve source and effective-date labels for exact numeric claims. Do not create data-quality-warning or provenance sections; the workflow records source metadata separately.
 
 The workflow injects the exact analysis date as the end/current date for every market-data tool call. Do not attempt to supply or override `end_date` or `curr_date`; only choose a historical `start_date` for `get_stock_data` and optional look-back lengths for the other tools.
 
@@ -94,20 +91,25 @@ Write a detailed and nuanced research report of the trends you observe. Provide 
         result = chain.invoke(state["messages"])
 
         report = ""
+        prefetched_evidence = []
 
         if len(result.tool_calls) == 0:
-            report = append_provenance_appendix(
-                result.content,
-                extract_provenance(state["messages"]),
-                expected=(("get_verified_market_snapshot", "verified market snapshot"),),
-                requested_date=current_date,
-                enabled=get_config()["provenance_appendix"],
+            report = (
+                result.content
+                if isinstance(result.content, str)
+                else str(result.content)
             )
-            result = result.model_copy(update={"content": report})
+            records = extract_provenance(state["messages"])
+            prefetched_evidence = missing_evidence_blocks(
+                records,
+                (("get_verified_market_snapshot", "verified market snapshot"),),
+                requested_date=current_date,
+            )
 
         return {
             "messages": [result],
             "market_report": report,
+            "prefetched_evidence": prefetched_evidence,
         }
 
     return market_analyst_node

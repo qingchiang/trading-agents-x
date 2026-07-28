@@ -60,7 +60,6 @@ const capabilities = {
     quick_reasoning_effort: "low",
     deep_reasoning_effort: "high",
     output_language: "zh-CN",
-    provenance: false,
     lan_enabled: false,
   },
 } as Capabilities;
@@ -136,8 +135,10 @@ test("reuses the idempotency key when a browser submission is retried", async ()
     quick_reasoning_effort: "low",
     deep_reasoning_effort: "high",
     output_language: "zh-CN",
-    provenance: false,
   });
+  expect(vi.mocked(api.createRun).mock.calls[1][0]).not.toHaveProperty(
+    "provenance",
+  );
 });
 
 test("keeps UI locale and report output language independent", async () => {

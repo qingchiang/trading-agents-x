@@ -10,7 +10,14 @@ from types import MappingProxyType
 from typing import Any
 
 from dotenv import find_dotenv, load_dotenv
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 
 from tradingagents.default_config import build_default_config
 
@@ -64,8 +71,22 @@ class RunSettings(BaseModel):
     temperature: float | None = None
     llm_max_retries: int | None = Field(default=None, ge=0)
     output_language: OutputLanguage = ReportLanguage.ENGLISH
-    provenance: bool = False
     data_config: Mapping[str, Any]
+
+    @model_validator(mode="before")
+    @classmethod
+    def discard_legacy_provenance(cls, value: Any) -> Any:
+        """Load old config snapshots without retaining the removed UI option."""
+        if not isinstance(value, Mapping):
+            return value
+        payload = dict(value)
+        payload.pop("provenance", None)
+        data_config = payload.get("data_config")
+        if isinstance(data_config, Mapping):
+            clean_data_config = dict(data_config)
+            clean_data_config.pop("provenance_appendix", None)
+            payload["data_config"] = clean_data_config
+        return payload
 
     @field_validator("output_language", mode="before")
     @classmethod
@@ -104,7 +125,7 @@ class RunSettings(BaseModel):
                 "output_language": report_language_prompt_label(
                     self.output_language
                 ),
-                "provenance_appendix": self.provenance,
+                "provenance_appendix": False,
             }
         )
         return config
@@ -172,14 +193,9 @@ class AppSettings(BaseModel):
                 defaults.get("output_language", "en"),
             )
         )
-        provenance = _env_bool(
-            env,
-            "TRADINGAGENTS_PROVENANCE_APPENDIX",
-            bool(defaults.get("provenance_appendix", False)),
-        )
         data_config = deepcopy(defaults)
+        data_config.pop("provenance_appendix", None)
         data_config["output_language"] = report_language_value(output_language)
-        data_config["provenance_appendix"] = provenance
         run_settings = RunSettings(
             llm_provider=provider,
             quick_model=env.get(
@@ -210,7 +226,6 @@ class AppSettings(BaseModel):
                 else defaults.get("llm_max_retries")
             ),
             output_language=output_language,
-            provenance=provenance,
             data_config=data_config,
         )
         lan_enabled = _env_bool(env, "TRADINGAGENTS_LAN_ENABLED", False)
@@ -267,11 +282,6 @@ class AppSettings(BaseModel):
                     else base.deep_reasoning_effort
                 ),
                 "output_language": request.output_language or base.output_language,
-                "provenance": (
-                    request.provenance
-                    if request.provenance is not None
-                    else base.provenance
-                ),
             }
         )
 
@@ -291,7 +301,6 @@ class AppSettings(BaseModel):
                 "quick_reasoning_effort": resolved.quick_reasoning_effort,
                 "deep_reasoning_effort": resolved.deep_reasoning_effort,
                 "output_language": resolved.output_language,
-                "provenance": resolved.provenance,
             }
         )
 

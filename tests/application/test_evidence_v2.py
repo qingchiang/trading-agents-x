@@ -9,10 +9,16 @@ from langchain_core.messages import ToolMessage
 from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
+    AnalystReport,
     EvidenceBundle,
     EvidenceItem,
     EvidenceQuality,
     NodeMetrics,
+    PerspectiveReview,
+    ResearchArtifact,
+    ResearchDecision,
+    ResearchRating,
+    ResearchWarning,
     RunExport,
     RunMetrics,
     RunStatus,
@@ -413,3 +419,116 @@ def test_markdown_export_includes_total_and_per_node_metrics() -> None:
     assert "| `analyst.market` | 2 | 2 | 900 | 200 | 2.500s |" in markdown
     assert "| `legacy.node` | — | — | — | — | 1.000s |" in markdown
     assert markdown.index("committee.final") < markdown.index("analyst.market")
+
+
+def test_markdown_export_cleans_reports_and_emits_each_audit_section_once() -> None:
+    now = datetime(2026, 7, 24, 12, tzinfo=timezone.utc)
+    warning = ResearchWarning(
+        code="evidence.partial",
+        message="Historical coverage is partial.",
+        source="fixture",
+    )
+    narrative = """MODEL REPORT
+
+<!-- tradingagents-data-provenance:start -->
+---
+
+## Data Quality Warnings
+
+- **price** (source: fixture): partial coverage
+
+## Data Provenance
+
+| Evidence | Source |
+|---|---|
+| price | fixture |
+<!-- tradingagents-data-provenance:end -->"""
+    report = AnalystReport(
+        analyst="market",
+        summary="Summary.",
+        confidence=0.7,
+        warnings=(warning,),
+        narrative=narrative,
+    )
+    decision = ResearchDecision(
+        rating=ResearchRating.HOLD,
+        confidence=0.6,
+        thesis="FINAL THESIS",
+        risks=("Demand weakens.",),
+        invalidation_conditions=("A new filing changes the evidence.",),
+        time_horizon="6-12 months",
+    )
+    artifacts = (
+        ResearchArtifact(
+            id="analyst-artifact",
+            run_id="fixture-run",
+            attempt=1,
+            stage="analyst",
+            role="market",
+            content=report,
+            created_at=now,
+        ),
+        ResearchArtifact(
+            id="review-artifact",
+            run_id="fixture-run",
+            attempt=1,
+            stage="perspective",
+            role="bear",
+            content=PerspectiveReview(
+                role="bear",
+                thesis="REVIEW THESIS",
+                claim_rebuttals=("A claim is challenged.",),
+                risks=("Demand weakens.",),
+            ),
+            created_at=now,
+        ),
+        ResearchArtifact(
+            id="decision-artifact",
+            run_id="fixture-run",
+            attempt=1,
+            stage="decision",
+            role="final_committee",
+            content=decision,
+            created_at=now,
+        ),
+    )
+    run_export = RunExport(
+        run=RunView(
+            id="fixture-run",
+            status=RunStatus.SUCCEEDED,
+            request=AnalysisRequest(
+                ticker="NVDA",
+                analysis_date="2026-07-24",
+            ),
+            config_snapshot={},
+            attempt=1,
+            cancel_requested=False,
+            created_at=now,
+            updated_at=now,
+        ),
+        result=AnalysisResult(
+            run_id="fixture-run",
+            status=RunStatus.SUCCEEDED,
+            instrument="NVDA",
+            reports={"market": report},
+            decision=decision,
+            warnings=(warning,),
+        ),
+        artifacts=artifacts,
+    )
+
+    markdown = render_run_export_markdown(run_export)
+
+    assert markdown.count("## Research Process") == 1
+    assert markdown.count("## Reports") == 1
+    assert markdown.count("## Research Decision") == 1
+    assert markdown.count("## Warnings") == 1
+    assert markdown.count("## Performance") == 1
+    assert markdown.count("## Evidence Appendix") == 1
+    assert markdown.count("MODEL REPORT") == 1
+    assert markdown.count("Historical coverage is partial.") == 1
+    assert "Data Quality Warnings" not in markdown
+    assert "Data Provenance" not in markdown
+    assert "review-artifact" in markdown
+    assert "analyst-artifact" not in markdown
+    assert "decision-artifact" not in markdown

@@ -89,17 +89,6 @@
             "$ref": "#/components/schemas/RunProfile",
             "default": "standard"
           },
-          "provenance": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Provenance"
-          },
           "quick_model": {
             "anyOf": [
               {
@@ -476,10 +465,6 @@
             "title": "Profile",
             "type": "string"
           },
-          "provenance": {
-            "title": "Provenance",
-            "type": "boolean"
-          },
           "quick_model": {
             "title": "Quick Model",
             "type": "string"
@@ -504,7 +489,6 @@
           "quick_reasoning_effort",
           "deep_reasoning_effort",
           "output_language",
-          "provenance",
           "lan_enabled"
         ],
         "title": "CapabilityDefaults",

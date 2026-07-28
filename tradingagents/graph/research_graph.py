@@ -66,7 +66,10 @@ from tradingagents.application.contracts import (
 )
 from tradingagents.application.evidence import group_evidence_by_content
 from tradingagents.application.metrics import MetricsCallback
-from tradingagents.application.reporting import order_reports
+from tradingagents.application.reporting import (
+    order_reports,
+    strip_report_audit_sections,
+)
 from tradingagents.application.runtime import RunContext, check_cancelled
 from tradingagents.dataflows.config import use_config
 from tradingagents.graph.structured_output import (
@@ -1339,28 +1342,22 @@ def _evidence_matches_warning(
 
 
 def _separate_warning_section(value: str) -> tuple[str, list[str]]:
-    """Remove the generated warning appendix while retaining provenance."""
+    """Extract legacy warning bullets and return a clean report narrative."""
     if _WARNING_HEADING not in value:
-        return value, []
+        return strip_report_audit_sections(value), []
     before, section = value.split(_WARNING_HEADING, 1)
     warning_section = section
-    provenance = ""
     if _PROVENANCE_HEADING in section:
-        warning_section, provenance_body = section.split(
+        warning_section, _provenance_body = section.split(
             _PROVENANCE_HEADING,
             1,
         )
-        provenance = f"{_PROVENANCE_HEADING}{provenance_body}".strip()
-    clean_before = before.rstrip()
-    if clean_before.endswith("---"):
-        clean_before = clean_before[:-3].rstrip()
-    clean_parts = [part for part in (clean_before, provenance) if part]
     warnings = [
         line.strip()
         for line in warning_section.splitlines()
         if line.strip().startswith("- ")
     ]
-    return "\n\n".join(clean_parts).strip(), warnings
+    return strip_report_audit_sections(before), warnings
 
 
 def _research_prompt(

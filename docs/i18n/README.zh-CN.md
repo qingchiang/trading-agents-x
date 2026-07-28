@@ -23,9 +23,9 @@ TradingAgentsX 是一个面向本地单用户的投资研究运行中心。它�
 
 - **Dashboard：** 队列、最近运行、状态和待结算 outcome。
 - **New Run：** 标的、PIT 日期、analysts、Fast/Standard/Deep、
-  provider/model、reasoning、报告语言与 provenance。
+  provider/model、reasoning 与报告语言。
 - **Run Detail：** 可恢复的事件时间线、报告 tabs、结构化决策、warning、
-  provenance、token/tool/wall-time 指标，以及取消、retry、rerun、导出。
+  可折叠审计详情、token/tool/wall-time 指标，以及取消、retry、rerun、导出。
 - **Memory：** 按 ticker、市场和 pending/resolved 状态查询 decision、
   outcome 与 reflection。
 - **Settings：** 只读能力列表、非敏感默认值和 API key 是否已配置。

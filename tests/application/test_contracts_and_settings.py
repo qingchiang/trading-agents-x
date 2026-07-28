@@ -16,7 +16,7 @@ from tradingagents.application.contracts import (
     ResearchWarning,
     RunProfile,
 )
-from tradingagents.application.settings import AppSettings
+from tradingagents.application.settings import AppSettings, RunSettings
 
 
 def test_analysis_request_is_normalized_ordered_and_immutable() -> None:
@@ -206,7 +206,7 @@ def test_omitted_request_values_inherit_and_materialize_environment_defaults(
             "TRADINGAGENTS_OUTPUT_LANGUAGE": custom_language,
             "TRADINGAGENTS_QUICK_REASONING_EFFORT": "low",
             "TRADINGAGENTS_DEEP_REASONING_EFFORT": "high",
-            "TRADINGAGENTS_PROVENANCE_APPENDIX": "false",
+            "TRADINGAGENTS_PROVENANCE_APPENDIX": "true",
         },
         load_env_files=False,
     )
@@ -227,4 +227,30 @@ def test_omitted_request_values_inherit_and_materialize_environment_defaults(
     assert materialized.output_language == custom_language
     assert materialized.quick_reasoning_effort == "low"
     assert materialized.deep_reasoning_effort == "high"
-    assert materialized.provenance is False
+    assert "provenance" not in materialized.model_dump(mode="json")
+    assert "provenance" not in resolved.snapshot()
+    assert "provenance_appendix" not in resolved.snapshot()["data_config"]
+    assert resolved.dataflow_config(settings)["provenance_appendix"] is False
+
+
+def test_legacy_provenance_options_are_accepted_then_discarded() -> None:
+    request = AnalysisRequest.model_validate(
+        {
+            "ticker": "NVDA",
+            "analysis_date": "2026-07-24",
+            "provenance": True,
+        }
+    )
+    settings = RunSettings.model_validate(
+        {
+            "provenance": True,
+            "data_config": {
+                "provenance_appendix": True,
+                "news_article_limit": 30,
+            },
+        }
+    )
+
+    assert "provenance" not in request.model_dump(mode="json")
+    assert "provenance" not in settings.model_dump(mode="json")
+    assert "provenance_appendix" not in settings.data_config

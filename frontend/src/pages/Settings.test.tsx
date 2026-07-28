@@ -52,7 +52,6 @@ const capabilities = {
     quick_reasoning_effort: null,
     deep_reasoning_effort: null,
     output_language: "zh-CN",
-    provenance: false,
     lan_enabled: false,
   },
 } as Capabilities;

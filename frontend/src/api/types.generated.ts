@@ -14,7 +14,6 @@ export interface components {
       llm_provider?: string | null;
       output_language?: components["schemas"]["ReportLanguage"] | string | null;
       profile?: components["schemas"]["RunProfile"];
-      provenance?: boolean | null;
       quick_model?: string | null;
       quick_reasoning_effort?: string | null;
       ticker: string;
@@ -70,7 +69,6 @@ export interface components {
       llm_provider: string;
       output_language: string;
       profile: string;
-      provenance: boolean;
       quick_model: string;
       quick_reasoning_effort: string | null;
     };

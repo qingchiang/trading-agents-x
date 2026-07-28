@@ -29,7 +29,6 @@ def _payload(ticker: str = "NVDA") -> dict:
         "profile": "standard",
         "analysts": ["market", "news"],
         "output_language": "en",
-        "provenance": True,
     }
 
 
@@ -138,6 +137,29 @@ async def test_openapi_contains_versioned_run_center_contract(
         "/api/v1/providers/{provider}/models",
         "/api/v1/health",
     } <= set(paths)
+    assert "provenance" not in schema["components"]["schemas"][
+        "AnalysisRequest"
+    ]["properties"]
+    assert "provenance" not in schema["components"]["schemas"][
+        "CapabilityDefaults"
+    ]["properties"]
+
+
+@pytest.mark.anyio
+async def test_legacy_provenance_request_is_accepted_and_discarded(
+    web_client: httpx.AsyncClient,
+) -> None:
+    response = await web_client.post(
+        "/api/v1/runs",
+        json={**_payload(), "provenance": True},
+    )
+    detail = await web_client.get(
+        f"/api/v1/runs/{response.json()['id']}"
+    )
+
+    assert response.status_code == 202
+    assert "provenance" not in detail.json()["run"]["request"]
+    assert "provenance" not in detail.json()["run"]["config_snapshot"]
 
 
 @pytest.mark.anyio
@@ -306,7 +328,6 @@ async def test_capabilities_expose_effective_non_sensitive_run_defaults(
     assert payload["output_languages"] == ["en", "zh-CN", "ja"]
     assert payload["defaults"] | {
         "output_language": "en",
-        "provenance": False,
         "quick_reasoning_effort": None,
         "deep_reasoning_effort": None,
     } == payload["defaults"]

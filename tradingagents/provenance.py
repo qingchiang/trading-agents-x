@@ -1,8 +1,9 @@
-"""Deterministic data-provenance metadata and report appendix rendering.
+"""Deterministic data-provenance metadata and compatibility rendering.
 
-Vendor results carry a small versioned HTML comment.  The comment is visible to
-the analyst model but hidden by Markdown renderers; analyst nodes parse it before
-ToolMessages are cleared and append one human-readable audit table to the report.
+Vendor results carry a small versioned HTML comment. The comment is visible to
+the analyst model but hidden by Markdown renderers; application graph nodes
+convert it into typed evidence before ToolMessages are cleared. The appendix
+renderer remains available only for direct low-level compatibility callers.
 No provenance is inferred from model prose.
 """
 

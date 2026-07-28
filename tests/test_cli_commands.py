@@ -47,6 +47,9 @@ def test_root_is_noninteractive_and_exposes_the_new_command_tree() -> None:
     for command in ("run", "serve", "worker", "runs", "memory", "export", "db"):
         assert command in result.output
     assert "questionnaire" not in result.output.lower()
+    run_help = runner.invoke(cli.app, ["run", "--help"])
+    assert run_help.exit_code == 0
+    assert "--provenance" not in run_help.output
 
 
 def test_version_exits_without_loading_settings(monkeypatch) -> None:
@@ -116,7 +119,6 @@ def test_run_builds_the_typed_request_and_prints_json(monkeypatch) -> None:
             "high",
             "--output-language",
             "ja",
-            "--no-provenance",
             "--quiet",
             "--json",
         ],
@@ -130,7 +132,6 @@ def test_run_builds_the_typed_request_and_prints_json(monkeypatch) -> None:
     assert request.profile is RunProfile.DEEP
     assert request.analysts == ("market", "news")
     assert request.output_language == "ja"
-    assert request.provenance is False
     assert request.quick_reasoning_effort == "low"
     assert request.deep_reasoning_effort == "high"
     assert captured["on_event"] is None
@@ -166,7 +167,6 @@ def test_run_defaults_to_the_instrument_market_date(monkeypatch) -> None:
     assert captured["market_ticker"] == "AAPL"
     assert captured["request"].analysis_date.isoformat() == "2026-07-27"
     assert captured["request"].output_language is None
-    assert captured["request"].provenance is None
 
 
 def test_run_preserves_custom_output_language(monkeypatch) -> None:

@@ -34,7 +34,6 @@ export default function NewRun() {
   const [quickReasoning, setQuickReasoning] = useState("provider_default");
   const [deepReasoning, setDeepReasoning] = useState("provider_default");
   const [outputLanguage, setOutputLanguage] = useState("en");
-  const [provenance, setProvenance] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const submission = useRef<{ fingerprint: string; key: string } | null>(null);
@@ -70,7 +69,6 @@ export default function NewRun() {
           setDeepReasoning("provider_default");
         }
         setOutputLanguage(data.defaults.output_language);
-        setProvenance(data.defaults.provenance);
         if (!nextProvider) setError(t("noConfiguredProviders"));
       })
       .catch((cause) => {
@@ -225,7 +223,6 @@ export default function NewRun() {
       quick_reasoning_effort: quickReasoning,
       deep_reasoning_effort: deepReasoning,
       output_language: outputLanguage,
-      provenance,
     };
     try {
       const fingerprint = JSON.stringify(payload);
@@ -428,14 +425,6 @@ export default function NewRun() {
                     </option>
                   ))}
                 </select>
-              </label>
-              <label className="toggle-row">
-                <input
-                  type="checkbox"
-                  checked={provenance}
-                  onChange={(event) => setProvenance(event.target.checked)}
-                />
-                <span>{t("provenance")}</span>
               </label>
             </div>
             {(modelsLoading || modelWarning) && (

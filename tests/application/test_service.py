@@ -605,7 +605,11 @@ def test_service_export_reads_the_durable_result(
     else:
         evidence_ref = result.evidence.items[0].ref
         assert "## Research Process" in body
-        assert "### analyst · market · round 0" in body
+        assert "### analyst · market · round 0" not in body
+        assert "## Reports" in body
+        assert "Fixture report." in body
+        assert "_No deliberation artifacts were recorded for this run._" in body
+        assert "## Warnings" in body
         assert "## Evidence Appendix" in body
         assert f"### `{evidence_ref}`" in body
         assert '"source": "fixture"' in body

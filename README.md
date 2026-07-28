@@ -38,10 +38,10 @@ or portfolio rebalancing.
 
 - **Dashboard:** queued and recent runs, statuses, and pending outcomes.
 - **New Run:** instrument, point-in-time date, analysts, profile,
-  provider/models, reasoning effort, report language, and provenance controls.
+  provider/models, reasoning effort, and report language.
 - **Run Detail:** persistent event timeline, analyst reports, structured
-  decision, warnings, provenance, token/tool metrics, cancellation, retry,
-  rerun, and export.
+  decision, collapsible audit details, token/tool metrics, cancellation,
+  retry, rerun, and export.
 - **Memory:** filter pending and resolved decisions, outcomes, and reflections
   by ticker or market.
 - **Settings:** read-only capabilities, safe defaults, and whether provider
