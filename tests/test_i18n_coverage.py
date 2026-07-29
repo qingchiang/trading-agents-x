@@ -59,6 +59,13 @@ def test_report_agent_applies_language_instruction(rel):
 
 @pytest.mark.unit
 def test_research_graph_applies_run_language_to_generic_roles():
-    path = _AGENTS_DIR.parent / "graph" / "research_graph.py"
-    src = path.read_text(encoding="utf-8")
-    assert 'state.get("output_language", "English")' in src
+    graph_dir = _AGENTS_DIR.parent / "graph"
+    graph_src = (graph_dir / "research_graph.py").read_text(
+        encoding="utf-8"
+    )
+    prompt_src = (graph_dir / "deliberation.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "report_language_prompt_label(" in graph_src
+    assert 'state.get("output_language", "English")' in prompt_src

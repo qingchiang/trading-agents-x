@@ -194,7 +194,7 @@ def invoke_analyst_report(
         bundle=bundle,
         confidence_override=confidence_override,
     )
-    prompt = _analyst_report_prompt(
+    prompt = analyst_report_prompt(
         analyst=analyst,
         draft_narrative=draft_narrative,
         bundle=bundle,
@@ -241,7 +241,7 @@ def invoke_analyst_report(
     )
 
 
-def _analyst_report_prompt(
+def analyst_report_prompt(
     *,
     analyst: str,
     draft_narrative: str,

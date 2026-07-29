@@ -266,8 +266,10 @@ OpenAPI/TypeScript drift、wheel/fresh install、Docker Web+worker smoke を
 
 US/JP/CN/crypto の固定 fixtures は evidence refs、PIT、source attribution、
 research-only decision、rating consistency、risk recall の契約テストです。
-実モデルの性能測定ではありません。quality、token、latency、Deep risk-recall
-のリリース基準には、同一モデル・各 scenario 3 回の記録が必要です。詳細は
+実モデルの品質を証明するものではありません。quality と Deep risk-recall
+の gate には、正確な main/Medium baseline と同一モデル・各 scenario 3 回で
+比較した実測記録が必要です。token、call 数、wall time は記録しますが、V2
+の release threshold には使いません。詳細は
 [graph evaluation](../graph-evaluation.md) を参照してください。
 
 ## 移行・バックアップ・ライセンス

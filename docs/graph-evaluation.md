@@ -1,124 +1,242 @@
-# Graph Evaluation and Release Gates
+# Research Graph evaluation and release gates
 
-TradingAgentsX separates deterministic contract evaluation from measured LLM
-performance. Passing offline fixtures does not prove quality, token, latency,
-or risk-recall improvements.
+TradingAgentsX separates deterministic contract auditing from recorded model
+quality. Offline fixtures can prove that a result obeys the Evidence, table,
+point-in-time, arithmetic, and research-boundary contracts. They cannot prove
+that one prompt or graph produces better research than another.
 
-## Fixed contract suite
+Resource metrics are recorded for every real evaluation. During the V2
+quality-first phase, token usage, LLM-call count, and wall time are descriptive
+baselines only and never pass/fail thresholds.
+
+## Two fixture layers
+
+### Deterministic contract fixtures
 
 `evals/fixtures/` contains versioned US, Japanese, China A-share, and crypto
-evidence cases. Each market covers:
+cases. Each market covers bullish, bearish, mixed, missing-data, and historical
+scenarios. Default tests load and audit these fixed inputs without invoking a
+model, executing a fake profile matrix, or inventing timing/token measurements.
 
-- bullish;
-- bearish;
-- mixed;
-- missing-data;
-- historical-date scenarios.
+The audits cover:
 
-The tests exercise Fast, Standard, and Deep three times per scenario without
-calling an LLM or network source. They verify graph-facing contracts such as:
+- sealed Evidence refs, actual sources, fallback provenance, and market-local
+  visibility dates;
+- exact figures in prose and tables;
+- reproducible `DerivedValue` formulas and inputs;
+- complete `EvidenceTable` and placed `ResearchTable` references;
+- nested JSON, fallback sentinels, and malformed artifacts;
+- current-evidence versus `memory:*` reference separation;
+- rating consistency, seeded-risk recall, and the research-only boundary.
 
-- every evidence reference resolves in the sealed bundle;
-- exact figures have supporting evidence references;
-- usable evidence identifies its actual source;
-- fallback evidence retains provenance;
-- effective and market-local availability dates do not cross the cutoff;
-- research decisions contain no account sizing, entry, stop, target, order, or
-  portfolio-weight instructions;
-- expected rating and seeded risk terms remain consistent.
-- decision `memory:*` references resolve only against memory supplied to the
-  current run;
-- historical memory references and figures cannot enter the current
-  `evidence_refs` channel.
-
-Run them with:
+Run the offline layer with:
 
 ```bash
 PYTHON_DOTENV_DISABLED=1 pytest -q tests/evals
 ```
 
-The exact test path may be included in the normal `pytest -q` suite; use
-`rg --files tests | rg eval` if selecting individual files.
+### Curated quality fixtures
 
-## Recorded model measurements
+`evals/quality_fixtures/research_v2.json` defines 20 cross-market quality
+scenarios: four markets times bullish, bearish, mixed, missing-data, and
+historical cases. The preparation step expands it into:
 
-Performance gates require an external, opt-in run that records
-`EvalMeasurement` rows. A valid comparison must use:
+- 75 role-local frozen Analyst inputs: Market, Social, News, and Fundamentals
+  for stocks, and Market, Social, and News for crypto;
+- one role-local sealed EvidenceBundle and deterministic EvidenceTable per
+  Analyst;
+- 20 combined EvidenceBundles for graph comparison;
+- expected ratings and deliberately seeded risks.
 
-- suite version `1`;
-- the same model for baseline Standard, current Standard, and current Deep;
-- the same case IDs in all three groups;
-- exactly repetitions 1, 2, and 3 for every case/profile;
-- Standard rows only in the baseline/current Standard groups and Deep rows only
-  in the current Deep group;
-- no duplicate case/profile/repetition rows;
-- observed token counts and wall time from the runtime metrics callback;
-- deterministic contract evaluation of each output.
+Generate a sealed suite and print its call plan without making any model call:
 
-Do not synthesize missing timing/token values or substitute fixture execution
-time for model execution time.
+```bash
+python scripts/run_graph_evaluation.py prepare-quality \
+  --spec evals/quality_fixtures/research_v2.json \
+  --output /tmp/tradingagents-eval/quality-suite.json
 
-Each measurement contains:
-
-```text
-suite_version
-model
-case_id
-profile
-repetition
-quality_score
-input_tokens
-wall_time_seconds
-risk_recall
-severe_issues
+python scripts/run_graph_evaluation.py plan \
+  --suite /tmp/tradingagents-eval/quality-suite.json
 ```
 
-Keep raw outputs, evidence bundles, model/provider identity, resolved run
-settings, and measurement rows together as the review artifact. Secrets and raw
-authorization/provider headers must not be captured.
+With three repetitions, the complete suite contains 630 recorded outputs and
+the following primary logical calls:
 
-## Hard release gates
+| Variant | Calls |
+| --- | ---: |
+| `main_analyst` | 225 |
+| `v2_analyst` | 225 |
+| `main_medium` | 1,080 |
+| `v2_standard` | 480 |
+| `v2_deep` | 600–840 |
+| **Total** | **2,610–2,850** |
 
-`tradingagents.evals.evaluate_release_gates()` applies:
+The range comes from zero to two optional additional Deep rebuttal rounds.
+Bounded schema/JSON recovery calls are not included. Because this is a large
+paid matrix, printing the plan is not authorization to execute it.
+
+## Comparison identity
+
+The recorded matrix has five variants:
+
+1. `main_analyst`: the old Analyst prompt for each matching frozen role input;
+2. `v2_analyst`: the V2 strict Analyst synthesis over the same input;
+3. `main_medium`: the exact old Medium debate/risk topology;
+4. `v2_standard`: the production V2 Standard deliberation topology;
+5. `v2_deep`: the production V2 Deep deliberation topology.
+
+The fixed baseline commit for this V2 comparison is:
+
+```text
+b2821a506f9f7c80f8c4b5285fbef0304032eb1a
+```
+
+The baseline adapter lives in `evals/adapters/`, outside the production Python
+package. It refuses a worktree that is not exactly the requested commit.
+Production code therefore does not ship the old graph or old prompts.
+
+Old tool-calling Analysts receive the frozen role transcript on their final
+report turn and are prohibited from making another tool call. The News
+prefetch is disabled for that isolated turn. The old Sentiment prompt receives
+the frozen source through its existing market-specific prefetch contract.
+These controls preserve the old prompt/report behavior while preventing a
+baseline evaluation from contacting live data sources.
+
+Graph comparison uses one predeclared, zero-severe V2 Analyst repetition as the
+approved report set. The same complete AnalystReports and combined
+EvidenceBundle are then supplied to `main_medium`, `v2_standard`, and
+`v2_deep`. `ResearchGraph.execute_frozen()` uses the production deliberation
+nodes and prompts while skipping data tools and Analyst generation.
+
+Every record retains:
+
+```text
+variant and case/repetition identity
+exact baseline or current commit
+provider, quick/deep models, reasoning, language, and temperature
+stable prompt-contract SHA-256, dynamic runtime-prompt-trace SHA-256,
+Evidence digest, and output SHA-256
+complete Evidence, reports, decision, and visible artifacts
+deterministic issues and seeded-risk recall
+real LLM calls, input/output tokens, and wall time
+```
+
+The prompt-contract hash covers the frozen input plus the exact source/prompt
+versions at the recorded commit and must remain stable across repetitions. The
+runtime trace hash covers prompts actually sent during the dynamic debate and
+may vary as earlier role outputs and Deep stopping decisions vary. Prompt
+bodies and raw provider messages are not persisted. Provider secrets, headers,
+hidden reasoning, and authorization material must never be captured.
+
+## Opt-in execution
+
+Real-model commands require both `--execute` and
+`RUN_LIVE_LLM_EVALS=1`. Before setting them, record the provider, models,
+reasoning settings, temperature, language, call plan, and expected billing, and
+obtain explicit authorization.
+
+Create a detached worktree at the exact baseline commit:
+
+```bash
+git worktree add --detach /tmp/tradingagents-main-b282 \
+  b2821a506f9f7c80f8c4b5285fbef0304032eb1a
+```
+
+The following commands show the execution sequence. Replace the angle-bracket
+values only after authorization, and use identical settings in every command.
+
+```bash
+RUN_LIVE_LLM_EVALS=1 python evals/adapters/main_medium.py \
+  --worktree /tmp/tradingagents-main-b282 \
+  --expected-commit b2821a506f9f7c80f8c4b5285fbef0304032eb1a \
+  --suite /tmp/tradingagents-eval/quality-suite.json \
+  --output-dir /tmp/tradingagents-eval/main-analyst \
+  --mode analyst \
+  --provider <provider> --quick-model <model> --deep-model <model> \
+  --quick-reasoning <effort> --deep-reasoning <effort> \
+  --output-language <language> --temperature <temperature> --execute
+
+RUN_LIVE_LLM_EVALS=1 python scripts/run_graph_evaluation.py run-v2-analyst \
+  --suite /tmp/tradingagents-eval/quality-suite.json \
+  --output-dir /tmp/tradingagents-eval/v2-analyst \
+  --provider <provider> --quick-model <model> --deep-model <model> \
+  --quick-reasoning <effort> --deep-reasoning <effort> \
+  --output-language <language> --temperature <temperature> --execute
+
+python scripts/run_graph_evaluation.py freeze-graph-inputs \
+  --suite /tmp/tradingagents-eval/quality-suite.json \
+  --records /tmp/tradingagents-eval/v2-analyst/records.jsonl \
+  --repetition 1 \
+  --output /tmp/tradingagents-eval/graph-suite.json
+
+RUN_LIVE_LLM_EVALS=1 python evals/adapters/main_medium.py \
+  --worktree /tmp/tradingagents-main-b282 \
+  --expected-commit b2821a506f9f7c80f8c4b5285fbef0304032eb1a \
+  --suite /tmp/tradingagents-eval/graph-suite.json \
+  --output-dir /tmp/tradingagents-eval/main-medium \
+  --mode medium \
+  --provider <provider> --quick-model <model> --deep-model <model> \
+  --quick-reasoning <effort> --deep-reasoning <effort> \
+  --output-language <language> --temperature <temperature> --execute
+
+RUN_LIVE_LLM_EVALS=1 python scripts/run_graph_evaluation.py run-v2-standard \
+  --suite /tmp/tradingagents-eval/graph-suite.json \
+  --output-dir /tmp/tradingagents-eval/v2-standard \
+  --provider <provider> --quick-model <model> --deep-model <model> \
+  --quick-reasoning <effort> --deep-reasoning <effort> \
+  --output-language <language> --temperature <temperature> --execute
+
+RUN_LIVE_LLM_EVALS=1 python scripts/run_graph_evaluation.py run-v2-deep \
+  --suite /tmp/tradingagents-eval/graph-suite.json \
+  --output-dir /tmp/tradingagents-eval/v2-deep \
+  --provider <provider> --quick-model <model> --deep-model <model> \
+  --quick-reasoning <effort> --deep-reasoning <effort> \
+  --output-language <language> --temperature <temperature> --execute
+```
+
+## Blinded review and gates
+
+Use [quality rubric v1](../evals/rubrics/quality-v1.md). Candidate identities
+and resource metrics remain hidden until scores are locked. The same reviewer
+or adjudicated panel ID and rubric version must cover the entire matrix.
+`EvalReview` rows stay separate from generated records; see
+`evals/rubrics/review.example.jsonl`.
+
+Join all five record sets only after review:
+
+```bash
+python scripts/run_graph_evaluation.py materialize \
+  --records /tmp/tradingagents-eval/main-analyst/records.jsonl \
+  --records /tmp/tradingagents-eval/v2-analyst/records.jsonl \
+  --records /tmp/tradingagents-eval/main-medium/records.jsonl \
+  --records /tmp/tradingagents-eval/v2-standard/records.jsonl \
+  --records /tmp/tradingagents-eval/v2-deep/records.jsonl \
+  --reviews /tmp/tradingagents-eval/reviews.jsonl \
+  --output /tmp/tradingagents-eval/measurements.jsonl
+
+python scripts/run_graph_evaluation.py gate \
+  --measurements /tmp/tradingagents-eval/measurements.jsonl
+```
+
+The evaluator rejects incomplete repetitions, prompt drift between repetitions,
+mismatched frozen evidence, mixed model/settings/reviewer identities, duplicate
+records, and mixed baseline or current commits.
+
+Hard release gates are:
 
 | Gate | Requirement |
 | --- | --- |
-| Severe regressions | zero across current Standard and Deep |
-| Standard quality | median no lower than baseline Standard |
-| Standard input tokens | median at least 30% below baseline |
-| Standard wall time | median at least 25% below baseline |
-| Deep risk recall | median at least 10 percentage points above current Standard |
+| Deterministic regressions | zero severe issues in V2 Analyst, Standard, and Deep |
+| V2 Analyst quality | every rubric dimension median is no lower than main Analyst |
+| Standard quality | every rubric dimension median is no lower than main Medium |
+| Deep quality | every rubric dimension median is no lower than Standard |
+| Deep risk recall | median at least 10 percentage points above Standard |
 
-The evaluator rejects incomplete or duplicate repetition matrices, wrong-profile
-collections, mismatched case sets, and mixed model identities before calculating
-gates.
+The four scored dimensions are factual completeness, analytical depth, table
+readability, and decision utility. LLM calls, tokens, and wall time appear in
+the result summary but do not affect `passed`.
 
-Deep is not releaseable as a supported profile until its risk-recall gate
-passes. A failure should lead to prompt/topology adjustment and another recorded
-comparison, not a relaxed threshold.
-
-## Interpreting the score
-
-The contract evaluator deducts for severe and warning issues. It is a release
-guard, not a calibrated forecast-accuracy score. Outcome settlement is also not
-a direct graph benchmark: five aligned intervals are useful short-term feedback,
-but they cannot establish long-horizon thesis quality by themselves.
-
-Reviewers should examine both aggregate gates and individual failures,
-especially:
-
-- future-visible or non-PIT evidence;
-- missing actual-source attribution;
-- an exact number supported only by unrelated evidence;
-- bullish/bearish language inconsistent with rating;
-- missing seeded counterevidence or risks;
-- unavailable data treated as a negative or neutral fact.
-
-## Adding a scenario
-
-1. Add the evidence case to the appropriate market fixture.
-2. Include a stable case ID, analysis date, expected rating, and seeded risks.
-3. Preserve requested/effective/available timing and source/fallback fields.
-4. Run the full offline matrix.
-5. Add the case to the next baseline/current recorded measurement set.
-6. Do not compare a new case set with an older incomplete baseline.
+No quality claim is valid until this real, same-setting matrix has been
+recorded and reviewed. Outcome settlement over five aligned intervals is useful
+short-term feedback, but it is not a substitute for the research-quality
+comparison.

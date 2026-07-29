@@ -62,37 +62,112 @@ function result(id: string) {
     reports: {
       market: {
         analyst: "market",
-        summary: "Market summary",
-        claims: [],
+        executive_summary: "Market evidence is balanced.",
         confidence: 0.7,
+        claims: [
+          {
+            id: "market.claim_1",
+            kind: "inference",
+            statement: "The observed market signal is constructive.",
+            implication: "Upside sensitivity remains relevant.",
+            confidence: 0.7,
+            evidence_refs: ["ev_0123456789ab"],
+          },
+        ],
+        sections: [
+          {
+            id: "market_report",
+            title: "Market report",
+            narrative:
+              "Market evidence cites ev_0123456789ab and remains balanced.",
+            table_ids: [],
+          },
+        ],
+        tables: [],
+        catalysts: ["Demand improves"],
+        risks: ["Demand slows"],
+        invalidation_conditions: ["The observed trend reverses"],
         evidence_refs: ["ev_0123456789ab"],
-        warnings: ["Partial historical source"],
-        narrative:
-          "# Market report\n\nMarket evidence cites ev_0123456789ab.",
+        warnings: [
+          {
+            code: "evidence.partial",
+            message: "Partial historical source",
+            evidence_ref: "ev_0123456789ab",
+            source: "fixture-feed",
+          },
+        ],
       },
       news: {
         analyst: "news",
-        summary: "News summary",
-        claims: [],
+        executive_summary: "No material change in the news path.",
         confidence: 0.6,
+        claims: [
+          {
+            id: "news.claim_1",
+            kind: "observation",
+            statement: "The supplied snapshot contains no adverse event.",
+            implication: "The news path does not override the market evidence.",
+            confidence: 0.6,
+            evidence_refs: ["ev_0123456789ab"],
+          },
+        ],
+        sections: [
+          {
+            id: "news_report",
+            title: "News report",
+            narrative: "News evidence remains limited.",
+            table_ids: [],
+          },
+        ],
+        tables: [],
+        catalysts: [],
+        risks: ["Coverage remains limited"],
+        invalidation_conditions: ["A material filing changes the event path"],
         evidence_refs: ["ev_0123456789ab"],
         warnings: [],
-        narrative: "# News report\n\nNews evidence.",
       },
     },
     decision: {
       rating: "Hold",
       confidence: 0.65,
+      executive_summary: "The evidence supports a balanced research opinion.",
       thesis: "Evidence is balanced.",
       evidence_refs: ["ev_0123456789ab"],
       memory_refs: [],
       catalysts: ["Demand improves"],
       risks: ["Demand slows"],
       invalidation_conditions: ["New filing changes the thesis"],
+      unresolved_questions: ["How durable is demand?"],
       time_horizon: "6-12 months",
+      scenarios: [
+        {
+          kind: "base",
+          core_assumptions: ["Demand remains stable"],
+          outcome: "The balanced view persists.",
+          evidence_refs: ["ev_0123456789ab"],
+          valuation_range: null,
+        },
+        {
+          kind: "bull",
+          core_assumptions: ["Demand improves"],
+          outcome: "Operating leverage improves.",
+          evidence_refs: ["ev_0123456789ab"],
+          valuation_range: null,
+        },
+        {
+          kind: "bear",
+          core_assumptions: ["Demand slows"],
+          outcome: "The thesis weakens.",
+          evidence_refs: ["ev_0123456789ab"],
+          valuation_range: null,
+        },
+      ],
+      valuation_assessment: null,
+      market_reference_levels: [],
+      risk_review_adjustments: [],
     },
     evidence: {
-      version: "2",
+      version: "3",
       instrument: "NVDA",
       analysis_date: "2026-07-24",
       sealed_at: timestamp,
@@ -114,6 +189,7 @@ function result(id: string) {
           provenance: { vendor: "fixture-feed" },
         },
       ],
+      tables: [],
     },
     metrics: {
       llm_calls: 4,
@@ -136,15 +212,28 @@ function artifacts(id: string) {
       stage: "perspective",
       role: "bull",
       round: 0,
-      schema_version: "1",
+      prompt_version: "research-case-bull-v2",
       generation_method: "tool_call",
       created_at: timestamp,
       content: {
         role: "bull",
+        executive_summary: "The constructive case remains conditional.",
         thesis: "Demand remains **constructive**.",
-        claim_rebuttals: ["Valuation risk is reflected."],
+        arguments: [
+          {
+            id: "case.bull.argument_1",
+            claim_ids: ["market.claim_1"],
+            statement: "Demand remains constructive.",
+            mechanism: "Demand supports operating leverage.",
+            implication: "Upside sensitivity remains material.",
+            confidence: 0.65,
+            evidence_refs: ["ev_0123456789ab"],
+          },
+        ],
+        strongest_counterarguments: ["Valuation risk is reflected."],
+        fragile_assumptions: ["Demand remains resilient."],
+        catalysts: ["Demand improves."],
         evidence_refs: ["ev_0123456789ab"],
-        new_evidence_refs: [],
         risks: ["Demand could slow."],
       },
     },
@@ -439,9 +528,15 @@ test("runs, templates, trash, and restores local research", async ({
   });
 
   await page.goto("/runs/run-report?view=deliberation");
-  await expect(page.getByText("constructive")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Bull and bear cases" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Demand remains constructive.").first(),
+  ).toBeVisible();
   await page
     .getByRole("button", { name: "Open evidence ev_0123456789ab" })
+    .first()
     .click();
   await expect(
     page.getByRole("heading", { name: "Price snapshot" }),
@@ -495,7 +590,7 @@ test("runs, templates, trash, and restores local research", async ({
   restored.trashed_at = null;
   await page.goto("/runs/run-report?view=reports&report=market");
   const reportMaxHeight = await page
-    .locator(".report-panel > .markdown")
+    .locator(".report-panel > .analyst-report")
     .evaluate((element) =>
       Number.parseFloat(getComputedStyle(element).maxHeight),
     );

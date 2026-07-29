@@ -336,9 +336,10 @@ smoke.
 The checked-in US/JP/CN/crypto fixtures validate evidence references,
 point-in-time boundaries, source attribution, research-only decisions, rating
 consistency, and risk recall without making network or LLM calls. They are
-contract fixtures, not proof that a model meets the performance release gates.
-Recorded same-model, three-repetition measurements are required before claiming
-the quality, token, latency, or Deep-risk thresholds described in
+contract fixtures, not proof of model quality. Quality and Deep risk-recall
+gates require recorded same-model, three-repetition comparisons against the
+exact main/Medium baseline. Token, call, and wall-time metrics are recorded for
+later optimization but are not V2 release thresholds; see
 [graph evaluation](docs/graph-evaluation.md).
 
 ## Migration, backup, and retention

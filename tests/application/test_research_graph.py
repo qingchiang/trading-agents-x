@@ -17,6 +17,7 @@ from tradingagents.application.contracts import (
     DebateImportance,
     DebateResolution,
     DisputeRuling,
+    EvidenceBundle,
     EvidenceItem,
     EvidenceQuality,
     JudgeDraft,
@@ -555,6 +556,60 @@ def test_profiles_route_quality_roles_to_the_configured_model_tier(
 
     assert {schema for schema, _prompt in quick.calls} == quick_schemas
     assert {schema for schema, _prompt in deep.calls} == deep_schemas
+
+
+def test_frozen_execution_uses_production_deliberation_without_analyst_calls(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {},
+    )
+    item = EvidenceItem.create(
+        source="fixture",
+        evidence_type="frozen tool response",
+        requested_date=date(2026, 7, 24),
+        effective_date=date(2026, 7, 24),
+        content="Frozen operating evidence is mixed.",
+    )
+    bundle = EvidenceBundle(
+        instrument="NVDA",
+        analysis_date=date(2026, 7, 24),
+        items=(item,),
+    )
+    report = analyst_report(
+        analyst="market",
+        evidence_ref=item.ref,
+        narrative="Frozen evidence-grounded market analysis.",
+    )
+    llm = _FakeLLM()
+    artifacts: list[ResearchArtifactDraft] = []
+    graph = ResearchGraph(
+        quick_llm=llm,
+        deep_llm=llm,
+        profile=RunProfile.STANDARD,
+        selected_analysts=("market",),
+    )
+    context = _context(
+        app_settings,
+        RunProfile.STANDARD,
+        analysts=("market",),
+        artifact_writer=artifacts.append,
+    )
+
+    execution = graph.execute_frozen(
+        context,
+        evidence=bundle,
+        reports={"market": report},
+    )
+
+    assert all(schema != "AnalystReport" for schema, _prompt in llm.calls)
+    assert all(artifact.stage != "analyst" for artifact in artifacts)
+    assert execution.evidence == bundle
+    assert execution.reports == {"market": report}
+    assert execution.decision.rating is ResearchRating.HOLD
 
 
 @pytest.mark.parametrize(
