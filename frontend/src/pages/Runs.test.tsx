@@ -101,7 +101,6 @@ beforeEach(async () => {
     runs: [],
     changed: 1,
   });
-  vi.spyOn(window, "confirm").mockReturnValue(true);
 });
 
 test("filters and atomically trashes eligible runs with instrument names", async () => {
@@ -125,11 +124,25 @@ test("filters and atomically trashes eligible runs with instrument names", async
     screen.getByRole("button", { name: "Move to Trash (1)" }),
   );
 
+  const dialog = screen.getByRole("alertdialog", {
+    name: "Move 1 selected run(s) to Trash?",
+  });
+  expect(dialog).toHaveTextContent(
+    "They will immediately leave the Dashboard, Memory, outcome settlement, and instrument suggestions.",
+  );
+  expect(dialog).toHaveTextContent(/scheduled for permanent deletion/);
+  expect(api.trashRuns).not.toHaveBeenCalled();
+  fireEvent.keyDown(document, { key: "Escape" });
+  expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Move to Trash (1)" }),
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: /^Move to Trash$/ }),
+  );
+
   await waitFor(() =>
     expect(api.trashRuns).toHaveBeenCalledWith(["run-1"]),
-  );
-  expect(window.confirm).toHaveBeenCalledWith(
-    expect.stringContaining("Estimated permanent cleanup"),
   );
 
   fireEvent.change(screen.getByLabelText("Search runs"), {
@@ -175,6 +188,11 @@ test("restores trashed runs and returns from an emptied page", async () => {
   );
 
   await screen.findByText("NVIDIA Corporation");
+  expect(screen.getByText("Trash retention")).toBeVisible();
+  expect(
+    screen.getByText(/Runs are permanently deleted 30 days/),
+  ).toBeVisible();
+  expect(screen.getByText("July 31, 2026")).toBeVisible();
   fireEvent.click(screen.getByLabelText("Select run NVDA"));
   fireEvent.click(
     screen.getByRole("button", { name: "Restore selected (1)" }),
@@ -182,7 +200,6 @@ test("restores trashed runs and returns from an emptied page", async () => {
   await waitFor(() =>
     expect(api.restoreRuns).toHaveBeenCalledWith(["run-trashed"]),
   );
-  expect(window.confirm).not.toHaveBeenCalled();
   await waitFor(() =>
     expect(screen.getByTestId("location")).toHaveTextContent(
       "/runs?trash_state=trashed&offset=0",

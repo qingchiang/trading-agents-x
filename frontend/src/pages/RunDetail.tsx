@@ -27,6 +27,7 @@ import {
   useNavigate,
   useParams,
 } from "../router";
+import { formatUtcDate, trashDeadline } from "../trash";
 
 const terminal = new Set(["succeeded", "failed", "cancelled"]);
 const reportOrder = ["fundamentals", "market", "news", "social"] as const;
@@ -387,13 +388,11 @@ export default function RunDetail() {
         <div className="trash-notice">
           <strong>{t("trashedRun")}</strong>
           <span>
-            {t("scheduledCleanup", {
-              date: cleanupDateLabel(
-                run.trashed_at,
-                capabilities?.defaults.trash_retention_days ?? 30,
-                t("permanentCleanupDisabled"),
-              ),
-            })}
+            {cleanupLabel(
+              run.trashed_at,
+              capabilities?.defaults.trash_retention_days ?? 30,
+              t,
+            )}
           </span>
         </div>
       )}
@@ -1497,20 +1496,19 @@ function readTimelineOrder(): TimelineOrder {
     : "newest";
 }
 
-function cleanupDateLabel(
+function cleanupLabel(
   trashedAt: string,
   retentionDays: number,
-  disabledLabel: string,
+  t: TFunction,
 ) {
-  if (retentionDays === 0) return disabledLabel;
-  const date = new Date(trashedAt);
-  date.setUTCDate(date.getUTCDate() + retentionDays);
-  return new Intl.DateTimeFormat(undefined, {
-    year: "numeric",
-    month: "long",
-    day: "2-digit",
-    timeZone: "UTC",
-  }).format(date);
+  const deadline = trashDeadline(trashedAt, retentionDays);
+  if (!deadline) return t("trashRetentionDisabled");
+  return t("scheduledCleanup", {
+    date: formatUtcDate(deadline.deletionAt),
+    remaining: deadline.due
+      ? t("trashCleanupDue")
+      : t("trashDaysRemaining", { count: deadline.remainingDays }),
+  });
 }
 
 function formatTime(value: string): string {

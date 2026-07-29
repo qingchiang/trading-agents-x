@@ -14,9 +14,11 @@ import {
   type RunPage,
   type RunView,
 } from "../api/client";
+import ConfirmDialog from "../components/ConfirmDialog";
 import { InstrumentIdentity } from "../components/Instruments";
 import StatusBadge from "../components/StatusBadge";
 import { Link, useLocation, useNavigate } from "../router";
+import { formatUtcDate, trashDeadline } from "../trash";
 
 const pageSize = 20;
 const terminalStatuses = new Set(["succeeded", "failed", "cancelled"]);
@@ -54,6 +56,7 @@ export default function Runs() {
   const [statusInput, setStatusInput] = useState(status);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [confirmTrash, setConfirmTrash] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -145,20 +148,7 @@ export default function Runs() {
   const applyLifecycle = async () => {
     const runIds = [...selected];
     if (!runIds.length) return;
-    if (
-      trashState === "active" &&
-      !window.confirm(
-        t("trashConfirm", {
-          count: runIds.length,
-          purge: purgeEstimate(
-            capabilities?.defaults.trash_retention_days ?? 30,
-            t,
-          ),
-        }),
-      )
-    ) {
-      return;
-    }
+    setConfirmTrash(false);
     setBusy(true);
     setError("");
     setNotice("");
@@ -221,6 +211,18 @@ export default function Runs() {
         ))}
       </div>
 
+      {trashState === "trashed" && (
+        <div className="trash-notice trash-retention-notice" role="note">
+          <strong>{t("trashRetentionTitle")}</strong>
+          <span>
+            {retentionPolicyLabel(
+              capabilities?.defaults.trash_retention_days ?? 30,
+              t,
+            )}
+          </span>
+        </div>
+      )}
+
       <form className="panel filter-bar run-filter-bar" onSubmit={applyFilters}>
         <label htmlFor="runs-search">
           {t("runSearch")}
@@ -275,7 +277,10 @@ export default function Runs() {
               trashState === "active" ? "danger" : "primary"
             }`}
             disabled={busy || selected.size === 0}
-            onClick={() => void applyLifecycle()}
+            onClick={() => {
+              if (trashState === "active") setConfirmTrash(true);
+              else void applyLifecycle();
+            }}
           >
             {trashState === "active"
               ? t("trashSelected", { count: selected.size })
@@ -307,7 +312,11 @@ export default function Runs() {
                   <th>{t("analysisDate")}</th>
                   <th>{t("status")}</th>
                   <th>
-                    {t(trashState === "active" ? "updated" : "trashedAt")}
+                    {t(
+                      trashState === "active"
+                        ? "updated"
+                        : "permanentDeletion",
+                    )}
                   </th>
                   <th />
                 </tr>
@@ -342,10 +351,16 @@ export default function Runs() {
                         <StatusBadge status={run.status} />
                       </td>
                       <td>
-                        {formatDate(
-                          trashState === "trashed"
-                            ? (run.trashed_at ?? run.updated_at)
-                            : run.updated_at,
+                        {trashState === "trashed" && run.trashed_at ? (
+                          <TrashDeadlineLabel
+                            trashedAt={run.trashed_at}
+                            retentionDays={
+                              capabilities?.defaults.trash_retention_days ?? 30
+                            }
+                            t={t}
+                          />
+                        ) : (
+                          formatDate(run.updated_at)
                         )}
                       </td>
                       <td className="right">
@@ -387,6 +402,24 @@ export default function Runs() {
           </button>
         </div>
       </article>
+      {confirmTrash && (
+        <ConfirmDialog
+          title={t("trashDialogTitle", { count: selected.size })}
+          confirmLabel={t("confirmTrash")}
+          cancelLabel={t("keepRuns")}
+          busy={busy}
+          onCancel={() => setConfirmTrash(false)}
+          onConfirm={() => void applyLifecycle()}
+        >
+          <p>{t("trashDialogImpact")}</p>
+          <p>
+            {trashDialogRetention(
+              capabilities?.defaults.trash_retention_days ?? 30,
+              t,
+            )}
+          </p>
+        </ConfirmDialog>
+      )}
     </section>
   );
 }
@@ -410,14 +443,46 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
-function purgeEstimate(retentionDays: number, t: TFunction) {
-  if (retentionDays === 0) return t("permanentCleanupDisabled");
-  const date = new Date();
-  date.setUTCDate(date.getUTCDate() + retentionDays);
-  return new Intl.DateTimeFormat(undefined, {
-    year: "numeric",
-    month: "long",
-    day: "2-digit",
-    timeZone: "UTC",
-  }).format(date);
+function retentionPolicyLabel(retentionDays: number, t: TFunction) {
+  if (retentionDays === 0) return t("trashRetentionDisabled");
+  return t("trashRetentionPolicy", { count: retentionDays });
+}
+
+function trashDialogRetention(retentionDays: number, t: TFunction) {
+  const deadline = trashDeadline(new Date(), retentionDays);
+  if (!deadline) return t("trashRetentionDisabled");
+  return t("trashDialogDeletion", {
+    date: formatUtcDate(deadline.deletionAt),
+    count: retentionDays,
+  });
+}
+
+function TrashDeadlineLabel({
+  trashedAt,
+  retentionDays,
+  t,
+}: {
+  trashedAt: string;
+  retentionDays: number;
+  t: TFunction;
+}) {
+  const deadline = trashDeadline(trashedAt, retentionDays);
+  if (!deadline) {
+    return (
+      <span className="trash-deadline">
+        <strong>{t("permanentCleanupDisabled")}</strong>
+        <small>{t("movedToTrashAt", { date: formatDate(trashedAt) })}</small>
+      </span>
+    );
+  }
+  return (
+    <span className="trash-deadline">
+      <strong>{formatUtcDate(deadline.deletionAt)}</strong>
+      <small>
+        {deadline.due
+          ? t("trashCleanupDue")
+          : t("trashDaysRemaining", { count: deadline.remainingDays })}
+      </small>
+    </span>
+  );
 }

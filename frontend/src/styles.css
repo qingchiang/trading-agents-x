@@ -1819,6 +1819,27 @@ label small {
   color: #806b3c;
 }
 
+.trash-retention-notice {
+  margin-bottom: 18px;
+}
+
+.trash-deadline {
+  display: grid;
+  gap: 3px;
+  min-width: 180px;
+}
+
+.trash-deadline strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.trash-deadline small {
+  color: #806b3c;
+  font-size: 12px;
+}
+
 .memory-list {
   display: grid;
   gap: 13px;
@@ -2081,6 +2102,48 @@ label small {
   padding: 20px;
   background: rgb(5 13 24 / 78%);
   backdrop-filter: blur(8px);
+}
+
+.confirm-card {
+  display: grid;
+  width: min(520px, 100%);
+  gap: 18px;
+  padding: 26px;
+  background: #fff;
+  border: 1px solid rgb(255 255 255 / 30%);
+  border-radius: 17px;
+  box-shadow: 0 28px 70px rgb(0 0 0 / 35%);
+}
+
+.confirm-card h2 {
+  margin: 0;
+  font-size: 21px;
+  letter-spacing: -0.025em;
+}
+
+.confirm-description {
+  display: grid;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.confirm-description p {
+  margin: 0;
+}
+
+.confirm-description p:last-child {
+  padding: 11px 13px;
+  color: #6c541d;
+  background: var(--amber-soft);
+  border-radius: 9px;
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
 }
 
 .login-card {

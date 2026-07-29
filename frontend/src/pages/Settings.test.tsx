@@ -73,5 +73,8 @@ test("shows configured and unavailable providers without exposing secrets", asyn
   expect(screen.getAllByText("Configured")).toHaveLength(1);
   expect(screen.getAllByText("Missing")).toHaveLength(1);
   expect(screen.getAllByText("Ready")).toHaveLength(1);
+  expect(screen.getByText("Default model provider")).toBeVisible();
+  expect(screen.getByText("Trash retention (days)")).toBeVisible();
+  expect(screen.queryByText("trash retention days")).not.toBeInTheDocument();
   expect(screen.queryByText("private-key")).not.toBeInTheDocument();
 });

@@ -474,7 +474,8 @@ test("shows trashed retention details and restores without deleting data", async
 
   expect(await screen.findByText("NVIDIA Corporation")).toBeVisible();
   expect(screen.getByText("This run is in Trash")).toBeVisible();
-  expect(screen.getByText(/Scheduled permanent cleanup/)).toBeVisible();
+  expect(screen.getByText(/Scheduled permanent deletion/)).toBeVisible();
+  expect(screen.getByText(/day|due/)).toBeVisible();
   expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Restore" }));
   await waitFor(() =>

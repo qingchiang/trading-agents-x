@@ -462,14 +462,21 @@ test("runs, templates, trash, and restores local research", async ({
   await page.goto("/runs");
   const reportRow = page.getByRole("row").filter({ hasText: "NVDA" });
   await reportRow.getByRole("checkbox").check();
-  page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Move to Trash (1)" }).click();
-  await expect(page.getByText("Trashed 1 run(s).")).toBeVisible();
+  const trashDialog = page.getByRole("alertdialog", {
+    name: "Move 1 selected run(s) to Trash?",
+  });
+  await expect(trashDialog).toContainText("permanent deletion");
+  await trashDialog
+    .getByRole("button", { name: "Move to Trash", exact: true })
+    .click();
+  await expect(page.getByText("Moved 1 run(s) to Trash.")).toBeVisible();
 
   await page.goto("/memory");
   await expect(page.getByText("No memory entries.")).toBeVisible();
 
   await page.goto("/runs?trash_state=trashed");
+  await expect(page.getByText("Trash retention")).toBeVisible();
   const trashedRow = page.getByRole("row").filter({ hasText: "NVDA" });
   await trashedRow.getByRole("checkbox").check();
   await page.getByRole("button", { name: "Restore selected (1)" }).click();
