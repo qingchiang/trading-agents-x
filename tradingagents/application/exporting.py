@@ -6,11 +6,16 @@ import json
 
 from .contracts import (
     AnalystReport,
+    DebateAgenda,
     EvidenceTable,
-    PerspectiveReview,
+    JudgeDraft,
+    RebuttalReview,
+    ResearchArtifactContent,
+    ResearchCase,
     ResearchDecision,
     ResearchTable,
     ResearchWarning,
+    RiskReview,
     RunExport,
 )
 from .evidence import group_evidence_by_content
@@ -366,11 +371,23 @@ def _render_analyst_report(
 
 
 def _artifact_human_text(
-    content: AnalystReport | PerspectiveReview | ResearchDecision,
+    content: ResearchArtifactContent,
 ) -> str:
     if isinstance(content, AnalystReport):
         return _render_analyst_report(content, evidence_tables={})
-    return content.thesis
+    if isinstance(content, ResearchCase):
+        return content.thesis
+    if isinstance(content, DebateAgenda):
+        return content.executive_summary
+    if isinstance(content, RebuttalReview):
+        return content.thesis_update
+    if isinstance(content, JudgeDraft):
+        return content.thesis
+    if isinstance(content, RiskReview):
+        return content.executive_summary
+    if isinstance(content, ResearchDecision):
+        return content.thesis
+    raise TypeError(f"unsupported research artifact: {type(content)!r}")
 
 
 def _export_warnings(run_export: RunExport) -> tuple[ResearchWarning, ...]:

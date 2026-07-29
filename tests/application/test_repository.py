@@ -9,7 +9,11 @@ from threading import Barrier
 import pytest
 from sqlalchemy import select
 
-from tests.factories import analyst_report
+from tests.factories import (
+    analyst_report,
+    research_case,
+    research_decision,
+)
 from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
@@ -18,11 +22,22 @@ from tradingagents.application.contracts import (
     AnalystReport,
     AnalystSection,
     ArtifactGenerationMethod,
+    DebateAgenda,
+    DebateImportance,
+    DebateResolution,
+    DisputeRuling,
     EvidenceBundle,
     EvidenceItem,
+    JudgeDraft,
+    RebuttalOutcome,
+    RebuttalPoint,
+    RebuttalReview,
     ResearchArtifactDraft,
-    ResearchDecision,
     ResearchRating,
+    RiskFinding,
+    RiskFindingKind,
+    RiskReview,
+    RiskSeverity,
     RunStatus,
     RunTrashState,
 )
@@ -367,6 +382,136 @@ def test_artifact_prompt_version_is_audited_and_part_of_identity(
     ]
 
 
+@pytest.mark.parametrize(
+    ("content", "content_type", "stage", "role"),
+    (
+        (research_case(role="bull"), "research_case", "case", "bull"),
+        (
+            DebateAgenda(
+                executive_summary="Fixture agenda.",
+                issues=(
+                    {
+                        "id": "debate.issue_1",
+                        "question": "Which mechanism dominates?",
+                        "claim_ids": ("market.claim_1",),
+                        "importance": DebateImportance.MATERIAL,
+                        "bull_position": "Demand persists.",
+                        "bear_position": "Demand fades.",
+                        "evidence_refs": ("ev_0123456789ab",),
+                    },
+                ),
+                evidence_refs=("ev_0123456789ab",),
+            ),
+            "debate_agenda",
+            "agenda",
+            "moderator",
+        ),
+        (
+            RebuttalReview(
+                role="bull",
+                round=1,
+                thesis_update="The case remains conditional.",
+                responses=(
+                    RebuttalPoint(
+                        agenda_id="debate.issue_1",
+                        claim_ids=("market.claim_1",),
+                        response="The mechanism remains plausible.",
+                        causal_mechanism="Demand transmits through volume.",
+                        outcome=RebuttalOutcome.UNRESOLVED,
+                        evidence_refs=("ev_0123456789ab",),
+                    ),
+                ),
+                evidence_refs=("ev_0123456789ab",),
+            ),
+            "rebuttal_review",
+            "rebuttal",
+            "bull",
+        ),
+        (
+            JudgeDraft(
+                preliminary_rating=ResearchRating.HOLD,
+                confidence=0.6,
+                executive_summary="Fixture judge summary.",
+                thesis="Fixture judge thesis.",
+                rulings=(
+                    DisputeRuling(
+                        agenda_id="debate.issue_1",
+                        resolution=DebateResolution.MIXED,
+                        rationale="Both cases retain support.",
+                        accepted_claim_ids=("market.claim_1",),
+                        evidence_refs=("ev_0123456789ab",),
+                    ),
+                ),
+                risks=("Fixture risk.",),
+                invalidation_conditions=("Fixture invalidation.",),
+                time_horizon="6-12 months",
+                evidence_refs=("ev_0123456789ab",),
+            ),
+            "judge_draft",
+            "judge",
+            "research_judge",
+        ),
+        (
+            RiskReview(
+                role="integrated",
+                executive_summary="Fixture risk summary.",
+                findings=(
+                    RiskFinding(
+                        id="risk.integrated.finding_1",
+                        kind=RiskFindingKind.BASE_CONSISTENCY,
+                        statement="Confidence needs calibration.",
+                        mechanism="Evidence uncertainty widens outcomes.",
+                        severity=RiskSeverity.MEDIUM,
+                        related_claim_ids=("market.claim_1",),
+                        evidence_refs=("ev_0123456789ab",),
+                    ),
+                ),
+                invalidation_paths=("The mechanism fails.",),
+                recommended_changes=("Reduce confidence.",),
+                confidence_adjustment=-0.05,
+                evidence_refs=("ev_0123456789ab",),
+            ),
+            "risk_review",
+            "risk",
+            "integrated",
+        ),
+        (
+            research_decision(),
+            "research_decision",
+            "decision",
+            "final_committee",
+        ),
+    ),
+)
+def test_deliberation_artifact_types_round_trip(
+    repository: RunRepository,
+    app_settings: AppSettings,
+    content,
+    content_type: str,
+    stage: str,
+    role: str,
+) -> None:
+    run, _ = _create(repository, app_settings)
+    repository.claim_run(run.id, "worker", 30)
+
+    stored, _ = repository.append_artifact(
+        run.id,
+        ResearchArtifactDraft(
+            node=f"{stage}.{role}",
+            stage=stage,
+            role=role,
+            round=1 if stage == "rebuttal" else 0,
+            prompt_version=f"{stage}-v2",
+            generation_method=ArtifactGenerationMethod.TOOL_CALL,
+            content=content,
+        ),
+    )
+    restored = repository.list_artifacts(run.id)
+
+    assert stored.content_type == content_type
+    assert restored == [stored]
+
+
 def test_recovered_artifact_surfaces_a_top_level_result_warning(
     repository: RunRepository,
     app_settings: AppSettings,
@@ -376,12 +521,11 @@ def test_recovered_artifact_surfaces_a_top_level_result_warning(
     repository.append_artifact(
         run.id,
         ResearchArtifactDraft(
-            node="review.bear",
-            stage="perspective",
-            role="bear",
+            node="committee.final",
+            stage="decision",
+            role="final_committee",
             generation_method=ArtifactGenerationMethod.RAW_JSON_RECOVERED,
-            content=ResearchDecision(
-                rating=ResearchRating.HOLD,
+            content=research_decision(
                 confidence=0.5,
                 thesis="Fixture recovered thesis.",
                 evidence_refs=(),
@@ -443,7 +587,7 @@ def test_complete_persists_result_and_resolved_memory(
         risks=("Momentum may reverse.",),
         invalidation_conditions=("Price evidence reverses.",),
     )
-    decision = ResearchDecision(
+    decision = research_decision(
         rating=ResearchRating.OVERWEIGHT,
         confidence=0.7,
         thesis="Constructive evidence outweighs valuation risk.",

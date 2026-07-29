@@ -77,6 +77,22 @@ export interface components {
       quick_reasoning_effort: string | null;
       trash_retention_days: number;
     };
+    DebateAgenda: {
+      evidence_refs: string[];
+      executive_summary: string;
+      issues: components["schemas"]["DebateIssue"][];
+    };
+    DebateImportance: "critical" | "material" | "secondary";
+    DebateIssue: {
+      bear_position: string;
+      bull_position: string;
+      claim_ids: string[];
+      evidence_refs: string[];
+      id: string;
+      importance: components["schemas"]["DebateImportance"];
+      question: string;
+    };
+    DebateResolution: "bull" | "bear" | "mixed" | "unresolved";
     DerivedValue: {
       formula: string;
       input_evidence_refs: string[];
@@ -90,6 +106,14 @@ export interface components {
       id: string;
       label: string;
       reasoning_efforts: string[];
+    };
+    DisputeRuling: {
+      accepted_claim_ids?: string[];
+      agenda_id: string;
+      evidence_refs: string[];
+      rationale: string;
+      rejected_claim_ids?: string[];
+      resolution: components["schemas"]["DebateResolution"];
     };
     EvidenceBundle: {
       analysis_date: string;
@@ -147,8 +171,30 @@ export interface components {
       status: "ok" | "degraded";
       version: string;
     };
+    JudgeDraft: {
+      catalysts?: string[];
+      confidence: number;
+      evidence_refs: string[];
+      executive_summary: string;
+      invalidation_conditions: string[];
+      memory_refs?: string[];
+      preliminary_rating: components["schemas"]["ResearchRating"];
+      risks: string[];
+      rulings: components["schemas"]["DisputeRuling"][];
+      thesis: string;
+      time_horizon: string;
+      unresolved_questions?: string[];
+    };
     LoginRequest: {
       token: string;
+    };
+    MarketReferenceLevel: {
+      as_of_date: string;
+      evidence_refs: string[];
+      interpretation: string;
+      level_type: string;
+      unit: string;
+      value: number;
     };
     MemoryEntry: {
       analysis_date: string;
@@ -181,14 +227,6 @@ export interface components {
       tool_calls?: number;
       wall_time_seconds?: number;
     };
-    PerspectiveReview: {
-      claim_rebuttals?: string[];
-      evidence_refs?: string[];
-      new_evidence_refs?: string[];
-      risks?: string[];
-      role: string;
-      thesis: string;
-    };
     ProviderCapabilities: {
       api_key_configured: boolean | null;
       api_key_required: boolean;
@@ -211,6 +249,26 @@ export interface components {
       queued: number;
       running: number;
     };
+    RebuttalOutcome: "upheld" | "weakened" | "rejected" | "unresolved";
+    RebuttalPoint: {
+      agenda_id: string;
+      causal_mechanism: string;
+      claim_ids: string[];
+      evidence_refs: string[];
+      new_evidence_refs?: string[];
+      outcome: components["schemas"]["RebuttalOutcome"];
+      remaining_questions?: string[];
+      response: string;
+    };
+    RebuttalReview: {
+      evidence_refs: string[];
+      new_evidence_refs?: string[];
+      remaining_questions?: string[];
+      responses: components["schemas"]["RebuttalPoint"][];
+      role: "bull" | "bear";
+      round: number;
+      thesis_update: string;
+    };
     RecentInstrument: {
       instrument_name?: string | null;
       last_used_at: string;
@@ -219,7 +277,7 @@ export interface components {
     ReportLanguage: "en" | "zh-CN" | "ja";
     ResearchArtifact: {
       attempt: number;
-      content: components["schemas"]["AnalystReport"] | components["schemas"]["PerspectiveReview"] | components["schemas"]["ResearchDecision"];
+      content: components["schemas"]["AnalystReport"] | components["schemas"]["ResearchCase"] | components["schemas"]["DebateAgenda"] | components["schemas"]["RebuttalReview"] | components["schemas"]["JudgeDraft"] | components["schemas"]["RiskReview"] | components["schemas"]["ResearchDecision"];
       created_at: string;
       generation_method: components["schemas"]["ArtifactGenerationMethod"];
       id: string;
@@ -230,18 +288,52 @@ export interface components {
       schema_version?: string;
       stage: string;
     };
+    ResearchCase: {
+      arguments: components["schemas"]["ResearchCaseArgument"][];
+      catalysts?: string[];
+      evidence_refs: string[];
+      executive_summary: string;
+      fragile_assumptions: string[];
+      risks: string[];
+      role: "bull" | "bear";
+      strongest_counterarguments: string[];
+      thesis: string;
+    };
+    ResearchCaseArgument: {
+      claim_ids: string[];
+      confidence: number;
+      evidence_refs: string[];
+      id: string;
+      implication: string;
+      mechanism: string;
+      statement: string;
+    };
     ResearchDecision: {
       catalysts?: string[];
       confidence: number;
       evidence_refs?: string[];
-      invalidation_conditions?: string[];
+      executive_summary: string;
+      invalidation_conditions: string[];
+      market_reference_levels?: components["schemas"]["MarketReferenceLevel"][];
       memory_refs?: string[];
       rating: components["schemas"]["ResearchRating"];
-      risks?: string[];
+      risk_review_adjustments?: components["schemas"]["RiskReviewAdjustment"][];
+      risks: string[];
+      scenarios: components["schemas"]["ResearchScenario"][];
       thesis: string;
       time_horizon: string;
+      unresolved_questions?: string[];
+      valuation_assessment?: components["schemas"]["ValuationAssessment"] | null;
     };
     ResearchRating: "Buy" | "Overweight" | "Hold" | "Underweight" | "Sell";
+    ResearchScenario: {
+      core_assumptions: string[];
+      evidence_refs?: string[];
+      kind: components["schemas"]["ResearchScenarioKind"];
+      outcome: string;
+      valuation_range?: components["schemas"]["ValuationRange"] | null;
+    };
+    ResearchScenarioKind: "base" | "bull" | "bear";
     ResearchTable: {
       columns: components["schemas"]["ResearchTableColumn"][];
       id: string;
@@ -275,6 +367,34 @@ export interface components {
       message: string;
       source?: string | null;
     };
+    RiskFinding: {
+      evidence_refs: string[];
+      id: string;
+      kind: components["schemas"]["RiskFindingKind"];
+      mechanism: string;
+      related_claim_ids?: string[];
+      severity: components["schemas"]["RiskSeverity"];
+      statement: string;
+    };
+    RiskFindingKind: "upside_omission" | "base_consistency" | "downside" | "tail_risk" | "data_quality" | "invalidation";
+    RiskReview: {
+      confidence_adjustment: number;
+      evidence_refs: string[];
+      executive_summary: string;
+      findings: components["schemas"]["RiskFinding"][];
+      invalidation_paths: string[];
+      recommended_changes: string[];
+      role: "integrated" | "aggressive" | "neutral" | "conservative";
+    };
+    RiskReviewAdjustment: {
+      disposition: components["schemas"]["RiskReviewDisposition"];
+      evidence_refs?: string[];
+      explanation: string;
+      source_role: "integrated" | "aggressive" | "neutral" | "conservative";
+      subject: string;
+    };
+    RiskReviewDisposition: "retained" | "modified" | "rejected";
+    RiskSeverity: "low" | "medium" | "high" | "critical";
     RunBatchRequest: {
       run_ids: string[];
     };
@@ -353,6 +473,18 @@ export interface components {
       loc: (string | number)[];
       msg: string;
       type: string;
+    };
+    ValuationAssessment: {
+      as_of_date: string;
+      currency: string;
+      input_evidence_refs: string[];
+      limitations: string[];
+      method: string;
+      valuation_range: components["schemas"]["ValuationRange"];
+    };
+    ValuationRange: {
+      high: number;
+      low: number;
     };
   };
 }

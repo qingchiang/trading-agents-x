@@ -5,14 +5,13 @@ from datetime import date, datetime, timezone
 import pytest
 from pydantic import ValidationError
 
-from tests.factories import analyst_report
+from tests.factories import analyst_report, research_decision
 from tradingagents.application.contracts import (
     AnalysisRequest,
     EvidenceBundle,
     EvidenceItem,
     ReportLanguage,
     ResearchDecision,
-    ResearchRating,
     ResearchWarning,
     RunProfile,
 )
@@ -35,16 +34,46 @@ def test_analysis_request_is_normalized_ordered_and_immutable() -> None:
 
 
 def test_research_decision_rejects_account_level_fields() -> None:
-    payload = {
-        "rating": ResearchRating.HOLD,
-        "confidence": 0.6,
-        "thesis": "Valuation and growth evidence are balanced.",
-        "time_horizon": "6-12 months",
-        "position_size": 0.25,
-    }
+    payload = research_decision().model_dump(mode="json")
+    payload["position_size"] = 0.25
 
     with pytest.raises(ValidationError, match="position_size"):
         ResearchDecision.model_validate(payload)
+
+
+def test_research_decision_accepts_audited_nonpersonalized_opinions() -> None:
+    payload = research_decision().model_dump(mode="json")
+    payload.update(
+        {
+            "rating": "Overweight",
+            "valuation_assessment": {
+                "method": "Comparable multiples",
+                "valuation_range": {"low": 90.0, "high": 110.0},
+                "currency": "USD",
+                "as_of_date": "2026-07-24",
+                "input_evidence_refs": ["ev_0123456789ab"],
+                "limitations": ["Peer comparability is imperfect."],
+            },
+            "market_reference_levels": [
+                {
+                    "level_type": "observed_support",
+                    "value": 95.0,
+                    "unit": "USD",
+                    "as_of_date": "2026-07-24",
+                    "interpretation": (
+                        "An observed reference level, not an execution order."
+                    ),
+                    "evidence_refs": ["ev_0123456789ab"],
+                }
+            ],
+        }
+    )
+
+    decision = ResearchDecision.model_validate(payload)
+
+    assert decision.rating.value == "Overweight"
+    assert decision.valuation_assessment is not None
+    assert decision.market_reference_levels[0].level_type == "observed_support"
 
 
 def test_legacy_warning_strings_become_plain_structured_records() -> None:

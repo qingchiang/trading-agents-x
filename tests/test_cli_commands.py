@@ -9,10 +9,9 @@ import pytest
 from typer.testing import CliRunner
 
 import cli.main as cli
+from tests.factories import research_decision
 from tradingagents.application.contracts import (
     AnalysisResult,
-    ResearchDecision,
-    ResearchRating,
     RunEvent,
     RunProfile,
     RunStatus,
@@ -88,11 +87,9 @@ def test_run_builds_the_typed_request_and_prints_json(monkeypatch) -> None:
         status=RunStatus.SUCCEEDED,
         instrument="7203.T",
         reports={},
-        decision=ResearchDecision(
-            rating=ResearchRating.HOLD,
+        decision=research_decision(
             confidence=0.7,
             thesis="Balanced evidence.",
-            time_horizon="6-12 months",
         ),
     )
 

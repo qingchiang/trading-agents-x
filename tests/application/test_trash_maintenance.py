@@ -7,7 +7,7 @@ import pytest
 from langgraph.checkpoint.sqlite import SqliteSaver
 from sqlalchemy import func, select
 
-from tests.factories import analyst_report
+from tests.factories import analyst_report, research_decision
 from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
@@ -15,8 +15,6 @@ from tradingagents.application.contracts import (
     EvidenceBundle,
     EvidenceItem,
     ResearchArtifactDraft,
-    ResearchDecision,
-    ResearchRating,
     RunStatus,
 )
 from tradingagents.application.database import (
@@ -111,8 +109,7 @@ def _complete_trashed_run(repository, app_settings):
             content=report,
         ),
     )
-    decision = ResearchDecision(
-        rating=ResearchRating.HOLD,
+    decision = research_decision(
         confidence=0.6,
         thesis="Fixture thesis.",
         evidence_refs=(evidence_item.ref,),

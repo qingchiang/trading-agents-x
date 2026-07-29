@@ -28,6 +28,22 @@ _SYMBOL_PATTERN = re.compile(r"^[A-Z0-9^][A-Z0-9.^=_-]*$")
 _MEMORY_REF_PATTERN = re.compile(
     r"^memory:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
 )
+_EVIDENCE_REF_PATTERN = re.compile(r"^ev_[a-f0-9]{12}$")
+_RESEARCH_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_.-]*$")
+
+
+def _unique_evidence_refs(value: tuple[str, ...]) -> tuple[str, ...]:
+    refs = tuple(dict.fromkeys(value))
+    if any(not _EVIDENCE_REF_PATTERN.fullmatch(ref) for ref in refs):
+        raise ValueError("invalid evidence reference")
+    return refs
+
+
+def _unique_research_ids(value: tuple[str, ...]) -> tuple[str, ...]:
+    ids = tuple(dict.fromkeys(value))
+    if any(not _RESEARCH_ID_PATTERN.fullmatch(item) for item in ids):
+        raise ValueError("invalid research identifier")
+    return ids
 
 
 def utc_now() -> datetime:
@@ -124,6 +140,54 @@ class ResearchRating(str, Enum):
     HOLD = "Hold"
     UNDERWEIGHT = "Underweight"
     SELL = "Sell"
+
+
+class DebateImportance(str, Enum):
+    CRITICAL = "critical"
+    MATERIAL = "material"
+    SECONDARY = "secondary"
+
+
+class DebateResolution(str, Enum):
+    BULL = "bull"
+    BEAR = "bear"
+    MIXED = "mixed"
+    UNRESOLVED = "unresolved"
+
+
+class RebuttalOutcome(str, Enum):
+    UPHELD = "upheld"
+    WEAKENED = "weakened"
+    REJECTED = "rejected"
+    UNRESOLVED = "unresolved"
+
+
+class RiskFindingKind(str, Enum):
+    UPSIDE_OMISSION = "upside_omission"
+    BASE_CONSISTENCY = "base_consistency"
+    DOWNSIDE = "downside"
+    TAIL_RISK = "tail_risk"
+    DATA_QUALITY = "data_quality"
+    INVALIDATION = "invalidation"
+
+
+class RiskSeverity(str, Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class RiskReviewDisposition(str, Enum):
+    RETAINED = "retained"
+    MODIFIED = "modified"
+    REJECTED = "rejected"
+
+
+class ResearchScenarioKind(str, Enum):
+    BASE = "base"
+    BULL = "bull"
+    BEAR = "bear"
 
 
 class ArtifactGenerationMethod(str, Enum):
@@ -734,13 +798,434 @@ class AnalystReport(FrozenModel):
         return self
 
 
-class PerspectiveReview(FrozenModel):
-    role: str
-    thesis: str
-    claim_rebuttals: tuple[str, ...] = ()
-    evidence_refs: tuple[str, ...] = ()
+class ResearchCaseArgument(FrozenModel):
+    """One explicit argument in a bull or bear research case."""
+
+    id: str = Field(
+        pattern=r"^case\.(?:bull|bear)\.[a-z0-9][a-z0-9_.-]*$"
+    )
+    claim_ids: tuple[str, ...] = Field(min_length=1)
+    statement: str = Field(min_length=1)
+    mechanism: str = Field(min_length=1)
+    implication: str = Field(min_length=1)
+    confidence: float = Field(ge=0.0, le=1.0)
+    evidence_refs: tuple[str, ...] = Field(min_length=1)
+
+    @field_validator("claim_ids")
+    @classmethod
+    def validate_claim_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _unique_research_ids(value)
+
+    @field_validator("evidence_refs")
+    @classmethod
+    def validate_evidence_refs(
+        cls,
+        value: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        return _unique_evidence_refs(value)
+
+
+class ResearchCase(FrozenModel):
+    """A complete constructive or skeptical case grounded in analyst claims."""
+
+    role: Literal["bull", "bear"]
+    executive_summary: str = Field(min_length=1)
+    thesis: str = Field(min_length=1)
+    arguments: tuple[ResearchCaseArgument, ...] = Field(min_length=1)
+    strongest_counterarguments: tuple[str, ...] = Field(min_length=1)
+    fragile_assumptions: tuple[str, ...] = Field(min_length=1)
+    catalysts: tuple[str, ...] = ()
+    risks: tuple[str, ...] = Field(min_length=1)
+    evidence_refs: tuple[str, ...] = Field(min_length=1)
+
+    @field_validator("evidence_refs")
+    @classmethod
+    def validate_evidence_refs(
+        cls,
+        value: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        return _unique_evidence_refs(value)
+
+    @model_validator(mode="after")
+    def validate_case(self) -> ResearchCase:
+        argument_ids = tuple(argument.id for argument in self.arguments)
+        if len(argument_ids) != len(set(argument_ids)):
+            raise ValueError("research case argument IDs must be unique")
+        if any(
+            not argument.id.startswith(f"case.{self.role}.")
+            for argument in self.arguments
+        ):
+            raise ValueError("research case argument IDs use the wrong role")
+        used = {
+            ref
+            for argument in self.arguments
+            for ref in argument.evidence_refs
+        }
+        if not used.issubset(self.evidence_refs):
+            raise ValueError(
+                "research case refs must include all argument evidence"
+            )
+        return self
+
+
+class DebateIssue(FrozenModel):
+    """One material disagreement that later roles must explicitly resolve."""
+
+    id: str = Field(pattern=r"^debate\.issue_[a-z0-9][a-z0-9_.-]*$")
+    question: str = Field(min_length=1)
+    claim_ids: tuple[str, ...] = Field(min_length=1)
+    importance: DebateImportance
+    bull_position: str = Field(min_length=1)
+    bear_position: str = Field(min_length=1)
+    evidence_refs: tuple[str, ...] = Field(min_length=1)
+
+    @field_validator("claim_ids")
+    @classmethod
+    def validate_claim_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _unique_research_ids(value)
+
+    @field_validator("evidence_refs")
+    @classmethod
+    def validate_evidence_refs(
+        cls,
+        value: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        return _unique_evidence_refs(value)
+
+
+class DebateAgenda(FrozenModel):
+    """Prioritized agenda derived from the independent bull and bear cases."""
+
+    executive_summary: str = Field(min_length=1)
+    issues: tuple[DebateIssue, ...] = Field(min_length=1)
+    evidence_refs: tuple[str, ...] = Field(min_length=1)
+
+    @field_validator("evidence_refs")
+    @classmethod
+    def validate_evidence_refs(
+        cls,
+        value: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        return _unique_evidence_refs(value)
+
+    @model_validator(mode="after")
+    def validate_agenda(self) -> DebateAgenda:
+        issue_ids = tuple(issue.id for issue in self.issues)
+        if len(issue_ids) != len(set(issue_ids)):
+            raise ValueError("debate issue IDs must be unique")
+        used = {
+            ref for issue in self.issues for ref in issue.evidence_refs
+        }
+        if not used.issubset(self.evidence_refs):
+            raise ValueError(
+                "debate agenda refs must include all issue evidence"
+            )
+        return self
+
+
+class RebuttalPoint(FrozenModel):
+    """A targeted response to one agenda issue and its analyst claims."""
+
+    agenda_id: str = Field(
+        pattern=r"^debate\.issue_[a-z0-9][a-z0-9_.-]*$"
+    )
+    claim_ids: tuple[str, ...] = Field(min_length=1)
+    response: str = Field(min_length=1)
+    causal_mechanism: str = Field(min_length=1)
+    outcome: RebuttalOutcome
+    evidence_refs: tuple[str, ...] = Field(min_length=1)
     new_evidence_refs: tuple[str, ...] = ()
-    risks: tuple[str, ...] = ()
+    remaining_questions: tuple[str, ...] = ()
+
+    @field_validator("claim_ids")
+    @classmethod
+    def validate_claim_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _unique_research_ids(value)
+
+    @field_validator("evidence_refs", "new_evidence_refs")
+    @classmethod
+    def validate_evidence_refs(
+        cls,
+        value: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        return _unique_evidence_refs(value)
+
+    @model_validator(mode="after")
+    def validate_rebuttal_point(self) -> RebuttalPoint:
+        if not set(self.new_evidence_refs).issubset(self.evidence_refs):
+            raise ValueError(
+                "new rebuttal evidence must be included in evidence_refs"
+            )
+        return self
+
+
+class RebuttalReview(FrozenModel):
+    """One role's issue-by-issue response in a specific debate round."""
+
+    role: Literal["bull", "bear"]
+    round: int = Field(ge=1)
+    thesis_update: str = Field(min_length=1)
+    responses: tuple[RebuttalPoint, ...] = Field(min_length=1)
+    evidence_refs: tuple[str, ...] = Field(min_length=1)
+    new_evidence_refs: tuple[str, ...] = ()
+    remaining_questions: tuple[str, ...] = ()
+
+    @field_validator("evidence_refs", "new_evidence_refs")
+    @classmethod
+    def validate_evidence_refs(
+        cls,
+        value: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        return _unique_evidence_refs(value)
+
+    @model_validator(mode="after")
+    def validate_rebuttal(self) -> RebuttalReview:
+        agenda_ids = tuple(response.agenda_id for response in self.responses)
+        if len(agenda_ids) != len(set(agenda_ids)):
+            raise ValueError(
+                "one rebuttal cannot answer an agenda issue more than once"
+            )
+        response_refs = {
+            ref for response in self.responses for ref in response.evidence_refs
+        }
+        response_new_refs = {
+            ref
+            for response in self.responses
+            for ref in response.new_evidence_refs
+        }
+        if not response_refs.issubset(self.evidence_refs):
+            raise ValueError(
+                "rebuttal refs must include all response evidence"
+            )
+        if not response_new_refs.issubset(self.new_evidence_refs):
+            raise ValueError(
+                "rebuttal new refs must include all response new evidence"
+            )
+        if not set(self.new_evidence_refs).issubset(self.evidence_refs):
+            raise ValueError(
+                "new rebuttal evidence must be included in evidence_refs"
+            )
+        return self
+
+
+class DisputeRuling(FrozenModel):
+    """The judge's auditable resolution of one debate-agenda issue."""
+
+    agenda_id: str = Field(
+        pattern=r"^debate\.issue_[a-z0-9][a-z0-9_.-]*$"
+    )
+    resolution: DebateResolution
+    rationale: str = Field(min_length=1)
+    accepted_claim_ids: tuple[str, ...] = ()
+    rejected_claim_ids: tuple[str, ...] = ()
+    evidence_refs: tuple[str, ...] = Field(min_length=1)
+
+    @field_validator("accepted_claim_ids", "rejected_claim_ids")
+    @classmethod
+    def validate_claim_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _unique_research_ids(value)
+
+    @field_validator("evidence_refs")
+    @classmethod
+    def validate_evidence_refs(
+        cls,
+        value: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        return _unique_evidence_refs(value)
+
+
+class JudgeDraft(FrozenModel):
+    """Preliminary research conclusion with explicit dispute rulings."""
+
+    preliminary_rating: ResearchRating
+    confidence: float = Field(ge=0.0, le=1.0)
+    executive_summary: str = Field(min_length=1)
+    thesis: str = Field(min_length=1)
+    rulings: tuple[DisputeRuling, ...] = Field(min_length=1)
+    catalysts: tuple[str, ...] = ()
+    risks: tuple[str, ...] = Field(min_length=1)
+    invalidation_conditions: tuple[str, ...] = Field(min_length=1)
+    unresolved_questions: tuple[str, ...] = ()
+    time_horizon: str = Field(min_length=1)
+    evidence_refs: tuple[str, ...] = Field(min_length=1)
+    memory_refs: tuple[str, ...] = ()
+
+    @field_validator("evidence_refs")
+    @classmethod
+    def validate_evidence_refs(
+        cls,
+        value: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        return _unique_evidence_refs(value)
+
+    @field_validator("memory_refs")
+    @classmethod
+    def validate_memory_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        refs = tuple(dict.fromkeys(value))
+        if any(not _MEMORY_REF_PATTERN.fullmatch(ref) for ref in refs):
+            raise ValueError(
+                "memory refs must use the memory:<run_id> format"
+            )
+        return refs
+
+    @model_validator(mode="after")
+    def validate_draft(self) -> JudgeDraft:
+        agenda_ids = tuple(ruling.agenda_id for ruling in self.rulings)
+        if len(agenda_ids) != len(set(agenda_ids)):
+            raise ValueError("judge rulings must use unique agenda IDs")
+        ruling_refs = {
+            ref for ruling in self.rulings for ref in ruling.evidence_refs
+        }
+        if not ruling_refs.issubset(self.evidence_refs):
+            raise ValueError(
+                "judge refs must include all ruling evidence"
+            )
+        return self
+
+
+class RiskFinding(FrozenModel):
+    """One concrete challenge raised by a risk-review lens."""
+
+    id: str = Field(pattern=r"^risk\.[a-z0-9][a-z0-9_.-]*$")
+    kind: RiskFindingKind
+    statement: str = Field(min_length=1)
+    mechanism: str = Field(min_length=1)
+    severity: RiskSeverity
+    related_claim_ids: tuple[str, ...] = ()
+    evidence_refs: tuple[str, ...] = Field(min_length=1)
+
+    @field_validator("related_claim_ids")
+    @classmethod
+    def validate_claim_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _unique_research_ids(value)
+
+    @field_validator("evidence_refs")
+    @classmethod
+    def validate_evidence_refs(
+        cls,
+        value: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        return _unique_evidence_refs(value)
+
+
+class RiskReview(FrozenModel):
+    """A visible challenge to the judge draft from one risk lens."""
+
+    role: Literal["integrated", "aggressive", "neutral", "conservative"]
+    executive_summary: str = Field(min_length=1)
+    findings: tuple[RiskFinding, ...] = Field(min_length=1)
+    invalidation_paths: tuple[str, ...] = Field(min_length=1)
+    recommended_changes: tuple[str, ...] = Field(min_length=1)
+    confidence_adjustment: float = Field(ge=-1.0, le=1.0)
+    evidence_refs: tuple[str, ...] = Field(min_length=1)
+
+    @field_validator("evidence_refs")
+    @classmethod
+    def validate_evidence_refs(
+        cls,
+        value: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        return _unique_evidence_refs(value)
+
+    @model_validator(mode="after")
+    def validate_review(self) -> RiskReview:
+        finding_ids = tuple(finding.id for finding in self.findings)
+        if len(finding_ids) != len(set(finding_ids)):
+            raise ValueError("risk finding IDs must be unique")
+        finding_refs = {
+            ref for finding in self.findings for ref in finding.evidence_refs
+        }
+        if not finding_refs.issubset(self.evidence_refs):
+            raise ValueError(
+                "risk review refs must include all finding evidence"
+            )
+        return self
+
+
+class ValuationRange(FrozenModel):
+    low: float
+    high: float
+
+    @model_validator(mode="after")
+    def validate_range(self) -> ValuationRange:
+        if self.high < self.low:
+            raise ValueError("valuation range high must be >= low")
+        return self
+
+
+class ResearchScenario(FrozenModel):
+    kind: ResearchScenarioKind
+    core_assumptions: tuple[str, ...] = Field(min_length=1)
+    outcome: str = Field(min_length=1)
+    evidence_refs: tuple[str, ...] = ()
+    valuation_range: ValuationRange | None = None
+
+    @field_validator("evidence_refs")
+    @classmethod
+    def validate_evidence_refs(
+        cls,
+        value: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        return _unique_evidence_refs(value)
+
+
+class ValuationAssessment(FrozenModel):
+    method: str = Field(min_length=1)
+    valuation_range: ValuationRange
+    currency: str = Field(min_length=1, max_length=16)
+    as_of_date: date
+    input_evidence_refs: tuple[str, ...] = Field(min_length=1)
+    limitations: tuple[str, ...] = Field(min_length=1)
+
+    @field_validator("input_evidence_refs")
+    @classmethod
+    def validate_evidence_refs(
+        cls,
+        value: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        return _unique_evidence_refs(value)
+
+
+class MarketReferenceLevel(FrozenModel):
+    level_type: str = Field(
+        min_length=1,
+        max_length=80,
+        pattern=r"^[a-z][a-z0-9_.-]*$",
+    )
+    value: float
+    unit: str = Field(min_length=1, max_length=32)
+    as_of_date: date
+    interpretation: str = Field(min_length=1)
+    evidence_refs: tuple[str, ...] = Field(min_length=1)
+
+    @field_validator("evidence_refs")
+    @classmethod
+    def validate_evidence_refs(
+        cls,
+        value: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        return _unique_evidence_refs(value)
+
+
+class RiskReviewAdjustment(FrozenModel):
+    source_role: Literal[
+        "integrated",
+        "aggressive",
+        "neutral",
+        "conservative",
+    ]
+    disposition: RiskReviewDisposition
+    subject: str = Field(min_length=1)
+    explanation: str = Field(min_length=1)
+    evidence_refs: tuple[str, ...] = ()
+
+    @field_validator("evidence_refs")
+    @classmethod
+    def validate_evidence_refs(
+        cls,
+        value: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        return _unique_evidence_refs(value)
 
 
 class ResearchDecision(FrozenModel):
@@ -748,13 +1233,22 @@ class ResearchDecision(FrozenModel):
 
     rating: ResearchRating
     confidence: float = Field(ge=0.0, le=1.0)
-    thesis: str
+    executive_summary: str = Field(min_length=1)
+    thesis: str = Field(min_length=1)
     evidence_refs: tuple[str, ...] = ()
     memory_refs: tuple[str, ...] = ()
     catalysts: tuple[str, ...] = ()
-    risks: tuple[str, ...] = ()
-    invalidation_conditions: tuple[str, ...] = ()
-    time_horizon: str
+    risks: tuple[str, ...] = Field(min_length=1)
+    invalidation_conditions: tuple[str, ...] = Field(min_length=1)
+    unresolved_questions: tuple[str, ...] = ()
+    time_horizon: str = Field(min_length=1)
+    scenarios: tuple[ResearchScenario, ...] = Field(
+        min_length=3,
+        max_length=3,
+    )
+    valuation_assessment: ValuationAssessment | None = None
+    market_reference_levels: tuple[MarketReferenceLevel, ...] = ()
+    risk_review_adjustments: tuple[RiskReviewAdjustment, ...] = ()
 
     @field_validator("memory_refs")
     @classmethod
@@ -763,6 +1257,49 @@ class ResearchDecision(FrozenModel):
         if any(not _MEMORY_REF_PATTERN.fullmatch(ref) for ref in refs):
             raise ValueError("memory refs must use the memory:<run_id> format")
         return refs
+
+    @field_validator("evidence_refs")
+    @classmethod
+    def validate_evidence_refs(
+        cls,
+        value: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        return _unique_evidence_refs(value)
+
+    @model_validator(mode="after")
+    def validate_decision(self) -> ResearchDecision:
+        scenario_kinds = tuple(scenario.kind for scenario in self.scenarios)
+        if set(scenario_kinds) != set(ResearchScenarioKind):
+            raise ValueError(
+                "research decision requires one base, bull, and bear scenario"
+            )
+        if len(scenario_kinds) != len(set(scenario_kinds)):
+            raise ValueError("research scenario kinds must be unique")
+        nested_refs = {
+            ref
+            for scenario in self.scenarios
+            for ref in scenario.evidence_refs
+        }
+        if self.valuation_assessment is not None:
+            nested_refs.update(
+                self.valuation_assessment.input_evidence_refs
+            )
+        nested_refs.update(
+            ref
+            for level in self.market_reference_levels
+            for ref in level.evidence_refs
+        )
+        nested_refs.update(
+            ref
+            for adjustment in self.risk_review_adjustments
+            for ref in adjustment.evidence_refs
+        )
+        if not nested_refs.issubset(self.evidence_refs):
+            raise ValueError(
+                "decision refs must include scenario, valuation, and "
+                "market-reference evidence"
+            )
+        return self
 
 
 class MemoryOutcome(FrozenModel):
@@ -902,15 +1439,33 @@ class MemoryContext(FrozenModel):
         )[:max_chars]
 
 
-ResearchArtifactContent = AnalystReport | PerspectiveReview | ResearchDecision
+ResearchArtifactContent = (
+    AnalystReport
+    | ResearchCase
+    | DebateAgenda
+    | RebuttalReview
+    | JudgeDraft
+    | RiskReview
+    | ResearchDecision
+)
 
 
 def _artifact_content_type(content: ResearchArtifactContent) -> str:
     if isinstance(content, AnalystReport):
         return "analyst_report"
-    if isinstance(content, PerspectiveReview):
-        return "perspective_review"
-    return "research_decision"
+    if isinstance(content, ResearchCase):
+        return "research_case"
+    if isinstance(content, DebateAgenda):
+        return "debate_agenda"
+    if isinstance(content, RebuttalReview):
+        return "rebuttal_review"
+    if isinstance(content, JudgeDraft):
+        return "judge_draft"
+    if isinstance(content, RiskReview):
+        return "risk_review"
+    if isinstance(content, ResearchDecision):
+        return "research_decision"
+    raise TypeError(f"unsupported research artifact: {type(content)!r}")
 
 
 class ResearchArtifactDraft(FrozenModel):

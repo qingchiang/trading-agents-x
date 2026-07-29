@@ -10,7 +10,11 @@ import pytest
 from langchain_core.messages import ToolMessage
 from pydantic import ValidationError
 
-from tests.factories import analyst_report
+from tests.factories import (
+    analyst_report,
+    research_case,
+    research_decision,
+)
 from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
@@ -21,10 +25,7 @@ from tradingagents.application.contracts import (
     EvidenceQuality,
     EvidenceTemporalScope,
     NodeMetrics,
-    PerspectiveReview,
     ResearchArtifact,
-    ResearchDecision,
-    ResearchRating,
     ResearchTable,
     ResearchTableCell,
     ResearchTableColumn,
@@ -39,10 +40,10 @@ from tradingagents.application.contracts import (
 )
 from tradingagents.application.evidence import extract_evidence_tables
 from tradingagents.application.exporting import render_run_export_markdown
+from tradingagents.graph.deliberation import _evidence_payload
 from tradingagents.graph.research_graph import (
     _collect_evidence,
     _evidence_from_records,
-    _evidence_prompt_index,
 )
 from tradingagents.provenance import (
     ProvenanceRecord,
@@ -322,7 +323,7 @@ def test_prompt_groups_exact_bodies_without_rewriting_refs() -> None:
         items=(first, second),
     )
 
-    index = _evidence_prompt_index(bundle)
+    index = _evidence_payload(bundle)["items"]
 
     assert len(index) == 1
     assert index[0]["canonical_ref"] == first.ref
@@ -719,13 +720,11 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
         warnings=(warning,),
         narrative=narrative,
     )
-    decision = ResearchDecision(
-        rating=ResearchRating.HOLD,
+    decision = research_decision(
         confidence=0.6,
         thesis="FINAL THESIS",
         risks=("Demand weakens.",),
         invalidation_conditions=("A new filing changes the evidence.",),
-        time_horizon="6-12 months",
     )
     artifacts = (
         ResearchArtifact(
@@ -742,15 +741,10 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
             id="review-artifact",
             run_id="fixture-run",
             attempt=1,
-            stage="perspective",
+            stage="case",
             role="bear",
             generation_method=ArtifactGenerationMethod.TOOL_CALL,
-            content=PerspectiveReview(
-                role="bear",
-                thesis="REVIEW THESIS",
-                claim_rebuttals=("A claim is challenged.",),
-                risks=("Demand weakens.",),
-            ),
+            content=research_case(role="bear"),
             created_at=now,
         ),
         ResearchArtifact(

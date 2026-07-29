@@ -6,23 +6,38 @@ from typing import Any
 
 import pytest
 
-from tests.factories import analyst_report
+from tests.factories import analyst_report, research_decision
 from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalystClaim,
     AnalystClaimType,
     AnalystReport,
     AnalystSection,
+    DebateAgenda,
+    DebateImportance,
+    DebateResolution,
+    DisputeRuling,
     EvidenceItem,
     EvidenceQuality,
+    JudgeDraft,
     MemoryContext,
     MemoryOutcome,
     MemoryRecord,
-    PerspectiveReview,
+    RebuttalOutcome,
+    RebuttalPoint,
+    RebuttalReview,
     ResearchArtifactDraft,
+    ResearchCase,
+    ResearchCaseArgument,
     ResearchDecision,
     ResearchRating,
     ResearchWarning,
+    RiskFinding,
+    RiskFindingKind,
+    RiskReview,
+    RiskReviewAdjustment,
+    RiskReviewDisposition,
+    RiskSeverity,
     RunProfile,
 )
 from tradingagents.application.metrics import MetricsCallback
@@ -123,17 +138,160 @@ class _StructuredInvoker:
                 ),
                 evidence_refs=refs[-1:],
             )
-        elif self.schema is PerspectiveReview:
-            parsed = PerspectiveReview(
-                role="fixture",
-                thesis="Structured review grounded in the sealed evidence.",
-                claim_rebuttals=("The opposing claim needs stronger support.",),
-                evidence_refs=refs[-1:],
+        elif self.schema is ResearchCase:
+            role = "bull" if "Bull Researcher" in prompt else "bear"
+            parsed = ResearchCase(
+                role=role,
+                executive_summary=f"Complete {role} case.",
+                thesis=f"The {role} case remains conditional.",
+                arguments=(
+                    ResearchCaseArgument(
+                        id=f"case.{role}.argument_1",
+                        claim_ids=("market.claim_1",),
+                        statement="A fixture claim supports the case.",
+                        mechanism="The cited mechanism affects the outcome.",
+                        implication="The committee should test this condition.",
+                        confidence=0.6,
+                        evidence_refs=refs[-1:],
+                    ),
+                ),
+                strongest_counterarguments=(
+                    "The opposing interpretation remains plausible.",
+                ),
+                fragile_assumptions=("The mechanism persists.",),
                 risks=("Evidence quality may deteriorate.",),
+                evidence_refs=refs[-1:],
+            )
+        elif self.schema is DebateAgenda:
+            parsed = DebateAgenda(
+                executive_summary="One material dispute requires resolution.",
+                issues=(
+                    {
+                        "id": "debate.issue_1",
+                        "question": "Will the fixture mechanism persist?",
+                        "claim_ids": ("market.claim_1",),
+                        "importance": DebateImportance.MATERIAL,
+                        "bull_position": "The mechanism persists.",
+                        "bear_position": "The mechanism fades.",
+                        "evidence_refs": refs[-1:],
+                    },
+                ),
+                evidence_refs=refs[-1:],
+            )
+        elif self.schema is RebuttalReview:
+            role = "bull" if "Bull Researcher Rebuttal" in prompt else "bear"
+            round_number = int(
+                re.search(r"CURRENT ROUND: (\d+)", prompt).group(1)
+            )
+            parsed = RebuttalReview(
+                role=role,
+                round=round_number,
+                thesis_update="The case remains conditional.",
+                responses=(
+                    RebuttalPoint(
+                        agenda_id="debate.issue_1",
+                        claim_ids=("market.claim_1",),
+                        response="The opposing interpretation is incomplete.",
+                        causal_mechanism=(
+                            "The fixture mechanism has a role-specific path."
+                        ),
+                        outcome=RebuttalOutcome.UNRESOLVED,
+                        evidence_refs=refs[-1:],
+                        remaining_questions=("Which mechanism dominates?",),
+                    ),
+                ),
+                evidence_refs=refs[-1:],
+                remaining_questions=("Which mechanism dominates?",),
+            )
+        elif self.schema is JudgeDraft:
+            parsed = JudgeDraft(
+                preliminary_rating=ResearchRating.HOLD,
+                confidence=0.6,
+                executive_summary="The debate supports a balanced draft.",
+                thesis="The fixture conclusion remains conditional.",
+                rulings=(
+                    DisputeRuling(
+                        agenda_id="debate.issue_1",
+                        resolution=DebateResolution.MIXED,
+                        rationale="Both cases retain evidentiary support.",
+                        accepted_claim_ids=("market.claim_1",),
+                        evidence_refs=refs[-1:],
+                    ),
+                ),
+                risks=("Evidence quality may deteriorate.",),
+                invalidation_conditions=(
+                    "New evidence contradicts the fixture.",
+                ),
+                unresolved_questions=("Which mechanism dominates?",),
+                time_horizon="6-12 months",
+                evidence_refs=refs[-1:],
+                memory_refs=memory_refs[:1],
+            )
+        elif self.schema is RiskReview:
+            role = next(
+                (
+                    candidate
+                    for candidate in (
+                        "integrated",
+                        "aggressive",
+                        "neutral",
+                        "conservative",
+                    )
+                    if (
+                        candidate.title() in prompt
+                        or (
+                            candidate == "integrated"
+                            and "Integrated Risk Reviewer" in prompt
+                        )
+                    )
+                ),
+                "integrated",
+            )
+            parsed = RiskReview(
+                role=role,
+                executive_summary="The draft needs a qualification.",
+                findings=(
+                    RiskFinding(
+                        id=f"risk.{role}.finding_1",
+                        kind=RiskFindingKind.BASE_CONSISTENCY,
+                        statement="Confidence exceeds fixture certainty.",
+                        mechanism="Uncertainty widens the result range.",
+                        severity=RiskSeverity.MEDIUM,
+                        related_claim_ids=("market.claim_1",),
+                        evidence_refs=refs[-1:],
+                    ),
+                ),
+                invalidation_paths=("The accepted mechanism fails.",),
+                recommended_changes=("Preserve uncertainty.",),
+                confidence_adjustment=-0.05,
+                evidence_refs=refs[-1:],
             )
         elif self.schema is ResearchDecision:
-            parsed = ResearchDecision(
-                rating=ResearchRating.HOLD,
+            risk_roles = tuple(
+                role
+                for role in (
+                    "integrated",
+                    "aggressive",
+                    "neutral",
+                    "conservative",
+                )
+                if f'"role": "{role}"' in prompt
+            )
+            adjustments = (
+                tuple(
+                    RiskReviewAdjustment(
+                        source_role=role,
+                        disposition=RiskReviewDisposition.MODIFIED,
+                        subject=f"{role} review",
+                        explanation="The committee calibrated the fixture.",
+                        evidence_refs=refs[-1:],
+                    )
+                    for role in risk_roles
+                )
+                if "RISK REVIEWS:" in prompt
+                else ()
+            )
+            parsed = research_decision(
                 confidence=0.65,
                 thesis="The available evidence supports a balanced conclusion.",
                 evidence_refs=refs[-1:],
@@ -141,7 +299,7 @@ class _StructuredInvoker:
                 catalysts=("Evidence improves",),
                 risks=("Evidence deteriorates",),
                 invalidation_conditions=("The cited evidence is superseded",),
-                time_horizon="6-12 months",
+                risk_review_adjustments=adjustments,
             )
         else:
             raise AssertionError(self.schema)
@@ -227,8 +385,7 @@ def _memory_context() -> MemoryContext:
                 ticker="NVDA",
                 market="America/New_York",
                 analysis_date=date(2026, 6, 30),
-                decision=ResearchDecision(
-                    rating=ResearchRating.HOLD,
+                decision=research_decision(
                     confidence=0.55,
                     thesis="Prior demand thesis.",
                     evidence_refs=(),
@@ -257,13 +414,14 @@ def _memory_context() -> MemoryContext:
         (
             RunProfile.FAST,
             {"analyst.market", "analyst.news", "committee.final"},
-            {"review.bull", "judge.research", "risk.review"},
+            {"case.bull", "judge.research", "risk.review"},
         ),
         (
             RunProfile.STANDARD,
             {
-                "review.bull",
-                "review.bear",
+                "case.bull",
+                "case.bear",
+                "debate.agenda",
                 "judge.research",
                 "risk.review",
                 "committee.final",
@@ -273,8 +431,8 @@ def _memory_context() -> MemoryContext:
         (
             RunProfile.DEEP,
             {
-                "review.bull.rebuttal",
-                "review.bear.rebuttal",
+                "rebuttal.bull",
+                "rebuttal.bear",
                 "risk.aggressive",
                 "risk.neutral",
                 "risk.conservative",
@@ -375,10 +533,14 @@ def test_memory_only_enters_profile_decision_nodes_and_refs_are_whitelisted(
 
     calls = [*quick.calls, *deep.calls]
     decision_prompts = [
-        prompt for schema, prompt in calls if schema == "ResearchDecision"
+        prompt
+        for schema, prompt in calls
+        if schema in {"ResearchDecision", "JudgeDraft"}
     ]
-    review_prompts = [
-        prompt for schema, prompt in calls if schema == "PerspectiveReview"
+    nondecision_prompts = [
+        prompt
+        for schema, prompt in calls
+        if schema not in {"ResearchDecision", "JudgeDraft", "AnalystReport"}
     ]
     assert len(decision_prompts) == decision_prompt_count
     assert all(
@@ -387,7 +549,7 @@ def test_memory_only_enters_profile_decision_nodes_and_refs_are_whitelisted(
     )
     assert all(
         "Calibration lesson: demand evidence was overweighted." not in prompt
-        for prompt in review_prompts
+        for prompt in nondecision_prompts
     )
     assert execution.decision.memory_refs == memory.refs
     assert "memory:invented" not in execution.decision.memory_refs
@@ -429,17 +591,21 @@ def test_graph_emits_only_typed_visible_research_artifacts(
     assert {(artifact.stage, artifact.role) for artifact in artifacts} == {
         ("analyst", "market"),
         ("analyst", "news"),
-        ("perspective", "bull"),
-        ("perspective", "bear"),
+        ("case", "bull"),
+        ("case", "bear"),
+        ("agenda", "moderator"),
         ("judge", "research_judge"),
-        ("risk", "risk"),
+        ("risk", "integrated"),
         ("decision", "final_committee"),
     }
     assert all(
         artifact.content_type
         in {
             "analyst_report",
-            "perspective_review",
+            "research_case",
+            "debate_agenda",
+            "judge_draft",
+            "risk_review",
             "research_decision",
         }
         for artifact in artifacts
@@ -458,6 +624,10 @@ def test_graph_emits_only_typed_visible_research_artifacts(
         ("market", "analyst-market-v2"),
         ("news", "analyst-news-v2"),
     }
+    assert all(
+        artifact.prompt_version != "research-v1"
+        for artifact in artifacts
+    )
 
 
 def test_deep_debate_stops_when_rebuttals_add_no_new_information(

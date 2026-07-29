@@ -89,22 +89,22 @@ def test_recovery_calls_stay_on_the_same_node_and_errors_release_run_ids() -> No
         {},
         [[]],
         run_id=reused_after_error,
-        metadata={"research_node": "review.bear"},
+        metadata={"research_node": "case.bear"},
     )
     metrics.on_llm_error(RuntimeError("fixture"), run_id=reused_after_error)
     metrics.on_chat_model_start(
         {},
         [[]],
         run_id=reused_after_error,
-        metadata={"research_node": "review.bull"},
+        metadata={"research_node": "case.bull"},
     )
 
     snapshot = metrics.snapshot()
 
     assert snapshot.node_metrics["committee.final"].llm_calls == 2
     assert snapshot.node_metrics["committee.final"].input_tokens == 100
-    assert snapshot.node_metrics["review.bear"].llm_calls == 1
-    assert snapshot.node_metrics["review.bull"].llm_calls == 1
+    assert snapshot.node_metrics["case.bear"].llm_calls == 1
+    assert snapshot.node_metrics["case.bull"].llm_calls == 1
 
 
 def test_missing_metadata_and_provider_usage_are_explicit() -> None:

@@ -23,12 +23,20 @@ const entry = {
   decision: {
     rating: "Hold",
     confidence: 0.6,
+    executive_summary: "Imported decision summary.",
     thesis: "**Imported thesis** with <script>unsafe()</script> markup.",
     evidence_refs: [],
     catalysts: ["**Volume growth** accelerates."],
     risks: ["Input costs remain elevated."],
     invalidation_conditions: ["Demand falls below the base case."],
+    unresolved_questions: [],
     time_horizon: "6-12 months",
+    scenarios: (["base", "bull", "bear"] as const).map((kind) => ({
+      kind,
+      core_assumptions: ["Imported assumptions remain valid."],
+      outcome: `Imported ${kind} outcome.`,
+      evidence_refs: [],
+    })),
   },
   outcome: {
     status: "resolved",

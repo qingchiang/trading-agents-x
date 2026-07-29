@@ -5,17 +5,18 @@ from datetime import date
 import httpx2 as httpx
 import pytest
 
-from tests.factories import analyst_report
+from tests.factories import (
+    analyst_report,
+    research_case,
+    research_decision,
+)
 from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
     ArtifactGenerationMethod,
     EvidenceBundle,
     EvidenceItem,
-    PerspectiveReview,
     ResearchArtifactDraft,
-    ResearchDecision,
-    ResearchRating,
     RunStatus,
 )
 from tradingagents.application.settings import AppSettings
@@ -366,25 +367,20 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
     review, _ = web_repository.append_artifact(
         queued.id,
         ResearchArtifactDraft(
-            node="perspective.bear",
-            stage="perspective",
+            node="case.bear",
+            stage="case",
             role="bear",
             generation_method=ArtifactGenerationMethod.TOOL_CALL,
-            content=PerspectiveReview(
+            content=research_case(
                 role="bear",
-                thesis="Fixture bearish review.",
-                claim_rebuttals=("Valuation may already reflect growth.",),
-                evidence_refs=(evidence_item.ref,),
-                risks=("Demand may weaken.",),
+                evidence_ref=evidence_item.ref,
             ),
         ),
     )
-    decision = ResearchDecision(
-        rating=ResearchRating.HOLD,
+    decision = research_decision(
         confidence=0.6,
         thesis="Fixture thesis.",
         evidence_refs=(evidence_item.ref,),
-        time_horizon="6-12 months",
     )
     web_repository.complete(
         queued.id,
@@ -429,7 +425,9 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
     )
     assert review_payload["generation_method"] == "tool_call"
     assert "diagnostics" not in review_payload
-    assert review_payload["content"]["risks"] == ["Demand may weaken."]
+    assert review_payload["content"]["risks"] == [
+        "Fixture evidence may deteriorate."
+    ]
     assert empty_attempt.json() == []
 
 

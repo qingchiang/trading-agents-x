@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from tests.factories import research_decision
 from tradingagents.application.contracts import (
     AnalystClaim,
     AnalystClaimType,
@@ -133,7 +134,7 @@ def _build_result(
         RunProfile.STANDARD: 2,
         RunProfile.DEEP: len(case["risks"]),
     }[profile]
-    decision = ResearchDecision(
+    decision = research_decision(
         rating=ResearchRating(case["rating"]),
         confidence=0.25 if case["scenario"] == "missing" else 0.70,
         thesis=case["thesis"],
@@ -203,12 +204,17 @@ def _memory_for(
     evidence_refs: tuple[str, ...] | None = None,
 ) -> MemoryContext:
     run_id = "prior-run"
+    past_refs = (
+        decision.evidence_refs
+        if evidence_refs is None
+        else evidence_refs
+    )
     past_decision = decision.model_copy(
         update={
-            "evidence_refs": (
-                decision.evidence_refs
-                if evidence_refs is None
-                else evidence_refs
+            "evidence_refs": past_refs,
+            "scenarios": tuple(
+                scenario.model_copy(update={"evidence_refs": past_refs})
+                for scenario in decision.scenarios
             ),
             "memory_refs": (),
         }

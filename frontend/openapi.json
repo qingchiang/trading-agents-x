@@ -534,6 +534,115 @@
         "title": "CapabilityDefaults",
         "type": "object"
       },
+      "DebateAgenda": {
+        "additionalProperties": false,
+        "description": "Prioritized agenda derived from the independent bull and bear cases.",
+        "properties": {
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "executive_summary": {
+            "minLength": 1,
+            "title": "Executive Summary",
+            "type": "string"
+          },
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/DebateIssue"
+            },
+            "minItems": 1,
+            "title": "Issues",
+            "type": "array"
+          }
+        },
+        "required": [
+          "executive_summary",
+          "issues",
+          "evidence_refs"
+        ],
+        "title": "DebateAgenda",
+        "type": "object"
+      },
+      "DebateImportance": {
+        "enum": [
+          "critical",
+          "material",
+          "secondary"
+        ],
+        "title": "DebateImportance",
+        "type": "string"
+      },
+      "DebateIssue": {
+        "additionalProperties": false,
+        "description": "One material disagreement that later roles must explicitly resolve.",
+        "properties": {
+          "bear_position": {
+            "minLength": 1,
+            "title": "Bear Position",
+            "type": "string"
+          },
+          "bull_position": {
+            "minLength": 1,
+            "title": "Bull Position",
+            "type": "string"
+          },
+          "claim_ids": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Claim Ids",
+            "type": "array"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "id": {
+            "pattern": "^debate\\.issue_[a-z0-9][a-z0-9_.-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "importance": {
+            "$ref": "#/components/schemas/DebateImportance"
+          },
+          "question": {
+            "minLength": 1,
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "question",
+          "claim_ids",
+          "importance",
+          "bull_position",
+          "bear_position",
+          "evidence_refs"
+        ],
+        "title": "DebateIssue",
+        "type": "object"
+      },
+      "DebateResolution": {
+        "enum": [
+          "bull",
+          "bear",
+          "mixed",
+          "unresolved"
+        ],
+        "title": "DebateResolution",
+        "type": "string"
+      },
       "DerivedValue": {
         "additionalProperties": false,
         "description": "Reproducible numeric value derived from cited observations.",
@@ -645,6 +754,57 @@
           "default_roles"
         ],
         "title": "DiscoveredModelView",
+        "type": "object"
+      },
+      "DisputeRuling": {
+        "additionalProperties": false,
+        "description": "The judge's auditable resolution of one debate-agenda issue.",
+        "properties": {
+          "accepted_claim_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Accepted Claim Ids",
+            "type": "array"
+          },
+          "agenda_id": {
+            "pattern": "^debate\\.issue_[a-z0-9][a-z0-9_.-]*$",
+            "title": "Agenda Id",
+            "type": "string"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "rationale": {
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          },
+          "rejected_claim_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Rejected Claim Ids",
+            "type": "array"
+          },
+          "resolution": {
+            "$ref": "#/components/schemas/DebateResolution"
+          }
+        },
+        "required": [
+          "agenda_id",
+          "resolution",
+          "rationale",
+          "evidence_refs"
+        ],
+        "title": "DisputeRuling",
         "type": "object"
       },
       "EvidenceBundle": {
@@ -1039,6 +1199,105 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "JudgeDraft": {
+        "additionalProperties": false,
+        "description": "Preliminary research conclusion with explicit dispute rulings.",
+        "properties": {
+          "catalysts": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Catalysts",
+            "type": "array"
+          },
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "executive_summary": {
+            "minLength": 1,
+            "title": "Executive Summary",
+            "type": "string"
+          },
+          "invalidation_conditions": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Invalidation Conditions",
+            "type": "array"
+          },
+          "memory_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Memory Refs",
+            "type": "array"
+          },
+          "preliminary_rating": {
+            "$ref": "#/components/schemas/ResearchRating"
+          },
+          "risks": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Risks",
+            "type": "array"
+          },
+          "rulings": {
+            "items": {
+              "$ref": "#/components/schemas/DisputeRuling"
+            },
+            "minItems": 1,
+            "title": "Rulings",
+            "type": "array"
+          },
+          "thesis": {
+            "minLength": 1,
+            "title": "Thesis",
+            "type": "string"
+          },
+          "time_horizon": {
+            "minLength": 1,
+            "title": "Time Horizon",
+            "type": "string"
+          },
+          "unresolved_questions": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Unresolved Questions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "preliminary_rating",
+          "confidence",
+          "executive_summary",
+          "thesis",
+          "rulings",
+          "risks",
+          "invalidation_conditions",
+          "time_horizon",
+          "evidence_refs"
+        ],
+        "title": "JudgeDraft",
+        "type": "object"
+      },
       "LoginRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1053,6 +1312,56 @@
           "token"
         ],
         "title": "LoginRequest",
+        "type": "object"
+      },
+      "MarketReferenceLevel": {
+        "additionalProperties": false,
+        "properties": {
+          "as_of_date": {
+            "format": "date",
+            "title": "As Of Date",
+            "type": "string"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "interpretation": {
+            "minLength": 1,
+            "title": "Interpretation",
+            "type": "string"
+          },
+          "level_type": {
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Level Type",
+            "type": "string"
+          },
+          "unit": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Unit",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "level_type",
+          "value",
+          "unit",
+          "as_of_date",
+          "interpretation",
+          "evidence_refs"
+        ],
+        "title": "MarketReferenceLevel",
         "type": "object"
       },
       "MemoryEntry": {
@@ -1260,57 +1569,6 @@
         "title": "NodeMetrics",
         "type": "object"
       },
-      "PerspectiveReview": {
-        "additionalProperties": false,
-        "properties": {
-          "claim_rebuttals": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Claim Rebuttals",
-            "type": "array"
-          },
-          "evidence_refs": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Evidence Refs",
-            "type": "array"
-          },
-          "new_evidence_refs": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "New Evidence Refs",
-            "type": "array"
-          },
-          "risks": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Risks",
-            "type": "array"
-          },
-          "role": {
-            "title": "Role",
-            "type": "string"
-          },
-          "thesis": {
-            "title": "Thesis",
-            "type": "string"
-          }
-        },
-        "required": [
-          "role",
-          "thesis"
-        ],
-        "title": "PerspectiveReview",
-        "type": "object"
-      },
       "ProviderCapabilities": {
         "additionalProperties": false,
         "properties": {
@@ -1445,6 +1703,147 @@
         "title": "QueueHealth",
         "type": "object"
       },
+      "RebuttalOutcome": {
+        "enum": [
+          "upheld",
+          "weakened",
+          "rejected",
+          "unresolved"
+        ],
+        "title": "RebuttalOutcome",
+        "type": "string"
+      },
+      "RebuttalPoint": {
+        "additionalProperties": false,
+        "description": "A targeted response to one agenda issue and its analyst claims.",
+        "properties": {
+          "agenda_id": {
+            "pattern": "^debate\\.issue_[a-z0-9][a-z0-9_.-]*$",
+            "title": "Agenda Id",
+            "type": "string"
+          },
+          "causal_mechanism": {
+            "minLength": 1,
+            "title": "Causal Mechanism",
+            "type": "string"
+          },
+          "claim_ids": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Claim Ids",
+            "type": "array"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "new_evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "New Evidence Refs",
+            "type": "array"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/RebuttalOutcome"
+          },
+          "remaining_questions": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Remaining Questions",
+            "type": "array"
+          },
+          "response": {
+            "minLength": 1,
+            "title": "Response",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agenda_id",
+          "claim_ids",
+          "response",
+          "causal_mechanism",
+          "outcome",
+          "evidence_refs"
+        ],
+        "title": "RebuttalPoint",
+        "type": "object"
+      },
+      "RebuttalReview": {
+        "additionalProperties": false,
+        "description": "One role's issue-by-issue response in a specific debate round.",
+        "properties": {
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "new_evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "New Evidence Refs",
+            "type": "array"
+          },
+          "remaining_questions": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Remaining Questions",
+            "type": "array"
+          },
+          "responses": {
+            "items": {
+              "$ref": "#/components/schemas/RebuttalPoint"
+            },
+            "minItems": 1,
+            "title": "Responses",
+            "type": "array"
+          },
+          "role": {
+            "enum": [
+              "bull",
+              "bear"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "round": {
+            "minimum": 1.0,
+            "title": "Round",
+            "type": "integer"
+          },
+          "thesis_update": {
+            "minLength": 1,
+            "title": "Thesis Update",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "round",
+          "thesis_update",
+          "responses",
+          "evidence_refs"
+        ],
+        "title": "RebuttalReview",
+        "type": "object"
+      },
       "RecentInstrument": {
         "additionalProperties": false,
         "properties": {
@@ -1500,7 +1899,19 @@
                 "$ref": "#/components/schemas/AnalystReport"
               },
               {
-                "$ref": "#/components/schemas/PerspectiveReview"
+                "$ref": "#/components/schemas/ResearchCase"
+              },
+              {
+                "$ref": "#/components/schemas/DebateAgenda"
+              },
+              {
+                "$ref": "#/components/schemas/RebuttalReview"
+              },
+              {
+                "$ref": "#/components/schemas/JudgeDraft"
+              },
+              {
+                "$ref": "#/components/schemas/RiskReview"
               },
               {
                 "$ref": "#/components/schemas/ResearchDecision"
@@ -1576,6 +1987,149 @@
         "title": "ResearchArtifact",
         "type": "object"
       },
+      "ResearchCase": {
+        "additionalProperties": false,
+        "description": "A complete constructive or skeptical case grounded in analyst claims.",
+        "properties": {
+          "arguments": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchCaseArgument"
+            },
+            "minItems": 1,
+            "title": "Arguments",
+            "type": "array"
+          },
+          "catalysts": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Catalysts",
+            "type": "array"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "executive_summary": {
+            "minLength": 1,
+            "title": "Executive Summary",
+            "type": "string"
+          },
+          "fragile_assumptions": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Fragile Assumptions",
+            "type": "array"
+          },
+          "risks": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Risks",
+            "type": "array"
+          },
+          "role": {
+            "enum": [
+              "bull",
+              "bear"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "strongest_counterarguments": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Strongest Counterarguments",
+            "type": "array"
+          },
+          "thesis": {
+            "minLength": 1,
+            "title": "Thesis",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "executive_summary",
+          "thesis",
+          "arguments",
+          "strongest_counterarguments",
+          "fragile_assumptions",
+          "risks",
+          "evidence_refs"
+        ],
+        "title": "ResearchCase",
+        "type": "object"
+      },
+      "ResearchCaseArgument": {
+        "additionalProperties": false,
+        "description": "One explicit argument in a bull or bear research case.",
+        "properties": {
+          "claim_ids": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Claim Ids",
+            "type": "array"
+          },
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "id": {
+            "pattern": "^case\\.(?:bull|bear)\\.[a-z0-9][a-z0-9_.-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "implication": {
+            "minLength": 1,
+            "title": "Implication",
+            "type": "string"
+          },
+          "mechanism": {
+            "minLength": 1,
+            "title": "Mechanism",
+            "type": "string"
+          },
+          "statement": {
+            "minLength": 1,
+            "title": "Statement",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "claim_ids",
+          "statement",
+          "mechanism",
+          "implication",
+          "confidence",
+          "evidence_refs"
+        ],
+        "title": "ResearchCaseArgument",
+        "type": "object"
+      },
       "ResearchDecision": {
         "additionalProperties": false,
         "description": "Research-only conclusion; deliberately excludes account-level advice.",
@@ -1602,12 +2156,25 @@
             "title": "Evidence Refs",
             "type": "array"
           },
+          "executive_summary": {
+            "minLength": 1,
+            "title": "Executive Summary",
+            "type": "string"
+          },
           "invalidation_conditions": {
-            "default": [],
             "items": {
               "type": "string"
             },
+            "minItems": 1,
             "title": "Invalidation Conditions",
+            "type": "array"
+          },
+          "market_reference_levels": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/MarketReferenceLevel"
+            },
+            "title": "Market Reference Levels",
             "type": "array"
           },
           "memory_refs": {
@@ -1621,28 +2188,69 @@
           "rating": {
             "$ref": "#/components/schemas/ResearchRating"
           },
-          "risks": {
+          "risk_review_adjustments": {
             "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RiskReviewAdjustment"
+            },
+            "title": "Risk Review Adjustments",
+            "type": "array"
+          },
+          "risks": {
             "items": {
               "type": "string"
             },
+            "minItems": 1,
             "title": "Risks",
             "type": "array"
           },
+          "scenarios": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchScenario"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "title": "Scenarios",
+            "type": "array"
+          },
           "thesis": {
+            "minLength": 1,
             "title": "Thesis",
             "type": "string"
           },
           "time_horizon": {
+            "minLength": 1,
             "title": "Time Horizon",
             "type": "string"
+          },
+          "unresolved_questions": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Unresolved Questions",
+            "type": "array"
+          },
+          "valuation_assessment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ValuationAssessment"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "rating",
           "confidence",
+          "executive_summary",
           "thesis",
-          "time_horizon"
+          "risks",
+          "invalidation_conditions",
+          "time_horizon",
+          "scenarios"
         ],
         "title": "ResearchDecision",
         "type": "object"
@@ -1656,6 +2264,61 @@
           "Sell"
         ],
         "title": "ResearchRating",
+        "type": "string"
+      },
+      "ResearchScenario": {
+        "additionalProperties": false,
+        "properties": {
+          "core_assumptions": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Core Assumptions",
+            "type": "array"
+          },
+          "evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ResearchScenarioKind"
+          },
+          "outcome": {
+            "minLength": 1,
+            "title": "Outcome",
+            "type": "string"
+          },
+          "valuation_range": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ValuationRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "core_assumptions",
+          "outcome"
+        ],
+        "title": "ResearchScenario",
+        "type": "object"
+      },
+      "ResearchScenarioKind": {
+        "enum": [
+          "base",
+          "bull",
+          "bear"
+        ],
+        "title": "ResearchScenarioKind",
         "type": "string"
       },
       "ResearchTable": {
@@ -1903,6 +2566,204 @@
         ],
         "title": "ResearchWarning",
         "type": "object"
+      },
+      "RiskFinding": {
+        "additionalProperties": false,
+        "description": "One concrete challenge raised by a risk-review lens.",
+        "properties": {
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "id": {
+            "pattern": "^risk\\.[a-z0-9][a-z0-9_.-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RiskFindingKind"
+          },
+          "mechanism": {
+            "minLength": 1,
+            "title": "Mechanism",
+            "type": "string"
+          },
+          "related_claim_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Related Claim Ids",
+            "type": "array"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/RiskSeverity"
+          },
+          "statement": {
+            "minLength": 1,
+            "title": "Statement",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "statement",
+          "mechanism",
+          "severity",
+          "evidence_refs"
+        ],
+        "title": "RiskFinding",
+        "type": "object"
+      },
+      "RiskFindingKind": {
+        "enum": [
+          "upside_omission",
+          "base_consistency",
+          "downside",
+          "tail_risk",
+          "data_quality",
+          "invalidation"
+        ],
+        "title": "RiskFindingKind",
+        "type": "string"
+      },
+      "RiskReview": {
+        "additionalProperties": false,
+        "description": "A visible challenge to the judge draft from one risk lens.",
+        "properties": {
+          "confidence_adjustment": {
+            "maximum": 1.0,
+            "minimum": -1.0,
+            "title": "Confidence Adjustment",
+            "type": "number"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "executive_summary": {
+            "minLength": 1,
+            "title": "Executive Summary",
+            "type": "string"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/RiskFinding"
+            },
+            "minItems": 1,
+            "title": "Findings",
+            "type": "array"
+          },
+          "invalidation_paths": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Invalidation Paths",
+            "type": "array"
+          },
+          "recommended_changes": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Recommended Changes",
+            "type": "array"
+          },
+          "role": {
+            "enum": [
+              "integrated",
+              "aggressive",
+              "neutral",
+              "conservative"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "executive_summary",
+          "findings",
+          "invalidation_paths",
+          "recommended_changes",
+          "confidence_adjustment",
+          "evidence_refs"
+        ],
+        "title": "RiskReview",
+        "type": "object"
+      },
+      "RiskReviewAdjustment": {
+        "additionalProperties": false,
+        "properties": {
+          "disposition": {
+            "$ref": "#/components/schemas/RiskReviewDisposition"
+          },
+          "evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "explanation": {
+            "minLength": 1,
+            "title": "Explanation",
+            "type": "string"
+          },
+          "source_role": {
+            "enum": [
+              "integrated",
+              "aggressive",
+              "neutral",
+              "conservative"
+            ],
+            "title": "Source Role",
+            "type": "string"
+          },
+          "subject": {
+            "minLength": 1,
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_role",
+          "disposition",
+          "subject",
+          "explanation"
+        ],
+        "title": "RiskReviewAdjustment",
+        "type": "object"
+      },
+      "RiskReviewDisposition": {
+        "enum": [
+          "retained",
+          "modified",
+          "rejected"
+        ],
+        "title": "RiskReviewDisposition",
+        "type": "string"
+      },
+      "RiskSeverity": {
+        "enum": [
+          "low",
+          "medium",
+          "high",
+          "critical"
+        ],
+        "title": "RiskSeverity",
+        "type": "string"
       },
       "RunBatchRequest": {
         "additionalProperties": false,
@@ -2465,6 +3326,75 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "ValuationAssessment": {
+        "additionalProperties": false,
+        "properties": {
+          "as_of_date": {
+            "format": "date",
+            "title": "As Of Date",
+            "type": "string"
+          },
+          "currency": {
+            "maxLength": 16,
+            "minLength": 1,
+            "title": "Currency",
+            "type": "string"
+          },
+          "input_evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Input Evidence Refs",
+            "type": "array"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Limitations",
+            "type": "array"
+          },
+          "method": {
+            "minLength": 1,
+            "title": "Method",
+            "type": "string"
+          },
+          "valuation_range": {
+            "$ref": "#/components/schemas/ValuationRange"
+          }
+        },
+        "required": [
+          "method",
+          "valuation_range",
+          "currency",
+          "as_of_date",
+          "input_evidence_refs",
+          "limitations"
+        ],
+        "title": "ValuationAssessment",
+        "type": "object"
+      },
+      "ValuationRange": {
+        "additionalProperties": false,
+        "properties": {
+          "high": {
+            "title": "High",
+            "type": "number"
+          },
+          "low": {
+            "title": "Low",
+            "type": "number"
+          }
+        },
+        "required": [
+          "low",
+          "high"
+        ],
+        "title": "ValuationRange",
         "type": "object"
       }
     }

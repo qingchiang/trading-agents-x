@@ -5,10 +5,14 @@ import {
   api,
   type AnalystReport,
   type Capabilities,
+  type DebateAgenda,
   type EvidenceBundle,
-  type PerspectiveReview,
+  type JudgeDraft,
+  type RebuttalReview,
   type ResearchArtifact,
+  type ResearchCase,
   type ResearchDecision,
+  type RiskReview,
   type RunDetail as RunDetailType,
   type RunEvent,
   type RunMetrics,
@@ -599,11 +603,19 @@ function ArtifactCard({
 }) {
   const { t } = useTranslation();
   const content = artifact.content;
-  const perspective = isPerspectiveReview(content) ? content : null;
+  const researchCase = isResearchCase(content) ? content : null;
+  const agenda = isDebateAgenda(content) ? content : null;
+  const rebuttal = isRebuttalReview(content) ? content : null;
+  const judge = isJudgeDraft(content) ? content : null;
+  const risk = isRiskReview(content) ? content : null;
   const decision = isResearchDecision(content) ? content : null;
   const refs = content.evidence_refs ?? [];
   const primaryText =
-    perspective?.thesis ??
+    researchCase?.thesis ??
+    agenda?.executive_summary ??
+    rebuttal?.thesis_update ??
+    judge?.thesis ??
+    risk?.executive_summary ??
     decision?.thesis ??
     "";
   return (
@@ -632,21 +644,53 @@ function ArtifactCard({
             {Math.round(decision.confidence * 100)}%
           </p>
         )}
-        {perspective && (
+        {researchCase && (
           <>
             <List
               title={t("claimRebuttals")}
-              items={perspective.claim_rebuttals ?? []}
+              items={researchCase.strongest_counterarguments ?? []}
               evidenceIndex={evidenceIndex}
               onEvidence={onEvidence}
             />
             <List
               title={t("risks")}
-              items={perspective.risks ?? []}
+              items={researchCase.risks ?? []}
               evidenceIndex={evidenceIndex}
               onEvidence={onEvidence}
             />
           </>
+        )}
+        {agenda && (
+          <List
+            title={t("claimRebuttals")}
+            items={agenda.issues.map((issue) => issue.question)}
+            evidenceIndex={evidenceIndex}
+            onEvidence={onEvidence}
+          />
+        )}
+        {rebuttal && (
+          <List
+            title={t("claimRebuttals")}
+            items={rebuttal.responses.map((response) => response.response)}
+            evidenceIndex={evidenceIndex}
+            onEvidence={onEvidence}
+          />
+        )}
+        {judge && (
+          <List
+            title={t("risks")}
+            items={judge.risks}
+            evidenceIndex={evidenceIndex}
+            onEvidence={onEvidence}
+          />
+        )}
+        {risk && (
+          <List
+            title={t("risks")}
+            items={risk.findings.map((finding) => finding.statement)}
+            evidenceIndex={evidenceIndex}
+            onEvidence={onEvidence}
+          />
         )}
         {decision && (
           <div className="decision-columns compact">
@@ -676,11 +720,11 @@ function ArtifactCard({
           onEvidence={onEvidence}
           evidenceIndex={evidenceIndex}
         />
-        {perspective && (perspective.new_evidence_refs ?? []).length > 0 && (
+        {rebuttal && (rebuttal.new_evidence_refs ?? []).length > 0 && (
           <div className="artifact-new-evidence">
             <strong>{t("newEvidenceRefs")}</strong>
             <EvidenceRefs
-              refs={perspective.new_evidence_refs ?? []}
+              refs={rebuttal.new_evidence_refs ?? []}
               onEvidence={onEvidence}
               evidenceIndex={evidenceIndex}
               hideLabel
@@ -1434,10 +1478,30 @@ function isAnalystReport(content: ArtifactContent): content is AnalystReport {
   );
 }
 
-function isPerspectiveReview(
+function isResearchCase(
   content: ArtifactContent,
-): content is PerspectiveReview {
-  return "role" in content;
+): content is ResearchCase {
+  return "role" in content && "arguments" in content;
+}
+
+function isDebateAgenda(
+  content: ArtifactContent,
+): content is DebateAgenda {
+  return "issues" in content;
+}
+
+function isRebuttalReview(
+  content: ArtifactContent,
+): content is RebuttalReview {
+  return "responses" in content && "thesis_update" in content;
+}
+
+function isJudgeDraft(content: ArtifactContent): content is JudgeDraft {
+  return "preliminary_rating" in content && "rulings" in content;
+}
+
+function isRiskReview(content: ArtifactContent): content is RiskReview {
+  return "findings" in content && "confidence_adjustment" in content;
 }
 
 function isResearchDecision(

@@ -18,7 +18,6 @@ from tradingagents.application.contracts import (
     EvidenceBundle,
     EvidenceItem,
     MemoryContext,
-    PerspectiveReview,
 )
 from tradingagents.application.evidence import extract_evidence_tables
 from tradingagents.graph.analyst_synthesis import (
@@ -28,8 +27,8 @@ from tradingagents.graph.analyst_synthesis import (
     _AnalystSectionChunk,
     invoke_analyst_report,
 )
+from tradingagents.graph.deliberation import invoke_research_decision
 from tradingagents.graph.research_graph import (
-    _invoke_decision,
     _structured_recovery_warnings,
 )
 from tradingagents.graph.structured_output import (
@@ -40,7 +39,16 @@ from tradingagents.graph.structured_output import (
 _EVIDENCE_REF = "ev_0123456789ab"
 
 
-def _review(**updates: Any) -> PerspectiveReview:
+class _ReviewOutput(BaseModel):
+    role: str
+    thesis: str
+    claim_rebuttals: tuple[str, ...] = ()
+    evidence_refs: tuple[str, ...] = ()
+    new_evidence_refs: tuple[str, ...] = ()
+    risks: tuple[str, ...] = ()
+
+
+def _review(**updates: Any) -> _ReviewOutput:
     values = {
         "role": "bear",
         "thesis": "The evidence supports a skeptical review.",
@@ -50,10 +58,10 @@ def _review(**updates: Any) -> PerspectiveReview:
         "risks": ("The downside mechanism may not materialize.",),
     }
     values.update(updates)
-    return PerspectiveReview(**values)
+    return _ReviewOutput(**values)
 
 
-def _validate_review(value: PerspectiveReview) -> PerspectiveReview:
+def _validate_review(value: _ReviewOutput) -> _ReviewOutput:
     if not value.claim_rebuttals or not value.risks:
         raise ValueError("missing semantic fields")
     if not value.evidence_refs or set(value.evidence_refs) != {_EVIDENCE_REF}:
@@ -126,9 +134,9 @@ class _FakeLLM:
 def _runner(llm: _FakeLLM, events: list[dict[str, Any]]):
     return StructuredOutputRunner(
         llm=llm,
-        schema=PerspectiveReview,
+        schema=_ReviewOutput,
         validator=_validate_review,
-        node="review.bear",
+        node="case.bear",
         event_writer=events.append,
     )
 
@@ -191,7 +199,7 @@ def test_primary_json_mode_is_a_normal_validated_output() -> None:
     assert "ORIGINAL TASK:\nProduce a bearish review." in primary_prompt
     assert "previous response" not in primary_prompt.casefold()
     assert llm.binds == [("json_mode", {"max_tokens": 16_384})]
-    assert _structured_recovery_warnings("review.bear", result) == []
+    assert _structured_recovery_warnings("case.bear", result) == []
     assert events == []
 
 
@@ -588,7 +596,7 @@ def test_truncated_analyst_output_recovers_by_manifest_and_sections() -> None:
     ),
 )
 def test_semantic_failures_trigger_recovery_then_fail(
-    invalid: PerspectiveReview,
+    invalid: _ReviewOutput,
 ) -> None:
     events: list[dict[str, Any]] = []
     response = {"raw": AIMessage(content=""), "parsed": invalid}
@@ -610,22 +618,37 @@ def _decision_payload(evidence_ref: str) -> dict[str, Any]:
     return {
         "rating": "Hold",
         "confidence": 0.5,
+        "executive_summary": "The evidence supports a balanced conclusion.",
         "thesis": "The current evidence supports a balanced conclusion.",
         "evidence_refs": [evidence_ref],
         "memory_refs": [],
         "catalysts": [],
         "risks": ["Demand may weaken."],
         "invalidation_conditions": ["New evidence contradicts the thesis."],
+        "unresolved_questions": [],
         "time_horizon": "6-12 months",
+        "scenarios": [
+            {
+                "kind": kind,
+                "core_assumptions": ["Current evidence remains representative."],
+                "outcome": f"The {kind} outcome materializes.",
+                "evidence_refs": [evidence_ref],
+                "valuation_range": None,
+            }
+            for kind in ("base", "bull", "bear")
+        ],
+        "valuation_assessment": None,
+        "market_reference_levels": [],
+        "risk_review_adjustments": [],
     }
 
 
 @pytest.mark.parametrize(
     ("field", "value", "expected_reason"),
-    (
-        ("rating", "StrongBuy", "schema_validation"),
-        ("risks", [], "semantic_validation"),
-        ("invalidation_conditions", [], "semantic_validation"),
+        (
+            ("rating", "StrongBuy", "schema_validation"),
+            ("risks", [], "schema_validation"),
+            ("invalidation_conditions", [], "schema_validation"),
         ("evidence_refs", ["ev_ffffffffffff"], "semantic_validation"),
         ("memory_refs", ["memory:invented"], "semantic_validation"),
         ("time_horizon", "Unspecified", "semantic_validation"),
@@ -655,16 +678,23 @@ def test_invalid_decision_contract_fails_after_one_recovery(
     )
     payload = _decision_payload(item.ref)
     payload[field] = value
+    if field == "evidence_refs":
+        for scenario in payload["scenarios"]:
+            scenario["evidence_refs"] = value
     response = {"raw": AIMessage(content=""), "parsed": payload}
     llm = _FakeLLM(primary=response, recovery=response)
 
     with pytest.raises(StructuredOutputError) as error:
-        _invoke_decision(
+        invoke_research_decision(
             llm,
-            "Produce a decision.",
-            {"evidence_bundle": bundle.model_dump(mode="json")},
+            prompt="Produce a decision.",
+            state={
+                "evidence_bundle": bundle.model_dump(mode="json"),
+                "risk_reviews": {},
+            },
             node="committee.final",
             memory=MemoryContext(instrument="NVDA"),
+            require_risk_adjustments=False,
         )
 
     assert error.value.reason_code == expected_reason

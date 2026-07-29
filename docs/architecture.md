@@ -67,15 +67,25 @@ persistence and lifecycle behavior cannot be bypassed accidentally.
 ```text
 rating
 confidence
+executive_summary
 thesis
 evidence_refs
+memory_refs
 catalysts
 risks
 invalidation_conditions
+unresolved_questions
 time_horizon
+scenarios[base, bull, bear]
+valuation_assessment
+market_reference_levels
+risk_review_adjustments
 ```
 
-Position percentage, account configuration, entry, stop, target, order, and
+Non-personalized ratings, conditional investment views, auditable valuation
+ranges, scenarios, and market reference levels are allowed. Position
+percentage, account configuration, order quantity/type, broker instructions,
+mandatory entry/stop/take-profit levels, guarantees, and personalized
 execution fields do not belong in this contract.
 
 ### Settings and runtime context
@@ -271,6 +281,29 @@ row, column, or cell-length limits. A report may present a declared view of an
 EvidenceTable, but it must retain the source table and source row identities so
 the complete data remains available.
 
+### Claim-driven deliberation
+
+Post-analyst roles consume every complete `AnalystReport`, including sections
+and tables, plus the complete sealed Evidence payload. Evidence bodies are not
+silently cropped to a fixed character budget. If provider context limits
+eventually require lookup, omitted bodies must remain available through a
+read-only lookup by canonical ref.
+
+Visible research-process artifacts have separate contracts:
+
+```text
+ResearchCase       bull/bear case, mechanisms, counterarguments, assumptions
+DebateAgenda       prioritized disputes linked to analyst claim IDs
+RebuttalReview     issue-specific response, mechanism, outcome, remaining issue
+JudgeDraft         ruling for every agenda issue and preliminary conclusion
+RiskReview         findings, invalidation paths, recommended changes
+ResearchDecision   final opinion and risk-review dispositions
+```
+
+Every artifact records its prompt version and structured generation method.
+Roles cite analyst claim IDs and Evidence refs; no artifact stores hidden
+reasoning traces or raw provider conversations.
+
 Adapters may still encode transport provenance in versioned markers. Analyst
 nodes extract those markers from tool messages into typed evidence and remove
 the control syntax from human narrative. Prose is never the canonical
@@ -298,10 +331,11 @@ flowchart LR
 - **Deep:** parallel first reviews, at most two targeted rebuttal rounds, a
   judge draft, three parallel risk lenses, then a final committee.
 
-Deep stops rebuttal when the reviews contain neither a new evidence reference
-nor a claim rebuttal. Role nodes are produced from `RoleSpec`; separate persona
-modules do not duplicate state copying and prompt assembly. There is no Trader
-node.
+Deep always executes its first targeted rebuttal. A later round requires a
+materially open agenda issue plus new evidence, a new causal mechanism, or a
+specific claim rejection; repeated thesis prose does not keep the loop alive.
+Role nodes are produced from `RoleSpec`; separate persona modules do not
+duplicate state copying and prompt assembly. There is no Trader node.
 
 ## Decision memory and outcomes
 

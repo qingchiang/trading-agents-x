@@ -12,15 +12,13 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from typing_extensions import TypedDict
 
-from tests.factories import analyst_report
+from tests.factories import analyst_report, research_decision
 from tradingagents.application.contracts import (
     AnalysisRequest,
     ArtifactGenerationMethod,
     EvidenceBundle,
     EvidenceItem,
     ResearchArtifactDraft,
-    ResearchDecision,
-    ResearchRating,
     RunStatus,
 )
 from tradingagents.application.repository import RunRepository
@@ -49,12 +47,10 @@ def _execution(ticker: str) -> GraphExecution:
         evidence_ref=item.ref,
         narrative="Fixture report.",
     )
-    decision = ResearchDecision(
-        rating=ResearchRating.HOLD,
+    decision = research_decision(
         confidence=0.6,
         thesis="Fixture thesis.",
         evidence_refs=(item.ref,),
-        time_horizon="6-12 months",
     )
     return GraphExecution(
         state={},

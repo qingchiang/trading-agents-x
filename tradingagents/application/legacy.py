@@ -21,6 +21,8 @@ from .contracts import (
     AnalysisRequest,
     ResearchDecision,
     ResearchRating,
+    ResearchScenario,
+    ResearchScenarioKind,
     RunProfile,
 )
 from .repository import RunRepository
@@ -158,13 +160,37 @@ class LegacyMemoryImporter:
         decision = ResearchDecision(
             rating=rating,
             confidence=0.5,
+            executive_summary=(
+                entry["decision"] or "Imported legacy decision."
+            ),
             thesis=entry["decision"] or "Imported legacy decision.",
             evidence_refs=(),
             catalysts=(),
-            risks=(),
-            invalidation_conditions=(),
+            risks=(
+                "The legacy source did not record structured risk factors.",
+            ),
+            invalidation_conditions=(
+                "The legacy source did not record structured invalidation "
+                "conditions.",
+            ),
+            unresolved_questions=(
+                "The imported record predates structured scenario capture.",
+            ),
             time_horizon=(
                 f"Legacy {entry['holding_intervals']}-interval feedback window"
+            ),
+            scenarios=tuple(
+                ResearchScenario(
+                    kind=kind,
+                    core_assumptions=(
+                        "Only the imported legacy decision text is available.",
+                    ),
+                    outcome=(
+                        "No structured scenario outcome was recorded in the "
+                        "legacy source."
+                    ),
+                )
+                for kind in ResearchScenarioKind
             ),
         )
         benchmark = self._benchmark(ticker)

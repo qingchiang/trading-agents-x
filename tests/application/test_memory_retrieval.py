@@ -5,9 +5,9 @@ from datetime import date, datetime
 import pytest
 from sqlalchemy import select
 
+from tests.factories import research_decision
 from tradingagents.application.contracts import (
     AnalysisRequest,
-    ResearchDecision,
     ResearchRating,
 )
 from tradingagents.application.database import (
@@ -38,14 +38,17 @@ def _seed_memory(
         analysis_date=analysis_date,
         analysts=("market",),
     )
-    decision = ResearchDecision(
+    decision = research_decision(
         rating=rating,
         confidence=0.5,
         thesis=thesis,
         evidence_refs=(),
         catalysts=catalysts,
-        risks=risks,
-        invalidation_conditions=invalidation_conditions,
+        risks=risks or ("Legacy fixture risks were not recorded.",),
+        invalidation_conditions=(
+            invalidation_conditions
+            or ("Legacy fixture invalidation was not recorded.",)
+        ),
         time_horizon=time_horizon,
     )
     run_id = repository.import_legacy_memory(
