@@ -6,6 +6,7 @@ import json
 
 from .contracts import (
     AnalystReport,
+    EvidenceTable,
     PerspectiveReview,
     ResearchDecision,
     ResearchWarning,
@@ -171,6 +172,11 @@ def render_run_export_markdown(run_export: RunExport) -> str:
                 f"- Analysis date: `{run_export.evidence.analysis_date}`",
             ]
         )
+        if run_export.evidence.tables:
+            sections.extend(["", "### Complete Evidence Tables"])
+            for table in run_export.evidence.tables:
+                sections.extend(["", *_render_evidence_table(table)])
+            sections.extend(["", "### Evidence Items"])
         for group in group_evidence_by_content(run_export.evidence.items):
             item = group.canonical
             sources = tuple(
@@ -227,6 +233,42 @@ def render_run_export_markdown(run_export: RunExport) -> str:
                 ]
             )
     return "\n".join(sections)
+
+
+def _render_evidence_table(table: EvidenceTable) -> list[str]:
+    """Render every persisted row; exports never inherit Web pagination."""
+
+    refs = ", ".join(f"`{ref}`" for ref in table.evidence_refs)
+    headers = "| " + " | ".join(
+        _escape_table_cell(column.label) for column in table.columns
+    ) + " |"
+    divider = "|" + "|".join("---" for _column in table.columns) + "|"
+    rows = [
+        "| "
+        + " | ".join(
+            _escape_table_cell(row.cells[column.key].display_value)
+            for column in table.columns
+        )
+        + " |"
+        for row in table.rows
+    ]
+    return [
+        f"#### {table.title}",
+        "",
+        f"- Table: `{table.id}`",
+        f"- Purpose: {table.purpose}",
+        f"- Source format: `{table.source_format}`",
+        f"- Evidence: {refs}",
+        f"- Rows: `{len(table.rows)}` (complete)",
+        "",
+        headers,
+        divider,
+        *rows,
+    ]
+
+
+def _escape_table_cell(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("|", "\\|").replace("\n", "<br>")
 
 
 def _artifact_human_text(

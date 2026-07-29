@@ -425,6 +425,71 @@
         "title": "CapabilityDefaults",
         "type": "object"
       },
+      "DerivedValue": {
+        "additionalProperties": false,
+        "description": "Reproducible numeric value derived from cited observations.",
+        "properties": {
+          "formula": {
+            "minLength": 1,
+            "title": "Formula",
+            "type": "string"
+          },
+          "input_evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Input Evidence Refs",
+            "type": "array"
+          },
+          "inputs": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                }
+              ]
+            },
+            "minProperties": 1,
+            "title": "Inputs",
+            "type": "object"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Result"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          }
+        },
+        "required": [
+          "formula",
+          "inputs",
+          "input_evidence_refs",
+          "result"
+        ],
+        "title": "DerivedValue",
+        "type": "object"
+      },
       "DiscoveredModelView": {
         "additionalProperties": false,
         "properties": {
@@ -509,12 +574,17 @@
             "title": "Sealed At",
             "type": "string"
           },
+          "tables": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/EvidenceTable"
+            },
+            "title": "Tables",
+            "type": "array"
+          },
           "version": {
-            "default": "2",
-            "enum": [
-              "1",
-              "2"
-            ],
+            "const": "3",
+            "default": "3",
             "title": "Version",
             "type": "string"
           }
@@ -735,6 +805,71 @@
         ],
         "title": "EvidenceQuality",
         "type": "string"
+      },
+      "EvidenceTable": {
+        "additionalProperties": false,
+        "description": "A complete fact table deterministically extracted from source evidence.",
+        "properties": {
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchTableColumn"
+            },
+            "minItems": 1,
+            "title": "Columns",
+            "type": "array"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "id": {
+            "pattern": "^et_[a-f0-9]{12}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "purpose": {
+            "minLength": 1,
+            "title": "Purpose",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchTableRow"
+            },
+            "minItems": 1,
+            "title": "Rows",
+            "type": "array"
+          },
+          "source_format": {
+            "enum": [
+              "structured",
+              "markdown",
+              "csv"
+            ],
+            "title": "Source Format",
+            "type": "string"
+          },
+          "title": {
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "purpose",
+          "columns",
+          "rows",
+          "evidence_refs",
+          "source_format"
+        ],
+        "title": "EvidenceTable",
+        "type": "object"
       },
       "EvidenceTemporalScope": {
         "description": "Whether source content is valid at the cutoff or only at retrieval time.",
@@ -1414,6 +1549,126 @@
         "title": "ResearchRating",
         "type": "string"
       },
+      "ResearchTableCell": {
+        "additionalProperties": false,
+        "description": "One auditable cell in a fact or model-produced research table.",
+        "properties": {
+          "derived": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DerivedValue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "display_value": {
+            "title": "Display Value",
+            "type": "string"
+          },
+          "evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TableCellKind",
+            "default": "observation"
+          },
+          "raw_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Value"
+          }
+        },
+        "required": [
+          "display_value"
+        ],
+        "title": "ResearchTableCell",
+        "type": "object"
+      },
+      "ResearchTableColumn": {
+        "additionalProperties": false,
+        "description": "One stable column in an evidence or research table.",
+        "properties": {
+          "data_type": {
+            "$ref": "#/components/schemas/TableDataType",
+            "default": "text"
+          },
+          "key": {
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          }
+        },
+        "required": [
+          "key",
+          "label"
+        ],
+        "title": "ResearchTableColumn",
+        "type": "object"
+      },
+      "ResearchTableRow": {
+        "additionalProperties": false,
+        "description": "One stable row keyed by the table's public column identifiers.",
+        "properties": {
+          "cells": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ResearchTableCell"
+            },
+            "minProperties": 1,
+            "title": "Cells",
+            "type": "object"
+          },
+          "id": {
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "cells"
+        ],
+        "title": "ResearchTableRow",
+        "type": "object"
+      },
       "ResearchWarning": {
         "additionalProperties": false,
         "description": "Structured, plain-text warning suitable for APIs and audit exports.",
@@ -1957,6 +2212,32 @@
         ],
         "title": "RunView",
         "type": "object"
+      },
+      "TableCellKind": {
+        "description": "Semantic relationship between a table cell and its evidence.",
+        "enum": [
+          "descriptor",
+          "observation",
+          "inference",
+          "derived"
+        ],
+        "title": "TableCellKind",
+        "type": "string"
+      },
+      "TableDataType": {
+        "description": "Machine-readable type of values in one research-table column.",
+        "enum": [
+          "text",
+          "integer",
+          "number",
+          "percentage",
+          "currency",
+          "date",
+          "datetime",
+          "boolean"
+        ],
+        "title": "TableDataType",
+        "type": "string"
       },
       "ValidationError": {
         "properties": {

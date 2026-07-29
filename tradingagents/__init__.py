@@ -4,11 +4,21 @@ import warnings
 from .application.contracts import (
     AnalysisRequest,
     AnalysisResult,
+    DerivedValue,
+    EvidenceBundle,
+    EvidenceItem,
+    EvidenceTable,
     ReportLanguage,
     ResearchArtifact,
     ResearchDecision,
+    ResearchTable,
+    ResearchTableCell,
+    ResearchTableColumn,
+    ResearchTableRow,
     ResearchWarning,
     RunProfile,
+    TableCellKind,
+    TableDataType,
 )
 from .client import TradingAgents
 from .version import __version__
@@ -16,11 +26,21 @@ from .version import __version__
 __all__ = [
     "AnalysisRequest",
     "AnalysisResult",
+    "DerivedValue",
+    "EvidenceBundle",
+    "EvidenceItem",
+    "EvidenceTable",
     "ReportLanguage",
     "ResearchArtifact",
     "ResearchDecision",
+    "ResearchTable",
+    "ResearchTableCell",
+    "ResearchTableColumn",
+    "ResearchTableRow",
     "ResearchWarning",
     "RunProfile",
+    "TableCellKind",
+    "TableDataType",
     "TradingAgents",
     "__version__",
 ]

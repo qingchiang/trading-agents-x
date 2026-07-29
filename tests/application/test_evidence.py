@@ -6,13 +6,16 @@ import hashlib
 import json
 from datetime import date, datetime, timezone
 
+import pytest
 from langchain_core.messages import ToolMessage
+from pydantic import ValidationError
 
 from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
     AnalystReport,
     ArtifactGenerationMethod,
+    DerivedValue,
     EvidenceBundle,
     EvidenceItem,
     EvidenceQuality,
@@ -22,12 +25,19 @@ from tradingagents.application.contracts import (
     ResearchArtifact,
     ResearchDecision,
     ResearchRating,
+    ResearchTable,
+    ResearchTableCell,
+    ResearchTableColumn,
+    ResearchTableRow,
     ResearchWarning,
     RunExport,
     RunMetrics,
     RunStatus,
     RunView,
+    TableCellKind,
+    TableDataType,
 )
+from tradingagents.application.evidence import extract_evidence_tables
 from tradingagents.application.exporting import render_run_export_markdown
 from tradingagents.graph.research_graph import (
     _collect_evidence,
@@ -324,7 +334,7 @@ def test_prompt_groups_exact_bodies_without_rewriting_refs() -> None:
     assert json.dumps(index).count("EXACT HISTORICAL BODY") == 1
 
 
-def test_bundle_digest_includes_canonical_origins_field() -> None:
+def test_bundle_digest_covers_items_and_tables_without_legacy_versions() -> None:
     item_payload = {
         "ref": "ev_0123456789ab",
         "source": "legacy",
@@ -340,28 +350,149 @@ def test_bundle_digest_includes_canonical_origins_field() -> None:
         "origins": [],
         "provenance": {"timing": "point-in-time available"},
     }
+    item = EvidenceItem.model_validate(item_payload)
+    table = extract_evidence_tables(
+        (
+            item.model_copy(
+                update={
+                    "content": (
+                        "## Filing comparison\n\n"
+                        "| Metric | 2026 | 2025 |\n"
+                        "|---|---:|---:|\n"
+                        "| Revenue | 120 | 100 |"
+                    )
+                }
+            ),
+        )
+    )[0]
     canonical = json.dumps(
-        [item_payload],
+        {
+            "items": [item.model_dump(mode="json")],
+            "tables": [table.model_dump(mode="json")],
+        },
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
     )
     digest = hashlib.sha256(canonical.encode()).hexdigest()
-
-    bundle = EvidenceBundle.model_validate(
-        {
-            "version": "1",
-            "instrument": "7203.T",
-            "analysis_date": "2026-07-24",
-            "items": [item_payload],
-            "sealed_at": "2026-07-24T12:00:00Z",
-            "digest": digest,
-        }
+    bundle = EvidenceBundle(
+        instrument="7203.T",
+        analysis_date=date(2026, 7, 24),
+        items=(item,),
+        tables=(table,),
+        digest=digest,
     )
 
-    assert bundle.version == "1"
+    assert bundle.version == "3"
     assert bundle.digest == digest
-    assert bundle.items[0].origins == ()
+    with pytest.raises(ValidationError, match="Input should be '3'"):
+        EvidenceBundle.model_validate(
+            {
+                **bundle.model_dump(mode="json"),
+                "version": "2",
+            }
+        )
+
+
+def test_exact_source_tables_are_extracted_once_without_row_limits() -> None:
+    csv_rows = "\n".join(
+        f"2026-05-{index:02d},{100 + index}.5"
+        for index in range(1, 29)
+    )
+    content = (
+        "## Verified snapshot\n\n"
+        "| Field | Value |\n"
+        "|---|---:|\n"
+        "| Close | 123.45 |\n"
+        "| Volume | 1200000 |\n\n"
+        "# Full price history\n"
+        "Date,Close\n"
+        f"{csv_rows}"
+    )
+    first = EvidenceItem.create(
+        source="source-a",
+        evidence_type="market data",
+        requested_date=date(2026, 7, 24),
+        content=content,
+    )
+    second = EvidenceItem.create(
+        source="source-b",
+        evidence_type="market data",
+        requested_date=date(2026, 7, 24),
+        content=content,
+    )
+
+    tables = extract_evidence_tables((first, second))
+
+    assert len(tables) == 2
+    markdown_table, csv_table = tables
+    assert markdown_table.source_format == "markdown"
+    assert markdown_table.evidence_refs == (first.ref, second.ref)
+    assert markdown_table.rows[0].cells["value"].raw_value == 123.45
+    assert csv_table.source_format == "csv"
+    assert len(csv_table.rows) == 28
+    assert csv_table.columns[0].data_type is TableDataType.DATE
+    assert csv_table.columns[1].data_type is TableDataType.NUMBER
+    assert all(
+        cell.evidence_refs == (first.ref, second.ref)
+        for row in csv_table.rows
+        for cell in row.cells.values()
+    )
+
+
+def test_table_contract_distinguishes_observed_and_derived_values() -> None:
+    ref = "ev_0123456789ab"
+    columns = (
+        ResearchTableColumn(key="metric", label="Metric"),
+        ResearchTableColumn(
+            key="value",
+            label="Value",
+            data_type=TableDataType.PERCENTAGE,
+            unit="%",
+        ),
+    )
+    table = ResearchTable(
+        id="rt_margin_change",
+        title="Margin change",
+        purpose="Show a reproducible period comparison.",
+        columns=columns,
+        rows=(
+            ResearchTableRow(
+                id="row_0001",
+                cells={
+                    "metric": ResearchTableCell(
+                        raw_value="Operating margin change",
+                        display_value="Operating margin change",
+                        kind=TableCellKind.DESCRIPTOR,
+                    ),
+                    "value": ResearchTableCell(
+                        raw_value=2.5,
+                        display_value="+2.5 pp",
+                        kind=TableCellKind.DERIVED,
+                        evidence_refs=(ref,),
+                        derived=DerivedValue(
+                            formula="current_margin - prior_margin",
+                            inputs={
+                                "current_margin": 12.5,
+                                "prior_margin": 10.0,
+                            },
+                            input_evidence_refs=(ref,),
+                            unit="percentage points",
+                            result=2.5,
+                        ),
+                    ),
+                },
+            ),
+        ),
+    )
+
+    assert table.rows[0].cells["value"].derived.result == 2.5
+    with pytest.raises(ValidationError, match="require evidence refs"):
+        ResearchTableCell(
+            raw_value=12.5,
+            display_value="12.5%",
+            kind=TableCellKind.OBSERVATION,
+        )
 
 
 def test_markdown_export_renders_an_exact_body_once_with_all_refs() -> None:
@@ -412,6 +543,61 @@ def test_markdown_export_renders_an_exact_body_once_with_all_refs() -> None:
     assert f"`{first.ref}`" in markdown
     assert f"`{second.ref}`" in markdown
     assert "source-a, source-b" in markdown
+
+
+def test_markdown_export_contains_every_evidence_table_row() -> None:
+    item = EvidenceItem.create(
+        source="verified fixture",
+        evidence_type="market snapshot",
+        requested_date=date(2026, 7, 24),
+        content=(
+            "## Recent closes\n\n"
+            "| Date | Close |\n"
+            "|---|---:|\n"
+            "| 2026-07-23 | 100.0 |\n"
+            "| 2026-07-24 | 101.5 |"
+        ),
+    )
+    tables = extract_evidence_tables((item,))
+    evidence = EvidenceBundle(
+        instrument="7203.T",
+        analysis_date=date(2026, 7, 24),
+        items=(item,),
+        tables=tables,
+    )
+    now = datetime(2026, 7, 24, 12, tzinfo=timezone.utc)
+    run_export = RunExport(
+        run=RunView(
+            id="fixture-run",
+            status=RunStatus.SUCCEEDED,
+            request=AnalysisRequest(
+                ticker="7203.T",
+                analysis_date="2026-07-24",
+            ),
+            config_snapshot={},
+            attempt=1,
+            cancel_requested=False,
+            created_at=now,
+            updated_at=now,
+        ),
+        result=AnalysisResult(
+            run_id="fixture-run",
+            status=RunStatus.SUCCEEDED,
+            instrument="7203.T",
+            reports={},
+            decision=None,
+            evidence=evidence,
+        ),
+        evidence=evidence,
+    )
+
+    markdown = render_run_export_markdown(run_export)
+
+    assert "### Complete Evidence Tables" in markdown
+    assert f"- Table: `{tables[0].id}`" in markdown
+    assert "- Rows: `2` (complete)" in markdown
+    assert "| 2026-07-23 | 100.0 |" in markdown
+    assert "| 2026-07-24 | 101.5 |" in markdown
 
 
 def test_markdown_export_uses_canonical_report_order() -> None:

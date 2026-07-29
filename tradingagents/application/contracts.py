@@ -151,6 +151,28 @@ class EvidenceTemporalScope(str, Enum):
     UNKNOWN = "unknown"
 
 
+class TableDataType(str, Enum):
+    """Machine-readable type of values in one research-table column."""
+
+    TEXT = "text"
+    INTEGER = "integer"
+    NUMBER = "number"
+    PERCENTAGE = "percentage"
+    CURRENCY = "currency"
+    DATE = "date"
+    DATETIME = "datetime"
+    BOOLEAN = "boolean"
+
+
+class TableCellKind(str, Enum):
+    """Semantic relationship between a table cell and its evidence."""
+
+    DESCRIPTOR = "descriptor"
+    OBSERVATION = "observation"
+    INFERENCE = "inference"
+    DERIVED = "derived"
+
+
 class EvidenceOrigin(FrozenModel):
     """One source record contributing to an evidence payload."""
 
@@ -235,13 +257,239 @@ class EvidenceItem(FrozenModel):
         )
 
 
+TableScalar: TypeAlias = str | int | float | bool | None
+
+
+class ResearchTableColumn(FrozenModel):
+    """One stable column in an evidence or research table."""
+
+    key: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    label: str = Field(min_length=1)
+    data_type: TableDataType = TableDataType.TEXT
+    unit: str | None = Field(default=None, min_length=1)
+
+
+class DerivedValue(FrozenModel):
+    """Reproducible numeric value derived from cited observations."""
+
+    formula: str = Field(min_length=1)
+    inputs: dict[str, int | float] = Field(min_length=1)
+    input_evidence_refs: tuple[str, ...] = Field(min_length=1)
+    unit: str | None = Field(default=None, min_length=1)
+    result: int | float
+
+    @field_validator("inputs")
+    @classmethod
+    def validate_inputs(
+        cls,
+        value: dict[str, int | float],
+    ) -> dict[str, int | float]:
+        if any(
+            not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", key)
+            for key in value
+        ):
+            raise ValueError("derived input names must be identifiers")
+        if any(isinstance(item, bool) for item in value.values()):
+            raise ValueError("derived inputs must be numeric")
+        return value
+
+    @field_validator("input_evidence_refs")
+    @classmethod
+    def validate_input_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        refs = tuple(dict.fromkeys(value))
+        if any(not re.fullmatch(r"ev_[a-f0-9]{12}", ref) for ref in refs):
+            raise ValueError("derived inputs must use valid evidence refs")
+        return refs
+
+
+class ResearchTableCell(FrozenModel):
+    """One auditable cell in a fact or model-produced research table."""
+
+    raw_value: TableScalar = None
+    display_value: str
+    kind: TableCellKind = TableCellKind.OBSERVATION
+    evidence_refs: tuple[str, ...] = ()
+    derived: DerivedValue | None = None
+
+    @field_validator("evidence_refs")
+    @classmethod
+    def validate_evidence_refs(
+        cls,
+        value: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        refs = tuple(dict.fromkeys(value))
+        if any(not re.fullmatch(r"ev_[a-f0-9]{12}", ref) for ref in refs):
+            raise ValueError("table cells must use valid evidence refs")
+        return refs
+
+    @model_validator(mode="after")
+    def validate_semantics(self) -> ResearchTableCell:
+        if self.kind is TableCellKind.DESCRIPTOR:
+            if self.derived is not None:
+                raise ValueError("descriptor cells cannot contain a derivation")
+            return self
+        if self.kind is TableCellKind.DERIVED:
+            if self.derived is None:
+                raise ValueError("derived cells require derivation details")
+            if not set(self.derived.input_evidence_refs).issubset(
+                self.evidence_refs
+            ):
+                raise ValueError(
+                    "derived cell refs must include every derivation input ref"
+                )
+            if self.raw_value != self.derived.result:
+                raise ValueError(
+                    "derived cell raw value must equal the saved result"
+                )
+            return self
+        if self.derived is not None:
+            raise ValueError(
+                "only derived cells may contain derivation details"
+            )
+        if not self.evidence_refs:
+            raise ValueError(
+                "observations and inferences require evidence refs"
+            )
+        return self
+
+
+class ResearchTableRow(FrozenModel):
+    """One stable row keyed by the table's public column identifiers."""
+
+    id: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
+    cells: dict[str, ResearchTableCell] = Field(min_length=1)
+
+
+def _validate_table_shape(
+    *,
+    columns: tuple[ResearchTableColumn, ...],
+    rows: tuple[ResearchTableRow, ...],
+) -> None:
+    column_keys = tuple(column.key for column in columns)
+    if len(column_keys) != len(set(column_keys)):
+        raise ValueError("table column keys must be unique")
+    row_ids = tuple(row.id for row in rows)
+    if len(row_ids) != len(set(row_ids)):
+        raise ValueError("table row IDs must be unique")
+    expected = set(column_keys)
+    for row in rows:
+        if set(row.cells) != expected:
+            raise ValueError(
+                f"table row {row.id} cells must exactly match its columns"
+            )
+
+
+class EvidenceTable(FrozenModel):
+    """A complete fact table deterministically extracted from source evidence."""
+
+    id: str = Field(pattern=r"^et_[a-f0-9]{12}$")
+    title: str = Field(min_length=1)
+    purpose: str = Field(min_length=1)
+    columns: tuple[ResearchTableColumn, ...] = Field(min_length=1)
+    rows: tuple[ResearchTableRow, ...] = Field(min_length=1)
+    evidence_refs: tuple[str, ...] = Field(min_length=1)
+    source_format: Literal["structured", "markdown", "csv"]
+
+    @field_validator("evidence_refs")
+    @classmethod
+    def validate_evidence_refs(
+        cls,
+        value: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        refs = tuple(dict.fromkeys(value))
+        if any(not re.fullmatch(r"ev_[a-f0-9]{12}", ref) for ref in refs):
+            raise ValueError("evidence tables must use valid evidence refs")
+        return refs
+
+    @model_validator(mode="after")
+    def validate_table(self) -> EvidenceTable:
+        _validate_table_shape(columns=self.columns, rows=self.rows)
+        table_refs = set(self.evidence_refs)
+        for row in self.rows:
+            for cell in row.cells.values():
+                if cell.kind is not TableCellKind.OBSERVATION:
+                    raise ValueError(
+                        "deterministic evidence tables contain observations only"
+                    )
+                if not set(cell.evidence_refs).issubset(table_refs):
+                    raise ValueError(
+                        "evidence table cell refs must belong to the table"
+                    )
+        return self
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        title: str,
+        purpose: str,
+        columns: tuple[ResearchTableColumn, ...],
+        rows: tuple[ResearchTableRow, ...],
+        evidence_refs: tuple[str, ...],
+        source_format: Literal["structured", "markdown", "csv"],
+    ) -> EvidenceTable:
+        payload = {
+            "title": title,
+            "purpose": purpose,
+            "columns": [
+                column.model_dump(mode="json") for column in columns
+            ],
+            "rows": [row.model_dump(mode="json") for row in rows],
+            "evidence_refs": list(dict.fromkeys(evidence_refs)),
+            "source_format": source_format,
+        }
+        digest = hashlib.sha256(
+            json.dumps(
+                payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()[:12]
+        return cls(id=f"et_{digest}", **payload)
+
+
+class ResearchTable(FrozenModel):
+    """A cited comparison, interpretation, or scenario table in a report."""
+
+    id: str = Field(pattern=r"^rt_[a-z0-9][a-z0-9_.-]*$")
+    title: str = Field(min_length=1)
+    purpose: str = Field(min_length=1)
+    columns: tuple[ResearchTableColumn, ...] = Field(min_length=1)
+    rows: tuple[ResearchTableRow, ...] = Field(min_length=1)
+    source_table_id: str | None = Field(
+        default=None,
+        pattern=r"^et_[a-f0-9]{12}$",
+    )
+    total_source_rows: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def validate_table(self) -> ResearchTable:
+        _validate_table_shape(columns=self.columns, rows=self.rows)
+        if (self.source_table_id is None) != (
+            self.total_source_rows is None
+        ):
+            raise ValueError(
+                "source table ID and total source rows must be supplied together"
+            )
+        if (
+            self.total_source_rows is not None
+            and self.total_source_rows < len(self.rows)
+        ):
+            raise ValueError(
+                "total source rows cannot be less than displayed rows"
+            )
+        return self
+
+
 class EvidenceBundle(FrozenModel):
     """Versioned evidence snapshot shared by every agent in one run."""
 
-    version: Literal["1", "2"] = "2"
+    version: Literal["3"] = "3"
     instrument: str
     analysis_date: date
     items: tuple[EvidenceItem, ...]
+    tables: tuple[EvidenceTable, ...] = ()
     sealed_at: datetime = Field(default_factory=utc_now)
     digest: str | None = None
 
@@ -267,13 +515,23 @@ class EvidenceBundle(FrozenModel):
                     raise ValueError(
                         f"{item.ref} available_at is after the analysis cutoff"
                     )
+        table_ids = [table.id for table in self.tables]
+        if len(table_ids) != len(set(table_ids)):
+            raise ValueError("evidence table IDs must be unique")
+        valid_refs = set(refs)
+        for table in self.tables:
+            if not set(table.evidence_refs).issubset(valid_refs):
+                raise ValueError(
+                    f"{table.id} contains refs outside this evidence bundle"
+                )
         serialized_items = [item.model_dump(mode="json") for item in self.items]
-        if self.version == "1":
-            for item in serialized_items:
-                for origin in item.get("origins", []):
-                    origin.pop("temporal_scope", None)
         canonical = json.dumps(
-            serialized_items,
+            {
+                "items": serialized_items,
+                "tables": [
+                    table.model_dump(mode="json") for table in self.tables
+                ],
+            },
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),

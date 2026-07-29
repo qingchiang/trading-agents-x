@@ -44,7 +44,7 @@ def test_legacy_import_is_read_only_reported_and_idempotent(
     assert repeated.imported == 0
     assert repeated.backup is None
     assert source.read_text(encoding="utf-8") == original
-    assert repository.get_result(imported.run_ids[0]).evidence.version == "2"
+    assert repository.get_result(imported.run_ids[0]).evidence.version == "3"
     memory = repository.memory_context("NVDA", "stock")
     assert "The evidence was useful" in memory.prompt_text()
 

@@ -65,7 +65,10 @@ from tradingagents.application.contracts import (
     RunProfile,
     report_language_prompt_label,
 )
-from tradingagents.application.evidence import group_evidence_by_content
+from tradingagents.application.evidence import (
+    extract_evidence_tables,
+    group_evidence_by_content,
+)
 from tradingagents.application.metrics import MetricsCallback
 from tradingagents.application.reporting import order_reports
 from tradingagents.application.runtime import RunContext, check_cancelled
@@ -553,6 +556,7 @@ class ResearchGraph:
             instrument=state["ticker"],
             analysis_date=date.fromisoformat(state["analysis_date"]),
             items=tuple(deduped.values()),
+            tables=extract_evidence_tables(tuple(deduped.values())),
         )
         reports: dict[str, dict[str, Any]] = {}
         valid_refs = set(deduped)
@@ -575,7 +579,11 @@ class ResearchGraph:
         self._finish_node(
             runtime,
             node,
-            {"items": len(bundle.items), "digest": bundle.digest},
+            {
+                "items": len(bundle.items),
+                "tables": len(bundle.tables),
+                "digest": bundle.digest,
+            },
         )
         return {
             "evidence_bundle": bundle.model_dump(mode="json"),

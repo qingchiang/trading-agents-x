@@ -62,6 +62,13 @@ export interface components {
       quick_reasoning_effort: string | null;
       trash_retention_days: number;
     };
+    DerivedValue: {
+      formula: string;
+      input_evidence_refs: string[];
+      inputs: Record<string, number>;
+      result: number;
+      unit?: string | null;
+    };
     DiscoveredModelView: {
       compatibility: "supported" | "unknown";
       default_roles: ("quick" | "deep")[];
@@ -75,7 +82,8 @@ export interface components {
       instrument: string;
       items: components["schemas"]["EvidenceItem"][];
       sealed_at?: string;
-      version?: "1" | "2";
+      tables?: components["schemas"]["EvidenceTable"][];
+      version?: string;
     };
     EvidenceItem: {
       available_at?: string | null;
@@ -105,6 +113,15 @@ export interface components {
       timing?: string;
     };
     EvidenceQuality: "high" | "medium" | "low" | "unavailable";
+    EvidenceTable: {
+      columns: components["schemas"]["ResearchTableColumn"][];
+      evidence_refs: string[];
+      id: string;
+      purpose: string;
+      rows: components["schemas"]["ResearchTableRow"][];
+      source_format: "structured" | "markdown" | "csv";
+      title: string;
+    };
     EvidenceTemporalScope: "point_in_time" | "live_only" | "unknown";
     HTTPValidationError: {
       detail?: components["schemas"]["ValidationError"][];
@@ -210,6 +227,23 @@ export interface components {
       time_horizon: string;
     };
     ResearchRating: "Buy" | "Overweight" | "Hold" | "Underweight" | "Sell";
+    ResearchTableCell: {
+      derived?: components["schemas"]["DerivedValue"] | null;
+      display_value: string;
+      evidence_refs?: string[];
+      kind?: components["schemas"]["TableCellKind"];
+      raw_value?: string | number | boolean | null;
+    };
+    ResearchTableColumn: {
+      data_type?: components["schemas"]["TableDataType"];
+      key: string;
+      label: string;
+      unit?: string | null;
+    };
+    ResearchTableRow: {
+      cells: Record<string, components["schemas"]["ResearchTableCell"]>;
+      id: string;
+    };
     ResearchWarning: {
       code?: string;
       evidence_ref?: string | null;
@@ -285,6 +319,8 @@ export interface components {
       trashed_at?: string | null;
       updated_at: string;
     };
+    TableCellKind: "descriptor" | "observation" | "inference" | "derived";
+    TableDataType: "text" | "integer" | "number" | "percentage" | "currency" | "date" | "datetime" | "boolean";
     ValidationError: {
       ctx?: {
       };
