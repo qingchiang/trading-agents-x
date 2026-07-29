@@ -363,7 +363,7 @@ test("restores deliberation and resolves evidence references across run views", 
 
   fireEvent.click(screen.getByRole("tab", { name: "Deliberation" }));
   expect(await screen.findByText("Demand")).toBeVisible();
-  expect(screen.getByText("research_judge")).toBeVisible();
+  expect(screen.getByText("research judge")).toBeVisible();
 
   fireEvent.click(
     screen.getAllByRole("button", {
@@ -628,9 +628,9 @@ test("restores report and evidence navigation from the URL", async () => {
     await screen.findByRole("heading", { name: "News report" }),
   ).toBeVisible();
   fireEvent.click(
-    screen.getByRole("button", {
+    screen.getAllByRole("button", {
       name: "Open evidence ev_0123456789ab",
-    }),
+    })[0],
   );
   expect(screen.getByTestId("router-location")).toHaveTextContent(
     "/runs/run-1?view=evidence&ref=ev_0123456789ab&return_view=reports&return_report=news",

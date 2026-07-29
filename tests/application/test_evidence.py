@@ -24,6 +24,7 @@ from tradingagents.application.contracts import (
     EvidenceItem,
     EvidenceQuality,
     EvidenceTemporalScope,
+    MarketReferenceLevel,
     NodeMetrics,
     ResearchArtifact,
     ResearchTable,
@@ -31,12 +32,16 @@ from tradingagents.application.contracts import (
     ResearchTableColumn,
     ResearchTableRow,
     ResearchWarning,
+    RiskReviewAdjustment,
+    RiskReviewDisposition,
     RunExport,
     RunMetrics,
     RunStatus,
     RunView,
     TableCellKind,
     TableDataType,
+    ValuationAssessment,
+    ValuationRange,
 )
 from tradingagents.application.evidence import extract_evidence_tables
 from tradingagents.application.exporting import render_run_export_markdown
@@ -720,11 +725,42 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
         warnings=(warning,),
         narrative=narrative,
     )
-    decision = research_decision(
+    base_decision = research_decision(
         confidence=0.6,
         thesis="FINAL THESIS",
         risks=("Demand weakens.",),
         invalidation_conditions=("A new filing changes the evidence.",),
+    )
+    decision = base_decision.model_copy(
+        update={
+            "valuation_assessment": ValuationAssessment(
+                method="Scenario-weighted multiple",
+                valuation_range=ValuationRange(low=100, high=125),
+                currency="USD",
+                as_of_date=date(2026, 7, 24),
+                input_evidence_refs=("ev_0123456789ab",),
+                limitations=("Cycle duration remains uncertain.",),
+            ),
+            "market_reference_levels": (
+                MarketReferenceLevel(
+                    level_type="recent_support",
+                    value=98,
+                    unit="USD",
+                    as_of_date=date(2026, 7, 24),
+                    interpretation="Observation only, not an entry order.",
+                    evidence_refs=("ev_0123456789ab",),
+                ),
+            ),
+            "risk_review_adjustments": (
+                RiskReviewAdjustment(
+                    source_role="conservative",
+                    disposition=RiskReviewDisposition.MODIFIED,
+                    subject="Confidence calibration",
+                    explanation="Confidence was reduced.",
+                    evidence_refs=("ev_0123456789ab",),
+                ),
+            ),
+        }
     )
     artifacts = (
         ResearchArtifact(
@@ -796,3 +832,19 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
     assert "review-artifact" in markdown
     assert "analyst-artifact" not in markdown
     assert "decision-artifact" not in markdown
+    assert "#### Auditable Claims" in markdown
+    assert "##### Arguments" in markdown
+    assert "##### Strongest Counterarguments" in markdown
+    assert "##### Fragile Assumptions" in markdown
+    assert "Non-personalized research opinion" in markdown
+    assert "### Scenarios" in markdown
+    assert "### Valuation Assessment" in markdown
+    assert "Scenario-weighted multiple" in markdown
+    assert "### Market Reference Levels" in markdown
+    assert "Observation only, not an entry order." in markdown
+    assert "### Final Committee Response to Risk Review" in markdown
+    assert "Confidence calibration" in markdown
+    assert markdown.index("## Reports") < markdown.index("## Research Process")
+    assert markdown.index("## Research Process") < markdown.index(
+        "## Research Decision"
+    )

@@ -5,19 +5,17 @@ import {
   api,
   type AnalystReport,
   type Capabilities,
-  type DebateAgenda,
   type EvidenceBundle,
-  type JudgeDraft,
-  type RebuttalReview,
   type ResearchArtifact,
-  type ResearchCase,
   type ResearchDecision,
-  type RiskReview,
   type RunDetail as RunDetailType,
   type RunEvent,
   type RunMetrics,
 } from "../api/client";
+import AnalystReportView from "../components/AnalystReportView";
+import DeliberationView from "../components/DeliberationView";
 import Markdown from "../components/Markdown";
+import ResearchDecisionView from "../components/ResearchDecisionView";
 import {
   buildEvidenceReferenceIndex,
   groupEvidenceRefs,
@@ -445,6 +443,7 @@ export default function RunDetail() {
       {activeView === "reports" && (
         <ReportsPanel
           reports={reports}
+          evidence={result?.evidence ?? null}
           reportNames={reportNames}
           activeReport={activeReport}
           onReport={selectReport}
@@ -554,8 +553,7 @@ function DeliberationPanel({
 }) {
   const { t } = useTranslation();
   const deliberation = artifacts.filter(
-    (artifact) =>
-      artifact.stage !== "analyst" && artifact.stage !== "decision",
+    (artifact) => artifact.stage !== "analyst",
   );
   return (
     <article
@@ -570,169 +568,12 @@ function DeliberationPanel({
         </div>
         <span className="event-count">{deliberation.length}</span>
       </div>
-      {deliberation.length === 0 ? (
-        <div className="empty-state">
-          {artifacts.length === 0
-            ? t("noArtifactsRecorded")
-            : t("noDeliberation")}
-        </div>
-      ) : (
-        <div className="artifact-list">
-          {deliberation.map((artifact) => (
-            <ArtifactCard
-              artifact={artifact}
-              onEvidence={onEvidence}
-              evidenceIndex={evidenceIndex}
-              key={artifact.id}
-            />
-          ))}
-        </div>
-      )}
+      <DeliberationView
+        artifacts={artifacts}
+        onEvidence={onEvidence}
+        evidenceIndex={evidenceIndex}
+      />
     </article>
-  );
-}
-
-function ArtifactCard({
-  artifact,
-  onEvidence,
-  evidenceIndex,
-}: {
-  artifact: ResearchArtifact;
-  onEvidence: (ref: string) => void;
-  evidenceIndex: EvidenceReferenceIndex;
-}) {
-  const { t } = useTranslation();
-  const content = artifact.content;
-  const researchCase = isResearchCase(content) ? content : null;
-  const agenda = isDebateAgenda(content) ? content : null;
-  const rebuttal = isRebuttalReview(content) ? content : null;
-  const judge = isJudgeDraft(content) ? content : null;
-  const risk = isRiskReview(content) ? content : null;
-  const decision = isResearchDecision(content) ? content : null;
-  const refs = content.evidence_refs ?? [];
-  const primaryText =
-    researchCase?.thesis ??
-    agenda?.executive_summary ??
-    rebuttal?.thesis_update ??
-    judge?.thesis ??
-    risk?.executive_summary ??
-    decision?.thesis ??
-    "";
-  return (
-    <section className="artifact-card">
-      <header className="artifact-header">
-        <div>
-          <span className="artifact-stage">{artifact.stage}</span>
-          <h3>{artifact.role}</h3>
-        </div>
-        <small>
-          {t("round")} {artifact.round} · {t("attempt")} {artifact.attempt}
-          {" · "}
-          {artifact.generation_method}
-        </small>
-      </header>
-      <div className="artifact-body">
-        <Markdown
-          evidenceAliases={evidenceIndex.aliases}
-          onEvidence={onEvidence}
-        >
-          {primaryText}
-        </Markdown>
-        {decision && (
-          <p className="artifact-rating">
-            <strong>{decision.rating}</strong> · {t("confidence")}{" "}
-            {Math.round(decision.confidence * 100)}%
-          </p>
-        )}
-        {researchCase && (
-          <>
-            <List
-              title={t("claimRebuttals")}
-              items={researchCase.strongest_counterarguments ?? []}
-              evidenceIndex={evidenceIndex}
-              onEvidence={onEvidence}
-            />
-            <List
-              title={t("risks")}
-              items={researchCase.risks ?? []}
-              evidenceIndex={evidenceIndex}
-              onEvidence={onEvidence}
-            />
-          </>
-        )}
-        {agenda && (
-          <List
-            title={t("claimRebuttals")}
-            items={agenda.issues.map((issue) => issue.question)}
-            evidenceIndex={evidenceIndex}
-            onEvidence={onEvidence}
-          />
-        )}
-        {rebuttal && (
-          <List
-            title={t("claimRebuttals")}
-            items={rebuttal.responses.map((response) => response.response)}
-            evidenceIndex={evidenceIndex}
-            onEvidence={onEvidence}
-          />
-        )}
-        {judge && (
-          <List
-            title={t("risks")}
-            items={judge.risks}
-            evidenceIndex={evidenceIndex}
-            onEvidence={onEvidence}
-          />
-        )}
-        {risk && (
-          <List
-            title={t("risks")}
-            items={risk.findings.map((finding) => finding.statement)}
-            evidenceIndex={evidenceIndex}
-            onEvidence={onEvidence}
-          />
-        )}
-        {decision && (
-          <div className="decision-columns compact">
-            <List
-              title={t("catalysts")}
-              items={decision.catalysts ?? []}
-              emptyLabel={t("noCatalystsIdentified")}
-              evidenceIndex={evidenceIndex}
-              onEvidence={onEvidence}
-            />
-            <List
-              title={t("risks")}
-              items={decision.risks ?? []}
-              evidenceIndex={evidenceIndex}
-              onEvidence={onEvidence}
-            />
-            <List
-              title={t("invalidation")}
-              items={decision.invalidation_conditions ?? []}
-              evidenceIndex={evidenceIndex}
-              onEvidence={onEvidence}
-            />
-          </div>
-        )}
-        <EvidenceRefs
-          refs={refs}
-          onEvidence={onEvidence}
-          evidenceIndex={evidenceIndex}
-        />
-        {rebuttal && (rebuttal.new_evidence_refs ?? []).length > 0 && (
-          <div className="artifact-new-evidence">
-            <strong>{t("newEvidenceRefs")}</strong>
-            <EvidenceRefs
-              refs={rebuttal.new_evidence_refs ?? []}
-              onEvidence={onEvidence}
-              evidenceIndex={evidenceIndex}
-              hideLabel
-            />
-          </div>
-        )}
-      </div>
-    </section>
   );
 }
 
@@ -917,6 +758,7 @@ function EvidenceCard({
 
 function ReportsPanel({
   reports,
+  evidence,
   reportNames,
   activeReport,
   onReport,
@@ -924,6 +766,7 @@ function ReportsPanel({
   evidenceIndex,
 }: {
   reports: Record<string, AnalystReport | string>;
+  evidence: EvidenceBundle | null;
   reportNames: string[];
   activeReport: string;
   onReport: (report: string) => void;
@@ -958,12 +801,12 @@ function ReportsPanel({
               </button>
             ))}
           </div>
-          <Markdown
-            evidenceAliases={evidenceIndex.aliases}
+          <AnalystReportView
+            report={reports[activeReport]}
+            evidence={evidence}
+            evidenceIndex={evidenceIndex}
             onEvidence={onEvidence}
-          >
-            {reportNarrative(reports[activeReport])}
-          </Markdown>
+          />
           <ReportMetadata
             report={reports[activeReport]}
             onEvidence={onEvidence}
@@ -984,105 +827,13 @@ function DecisionPanel({
   onEvidence: (ref: string) => void;
   evidenceIndex: EvidenceReferenceIndex;
 }) {
-  const { t } = useTranslation();
-  if (!decision) {
-    return (
-      <article
-        className="panel audit-panel"
-        id="run-view-decision"
-        role="tabpanel"
-      >
-        <div className="empty-state">{t("noDecision")}</div>
-      </article>
-    );
-  }
   return (
-    <article
-      className="panel audit-panel decision-panel"
-      id="run-view-decision"
-      role="tabpanel"
-    >
-      <div className="decision-rating">
-        <span>{t("researchRating")}</span>
-        <strong>{decision.rating}</strong>
-        <small>
-          {t("confidence")} {Math.round(decision.confidence * 100)}%
-        </small>
-      </div>
-      <div className="decision-body">
-        <h2>{t("decision")}</h2>
-        <h3>{t("thesis")}</h3>
-        <div className="decision-thesis">
-          <Markdown
-            evidenceAliases={evidenceIndex.aliases}
-            onEvidence={onEvidence}
-          >
-            {decision.thesis}
-          </Markdown>
-        </div>
-        <EvidenceRefs
-          refs={decision.evidence_refs ?? []}
-          onEvidence={onEvidence}
-          evidenceIndex={evidenceIndex}
-        />
-        <MemoryRefs refs={decision.memory_refs ?? []} />
-        <div className="decision-columns">
-          <List
-            title={t("catalysts")}
-            items={decision.catalysts ?? []}
-            emptyLabel={t("noCatalystsIdentified")}
-            evidenceIndex={evidenceIndex}
-            onEvidence={onEvidence}
-          />
-          <List
-            title={t("risks")}
-            items={decision.risks ?? []}
-            evidenceIndex={evidenceIndex}
-            onEvidence={onEvidence}
-          />
-          <List
-            title={t("invalidation")}
-            items={decision.invalidation_conditions ?? []}
-            evidenceIndex={evidenceIndex}
-            onEvidence={onEvidence}
-          />
-        </div>
-        <p className="horizon">
-          <strong>{t("horizon")}:</strong> {decision.time_horizon}
-        </p>
-      </div>
-    </article>
+    <ResearchDecisionView
+      decision={decision}
+      onEvidence={onEvidence}
+      evidenceIndex={evidenceIndex}
+    />
   );
-}
-
-function reportNarrative(value: unknown): string {
-  if (typeof value === "string") {
-    return value;
-  }
-  if (value && typeof value === "object" && isAnalystReport(value as ArtifactContent)) {
-    const report = value as AnalystReport;
-    return [
-      "## Executive Summary",
-      report.executive_summary,
-      ...(report.sections ?? []).flatMap((section) => [
-        `## ${section.title}`,
-        section.narrative,
-      ]),
-      "## Catalysts",
-      ...listMarkdown(report.catalysts ?? []),
-      "## Risks",
-      ...listMarkdown(report.risks ?? []),
-      "## Invalidation Conditions",
-      ...listMarkdown(report.invalidation_conditions ?? []),
-    ].join("\n\n");
-  }
-  return JSON.stringify(value, null, 2);
-}
-
-function listMarkdown(items: string[]): string[] {
-  return items.length > 0
-    ? items.map((item) => `- ${item}`)
-    : ["- —"];
 }
 
 function ReportMetadata({
@@ -1261,118 +1012,6 @@ function persistAuditDetailsOpen(open: boolean): void {
   localStorage.setItem(auditDetailsStorageKey, String(open));
 }
 
-function EvidenceRefs({
-  refs,
-  onEvidence,
-  evidenceIndex,
-  hideLabel = false,
-}: {
-  refs: string[];
-  onEvidence: (ref: string) => void;
-  evidenceIndex: EvidenceReferenceIndex;
-  hideLabel?: boolean;
-}) {
-  const { t } = useTranslation();
-  if (!refs.length) return null;
-  const groupedRefs = groupEvidenceRefs(refs, evidenceIndex);
-  return (
-    <div className="evidence-ref-group">
-      {!hideLabel && <strong>{t("evidenceRefs")}</strong>}
-      <div className="evidence-chips">
-        {groupedRefs.map((group) => (
-          <span className="evidence-chip" key={group.alias}>
-            <button
-              type="button"
-              className="open-evidence-button"
-              onClick={() => onEvidence(group.targetRef)}
-              aria-label={`${t("openEvidence")} ${group.targetRef}`}
-              title={group.refs.join("\n")}
-            >
-              <code>{group.alias}</code>
-            </button>
-            <button
-              type="button"
-              className="copy-chip-button"
-              onClick={() => void copyEvidenceRef(group.targetRef)}
-              aria-label={t("copyEvidenceId", {
-                ref: group.targetRef,
-              })}
-              title={group.targetRef}
-            >
-              ⧉
-            </button>
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function MemoryRefs({ refs }: { refs: string[] }) {
-  const { t } = useTranslation();
-  if (!refs.length) return null;
-  return (
-    <div className="evidence-ref-group memory-ref-group">
-      <strong>{t("memoryRefs")}</strong>
-      <div className="evidence-chips">
-        {refs.map((ref) => {
-          const runId = ref.startsWith("memory:") ? ref.slice(7) : ref;
-          const encoded = encodeURIComponent(runId);
-          return (
-            <a
-              href={`/memory?q=${encoded}#memory-${encoded}`}
-              aria-label={`${t("openMemory")} ${ref}`}
-              key={ref}
-            >
-              <code>{ref}</code>
-            </a>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function List({
-  title,
-  items,
-  emptyLabel = "—",
-  evidenceIndex,
-  onEvidence,
-}: {
-  title: string;
-  items: string[];
-  emptyLabel?: string;
-  evidenceIndex?: EvidenceReferenceIndex;
-  onEvidence?: (ref: string) => void;
-}) {
-  return (
-    <div className="artifact-list-section">
-      <h3>{title}</h3>
-      {items.length ? (
-        <ul>
-          {items.map((item) => (
-            <li key={item}>
-              {evidenceIndex && onEvidence ? (
-                <Markdown
-                  evidenceAliases={evidenceIndex.aliases}
-                  onEvidence={onEvidence}
-                >
-                  {item}
-                </Markdown>
-              ) : (
-                item
-              )}
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <span className="muted">{emptyLabel}</span>
-      )}
-    </div>
-  );
-}
-
 function Metric({ label, value }: { label: string; value: number | string }) {
   return (
     <div>
@@ -1476,38 +1115,6 @@ function isAnalystReport(content: ArtifactContent): content is AnalystReport {
     "executive_summary" in content &&
     "sections" in content
   );
-}
-
-function isResearchCase(
-  content: ArtifactContent,
-): content is ResearchCase {
-  return "role" in content && "arguments" in content;
-}
-
-function isDebateAgenda(
-  content: ArtifactContent,
-): content is DebateAgenda {
-  return "issues" in content;
-}
-
-function isRebuttalReview(
-  content: ArtifactContent,
-): content is RebuttalReview {
-  return "responses" in content && "thesis_update" in content;
-}
-
-function isJudgeDraft(content: ArtifactContent): content is JudgeDraft {
-  return "preliminary_rating" in content && "rulings" in content;
-}
-
-function isRiskReview(content: ArtifactContent): content is RiskReview {
-  return "findings" in content && "confidence_adjustment" in content;
-}
-
-function isResearchDecision(
-  content: ArtifactContent,
-): content is ResearchDecision {
-  return "rating" in content && "time_horizon" in content;
 }
 
 function uniqueStrings(values: string[]): string[] {

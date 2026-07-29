@@ -18,6 +18,12 @@ export type RiskReview = components["schemas"]["RiskReview"];
 export type ResearchDecision = components["schemas"]["ResearchDecision"];
 export type EvidenceBundle = components["schemas"]["EvidenceBundle"];
 export type EvidenceItem = components["schemas"]["EvidenceItem"];
+export type EvidenceTable = components["schemas"]["EvidenceTable"];
+export type ResearchTable = components["schemas"]["ResearchTable"];
+export type ResearchTableColumn =
+  components["schemas"]["ResearchTableColumn"];
+export type ResearchTableCell = components["schemas"]["ResearchTableCell"];
+export type ResearchTableRow = components["schemas"]["ResearchTableRow"];
 export type Capabilities = components["schemas"]["CapabilitiesResponse"];
 export type ProviderModelCatalog =
   components["schemas"]["ProviderModelCatalog"];
