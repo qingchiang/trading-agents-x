@@ -213,20 +213,30 @@ run mutations use ordinary HTTP endpoints.
 ### Independent analyst channels
 
 Market, Social/Sentiment, News, and Fundamentals analysts begin in the same
-LangGraph superstep but use independent local message state and tools. Their
-typed handoff is `AnalystReport`:
+LangGraph superstep but use independent local message state and tools. Tool
+collection is followed by a validated report-synthesis step. Its typed handoff
+is `AnalystReport`:
 
 ```text
-summary
-claims[{text, evidence_refs}]
+analyst
+executive_summary
 confidence
+claims[{id, kind, statement, implication, confidence, evidence_refs}]
+sections[{id, title, narrative, table_ids}]
+tables[ResearchTable]
+catalysts
+risks
+invalidation_conditions
 evidence_refs
 warnings
-narrative
 ```
 
-The main graph merges typed reports and evidence items, not a shared
-`MessagesState`.
+The main graph merges complete typed reports and evidence items, not a shared
+`MessagesState`. It does not derive formal claims from Markdown with regular
+expressions. Schema or semantic failures receive one bounded JSON recovery;
+provider truncation can recover through a validated manifest and independent
+section synthesis. A report that still fails validation fails the attempt
+instead of producing a fabricated typed artifact.
 
 ### Evidence sealing
 
@@ -246,10 +256,20 @@ fallback
 provenance
 ```
 
-`EvidenceBundle(version="1")` deduplicates items, validates unique references,
+`EvidenceBundle(version="3")` deduplicates items, validates unique references,
 rejects effective dates after the analysis cutoff, interprets `available_at`
-in the instrument's market timezone, and seals the content with a digest.
-Every later role receives the same sealed bundle.
+in the instrument's market timezone, and seals both evidence items and
+deterministic `EvidenceTable` objects with a digest. Every later role receives
+the same sealed bundle.
+
+`EvidenceTable` preserves complete fact tables extracted or generated
+deterministically from source results. `ResearchTable` holds cited comparisons,
+interpretations, scenarios, or derived values created during report synthesis.
+Observation cells cite Evidence; derived cells retain the formula, inputs,
+input refs, unit, and result. The contracts impose no product-level table,
+row, column, or cell-length limits. A report may present a declared view of an
+EvidenceTable, but it must retain the source table and source row identities so
+the complete data remains available.
 
 Adapters may still encode transport provenance in versioned markers. Analyst
 nodes extract those markers from tool messages into typed evidence and remove

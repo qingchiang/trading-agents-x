@@ -57,12 +57,16 @@ class StructuredOutputRunner(Generic[StructuredModel]):
         validator: SemanticValidator[StructuredModel],
         node: str,
         event_writer: EventWriter | None = None,
+        truncation_recovery: (
+            Callable[[], StructuredOutputResult[StructuredModel]] | None
+        ) = None,
     ):
         self.llm = llm
         self.schema = schema
         self.validator = validator
         self.node = node
         self.event_writer = event_writer
+        self.truncation_recovery = truncation_recovery
 
     def invoke(
         self,
@@ -133,6 +137,46 @@ class StructuredOutputRunner(Generic[StructuredModel]):
                             ),
                         )
 
+        if (
+            primary_reason == "output_truncated"
+            and self.truncation_recovery is not None
+        ):
+            self._emit(
+                "node.output_retry",
+                method=ArtifactGenerationMethod.SECTIONED_RECOVERY,
+                reason_code=primary_reason,
+            )
+            failure_reason = "sectioned_recovery_failed"
+            try:
+                sectioned = self.truncation_recovery()
+                value = self._validate(sectioned.value)
+            except StructuredOutputError as exc:
+                failure_reason = exc.reason_code
+            except Exception:
+                pass
+            else:
+                self._emit(
+                    "node.output_recovered",
+                    method=ArtifactGenerationMethod.SECTIONED_RECOVERY,
+                    reason_code=primary_reason,
+                )
+                return StructuredOutputResult(
+                    value=value,
+                    generation_method=(
+                        ArtifactGenerationMethod.SECTIONED_RECOVERY
+                    ),
+                )
+            self._emit(
+                "node.output_failed",
+                method=ArtifactGenerationMethod.SECTIONED_RECOVERY,
+                reason_code=failure_reason,
+            )
+            raise StructuredOutputError(
+                node=self.node,
+                schema=self.schema.__name__,
+                reason_code=failure_reason,
+            )
+
         self._emit(
             "node.output_retry",
             method=ArtifactGenerationMethod.JSON_MODE_RECOVERED,
@@ -196,6 +240,37 @@ class StructuredOutputRunner(Generic[StructuredModel]):
                             ArtifactGenerationMethod.JSON_MODE_RECOVERED
                         ),
                     )
+
+        if (
+            failure_reason == "output_truncated"
+            and self.truncation_recovery is not None
+        ):
+            self._emit(
+                "node.output_retry",
+                method=ArtifactGenerationMethod.SECTIONED_RECOVERY,
+                reason_code=failure_reason,
+            )
+            sectioned_failure = "sectioned_recovery_failed"
+            try:
+                sectioned = self.truncation_recovery()
+                value = self._validate(sectioned.value)
+            except StructuredOutputError as exc:
+                sectioned_failure = exc.reason_code
+            except Exception:
+                pass
+            else:
+                self._emit(
+                    "node.output_recovered",
+                    method=ArtifactGenerationMethod.SECTIONED_RECOVERY,
+                    reason_code=failure_reason,
+                )
+                return StructuredOutputResult(
+                    value=value,
+                    generation_method=(
+                        ArtifactGenerationMethod.SECTIONED_RECOVERY
+                    ),
+                )
+            failure_reason = sectioned_failure
 
         self._emit(
             "node.output_failed",

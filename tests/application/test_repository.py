@@ -9,11 +9,14 @@ from threading import Barrier
 import pytest
 from sqlalchemy import select
 
+from tests.factories import analyst_report
 from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
     AnalystClaim,
+    AnalystClaimType,
     AnalystReport,
+    AnalystSection,
     ArtifactGenerationMethod,
     EvidenceBundle,
     EvidenceItem,
@@ -269,9 +272,8 @@ def test_artifacts_are_typed_retained_and_idempotent_across_retries(
 ) -> None:
     run, _ = _create(repository, app_settings)
     repository.claim_run(run.id, "worker-1", 30)
-    report = AnalystReport(
-        analyst="market",
-        summary="Fixture summary.",
+    report = analyst_report(
+        executive_summary="Fixture summary.",
         confidence=0.8,
         narrative="Fixture narrative must not enter event payloads.",
     )
@@ -294,7 +296,9 @@ def test_artifacts_are_typed_retained_and_idempotent_across_retries(
         draft.model_copy(
             update={
                 "content": report.model_copy(
-                    update={"summary": "Recomputed summary."}
+                    update={
+                        "executive_summary": "Recomputed summary."
+                    }
                 )
             }
         ),
@@ -336,9 +340,8 @@ def test_artifact_prompt_version_is_audited_and_part_of_identity(
 ) -> None:
     run, _ = _create(repository, app_settings)
     repository.claim_run(run.id, "worker", 30)
-    report = AnalystReport(
-        analyst="market",
-        summary="Fixture summary.",
+    report = analyst_report(
+        executive_summary="Fixture summary.",
         confidence=0.8,
         narrative="Fixture narrative.",
     )
@@ -416,17 +419,29 @@ def test_complete_persists_result_and_resolved_memory(
     )
     report = AnalystReport(
         analyst="market",
-        summary="Momentum is constructive.",
+        executive_summary="Momentum is constructive.",
         claims=(
             AnalystClaim(
-                text="Price closed at 100.",
+                id="market.claim_1",
+                kind=AnalystClaimType.OBSERVATION,
+                statement="Price closed at 100.",
+                implication="Momentum remains constructive.",
+                confidence=0.7,
                 evidence_refs=(evidence_item.ref,),
             ),
         ),
         confidence=0.7,
+        sections=(
+            AnalystSection(
+                id="overview",
+                title="Overview",
+                narrative="Market report.",
+            ),
+        ),
         evidence_refs=(evidence_item.ref,),
         warnings=("**Historical price** was `partial`.",),
-        narrative="Market report.",
+        risks=("Momentum may reverse.",),
+        invalidation_conditions=("Price evidence reverses.",),
     )
     decision = ResearchDecision(
         rating=ResearchRating.OVERWEIGHT,

@@ -5,10 +5,10 @@ from datetime import date
 import httpx2 as httpx
 import pytest
 
+from tests.factories import analyst_report
 from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
-    AnalystReport,
     ArtifactGenerationMethod,
     EvidenceBundle,
     EvidenceItem,
@@ -343,11 +343,10 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
         analysis_date=date(2026, 7, 24),
         items=(evidence_item,),
     )
-    report = AnalystReport(
-        analyst="market",
-        summary="Fixture summary.",
+    report = analyst_report(
+        executive_summary="Fixture summary.",
         confidence=0.8,
-        evidence_refs=(evidence_item.ref,),
+        evidence_ref=evidence_item.ref,
         narrative="Fixture report.",
     )
     reports = {
@@ -360,7 +359,7 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
             node="analyst.market",
             stage="analyst",
             role="market",
-            generation_method=ArtifactGenerationMethod.NARRATIVE_ADAPTED,
+            generation_method=ArtifactGenerationMethod.TOOL_CALL,
             content=report,
         ),
     )
@@ -422,7 +421,9 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
     )
     assert artifacts.status_code == 200
     assert artifacts.json()[0]["id"] == artifact.id
-    assert artifacts.json()[0]["content"]["narrative"] == "Fixture report."
+    assert artifacts.json()[0]["content"]["sections"][0]["narrative"] == (
+        "Fixture report."
+    )
     review_payload = next(
         item for item in artifacts.json() if item["id"] == review.id
     )

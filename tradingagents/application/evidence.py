@@ -101,8 +101,7 @@ def extract_evidence_tables(
     evidence refs that supplied it.
     """
 
-    tables: list[EvidenceTable] = []
-    seen_ids: set[str] = set()
+    tables: dict[str, EvidenceTable] = {}
     for group in group_evidence_by_content(items):
         if not group.content:
             continue
@@ -128,10 +127,48 @@ def extract_evidence_tables(
                 evidence_refs=group.refs,
                 source_format=source_format,
             )
-            if table.id not in seen_ids:
-                tables.append(table)
-                seen_ids.add(table.id)
-    return tuple(tables)
+            existing = tables.get(table.id)
+            tables[table.id] = (
+                _merge_evidence_tables(existing, table)
+                if existing is not None
+                else table
+            )
+    return tuple(tables.values())
+
+
+def _merge_evidence_tables(
+    left: EvidenceTable,
+    right: EvidenceTable,
+) -> EvidenceTable:
+    refs = tuple(dict.fromkeys((*left.evidence_refs, *right.evidence_refs)))
+    rows = []
+    for left_row, right_row in zip(left.rows, right.rows, strict=True):
+        cells = {}
+        for column in left.columns:
+            left_cell = left_row.cells[column.key]
+            right_cell = right_row.cells[column.key]
+            cells[column.key] = left_cell.model_copy(
+                update={
+                    "evidence_refs": tuple(
+                        dict.fromkeys(
+                            (
+                                *left_cell.evidence_refs,
+                                *right_cell.evidence_refs,
+                            )
+                        )
+                    )
+                }
+            )
+        rows.append(left_row.model_copy(update={"cells": cells}))
+    return EvidenceTable(
+        id=left.id,
+        title=left.title,
+        purpose=left.purpose,
+        columns=left.columns,
+        rows=tuple(rows),
+        evidence_refs=refs,
+        source_format=left.source_format,
+    )
 
 
 def _markdown_table_candidates(

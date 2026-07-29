@@ -9,6 +9,7 @@ from .contracts import (
     EvidenceTable,
     PerspectiveReview,
     ResearchDecision,
+    ResearchTable,
     ResearchWarning,
     RunExport,
 )
@@ -52,6 +53,8 @@ def render_run_export_markdown(run_export: RunExport) -> str:
                 f"- Artifact: `{artifact.id}`",
                 f"- Attempt: `{artifact.attempt}`",
                 f"- Schema: `{artifact.schema_version}`",
+                f"- Prompt: `{artifact.prompt_version}`",
+                f"- Generation: `{artifact.generation_method.value}`",
                 f"- Created: `{artifact.created_at.isoformat()}`",
             ]
         )
@@ -75,7 +78,21 @@ def render_run_export_markdown(run_export: RunExport) -> str:
     if not result.reports:
         sections.extend(["", "_No final reports were recorded._"])
     for name, report in result.reports.items():
-        narrative = getattr(report, "narrative", str(report))
+        narrative = (
+            _render_analyst_report(
+                report,
+                evidence_tables=(
+                    {
+                        table.id: table
+                        for table in run_export.evidence.tables
+                    }
+                    if run_export.evidence is not None
+                    else {}
+                ),
+            )
+            if isinstance(report, AnalystReport)
+            else str(report)
+        )
         sections.extend(
             [
                 "",
@@ -271,11 +288,88 @@ def _escape_table_cell(value: str) -> str:
     return value.replace("\\", "\\\\").replace("|", "\\|").replace("\n", "<br>")
 
 
+def _render_research_table(table: ResearchTable) -> list[str]:
+    headers = "| " + " | ".join(
+        _escape_table_cell(column.label) for column in table.columns
+    ) + " |"
+    divider = "|" + "|".join("---" for _column in table.columns) + "|"
+    rows = [
+        "| "
+        + " | ".join(
+            _escape_table_cell(row.cells[column.key].display_value)
+            for column in table.columns
+        )
+        + " |"
+        for row in table.rows
+    ]
+    source_note = (
+        (
+            f"- Source view: `{len(table.rows)}/{table.total_source_rows}` "
+            f"rows from `{table.source_table_id}`"
+        )
+        if table.source_table_id is not None
+        else "- Source view: synthesized comparison"
+    )
+    return [
+        f"##### {table.title}",
+        "",
+        f"- Table: `{table.id}`",
+        f"- Purpose: {table.purpose}",
+        source_note,
+        "",
+        headers,
+        divider,
+        *rows,
+    ]
+
+
+def _render_analyst_report(
+    report: AnalystReport,
+    *,
+    evidence_tables: dict[str, EvidenceTable],
+) -> str:
+    research_tables = {table.id: table for table in report.tables}
+    lines = [
+        "#### Executive Summary",
+        "",
+        report.executive_summary,
+    ]
+    for section in report.sections:
+        lines.extend(["", f"#### {section.title}", "", section.narrative])
+        for table_id in section.table_ids:
+            if table_id in evidence_tables:
+                lines.extend(
+                    ["", *_render_evidence_table(evidence_tables[table_id])]
+                )
+            elif table_id in research_tables:
+                lines.extend(
+                    ["", *_render_research_table(research_tables[table_id])]
+                )
+    lines.extend(
+        [
+            "",
+            "#### Catalysts",
+            *(
+                [f"- {item}" for item in report.catalysts]
+                if report.catalysts
+                else ["- None identified."]
+            ),
+            "",
+            "#### Risks",
+            *[f"- {item}" for item in report.risks],
+            "",
+            "#### Invalidation Conditions",
+            *[f"- {item}" for item in report.invalidation_conditions],
+        ]
+    )
+    return "\n".join(lines)
+
+
 def _artifact_human_text(
     content: AnalystReport | PerspectiveReview | ResearchDecision,
 ) -> str:
     if isinstance(content, AnalystReport):
-        return content.narrative
+        return _render_analyst_report(content, evidence_tables={})
     return content.thesis
 
 

@@ -10,10 +10,10 @@ import pytest
 from langchain_core.messages import ToolMessage
 from pydantic import ValidationError
 
+from tests.factories import analyst_report
 from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
-    AnalystReport,
     ArtifactGenerationMethod,
     DerivedValue,
     EvidenceBundle,
@@ -713,9 +713,8 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
         source="fixture",
     )
     narrative = "MODEL REPORT"
-    report = AnalystReport(
-        analyst="market",
-        summary="Summary.",
+    report = analyst_report(
+        executive_summary="Summary.",
         confidence=0.7,
         warnings=(warning,),
         narrative=narrative,
@@ -735,7 +734,7 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
             attempt=1,
             stage="analyst",
             role="market",
-            generation_method=ArtifactGenerationMethod.NARRATIVE_ADAPTED,
+            generation_method=ArtifactGenerationMethod.TOOL_CALL,
             content=report,
             created_at=now,
         ),

@@ -1015,10 +1015,30 @@ function reportNarrative(value: unknown): string {
   if (typeof value === "string") {
     return value;
   }
-  if (value && typeof value === "object" && "narrative" in value) {
-    return String((value as { narrative: unknown }).narrative);
+  if (value && typeof value === "object" && isAnalystReport(value as ArtifactContent)) {
+    const report = value as AnalystReport;
+    return [
+      "## Executive Summary",
+      report.executive_summary,
+      ...(report.sections ?? []).flatMap((section) => [
+        `## ${section.title}`,
+        section.narrative,
+      ]),
+      "## Catalysts",
+      ...listMarkdown(report.catalysts ?? []),
+      "## Risks",
+      ...listMarkdown(report.risks ?? []),
+      "## Invalidation Conditions",
+      ...listMarkdown(report.invalidation_conditions ?? []),
+    ].join("\n\n");
   }
   return JSON.stringify(value, null, 2);
+}
+
+function listMarkdown(items: string[]): string[] {
+  return items.length > 0
+    ? items.map((item) => `- ${item}`)
+    : ["- —"];
 }
 
 function ReportMetadata({
@@ -1407,7 +1427,11 @@ function metricCell(value: number | null): string {
 }
 
 function isAnalystReport(content: ArtifactContent): content is AnalystReport {
-  return "analyst" in content && "narrative" in content;
+  return (
+    "analyst" in content &&
+    "executive_summary" in content &&
+    "sections" in content
+  );
 }
 
 function isPerspectiveReview(

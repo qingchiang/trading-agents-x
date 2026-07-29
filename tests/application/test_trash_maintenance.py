@@ -7,10 +7,10 @@ import pytest
 from langgraph.checkpoint.sqlite import SqliteSaver
 from sqlalchemy import func, select
 
+from tests.factories import analyst_report
 from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
-    AnalystReport,
     ArtifactGenerationMethod,
     EvidenceBundle,
     EvidenceItem,
@@ -95,11 +95,10 @@ def _complete_trashed_run(repository, app_settings):
         analysis_date=date(2026, 7, 24),
         items=(evidence_item,),
     )
-    report = AnalystReport(
-        analyst="market",
-        summary="Fixture summary.",
+    report = analyst_report(
+        executive_summary="Fixture summary.",
         confidence=0.8,
-        evidence_refs=(evidence_item.ref,),
+        evidence_ref=evidence_item.ref,
         narrative="Fixture report.",
     )
     repository.append_artifact(

@@ -4,6 +4,10 @@ import warnings
 from .application.contracts import (
     AnalysisRequest,
     AnalysisResult,
+    AnalystClaim,
+    AnalystClaimType,
+    AnalystReport,
+    AnalystSection,
     DerivedValue,
     EvidenceBundle,
     EvidenceItem,
@@ -26,6 +30,10 @@ from .version import __version__
 __all__ = [
     "AnalysisRequest",
     "AnalysisResult",
+    "AnalystClaim",
+    "AnalystClaimType",
+    "AnalystReport",
+    "AnalystSection",
     "DerivedValue",
     "EvidenceBundle",
     "EvidenceItem",

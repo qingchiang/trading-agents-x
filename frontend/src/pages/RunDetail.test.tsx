@@ -60,12 +60,32 @@ function analystReport(
 ) {
   return {
     analyst,
-    summary: `${title} summary`,
-    claims: [],
+    executive_summary: `${title} summary`,
     confidence: 0.7,
+    claims: [
+      {
+        id: `${analyst}.claim_1`,
+        kind: "inference",
+        statement: "Evidence is mixed.",
+        implication: "The conclusion should preserve uncertainty.",
+        confidence: 0.7,
+        evidence_refs: ["ev_0123456789ab"],
+      },
+    ],
+    sections: [
+      {
+        id: "overview",
+        title: `${title} report`,
+        narrative: "Evidence-grounded narrative.",
+        table_ids: [],
+      },
+    ],
+    tables: [],
+    catalysts: [],
+    risks: ["Evidence may deteriorate."],
+    invalidation_conditions: ["New evidence contradicts the report."],
     evidence_refs: ["ev_0123456789ab"],
     warnings,
-    narrative: `# ${title} report\n\nEvidence-grounded narrative.`,
   };
 }
 
@@ -134,8 +154,15 @@ const detail = {
           "ev_0123456789ab",
           "ev_fedcba987654",
         ],
-        narrative:
-          "# Market report\n\nCompare ev_0123456789ab with ev_fedcba987654.",
+        sections: [
+          {
+            id: "overview",
+            title: "Market report",
+            narrative:
+              "Compare ev_0123456789ab with ev_fedcba987654.",
+            table_ids: [],
+          },
+        ],
       },
       fundamentals: analystReport("fundamentals", "Fundamentals"),
     },
@@ -151,7 +178,7 @@ const detail = {
       time_horizon: "6-12 months",
     },
     evidence: {
-      version: "1",
+      version: "3",
       instrument: "NVDA",
       analysis_date: "2026-07-24",
       sealed_at: "2026-07-24T00:00:30Z",

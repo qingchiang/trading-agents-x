@@ -6,8 +6,13 @@ from typing import Any
 
 import pytest
 
+from tests.factories import analyst_report
 from tradingagents.application.contracts import (
     AnalysisRequest,
+    AnalystClaim,
+    AnalystClaimType,
+    AnalystReport,
+    AnalystSection,
     EvidenceItem,
     EvidenceQuality,
     MemoryContext,
@@ -24,8 +29,8 @@ from tradingagents.application.metrics import MetricsCallback
 from tradingagents.application.runtime import RunContext
 from tradingagents.graph.research_graph import (
     ResearchGraph,
-    _adapt_analyst_report,
     _evidence_from_record,
+    _evidence_warnings,
 )
 from tradingagents.provenance import ProvenanceRecord
 
@@ -46,7 +51,79 @@ class _StructuredInvoker:
                 )
             )
         )
-        if self.schema is PerspectiveReview:
+        if self.schema is AnalystReport:
+            analyst = re.search(
+                r"You are the (market|social|news|fundamentals) analyst",
+                prompt,
+            ).group(1)
+            section_ids = {
+                "market": (
+                    "trend",
+                    "market_regime",
+                    "price_volume",
+                    "momentum",
+                    "volatility",
+                    "counter_evidence",
+                    "market_reference_levels",
+                ),
+                "social": (
+                    "overall_sentiment",
+                    "source_assessments",
+                    "consensus_divergence",
+                    "dominant_themes",
+                    "catalysts_risks",
+                    "coverage_limits",
+                ),
+                "news": (
+                    "company_events",
+                    "disclosures",
+                    "industry_macro",
+                    "event_timeline",
+                    "impact_paths",
+                    "relevance",
+                ),
+                "fundamentals": (
+                    "business",
+                    "growth",
+                    "profitability_quality",
+                    "cash_flow",
+                    "balance_sheet",
+                    "valuation",
+                    "disclosure_limits",
+                ),
+            }[analyst]
+            parsed = AnalystReport(
+                analyst=analyst,
+                executive_summary="Complete fixture analyst summary.",
+                confidence=0.6,
+                claims=(
+                    AnalystClaim(
+                        id=f"{analyst}.claim_1",
+                        kind=AnalystClaimType.INFERENCE,
+                        statement="Fixture evidence is mixed.",
+                        implication="The conclusion should preserve uncertainty.",
+                        confidence=0.6,
+                        evidence_refs=refs[-1:],
+                    ),
+                ),
+                sections=tuple(
+                    AnalystSection(
+                        id=section_id,
+                        title=section_id.replace("_", " ").title(),
+                        narrative=(
+                            "Detailed fixture analysis grounded in "
+                            f"{refs[-1]}."
+                        ),
+                    )
+                    for section_id in section_ids
+                ),
+                risks=("Evidence quality may deteriorate.",),
+                invalidation_conditions=(
+                    "New evidence contradicts the fixture.",
+                ),
+                evidence_refs=refs[-1:],
+            )
+        elif self.schema is PerspectiveReview:
             parsed = PerspectiveReview(
                 role="fixture",
                 thesis="Structured review grounded in the sealed evidence.",
@@ -373,6 +450,14 @@ def test_graph_emits_only_typed_visible_research_artifacts(
         for artifact in artifacts
         if artifact.stage != "analyst"
     } == {"tool_call"}
+    assert {
+        (artifact.role, artifact.prompt_version)
+        for artifact in artifacts
+        if artifact.stage == "analyst"
+    } == {
+        ("market", "analyst-market-v2"),
+        ("news", "analyst-news-v2"),
+    }
 
 
 def test_deep_debate_stops_when_rebuttals_add_no_new_information(
@@ -431,16 +516,13 @@ def test_analyst_warning_is_derived_from_evidence_quality() -> None:
         content="Fixture data.",
         quality=EvidenceQuality.LOW,
     )
-    narrative = "Evidence-grounded report."
+    warnings = _evidence_warnings([item])
 
-    report = _adapt_analyst_report("market", narrative, [item])
-
-    assert report.narrative == narrative
-    assert len(report.warnings) == 1
-    assert report.warnings[0].message == (
+    assert len(warnings) == 1
+    assert warnings[0].message == (
         "historical price from fixture has low evidence quality."
     )
-    assert report.warnings[0].evidence_ref == item.ref
+    assert warnings[0].evidence_ref == item.ref
 
 
 def test_sentiment_confidence_and_fallback_warning_reach_typed_handoff() -> None:
@@ -450,12 +532,11 @@ def test_sentiment_confidence_and_fallback_warning_reach_typed_handoff() -> None
         source="Sentiment Analyst",
     )
 
-    report = _adapt_analyst_report(
-        "social",
-        "Preserved free-text sentiment report.",
-        [],
-        confidence_override=0.55,
-        extra_warnings=(warning,),
+    report = analyst_report(
+        analyst="social",
+        confidence=0.55,
+        warnings=(warning,),
+        narrative="Preserved structured sentiment report.",
     )
 
     assert report.confidence == 0.55

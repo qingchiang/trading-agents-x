@@ -3,7 +3,10 @@
 from .contracts import (
     AnalysisRequest,
     AnalysisResult,
+    AnalystClaim,
+    AnalystClaimType,
     AnalystReport,
+    AnalystSection,
     DerivedValue,
     EvidenceBundle,
     EvidenceItem,
@@ -31,7 +34,10 @@ from .settings import AppSettings, RunSettings
 __all__ = [
     "AnalysisRequest",
     "AnalysisResult",
+    "AnalystClaim",
+    "AnalystClaimType",
     "AnalystReport",
+    "AnalystSection",
     "AppSettings",
     "DerivedValue",
     "EvidenceBundle",

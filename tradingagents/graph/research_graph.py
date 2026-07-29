@@ -48,7 +48,6 @@ from tradingagents.agents.utils.technical_indicators_tools import (
     get_indicators_for_analysis,
 )
 from tradingagents.application.contracts import (
-    AnalystClaim,
     AnalystReport,
     ArtifactGenerationMethod,
     EvidenceBundle,
@@ -73,6 +72,15 @@ from tradingagents.application.metrics import MetricsCallback
 from tradingagents.application.reporting import order_reports
 from tradingagents.application.runtime import RunContext, check_cancelled
 from tradingagents.dataflows.config import use_config
+from tradingagents.graph.analyst_synthesis import (
+    evidence_warnings as _evidence_warnings,
+    invoke_analyst_report as _invoke_analyst_report,
+)
+from tradingagents.graph.output_validation import (
+    require_nonempty_texts as _require_nonempty_texts,
+    require_text as _require_text,
+    require_valid_refs as _require_valid_refs,
+)
 from tradingagents.graph.structured_output import (
     StructuredOutputResult,
     StructuredOutputRunner,
@@ -81,7 +89,6 @@ from tradingagents.provenance import (
     ProvenanceRecord,
     extract_evidence_spans,
     extract_provenance,
-    provenance_quality_issues,
     strip_provenance_markers,
     temporal_scope_from_records,
 )
@@ -90,25 +97,6 @@ _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _CONTROL_COMMENT_RE = re.compile(
     r"<!--\s*tradingagents-data-provenance:(?:start|end)\s*-->"
 )
-_PROVENANCE_HEADING = "## Data Provenance"
-_STRUCTURED_SENTINELS = {
-    "n/a",
-    "none",
-    "not available",
-    "unavailable",
-    "unknown",
-    "unspecified",
-    "unspecified research horizon",
-    "不可用",
-    "不明",
-    "未知",
-    "未定",
-    "未指定",
-    "利用不可",
-    "指定なし",
-}
-
-
 def _merge_dicts(
     left: dict[str, Any] | None,
     right: dict[str, Any] | None,
@@ -496,17 +484,33 @@ class ResearchGraph:
                         source="Sentiment Analyst",
                     ),
                 )
-            typed = _adapt_analyst_report(
-                analyst,
-                narrative,
-                evidence,
+            evidence_warnings = _evidence_warnings(evidence)
+            analyst_bundle = EvidenceBundle(
+                instrument=context.request.ticker,
+                analysis_date=context.request.analysis_date,
+                items=tuple(evidence),
+                tables=extract_evidence_tables(evidence),
+            )
+            output = _invoke_analyst_report(
+                self.quick_llm,
+                analyst=analyst,
+                draft_narrative=narrative,
+                bundle=analyst_bundle,
+                output_language=report_language_prompt_label(
+                    context.settings.output_language
+                ),
                 confidence_override=(
                     result.get("sentiment_confidence")
                     if analyst == "social"
                     else None
                 ),
-                extra_warnings=extra_warnings,
+                warnings=tuple(
+                    dict.fromkeys((*evidence_warnings, *extra_warnings))
+                ),
+                node=node_name,
+                event_writer=runtime.stream_writer,
             )
+            typed = output.value
             check_cancelled(context)
             self._write_artifact(
                 runtime,
@@ -514,7 +518,8 @@ class ResearchGraph:
                 stage="analyst",
                 role=analyst,
                 content=typed,
-                generation_method=ArtifactGenerationMethod.NARRATIVE_ADAPTED,
+                generation_method=output.generation_method,
+                prompt_version=f"analyst-{analyst}-v2",
             )
             self._finish_node(
                 runtime,
@@ -535,7 +540,8 @@ class ResearchGraph:
                 "warnings": [
                     warning.model_dump(mode="json")
                     for warning in typed.warnings
-                ],
+                ]
+                + _structured_recovery_warnings(node_name, output),
             }
 
         return analyst_node
@@ -562,20 +568,12 @@ class ResearchGraph:
         valid_refs = set(deduped)
         for key, raw in state["analyst_reports"].items():
             report = AnalystReport.model_validate(raw)
-            refs = tuple(ref for ref in report.evidence_refs if ref in valid_refs)
-            claims = tuple(
-                claim.model_copy(
-                    update={
-                        "evidence_refs": tuple(
-                            ref for ref in claim.evidence_refs if ref in valid_refs
-                        )
-                    }
-                )
-                for claim in report.claims
+            _require_valid_refs(
+                report.evidence_refs,
+                valid_refs,
+                required=True,
             )
-            reports[key] = report.model_copy(
-                update={"evidence_refs": refs, "claims": claims}
-            ).model_dump(mode="json")
+            reports[key] = report.model_dump(mode="json")
         self._finish_node(
             runtime,
             node,
@@ -877,6 +875,7 @@ class ResearchGraph:
         content: ResearchArtifactContent,
         generation_method: ArtifactGenerationMethod,
         round: int = 0,
+        prompt_version: str = "research-v1",
     ) -> None:
         runtime.context.artifact_writer(
             ResearchArtifactDraft(
@@ -884,6 +883,7 @@ class ResearchGraph:
                 stage=stage,
                 role=role,
                 round=round,
+                prompt_version=prompt_version,
                 generation_method=generation_method,
                 content=content,
             )
@@ -928,14 +928,13 @@ def _analyst_route(state: AgentState) -> str:
 
 def _collect_evidence(
     messages: Iterable[Any],
-    narrative: str,
+    _narrative: str,
     *,
     requested_date: date,
     analyst: str,
     prefetched_blocks: Iterable[dict[str, Any]] = (),
 ) -> list[EvidenceItem]:
     items: dict[str, EvidenceItem] = {}
-    origin_keys: set[tuple[str, ...]] = set()
     content_groups: dict[
         tuple[str, EvidenceTemporalScope],
         list[ProvenanceRecord],
@@ -954,7 +953,6 @@ def _collect_evidence(
         if not records:
             return
         scope = _coerce_temporal_scope(temporal_scope, records)
-        origin_keys.update(_record_identity(record) for record in records)
         if content:
             key = (content, scope)
             if key not in content_groups:
@@ -1042,15 +1040,6 @@ def _collect_evidence(
             requested_date=requested_date,
             content=None,
             temporal_scope=scope,
-        )
-        items[item.ref] = item
-    for record in _parse_provenance_table(narrative):
-        if _record_identity(record) in origin_keys:
-            continue
-        item = _evidence_from_record(
-            record,
-            requested_date=requested_date,
-            content=None,
         )
         items[item.ref] = item
     if not items:
@@ -1265,20 +1254,6 @@ def _coerce_temporal_scope(
         return EvidenceTemporalScope.UNKNOWN
 
 
-def _record_identity(record: ProvenanceRecord) -> tuple[str, ...]:
-    timing = record.timing.split("; retrieved ", 1)[0]
-    return tuple(
-        value.strip().casefold()
-        for value in (
-            record.evidence,
-            record.source,
-            record.requested,
-            record.effective,
-            timing,
-        )
-    )
-
-
 def _last_date(value: str | None) -> date | None:
     matches = _DATE_RE.findall(value or "")
     if not matches:
@@ -1289,123 +1264,11 @@ def _last_date(value: str | None) -> date | None:
         return None
 
 
-def _parse_provenance_table(text: str) -> list[ProvenanceRecord]:
-    if _PROVENANCE_HEADING not in text:
-        return []
-    section = text.split(_PROVENANCE_HEADING, 1)[1]
-    records = []
-    for line in section.splitlines():
-        stripped = line.strip()
-        if not stripped.startswith("|") or stripped.startswith("|---"):
-            continue
-        cells = [cell.strip() for cell in stripped.strip("|").split("|")]
-        if not cells or cells[0] == "Evidence" or len(cells) < 5:
-            continue
-        records.append(
-            ProvenanceRecord(
-                evidence=cells[0],
-                source=cells[1],
-                requested=cells[2],
-                effective=cells[3],
-                timing=cells[4],
-            )
-        )
-    return records
-
-
 def _clean_narrative(value: str) -> str:
     return _CONTROL_COMMENT_RE.sub(
         "",
         strip_provenance_markers(value),
     ).strip()
-
-
-def _adapt_analyst_report(
-    analyst: str,
-    narrative: str,
-    evidence: list[EvidenceItem],
-    *,
-    confidence_override: float | None = None,
-    extra_warnings: tuple[ResearchWarning, ...] = (),
-) -> AnalystReport:
-    refs = tuple(item.ref for item in evidence)
-    warnings = list(extra_warnings)
-    for item in evidence:
-        origin_records = tuple(
-            ProvenanceRecord(
-                evidence=origin.evidence_type,
-                source=origin.source,
-                requested=origin.requested,
-                effective=origin.effective,
-                timing=origin.timing,
-                retrieved_at=origin.retrieved_at,
-            )
-            for origin in item.origins
-        )
-        issues = provenance_quality_issues(origin_records)
-        for issue in issues:
-            warnings.append(
-                ResearchWarning(
-                    code=f"evidence.{issue.code}",
-                    message=(
-                        f"{issue.evidence} ({issue.source}): {issue.reason}"
-                    ),
-                    evidence_ref=item.ref,
-                    source=issue.source,
-                )
-            )
-        if (
-            not issues
-            and item.quality
-            in {EvidenceQuality.LOW, EvidenceQuality.UNAVAILABLE}
-        ):
-            warnings.append(
-                ResearchWarning(
-                    code=f"evidence.{item.quality.value}",
-                    message=(
-                        f"{item.evidence_type} from {item.source} has "
-                        f"{item.quality.value} evidence quality."
-                    ),
-                    evidence_ref=item.ref,
-                    source=item.source,
-                )
-            )
-    paragraphs = [
-        paragraph.strip()
-        for paragraph in re.split(r"\n\s*\n", narrative)
-        if paragraph.strip() and not paragraph.lstrip().startswith("#")
-    ]
-    summary = paragraphs[0][:1200] if paragraphs else "No substantive report."
-    sentences = [
-        sentence.strip()
-        for sentence in re.split(r"(?<=[.!?。！？])\s+", narrative)
-        if len(sentence.strip()) >= 20
-    ][:6]
-    claims = tuple(
-        AnalystClaim(text=sentence[:1500], evidence_refs=refs)
-        for sentence in sentences
-    )
-    unavailable = sum(
-        item.quality is EvidenceQuality.UNAVAILABLE for item in evidence
-    )
-    low = sum(item.quality is EvidenceQuality.LOW for item in evidence)
-    confidence = (
-        confidence_override
-        if confidence_override is not None
-        else max(
-            0.1,
-            min(0.9, 0.85 - unavailable * 0.2 - low * 0.1),
-        )
-    )
-    return AnalystReport(
-        analyst=analyst,
-        summary=summary,
-        claims=claims,
-        confidence=confidence,
-        evidence_refs=refs,
-        warnings=tuple(dict.fromkeys(warnings)),
-        narrative=narrative,
-    )
 
 
 def _research_prompt(
@@ -1418,15 +1281,7 @@ def _research_prompt(
 ) -> str:
     bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
     evidence_index = _evidence_prompt_index(bundle)
-    reports = {
-        key: {
-            "summary": value.get("summary"),
-            "claims": value.get("claims"),
-            "confidence": value.get("confidence"),
-            "warnings": value.get("warnings"),
-        }
-        for key, value in state["analyst_reports"].items()
-    }
+    reports = state["analyst_reports"]
     memory_text = memory.prompt_text() if memory is not None else ""
     memory_section = (
         "HISTORICAL FEEDBACK MEMORY (NOT CURRENT EVIDENCE):\n" + memory_text
@@ -1615,42 +1470,6 @@ def _invoke_decision(
         allowed_evidence_refs=valid_refs,
         allowed_memory_refs=valid_memory_refs,
     )
-
-
-def _require_text(value: str, *, reject_sentinel: bool = True) -> None:
-    text = value.strip()
-    if not text or _looks_like_json_object(text):
-        raise ValueError("structured text field is empty or contains nested JSON")
-    normalized = text.casefold().strip(" .。!！?？-_")
-    if reject_sentinel and normalized in _STRUCTURED_SENTINELS:
-        raise ValueError("structured text field contains a fallback sentinel")
-
-
-def _require_nonempty_texts(values: tuple[str, ...]) -> None:
-    if not values:
-        raise ValueError("structured list field must not be empty")
-    for value in values:
-        _require_text(value)
-
-
-def _require_valid_refs(
-    refs: tuple[str, ...],
-    allowed: set[str],
-    *,
-    required: bool,
-) -> None:
-    if required and not refs:
-        raise ValueError("at least one evidence ref is required")
-    if len(refs) != len(set(refs)) or any(ref not in allowed for ref in refs):
-        raise ValueError("structured output contains an invalid reference")
-
-
-def _looks_like_json_object(value: str) -> bool:
-    try:
-        return isinstance(json.loads(value), dict)
-    except (TypeError, ValueError):
-        return False
-
 
 def _structured_recovery_warnings(
     node: str,

@@ -209,29 +209,62 @@
       "AnalystClaim": {
         "additionalProperties": false,
         "properties": {
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
           "evidence_refs": {
-            "default": [],
             "items": {
               "type": "string"
             },
+            "minItems": 1,
             "title": "Evidence Refs",
             "type": "array"
           },
-          "text": {
+          "id": {
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "implication": {
             "minLength": 1,
-            "title": "Text",
+            "title": "Implication",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/AnalystClaimType"
+          },
+          "statement": {
+            "minLength": 1,
+            "title": "Statement",
             "type": "string"
           }
         },
         "required": [
-          "text"
+          "id",
+          "kind",
+          "statement",
+          "implication",
+          "confidence",
+          "evidence_refs"
         ],
         "title": "AnalystClaim",
         "type": "object"
       },
+      "AnalystClaimType": {
+        "enum": [
+          "observation",
+          "inference",
+          "forecast"
+        ],
+        "title": "AnalystClaimType",
+        "type": "string"
+      },
       "AnalystReport": {
         "additionalProperties": false,
-        "description": "Typed analyst hand-off; narrative remains available for human readers.",
+        "description": "Rich, typed analyst hand-off shared by users and downstream agents.",
         "properties": {
           "analyst": {
             "enum": [
@@ -243,11 +276,19 @@
             "title": "Analyst",
             "type": "string"
           },
-          "claims": {
+          "catalysts": {
             "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Catalysts",
+            "type": "array"
+          },
+          "claims": {
             "items": {
               "$ref": "#/components/schemas/AnalystClaim"
             },
+            "minItems": 1,
             "title": "Claims",
             "type": "array"
           },
@@ -258,20 +299,49 @@
             "type": "number"
           },
           "evidence_refs": {
-            "default": [],
             "items": {
               "type": "string"
             },
+            "minItems": 1,
             "title": "Evidence Refs",
             "type": "array"
           },
-          "narrative": {
-            "title": "Narrative",
+          "executive_summary": {
+            "minLength": 1,
+            "title": "Executive Summary",
             "type": "string"
           },
-          "summary": {
-            "title": "Summary",
-            "type": "string"
+          "invalidation_conditions": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Invalidation Conditions",
+            "type": "array"
+          },
+          "risks": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Risks",
+            "type": "array"
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/AnalystSection"
+            },
+            "minItems": 1,
+            "title": "Sections",
+            "type": "array"
+          },
+          "tables": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchTable"
+            },
+            "title": "Tables",
+            "type": "array"
           },
           "warnings": {
             "default": [],
@@ -284,11 +354,50 @@
         },
         "required": [
           "analyst",
-          "summary",
+          "executive_summary",
           "confidence",
-          "narrative"
+          "claims",
+          "sections",
+          "risks",
+          "invalidation_conditions",
+          "evidence_refs"
         ],
         "title": "AnalystReport",
+        "type": "object"
+      },
+      "AnalystSection": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "narrative": {
+            "minLength": 1,
+            "title": "Narrative",
+            "type": "string"
+          },
+          "table_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Table Ids",
+            "type": "array"
+          },
+          "title": {
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "narrative"
+        ],
+        "title": "AnalystSection",
         "type": "object"
       },
       "ArtifactGenerationMethod": {
@@ -296,9 +405,9 @@
         "enum": [
           "tool_call",
           "json_mode",
-          "narrative_adapted",
           "raw_json_recovered",
-          "json_mode_recovered"
+          "json_mode_recovered",
+          "sectioned_recovery"
         ],
         "title": "ArtifactGenerationMethod",
         "type": "string"
@@ -1549,6 +1658,84 @@
         "title": "ResearchRating",
         "type": "string"
       },
+      "ResearchTable": {
+        "additionalProperties": false,
+        "description": "A cited comparison, interpretation, or scenario table in a report.",
+        "properties": {
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchTableColumn"
+            },
+            "minItems": 1,
+            "title": "Columns",
+            "type": "array"
+          },
+          "id": {
+            "pattern": "^rt_[a-z0-9][a-z0-9_.-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "purpose": {
+            "minLength": 1,
+            "title": "Purpose",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchTableRow"
+            },
+            "minItems": 1,
+            "title": "Rows",
+            "type": "array"
+          },
+          "source_row_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Row Ids",
+            "type": "array"
+          },
+          "source_table_id": {
+            "anyOf": [
+              {
+                "pattern": "^et_[a-f0-9]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Table Id"
+          },
+          "title": {
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "total_source_rows": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Source Rows"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "purpose",
+          "columns",
+          "rows"
+        ],
+        "title": "ResearchTable",
+        "type": "object"
+      },
       "ResearchTableCell": {
         "additionalProperties": false,
         "description": "One auditable cell in a fact or model-produced research table.",
@@ -1564,6 +1751,7 @@
             ]
           },
           "display_value": {
+            "minLength": 1,
             "title": "Display Value",
             "type": "string"
           },

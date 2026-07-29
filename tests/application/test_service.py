@@ -12,9 +12,9 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from typing_extensions import TypedDict
 
+from tests.factories import analyst_report
 from tradingagents.application.contracts import (
     AnalysisRequest,
-    AnalystReport,
     ArtifactGenerationMethod,
     EvidenceBundle,
     EvidenceItem,
@@ -43,11 +43,10 @@ def _execution(ticker: str) -> GraphExecution:
         analysis_date=date(2026, 7, 24),
         items=(item,),
     )
-    report = AnalystReport(
-        analyst="market",
-        summary="Fixture summary.",
+    report = analyst_report(
+        executive_summary="Fixture summary.",
         confidence=0.8,
-        evidence_refs=(item.ref,),
+        evidence_ref=item.ref,
         narrative="Fixture report.",
     )
     decision = ResearchDecision(
@@ -108,9 +107,7 @@ class _ArtifactGraph:
                 node="analyst.market",
                 stage="analyst",
                 role="market",
-                generation_method=(
-                    ArtifactGenerationMethod.NARRATIVE_ADAPTED
-                ),
+                generation_method=ArtifactGenerationMethod.TOOL_CALL,
                 content=execution.reports["market"],
             )
         )
@@ -708,9 +705,8 @@ def test_service_export_reads_the_durable_result(
         assert payload["result"]["evidence"] == payload["evidence"]
         assert payload["evidence"]["items"][0]["source"] == "fixture"
         assert payload["artifacts"][0]["stage"] == "analyst"
-        assert payload["artifacts"][0]["content"]["narrative"] == (
-            "Fixture report."
-        )
+        content = payload["artifacts"][0]["content"]
+        assert content["sections"][0]["narrative"] == "Fixture report."
     else:
         evidence_ref = result.evidence.items[0].ref
         assert "## Research Process" in body

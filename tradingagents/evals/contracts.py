@@ -121,19 +121,20 @@ def validate_research_output(
             issues,
         )
         _check_exact_figures(
-            report.summary,
+            report.executive_summary,
             report.evidence_refs,
             evidence,
-            f"{location}.summary",
+            f"{location}.executive_summary",
             issues,
         )
-        _check_exact_figures(
-            report.narrative,
-            report.evidence_refs,
-            evidence,
-            f"{location}.narrative",
-            issues,
-        )
+        for index, section in enumerate(report.sections):
+            _check_exact_figures(
+                section.narrative,
+                report.evidence_refs,
+                evidence,
+                f"{location}.sections[{index}]",
+                issues,
+            )
         for index, claim in enumerate(report.claims):
             claim_location = f"{location}.claims[{index}]"
             _check_refs(
@@ -143,10 +144,17 @@ def validate_research_output(
                 issues,
             )
             _check_exact_figures(
-                claim.text,
+                claim.statement,
                 claim.evidence_refs,
                 evidence,
                 claim_location,
+                issues,
+            )
+            _check_exact_figures(
+                claim.implication,
+                claim.evidence_refs,
+                evidence,
+                f"{claim_location}.implication",
                 issues,
             )
 

@@ -30,19 +30,34 @@ export interface components {
       warnings?: components["schemas"]["ResearchWarning"][];
     };
     AnalystClaim: {
-      evidence_refs?: string[];
-      text: string;
+      confidence: number;
+      evidence_refs: string[];
+      id: string;
+      implication: string;
+      kind: components["schemas"]["AnalystClaimType"];
+      statement: string;
     };
+    AnalystClaimType: "observation" | "inference" | "forecast";
     AnalystReport: {
       analyst: "market" | "social" | "news" | "fundamentals";
-      claims?: components["schemas"]["AnalystClaim"][];
+      catalysts?: string[];
+      claims: components["schemas"]["AnalystClaim"][];
       confidence: number;
-      evidence_refs?: string[];
-      narrative: string;
-      summary: string;
+      evidence_refs: string[];
+      executive_summary: string;
+      invalidation_conditions: string[];
+      risks: string[];
+      sections: components["schemas"]["AnalystSection"][];
+      tables?: components["schemas"]["ResearchTable"][];
       warnings?: components["schemas"]["ResearchWarning"][];
     };
-    ArtifactGenerationMethod: "tool_call" | "json_mode" | "narrative_adapted" | "raw_json_recovered" | "json_mode_recovered";
+    AnalystSection: {
+      id: string;
+      narrative: string;
+      table_ids?: string[];
+      title: string;
+    };
+    ArtifactGenerationMethod: "tool_call" | "json_mode" | "raw_json_recovered" | "json_mode_recovered" | "sectioned_recovery";
     AssetType: "stock" | "crypto";
     CapabilitiesResponse: {
       analysts: string[];
@@ -227,6 +242,16 @@ export interface components {
       time_horizon: string;
     };
     ResearchRating: "Buy" | "Overweight" | "Hold" | "Underweight" | "Sell";
+    ResearchTable: {
+      columns: components["schemas"]["ResearchTableColumn"][];
+      id: string;
+      purpose: string;
+      rows: components["schemas"]["ResearchTableRow"][];
+      source_row_ids?: string[];
+      source_table_id?: string | null;
+      title: string;
+      total_source_rows?: number | null;
+    };
     ResearchTableCell: {
       derived?: components["schemas"]["DerivedValue"] | null;
       display_value: string;

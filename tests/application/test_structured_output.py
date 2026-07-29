@@ -1,18 +1,32 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date
 from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessage
+from pydantic import BaseModel
 
 from tradingagents.application.contracts import (
+    AnalystClaim,
+    AnalystClaimType,
+    AnalystReport,
+    AnalystSection,
     ArtifactGenerationMethod,
     EvidenceBundle,
     EvidenceItem,
     MemoryContext,
     PerspectiveReview,
+)
+from tradingagents.application.evidence import extract_evidence_tables
+from tradingagents.graph.analyst_synthesis import (
+    _ANALYST_SECTIONS,
+    _analyst_report_example,
+    _AnalystReportManifest,
+    _AnalystSectionChunk,
+    invoke_analyst_report,
 )
 from tradingagents.graph.research_graph import (
     _invoke_decision,
@@ -341,6 +355,228 @@ def test_two_invalid_outputs_fail_without_leaking_provider_content() -> None:
     ]
     assert secret not in str(events)
     assert secret not in str(error.value)
+
+
+def _analyst_bundle(*, with_table: bool = True) -> EvidenceBundle:
+    content = (
+        "## Verified snapshot\n\n"
+        "| Metric | Value |\n"
+        "|---|---:|\n"
+        "| Revenue | 120 |"
+        if with_table
+        else "Fixture evidence body."
+    )
+    item = EvidenceItem.create(
+        source="fixture",
+        evidence_type="fundamental data",
+        requested_date=date(2026, 7, 24),
+        effective_date=date(2026, 7, 24),
+        content=content,
+    )
+    tables = extract_evidence_tables((item,))
+    return EvidenceBundle(
+        instrument="NVDA",
+        analysis_date=date(2026, 7, 24),
+        items=(item,),
+        tables=tables,
+    )
+
+
+def test_analyst_report_is_synthesized_directly_from_complete_evidence() -> None:
+    bundle = _analyst_bundle()
+    report = _analyst_report_example(
+        analyst="fundamentals",
+        bundle=bundle,
+        confidence_override=None,
+    )
+    events: list[dict[str, Any]] = []
+    llm = _FakeLLM(
+        primary={
+            "raw": AIMessage(content=""),
+            "parsed": report,
+            "parsing_error": None,
+        },
+        recovery=AssertionError("recovery must not run"),
+    )
+
+    result = invoke_analyst_report(
+        llm,
+        analyst="fundamentals",
+        draft_narrative="A detailed tool-agent draft.",
+        bundle=bundle,
+        output_language="English (en)",
+        confidence_override=None,
+        warnings=(),
+        node="analyst.fundamentals",
+        event_writer=events.append,
+    )
+
+    assert result.generation_method is ArtifactGenerationMethod.TOOL_CALL
+    assert result.value.sections[0].table_ids == (bundle.tables[0].id,)
+    assert "Revenue" in llm.calls[0][1]
+    assert bundle.items[0].ref in llm.calls[0][1]
+    assert "There is no" in llm.calls[0][1]
+    assert events == []
+
+
+def test_analyst_semantics_reject_missing_sections_and_fabricated_refs() -> None:
+    bundle = _analyst_bundle()
+    report = _analyst_report_example(
+        analyst="market",
+        bundle=bundle,
+        confidence_override=None,
+    )
+    invalid_claim = report.claims[0].model_copy(
+        update={"evidence_refs": ("ev_ffffffffffff",)}
+    )
+    invalid = report.model_copy(
+        update={
+            "claims": (invalid_claim,),
+            "sections": report.sections[:1],
+        }
+    )
+    response = {"raw": AIMessage(content=""), "parsed": invalid}
+    llm = _FakeLLM(primary=response, recovery=response)
+
+    with pytest.raises(
+        StructuredOutputError,
+        match="semantic_validation",
+    ):
+        invoke_analyst_report(
+            llm,
+            analyst="market",
+            draft_narrative="Draft.",
+            bundle=bundle,
+            output_language="English (en)",
+            confidence_override=None,
+            warnings=(),
+            node="analyst.market",
+        )
+
+
+class _SectionedInvoker:
+    def __init__(self, owner: _SectionedLLM, schema: type[BaseModel]):
+        self.owner = owner
+        self.schema = schema
+
+    def invoke(self, prompt: str) -> dict[str, Any]:
+        self.owner.calls.append((self.schema.__name__, prompt))
+        ref = self.owner.ref
+        if self.schema is AnalystReport:
+            return {
+                "raw": AIMessage(
+                    content="{",
+                    response_metadata={"finish_reason": "length"},
+                ),
+                "parsed": None,
+            }
+        if self.schema is _AnalystReportManifest:
+            return {
+                "raw": AIMessage(content=""),
+                "parsed": _AnalystReportManifest(
+                    analyst="market",
+                    executive_summary="Complete sectioned summary.",
+                    confidence=0.65,
+                    claims=(
+                        AnalystClaim(
+                            id="market.claim_1",
+                            kind=AnalystClaimType.INFERENCE,
+                            statement="Evidence supports a mixed regime.",
+                            implication="Maintain conditional conclusions.",
+                            confidence=0.65,
+                            evidence_refs=(ref,),
+                        ),
+                    ),
+                    sections=tuple(
+                        {
+                            "id": section_id,
+                            "title": title,
+                            "evidence_table_ids": (),
+                        }
+                        for section_id, title in _ANALYST_SECTIONS["market"]
+                    ),
+                    risks=("The observed regime may reverse.",),
+                    invalidation_conditions=(
+                        "New evidence contradicts the regime.",
+                    ),
+                    evidence_refs=(ref,),
+                ),
+            }
+        if self.schema is _AnalystSectionChunk:
+            match = re.search(r"Generate only section `([^`]+)`", prompt)
+            assert match is not None
+            section_id = match.group(1)
+            title = dict(_ANALYST_SECTIONS["market"])[section_id]
+            return {
+                "raw": AIMessage(content=""),
+                "parsed": _AnalystSectionChunk(
+                    section=AnalystSection(
+                        id=section_id,
+                        title=title,
+                        narrative=(
+                            f"Complete detailed analysis for {section_id} "
+                            f"grounded in {ref}."
+                        ),
+                    ),
+                ),
+            }
+        raise AssertionError(self.schema)
+
+
+class _SectionedLLM:
+    preferred_structured_output_method = "function_calling"
+
+    def __init__(self, ref: str):
+        self.ref = ref
+        self.calls: list[tuple[str, str]] = []
+
+    def with_structured_output(
+        self,
+        schema,
+        *,
+        include_raw: bool,
+        **_kwargs,
+    ) -> _SectionedInvoker:
+        assert include_raw is True
+        return _SectionedInvoker(self, schema)
+
+
+def test_truncated_analyst_output_recovers_by_manifest_and_sections() -> None:
+    bundle = _analyst_bundle(with_table=False)
+    llm = _SectionedLLM(bundle.items[0].ref)
+    events: list[dict[str, Any]] = []
+
+    result = invoke_analyst_report(
+        llm,
+        analyst="market",
+        draft_narrative="Full draft.",
+        bundle=bundle,
+        output_language="English (en)",
+        confidence_override=None,
+        warnings=(),
+        node="analyst.market",
+        event_writer=events.append,
+    )
+
+    assert result.generation_method is (
+        ArtifactGenerationMethod.SECTIONED_RECOVERY
+    )
+    assert len(result.value.sections) == len(_ANALYST_SECTIONS["market"])
+    assert all(
+        section.narrative.startswith("Complete detailed analysis")
+        for section in result.value.sections
+    )
+    assert [schema for schema, _prompt in llm.calls] == [
+        "AnalystReport",
+        "_AnalystReportManifest",
+        *[
+            "_AnalystSectionChunk"
+            for _section in _ANALYST_SECTIONS["market"]
+        ],
+    ]
+    assert events[0]["event_type"] == "node.output_retry"
+    assert events[0]["payload"]["method"] == "sectioned_recovery"
+    assert events[-1]["event_type"] == "node.output_recovered"
 
 
 @pytest.mark.parametrize(

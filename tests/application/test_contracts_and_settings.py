@@ -5,9 +5,9 @@ from datetime import date, datetime, timezone
 import pytest
 from pydantic import ValidationError
 
+from tests.factories import analyst_report
 from tradingagents.application.contracts import (
     AnalysisRequest,
-    AnalystReport,
     EvidenceBundle,
     EvidenceItem,
     ReportLanguage,
@@ -48,9 +48,8 @@ def test_research_decision_rejects_account_level_fields() -> None:
 
 
 def test_legacy_warning_strings_become_plain_structured_records() -> None:
-    report = AnalystReport(
-        analyst="market",
-        summary="Summary",
+    report = analyst_report(
+        executive_summary="Summary",
         confidence=0.5,
         warnings=("**Historical source** was `partial`.",),
         narrative="Narrative",

@@ -9,7 +9,9 @@ from pydantic import ValidationError
 
 from tradingagents.application.contracts import (
     AnalystClaim,
+    AnalystClaimType,
     AnalystReport,
+    AnalystSection,
     EvidenceBundle,
     EvidenceItem,
     EvidenceQuality,
@@ -93,24 +95,38 @@ def _build_result(
     )
     claims = tuple(
         AnalystClaim(
-            text=raw["text"],
+            id=f"market.claim_{index}",
+            kind=AnalystClaimType.OBSERVATION,
+            statement=raw["text"],
+            implication="This observation affects the market assessment.",
+            confidence=0.7,
             evidence_refs=tuple(refs[key] for key in raw["evidence_keys"]),
         )
-        for raw in case["claims"]
+        for index, raw in enumerate(case["claims"], start=1)
     )
-    narrative = "\n\n".join(claim.text for claim in claims)
+    narrative = "\n\n".join(claim.statement for claim in claims)
     report = AnalystReport(
         analyst="market",
-        summary=narrative,
+        executive_summary=narrative,
         claims=claims,
         confidence=0.25 if case["scenario"] == "missing" else 0.75,
+        sections=(
+            AnalystSection(
+                id="overview",
+                title="Overview",
+                narrative=narrative,
+            ),
+        ),
         evidence_refs=tuple(refs.values()),
         warnings=(
             ("Required evidence is unavailable.",)
             if case["scenario"] == "missing"
             else ()
         ),
-        narrative=narrative,
+        risks=tuple(case["risks"]),
+        invalidation_conditions=(
+            "Reassess if the cited evidence is superseded.",
+        ),
     )
     risk_count = {
         RunProfile.FAST: 1,
@@ -245,12 +261,15 @@ def test_eval_rejects_dangling_evidence_refs() -> None:
 def test_eval_rejects_exact_figure_absent_from_referenced_evidence() -> None:
     bundle, report, decision = _base_output()
     claim = report.claims[0].model_copy(
-        update={"text": "Revenue grew 99% year over year."}
+        update={"statement": "Revenue grew 99% year over year."}
+    )
+    section = report.sections[0].model_copy(
+        update={"narrative": claim.statement}
     )
     report = report.model_copy(
         update={
-            "summary": claim.text,
-            "narrative": claim.text,
+            "executive_summary": claim.statement,
+            "sections": (section,),
             "claims": (claim,),
         }
     )
