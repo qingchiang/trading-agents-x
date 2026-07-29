@@ -419,7 +419,7 @@ Fill the following fields:
 - **overall_band**: Exactly one of Bullish / Mildly Bullish / Neutral / Mixed / Mildly Bearish / Bearish. Use Mixed when sources point in clearly different directions; Neutral only when all sources are genuinely silent.
 - **overall_score**: A number from 0 (maximally bearish) to 10 (maximally bullish); 5 is neutral. Keep it consistent with overall_band.
 - **executive_summary**: A substantive synthesis of the overall direction, strongest evidence, and why conflicting signals matter.
-- **source_assessments**: Exactly one item for every applicable source_id. A substantive source requires a direction and at least one concrete key-evidence statement. A no-signal or unavailable source must use null direction and no key evidence.
+- **source_assessments**: Exactly one item for every applicable source_id. Include a concise source-level summary. A substantive source requires a direction and at least one concrete key-evidence statement. A no-signal or unavailable source must use null direction and no key evidence.
 - **cross_source_consensus**: Concrete points on which independent sources agree; may be empty when only one source is substantive.
 - **cross_source_divergences**: Material conflicts between sources; may be empty when none exist.
 - **dominant_themes**: One or more recurring narratives supported by the supplied evidence.

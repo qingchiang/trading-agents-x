@@ -11,6 +11,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
+    field_validator,
     model_validator,
 )
 
@@ -53,9 +54,20 @@ class SentimentSourceAssessment(BaseModel):
             "source has no usable signal or is unavailable."
         ),
     )
-    summary: NonEmptyText
+    summary: NonEmptyText | None = Field(
+        default=None,
+        description=(
+            "Concise source-level synthesis. When omitted for a substantive "
+            "source, the renderer reuses its first validated key-evidence item."
+        ),
+    )
     key_evidence: tuple[NonEmptyText, ...] = ()
     limitations: tuple[NonEmptyText, ...] = ()
+
+    @field_validator("direction", mode="before")
+    @classmethod
+    def normalize_direction(cls, value: object) -> object:
+        return _normalize_sentiment_band(value)
 
     @model_validator(mode="after")
     def validate_signal_fields(self) -> SentimentSourceAssessment:
@@ -134,6 +146,11 @@ class SentimentReport(BaseModel):
         description="Coverage, timing, or interpretation limitations.",
     )
 
+    @field_validator("overall_band", mode="before")
+    @classmethod
+    def normalize_overall_band(cls, value: object) -> object:
+        return _normalize_sentiment_band(value)
+
     @model_validator(mode="after")
     def validate_source_ids(self) -> SentimentReport:
         source_ids = [
@@ -142,6 +159,18 @@ class SentimentReport(BaseModel):
         if len(source_ids) != len(set(source_ids)):
             raise ValueError("sentiment source_id values must be unique")
         return self
+
+
+def _normalize_sentiment_band(value: object) -> object:
+    """Accept enum casing differences without broadening the fixed vocabulary."""
+
+    if value is None or isinstance(value, SentimentBand):
+        return value
+    normalized = " ".join(str(value).strip().split()).casefold()
+    for band in SentimentBand:
+        if band.value.casefold() == normalized:
+            return band
+    return value
 
 
 def validate_sentiment_sources(
@@ -201,6 +230,14 @@ def render_sentiment_report(
             if assessment.key_evidence
             else "—"
         )
+        summary = (
+            assessment.summary
+            or (
+                assessment.key_evidence[0]
+                if assessment.key_evidence
+                else "—"
+            )
+        )
         limitations = (
             "; ".join(assessment.limitations)
             if assessment.limitations
@@ -213,7 +250,7 @@ def render_sentiment_report(
                     f"{table_cell(label)} (`{assessment.source_id}`)",
                     assessment.status.value,
                     direction,
-                    table_cell(assessment.summary),
+                    table_cell(summary),
                     table_cell(key_evidence),
                     table_cell(limitations),
                 )

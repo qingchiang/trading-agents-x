@@ -199,6 +199,59 @@ def test_non_substantive_source_cannot_invent_direction_or_evidence():
 
 
 @pytest.mark.unit
+def test_sentiment_band_casing_is_normalized_without_broad_aliases():
+    assessment = SentimentSourceAssessment(
+        source_id="news",
+        status=SentimentSourceStatus.SUBSTANTIVE,
+        direction="neutral",
+        key_evidence=("The supplied signals are balanced.",),
+    )
+    payload = _report(("news",)).model_dump(mode="json")
+    payload["overall_band"] = "mildly bullish"
+    payload["source_assessments"] = [
+        assessment.model_dump(mode="json")
+    ]
+
+    report = SentimentReport.model_validate(payload)
+
+    assert report.overall_band is SentimentBand.MILDLY_BULLISH
+    assert report.source_assessments[0].direction is SentimentBand.NEUTRAL
+
+
+@pytest.mark.unit
+def test_missing_source_summary_reuses_validated_key_evidence_in_renderer():
+    report = SentimentReport(
+        overall_band=SentimentBand.NEUTRAL,
+        overall_score=5.0,
+        executive_summary="The evidence is balanced.",
+        source_assessments=(
+            SentimentSourceAssessment(
+                source_id="news",
+                status=SentimentSourceStatus.SUBSTANTIVE,
+                direction="neutral",
+                key_evidence=("The supplied signals are balanced.",),
+            ),
+        ),
+        dominant_themes=("No directional theme dominates.",),
+        risks=("Coverage remains limited.",),
+        limitations=("Only one source was substantive.",),
+    )
+
+    rendered = render_sentiment_report(
+        report,
+        confidence="medium",
+        confidence_score=0.55,
+        source_labels={"news": "Routed ticker news"},
+    )
+
+    assert report.source_assessments[0].summary is None
+    assert (
+        "| substantive | Neutral | The supplied signals are balanced. |"
+        in rendered
+    )
+
+
+@pytest.mark.unit
 def test_sentiment_source_contract_rejects_missing_and_unknown_ids():
     report = _report(("news", "invented"))
 
