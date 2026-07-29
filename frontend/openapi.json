@@ -510,8 +510,11 @@
             "type": "string"
           },
           "version": {
-            "const": "1",
-            "default": "1",
+            "default": "2",
+            "enum": [
+              "1",
+              "2"
+            ],
             "title": "Version",
             "type": "string"
           }
@@ -705,6 +708,10 @@
             "title": "Source",
             "type": "string"
           },
+          "temporal_scope": {
+            "$ref": "#/components/schemas/EvidenceTemporalScope",
+            "default": "unknown"
+          },
           "timing": {
             "default": "unknown",
             "minLength": 1,
@@ -727,6 +734,16 @@
           "unavailable"
         ],
         "title": "EvidenceQuality",
+        "type": "string"
+      },
+      "EvidenceTemporalScope": {
+        "description": "Whether source content is valid at the cutoff or only at retrieval time.",
+        "enum": [
+          "point_in_time",
+          "live_only",
+          "unknown"
+        ],
+        "title": "EvidenceTemporalScope",
         "type": "string"
       },
       "HTTPValidationError": {

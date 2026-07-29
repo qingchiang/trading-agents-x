@@ -9,6 +9,7 @@ from langgraph.graph import MessagesState
 from tradingagents.provenance import (
     ProvenanceRecord,
     strip_provenance_markers,
+    temporal_scope_from_records,
 )
 
 
@@ -17,6 +18,7 @@ class PrefetchedEvidenceBlock(TypedDict):
 
     content: str | None
     records: list[dict[str, str | None]]
+    temporal_scope: str
 
 
 class AgentState(MessagesState):
@@ -38,6 +40,8 @@ class AgentState(MessagesState):
 def prefetched_evidence_block(
     body: str,
     records: Iterable[ProvenanceRecord],
+    *,
+    temporal_scope: str | None = None,
 ) -> PrefetchedEvidenceBlock:
     """Serialize one prefetch response independently from report rendering."""
 
@@ -64,6 +68,12 @@ def prefetched_evidence_block(
     return {
         "content": content,
         "records": [asdict(record) for record in records],
+        "temporal_scope": (
+            temporal_scope
+            if temporal_scope
+            in {"point_in_time", "live_only", "unknown"}
+            else temporal_scope_from_records(records)
+        ),
     }
 
 

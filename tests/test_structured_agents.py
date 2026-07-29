@@ -153,7 +153,7 @@ def _run(
             return_value=signals,
         ) as market_signals,
         mock.patch(f"{_SENTIMENT_MOD}.get_news") as news,
-        mock.patch(f"{_SENTIMENT_MOD}.is_live", return_value=live),
+        mock.patch(f"{_SENTIMENT_MOD}.is_near_live", return_value=live),
         mock.patch(f"{_SENTIMENT_MOD}.datetime") as clock,
     ):
         clock.now.return_value = datetime(
@@ -199,7 +199,7 @@ def test_structured_report_is_persisted_in_state_and_messages():
             return_value="REDDIT_DATA",
         ),
         mock.patch(f"{_SENTIMENT_MOD}.get_news") as news,
-        mock.patch(f"{_SENTIMENT_MOD}.is_live", return_value=True),
+        mock.patch(f"{_SENTIMENT_MOD}.is_near_live", return_value=True),
     ):
         news.func.return_value = "NEWS_DATA"
         result = create_sentiment_analyst(
@@ -330,12 +330,17 @@ def test_historical_us_run_never_queries_live_social_sources():
     reddit.assert_not_called()
     signals.assert_not_called()
     prompt = "\n".join(map(str, captured["prompt"]))
-    assert "live-only source unavailable for historical trade_date" in prompt
-    assert "unavailable for historical date" not in result["sentiment_report"]
+    assert (
+        "live-only source unavailable for historical or future trade_date"
+        in prompt
+    )
+    assert "unavailable for historical or future date" not in result[
+        "sentiment_report"
+    ]
     assert result["prefetched_evidence"][1]["content"] is None
     assert (
         result["prefetched_evidence"][1]["records"][0]["timing"]
-        == "unavailable for historical date; vendor not queried"
+        == "live-only; unavailable for historical or future date; vendor not queried"
     )
 
 

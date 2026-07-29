@@ -55,6 +55,7 @@ from tradingagents.application.contracts import (
     EvidenceItem,
     EvidenceOrigin,
     EvidenceQuality,
+    EvidenceTemporalScope,
     MemoryContext,
     PerspectiveReview,
     ResearchArtifactContent,
@@ -75,9 +76,11 @@ from tradingagents.graph.structured_output import (
 )
 from tradingagents.provenance import (
     ProvenanceRecord,
+    extract_evidence_spans,
     extract_provenance,
     provenance_quality_issues,
     strip_provenance_markers,
+    temporal_scope_from_records,
 )
 
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
@@ -896,28 +899,36 @@ def _collect_evidence(
 ) -> list[EvidenceItem]:
     items: dict[str, EvidenceItem] = {}
     origin_keys: set[tuple[str, ...]] = set()
-    content_groups: dict[str, list[ProvenanceRecord]] = {}
-    content_order: list[str] = []
-    empty_payloads: list[tuple[ProvenanceRecord, ...]] = []
+    content_groups: dict[
+        tuple[str, EvidenceTemporalScope],
+        list[ProvenanceRecord],
+    ] = {}
+    content_order: list[tuple[str, EvidenceTemporalScope]] = []
+    empty_payloads: list[
+        tuple[tuple[ProvenanceRecord, ...], EvidenceTemporalScope]
+    ] = []
 
     def collect_payload(
         records: Iterable[ProvenanceRecord],
         content: str | None,
+        temporal_scope: str | EvidenceTemporalScope | None = None,
     ) -> None:
         records = tuple(dict.fromkeys(records))
         if not records:
             return
+        scope = _coerce_temporal_scope(temporal_scope, records)
         origin_keys.update(_record_identity(record) for record in records)
         if content:
-            if content not in content_groups:
-                content_groups[content] = []
-                content_order.append(content)
-            existing = content_groups[content]
+            key = (content, scope)
+            if key not in content_groups:
+                content_groups[key] = []
+                content_order.append(key)
+            existing = content_groups[key]
             for record in records:
                 if record not in existing:
                     existing.append(record)
         else:
-            empty_payloads.append(records)
+            empty_payloads.append((records, scope))
 
     tool_messages = [
         message for message in messages if isinstance(message, ToolMessage)
@@ -926,6 +937,30 @@ def _collect_evidence(
         content = message.content if isinstance(message.content, str) else str(
             message.content
         )
+        spans = extract_evidence_spans(content)
+        if spans:
+            for span in spans:
+                records = list(span.records)
+                if not records:
+                    records = [
+                        ProvenanceRecord(
+                            evidence=getattr(message, "name", None)
+                            or f"{analyst} tool",
+                            source="unknown",
+                            requested=requested_date.isoformat(),
+                            effective="unknown",
+                            timing=(
+                                f"{span.temporal_scope} span without "
+                                "auditable source metadata"
+                            ),
+                        )
+                    ]
+                collect_payload(
+                    records,
+                    span.content,
+                    span.temporal_scope,
+                )
+            continue
         records = extract_provenance(content)
         if not records:
             records = [
@@ -937,7 +972,10 @@ def _collect_evidence(
                     timing="no auditable source metadata captured",
                 )
             ]
-        collect_payload(records, strip_provenance_markers(content).strip() or None)
+        collect_payload(
+            records,
+            strip_provenance_markers(content).strip() or None,
+        )
 
     for block in prefetched_blocks:
         raw_records = block.get("records", [])
@@ -947,20 +985,26 @@ def _collect_evidence(
                 records.append(ProvenanceRecord(**raw))
             except (TypeError, ValueError):
                 continue
-        collect_payload(records, block.get("content"))
+        collect_payload(
+            records,
+            block.get("content"),
+            block.get("temporal_scope"),
+        )
 
-    for content in content_order:
+    for content, scope in content_order:
         item = _evidence_from_records(
-            content_groups[content],
+            content_groups[(content, scope)],
             requested_date=requested_date,
             content=content,
+            temporal_scope=scope,
         )
         items[item.ref] = item
-    for records in empty_payloads:
+    for records, scope in empty_payloads:
         item = _evidence_from_records(
             records,
             requested_date=requested_date,
             content=None,
+            temporal_scope=scope,
         )
         items[item.ref] = item
     for record in _parse_provenance_table(narrative):
@@ -1006,12 +1050,17 @@ def _evidence_from_records(
     *,
     requested_date: date,
     content: str | None,
+    temporal_scope: str | EvidenceTemporalScope | None = None,
 ) -> EvidenceItem:
     records = tuple(records)
     if not records:
         raise ValueError("at least one provenance record is required")
     origin_pairs = tuple(
-        _origin_from_record(record, requested_date=requested_date)
+        _origin_from_record(
+            record,
+            requested_date=requested_date,
+            temporal_scope=temporal_scope,
+        )
         for record in records
     )
     origins = tuple(origin for origin, _future in origin_pairs)
@@ -1032,6 +1081,10 @@ def _evidence_from_records(
         origin.quality is EvidenceQuality.HIGH and not origin.fallback
         for origin in origins
     )
+    temporal_scopes = tuple(
+        dict.fromkeys(origin.temporal_scope for origin in origins)
+    )
+    mixed_temporal_scope = len(temporal_scopes) > 1
     quality = (
         EvidenceQuality.UNAVAILABLE
         if all_unavailable
@@ -1062,6 +1115,10 @@ def _evidence_from_records(
         else {
             "composite": True,
             "origin_count": len(origins),
+            "temporal_scopes": [
+                scope.value for scope in temporal_scopes
+            ],
+            "mixed_temporal_scope_unseparated": mixed_temporal_scope,
         }
     )
     return EvidenceItem.create(
@@ -1069,7 +1126,11 @@ def _evidence_from_records(
         evidence_type=evidence_type,
         requested_date=requested_date,
         effective_date=effective,
-        content=None if future_dated else content,
+        content=(
+            None
+            if future_dated or all_unavailable or mixed_temporal_scope
+            else content
+        ),
         quality=quality,
         fallback=fallback,
         origins=origins,
@@ -1081,10 +1142,12 @@ def _origin_from_record(
     record: ProvenanceRecord,
     *,
     requested_date: date,
+    temporal_scope: str | EvidenceTemporalScope | None = None,
 ) -> tuple[EvidenceOrigin, bool]:
     effective = _last_date(record.effective)
     future_dated = bool(effective and effective > requested_date)
     timing = record.timing.casefold()
+    scope = _coerce_temporal_scope(temporal_scope, (record,))
     unavailable = any(
         token in timing
         for token in (
@@ -1096,7 +1159,7 @@ def _origin_from_record(
             "no auditable source metadata",
         )
     ) or future_dated
-    degraded = any(
+    degraded = scope is EvidenceTemporalScope.LIVE_ONLY or any(
         token in timing
         for token in (
             "fallback",
@@ -1138,9 +1201,31 @@ def _origin_from_record(
             retrieved_at=record.retrieved_at,
             quality=quality,
             fallback="fallback" in timing,
+            temporal_scope=scope,
         ),
         future_dated,
     )
+
+
+def _coerce_temporal_scope(
+    value: str | EvidenceTemporalScope | None,
+    records: Iterable[ProvenanceRecord],
+) -> EvidenceTemporalScope:
+    if isinstance(value, EvidenceTemporalScope):
+        return (
+            EvidenceTemporalScope(
+                temporal_scope_from_records(records)
+            )
+            if value is EvidenceTemporalScope.UNKNOWN
+            else value
+        )
+    raw = value or temporal_scope_from_records(records)
+    if raw == EvidenceTemporalScope.UNKNOWN.value:
+        raw = temporal_scope_from_records(records)
+    try:
+        return EvidenceTemporalScope(raw)
+    except ValueError:
+        return EvidenceTemporalScope.UNKNOWN
 
 
 def _record_identity(record: ProvenanceRecord) -> tuple[str, ...]:
@@ -1360,6 +1445,7 @@ def _evidence_prompt_index(
                         "effective": origin.effective,
                         "quality": origin.quality.value,
                         "fallback": origin.fallback,
+                        "temporal_scope": origin.temporal_scope.value,
                     }
                     for origin in item.origins
                 )
@@ -1375,6 +1461,7 @@ def _evidence_prompt_index(
                         ),
                         "quality": item.quality.value,
                         "fallback": item.fallback,
+                        "temporal_scope": "unknown",
                     }
                 )
         entry = {

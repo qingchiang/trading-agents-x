@@ -16,6 +16,7 @@ from tradingagents.application.contracts import (
     EvidenceBundle,
     EvidenceItem,
     EvidenceQuality,
+    EvidenceTemporalScope,
     NodeMetrics,
     PerspectiveReview,
     ResearchArtifact,
@@ -35,6 +36,7 @@ from tradingagents.graph.research_graph import (
 )
 from tradingagents.provenance import (
     ProvenanceRecord,
+    attach_evidence_span,
     attach_provenance,
 )
 
@@ -188,6 +190,105 @@ def test_any_future_origin_withholds_the_entire_composite_body() -> None:
     assert item.quality is EvidenceQuality.LOW
     assert item.origins[1].effective_date == date(2026, 7, 25)
     assert "future-dated evidence withheld" in item.origins[1].timing
+
+
+def test_explicit_temporal_spans_split_composite_tool_content() -> None:
+    pit = attach_evidence_span(
+        attach_provenance(
+            "DISCLOSURE-SAFE BODY",
+            _record(
+                "filing",
+                "EDINET",
+                timing="disclosure-date filtered",
+            ),
+        ),
+        temporal_scope="point_in_time",
+    )
+    live = attach_evidence_span(
+        attach_provenance(
+            "RETRIEVAL SNAPSHOT BODY",
+            _record(
+                "analyst consensus",
+                "yfinance",
+                effective="retrieval-time snapshot",
+                timing="live non-point-in-time",
+            ),
+        ),
+        temporal_scope="live_only",
+    )
+
+    items = _collect_evidence(
+        [ToolMessage(content=f"{pit}\n\n{live}", tool_call_id="fixture")],
+        "Report.",
+        requested_date=date(2026, 7, 24),
+        analyst="fundamentals",
+    )
+
+    assert len(items) == 2
+    by_scope = {
+        item.origins[0].temporal_scope: item
+        for item in items
+    }
+    assert (
+        by_scope[EvidenceTemporalScope.POINT_IN_TIME].content
+        == "DISCLOSURE-SAFE BODY"
+    )
+    live_item = by_scope[EvidenceTemporalScope.LIVE_ONLY]
+    assert live_item.content == "RETRIEVAL SNAPSHOT BODY"
+    assert live_item.quality is EvidenceQuality.LOW
+    assert live_item.origins[0].retrieved_at == "2026-07-24T12:00:00Z"
+
+
+def test_unavailable_live_span_keeps_audit_record_without_body() -> None:
+    content = attach_evidence_span(
+        attach_provenance(
+            "Vendor was not queried.",
+            _record(
+                "analyst consensus",
+                "yfinance",
+                effective="—",
+                timing=(
+                    "live-only; unavailable for historical or future date; "
+                    "vendor not queried"
+                ),
+            ),
+        ),
+        temporal_scope="live_only",
+    )
+
+    item = _collect_evidence(
+        [ToolMessage(content=content, tool_call_id="fixture")],
+        "Report.",
+        requested_date=date(2026, 7, 24),
+        analyst="fundamentals",
+    )[0]
+
+    assert item.content is None
+    assert item.quality is EvidenceQuality.UNAVAILABLE
+    assert item.origins[0].temporal_scope is EvidenceTemporalScope.LIVE_ONLY
+
+
+def test_unbounded_mixed_temporal_content_fails_closed() -> None:
+    content = attach_provenance(
+        "UNSEPARATED BODY",
+        _record("filing", "EDINET", timing="disclosure-date filtered"),
+        _record(
+            "analyst consensus",
+            "yfinance",
+            effective="retrieval-time snapshot",
+            timing="live non-point-in-time",
+        ),
+    )
+
+    item = _collect_evidence(
+        [ToolMessage(content=content, tool_call_id="fixture")],
+        "Report.",
+        requested_date=date(2026, 7, 24),
+        analyst="fundamentals",
+    )[0]
+
+    assert item.content is None
+    assert item.provenance["mixed_temporal_scope_unseparated"] is True
 
 
 def test_prompt_groups_exact_bodies_without_rewriting_refs() -> None:

@@ -11,6 +11,8 @@ from tradingagents.dataflows import market_signals
 @pytest.mark.unit
 def test_tokyo_registry_fetches_registered_signals():
     with mock.patch.object(
+        market_signals, "is_near_live", return_value=True
+    ), mock.patch.object(
         market_signals, "get_large_holdings", return_value="HOLDINGS"
     ) as holdings, mock.patch.object(
         market_signals, "get_margin_balance", return_value="MARGIN"
@@ -31,6 +33,26 @@ def test_tokyo_registry_fetches_registered_signals():
     margin.assert_called_once_with("9984.T", "2026-07-18")
     shorts.assert_called_once_with("9984.T", "2026-07-18")
     ratings.assert_called_once_with("9984.T", "2026-07-18")
+
+
+@pytest.mark.unit
+def test_historical_tokyo_registry_does_not_query_live_only_signal():
+    with mock.patch.object(
+        market_signals, "is_near_live", return_value=False
+    ), mock.patch.object(
+        market_signals, "get_analyst_ratings_block"
+    ) as ratings:
+        results = market_signals.fetch_sentiment_signals(
+            "9984.T",
+            "2020-01-15",
+        )
+
+    ratings.assert_not_called()
+    analyst = next(
+        result for result in results if result.spec.tag == "analyst_ratings"
+    )
+    assert "vendor not queried" in analyst.body
+    assert analyst.retrieved_at is None
 
 
 @pytest.mark.unit

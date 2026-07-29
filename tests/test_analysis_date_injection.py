@@ -36,6 +36,7 @@ from tradingagents.provenance import extract_provenance, strip_provenance_marker
 class _ToolState(TypedDict):
     messages: list
     trade_date: str
+    company_of_interest: str
 
 
 def _invoke_tool(tool, args, trade_date="2020-01-15", context=None):
@@ -50,6 +51,7 @@ def _invoke_tool(tool, args, trade_date="2020-01-15", context=None):
     return graph.invoke(
         {
             "trade_date": trade_date,
+            "company_of_interest": "NVDA",
             "messages": [
                 AIMessage(
                     content="",
@@ -261,8 +263,8 @@ def test_prediction_market_gate_skips_historical_vendor_call(monkeypatch):
     assert "LIVE_DATA_UNAVAILABLE" in historical["messages"][0].content
 
     monkeypatch.setattr(
-        "tradingagents.agents.utils.prediction_markets_tools.is_live",
-        lambda curr_date: True,
+        "tradingagents.agents.utils.prediction_markets_tools.is_near_live",
+        lambda curr_date, ticker: True,
     )
     live = _invoke_tool(
         get_prediction_markets_for_analysis,

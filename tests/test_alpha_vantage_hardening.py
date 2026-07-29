@@ -111,7 +111,7 @@ def test_historical_overview_does_not_query_current_snapshot(monkeypatch):
 
 @pytest.mark.unit
 def test_live_overview_labels_retrieval_time_and_non_point_in_time(monkeypatch):
-    monkeypatch.setattr(avf, "is_live", lambda curr_date: True)
+    monkeypatch.setattr(avf, "is_near_live", lambda curr_date, ticker: True)
     monkeypatch.setattr(avf, "_make_api_request", lambda fn, params: '{"PERatio":"30"}')
 
     out = avf.get_fundamentals("AAPL", curr_date="2026-07-17")

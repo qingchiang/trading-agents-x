@@ -75,7 +75,7 @@ export interface components {
       instrument: string;
       items: components["schemas"]["EvidenceItem"][];
       sealed_at?: string;
-      version?: string;
+      version?: "1" | "2";
     };
     EvidenceItem: {
       available_at?: string | null;
@@ -101,9 +101,11 @@ export interface components {
       requested?: string;
       retrieved_at?: string | null;
       source: string;
+      temporal_scope?: components["schemas"]["EvidenceTemporalScope"];
       timing?: string;
     };
     EvidenceQuality: "high" | "medium" | "low" | "unavailable";
+    EvidenceTemporalScope: "point_in_time" | "live_only" | "unknown";
     HTTPValidationError: {
       detail?: components["schemas"]["ValidationError"][];
     };

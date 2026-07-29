@@ -6,19 +6,31 @@ may enrich a live or near-live run, but must be omitted from older backtests.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
-# Within this many days of today (either side) counts as live/near-live.
+from .symbol_utils import market_today
+
+# Today and this many preceding market-local calendar dates are near-live.
 LIVE_SNAPSHOT_MAX_AGE_DAYS = 5
 
 
-def is_live(curr_date: str) -> bool:
-    """Return whether ``curr_date`` is close enough to today for live snapshots."""
+def is_near_live(
+    curr_date: str,
+    ticker: str | None,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    """Return whether a cutoff may safely use retrieval-time snapshots.
+
+    The comparison uses the instrument's market calendar date. Only today and
+    the preceding five dates qualify; future dates fail closed.
+    """
     try:
-        age = (datetime.now() - datetime.strptime(curr_date, "%Y-%m-%d")).days
+        requested = date.fromisoformat(curr_date)
     except (TypeError, ValueError):
         return False
-    return abs(age) <= LIVE_SNAPSHOT_MAX_AGE_DAYS
+    age = (market_today(ticker, now) - requested).days
+    return 0 <= age <= LIVE_SNAPSHOT_MAX_AGE_DAYS
 
 
 def lookback_start_date(curr_date: str, lookback_days: int) -> str:

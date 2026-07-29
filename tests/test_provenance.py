@@ -425,7 +425,9 @@ def test_historical_live_only_sentinel_keeps_not_queried_semantics():
 
     record = extract_provenance(marked)[0]
     assert record.effective == "—"
-    assert record.timing == "unavailable for historical date; vendor not queried"
+    assert record.timing == (
+        "live-only; unavailable for historical or future date; vendor not queried"
+    )
     assert record.retrieved_at is None
 
 

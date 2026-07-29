@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timezone
 
 from .alpha_vantage_common import _make_api_request
-from .lookahead import is_live
+from .lookahead import is_near_live
 
 
 def _filter_reports_by_date(result, curr_date: str):
@@ -40,7 +40,7 @@ def get_fundamentals(ticker: str, curr_date: str = None) -> str:
     Returns:
         str: Company overview data including financial ratios and key metrics
     """
-    if curr_date and not is_live(curr_date):
+    if curr_date and not is_near_live(curr_date, ticker):
         return (
             "LIVE_DATA_UNAVAILABLE: Alpha Vantage OVERVIEW is a current "
             "snapshot, not point-in-time historical data. "

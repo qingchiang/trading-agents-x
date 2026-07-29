@@ -471,7 +471,18 @@ def _provenance_for_route(
     lowered = result.casefold()
     if "live_data_unavailable" in lowered:
         effective = "—"
-        timing = "unavailable for historical date; vendor not queried"
+        timing = (
+            "live-only; unavailable for historical or future date; vendor not queried"
+            if vendor in {"yfinance", "alpha_vantage"}
+            and method
+            in {
+                "get_fundamentals",
+                "get_balance_sheet",
+                "get_cashflow",
+                "get_income_statement",
+            }
+            else "unavailable for historical date; vendor not queried"
+        )
         retrieved_at = None
     elif "data_unavailable" in lowered or "error fetching" in lowered or "error retrieving" in lowered:
         effective = "—"

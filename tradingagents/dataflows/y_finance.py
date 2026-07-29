@@ -4,7 +4,7 @@ from typing import Annotated
 import yfinance as yf
 from dateutil.relativedelta import relativedelta
 
-from .lookahead import is_live
+from .lookahead import is_near_live
 from .macro_common import SeriesCache
 from .stockstats_utils import (
     INDICATOR_DESCRIPTIONS,
@@ -184,7 +184,7 @@ def get_fundamentals(
 ):
     """Get a live company overview, refusing to inject it into old backtests."""
     canonical = normalize_symbol(ticker)
-    if curr_date is not None and not is_live(curr_date):
+    if curr_date is not None and not is_near_live(curr_date, canonical):
         return (
             f"LIVE_DATA_UNAVAILABLE: yfinance .info for {canonical} is a current "
             f"snapshot, not point-in-time historical data, and was not requested "
@@ -355,7 +355,11 @@ def _historical_tokyo_statement_unavailable(
     graph-facing tools inject the analysis date from workflow state.
     """
     canonical = normalize_symbol(ticker)
-    if curr_date is None or not canonical.endswith(".T") or is_live(curr_date):
+    if (
+        curr_date is None
+        or not canonical.endswith(".T")
+        or is_near_live(curr_date, canonical)
+    ):
         return None
     return (
         f"HISTORICAL_DATA_UNAVAILABLE: yfinance statements for {canonical} are "

@@ -49,7 +49,7 @@ from tradingagents.agents.utils.structured import (
     structured_prompt_for,
 )
 from tradingagents.dataflows.config import get_config
-from tradingagents.dataflows.lookahead import is_live, lookback_start_date
+from tradingagents.dataflows.lookahead import is_near_live, lookback_start_date
 from tradingagents.dataflows.market_context import market_suffix_of
 from tradingagents.dataflows.market_signals import (
     FetchedSentimentSignal,
@@ -88,7 +88,7 @@ def create_sentiment_analyst(llm):
             config["social_lookback_days"],
         )
         instrument_context = get_instrument_context_from_state(state)
-        live_run = is_live(end_date)
+        live_run = is_near_live(end_date, ticker)
         stocktwits_retrieved_at = None
         reddit_retrieved_at = None
         fetched_market_signals = ()
@@ -137,7 +137,8 @@ def create_sentiment_analyst(llm):
                 )
             else:
                 historical = (
-                    f"<live-only source unavailable for historical trade_date {end_date}>"
+                    "<live-only source unavailable for historical or future "
+                    f"trade_date {end_date}>"
                 )
                 stocktwits_block = historical
                 reddit_block = historical
@@ -217,7 +218,12 @@ def create_sentiment_analyst(llm):
             if market_suffix:
                 return "—", "unavailable: no coverage for this market", None
             if not live_run:
-                return "—", "unavailable for historical date; vendor not queried", None
+                return (
+                    "—",
+                    "live-only; unavailable for historical or future date; "
+                    "vendor not queried",
+                    None,
+                )
             lowered = body.casefold()
             if "unavailable" in lowered:
                 return "—", "retrieval unavailable", retrieved_at
@@ -256,14 +262,20 @@ def create_sentiment_analyst(llm):
             retrieved_at=reddit_retrieved,
         )
         prefetched_evidence = [
-            prefetched_evidence_block(news_block, news_records),
+            prefetched_evidence_block(
+                news_block,
+                news_records,
+                temporal_scope="point_in_time",
+            ),
             prefetched_evidence_block(
                 stocktwits_block,
                 (stocktwits_record,),
+                temporal_scope="live_only",
             ),
             prefetched_evidence_block(
                 reddit_block,
                 (reddit_record,),
+                temporal_scope="live_only",
             ),
         ]
         if fetched_market_signals:
@@ -284,7 +296,8 @@ def create_sentiment_analyst(llm):
                         record_effective = spec.effective(end_date)
                     elif spec.live_only:
                         record_timing = (
-                            "unavailable for historical date; vendor not queried"
+                            "live-only; unavailable for historical or future "
+                            "date; vendor not queried"
                             if not live_run
                             else "no analyst snapshot returned; retrieval success unknown"
                         )
@@ -303,7 +316,15 @@ def create_sentiment_analyst(llm):
                         )
                     ]
                 prefetched_evidence.append(
-                    prefetched_evidence_block(body, body_records)
+                    prefetched_evidence_block(
+                        body,
+                        body_records,
+                        temporal_scope=(
+                            "live_only"
+                            if spec.live_only
+                            else "point_in_time"
+                        ),
+                    )
                 )
 
         return {

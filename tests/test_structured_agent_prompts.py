@@ -46,7 +46,11 @@ def test_sentiment_prompt_states_no_external_tool_constraint(monkeypatch):
         lambda *args, **kwargs: "news",
         raising=False,
     )
-    monkeypatch.setattr(sentiment, "is_live", lambda _date: True)
+    monkeypatch.setattr(
+        sentiment,
+        "is_near_live",
+        lambda _date, _ticker: True,
+    )
     captured = {}
 
     sentiment.create_sentiment_analyst(_capturing_llm(captured))(

@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from ..lookahead import is_live
+from ..lookahead import is_near_live
 from ..y_finance import get_analyst_ratings
 from .jquants_common import parse_number as _num
 from .market import is_tokyo_ticker
@@ -33,14 +33,14 @@ def get_analyst_ratings_block(ticker: str, curr_date: str) -> str:
     """Return a live-only analyst-consensus rating block for a ``.T`` ticker, else "".
 
     Empty for non-Japanese tickers (yfinance-sourced but injected as a JP fill;
-    another market supplies its own) and empty in a backtest (``is_live`` gate:
-    ``.info`` is a live snapshot that would leak the future). Degrades to "" on
+    another market supplies its own) and empty outside the market-local near-live
+    gate (``.info`` is a live snapshot that would leak the future). Degrades to "" on
     any fetch error or when no rating/target is available — never raises (the
     sentiment prefetch contract).
     """
     if not is_tokyo_ticker(ticker):
         return ""
-    if not is_live(curr_date):
+    if not is_near_live(curr_date, ticker):
         return ""
     try:
         ratings = get_analyst_ratings(ticker)

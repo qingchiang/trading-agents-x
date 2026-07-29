@@ -143,6 +143,14 @@ class EvidenceQuality(str, Enum):
     UNAVAILABLE = "unavailable"
 
 
+class EvidenceTemporalScope(str, Enum):
+    """Whether source content is valid at the cutoff or only at retrieval time."""
+
+    POINT_IN_TIME = "point_in_time"
+    LIVE_ONLY = "live_only"
+    UNKNOWN = "unknown"
+
+
 class EvidenceOrigin(FrozenModel):
     """One source record contributing to an evidence payload."""
 
@@ -155,6 +163,7 @@ class EvidenceOrigin(FrozenModel):
     retrieved_at: str | None = None
     quality: EvidenceQuality = EvidenceQuality.MEDIUM
     fallback: bool = False
+    temporal_scope: EvidenceTemporalScope = EvidenceTemporalScope.UNKNOWN
 
 
 class EvidenceItem(FrozenModel):
@@ -229,7 +238,7 @@ class EvidenceItem(FrozenModel):
 class EvidenceBundle(FrozenModel):
     """Versioned evidence snapshot shared by every agent in one run."""
 
-    version: Literal["1"] = "1"
+    version: Literal["1", "2"] = "2"
     instrument: str
     analysis_date: date
     items: tuple[EvidenceItem, ...]
@@ -258,9 +267,11 @@ class EvidenceBundle(FrozenModel):
                     raise ValueError(
                         f"{item.ref} available_at is after the analysis cutoff"
                     )
-        serialized_items = [
-            item.model_dump(mode="json") for item in self.items
-        ]
+        serialized_items = [item.model_dump(mode="json") for item in self.items]
+        if self.version == "1":
+            for item in serialized_items:
+                for origin in item.get("origins", []):
+                    origin.pop("temporal_scope", None)
         canonical = json.dumps(
             serialized_items,
             ensure_ascii=False,

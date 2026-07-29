@@ -13,6 +13,7 @@ import json
 import re
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
+from typing import Literal
 
 from langchain_core.messages import BaseMessage, ToolMessage
 
@@ -23,6 +24,19 @@ _MARKER_RE = re.compile(
 )
 _APPENDIX_START = "<!-- tradingagents-data-provenance:start -->"
 _APPENDIX_END = "<!-- tradingagents-data-provenance:end -->"
+_SPAN_PREFIX = "tradingagents-evidence-span:v1"
+_SPAN_END = f"<!-- /{_SPAN_PREFIX} -->"
+_SPAN_RE = re.compile(
+    rf"<!--\s*{re.escape(_SPAN_PREFIX)}\s+(\{{.*?\}})\s*-->"
+    rf"(.*?)<!--\s*/{re.escape(_SPAN_PREFIX)}\s*-->",
+    re.DOTALL,
+)
+_SPAN_MARKER_RE = re.compile(
+    rf"<!--\s*/?{re.escape(_SPAN_PREFIX)}(?:\s+\{{.*?\}})?\s*-->",
+    re.DOTALL,
+)
+
+TemporalScopeName = Literal["point_in_time", "live_only", "unknown"]
 
 
 @dataclass(frozen=True)
@@ -45,6 +59,15 @@ class ProvenanceQualityIssue:
     source: str
     code: str
     reason: str
+
+
+@dataclass(frozen=True)
+class EvidenceSpan:
+    """One explicitly bounded body with a shared temporal contract."""
+
+    content: str | None
+    records: tuple[ProvenanceRecord, ...]
+    temporal_scope: TemporalScopeName
 
 
 def provenance_marker(record: ProvenanceRecord) -> str:
@@ -70,9 +93,129 @@ def attach_provenance(text: str, *records: ProvenanceRecord) -> str:
     return "\n".join([*markers, text]) if text else "\n".join(markers)
 
 
+def attach_evidence_span(
+    text: str,
+    *,
+    temporal_scope: TemporalScopeName,
+) -> str:
+    """Wrap one body so composite tool responses retain temporal boundaries."""
+    if temporal_scope not in {"point_in_time", "live_only", "unknown"}:
+        raise ValueError(f"unsupported temporal scope: {temporal_scope!r}")
+    payload = json.dumps(
+        {"temporal_scope": temporal_scope},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return f"<!-- {_SPAN_PREFIX} {payload} -->{text}{_SPAN_END}"
+
+
+def extract_evidence_spans(text: str) -> list[EvidenceSpan]:
+    """Split explicit live-only blocks from the remaining point-in-time body."""
+    if not isinstance(text, str):
+        return []
+    matches = list(_SPAN_RE.finditer(text))
+    if not matches:
+        return []
+
+    explicit: list[EvidenceSpan] = []
+    remainder_parts: list[str] = []
+    cursor = 0
+    for match in matches:
+        remainder_parts.append(text[cursor : match.start()])
+        cursor = match.end()
+        try:
+            scope = json.loads(match.group(1)).get("temporal_scope", "unknown")
+        except (AttributeError, json.JSONDecodeError):
+            scope = "unknown"
+        if scope not in {"point_in_time", "live_only", "unknown"}:
+            scope = "unknown"
+        raw_content = match.group(2).strip()
+        explicit.append(
+            EvidenceSpan(
+                content=strip_provenance_markers(raw_content).strip() or None,
+                records=tuple(extract_provenance(raw_content)),
+                temporal_scope=scope,
+            )
+        )
+    remainder_parts.append(text[cursor:])
+    remainder = "\n".join(
+        part.strip() for part in remainder_parts if part.strip()
+    )
+    remainder_records = tuple(extract_provenance(remainder))
+    remainder_content = strip_provenance_markers(remainder).strip() or None
+    if remainder_records or remainder_content:
+        explicit.insert(
+            0,
+            EvidenceSpan(
+                content=remainder_content,
+                records=remainder_records,
+                temporal_scope=temporal_scope_from_records(
+                    remainder_records
+                ),
+            ),
+        )
+    return explicit
+
+
+def temporal_scope_from_records(
+    records: Iterable[ProvenanceRecord],
+) -> TemporalScopeName:
+    """Infer a conservative scope for unwrapped legacy source metadata."""
+    scopes = {_temporal_scope_from_record(record) for record in records}
+    scopes.discard("unknown")
+    return scopes.pop() if len(scopes) == 1 else "unknown"
+
+
+def _temporal_scope_from_record(record: ProvenanceRecord) -> TemporalScopeName:
+    text = " ".join(
+        (
+            record.evidence,
+            record.source,
+            record.effective,
+            record.timing,
+        )
+    ).casefold()
+    if any(
+        token in text
+        for token in (
+            "live-only",
+            "live only",
+            "live non-point-in-time",
+            "live non point in time",
+            "current-only",
+            "current snapshot",
+            "retrieval-time snapshot",
+            "retrieval-time analyst",
+            "not historical pit",
+            "not point-in-time",
+            "non-point-in-time",
+        )
+    ):
+        return "live_only"
+    if any(
+        token in text
+        for token in (
+            "point-in-time",
+            "date filtered",
+            "date-filtered",
+            "market-date filtered",
+            "trade-date filtered",
+            "observation-date filtered",
+            "publication-date filtered",
+            "publication/update-date filtered",
+            "disclosure-date filtered",
+            "fiscal period ends",
+        )
+    ):
+        return "point_in_time"
+    return "unknown"
+
+
 def strip_provenance_markers(text: str) -> str:
     """Remove machine metadata while preserving the human-readable vendor body."""
-    return _MARKER_RE.sub("", text).lstrip("\n") if isinstance(text, str) else text
+    if not isinstance(text, str):
+        return text
+    return _SPAN_MARKER_RE.sub("", _MARKER_RE.sub("", text)).lstrip("\n")
 
 
 def extract_provenance(value: str | Iterable[BaseMessage]) -> list[ProvenanceRecord]:

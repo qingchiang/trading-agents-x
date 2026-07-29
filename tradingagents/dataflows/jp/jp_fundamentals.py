@@ -21,7 +21,7 @@ Basis conventions (labelled in the output so nothing is silently cross-compared)
 - Forward (PE/PEG) → the company's own guidance (会社予想, ``NxFEPS``), which is
   disclosed with the report and therefore date-safe, shown in every mode. The
   analyst-consensus forward (yfinance ``.info``, a live snapshot) is added as a
-  separate **live-only** line, gated by ``is_live`` so a backtest never sees it.
+  separate **live-only** line, gated by the market-local near-live boundary.
 - Beta → trailing 3-year WEEKLY regression of the stock's returns on TOPIX's
   (the cap-weighted market portfolio, per Japanese valuation practice), both
   J-Quants closes filtered to ``<= curr_date`` (date-safe).
@@ -35,9 +35,13 @@ from datetime import datetime, timezone
 import pandas as pd
 from dateutil.relativedelta import relativedelta
 
-from tradingagents.provenance import ProvenanceRecord, attach_provenance
+from tradingagents.provenance import (
+    ProvenanceRecord,
+    attach_evidence_span,
+    attach_provenance,
+)
 
-from ..lookahead import is_live
+from ..lookahead import is_near_live
 from ..y_finance import get_analyst_forward
 from . import jquants_fundamentals as jqf
 from .jquants_common import parse_number as _num
@@ -208,12 +212,12 @@ def _analyst_forward_line(
 ) -> str | None:
     """Live-only analyst-consensus forward line, or None in backtest / when absent.
 
-    Only rendered on a (near-)live run (``is_live``): yfinance's ``.info`` forward
+    Only rendered on a near-live run: yfinance's ``.info`` forward
     is a live snapshot that would leak the future in a backtest. Forward PE is
     computed from our own as-of price for single-price consistency; the note
     contrasts the company guidance vs the street to surface a divergence.
     """
-    if not is_live(curr_date):
+    if not is_near_live(curr_date, ticker):
         return None
     eps, n_analysts = get_analyst_forward(ticker)
     eps = _num(eps)
@@ -236,16 +240,19 @@ def _analyst_forward_line(
         f"{curr_date}, retrieved {retrieved}{count}, "
         f"not point-in-time historical data, EPS {_ratio(eps)}){note}"
     )
-    return attach_provenance(
-        line,
-        ProvenanceRecord(
-            evidence="get_fundamentals",
-            source="yfinance analyst consensus",
-            requested=curr_date,
-            effective="retrieval-time analyst snapshot",
-            timing="live non-point-in-time",
-            retrieved_at=retrieved,
+    return attach_evidence_span(
+        attach_provenance(
+            line,
+            ProvenanceRecord(
+                evidence="get_fundamentals",
+                source="yfinance analyst consensus",
+                requested=curr_date,
+                effective="retrieval-time analyst snapshot",
+                timing="live non-point-in-time",
+                retrieved_at=retrieved,
+            ),
         ),
+        temporal_scope="live_only",
     )
 
 
