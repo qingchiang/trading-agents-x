@@ -9,7 +9,8 @@ class _Service:
         self.repository = repository
         self.executed = []
 
-    def execute_claimed(self, run, *, worker_id):
+    def execute_claimed(self, run, *, worker_id, shutdown_requested):
+        assert shutdown_requested() is False
         self.executed.append((run.id, worker_id, run.status))
 
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import sys
 from datetime import date
 from enum import Enum
 from pathlib import Path
@@ -12,6 +14,7 @@ from typing import Annotated, Any
 import typer
 import uvicorn
 from rich.console import Console
+from rich.logging import RichHandler
 from rich.table import Table
 
 from tradingagents import AnalysisRequest, RunProfile, TradingAgents
@@ -24,7 +27,7 @@ from tradingagents.dataflows.symbol_utils import market_today
 from tradingagents.version import __version__
 from tradingagents.web import create_app
 
-from .supervisor import LocalProcessSupervisor
+from .supervisor import ColorMode, LocalProcessSupervisor
 
 PROJECT_DESCRIPTION = "Local evidence-first investment research platform"
 
@@ -166,6 +169,13 @@ def run_command(
 @app.command()
 def serve(
     log_level: Annotated[str, typer.Option("--log-level")] = "info",
+    use_colors: Annotated[
+        bool | None,
+        typer.Option(
+            "--use-colors/--no-use-colors",
+            hidden=True,
+        ),
+    ] = None,
 ) -> None:
     """Serve the Web run center using the configured loopback or LAN policy."""
     settings = _settings()
@@ -174,12 +184,20 @@ def serve(
         host=settings.host,
         port=settings.port,
         log_level=log_level,
+        use_colors=use_colors,
     )
 
 
 @app.command()
 def start(
     log_level: Annotated[str, typer.Option("--log-level")] = "info",
+    color: Annotated[
+        ColorMode,
+        typer.Option(
+            "--color",
+            help="Color policy for merged Web and worker output.",
+        ),
+    ] = ColorMode.AUTO,
     log_dir: Annotated[
         Path | None,
         typer.Option(
@@ -194,6 +212,7 @@ def start(
         _settings(),
         log_level=log_level,
         log_dir=log_dir,
+        color_mode=color,
     ).run()
     if code:
         raise typer.Exit(code=code)
@@ -206,12 +225,40 @@ def worker(
         typer.Option("--once", help="Process at most one queue item."),
     ] = False,
     log_level: Annotated[str, typer.Option("--log-level")] = "info",
+    use_colors: Annotated[
+        bool | None,
+        typer.Option(
+            "--use-colors/--no-use-colors",
+            hidden=True,
+        ),
+    ] = None,
 ) -> None:
     """Run the single-concurrency analysis and outcome-settlement worker."""
-    logging.basicConfig(
-        level=getattr(logging, log_level.upper(), logging.INFO),
-        format="%(levelname)s [%(name)s] %(message)s",
+    color_enabled = (
+        sys.stderr.isatty() and "NO_COLOR" not in os.environ
+        if use_colors is None
+        else use_colors
     )
+    if color_enabled:
+        logging.basicConfig(
+            level=getattr(logging, log_level.upper(), logging.INFO),
+            format="%(message)s",
+            handlers=[
+                RichHandler(
+                    console=Console(stderr=True, force_terminal=True),
+                    show_path=False,
+                    markup=False,
+                    rich_tracebacks=True,
+                )
+            ],
+            force=True,
+        )
+    else:
+        logging.basicConfig(
+            level=getattr(logging, log_level.upper(), logging.INFO),
+            format="%(levelname)s [%(name)s] %(message)s",
+            force=True,
+        )
     process = AnalysisWorker(_settings())
     if once:
         worked = process.run_once()

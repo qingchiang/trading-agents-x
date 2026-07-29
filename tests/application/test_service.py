@@ -24,7 +24,7 @@ from tradingagents.application.contracts import (
     RunStatus,
 )
 from tradingagents.application.repository import RunRepository
-from tradingagents.application.runtime import RunCancelled
+from tradingagents.application.runtime import RunCancelled, WorkerShutdown
 from tradingagents.application.service import AnalysisService
 from tradingagents.dataflows.config import get_config
 from tradingagents.graph.research_graph import GraphExecution
@@ -545,6 +545,36 @@ def test_cooperative_cancel_cleans_checkpoint(
     assert result.status is RunStatus.CANCELLED
     assert cleared == [repository.checkpoint_thread(queued.id)]
     assert repository.get_run(queued.id).status is RunStatus.CANCELLED
+
+
+def test_worker_shutdown_requeues_run_and_preserves_checkpoint(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(app_settings, repository)
+    _Graph.error = WorkerShutdown("fixture shutdown")
+    queued = service.enqueue(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+    claimed = repository.claim_run(queued.id, "worker", 30)
+    checkpoint = repository.checkpoint_thread(queued.id)
+
+    with pytest.raises(WorkerShutdown):
+        service.execute_claimed(
+            claimed,
+            worker_id="worker",
+            shutdown_requested=lambda: True,
+        )
+
+    released = repository.get_run(queued.id)
+    assert released.status is RunStatus.QUEUED
+    assert released.attempt == 1
+    assert repository.checkpoint_thread(queued.id) == checkpoint
+    assert repository.list_events(queued.id)[-1].event_type == "run.interrupted"
 
 
 def test_queued_cancel_is_terminal_and_emits_event(

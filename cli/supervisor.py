@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import logging
+import os
+import re
+import signal
 import subprocess
 import sys
 import threading
@@ -10,6 +13,7 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
+from enum import Enum
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, TextIO
@@ -17,10 +21,24 @@ from typing import Any, TextIO
 from tradingagents.application.settings import AppSettings
 
 STARTUP_TIMEOUT_SECONDS = 30.0
-SHUTDOWN_TIMEOUT_SECONDS = 10.0
+SHUTDOWN_TIMEOUT_SECONDS = 30.0
 PROCESS_POLL_SECONDS = 0.1
 LOG_MAX_BYTES = 10 * 1024 * 1024
 LOG_BACKUP_COUNT = 3
+INTERRUPTED_EXIT_CODE = 130
+
+_ANSI_ESCAPE_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+_PREFIX_COLORS = {
+    "web": "36",
+    "worker": "35",
+    "start": "33",
+}
+
+
+class ColorMode(str, Enum):
+    AUTO = "auto"
+    ALWAYS = "always"
+    NEVER = "never"
 
 
 class _ProcessLog:
@@ -48,7 +66,7 @@ class _ProcessLog:
             level=logging.INFO,
             pathname="",
             lineno=0,
-            msg=line.rstrip("\n"),
+            msg=_strip_ansi(line).rstrip("\n"),
             args=(),
             exc_info=None,
         )
@@ -72,6 +90,7 @@ class LocalProcessSupervisor:
         monotonic_clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
         output: Callable[[str], None] | None = None,
+        color_mode: ColorMode | str = ColorMode.AUTO,
         startup_timeout: float = STARTUP_TIMEOUT_SECONDS,
         shutdown_timeout: float = SHUTDOWN_TIMEOUT_SECONDS,
     ):
@@ -83,6 +102,8 @@ class LocalProcessSupervisor:
         self.monotonic_clock = monotonic_clock
         self.sleep = sleep
         self.output = output or _terminal_output
+        self.color_mode = ColorMode(color_mode)
+        self.use_colors = _resolve_colors(self.color_mode)
         self.startup_timeout = startup_timeout
         self.shutdown_timeout = shutdown_timeout
         self.processes: dict[str, Any] = {}
@@ -93,16 +114,35 @@ class LocalProcessSupervisor:
     def run(self) -> int:
         """Run until interrupted or either child exits unexpectedly."""
         exit_code = 0
+        shutdown_complete = False
         try:
             web = self._spawn(
                 "web",
-                ["serve", "--log-level", self.log_level],
+                [
+                    "serve",
+                    "--log-level",
+                    self.log_level,
+                    (
+                        "--use-colors"
+                        if self.use_colors
+                        else "--no-use-colors"
+                    ),
+                ],
             )
             if not self._wait_for_web(web):
                 return 1
             self._spawn(
                 "worker",
-                ["worker", "--log-level", self.log_level],
+                [
+                    "worker",
+                    "--log-level",
+                    self.log_level,
+                    (
+                        "--use-colors"
+                        if self.use_colors
+                        else "--no-use-colors"
+                    ),
+                ],
             )
             while True:
                 for name, process in tuple(self.processes.items()):
@@ -115,24 +155,35 @@ class LocalProcessSupervisor:
                         return code if code != 0 else 1
                 self.sleep(PROCESS_POLL_SECONDS)
         except KeyboardInterrupt:
-            self._emit("start", "Stopping web and worker.")
+            self._emit(
+                "start",
+                "Graceful shutdown requested; press Ctrl+C again to force stop.",
+            )
+            self._stop_children(interrupted=True)
+            shutdown_complete = True
+            exit_code = INTERRUPTED_EXIT_CODE
         except (OSError, RuntimeError) as exc:
             self._emit("start", f"Unable to run local services: {type(exc).__name__}.")
             exit_code = 1
         finally:
-            self._stop_children()
+            if not shutdown_complete:
+                self._stop_children()
             self._close_logs()
         return exit_code
 
     def _spawn(self, name: str, arguments: list[str]):
         command = [sys.executable, "-m", "cli.main", *arguments]
-        process = self.process_factory(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
+        process_kwargs: dict[str, Any] = {
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.STDOUT,
+            "text": True,
+            "bufsize": 1,
+        }
+        if os.name == "nt":
+            process_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            process_kwargs["start_new_session"] = True
+        process = self.process_factory(command, **process_kwargs)
         self.processes[name] = process
         if self.log_dir is not None:
             self.logs[name] = _ProcessLog(self.log_dir / f"{name}.log")
@@ -173,26 +224,43 @@ class LocalProcessSupervisor:
         stream.close()
 
     def _emit(self, name: str, line: str) -> None:
-        rendered = f"[{name}] {line}"
+        prefix = f"[{name}]"
+        if self.use_colors:
+            color = _PREFIX_COLORS.get(name, "37")
+            prefix = f"\x1b[{color}m{prefix}\x1b[0m"
+        rendered = f"{prefix} {line}"
         with self._output_lock:
             self.output(rendered)
             process_log = self.logs.get(name)
             if process_log is not None:
                 process_log.write(line)
 
-    def _stop_children(self) -> None:
+    def _stop_children(self, *, interrupted: bool = False) -> None:
         active = [
             process
             for process in self.processes.values()
             if process.poll() is None
         ]
         for process in active:
-            process.terminate()
+            if interrupted:
+                _interrupt_process_group(process)
+            else:
+                process.terminate()
         deadline = self.monotonic_clock() + self.shutdown_timeout
-        while active and self.monotonic_clock() < deadline:
-            active = [process for process in active if process.poll() is None]
-            if active:
-                self.sleep(PROCESS_POLL_SECONDS)
+        force_requested = False
+        try:
+            while active and self.monotonic_clock() < deadline:
+                active = [process for process in active if process.poll() is None]
+                if active:
+                    self.sleep(PROCESS_POLL_SECONDS)
+        except KeyboardInterrupt:
+            force_requested = True
+            self._emit("start", "Second interrupt received; forcing shutdown.")
+        if active and not force_requested:
+            self._emit(
+                "start",
+                "Graceful shutdown timed out after 30 seconds; forcing shutdown.",
+            )
         for process in active:
             process.kill()
         for reader in self.readers:
@@ -216,3 +284,25 @@ def _health_probe(port: int) -> bool:
 
 def _terminal_output(line: str) -> None:
     print(line, flush=True)
+
+
+def _resolve_colors(mode: ColorMode) -> bool:
+    if mode is ColorMode.NEVER or "NO_COLOR" in os.environ:
+        return False
+    if mode is ColorMode.ALWAYS:
+        return True
+    return bool(getattr(sys.stdout, "isatty", lambda: False)())
+
+
+def _strip_ansi(value: str) -> str:
+    return _ANSI_ESCAPE_RE.sub("", value)
+
+
+def _interrupt_process_group(process: Any) -> None:
+    if os.name == "nt":
+        process.send_signal(signal.CTRL_BREAK_EVENT)
+        return
+    try:
+        os.killpg(process.pid, signal.SIGINT)
+    except (AttributeError, ProcessLookupError):
+        process.send_signal(signal.SIGINT)

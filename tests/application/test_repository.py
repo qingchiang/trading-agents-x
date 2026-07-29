@@ -134,6 +134,36 @@ def test_retry_reuses_compatible_checkpoint_across_attempts(
         assert repository.checkpoint_thread(run.id) == initial_checkpoint
 
 
+def test_release_claim_requeues_same_attempt_and_checkpoint(
+    repository: RunRepository,
+    app_settings: AppSettings,
+) -> None:
+    queued, _ = _create(repository, app_settings)
+    checkpoint = repository.checkpoint_thread(queued.id)
+    repository.claim_run(queued.id, "worker-a", 30)
+
+    released = repository.release_claim(queued.id, "worker-a")
+
+    assert released.status is RunStatus.QUEUED
+    assert released.attempt == 1
+    assert repository.checkpoint_thread(queued.id) == checkpoint
+    reclaimed = repository.claim_next("worker-b", 30)
+    assert reclaimed is not None
+    assert reclaimed.id == queued.id
+    assert reclaimed.attempt == 1
+
+
+def test_release_claim_requires_current_lease_owner(
+    repository: RunRepository,
+    app_settings: AppSettings,
+) -> None:
+    queued, _ = _create(repository, app_settings)
+    repository.claim_run(queued.id, "worker-a", 30)
+
+    with pytest.raises(InvalidRunTransitionError):
+        repository.release_claim(queued.id, "worker-b")
+
+
 def test_events_are_monotonic_replayable_and_redacted(
     repository: RunRepository,
     app_settings: AppSettings,

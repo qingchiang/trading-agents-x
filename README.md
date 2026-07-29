@@ -82,9 +82,12 @@ tradingagents start
 ```
 
 The command keeps both child processes separate, prefixes their merged output
-with `[web]` and `[worker]`, and stops both on Ctrl+C. Use `--log-dir PATH` only
-when rotating on-disk logs are wanted. The underlying commands remain available
-for independent process management:
+with colored `[web]` and `[worker]` labels, and respects `NO_COLOR`. The first
+Ctrl+C requests a cooperative shutdown; press it again, or wait 30 seconds, to
+force remaining children to stop. An interrupted analysis is resumed from its
+checkpoint on the next worker. Use `--log-dir PATH` only when rotating on-disk
+logs are wanted. The underlying commands remain available for independent
+process management:
 
 ```bash
 tradingagents serve
@@ -226,7 +229,7 @@ The CLI is non-interactive and automation-friendly:
 
 ```text
 tradingagents run TICKER [options]
-tradingagents start [--log-dir PATH]
+tradingagents start [--color auto|always|never] [--log-dir PATH]
 tradingagents serve
 tradingagents worker [--once] [--log-level LEVEL]
 tradingagents runs list|show|cancel|retry

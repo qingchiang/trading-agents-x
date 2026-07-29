@@ -66,9 +66,11 @@ tradingagents start
 ```
 
 両方は独立した子プロセスのまま動作し、統合出力には `[web]` と
-`[worker]` の接頭辞が付きます。Ctrl+C で両方を停止します。ローテーション
-ログが必要な場合だけ `--log-dir PATH` を指定します。個別のプロセス管理が
-必要な場合は従来のコマンドも使用できます。
+`[worker]` の色付き接頭辞が付き、`NO_COLOR` も尊重します。最初の Ctrl+C
+は協調停止を要求し、もう一度押すか 30 秒経過すると残りの子プロセスを
+強制終了します。中断された分析は次回の worker が checkpoint から再開
+します。ローテーションログが必要な場合だけ `--log-dir PATH` を指定します。
+個別のプロセス管理が必要な場合は従来のコマンドも使用できます。
 
 ```bash
 tradingagents serve
@@ -190,7 +192,7 @@ CLI は非対話型です。
 
 ```text
 tradingagents run TICKER [options]
-tradingagents start [--log-dir PATH]
+tradingagents start [--color auto|always|never] [--log-dir PATH]
 tradingagents serve
 tradingagents worker [--once] [--log-level LEVEL]
 tradingagents runs list|show|cancel|retry

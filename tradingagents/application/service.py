@@ -37,7 +37,7 @@ from .exporting import render_run_export_markdown
 from .llms import create_run_llms
 from .metrics import MetricsCallback
 from .repository import RunRepository, RunView
-from .runtime import RunCancelled, RunContext
+from .runtime import RunCancelled, RunContext, WorkerShutdown
 from .settings import AppSettings, RunSettings
 
 logger = logging.getLogger(__name__)
@@ -138,6 +138,7 @@ class AnalysisService:
         *,
         worker_id: str,
         on_event: EventHandler | None = None,
+        shutdown_requested: Callable[[], bool] | None = None,
     ) -> AnalysisResult:
         if run.status is not RunStatus.RUNNING:
             raise ValueError(f"run {run.id} must be claimed before execution")
@@ -206,6 +207,7 @@ class AnalysisService:
                     cancel_requested=lambda: self.repository.cancel_requested(
                         run.id
                     ),
+                    shutdown_requested=shutdown_requested or (lambda: False),
                     artifact_writer=lambda artifact: self._persist_artifact(
                         run.id,
                         artifact,
@@ -284,6 +286,15 @@ class AnalysisService:
                     metrics=metrics.snapshot(),
                     warnings=("Run cancelled at a graph node boundary.",),
                 )
+            except WorkerShutdown:
+                self.repository.release_claim(run.id, worker_id)
+                self._emit(
+                    run.id,
+                    "run.interrupted",
+                    payload={"reason": "worker_shutdown"},
+                    on_event=on_event,
+                )
+                raise
             except Exception as exc:
                 self.repository.fail(run.id, exc)
                 self._emit(

@@ -23,6 +23,7 @@ class RunContext:
     memory: MemoryContext
     instrument_context: str
     cancel_requested: Callable[[], bool]
+    shutdown_requested: Callable[[], bool] = lambda: False
     artifact_writer: Callable[[ResearchArtifactDraft], None] = _discard_artifact
 
 
@@ -30,6 +31,12 @@ class RunCancelled(RuntimeError):
     """Raised at a node boundary after a cooperative cancellation request."""
 
 
+class WorkerShutdown(RuntimeError):
+    """Raised at a node boundary so a worker can preserve and release its run."""
+
+
 def check_cancelled(context: RunContext) -> None:
     if context.cancel_requested():
         raise RunCancelled(f"run {context.run_id} was cancelled")
+    if context.shutdown_requested():
+        raise WorkerShutdown(f"worker shutdown interrupted run {context.run_id}")

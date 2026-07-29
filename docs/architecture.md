@@ -124,7 +124,10 @@ The worker atomically claims one queued run and sets a lease. A process crash
 leaves the run recoverable after lease expiry. Heartbeats extend active leases.
 `tradingagents start` is a local foreground supervisor that health-gates and
 monitors the otherwise independent Web and worker processes; production-style
-and Docker deployments continue to manage those processes separately.
+and Docker deployments continue to manage those processes separately. Its
+merged output retains child colors and adds distinct service labels. The first
+interrupt requests cooperative shutdown and waits up to 30 seconds; a second
+interrupt forces termination.
 
 - `retry` is valid for a failed run, increments its attempt, and reuses the
   compatible checkpoint thread.
@@ -132,7 +135,10 @@ and Docker deployments continue to manage those processes separately.
   linked run with a new ID and fresh data/evidence snapshot.
 - a queued cancellation becomes terminal immediately;
 - a running cancellation is checked cooperatively at graph-node boundaries;
-- an in-flight provider call is not force-killed.
+- supervisor shutdown returns a running claim to the queue at the next node
+  boundary without changing its attempt or deleting its checkpoint;
+- an in-flight provider call is force-killed only after the supervisor grace
+  period, after which lease expiry provides crash recovery.
 
 Successful and cancelled runs delete their checkpoint thread. Failed runs keep
 it for retry or later trash cleanup.

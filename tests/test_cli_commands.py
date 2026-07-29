@@ -317,6 +317,7 @@ def test_serve_uses_the_validated_application_binding(
     assert calls["host"] == "127.0.0.1"
     assert calls["port"] == 8000
     assert calls["log_level"] == "warning"
+    assert calls["use_colors"] is None
 
 
 def test_start_supervises_web_and_worker(
@@ -353,6 +354,7 @@ def test_start_supervises_web_and_worker(
         "settings": cli_settings,
         "log_level": "warning",
         "log_dir": log_dir,
+        "color_mode": cli.ColorMode.AUTO,
     }
 
 

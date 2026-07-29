@@ -600,6 +600,30 @@ class RunRepository:
                 )
         return bool(changed)
 
+    def release_claim(self, run_id: str, worker_id: str) -> RunView:
+        """Return an interrupted run to the queue without changing its attempt."""
+        now = _utc_naive()
+        with self.sessions.begin() as session:
+            record = session.get(RunRecord, run_id)
+            if record is None:
+                raise RunNotFoundError(run_id)
+            if (
+                record.status != RunStatus.RUNNING.value
+                or record.lease_owner != worker_id
+            ):
+                raise InvalidRunTransitionError(
+                    f"run {run_id} is not claimed by {worker_id}"
+                )
+            record.status = RunStatus.QUEUED.value
+            record.lease_owner = None
+            record.lease_expires_at = None
+            record.updated_at = now
+            attempt = self._attempt(session, record)
+            attempt.status = RunStatus.QUEUED.value
+            attempt.lease_owner = None
+            attempt.lease_expires_at = None
+        return self.get_run(run_id)
+
     def request_cancel(self, run_id: str) -> RunView:
         now = _utc_naive()
         with self.sessions.begin() as session:

@@ -58,8 +58,10 @@ tradingagents start
 ```
 
 该命令仍将两者作为独立子进程运行，合并输出会带有 `[web]` 和 `[worker]`
-前缀，按 Ctrl+C 会同时停止。仅在需要轮转落盘日志时传入
-`--log-dir PATH`。需要交给其他进程管理器时，仍可分别启动：
+彩色前缀，并尊重 `NO_COLOR`。第一次按 Ctrl+C 会请求协作式停机；再次按下
+或等待 30 秒后会强制结束仍未退出的子进程。被中断的研究会由下次启动的
+worker 从 checkpoint 恢复。仅在需要轮转落盘日志时传入 `--log-dir PATH`。
+需要交给其他进程管理器时，仍可分别启动：
 
 ```bash
 tradingagents serve
@@ -176,7 +178,7 @@ CLI 现在是非交互式命令：
 
 ```text
 tradingagents run TICKER [options]
-tradingagents start [--log-dir PATH]
+tradingagents start [--color auto|always|never] [--log-dir PATH]
 tradingagents serve
 tradingagents worker [--once] [--log-level LEVEL]
 tradingagents runs list|show|cancel|retry

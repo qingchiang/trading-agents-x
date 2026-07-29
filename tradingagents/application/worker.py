@@ -15,6 +15,7 @@ from .maintenance import (
     TrashMaintenance,
 )
 from .outcomes import OutcomeSettlement
+from .runtime import WorkerShutdown
 from .service import AnalysisService
 from .settings import AppSettings
 
@@ -61,6 +62,12 @@ class AnalysisWorker:
             self.service.execute_claimed(
                 claimed,
                 worker_id=self.worker_id,
+                shutdown_requested=self.stop_event.is_set,
+            )
+        except WorkerShutdown:
+            logger.info(
+                "analysis run %s returned to queue during worker shutdown",
+                claimed.id,
             )
         except Exception:
             logger.exception("analysis run %s failed", claimed.id)
