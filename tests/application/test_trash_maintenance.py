@@ -30,26 +30,26 @@ from tradingagents.application.database import (
     RunEventRecord,
     RunRecord,
 )
-from tradingagents.application.maintenance import ArchiveMaintenance
+from tradingagents.application.maintenance import TrashMaintenance
 from tradingagents.application.repository import RunNotFoundError
 
 
-def _cancel_and_archive(repository, app_settings, ticker: str):
+def _cancel_and_trash(repository, app_settings, ticker: str):
     request = AnalysisRequest(ticker=ticker, analysis_date="2026-07-24")
     run, _ = repository.create_run(
         request,
         app_settings.resolve_run(request).snapshot(),
     )
     repository.request_cancel(run.id)
-    repository.archive_runs((run.id,))
+    repository.trash_runs((run.id,))
     return run
 
 
-def _set_archived_at(repository, run_id: str, value: datetime) -> None:
+def _set_trashed_at(repository, run_id: str, value: datetime) -> None:
     with repository.sessions.begin() as session:
         record = session.get(RunRecord, run_id)
         assert record is not None
-        record.archived_at = value.replace(tzinfo=None)
+        record.trashed_at = value.replace(tzinfo=None)
 
 
 def _insert_checkpoint(app_settings, thread_id: str) -> None:
@@ -75,7 +75,7 @@ def _insert_checkpoint(app_settings, thread_id: str) -> None:
         saver.conn.commit()
 
 
-def _complete_archived_run(repository, app_settings):
+def _complete_trashed_run(repository, app_settings):
     request = AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
     run, _ = repository.create_run(
         request,
@@ -146,16 +146,16 @@ def _complete_archived_run(repository, app_settings):
         reflection="Fixture reflection.",
     )
     repository.append_event(run.id, "fixture.completed")
-    repository.archive_runs((run.id,))
+    repository.trash_runs((run.id,))
     return run
 
 
-def test_archive_maintenance_purges_owned_data_and_preserves_audit_links(
+def test_trash_maintenance_purges_owned_data_and_preserves_audit_links(
     repository,
     app_settings,
 ) -> None:
     now = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
-    run = _complete_archived_run(repository, app_settings)
+    run = _complete_trashed_run(repository, app_settings)
     child_request = AnalysisRequest(
         ticker="NVDA",
         analysis_date="2026-07-25",
@@ -167,7 +167,7 @@ def test_archive_maintenance_purges_owned_data_and_preserves_audit_links(
     )
     checkpoint_thread = repository.checkpoint_thread(run.id)
     _insert_checkpoint(app_settings, checkpoint_thread)
-    _set_archived_at(repository, run.id, now - timedelta(days=31))
+    _set_trashed_at(repository, run.id, now - timedelta(days=31))
     with repository.sessions.begin() as session:
         session.add(
             LegacyImportRecord(
@@ -179,7 +179,7 @@ def test_archive_maintenance_purges_owned_data_and_preserves_audit_links(
             )
         )
 
-    purged = ArchiveMaintenance(
+    purged = TrashMaintenance(
         app_settings,
         repository,
         utc_clock=lambda: now,
@@ -233,24 +233,24 @@ def test_archive_maintenance_purges_owned_data_and_preserves_audit_links(
         )
 
 
-def test_archive_maintenance_honors_cutoff_restore_and_disabled_retention(
+def test_trash_maintenance_honors_cutoff_restore_and_disabled_retention(
     repository,
     app_settings,
 ) -> None:
     now = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
-    boundary = _cancel_and_archive(repository, app_settings, "NVDA")
-    newer = _cancel_and_archive(repository, app_settings, "AAPL")
-    restored = _cancel_and_archive(repository, app_settings, "MSFT")
-    _set_archived_at(repository, boundary.id, now - timedelta(days=30))
-    _set_archived_at(
+    boundary = _cancel_and_trash(repository, app_settings, "NVDA")
+    newer = _cancel_and_trash(repository, app_settings, "AAPL")
+    restored = _cancel_and_trash(repository, app_settings, "MSFT")
+    _set_trashed_at(repository, boundary.id, now - timedelta(days=30))
+    _set_trashed_at(
         repository,
         newer.id,
         now - timedelta(days=30) + timedelta(microseconds=1),
     )
-    _set_archived_at(repository, restored.id, now - timedelta(days=31))
+    _set_trashed_at(repository, restored.id, now - timedelta(days=31))
     repository.restore_runs((restored.id,))
 
-    purged = ArchiveMaintenance(
+    purged = TrashMaintenance(
         app_settings,
         repository,
         utc_clock=lambda: now,
@@ -259,22 +259,22 @@ def test_archive_maintenance_honors_cutoff_restore_and_disabled_retention(
     assert purged == 1
     with pytest.raises(RunNotFoundError):
         repository.get_run(boundary.id)
-    assert repository.get_run(newer.id).archived_at is not None
-    assert repository.get_run(restored.id).archived_at is None
+    assert repository.get_run(newer.id).trashed_at is not None
+    assert repository.get_run(restored.id).trashed_at is None
 
     disabled = app_settings.model_copy(
-        update={"archive_retention_days": 0}
+        update={"trash_retention_days": 0}
     )
-    _set_archived_at(repository, newer.id, now - timedelta(days=90))
+    _set_trashed_at(repository, newer.id, now - timedelta(days=90))
     assert (
-        ArchiveMaintenance(
+        TrashMaintenance(
             disabled,
             repository,
             utc_clock=lambda: now,
         ).run_once()
         == 0
     )
-    assert repository.get_run(newer.id).archived_at is not None
+    assert repository.get_run(newer.id).trashed_at is not None
 
 
 def test_checkpoint_delete_failure_rolls_back_application_deletion(
@@ -282,10 +282,10 @@ def test_checkpoint_delete_failure_rolls_back_application_deletion(
     app_settings,
 ) -> None:
     now = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
-    run = _cancel_and_archive(repository, app_settings, "NVDA")
+    run = _cancel_and_trash(repository, app_settings, "NVDA")
     checkpoint_thread = repository.checkpoint_thread(run.id)
     _insert_checkpoint(app_settings, checkpoint_thread)
-    _set_archived_at(repository, run.id, now - timedelta(days=31))
+    _set_trashed_at(repository, run.id, now - timedelta(days=31))
     with repository.engine.begin() as connection:
         connection.exec_driver_sql(
             """
@@ -298,13 +298,13 @@ def test_checkpoint_delete_failure_rolls_back_application_deletion(
         )
 
     with pytest.raises(Exception, match="fixture checkpoint failure"):
-        ArchiveMaintenance(
+        TrashMaintenance(
             app_settings,
             repository,
             utc_clock=lambda: now,
         ).run_once()
 
-    assert repository.get_run(run.id).archived_at is not None
+    assert repository.get_run(run.id).trashed_at is not None
     with repository.engine.begin() as connection:
         assert (
             connection.exec_driver_sql(
@@ -316,16 +316,16 @@ def test_checkpoint_delete_failure_rolls_back_application_deletion(
         connection.exec_driver_sql("DROP TRIGGER block_checkpoint_purge")
 
 
-def test_concurrent_archive_maintenance_is_idempotent(
+def test_concurrent_trash_maintenance_is_idempotent(
     repository,
     app_settings,
 ) -> None:
     now = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
-    run = _cancel_and_archive(repository, app_settings, "NVDA")
-    _set_archived_at(repository, run.id, now - timedelta(days=31))
+    run = _cancel_and_trash(repository, app_settings, "NVDA")
+    _set_trashed_at(repository, run.id, now - timedelta(days=31))
 
     def purge() -> int:
-        return ArchiveMaintenance(
+        return TrashMaintenance(
             app_settings,
             repository,
             utc_clock=lambda: now,

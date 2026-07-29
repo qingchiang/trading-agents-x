@@ -32,11 +32,11 @@ from .contracts import (
     ResearchArtifactDraft,
     ResearchDecision,
     ResearchWarning,
-    RunArchiveState,
     RunEvent,
     RunMetrics,
     RunPage,
     RunStatus,
+    RunTrashState,
     RunView,
 )
 from .database import (
@@ -223,7 +223,7 @@ class RunRepository:
     def list_runs(
         self,
         *,
-        archive_state: RunArchiveState = RunArchiveState.ACTIVE,
+        trash_state: RunTrashState = RunTrashState.ACTIVE,
         status: RunStatus | None = None,
         q: str | None = None,
         limit: int = 50,
@@ -232,10 +232,10 @@ class RunRepository:
         limit = min(max(1, limit), 200)
         offset = max(0, offset)
         filters = []
-        if archive_state is RunArchiveState.ACTIVE:
-            filters.append(RunRecord.archived_at.is_(None))
-        elif archive_state is RunArchiveState.ARCHIVED:
-            filters.append(RunRecord.archived_at.is_not(None))
+        if trash_state is RunTrashState.ACTIVE:
+            filters.append(RunRecord.trashed_at.is_(None))
+        elif trash_state is RunTrashState.TRASHED:
+            filters.append(RunRecord.trashed_at.is_not(None))
         if status is not None:
             filters.append(RunRecord.status == status.value)
         if q and (query := q.strip().casefold()):
@@ -283,11 +283,11 @@ class RunRepository:
                 offset=offset,
             )
 
-    def archive_runs(
+    def trash_runs(
         self,
         run_ids: tuple[str, ...],
     ) -> tuple[tuple[RunView, ...], int]:
-        """Atomically archive terminal runs after validating the full batch."""
+        """Atomically trash terminal runs after validating the full batch."""
         now = _utc_naive()
         with self.sessions.begin() as session:
             records = {
@@ -302,19 +302,19 @@ class RunRepository:
             invalid = [
                 record.id
                 for record in records.values()
-                if record.archived_at is None
+                if record.trashed_at is None
                 and record.status not in _TERMINAL_STATUSES
             ]
             if invalid:
                 raise InvalidRunTransitionError(
-                    "only terminal runs can be archived: "
+                    "only terminal runs can be trashed: "
                     + ", ".join(invalid)
                 )
             changed = 0
             for run_id in run_ids:
                 record = records[run_id]
-                if record.archived_at is None:
-                    record.archived_at = now
+                if record.trashed_at is None:
+                    record.trashed_at = now
                     record.updated_at = now
                     changed += 1
             session.flush()
@@ -325,7 +325,7 @@ class RunRepository:
         self,
         run_ids: tuple[str, ...],
     ) -> tuple[tuple[RunView, ...], int]:
-        """Atomically restore archived runs; repeated requests are idempotent."""
+        """Atomically restore trashed runs; repeated requests are idempotent."""
         now = _utc_naive()
         with self.sessions.begin() as session:
             records = {
@@ -340,8 +340,8 @@ class RunRepository:
             changed = 0
             for run_id in run_ids:
                 record = records[run_id]
-                if record.archived_at is not None:
-                    record.archived_at = None
+                if record.trashed_at is not None:
+                    record.trashed_at = None
                     record.updated_at = now
                     changed += 1
             session.flush()
@@ -370,7 +370,7 @@ class RunRepository:
         return self.get_run(run_id)
 
     def recent_instruments(self, *, limit: int = 20) -> tuple[RecentInstrument, ...]:
-        """Return the latest non-archived use of each canonical ticker."""
+        """Return the latest non-trashed use of each canonical ticker."""
         limit = min(max(1, limit), 100)
         ticker = func.json_extract(
             RunRecord.request_json,
@@ -392,7 +392,7 @@ class RunRepository:
                 .label("ticker_rank"),
             )
             .where(
-                RunRecord.archived_at.is_(None),
+                RunRecord.trashed_at.is_(None),
                 ticker.is_not(None),
             )
             .subquery()
@@ -417,13 +417,13 @@ class RunRepository:
                 for row in connection.execute(stmt)
             )
 
-    def purge_expired_archives(
+    def purge_expired_trash(
         self,
         *,
         cutoff: datetime,
         batch_size: int = 50,
     ) -> int:
-        """Permanently remove one bounded batch of expired archived runs.
+        """Permanently remove one bounded batch of expired trashed runs.
 
         Checkpoint rows and application-owned rows are deleted in the same
         SQLite write transaction. A checkpoint failure therefore preserves the
@@ -439,10 +439,10 @@ class RunRepository:
                     connection.scalars(
                         select(RunRecord.id)
                         .where(
-                            RunRecord.archived_at.is_not(None),
-                            RunRecord.archived_at <= cutoff,
+                            RunRecord.trashed_at.is_not(None),
+                            RunRecord.trashed_at <= cutoff,
                         )
-                        .order_by(RunRecord.archived_at, RunRecord.id)
+                        .order_by(RunRecord.trashed_at, RunRecord.id)
                         .limit(batch_size)
                     )
                 )
@@ -470,8 +470,8 @@ class RunRepository:
                 deleted = connection.execute(
                     delete(RunRecord).where(
                         RunRecord.id.in_(run_ids),
-                        RunRecord.archived_at.is_not(None),
-                        RunRecord.archived_at <= cutoff,
+                        RunRecord.trashed_at.is_not(None),
+                        RunRecord.trashed_at <= cutoff,
                     )
                 ).rowcount
                 connection.commit()
@@ -493,7 +493,7 @@ class RunRepository:
                     RunRecord.current_attempt,
                 )
                 .where(
-                    RunRecord.archived_at.is_(None),
+                    RunRecord.trashed_at.is_(None),
                     or_(
                         RunRecord.status == RunStatus.QUEUED.value,
                         and_(
@@ -550,9 +550,9 @@ class RunRepository:
             record = session.get(RunRecord, run_id)
             if record is None:
                 raise RunNotFoundError(run_id)
-            if record.archived_at is not None:
+            if record.trashed_at is not None:
                 raise InvalidRunTransitionError(
-                    f"run {run_id} is archived"
+                    f"run {run_id} is trashed"
                 )
             if record.status != RunStatus.QUEUED.value:
                 raise InvalidRunTransitionError(
@@ -606,9 +606,9 @@ class RunRepository:
             record = session.get(RunRecord, run_id)
             if record is None:
                 raise RunNotFoundError(run_id)
-            if record.archived_at is not None:
+            if record.trashed_at is not None:
                 raise InvalidRunTransitionError(
-                    f"run {run_id} is archived"
+                    f"run {run_id} is trashed"
                 )
             if record.status == RunStatus.QUEUED.value:
                 record.status = RunStatus.CANCELLED.value
@@ -643,9 +643,9 @@ class RunRepository:
             record = session.get(RunRecord, run_id)
             if record is None:
                 raise RunNotFoundError(run_id)
-            if record.archived_at is not None:
+            if record.trashed_at is not None:
                 raise InvalidRunTransitionError(
-                    f"run {run_id} is archived"
+                    f"run {run_id} is trashed"
                 )
             if record.status != RunStatus.FAILED.value:
                 raise InvalidRunTransitionError(
@@ -1135,7 +1135,7 @@ class RunRepository:
             .join(RunRecord, RunRecord.id == DecisionRecord.run_id)
             .where(
                 OutcomeRecord.status == "pending",
-                RunRecord.archived_at.is_(None),
+                RunRecord.trashed_at.is_(None),
                 OutcomeRecord.next_check_at.is_not(None),
                 OutcomeRecord.next_check_at <= due,
             )
@@ -1200,7 +1200,7 @@ class RunRepository:
                 .join(RunRecord, RunRecord.id == DecisionRecord.run_id)
                 .where(
                     OutcomeRecord.id == outcome_id,
-                    RunRecord.archived_at.is_(None),
+                    RunRecord.trashed_at.is_(None),
                 )
             )
             if outcome is None or outcome.status != "pending":
@@ -1244,7 +1244,7 @@ class RunRepository:
             )
             .join(RunRecord, RunRecord.id == DecisionRecord.run_id)
             .where(
-                RunRecord.archived_at.is_(None),
+                RunRecord.trashed_at.is_(None),
                 OutcomeRecord.status == "resolved",
                 OutcomeRecord.holding_intervals >= 5,
                 OutcomeRecord.raw_return.is_not(None),
@@ -1346,7 +1346,7 @@ class RunRepository:
                 DecisionRecord.created_at.desc(),
                 DecisionRecord.id.desc(),
             )
-            .where(RunRecord.archived_at.is_(None))
+            .where(RunRecord.trashed_at.is_(None))
             .limit(min(max(1, limit), 500))
         )
         if ticker and (ticker_query := ticker.strip().casefold()):
@@ -1661,6 +1661,6 @@ class RunRepository:
             created_at=_aware(record.created_at),
             started_at=_aware(record.started_at),
             finished_at=_aware(record.finished_at),
-            archived_at=_aware(record.archived_at),
+            trashed_at=_aware(record.trashed_at),
             updated_at=_aware(record.updated_at),
         )

@@ -70,15 +70,15 @@ async def test_run_lifecycle_routes_and_filters(
     detail = await web_client.get(f"/api/v1/runs/{run_id}")
     queued = await web_client.get("/api/v1/runs?status=queued")
     cancelled = await web_client.post(f"/api/v1/runs/{run_id}/cancel")
-    archived = await web_client.post(
-        "/api/v1/runs/archive",
+    trashed = await web_client.post(
+        "/api/v1/runs/trash",
         json={"run_ids": [run_id]},
     )
-    archived_page = await web_client.get(
-        "/api/v1/runs?archive_state=archived&q=nv"
+    trashed_page = await web_client.get(
+        "/api/v1/runs?trash_state=trashed&q=nv"
     )
-    archived_detail = await web_client.get(f"/api/v1/runs/{run_id}")
-    archived_export = await web_client.get(
+    trashed_detail = await web_client.get(f"/api/v1/runs/{run_id}")
+    trashed_export = await web_client.get(
         f"/api/v1/runs/{run_id}/export?format=json"
     )
     restored = await web_client.post(
@@ -95,19 +95,19 @@ async def test_run_lifecycle_routes_and_filters(
     assert [run["id"] for run in queued.json()["items"]] == [run_id]
     assert queued.json()["total"] == 1
     assert cancelled.json()["status"] == "cancelled"
-    assert archived.json()["changed"] == 1
-    assert archived.json()["runs"][0]["archived_at"] is not None
-    assert archived_page.json()["items"][0]["id"] == run_id
-    assert archived_detail.json()["run"]["archived_at"] is not None
-    assert archived_export.status_code == 200
+    assert trashed.json()["changed"] == 1
+    assert trashed.json()["runs"][0]["trashed_at"] is not None
+    assert trashed_page.json()["items"][0]["id"] == run_id
+    assert trashed_detail.json()["run"]["trashed_at"] is not None
+    assert trashed_export.status_code == 200
     assert restored.json()["changed"] == 1
-    assert restored.json()["runs"][0]["archived_at"] is None
+    assert restored.json()["runs"][0]["trashed_at"] is None
     assert templated.status_code == 202
     assert templated.json()["source_run_id"] == run_id
 
 
 @pytest.mark.anyio
-async def test_archive_batch_validation_is_atomic_and_idempotent(
+async def test_trash_batch_validation_is_atomic_and_idempotent(
     web_client: httpx.AsyncClient,
 ) -> None:
     terminal = (
@@ -119,20 +119,20 @@ async def test_archive_batch_validation_is_atomic_and_idempotent(
     await web_client.post(f"/api/v1/runs/{terminal['id']}/cancel")
 
     invalid = await web_client.post(
-        "/api/v1/runs/archive",
+        "/api/v1/runs/trash",
         json={"run_ids": [terminal["id"], queued["id"]]},
     )
-    active = await web_client.get("/api/v1/runs?archive_state=active")
-    archived = await web_client.post(
-        "/api/v1/runs/archive",
+    active = await web_client.get("/api/v1/runs?trash_state=active")
+    trashed = await web_client.post(
+        "/api/v1/runs/trash",
         json={"run_ids": [terminal["id"]]},
     )
     repeated = await web_client.post(
-        "/api/v1/runs/archive",
+        "/api/v1/runs/trash",
         json={"run_ids": [terminal["id"]]},
     )
     duplicate_ids = await web_client.post(
-        "/api/v1/runs/archive",
+        "/api/v1/runs/trash",
         json={"run_ids": [terminal["id"], terminal["id"]]},
     )
 
@@ -141,7 +141,7 @@ async def test_archive_batch_validation_is_atomic_and_idempotent(
         terminal["id"],
         queued["id"],
     }
-    assert archived.json()["changed"] == 1
+    assert trashed.json()["changed"] == 1
     assert repeated.json()["changed"] == 0
     assert duplicate_ids.status_code == 422
 
@@ -241,22 +241,22 @@ async def test_openapi_contains_versioned_run_center_contract(
 
 
 @pytest.mark.anyio
-async def test_recent_instruments_exclude_archived_runs_and_include_names(
+async def test_recent_instruments_exclude_trashed_runs_and_include_names(
     web_client: httpx.AsyncClient,
     web_repository,
 ) -> None:
     active = (
         await web_client.post("/api/v1/runs", json=_payload("NVDA"))
     ).json()
-    archived = (
+    trashed = (
         await web_client.post("/api/v1/runs", json=_payload("AAPL"))
     ).json()
     web_repository.set_instrument_name(active["id"], "NVIDIA")
-    web_repository.set_instrument_name(archived["id"], "Apple")
-    await web_client.post(f"/api/v1/runs/{archived['id']}/cancel")
+    web_repository.set_instrument_name(trashed["id"], "Apple")
+    await web_client.post(f"/api/v1/runs/{trashed['id']}/cancel")
     await web_client.post(
-        "/api/v1/runs/archive",
-        json={"run_ids": [archived["id"]]},
+        "/api/v1/runs/trash",
+        json={"run_ids": [trashed["id"]]},
     )
 
     response = await web_client.get(
@@ -451,7 +451,7 @@ async def test_capabilities_expose_effective_non_sensitive_run_defaults(
     assert payload["providers"]["openai"]["configured"] is True
     assert payload["providers"]["openai"]["selectable"] is True
     assert "quick_models" not in payload["providers"]["openai"]
-    assert payload["defaults"]["archive_retention_days"] == 30
+    assert payload["defaults"]["trash_retention_days"] == 30
 
 
 @pytest.mark.anyio

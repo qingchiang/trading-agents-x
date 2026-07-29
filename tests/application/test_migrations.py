@@ -44,7 +44,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     finally:
         engine.dispose()
 
-    assert revision == "0002_outcome_schedule"
+    assert revision == "0003_trash_lifecycle"
     assert {
         "id",
         "run_id",
@@ -66,8 +66,8 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
         "round",
         "content_hash",
     ) in artifact_uniques
-    assert "archived_at" in run_columns
-    assert "ix_runs_archive" in run_indexes
+    assert "trashed_at" in run_columns
+    assert "ix_runs_trash" in run_indexes
     assert "next_check_at" in outcome_columns
     assert "ix_outcomes_due" in outcome_indexes
 
@@ -143,3 +143,55 @@ def test_outcome_schedule_migration_backfills_existing_pending_rows(
         engine.dispose()
 
     assert datetime.fromisoformat(str(due)) == datetime(2026, 8, 4, 15)
+
+
+def test_trash_lifecycle_migration_preserves_existing_soft_deleted_runs(
+    app_settings,
+) -> None:
+    upgrade_database(app_settings, "0002_outcome_schedule")
+    engine = create_sqlite_engine(
+        app_settings.database_path,
+        busy_timeout_ms=app_settings.busy_timeout_ms,
+    )
+    trashed_at = datetime(2026, 7, 1, 12)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO runs (
+                        id, status, request_json, config_json, version,
+                        current_attempt, cancel_requested, metrics_json,
+                        created_at, archived_at, updated_at
+                    ) VALUES (
+                        'run-trashed', 'cancelled', '{}', '{}', 'test',
+                        1, 0, '{}', :created_at, :archived_at, :updated_at
+                    )
+                    """
+                ),
+                {
+                    "created_at": datetime(2026, 6, 1),
+                    "archived_at": trashed_at,
+                    "updated_at": trashed_at,
+                },
+            )
+    finally:
+        engine.dispose()
+
+    upgrade_database(app_settings)
+
+    engine = create_sqlite_engine(
+        app_settings.database_path,
+        busy_timeout_ms=app_settings.busy_timeout_ms,
+    )
+    try:
+        with engine.connect() as connection:
+            value = connection.scalar(
+                text(
+                    "SELECT trashed_at FROM runs WHERE id = 'run-trashed'"
+                )
+            )
+    finally:
+        engine.dispose()
+
+    assert datetime.fromisoformat(str(value)) == trashed_at

@@ -20,11 +20,11 @@ from tradingagents.application.contracts import (
     ResearchArtifactDraft,
     ResearchDecision,
     ResearchRating,
-    RunArchiveState,
     RunStatus,
+    RunTrashState,
 )
 from tradingagents.application.database import RunAttemptRecord, RunRecord
-from tradingagents.application.maintenance import ArchiveMaintenance
+from tradingagents.application.maintenance import TrashMaintenance
 from tradingagents.application.repository import (
     IdempotencyConflictError,
     InvalidRunTransitionError,
@@ -156,7 +156,7 @@ def test_events_are_monotonic_replayable_and_redacted(
     assert "private" not in stored["message"]
 
 
-def test_archive_restore_filters_are_atomic_and_idempotent(
+def test_trash_restore_filters_are_atomic_and_idempotent(
     repository: RunRepository,
     app_settings: AppSettings,
 ) -> None:
@@ -168,25 +168,25 @@ def test_archive_restore_filters_are_atomic_and_idempotent(
         InvalidRunTransitionError,
         match="only terminal runs",
     ):
-        repository.archive_runs((terminal.id, queued.id))
+        repository.trash_runs((terminal.id, queued.id))
 
-    assert repository.get_run(terminal.id).archived_at is None
-    archived, changed = repository.archive_runs((terminal.id,))
-    repeated, changed_again = repository.archive_runs((terminal.id,))
+    assert repository.get_run(terminal.id).trashed_at is None
+    trashed, changed = repository.trash_runs((terminal.id,))
+    repeated, changed_again = repository.trash_runs((terminal.id,))
 
     assert changed == 1
     assert changed_again == 0
-    assert archived[0].archived_at is not None
-    assert repeated[0].archived_at == archived[0].archived_at
+    assert trashed[0].trashed_at is not None
+    assert repeated[0].trashed_at == trashed[0].trashed_at
     assert repository.list_runs().items == (repository.get_run(queued.id),)
-    archived_page = repository.list_runs(
-        archive_state=RunArchiveState.ARCHIVED,
+    trashed_page = repository.list_runs(
+        trash_state=RunTrashState.TRASHED,
         q="nv",
     )
-    assert archived_page.total == 1
-    assert archived_page.items[0].id == terminal.id
+    assert trashed_page.total == 1
+    assert trashed_page.items[0].id == terminal.id
     all_page = repository.list_runs(
-        archive_state=RunArchiveState.ALL,
+        trash_state=RunTrashState.ALL,
         limit=1,
         offset=1,
     )
@@ -198,26 +198,26 @@ def test_archive_restore_filters_are_atomic_and_idempotent(
 
     assert restored_changed == 1
     assert restored_again == 0
-    assert restored[0].archived_at is None
+    assert restored[0].trashed_at is None
     assert repository.list_runs().total == 2
 
 
-def test_recent_instruments_are_deduplicated_and_exclude_archives(
+def test_recent_instruments_are_deduplicated_and_exclude_trashed_runs(
     repository: RunRepository,
     app_settings: AppSettings,
 ) -> None:
     older, _ = _create(repository, app_settings, "NVDA")
-    archived, _ = _create(repository, app_settings, "AAPL")
+    trashed, _ = _create(repository, app_settings, "AAPL")
     latest, _ = _create(repository, app_settings, "NVDA")
     repository.set_instrument_name(older.id, "NVIDIA Corporation")
-    repository.set_instrument_name(archived.id, "Apple")
+    repository.set_instrument_name(trashed.id, "Apple")
     repository.set_instrument_name(latest.id, "NVIDIA")
     with repository.sessions.begin() as session:
         session.get(RunRecord, older.id).created_at = datetime(2026, 7, 1)
-        session.get(RunRecord, archived.id).created_at = datetime(2026, 7, 2)
+        session.get(RunRecord, trashed.id).created_at = datetime(2026, 7, 2)
         session.get(RunRecord, latest.id).created_at = datetime(2026, 7, 3)
-    repository.request_cancel(archived.id)
-    repository.archive_runs((archived.id,))
+    repository.request_cancel(trashed.id)
+    repository.trash_runs((trashed.id,))
 
     recent = repository.recent_instruments()
 
@@ -385,7 +385,7 @@ def test_complete_persists_result_and_resolved_memory(
     restored = repository.get_result(run.id)
     due_at = datetime(2026, 8, 10, tzinfo=timezone.utc)
     pending = repository.pending_outcomes(due_at=due_at)
-    repository.archive_runs((run.id,))
+    repository.trash_runs((run.id,))
     assert repository.pending_outcomes(due_at=due_at) == []
     assert repository.memory_entries() == []
     repository.restore_runs((run.id,))
@@ -410,7 +410,7 @@ def test_complete_persists_result_and_resolved_memory(
     assert len(context.items) == 1
     assert context.items[0].ticker == "NVDA"
     assert "The thesis worked" in context.items[0].reflection
-    repository.archive_runs((run.id,))
+    repository.trash_runs((run.id,))
     assert repository.memory_context("NVDA", "stock").items == ()
     assert repository.memory_entries() == []
     repository.restore_runs((run.id,))
@@ -485,9 +485,9 @@ def test_research_template_and_source_purge_are_race_safe(
 ) -> None:
     source, _ = _create(repository, app_settings, "NVDA")
     repository.request_cancel(source.id)
-    repository.archive_runs((source.id,))
+    repository.trash_runs((source.id,))
     with repository.sessions.begin() as session:
-        session.get(RunRecord, source.id).archived_at = datetime(2026, 7, 1)
+        session.get(RunRecord, source.id).trashed_at = datetime(2026, 7, 1)
     request = _request("AAPL")
     barrier = Barrier(2)
 
@@ -504,7 +504,7 @@ def test_research_template_and_source_purge_are_race_safe(
 
     def purge_source():
         barrier.wait(timeout=5)
-        return ArchiveMaintenance(
+        return TrashMaintenance(
             app_settings,
             repository,
             utc_clock=lambda: datetime(

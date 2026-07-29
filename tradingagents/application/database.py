@@ -60,7 +60,7 @@ class RunRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    trashed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
     attempts: Mapped[list[RunAttemptRecord]] = relationship(
@@ -69,7 +69,7 @@ class RunRecord(Base):
 
     __table_args__ = (
         Index("ix_runs_claim", "status", "lease_expires_at", "created_at"),
-        Index("ix_runs_archive", "archived_at", "created_at"),
+        Index("ix_runs_trash", "trashed_at", "created_at"),
     )
 
 

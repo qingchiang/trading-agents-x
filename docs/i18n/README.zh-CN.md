@@ -131,10 +131,11 @@ checkpoint 恢复：
 - cancel 在 graph node 边界协作完成，不会强杀正在执行的 provider 请求；
 - 成功或取消后删除 checkpoint，失败时保留到后续处理。
 
-终态运行可在 Runs 页面归档和恢复。归档后会立即退出 Dashboard、Memory、
-outcome 结算和近期标的建议。Web 启动时检查一次到期归档；worker 在领取任务前
-检查，并在成功后每 24 小时再次执行，失败则 1 小时后重试。默认 30 天后永久
-清理，可通过 `TRADINGAGENTS_ARCHIVE_RETENTION_DAYS` 修改；设为 `0` 时关闭
+终态运行可在 Runs 页面移入回收站和恢复。移入后会立即退出 Dashboard、
+Memory、outcome 结算和近期标的建议。Web 启动时检查一次到期回收站记录；
+worker 在领取任务前检查，并在成功后每 24 小时再次执行，失败则 1 小时后
+重试。默认 30 天后永久清理，可通过
+`TRADINGAGENTS_TRASH_RETENTION_DAYS` 修改；设为 `0` 时关闭
 永久清理。
 
 事件先写入数据库，再发送给客户端。SSE 使用 `Last-Event-ID` 回放刷新或断线

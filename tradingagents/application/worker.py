@@ -10,9 +10,9 @@ from time import monotonic
 from uuid import uuid4
 
 from .maintenance import (
-    ARCHIVE_MAINTENANCE_INTERVAL_SECONDS,
-    ARCHIVE_MAINTENANCE_RETRY_SECONDS,
-    ArchiveMaintenance,
+    TRASH_MAINTENANCE_INTERVAL_SECONDS,
+    TRASH_MAINTENANCE_RETRY_SECONDS,
+    TrashMaintenance,
 )
 from .outcomes import OutcomeSettlement
 from .service import AnalysisService
@@ -28,7 +28,7 @@ class AnalysisWorker:
         *,
         service: AnalysisService | None = None,
         settlement: OutcomeSettlement | None = None,
-        maintenance: ArchiveMaintenance | None = None,
+        maintenance: TrashMaintenance | None = None,
         monotonic_clock: Callable[[], float] = monotonic,
         worker_id: str | None = None,
     ):
@@ -39,7 +39,7 @@ class AnalysisWorker:
             settings,
             self.repository,
         )
-        self.maintenance = maintenance or ArchiveMaintenance(
+        self.maintenance = maintenance or TrashMaintenance(
             settings,
             self.repository,
         )
@@ -85,16 +85,16 @@ class AnalysisWorker:
         except Exception as exc:
             self._next_maintenance_at = (
                 self.monotonic_clock()
-                + ARCHIVE_MAINTENANCE_RETRY_SECONDS
+                + TRASH_MAINTENANCE_RETRY_SECONDS
             )
             logger.warning(
-                "archive maintenance failed; retry scheduled: %s",
+                "trash maintenance failed; retry scheduled: %s",
                 type(exc).__name__,
             )
             return
         self._next_maintenance_at = (
             self.monotonic_clock()
-            + ARCHIVE_MAINTENANCE_INTERVAL_SECONDS
+            + TRASH_MAINTENANCE_INTERVAL_SECONDS
         )
 
     def _install_signal_handlers(self) -> None:

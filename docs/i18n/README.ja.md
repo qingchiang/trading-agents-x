@@ -143,11 +143,11 @@ worker は database lease で run を原子的に claim します。lease が期
   しない。
 - success/cancel 後は checkpoint を削除し、failure 時は次の判断まで保持。
 
-終端状態の run は Runs ページからアーカイブ・復元できます。アーカイブ後は
+終端状態の run は Runs ページからゴミ箱へ移動・復元できます。移動後は
 Dashboard、Memory、outcome 評価、最近の銘柄候補から直ちに除外されます。
 Web 起動時に一度、worker は work claim 前と成功後 24 時間ごとに期限切れを
 確認し、失敗時は 1 時間後に再試行します。既定の保持期間は 30 日で、
-`TRADINGAGENTS_ARCHIVE_RETENTION_DAYS=0` にすると完全削除を無効化します。
+`TRADINGAGENTS_TRASH_RETENTION_DAYS=0` にすると完全削除を無効化します。
 
 event はクライアント送信前に database へ commit されます。SSE は
 `Last-Event-ID` から欠落イベントを replay するため、ページ更新でも進捗を

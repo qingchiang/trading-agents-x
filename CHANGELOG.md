@@ -16,14 +16,14 @@ version numbers.
 
 - **Local Web research run center.** Added a React/TypeScript application with
   Dashboard, New Run, Runs, Run Detail, Memory, and Settings views; persistent
-  SSE timelines; recoverable archive management; recent-instrument
+  SSE timelines; recoverable trash management; recent-instrument
   suggestions and display names; sanitized Markdown; and independent English,
   Simplified Chinese, and Japanese UI locales.
 - **Durable application platform.** Added immutable app/run context, a central
   `AnalysisService`, SQLite/Alembic repositories for runs, attempts, events,
   reports, typed decisions, outcomes, reflections, and legacy-import audit
   records, plus single-worker database leases, crash recovery, cancellation,
-  retry, editable run templates, recoverable archives, and online backup.
+  retry, editable run templates, recoverable trash, and online backup.
 - **Versioned HTTP and Python APIs.** Added `/api/v1` run, event, lifecycle,
   export, memory, capability, and health endpoints with idempotent creation, and
   the typed `TradingAgents.run()` / `enqueue()` Python surface.

@@ -1,4 +1,4 @@
-"""Periodic maintenance for recoverable run archives."""
+"""Periodic maintenance for runs moved to the recoverable trash."""
 
 from __future__ import annotations
 
@@ -10,13 +10,13 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from .repository import RunRepository
 from .settings import AppSettings
 
-ARCHIVE_MAINTENANCE_INTERVAL_SECONDS = 24 * 60 * 60
-ARCHIVE_MAINTENANCE_RETRY_SECONDS = 60 * 60
-ARCHIVE_PURGE_BATCH_SIZE = 50
+TRASH_MAINTENANCE_INTERVAL_SECONDS = 24 * 60 * 60
+TRASH_MAINTENANCE_RETRY_SECONDS = 60 * 60
+TRASH_PURGE_BATCH_SIZE = 50
 
 
-class ArchiveMaintenance:
-    """Purge expired archives without introducing a scheduler dependency."""
+class TrashMaintenance:
+    """Purge expired trashed runs without introducing a scheduler dependency."""
 
     def __init__(
         self,
@@ -24,7 +24,7 @@ class ArchiveMaintenance:
         repository: RunRepository,
         *,
         utc_clock: Callable[[], datetime] | None = None,
-        batch_size: int = ARCHIVE_PURGE_BATCH_SIZE,
+        batch_size: int = TRASH_PURGE_BATCH_SIZE,
     ):
         self.settings = settings
         self.repository = repository
@@ -32,8 +32,8 @@ class ArchiveMaintenance:
         self.batch_size = batch_size
 
     def run_once(self) -> int:
-        """Purge all archives expired at this maintenance cycle's cutoff."""
-        retention_days = self.settings.archive_retention_days
+        """Purge all trashed runs expired at this maintenance cycle's cutoff."""
+        retention_days = self.settings.trash_retention_days
         if retention_days == 0:
             return 0
         now = self.utc_clock()
@@ -45,7 +45,7 @@ class ArchiveMaintenance:
         self._ensure_checkpoint_schema()
         purged = 0
         while True:
-            batch = self.repository.purge_expired_archives(
+            batch = self.repository.purge_expired_trash(
                 cutoff=cutoff,
                 batch_size=self.batch_size,
             )

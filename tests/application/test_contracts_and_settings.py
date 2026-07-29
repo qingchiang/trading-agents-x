@@ -121,7 +121,7 @@ def test_lan_mode_requires_token(tmp_path) -> None:
         )
 
 
-def test_archive_retention_defaults_can_be_disabled_and_reject_negatives(
+def test_trash_retention_defaults_can_be_disabled_and_reject_negatives(
     tmp_path,
 ) -> None:
     defaults = AppSettings.from_env(
@@ -131,18 +131,34 @@ def test_archive_retention_defaults_can_be_disabled_and_reject_negatives(
     disabled = AppSettings.from_env(
         environ={
             "TRADINGAGENTS_HOME": str(tmp_path / "disabled"),
-            "TRADINGAGENTS_ARCHIVE_RETENTION_DAYS": "0",
+            "TRADINGAGENTS_TRASH_RETENTION_DAYS": "0",
         },
         load_env_files=False,
     )
 
-    assert defaults.archive_retention_days == 30
-    assert disabled.archive_retention_days == 0
+    assert defaults.trash_retention_days == 30
+    assert disabled.trash_retention_days == 0
     with pytest.raises(ValueError, match="must be >= 0"):
         AppSettings.from_env(
             environ={
                 "TRADINGAGENTS_HOME": str(tmp_path / "invalid"),
-                "TRADINGAGENTS_ARCHIVE_RETENTION_DAYS": "-1",
+                "TRADINGAGENTS_TRASH_RETENTION_DAYS": "-1",
+            },
+            load_env_files=False,
+        )
+
+
+def test_legacy_archive_retention_setting_fails_with_rename_guidance(
+    tmp_path,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match="TRADINGAGENTS_TRASH_RETENTION_DAYS",
+    ):
+        AppSettings.from_env(
+            environ={
+                "TRADINGAGENTS_HOME": str(tmp_path),
+                "TRADINGAGENTS_ARCHIVE_RETENTION_DAYS": "30",
             },
             load_env_files=False,
         )

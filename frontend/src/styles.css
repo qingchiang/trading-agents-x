@@ -1742,14 +1742,14 @@ label small {
   grid-template-columns: minmax(260px, 1fr) minmax(180px, 0.35fr) auto;
 }
 
-.archive-state-tabs {
+.trash-state-tabs {
   display: inline-flex;
   gap: 4px;
   margin-bottom: 14px;
   padding: 5px;
 }
 
-.archive-state-tabs button {
+.trash-state-tabs button {
   min-height: 36px;
   padding: 0 15px;
   color: var(--muted);
@@ -1761,7 +1761,7 @@ label small {
   cursor: pointer;
 }
 
-.archive-state-tabs button.active {
+.trash-state-tabs button.active {
   color: var(--blue);
   background: var(--blue-soft);
 }
@@ -1795,7 +1795,7 @@ label small {
 }
 
 .notice,
-.archive-notice {
+.trash-notice {
   margin: 0 0 18px;
   padding: 12px 15px;
   color: var(--green);
@@ -1806,7 +1806,7 @@ label small {
   border-radius: 10px;
 }
 
-.archive-notice {
+.trash-notice {
   display: flex;
   gap: 8px 18px;
   align-items: baseline;
@@ -1815,7 +1815,7 @@ label small {
   border-color: #f2ddb2;
 }
 
-.archive-notice span {
+.trash-notice span {
   color: #806b3c;
 }
 
@@ -2336,11 +2336,11 @@ label small {
     grid-template-columns: 1fr;
   }
 
-  .archive-state-tabs {
+  .trash-state-tabs {
     display: flex;
   }
 
-  .archive-state-tabs button {
+  .trash-state-tabs button {
     flex: 1;
   }
 
@@ -2352,7 +2352,7 @@ label small {
     text-align: center;
   }
 
-  .archive-notice {
+  .trash-notice {
     display: grid;
   }
 

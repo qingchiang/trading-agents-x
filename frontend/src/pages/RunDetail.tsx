@@ -344,18 +344,18 @@ export default function RunDetail() {
           )}
         </div>
         <div className="action-row">
-          {!run.archived_at &&
+          {!run.trashed_at &&
             (run.status === "queued" || run.status === "running") && (
             <button className="button danger" onClick={() => void act("cancel")}>
               {t("cancel")}
             </button>
           )}
-          {!run.archived_at && run.status === "failed" && (
+          {!run.trashed_at && run.status === "failed" && (
             <button className="button" onClick={() => void act("retry")}>
               {t("retry")}
             </button>
           )}
-          {run.archived_at && (
+          {run.trashed_at && (
             <button className="button primary" onClick={() => void restore()}>
               {t("restore")}
             </button>
@@ -383,14 +383,14 @@ export default function RunDetail() {
         </div>
       </header>
       {error && <div className="alert">{error}</div>}
-      {run.archived_at && (
-        <div className="archive-notice">
-          <strong>{t("archivedRun")}</strong>
+      {run.trashed_at && (
+        <div className="trash-notice">
+          <strong>{t("trashedRun")}</strong>
           <span>
             {t("scheduledCleanup", {
               date: cleanupDateLabel(
-                run.archived_at,
-                capabilities?.defaults.archive_retention_days ?? 30,
+                run.trashed_at,
+                capabilities?.defaults.trash_retention_days ?? 30,
                 t("permanentCleanupDisabled"),
               ),
             })}
@@ -1498,12 +1498,12 @@ function readTimelineOrder(): TimelineOrder {
 }
 
 function cleanupDateLabel(
-  archivedAt: string,
+  trashedAt: string,
   retentionDays: number,
   disabledLabel: string,
 ) {
   if (retentionDays === 0) return disabledLabel;
-  const date = new Date(archivedAt);
+  const date = new Date(trashedAt);
   date.setUTCDate(date.getUTCDate() + retentionDays);
   return new Intl.DateTimeFormat(undefined, {
     year: "numeric",

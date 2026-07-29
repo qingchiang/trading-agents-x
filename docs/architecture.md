@@ -135,28 +135,29 @@ and Docker deployments continue to manage those processes separately.
 - an in-flight provider call is not force-killed.
 
 Successful and cancelled runs delete their checkpoint thread. Failed runs keep
-it for retry or later archive cleanup.
+it for retry or later trash cleanup.
 
-### Archive lifecycle
+### Trash lifecycle
 
-Only terminal runs can be archived. An archive remains readable and exportable,
-but is excluded immediately from default run listings, Dashboard summaries,
-Memory and `MemoryContext`, pending outcome settlement, and recent-instrument
-suggestions. Restore is idempotent and re-enables those consumers.
+Only terminal runs can be moved to Trash. A trashed run remains readable and
+exportable, but is excluded immediately from default run listings, Dashboard
+summaries, Memory and `MemoryContext`, pending outcome settlement, and
+recent-instrument suggestions. Restore is idempotent and re-enables those
+consumers.
 
 The Web process performs one opportunistic expiry check at startup. The worker
 checks before its first claim and uses a monotonic in-process deadline for
 subsequent checks: 24 hours after success or one hour after failure. UTC
 database timestamps determine the configured retention boundary. Cleanup uses
 bounded SQLite write transactions, rechecks that each candidate is still
-archived before deletion, removes its checkpoint and owned application rows,
+trashed before deletion, removes its checkpoint and owned application rows,
 and leaves `legacy_imports` hashes with a null run link. Concurrent Web/worker
-checks are therefore idempotent. `TRADINGAGENTS_ARCHIVE_RETENTION_DAYS=0`
+checks are therefore idempotent. `TRADINGAGENTS_TRASH_RETENTION_DAYS=0`
 disables permanent cleanup.
 
 `runs.instrument_name` stores the identity resolver's preferred display value
 (`short_name`, then `company_name`, `long_name`, or `name`). Resolution failure
-does not fail research. The recent-instruments API deduplicates non-archived
+does not fail research. The recent-instruments API deduplicates non-trashed
 runs by ticker and never derives names from LLM output.
 
 ### Database

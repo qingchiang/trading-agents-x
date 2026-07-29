@@ -28,7 +28,7 @@ const runStatuses = [
   "cancelled",
 ] as const;
 
-type ArchiveState = "active" | "archived";
+type TrashState = "active" | "trashed";
 
 export default function Runs() {
   const { t } = useTranslation();
@@ -38,8 +38,8 @@ export default function Runs() {
     () => new URLSearchParams(location.search),
     [location.search],
   );
-  const archiveState: ArchiveState =
-    params.get("archive_state") === "archived" ? "archived" : "active";
+  const trashState: TrashState =
+    params.get("trash_state") === "trashed" ? "trashed" : "active";
   const requestedStatus = params.get("status") ?? "";
   const status = runStatuses.includes(
     requestedStatus as (typeof runStatuses)[number],
@@ -64,7 +64,7 @@ export default function Runs() {
 
   const load = useCallback(async () => {
     const requestParams = new URLSearchParams({
-      archive_state: archiveState,
+      trash_state: trashState,
       limit: String(pageSize),
       offset: String(offset),
     });
@@ -78,7 +78,7 @@ export default function Runs() {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t("error"));
     }
-  }, [archiveState, offset, query, status, t]);
+  }, [trashState, offset, query, status, t]);
 
   useEffect(() => {
     void load();
@@ -119,7 +119,7 @@ export default function Runs() {
   };
 
   const eligibleRuns = (page?.items ?? []).filter((run) =>
-    archiveState === "archived" ? true : terminalStatuses.has(run.status),
+    trashState === "trashed" ? true : terminalStatuses.has(run.status),
   );
   const allEligibleSelected =
     eligibleRuns.length > 0 &&
@@ -146,12 +146,12 @@ export default function Runs() {
     const runIds = [...selected];
     if (!runIds.length) return;
     if (
-      archiveState === "active" &&
+      trashState === "active" &&
       !window.confirm(
-        t("archiveConfirm", {
+        t("trashConfirm", {
           count: runIds.length,
           purge: purgeEstimate(
-            capabilities?.defaults.archive_retention_days ?? 30,
+            capabilities?.defaults.trash_retention_days ?? 30,
             t,
           ),
         }),
@@ -164,12 +164,12 @@ export default function Runs() {
     setNotice("");
     try {
       const result =
-        archiveState === "active"
-          ? await api.archiveRuns(runIds)
+        trashState === "active"
+          ? await api.trashRuns(runIds)
           : await api.restoreRuns(runIds);
       setNotice(
         t(
-          archiveState === "active" ? "runsArchived" : "runsRestored",
+          trashState === "active" ? "runsTrashed" : "runsRestored",
           { count: result.changed },
         ),
       );
@@ -201,22 +201,22 @@ export default function Runs() {
         </Link>
       </header>
 
-      <div className="panel archive-state-tabs" role="tablist">
-        {(["active", "archived"] as const).map((state) => (
+      <div className="panel trash-state-tabs" role="tablist">
+        {(["active", "trashed"] as const).map((state) => (
           <button
             key={state}
             type="button"
             role="tab"
-            aria-selected={archiveState === state}
-            className={archiveState === state ? "active" : ""}
+            aria-selected={trashState === state}
+            className={trashState === state ? "active" : ""}
             onClick={() =>
               updateSearch({
-                archive_state: state === "active" ? null : state,
+                trash_state: state === "active" ? null : state,
                 offset: null,
               })
             }
           >
-            {t(state === "active" ? "activeRuns" : "archivedRuns")}
+            {t(state === "active" ? "activeRuns" : "trashedRuns")}
           </button>
         ))}
       </div>
@@ -259,7 +259,7 @@ export default function Runs() {
         <div className="panel-header">
           <div>
             <p className="eyebrow">
-              {t(archiveState === "active" ? "activeRuns" : "archivedRuns")}
+              {t(trashState === "active" ? "activeRuns" : "trashedRuns")}
             </p>
             <h2>
               {t("runRange", {
@@ -272,13 +272,13 @@ export default function Runs() {
           <button
             type="button"
             className={`button ${
-              archiveState === "active" ? "danger" : "primary"
+              trashState === "active" ? "danger" : "primary"
             }`}
             disabled={busy || selected.size === 0}
             onClick={() => void applyLifecycle()}
           >
-            {archiveState === "active"
-              ? t("archiveSelected", { count: selected.size })
+            {trashState === "active"
+              ? t("trashSelected", { count: selected.size })
               : t("restoreSelected", { count: selected.size })}
           </button>
         </div>
@@ -287,7 +287,7 @@ export default function Runs() {
           <div className="loading">{t("loading")}</div>
         ) : page.items.length === 0 ? (
           <div className="empty-state">
-            {t(archiveState === "active" ? "noActiveRuns" : "noArchivedRuns")}
+            {t(trashState === "active" ? "noActiveRuns" : "noTrashedRuns")}
           </div>
         ) : (
           <div className="table-wrap">
@@ -307,7 +307,7 @@ export default function Runs() {
                   <th>{t("analysisDate")}</th>
                   <th>{t("status")}</th>
                   <th>
-                    {t(archiveState === "active" ? "updated" : "archivedAt")}
+                    {t(trashState === "active" ? "updated" : "trashedAt")}
                   </th>
                   <th />
                 </tr>
@@ -315,7 +315,7 @@ export default function Runs() {
               <tbody>
                 {page.items.map((run) => {
                   const eligible =
-                    archiveState === "archived" ||
+                    trashState === "trashed" ||
                     terminalStatuses.has(run.status);
                   return (
                     <tr key={run.id}>
@@ -343,8 +343,8 @@ export default function Runs() {
                       </td>
                       <td>
                         {formatDate(
-                          archiveState === "archived"
-                            ? (run.archived_at ?? run.updated_at)
+                          trashState === "trashed"
+                            ? (run.trashed_at ?? run.updated_at)
                             : run.updated_at,
                         )}
                       </td>

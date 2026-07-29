@@ -18,7 +18,7 @@ class _Maintenance:
 
 
 @pytest.mark.anyio
-async def test_web_startup_runs_archive_maintenance_once(
+async def test_web_startup_runs_trash_maintenance_once(
     web_settings,
     web_service,
 ) -> None:
@@ -34,7 +34,7 @@ async def test_web_startup_runs_archive_maintenance_once(
 
 
 @pytest.mark.anyio
-async def test_web_startup_continues_when_archive_maintenance_fails(
+async def test_web_startup_continues_when_trash_maintenance_fails(
     web_settings,
     web_service,
     caplog,

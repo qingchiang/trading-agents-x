@@ -68,8 +68,8 @@ export const api = {
       }`,
     ),
   runs: (query = "") => request<RunPage>(`/api/v1/runs${query}`),
-  archiveRuns: (runIds: string[]) =>
-    request<RunBatchResult>("/api/v1/runs/archive", {
+  trashRuns: (runIds: string[]) =>
+    request<RunBatchResult>("/api/v1/runs/trash", {
       method: "POST",
       body: JSON.stringify({ run_ids: runIds }),
     }),

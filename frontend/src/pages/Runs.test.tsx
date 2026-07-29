@@ -20,7 +20,7 @@ vi.mock("../api/client", () => ({
   api: {
     runs: vi.fn(),
     capabilities: vi.fn(),
-    archiveRuns: vi.fn(),
+    trashRuns: vi.fn(),
     restoreRuns: vi.fn(),
   },
 }));
@@ -29,14 +29,14 @@ function run(
   id: string,
   ticker: string,
   status: RunView["status"],
-  archivedAt: string | null = null,
+  trashedAt: string | null = null,
 ): RunView {
   return {
     id,
     source_run_id: null,
     instrument_name:
       ticker === "NVDA" ? "NVIDIA Corporation" : "Apple Inc.",
-    archived_at: archivedAt,
+    trashed_at: trashedAt,
     status,
     request: {
       ticker,
@@ -72,7 +72,7 @@ function run(
 }
 
 const capabilities = {
-  defaults: { archive_retention_days: 30 },
+  defaults: { trash_retention_days: 30 },
 } as Capabilities;
 
 function page(items: RunView[], offset = 0, total = items.length): RunPage {
@@ -93,7 +93,7 @@ beforeEach(async () => {
   vi.resetAllMocks();
   await i18n.changeLanguage("en");
   vi.mocked(api.capabilities).mockResolvedValue(capabilities);
-  vi.mocked(api.archiveRuns).mockResolvedValue({
+  vi.mocked(api.trashRuns).mockResolvedValue({
     runs: [],
     changed: 1,
   });
@@ -104,7 +104,7 @@ beforeEach(async () => {
   vi.spyOn(window, "confirm").mockReturnValue(true);
 });
 
-test("filters and atomically archives eligible runs with instrument names", async () => {
+test("filters and atomically trashes eligible runs with instrument names", async () => {
   vi.mocked(api.runs).mockResolvedValue(
     page([
       run("run-1", "NVDA", "succeeded"),
@@ -122,11 +122,11 @@ test("filters and atomically archives eligible runs with instrument names", asyn
   expect(screen.getByLabelText("Select run AAPL")).toBeDisabled();
   fireEvent.click(screen.getByLabelText("Select run NVDA"));
   fireEvent.click(
-    screen.getByRole("button", { name: "Archive selected (1)" }),
+    screen.getByRole("button", { name: "Move to Trash (1)" }),
   );
 
   await waitFor(() =>
-    expect(api.archiveRuns).toHaveBeenCalledWith(["run-1"]),
+    expect(api.trashRuns).toHaveBeenCalledWith(["run-1"]),
   );
   expect(window.confirm).toHaveBeenCalledWith(
     expect.stringContaining("Estimated permanent cleanup"),
@@ -149,7 +149,7 @@ test("filters and atomically archives eligible runs with instrument names", asyn
     const lastQuery = vi.mocked(api.runs).mock.calls.at(-1)?.[0] ?? "";
     const params = new URLSearchParams(lastQuery.replace(/^\?/, ""));
     expect(Object.fromEntries(params)).toMatchObject({
-      archive_state: "active",
+      trash_state: "active",
       q: "nvidia",
       status: "succeeded",
       limit: "20",
@@ -158,17 +158,17 @@ test("filters and atomically archives eligible runs with instrument names", asyn
   });
 });
 
-test("restores archived runs and returns from an emptied page", async () => {
-  const archived = run(
-    "run-archived",
+test("restores trashed runs and returns from an emptied page", async () => {
+  const trashed = run(
+    "run-trashed",
     "NVDA",
     "failed",
     "2026-07-01T00:00:00Z",
   );
-  vi.mocked(api.runs).mockResolvedValue(page([archived], 20, 41));
+  vi.mocked(api.runs).mockResolvedValue(page([trashed], 20, 41));
 
   render(
-    <Router initialPath="/runs?archive_state=archived&offset=20">
+    <Router initialPath="/runs?trash_state=trashed&offset=20">
       <Runs />
       <LocationProbe />
     </Router>,
@@ -180,12 +180,12 @@ test("restores archived runs and returns from an emptied page", async () => {
     screen.getByRole("button", { name: "Restore selected (1)" }),
   );
   await waitFor(() =>
-    expect(api.restoreRuns).toHaveBeenCalledWith(["run-archived"]),
+    expect(api.restoreRuns).toHaveBeenCalledWith(["run-trashed"]),
   );
   expect(window.confirm).not.toHaveBeenCalled();
   await waitFor(() =>
     expect(screen.getByTestId("location")).toHaveTextContent(
-      "/runs?archive_state=archived&offset=0",
+      "/runs?trash_state=trashed&offset=0",
     ),
   );
 });

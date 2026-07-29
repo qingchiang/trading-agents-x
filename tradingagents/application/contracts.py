@@ -107,9 +107,9 @@ class RunStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-class RunArchiveState(str, Enum):
+class RunTrashState(str, Enum):
     ACTIVE = "active"
-    ARCHIVED = "archived"
+    TRASHED = "trashed"
     ALL = "all"
 
 
@@ -709,7 +709,7 @@ class RunView(FrozenModel):
     created_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None
-    archived_at: datetime | None = None
+    trashed_at: datetime | None = None
     updated_at: datetime
 
 

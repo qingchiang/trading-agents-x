@@ -359,11 +359,6 @@
       "CapabilityDefaults": {
         "additionalProperties": false,
         "properties": {
-          "archive_retention_days": {
-            "minimum": 0.0,
-            "title": "Archive Retention Days",
-            "type": "integer"
-          },
           "deep_model": {
             "title": "Deep Model",
             "type": "string"
@@ -409,6 +404,11 @@
               }
             ],
             "title": "Quick Reasoning Effort"
+          },
+          "trash_retention_days": {
+            "minimum": 0.0,
+            "title": "Trash Retention Days",
+            "type": "integer"
           }
         },
         "required": [
@@ -420,7 +420,7 @@
           "deep_reasoning_effort",
           "output_language",
           "lan_enabled",
-          "archive_retention_days"
+          "trash_retention_days"
         ],
         "title": "CapabilityDefaults",
         "type": "object"
@@ -1436,15 +1436,6 @@
         "title": "ResearchWarning",
         "type": "object"
       },
-      "RunArchiveState": {
-        "enum": [
-          "active",
-          "archived",
-          "all"
-        ],
-        "title": "RunArchiveState",
-        "type": "string"
-      },
       "RunBatchRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1800,21 +1791,18 @@
         "title": "RunStatus",
         "type": "string"
       },
+      "RunTrashState": {
+        "enum": [
+          "active",
+          "trashed",
+          "all"
+        ],
+        "title": "RunTrashState",
+        "type": "string"
+      },
       "RunView": {
         "additionalProperties": false,
         "properties": {
-          "archived_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Archived At"
-          },
           "attempt": {
             "title": "Attempt",
             "type": "integer"
@@ -1913,6 +1901,18 @@
           },
           "status": {
             "$ref": "#/components/schemas/RunStatus"
+          },
+          "trashed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trashed At"
           },
           "updated_at": {
             "format": "date-time",
@@ -2286,10 +2286,10 @@
         "parameters": [
           {
             "in": "query",
-            "name": "archive_state",
+            "name": "trash_state",
             "required": false,
             "schema": {
-              "$ref": "#/components/schemas/RunArchiveState",
+              "$ref": "#/components/schemas/RunTrashState",
               "default": "active"
             }
           },
@@ -2430,44 +2430,6 @@
         "summary": "Create Run"
       }
     },
-    "/api/v1/runs/archive": {
-      "post": {
-        "operationId": "archive_runs_api_v1_runs_archive_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RunBatchRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RunBatchResult"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Archive Runs"
-      }
-    },
     "/api/v1/runs/restore": {
       "post": {
         "operationId": "restore_runs_api_v1_runs_restore_post",
@@ -2504,6 +2466,44 @@
           }
         },
         "summary": "Restore Runs"
+      }
+    },
+    "/api/v1/runs/trash": {
+      "post": {
+        "operationId": "trash_runs_api_v1_runs_trash_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunBatchResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Trash Runs"
       }
     },
     "/api/v1/runs/{run_id}": {

@@ -28,7 +28,7 @@ beforeEach(async () => {
         id: "run-1",
         source_run_id: null,
         instrument_name: "Toyota Motor Corporation",
-        archived_at: null,
+        trashed_at: null,
         status: "succeeded",
         request: {
           ticker: "7203.T",

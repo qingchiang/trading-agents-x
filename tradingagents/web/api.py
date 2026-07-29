@@ -26,10 +26,10 @@ from sqlalchemy import func, select
 from tradingagents.application.contracts import (
     RecentInstrument,
     ResearchArtifact,
-    RunArchiveState,
     RunEvent,
     RunPage,
     RunStatus,
+    RunTrashState,
     RunView,
     report_language_value,
 )
@@ -38,7 +38,7 @@ from tradingagents.application.database import (
     OutcomeRecord,
     RunRecord,
 )
-from tradingagents.application.maintenance import ArchiveMaintenance
+from tradingagents.application.maintenance import TrashMaintenance
 from tradingagents.application.repository import (
     IdempotencyConflictError,
     InvalidRunTransitionError,
@@ -79,13 +79,13 @@ def create_app(
     *,
     service: AnalysisService | None = None,
     model_discovery: ModelDiscoveryService | None = None,
-    maintenance: ArchiveMaintenance | None = None,
+    maintenance: TrashMaintenance | None = None,
 ) -> FastAPI:
     settings = settings or AppSettings.from_env()
     service = service or AnalysisService(settings)
     repository = service.repository
     model_discovery = model_discovery or ModelDiscoveryService(settings)
-    maintenance = maintenance or ArchiveMaintenance(settings, repository)
+    maintenance = maintenance or TrashMaintenance(settings, repository)
     auth = LanSessionManager(settings)
 
     @asynccontextmanager
@@ -94,7 +94,7 @@ def create_app(
             maintenance.run_once()
         except Exception as exc:
             logger.warning(
-                "archive maintenance failed during web startup: %s",
+                "trash maintenance failed during web startup: %s",
                 type(exc).__name__,
             )
         yield
@@ -108,7 +108,7 @@ def create_app(
     app.state.settings = settings
     app.state.service = service
     app.state.model_discovery = model_discovery
-    app.state.archive_maintenance = maintenance
+    app.state.trash_maintenance = maintenance
 
     @app.exception_handler(RunNotFoundError)
     async def not_found(_request: Request, exc: RunNotFoundError):
@@ -205,14 +205,14 @@ def create_app(
 
     @app.get(f"{API_PREFIX}/runs", response_model=RunPage)
     def list_runs(
-        archive_state: RunArchiveState = RunArchiveState.ACTIVE,
+        trash_state: RunTrashState = RunTrashState.ACTIVE,
         status: RunStatus | None = None,
         q: Annotated[str | None, Query(max_length=200)] = None,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
     ):
         return repository.list_runs(
-            archive_state=archive_state,
+            trash_state=trash_state,
             status=status,
             q=q,
             limit=limit,
@@ -229,11 +229,11 @@ def create_app(
         return repository.recent_instruments(limit=limit)
 
     @app.post(
-        f"{API_PREFIX}/runs/archive",
+        f"{API_PREFIX}/runs/trash",
         response_model=RunBatchResult,
     )
-    def archive_runs(payload: RunBatchRequest):
-        runs, changed = repository.archive_runs(payload.run_ids)
+    def trash_runs(payload: RunBatchRequest):
+        runs, changed = repository.trash_runs(payload.run_ids)
         return RunBatchResult(runs=runs, changed=changed)
 
     @app.post(
@@ -403,7 +403,7 @@ def create_app(
                     defaults.output_language
                 ),
                 "lan_enabled": settings.lan_enabled,
-                "archive_retention_days": settings.archive_retention_days,
+                "trash_retention_days": settings.trash_retention_days,
             },
         )
 
@@ -436,7 +436,7 @@ def create_app(
                 counts = dict(
                     session.execute(
                         select(RunRecord.status, func.count())
-                        .where(RunRecord.archived_at.is_(None))
+                        .where(RunRecord.trashed_at.is_(None))
                         .group_by(RunRecord.status)
                     ).all()
                 )
@@ -458,7 +458,7 @@ def create_app(
                         )
                         .where(
                             OutcomeRecord.status == "pending",
-                            RunRecord.archived_at.is_(None),
+                            RunRecord.trashed_at.is_(None),
                         )
                     )
                     or 0

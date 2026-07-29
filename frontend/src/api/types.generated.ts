@@ -52,7 +52,6 @@ export interface components {
       providers: Record<string, components["schemas"]["ProviderCapabilities"]>;
     };
     CapabilityDefaults: {
-      archive_retention_days: number;
       deep_model: string;
       deep_reasoning_effort: string | null;
       lan_enabled: boolean;
@@ -61,6 +60,7 @@ export interface components {
       profile: string;
       quick_model: string;
       quick_reasoning_effort: string | null;
+      trash_retention_days: number;
     };
     DiscoveredModelView: {
       compatibility: "supported" | "unknown";
@@ -213,7 +213,6 @@ export interface components {
       message: string;
       source?: string | null;
     };
-    RunArchiveState: "active" | "archived" | "all";
     RunBatchRequest: {
       run_ids: string[];
     };
@@ -264,8 +263,8 @@ export interface components {
     };
     RunProfile: "fast" | "standard" | "deep";
     RunStatus: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+    RunTrashState: "active" | "trashed" | "all";
     RunView: {
-      archived_at?: string | null;
       attempt: number;
       cancel_requested: boolean;
       config_snapshot: Record<string, unknown>;
@@ -280,6 +279,7 @@ export interface components {
       source_run_id?: string | null;
       started_at?: string | null;
       status: components["schemas"]["RunStatus"];
+      trashed_at?: string | null;
       updated_at: string;
     };
     ValidationError: {

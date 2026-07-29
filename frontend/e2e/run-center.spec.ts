@@ -10,7 +10,7 @@ function makeRun(
   options: {
     ticker?: string;
     instrumentName?: string;
-    archivedAt?: string | null;
+    trashedAt?: string | null;
     sourceRunId?: string | null;
   } = {},
 ) {
@@ -18,7 +18,7 @@ function makeRun(
     id,
     source_run_id: options.sourceRunId ?? null,
     instrument_name: options.instrumentName ?? null,
-    archived_at: options.archivedAt ?? null,
+    trashed_at: options.trashedAt ?? null,
     status,
     request: {
       ticker: options.ticker ?? "NVDA",
@@ -151,7 +151,7 @@ function artifacts(id: string) {
   ];
 }
 
-test("runs, templates, archives, and restores local research", async ({
+test("runs, templates, trash, and restores local research", async ({
   page,
 }) => {
   test.setTimeout(60_000);
@@ -209,7 +209,7 @@ test("runs, templates, archives, and restores local research", async ({
             deep_reasoning_effort: "provider_default",
             output_language: "zh-CN",
             lan_enabled: false,
-            archive_retention_days: 30,
+            trash_retention_days: 30,
           },
         },
       });
@@ -243,7 +243,7 @@ test("runs, templates, archives, and restores local research", async ({
     }
     if (path === "/api/v1/instruments/recent") {
       const active = [...runs.values()].filter(
-        (run) => !run.archived_at && !purged.has(run.id),
+        (run) => !run.trashed_at && !purged.has(run.id),
       );
       return route.fulfill({
         json: active.map((run) => ({
@@ -254,7 +254,7 @@ test("runs, templates, archives, and restores local research", async ({
       });
     }
     if (path === "/api/v1/runs" && request.method() === "GET") {
-      const archiveState = url.searchParams.get("archive_state") ?? "active";
+      const trashState = url.searchParams.get("trash_state") ?? "active";
       const q = (url.searchParams.get("q") ?? "").toLowerCase();
       const status = url.searchParams.get("status");
       const offset = Number(url.searchParams.get("offset") ?? 0);
@@ -262,7 +262,7 @@ test("runs, templates, archives, and restores local research", async ({
       const visible = [...runs.values()]
         .filter((run) => !purged.has(run.id))
         .filter((run) =>
-          archiveState === "archived" ? run.archived_at : !run.archived_at,
+          trashState === "trashed" ? run.trashed_at : !run.trashed_at,
         )
         .filter((run) => !status || run.status === status)
         .filter(
@@ -300,13 +300,13 @@ test("runs, templates, archives, and restores local research", async ({
       runs.set(id, created);
       return route.fulfill({ status: 202, json: created });
     }
-    if (path === "/api/v1/runs/archive") {
+    if (path === "/api/v1/runs/trash") {
       const ids = (request.postDataJSON() as { run_ids: string[] }).run_ids;
       const changed: MockRun[] = [];
       for (const id of ids) {
         const current = runs.get(id);
-        if (current && !current.archived_at) {
-          current.archived_at = "2026-07-29T00:00:00Z";
+        if (current && !current.trashed_at) {
+          current.trashed_at = "2026-07-29T00:00:00Z";
           changed.push(current);
         }
       }
@@ -319,8 +319,8 @@ test("runs, templates, archives, and restores local research", async ({
       let changed = 0;
       for (const id of ids) {
         const current = runs.get(id);
-        if (current?.archived_at) {
-          current.archived_at = null;
+        if (current?.trashed_at) {
+          current.trashed_at = null;
           changed += 1;
         }
       }
@@ -330,7 +330,7 @@ test("runs, templates, archives, and restores local research", async ({
     }
     if (path === "/api/v1/memory") {
       const report = runs.get("run-report");
-      if (!report || report.archived_at || purged.has(report.id)) {
+      if (!report || report.trashed_at || purged.has(report.id)) {
         return route.fulfill({ json: [] });
       }
       return route.fulfill({
@@ -463,29 +463,29 @@ test("runs, templates, archives, and restores local research", async ({
   const reportRow = page.getByRole("row").filter({ hasText: "NVDA" });
   await reportRow.getByRole("checkbox").check();
   page.once("dialog", (dialog) => dialog.accept());
-  await page.getByRole("button", { name: "Archive selected (1)" }).click();
-  await expect(page.getByText("Archived 1 run(s).")).toBeVisible();
+  await page.getByRole("button", { name: "Move to Trash (1)" }).click();
+  await expect(page.getByText("Trashed 1 run(s).")).toBeVisible();
 
   await page.goto("/memory");
   await expect(page.getByText("No memory entries.")).toBeVisible();
 
-  await page.goto("/runs?archive_state=archived");
-  const archivedRow = page.getByRole("row").filter({ hasText: "NVDA" });
-  await archivedRow.getByRole("checkbox").check();
+  await page.goto("/runs?trash_state=trashed");
+  const trashedRow = page.getByRole("row").filter({ hasText: "NVDA" });
+  await trashedRow.getByRole("checkbox").check();
   await page.getByRole("button", { name: "Restore selected (1)" }).click();
   await expect(page.getByText("Restored 1 run(s).")).toBeVisible();
   await page.goto("/memory");
   await expect(page.getByText("NVIDIA Corporation")).toBeVisible();
 
   const restored = runs.get("run-report")!;
-  restored.archived_at = "2026-06-01T00:00:00Z";
+  restored.trashed_at = "2026-06-01T00:00:00Z";
   purged.add("run-report");
   await page.goto("/runs/run-report");
   await expect(page.getByText("Run not found")).toBeVisible();
 
   await page.setViewportSize({ width: 1080, height: 1920 });
   purged.delete("run-report");
-  restored.archived_at = null;
+  restored.trashed_at = null;
   await page.goto("/runs/run-report?view=reports&report=market");
   const reportMaxHeight = await page
     .locator(".report-panel > .markdown")

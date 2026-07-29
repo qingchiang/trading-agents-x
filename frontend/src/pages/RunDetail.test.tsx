@@ -85,7 +85,7 @@ const detail = {
     id: "run-1",
     source_run_id: null,
     instrument_name: "NVIDIA Corporation",
-    archived_at: null,
+    trashed_at: null,
     status: "succeeded",
     request: {
       ticker: "NVDA",
@@ -276,7 +276,7 @@ beforeEach(async () => {
   vi.mocked(api.run).mockResolvedValue(detail);
   vi.mocked(api.artifacts).mockResolvedValue(artifacts);
   vi.mocked(api.capabilities).mockResolvedValue({
-    defaults: { archive_retention_days: 30 },
+    defaults: { trash_retention_days: 30 },
   } as Capabilities);
   vi.stubGlobal("EventSource", FakeEventSource);
 });
@@ -448,18 +448,18 @@ test("opens an editable new-run template instead of rerunning immediately", asyn
   expect(api.action).not.toHaveBeenCalled();
 });
 
-test("shows archived retention details and restores without deleting data", async () => {
+test("shows trashed retention details and restores without deleting data", async () => {
   vi.mocked(api.run)
     .mockResolvedValueOnce({
       ...detail,
       run: {
         ...detail.run,
-        archived_at: "2026-07-01T00:00:00Z",
+        trashed_at: "2026-07-01T00:00:00Z",
       },
     } as RunDetailType)
     .mockResolvedValue({
       ...detail,
-      run: { ...detail.run, archived_at: null },
+      run: { ...detail.run, trashed_at: null },
     } as RunDetailType);
   vi.mocked(api.restoreRuns).mockResolvedValue({
     runs: [],
@@ -473,7 +473,7 @@ test("shows archived retention details and restores without deleting data", asyn
   );
 
   expect(await screen.findByText("NVIDIA Corporation")).toBeVisible();
-  expect(screen.getByText("Archived run")).toBeVisible();
+  expect(screen.getByText("This run is in Trash")).toBeVisible();
   expect(screen.getByText(/Scheduled permanent cleanup/)).toBeVisible();
   expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Restore" }));
