@@ -134,7 +134,9 @@ def _complete_archived_run(repository, app_settings):
         evidence=evidence,
         benchmark="SPY",
     )
-    pending = repository.pending_outcomes()[0]
+    pending = repository.pending_outcomes(
+        due_at=datetime(2026, 9, 1, tzinfo=timezone.utc)
+    )[0]
     repository.resolve_outcome(
         pending["outcome_id"],
         observation_start=date(2026, 7, 25),

@@ -210,8 +210,13 @@ class OutcomeRecord(Base):
     raw_return: Mapped[float | None] = mapped_column(Float, nullable=True)
     alpha_return: Mapped[float | None] = mapped_column(Float, nullable=True)
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    next_check_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("ix_outcomes_due", "status", "next_check_at"),
+    )
 
 
 class ReflectionRecord(Base):

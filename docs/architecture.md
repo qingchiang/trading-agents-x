@@ -295,6 +295,13 @@ raw return = ticker_close[5] / ticker_close[0] - 1
 alpha      = raw return - (benchmark_close[5] / benchmark_close[0] - 1)
 ```
 
+Each pending outcome stores its next due time. The initial check is no earlier
+than the market-local day after six plausible closes (daily for crypto,
+weekdays as the lower bound for other markets). An incomplete observation is
+deferred for 24 hours; a provider or transport failure is retried after one
+hour. Exchange holidays therefore degrade to bounded daily checks instead of
+the worker poll interval.
+
 The stored range and reflection describe short-term feedback. They are not the
 sole truth for long-horizon thesis validity or graph quality.
 

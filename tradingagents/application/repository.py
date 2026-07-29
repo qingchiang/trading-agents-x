@@ -52,6 +52,7 @@ from .database import (
     RunRecord,
     create_sqlite_engine,
 )
+from .outcome_schedule import earliest_outcome_check_at
 from .reporting import order_reports
 from .settings import AppSettings
 
@@ -938,6 +939,15 @@ class RunRepository:
                         status="pending",
                         benchmark=benchmark,
                         holding_intervals=5,
+                        next_check_at=max(
+                            now,
+                            earliest_outcome_check_at(
+                                ticker=request.ticker,
+                                asset_type=request.asset_type.value,
+                                analysis_date=request.analysis_date,
+                                holding_intervals=5,
+                            ).replace(tzinfo=None),
+                        ),
                     )
                 )
             record.status = RunStatus.SUCCEEDED.value
@@ -1110,7 +1120,15 @@ class RunRepository:
             created_at=_aware(record["created_at"]),
         )
 
-    def pending_outcomes(self, limit: int = 20) -> list[dict[str, Any]]:
+    def pending_outcomes(
+        self,
+        limit: int = 20,
+        *,
+        due_at: datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        due = due_at or _utc_naive()
+        if due.tzinfo is not None:
+            due = due.astimezone(timezone.utc).replace(tzinfo=None)
         stmt = (
             select(OutcomeRecord, DecisionRecord)
             .join(DecisionRecord, OutcomeRecord.decision_id == DecisionRecord.id)
@@ -1118,8 +1136,10 @@ class RunRepository:
             .where(
                 OutcomeRecord.status == "pending",
                 RunRecord.archived_at.is_(None),
+                OutcomeRecord.next_check_at.is_not(None),
+                OutcomeRecord.next_check_at <= due,
             )
-            .order_by(DecisionRecord.analysis_date)
+            .order_by(OutcomeRecord.next_check_at, DecisionRecord.analysis_date)
             .limit(limit)
         )
         with self.sessions() as session:
@@ -1132,18 +1152,31 @@ class RunRepository:
                     "benchmark": outcome.benchmark,
                     "holding_intervals": outcome.holding_intervals,
                     "decision": decision.decision_json,
+                    "next_check_at": _aware(outcome.next_check_at),
                 }
                 for outcome, decision in session.execute(stmt)
             ]
 
     def mark_outcome_checked(
-        self, outcome_id: int, error_message: str | None = None
+        self,
+        outcome_id: int,
+        *,
+        checked_at: datetime,
+        next_check_at: datetime,
+        error_message: str | None = None,
     ) -> None:
+        if checked_at.tzinfo is not None:
+            checked_at = checked_at.astimezone(timezone.utc).replace(tzinfo=None)
+        if next_check_at.tzinfo is not None:
+            next_check_at = next_check_at.astimezone(timezone.utc).replace(
+                tzinfo=None
+            )
         with self.sessions.begin() as session:
             outcome = session.get(OutcomeRecord, outcome_id)
             if outcome is None:
                 return
-            outcome.last_checked_at = _utc_naive()
+            outcome.last_checked_at = checked_at
+            outcome.next_check_at = next_check_at
             outcome.error_message = _sanitize_text(error_message)
 
     def resolve_outcome(
@@ -1178,6 +1211,7 @@ class RunRepository:
             outcome.raw_return = raw_return
             outcome.alpha_return = alpha_return
             outcome.last_checked_at = now
+            outcome.next_check_at = None
             outcome.resolved_at = now
             outcome.error_message = None
             session.add(
@@ -1542,6 +1576,19 @@ class RunRepository:
                 raw_return=raw_return,
                 alpha_return=alpha_return,
                 last_checked_at=now if resolved else None,
+                next_check_at=(
+                    None
+                    if resolved
+                    else max(
+                        now,
+                        earliest_outcome_check_at(
+                            ticker=request.ticker,
+                            asset_type=request.asset_type.value,
+                            analysis_date=request.analysis_date,
+                            holding_intervals=holding_intervals,
+                        ).replace(tzinfo=None),
+                    )
+                ),
                 resolved_at=now if resolved else None,
             )
             session.add(outcome)

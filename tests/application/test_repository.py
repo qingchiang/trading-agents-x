@@ -383,12 +383,13 @@ def test_complete_persists_result_and_resolved_memory(
 
     repository.complete(run.id, result, evidence=evidence, benchmark="SPY")
     restored = repository.get_result(run.id)
-    pending = repository.pending_outcomes()
+    due_at = datetime(2026, 8, 10, tzinfo=timezone.utc)
+    pending = repository.pending_outcomes(due_at=due_at)
     repository.archive_runs((run.id,))
-    assert repository.pending_outcomes() == []
+    assert repository.pending_outcomes(due_at=due_at) == []
     assert repository.memory_entries() == []
     repository.restore_runs((run.id,))
-    assert repository.pending_outcomes()[0]["outcome_id"] == (
+    assert repository.pending_outcomes(due_at=due_at)[0]["outcome_id"] == (
         pending[0]["outcome_id"]
     )
     repository.resolve_outcome(

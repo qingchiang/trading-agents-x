@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import pandas as pd
@@ -20,6 +21,9 @@ from .repository import RunRepository
 from .settings import AppSettings
 
 logger = logging.getLogger(__name__)
+
+PENDING_RECHECK_INTERVAL = timedelta(hours=24)
+ERROR_RECHECK_INTERVAL = timedelta(hours=1)
 
 
 @dataclass(frozen=True)
@@ -54,15 +58,22 @@ class OutcomeSettlement:
         *,
         history_provider: Any = yf,
         reflector: OutcomeReflector | None = None,
+        utc_clock: Callable[[], datetime] | None = None,
     ):
         self.settings = settings
         self.repository = repository
         self.history_provider = history_provider
         self._reflector = reflector
+        self.utc_clock = utc_clock or (lambda: datetime.now(timezone.utc))
 
     def settle_once(self, *, limit: int = 20) -> dict[str, int]:
         stats = {"checked": 0, "resolved": 0, "pending": 0, "failed": 0}
-        for item in self.repository.pending_outcomes(limit):
+        now = self.utc_clock()
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        else:
+            now = now.astimezone(timezone.utc)
+        for item in self.repository.pending_outcomes(limit, due_at=now):
             stats["checked"] += 1
             try:
                 observation = self.observe(
@@ -72,7 +83,11 @@ class OutcomeSettlement:
                     holding_intervals=item["holding_intervals"],
                 )
                 if observation is None:
-                    self.repository.mark_outcome_checked(item["outcome_id"])
+                    self.repository.mark_outcome_checked(
+                        item["outcome_id"],
+                        checked_at=now,
+                        next_check_at=now + PENDING_RECHECK_INTERVAL,
+                    )
                     stats["pending"] += 1
                     continue
                 reflection = self._reflection(
@@ -98,7 +113,9 @@ class OutcomeSettlement:
                 )
                 self.repository.mark_outcome_checked(
                     item["outcome_id"],
-                    type(exc).__name__,
+                    checked_at=now,
+                    next_check_at=now + ERROR_RECHECK_INTERVAL,
+                    error_message=type(exc).__name__,
                 )
                 stats["failed"] += 1
         return stats
