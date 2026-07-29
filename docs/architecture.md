@@ -315,21 +315,30 @@ provenance transport between graph stages.
 flowchart LR
     A["Parallel analysts"] --> E["Seal EvidenceBundle"]
     E -->|Fast| FC["Final committee"]
-    E -->|Standard/Deep| BB["Bull + bear reviews"]
-    BB -->|Standard| J["Research judge"]
+    E -->|Standard/Deep| BB["Bull + bear cases"]
+    BB --> DA["Debate agenda"]
+    DA --> R1["Required cross-rebuttal round"]
+    R1 -->|Standard| J["Research judge"]
     J --> SR["Single risk reviewer"]
     SR --> FC
-    BB -->|Deep| R["0–2 targeted rebuttal rounds"]
+    R1 -->|Deep, material issue remains| R["0–2 additional rounds"]
     R --> J2["Research judge"]
     J2 --> RL["Aggressive + neutral + conservative risk lenses"]
     RL --> FC
 ```
 
 - **Fast:** no debate; the committee directly synthesizes analyst reports.
-- **Standard:** parallel bull/bear structured reviews, a judge draft, one risk
-  review, then a final committee.
-- **Deep:** parallel first reviews, at most two targeted rebuttal rounds, a
-  judge draft, three parallel risk lenses, then a final committee.
+- **Standard:** parallel bull/bear cases, a debate agenda, one required
+  cross-rebuttal round, a judge draft, one integrated risk review, then a final
+  committee.
+- **Deep:** parallel bull/bear cases, a debate agenda, one required and at most
+  two additional targeted rebuttal rounds, a judge draft, three parallel risk
+  lenses, then a final committee.
+
+Fast final synthesis and Standard judge/final synthesis use the deep model.
+Other Standard deliberation roles use the quick model. Deep uses the deep
+model for every case, agenda, rebuttal, judge, risk, and final role; analyst
+tool collection and report synthesis continue to use the quick model.
 
 Deep always executes its first targeted rebuttal. A later round requires a
 materially open agenda issue plus new evidence, a new causal mechanism, or a

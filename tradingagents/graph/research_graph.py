@@ -372,30 +372,27 @@ class ResearchGraph:
         workflow.add_edge("case.bull", "debate.agenda")
         workflow.add_edge("case.bear", "debate.agenda")
 
-        if self.profile is RunProfile.DEEP:
-            workflow.add_node("debate.control", self._debate_control)
-            workflow.add_node(
-                "rebuttal.bull",
-                self._create_rebuttal_node(_PERSPECTIVE_SPECS["bull"]),
-            )
-            workflow.add_node(
-                "rebuttal.bear",
-                self._create_rebuttal_node(_PERSPECTIVE_SPECS["bear"]),
-            )
-            workflow.add_edge("debate.agenda", "debate.control")
-            workflow.add_conditional_edges(
-                "debate.control",
-                self._route_deep_debate,
-                {
-                    "bull_rebuttal": "rebuttal.bull",
-                    "bear_rebuttal": "rebuttal.bear",
-                    "judge": "judge.research",
-                },
-            )
-            workflow.add_edge("rebuttal.bull", "debate.control")
-            workflow.add_edge("rebuttal.bear", "debate.control")
-        else:
-            workflow.add_edge("debate.agenda", "judge.research")
+        workflow.add_node("debate.control", self._debate_control)
+        workflow.add_node(
+            "rebuttal.bull",
+            self._create_rebuttal_node(_PERSPECTIVE_SPECS["bull"]),
+        )
+        workflow.add_node(
+            "rebuttal.bear",
+            self._create_rebuttal_node(_PERSPECTIVE_SPECS["bear"]),
+        )
+        workflow.add_edge("debate.agenda", "debate.control")
+        workflow.add_conditional_edges(
+            "debate.control",
+            self._route_debate,
+            {
+                "bull_rebuttal": "rebuttal.bull",
+                "bear_rebuttal": "rebuttal.bear",
+                "judge": "judge.research",
+            },
+        )
+        workflow.add_edge("rebuttal.bull", "debate.control")
+        workflow.add_edge("rebuttal.bear", "debate.control")
 
         workflow.add_node("judge.research", self._research_judge)
 
@@ -596,7 +593,7 @@ class ResearchGraph:
         }
 
     def _create_case_node(self, spec: RoleSpec):
-        llm = self.quick_llm if spec.model == "quick" else self.deep_llm
+        llm = self._deliberation_llm(spec)
 
         def case_node(
             state: ResearchState,
@@ -673,7 +670,7 @@ class ResearchGraph:
                 ),
             )
             output = invoke_debate_agenda(
-                self.quick_llm,
+                self._deliberation_llm(),
                 prompt=prompt,
                 state=state,
                 node=node,
@@ -708,7 +705,7 @@ class ResearchGraph:
         return agenda_node
 
     def _create_rebuttal_node(self, spec: RoleSpec):
-        llm = self.quick_llm if spec.model == "quick" else self.deep_llm
+        llm = self._deliberation_llm(spec)
 
         def rebuttal_node(
             state: ResearchState,
@@ -793,8 +790,11 @@ class ResearchGraph:
         if round_number == 0:
             should_continue = True
         else:
+            max_rounds = (
+                3 if self.profile is RunProfile.DEEP else 1
+            )
             should_continue = (
-                round_number < 2
+                round_number < max_rounds
                 and debate_round_has_material_progress(
                     state,
                     round_number=round_number,
@@ -812,7 +812,7 @@ class ResearchGraph:
         }
 
     @staticmethod
-    def _route_deep_debate(state: ResearchState) -> list[str]:
+    def _route_debate(state: ResearchState) -> list[str]:
         if state.get("debate_continue", False):
             return ["bull_rebuttal", "bear_rebuttal"]
         return ["judge"]
@@ -911,7 +911,7 @@ class ResearchGraph:
                 ),
             )
             output = invoke_risk_review(
-                self.quick_llm,
+                self._deliberation_llm(spec),
                 role=spec.key,
                 prompt=prompt,
                 state=state,
@@ -1016,6 +1016,15 @@ class ResearchGraph:
             }
 
         return final_node
+
+    def _deliberation_llm(self, spec: RoleSpec | None = None) -> Any:
+        """Resolve role models according to the quality-first profile contract."""
+
+        if self.profile is RunProfile.DEEP:
+            return self.deep_llm
+        if spec is not None and spec.model == "deep":
+            return self.deep_llm
+        return self.quick_llm
 
     @staticmethod
     def _write_artifact(

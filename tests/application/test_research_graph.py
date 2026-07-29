@@ -422,6 +422,8 @@ def _memory_context() -> MemoryContext:
                 "case.bull",
                 "case.bear",
                 "debate.agenda",
+                "rebuttal.bull",
+                "rebuttal.bear",
                 "judge.research",
                 "risk.review",
                 "committee.final",
@@ -487,6 +489,72 @@ def test_profiles_share_contract_but_use_distinct_topologies(
     assert execution.decision.rating is ResearchRating.HOLD
     valid_refs = {item.ref for item in execution.evidence.items}
     assert set(execution.decision.evidence_refs) <= valid_refs
+
+
+@pytest.mark.parametrize(
+    ("profile", "quick_schemas", "deep_schemas"),
+    (
+        (
+            RunProfile.FAST,
+            {"AnalystReport"},
+            {"ResearchDecision"},
+        ),
+        (
+            RunProfile.STANDARD,
+            {
+                "AnalystReport",
+                "ResearchCase",
+                "DebateAgenda",
+                "RebuttalReview",
+                "RiskReview",
+            },
+            {"JudgeDraft", "ResearchDecision"},
+        ),
+        (
+            RunProfile.DEEP,
+            {"AnalystReport"},
+            {
+                "ResearchCase",
+                "DebateAgenda",
+                "RebuttalReview",
+                "JudgeDraft",
+                "RiskReview",
+                "ResearchDecision",
+            },
+        ),
+    ),
+)
+def test_profiles_route_quality_roles_to_the_configured_model_tier(
+    app_settings,
+    monkeypatch,
+    profile: RunProfile,
+    quick_schemas: set[str],
+    deep_schemas: set[str],
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _AnalystSubgraph(analyst)
+            for analyst in self.selected_analysts
+        },
+    )
+    quick = _FakeLLM()
+    deep = _FakeLLM()
+    graph = ResearchGraph(
+        quick_llm=quick,
+        deep_llm=deep,
+        profile=profile,
+        selected_analysts=("market",),
+    )
+
+    graph.execute(
+        _context(app_settings, profile, analysts=("market",)),
+        checkpoint_thread_id=f"model-routing:{profile.value}",
+    )
+
+    assert {schema for schema, _prompt in quick.calls} == quick_schemas
+    assert {schema for schema, _prompt in deep.calls} == deep_schemas
 
 
 @pytest.mark.parametrize(
@@ -594,6 +662,8 @@ def test_graph_emits_only_typed_visible_research_artifacts(
         ("case", "bull"),
         ("case", "bear"),
         ("agenda", "moderator"),
+        ("rebuttal", "bull"),
+        ("rebuttal", "bear"),
         ("judge", "research_judge"),
         ("risk", "integrated"),
         ("decision", "final_committee"),
@@ -604,6 +674,7 @@ def test_graph_emits_only_typed_visible_research_artifacts(
             "analyst_report",
             "research_case",
             "debate_agenda",
+            "rebuttal_review",
             "judge_draft",
             "risk_review",
             "research_decision",
@@ -655,7 +726,7 @@ def test_deep_debate_stops_when_rebuttals_add_no_new_information(
         checkpoint_thread_id="deep-stop",
     )
 
-    assert execution.state["rebuttal_round"] <= 2
+    assert execution.state["rebuttal_round"] <= 3
 
 
 def test_future_dated_provenance_is_withheld_before_bundle_sealing() -> None:
