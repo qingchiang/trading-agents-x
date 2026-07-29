@@ -58,14 +58,20 @@ pip install .
 cp .env.example .env
 ```
 
-`.env` に利用する LLM provider を設定し、Web と worker を別々の
-ターミナルで起動します。
+`.env` に利用する LLM provider を設定し、ローカルの Web と worker を
+まとめて起動します。
+
+```bash
+tradingagents start
+```
+
+両方は独立した子プロセスのまま動作し、統合出力には `[web]` と
+`[worker]` の接頭辞が付きます。Ctrl+C で両方を停止します。ローテーション
+ログが必要な場合だけ `--log-dir PATH` を指定します。個別のプロセス管理が
+必要な場合は従来のコマンドも使用できます。
 
 ```bash
 tradingagents serve
-```
-
-```bash
 tradingagents worker
 ```
 
@@ -184,8 +190,9 @@ CLI は非対話型です。
 
 ```text
 tradingagents run TICKER [options]
+tradingagents start [--log-dir PATH]
 tradingagents serve
-tradingagents worker [--once]
+tradingagents worker [--once] [--log-level LEVEL]
 tradingagents runs list|show|cancel|retry
 tradingagents memory import PATH [--apply] [--no-backup]
 tradingagents export RUN_ID [--format markdown|json] [-o PATH]

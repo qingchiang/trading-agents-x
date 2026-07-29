@@ -51,13 +51,18 @@ pip install .
 cp .env.example .env
 ```
 
-在 `.env` 中配置一个 LLM provider，然后分别启动 Web 和 worker：
+在 `.env` 中配置一个 LLM provider，然后一键启动本地 Web 和 worker：
+
+```bash
+tradingagents start
+```
+
+该命令仍将两者作为独立子进程运行，合并输出会带有 `[web]` 和 `[worker]`
+前缀，按 Ctrl+C 会同时停止。仅在需要轮转落盘日志时传入
+`--log-dir PATH`。需要交给其他进程管理器时，仍可分别启动：
 
 ```bash
 tradingagents serve
-```
-
-```bash
 tradingagents worker
 ```
 
@@ -170,8 +175,9 @@ CLI 现在是非交互式命令：
 
 ```text
 tradingagents run TICKER [options]
+tradingagents start [--log-dir PATH]
 tradingagents serve
-tradingagents worker [--once]
+tradingagents worker [--once] [--log-level LEVEL]
 tradingagents runs list|show|cancel|retry
 tradingagents memory import PATH [--apply] [--no-backup]
 tradingagents export RUN_ID [--format markdown|json] [-o PATH]

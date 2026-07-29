@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date
 from enum import Enum
 from pathlib import Path
@@ -22,6 +23,8 @@ from tradingagents.application.worker import AnalysisWorker
 from tradingagents.dataflows.symbol_utils import market_today
 from tradingagents.version import __version__
 from tradingagents.web import create_app
+
+from .supervisor import LocalProcessSupervisor
 
 PROJECT_DESCRIPTION = "Local evidence-first investment research platform"
 
@@ -175,13 +178,40 @@ def serve(
 
 
 @app.command()
+def start(
+    log_level: Annotated[str, typer.Option("--log-level")] = "info",
+    log_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--log-dir",
+            file_okay=False,
+            help="Optionally tee Web and worker output to rotating log files.",
+        ),
+    ] = None,
+) -> None:
+    """Start the local Web and worker together in the foreground."""
+    code = LocalProcessSupervisor(
+        _settings(),
+        log_level=log_level,
+        log_dir=log_dir,
+    ).run()
+    if code:
+        raise typer.Exit(code=code)
+
+
+@app.command()
 def worker(
     once: Annotated[
         bool,
         typer.Option("--once", help="Process at most one queue item."),
     ] = False,
+    log_level: Annotated[str, typer.Option("--log-level")] = "info",
 ) -> None:
     """Run the single-concurrency analysis and outcome-settlement worker."""
+    logging.basicConfig(
+        level=getattr(logging, log_level.upper(), logging.INFO),
+        format="%(levelname)s [%(name)s] %(message)s",
+    )
     process = AnalysisWorker(_settings())
     if once:
         worked = process.run_once()

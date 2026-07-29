@@ -122,6 +122,9 @@ queued → running → succeeded
 
 The worker atomically claims one queued run and sets a lease. A process crash
 leaves the run recoverable after lease expiry. Heartbeats extend active leases.
+`tradingagents start` is a local foreground supervisor that health-gates and
+monitors the otherwise independent Web and worker processes; production-style
+and Docker deployments continue to manage those processes separately.
 
 - `retry` is valid for a failed run, increments its attempt, and reuses the
   compatible checkpoint thread.

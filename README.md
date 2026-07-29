@@ -74,14 +74,20 @@ pip install .
 cp .env.example .env
 ```
 
-Configure one LLM provider in `.env`, then start the Web process and worker in
-separate terminals:
+Configure one LLM provider in `.env`, then start the local Web and worker
+together:
+
+```bash
+tradingagents start
+```
+
+The command keeps both child processes separate, prefixes their merged output
+with `[web]` and `[worker]`, and stops both on Ctrl+C. Use `--log-dir PATH` only
+when rotating on-disk logs are wanted. The underlying commands remain available
+for independent process management:
 
 ```bash
 tradingagents serve
-```
-
-```bash
 tradingagents worker
 ```
 
@@ -220,8 +226,9 @@ The CLI is non-interactive and automation-friendly:
 
 ```text
 tradingagents run TICKER [options]
+tradingagents start [--log-dir PATH]
 tradingagents serve
-tradingagents worker [--once]
+tradingagents worker [--once] [--log-level LEVEL]
 tradingagents runs list|show|cancel|retry
 tradingagents memory import PATH [--apply] [--no-backup]
 tradingagents export RUN_ID [--format markdown|json] [-o PATH]

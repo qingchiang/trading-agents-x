@@ -79,6 +79,7 @@ After, choose an explicit command:
 
 ```bash
 tradingagents run NVDA --date 2026-07-24 --profile standard
+tradingagents start
 tradingagents serve
 tradingagents worker
 tradingagents runs list

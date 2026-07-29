@@ -44,7 +44,16 @@ def test_root_is_noninteractive_and_exposes_the_new_command_tree() -> None:
     result = runner.invoke(cli.app, ["--help"])
 
     assert result.exit_code == 0
-    for command in ("run", "serve", "worker", "runs", "memory", "export", "db"):
+    for command in (
+        "run",
+        "start",
+        "serve",
+        "worker",
+        "runs",
+        "memory",
+        "export",
+        "db",
+    ):
         assert command in result.output
     assert "questionnaire" not in result.output.lower()
     run_help = runner.invoke(cli.app, ["run", "--help"])
@@ -308,6 +317,43 @@ def test_serve_uses_the_validated_application_binding(
     assert calls["host"] == "127.0.0.1"
     assert calls["port"] == 8000
     assert calls["log_level"] == "warning"
+
+
+def test_start_supervises_web_and_worker(
+    monkeypatch,
+    cli_settings: AppSettings,
+    tmp_path: Path,
+) -> None:
+    calls = {}
+
+    class FakeSupervisor:
+        def __init__(self, settings, **kwargs):
+            calls.update({"settings": settings, **kwargs})
+
+        def run(self):
+            return 0
+
+    monkeypatch.setattr(cli, "_settings", lambda: cli_settings)
+    monkeypatch.setattr(cli, "LocalProcessSupervisor", FakeSupervisor)
+    log_dir = tmp_path / "logs"
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "start",
+            "--log-level",
+            "warning",
+            "--log-dir",
+            str(log_dir),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls == {
+        "settings": cli_settings,
+        "log_level": "warning",
+        "log_dir": log_dir,
+    }
 
 
 def test_worker_once_processes_at_most_one_item(
