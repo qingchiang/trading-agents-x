@@ -812,6 +812,7 @@ class RunRepository:
                         table.c.stage == draft.stage,
                         table.c.role == draft.role,
                         table.c.round == draft.round,
+                        table.c.prompt_version == draft.prompt_version,
                         table.c.content_hash == draft.content_hash,
                     )
                 )
@@ -833,6 +834,7 @@ class RunRepository:
                     role=draft.role,
                     round=draft.round,
                     schema_version=draft.schema_version,
+                    prompt_version=draft.prompt_version,
                     generation_method=draft.generation_method.value,
                     content_type=draft.content_type,
                     content_json=draft.content.model_dump(mode="json"),
@@ -851,6 +853,7 @@ class RunRepository:
                 "role": draft.role,
                 "round": draft.round,
                 "schema_version": draft.schema_version,
+                "prompt_version": draft.prompt_version,
                 "generation_method": draft.generation_method.value,
                 "content_type": draft.content_type,
             }
@@ -875,6 +878,7 @@ class RunRepository:
             role=draft.role,
             round=draft.round,
             schema_version=draft.schema_version,
+            prompt_version=draft.prompt_version,
             generation_method=draft.generation_method,
             content=draft.content,
             created_at=_aware(now),
@@ -1139,6 +1143,7 @@ class RunRepository:
             role=record["role"],
             round=record["round"],
             schema_version=record["schema_version"],
+            prompt_version=record["prompt_version"],
             generation_method=generation_method,
             content=content,
             created_at=_aware(record["created_at"]),

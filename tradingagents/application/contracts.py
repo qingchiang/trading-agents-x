@@ -539,6 +539,12 @@ class ResearchArtifactDraft(FrozenModel):
     )
     round: int = Field(default=0, ge=0)
     schema_version: Literal["1"] = "1"
+    prompt_version: str = Field(
+        default="research-v1",
+        min_length=1,
+        max_length=80,
+        pattern=r"^[a-z0-9][a-z0-9_.-]*$",
+    )
     generation_method: ArtifactGenerationMethod
     content: ResearchArtifactContent
 
@@ -575,6 +581,12 @@ class ResearchArtifact(FrozenModel):
     )
     round: int = Field(default=0, ge=0)
     schema_version: Literal["1"] = "1"
+    prompt_version: str = Field(
+        default="research-v1",
+        min_length=1,
+        max_length=80,
+        pattern=r"^[a-z0-9][a-z0-9_.-]*$",
+    )
     generation_method: ArtifactGenerationMethod
     content: ResearchArtifactContent
     created_at: datetime

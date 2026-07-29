@@ -1,5 +1,5 @@
 """Database migration entry points."""
 
-from .migrations import upgrade_database
+from .migrations import IncompatibleDatabaseError, upgrade_database
 
-__all__ = ["upgrade_database"]
+__all__ = ["IncompatibleDatabaseError", "upgrade_database"]

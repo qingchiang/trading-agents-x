@@ -191,6 +191,7 @@ export interface components {
       created_at: string;
       generation_method: components["schemas"]["ArtifactGenerationMethod"];
       id: string;
+      prompt_version?: string;
       role: string;
       round?: number;
       run_id: string;

@@ -130,6 +130,7 @@ class RunArtifactRecord(Base):
     role: Mapped[str] = mapped_column(String(80), nullable=False)
     round: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     schema_version: Mapped[str] = mapped_column(String(20), nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(80), nullable=False)
     generation_method: Mapped[str] = mapped_column(
         String(40), nullable=False
     )
@@ -144,6 +145,7 @@ class RunArtifactRecord(Base):
             "stage",
             "role",
             "round",
+            "prompt_version",
             "content_hash",
             name="uq_run_artifact_identity",
         ),

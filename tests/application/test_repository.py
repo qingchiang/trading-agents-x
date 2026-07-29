@@ -323,10 +323,45 @@ def test_artifacts_are_typed_retained_and_idempotent_across_retries(
         "role": "market",
         "round": 0,
         "schema_version": "1",
+        "prompt_version": "research-v1",
         "generation_method": "tool_call",
         "content_type": "analyst_report",
     }
     assert "Fixture narrative" not in str(events[0].payload)
+
+
+def test_artifact_prompt_version_is_audited_and_part_of_identity(
+    repository: RunRepository,
+    app_settings: AppSettings,
+) -> None:
+    run, _ = _create(repository, app_settings)
+    repository.claim_run(run.id, "worker", 30)
+    report = AnalystReport(
+        analyst="market",
+        summary="Fixture summary.",
+        confidence=0.8,
+        narrative="Fixture narrative.",
+    )
+    base = ResearchArtifactDraft(
+        node="analyst.market",
+        stage="analyst",
+        role="market",
+        prompt_version="market-v1",
+        generation_method=ArtifactGenerationMethod.TOOL_CALL,
+        content=report,
+    )
+
+    first, _ = repository.append_artifact(run.id, base)
+    second, _ = repository.append_artifact(
+        run.id,
+        base.model_copy(update={"prompt_version": "market-v2"}),
+    )
+
+    assert first.id != second.id
+    assert [item.prompt_version for item in repository.list_artifacts(run.id)] == [
+        "market-v1",
+        "market-v2",
+    ]
 
 
 def test_recovered_artifact_surfaces_a_top_level_result_warning(

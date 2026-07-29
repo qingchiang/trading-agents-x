@@ -39,7 +39,7 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("started_at", sa.DateTime(), nullable=True),
         sa.Column("finished_at", sa.DateTime(), nullable=True),
-        sa.Column("archived_at", sa.DateTime(), nullable=True),
+        sa.Column("trashed_at", sa.DateTime(), nullable=True),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(
             ["source_run_id"], ["runs.id"], ondelete="SET NULL"
@@ -55,9 +55,9 @@ def upgrade() -> None:
         unique=False,
     )
     op.create_index(
-        "ix_runs_archive",
+        "ix_runs_trash",
         "runs",
-        ["archived_at", "created_at"],
+        ["trashed_at", "created_at"],
         unique=False,
     )
     op.create_table(
@@ -113,6 +113,7 @@ def upgrade() -> None:
         sa.Column("role", sa.String(length=80), nullable=False),
         sa.Column("round", sa.Integer(), nullable=False),
         sa.Column("schema_version", sa.String(length=20), nullable=False),
+        sa.Column("prompt_version", sa.String(length=80), nullable=False),
         sa.Column("generation_method", sa.String(length=40), nullable=False),
         sa.Column("content_type", sa.String(length=40), nullable=False),
         sa.Column("content_json", sa.JSON(), nullable=False),
@@ -125,6 +126,7 @@ def upgrade() -> None:
             "stage",
             "role",
             "round",
+            "prompt_version",
             "content_hash",
             name="uq_run_artifact_identity",
         ),
@@ -192,6 +194,7 @@ def upgrade() -> None:
         sa.Column("raw_return", sa.Float(), nullable=True),
         sa.Column("alpha_return", sa.Float(), nullable=True),
         sa.Column("last_checked_at", sa.DateTime(), nullable=True),
+        sa.Column("next_check_at", sa.DateTime(), nullable=True),
         sa.Column("resolved_at", sa.DateTime(), nullable=True),
         sa.Column("error_message", sa.Text(), nullable=True),
         sa.ForeignKeyConstraint(
@@ -205,6 +208,12 @@ def upgrade() -> None:
     )
     op.create_index(
         "ix_outcomes_status", "outcomes", ["status"], unique=False
+    )
+    op.create_index(
+        "ix_outcomes_due",
+        "outcomes",
+        ["status", "next_check_at"],
+        unique=False,
     )
     op.create_table(
         "reflections",
@@ -243,6 +252,7 @@ def downgrade() -> None:
     op.drop_table("legacy_imports")
     op.drop_index("ix_reflections_outcome_id", table_name="reflections")
     op.drop_table("reflections")
+    op.drop_index("ix_outcomes_due", table_name="outcomes")
     op.drop_index("ix_outcomes_status", table_name="outcomes")
     op.drop_index("ix_outcomes_decision_id", table_name="outcomes")
     op.drop_table("outcomes")
@@ -261,6 +271,6 @@ def downgrade() -> None:
     op.drop_index("ix_run_attempts_run_id", table_name="run_attempts")
     op.drop_table("run_attempts")
     op.drop_index("ix_runs_claim", table_name="runs")
-    op.drop_index("ix_runs_archive", table_name="runs")
+    op.drop_index("ix_runs_trash", table_name="runs")
     op.drop_index("ix_runs_status", table_name="runs")
     op.drop_table("runs")

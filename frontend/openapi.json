@@ -1278,6 +1278,14 @@
             "title": "Id",
             "type": "string"
           },
+          "prompt_version": {
+            "default": "research-v1",
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9_.-]*$",
+            "title": "Prompt Version",
+            "type": "string"
+          },
           "role": {
             "maxLength": 80,
             "minLength": 1,

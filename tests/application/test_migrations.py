@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-from datetime import datetime
+import sqlite3
 
+import pytest
 from sqlalchemy import inspect, text
 
 from tradingagents.application.database import create_sqlite_engine
-from tradingagents.persistence import upgrade_database
+from tradingagents.persistence import (
+    IncompatibleDatabaseError,
+    upgrade_database,
+)
 
 
 def test_upgrade_persists_revision_and_is_idempotent(app_settings):
@@ -44,7 +48,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     finally:
         engine.dispose()
 
-    assert revision == "0003_trash_lifecycle"
+    assert revision == "0001_application_core"
     assert {
         "id",
         "run_id",
@@ -53,6 +57,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
         "role",
         "round",
         "schema_version",
+        "prompt_version",
         "generation_method",
         "content_type",
         "content_json",
@@ -64,6 +69,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
         "stage",
         "role",
         "round",
+        "prompt_version",
         "content_hash",
     ) in artifact_uniques
     assert "trashed_at" in run_columns
@@ -72,126 +78,21 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     assert "ix_outcomes_due" in outcome_indexes
 
 
-def test_outcome_schedule_migration_backfills_existing_pending_rows(
+def test_unreleased_revision_requires_explicit_database_reset(
     app_settings,
 ) -> None:
-    upgrade_database(app_settings, "0001_application_core")
-    engine = create_sqlite_engine(
-        app_settings.database_path,
-        busy_timeout_ms=app_settings.busy_timeout_ms,
-    )
-    try:
-        with engine.begin() as connection:
-            connection.execute(
-                text(
-                    """
-                    INSERT INTO runs (
-                        id, status, request_json, config_json, version,
-                        current_attempt, cancel_requested, metrics_json,
-                        created_at, updated_at
-                    ) VALUES (
-                        'run-1', 'succeeded', '{}', '{}', 'test',
-                        1, 0, '{}', :now, :now
-                    )
-                    """
-                ),
-                {"now": datetime(2026, 7, 29)},
-            )
-            connection.execute(
-                text(
-                    """
-                    INSERT INTO decisions (
-                        run_id, ticker, market, asset_type, analysis_date,
-                        rating, confidence, decision_json,
-                        evidence_bundle_json, created_at
-                    ) VALUES (
-                        'run-1', '6501.T', 'JP', 'stock', '2026-07-28',
-                        'Hold', 0.5, '{}', '{}', :now
-                    )
-                    """
-                ),
-                {"now": datetime(2026, 7, 29)},
-            )
-            connection.execute(
-                text(
-                    """
-                    INSERT INTO outcomes (
-                        decision_id, status, benchmark, holding_intervals,
-                        last_checked_at
-                    ) VALUES (
-                        1, 'pending', '^N225', 5, :last_checked
-                    )
-                    """
-                ),
-                {"last_checked": datetime(2026, 7, 29, 1)},
-            )
-    finally:
-        engine.dispose()
+    app_settings.prepare_filesystem()
+    with sqlite3.connect(app_settings.database_path) as connection:
+        connection.execute(
+            "CREATE TABLE alembic_version "
+            "(version_num VARCHAR(32) NOT NULL)"
+        )
+        connection.execute(
+            "INSERT INTO alembic_version VALUES ('0003_trash_lifecycle')"
+        )
 
-    upgrade_database(app_settings)
-
-    engine = create_sqlite_engine(
-        app_settings.database_path,
-        busy_timeout_ms=app_settings.busy_timeout_ms,
-    )
-    try:
-        with engine.connect() as connection:
-            due = connection.scalar(
-                text("SELECT next_check_at FROM outcomes WHERE id = 1")
-            )
-    finally:
-        engine.dispose()
-
-    assert datetime.fromisoformat(str(due)) == datetime(2026, 8, 4, 15)
-
-
-def test_trash_lifecycle_migration_preserves_existing_soft_deleted_runs(
-    app_settings,
-) -> None:
-    upgrade_database(app_settings, "0002_outcome_schedule")
-    engine = create_sqlite_engine(
-        app_settings.database_path,
-        busy_timeout_ms=app_settings.busy_timeout_ms,
-    )
-    trashed_at = datetime(2026, 7, 1, 12)
-    try:
-        with engine.begin() as connection:
-            connection.execute(
-                text(
-                    """
-                    INSERT INTO runs (
-                        id, status, request_json, config_json, version,
-                        current_attempt, cancel_requested, metrics_json,
-                        created_at, archived_at, updated_at
-                    ) VALUES (
-                        'run-trashed', 'cancelled', '{}', '{}', 'test',
-                        1, 0, '{}', :created_at, :archived_at, :updated_at
-                    )
-                    """
-                ),
-                {
-                    "created_at": datetime(2026, 6, 1),
-                    "archived_at": trashed_at,
-                    "updated_at": trashed_at,
-                },
-            )
-    finally:
-        engine.dispose()
-
-    upgrade_database(app_settings)
-
-    engine = create_sqlite_engine(
-        app_settings.database_path,
-        busy_timeout_ms=app_settings.busy_timeout_ms,
-    )
-    try:
-        with engine.connect() as connection:
-            value = connection.scalar(
-                text(
-                    "SELECT trashed_at FROM runs WHERE id = 'run-trashed'"
-                )
-            )
-    finally:
-        engine.dispose()
-
-    assert datetime.fromisoformat(str(value)) == trashed_at
+    with pytest.raises(
+        IncompatibleDatabaseError,
+        match="remove .*tradingagents.db",
+    ):
+        upgrade_database(app_settings)
