@@ -15,13 +15,22 @@ from tradingagents.agents.analysts.sentiment_analyst import (
 from tradingagents.agents.schemas import (
     SentimentBand,
     SentimentReport,
+    SentimentSourceAssessment,
+    SentimentSourceStatus,
     render_sentiment_report,
+    validate_sentiment_sources,
+)
+from tradingagents.agents.sentiment_sources import (
+    SentimentConfidence,
+    SentimentSourceInput,
+    sentiment_confidence,
 )
 from tradingagents.agents.utils.structured import (
     bind_structured,
     invoke_structured_or_freetext,
 )
 from tradingagents.dataflows.config import bind_config
+from tradingagents.dataflows.market_context import market_suffix_of
 from tradingagents.dataflows.market_signals import (
     FetchedSentimentSignal,
     SentimentSignal,
@@ -42,16 +51,71 @@ def _state(ticker: str = "NVDA", trade_date: str = "2026-01-15"):
     }
 
 
+def _assessment(
+    source_id: str,
+    *,
+    status: SentimentSourceStatus = SentimentSourceStatus.SUBSTANTIVE,
+    direction: SentimentBand | None = SentimentBand.BULLISH,
+) -> SentimentSourceAssessment:
+    return SentimentSourceAssessment(
+        source_id=source_id,
+        status=status,
+        direction=direction,
+        summary=f"{source_id} assessment.",
+        key_evidence=(
+            (f"{source_id} supplied concrete evidence.",)
+            if status is SentimentSourceStatus.SUBSTANTIVE
+            else ()
+        ),
+        limitations=(f"{source_id} coverage is bounded.",),
+    )
+
+
+def _report(
+    source_ids: tuple[str, ...] = ("news", "stocktwits", "reddit"),
+    *,
+    band: SentimentBand = SentimentBand.BULLISH,
+    score: float = 7.5,
+    statuses: dict[str, SentimentSourceStatus] | None = None,
+) -> SentimentReport:
+    statuses = statuses or {}
+    return SentimentReport(
+        overall_band=band,
+        overall_score=score,
+        executive_summary="The available evidence is constructive overall.",
+        source_assessments=tuple(
+            _assessment(
+                source_id,
+                status=statuses.get(
+                    source_id,
+                    SentimentSourceStatus.SUBSTANTIVE,
+                ),
+                direction=(
+                    SentimentBand.BULLISH
+                    if statuses.get(
+                        source_id,
+                        SentimentSourceStatus.SUBSTANTIVE,
+                    )
+                    is SentimentSourceStatus.SUBSTANTIVE
+                    else None
+                ),
+            )
+            for source_id in source_ids
+        ),
+        cross_source_consensus=("Several sources point in the same direction.",),
+        cross_source_divergences=(),
+        dominant_themes=("Positioning is constructive.",),
+        catalysts=("A scheduled disclosure could shift sentiment.",),
+        risks=("The current narrative may be crowded.",),
+        limitations=("Source windows and sample sizes are bounded.",),
+    )
+
+
 def _structured_llm(
     captured: dict,
     report: SentimentReport | None = None,
 ):
-    report = report or SentimentReport(
-        overall_band=SentimentBand.BULLISH,
-        overall_score=7.5,
-        confidence="high",
-        narrative="News and positioning evidence are constructive.",
-    )
+    report = report or _report()
     structured = MagicMock()
     structured.invoke.side_effect = lambda prompt: (
         captured.__setitem__("prompt", prompt) or report
@@ -64,30 +128,205 @@ def _structured_llm(
 @pytest.mark.unit
 @pytest.mark.parametrize("band", list(SentimentBand))
 def test_all_sentiment_bands_render_deterministically(band):
-    report = SentimentReport(
-        overall_band=band,
-        overall_score=5.0,
-        confidence="medium",
-        narrative="Evidence narrative.",
+    report = _report(
+        ("news",),
+        band=band,
+        score=5.0,
     )
 
-    rendered = render_sentiment_report(report)
+    rendered = render_sentiment_report(
+        report,
+        confidence="medium",
+        confidence_score=0.55,
+        source_labels={"news": "Routed ticker news"},
+    )
 
     assert band.value in rendered
-    assert "**Confidence:** Medium" in rendered
-    assert rendered.endswith("Evidence narrative.")
+    assert "**Confidence:** Medium (0.55)" in rendered
+    assert "## Source Assessments" in rendered
+    assert "## Cross-source Divergences\n- —" in rendered
+    assert "## Dominant Themes" in rendered
+    assert "## Catalysts" in rendered
+    assert "## Risks" in rendered
+    assert rendered.endswith(
+        "- Source windows and sample sizes are bounded."
+    )
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize("score", [-0.1, 10.1])
 def test_sentiment_score_must_remain_on_the_declared_scale(score):
     with pytest.raises(ValidationError):
+        _report(("news",), band=SentimentBand.NEUTRAL, score=score)
+
+
+@pytest.mark.unit
+def test_empty_catalysts_are_valid_and_render_explicitly():
+    report = _report(("news",)).model_copy(update={"catalysts": ()})
+
+    rendered = render_sentiment_report(
+        report,
+        confidence="medium",
+        confidence_score=0.55,
+        source_labels={"news": "Routed ticker news"},
+    )
+
+    assert "## Catalysts\n- —" in rendered
+
+
+@pytest.mark.unit
+def test_substantive_source_requires_direction_and_key_evidence():
+    with pytest.raises(ValidationError):
+        SentimentSourceAssessment(
+            source_id="news",
+            status=SentimentSourceStatus.SUBSTANTIVE,
+            direction=SentimentBand.BULLISH,
+            summary="Constructive news flow.",
+            key_evidence=(),
+        )
+
+
+@pytest.mark.unit
+def test_non_substantive_source_cannot_invent_direction_or_evidence():
+    with pytest.raises(ValidationError):
+        SentimentSourceAssessment(
+            source_id="reddit",
+            status=SentimentSourceStatus.UNAVAILABLE,
+            direction=SentimentBand.BEARISH,
+            summary="The source is unavailable.",
+            key_evidence=("Invented evidence.",),
+        )
+
+
+@pytest.mark.unit
+def test_sentiment_source_contract_rejects_missing_and_unknown_ids():
+    report = _report(("news", "invented"))
+
+    with pytest.raises(ValueError, match="missing=.*stocktwits"):
+        validate_sentiment_sources(
+            report,
+            {
+                "news": SentimentSourceStatus.SUBSTANTIVE,
+                "stocktwits": SentimentSourceStatus.SUBSTANTIVE,
+            },
+        )
+
+
+@pytest.mark.unit
+def test_sentiment_source_ids_must_be_unique():
+    with pytest.raises(ValidationError, match="must be unique"):
         SentimentReport(
             overall_band=SentimentBand.NEUTRAL,
-            overall_score=score,
-            confidence="low",
-            narrative="Invalid fixture.",
+            overall_score=5.0,
+            executive_summary="The evidence is balanced.",
+            source_assessments=(
+                _assessment("news"),
+                _assessment("news"),
+            ),
+            dominant_themes=("No theme dominates.",),
+            risks=("Coverage is thin.",),
+            limitations=("Only one source type was supplied.",),
         )
+
+
+@pytest.mark.unit
+def test_model_cannot_self_report_confidence():
+    payload = _report(("news",)).model_dump(mode="json")
+    payload["confidence"] = "high"
+
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        SentimentReport.model_validate(payload)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("sources", "expected"),
+    [
+        (
+            (
+                SentimentSourceInput(
+                    "news",
+                    "News",
+                    SentimentSourceStatus.SUBSTANTIVE,
+                    True,
+                    False,
+                ),
+                SentimentSourceInput(
+                    "positioning",
+                    "Positioning",
+                    SentimentSourceStatus.SUBSTANTIVE,
+                    True,
+                    False,
+                ),
+            ),
+            SentimentConfidence("high", 0.8),
+        ),
+        (
+            (
+                SentimentSourceInput(
+                    "news",
+                    "News",
+                    SentimentSourceStatus.SUBSTANTIVE,
+                    True,
+                    False,
+                ),
+            ),
+            SentimentConfidence("medium", 0.55),
+        ),
+        (
+            (
+                SentimentSourceInput(
+                    "stocktwits",
+                    "StockTwits",
+                    SentimentSourceStatus.SUBSTANTIVE,
+                    True,
+                    True,
+                ),
+                SentimentSourceInput(
+                    "reddit",
+                    "Reddit",
+                    SentimentSourceStatus.SUBSTANTIVE,
+                    True,
+                    True,
+                ),
+            ),
+            SentimentConfidence("medium", 0.55),
+        ),
+        (
+            (
+                SentimentSourceInput(
+                    "stocktwits",
+                    "StockTwits",
+                    SentimentSourceStatus.SUBSTANTIVE,
+                    True,
+                    True,
+                ),
+            ),
+            SentimentConfidence("low", 0.25),
+        ),
+        (
+            (
+                SentimentSourceInput(
+                    "stocktwits",
+                    "StockTwits",
+                    SentimentSourceStatus.UNAVAILABLE,
+                    False,
+                    True,
+                ),
+                SentimentSourceInput(
+                    "reddit",
+                    "Reddit",
+                    SentimentSourceStatus.UNAVAILABLE,
+                    False,
+                    True,
+                ),
+            ),
+            SentimentConfidence("low", 0.25),
+        ),
+    ],
+)
+def test_sentiment_confidence_uses_fixed_coverage_rules(sources, expected):
+    assert sentiment_confidence(sources) == expected
 
 
 @pytest.mark.unit
@@ -101,7 +340,7 @@ def test_structured_none_falls_back_once_to_free_text():
         structured,
         plain,
         "prompt",
-        render=lambda value: value.narrative,
+        render=lambda value: value.executive_summary,
         agent_name="sentiment",
         structured_prompt="JSON prompt",
     )
@@ -167,8 +406,36 @@ def _run(
             news.func.side_effect = news_side_effect
         else:
             news.func.return_value = "NEWS_DATA"
+        if llm is None:
+            source_ids = ["news"]
+            statuses = {
+                "news": (
+                    SentimentSourceStatus.UNAVAILABLE
+                    if news_side_effect
+                    else SentimentSourceStatus.SUBSTANTIVE
+                )
+            }
+            if market_suffix_of(ticker):
+                for signal in signals:
+                    if signal.spec.live_only and not live:
+                        continue
+                    source_id = f"signal.{signal.spec.tag}"
+                    source_ids.append(source_id)
+                    if not signal.body:
+                        status = SentimentSourceStatus.NO_SIGNAL
+                    elif "unavailable" in signal.body.casefold():
+                        status = SentimentSourceStatus.UNAVAILABLE
+                    else:
+                        status = SentimentSourceStatus.SUBSTANTIVE
+                    statuses[source_id] = status
+            elif live:
+                source_ids.extend(("stocktwits", "reddit"))
+            llm = _structured_llm(
+                captured,
+                _report(tuple(source_ids), statuses=statuses),
+            )
         result = create_sentiment_analyst(
-            llm or _structured_llm(captured)
+            llm
         )(_state(ticker, trade_date))
     return (
         captured,
@@ -182,11 +449,9 @@ def _run(
 
 @pytest.mark.unit
 def test_structured_report_is_persisted_in_state_and_messages():
-    report = SentimentReport(
-        overall_band=SentimentBand.MILDLY_BEARISH,
-        overall_score=4.0,
-        confidence="medium",
-        narrative="Mixed source evidence.",
+    report = _report(
+        band=SentimentBand.MILDLY_BEARISH,
+        score=4.0,
     )
     captured = {}
     with (
@@ -207,6 +472,13 @@ def test_structured_report_is_persisted_in_state_and_messages():
         )(_state())
 
     assert "Mildly Bearish" in result["sentiment_report"]
+    assert "**Confidence:** Medium (0.55)" in result["sentiment_report"]
+    assert "## Source Assessments" in result["sentiment_report"]
+    assert "## Dominant Themes" in result["sentiment_report"]
+    assert "## Risks" in result["sentiment_report"]
+    assert "## Limitations" in result["sentiment_report"]
+    assert result["sentiment_confidence"] == 0.55
+    assert result["sentiment_output_warning"] is None
     assert result["messages"][0].content == result["sentiment_report"]
 
 
@@ -224,7 +496,9 @@ def test_json_mode_receives_schema_contract_without_changing_fallback_prompt():
     assert "Return exactly one JSON object" in contract
     assert "JSON Schema" in contract
     assert '"overall_band"' in contract
-    assert '"narrative"' in contract
+    assert '"source_assessments"' in contract
+    assert '"dominant_themes"' in contract
+    assert '"confidence"' not in contract
     llm.with_structured_output.assert_called_once_with(
         SentimentReport,
         max_tokens=16_384,
@@ -246,6 +520,27 @@ def test_function_calling_keeps_the_original_sentiment_prompt():
     )
     assert "Return exactly one JSON object" not in prompt_text
     llm.with_structured_output.assert_called_once_with(SentimentReport)
+
+
+@pytest.mark.unit
+def test_unknown_or_missing_source_ids_trigger_free_text_fallback():
+    captured = {}
+    llm = _structured_llm(
+        captured,
+        _report(("news", "invented")),
+    )
+    llm.invoke.return_value = MagicMock(
+        content="Fallback narrative after source validation failed."
+    )
+
+    result = _run(llm=llm)[-1]
+
+    assert result["sentiment_report"].startswith("Fallback narrative")
+    assert (
+        result["sentiment_output_warning"]
+        == "structured_output_failed"
+    )
+    llm.invoke.assert_called_once()
 
 
 @pytest.mark.unit
@@ -310,7 +605,12 @@ def test_routed_markets_skip_us_social_and_use_per_name_signals(
     prompt = "\n".join(map(str, captured["prompt"]))
     assert "unavailable: no coverage for this market" in prompt
     assert "SIGNAL_DATA" in prompt
+    assert "Do not return assessments for these non-applicable sources" in prompt
+    assert "`stocktwits`" in prompt
+    assert "`reddit`" in prompt
     assert "## Data Provenance" not in result["sentiment_report"]
+    assert "`signal.fixture`" in result["sentiment_report"]
+    assert result["sentiment_confidence"] == 0.55
     signal_block = next(
         block
         for block in result["prefetched_evidence"]
@@ -403,9 +703,9 @@ def test_provenance_uses_actual_fallback_source():
 @pytest.mark.parametrize(
     ("language", "expected"),
     [
-        ("Chinese", "narrative` field in Chinese"),
-        ("Japanese", "narrative` field in Japanese"),
-        ("English", "narrative, in English"),
+        ("Chinese", "structured text field in Chinese"),
+        ("Japanese", "structured text field in Japanese"),
+        ("English", "structured text field in English"),
     ],
 )
 def test_report_language_contract_is_explicit(language, expected):
@@ -442,6 +742,11 @@ def test_structured_output_failures_fall_back_without_provenance_loss(
     assert result["sentiment_report"].startswith("Fallback narrative.")
     assert "## Data Provenance" not in result["sentiment_report"]
     assert result["prefetched_evidence"]
+    assert result["sentiment_output_warning"] in {
+        "structured_output_failed",
+        "structured_output_unavailable",
+    }
+    assert result["sentiment_confidence"] == 0.55
 
 
 @pytest.mark.unit

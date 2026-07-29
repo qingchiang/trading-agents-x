@@ -31,6 +31,14 @@ class AgentState(MessagesState):
     sentiment_report: Annotated[str, "Sentiment analyst narrative"]
     news_report: Annotated[str, "News analyst narrative"]
     fundamentals_report: Annotated[str, "Fundamentals analyst narrative"]
+    sentiment_confidence: Annotated[
+        float | None,
+        "Locally calculated confidence shared with the research graph",
+    ]
+    sentiment_output_warning: Annotated[
+        str | None,
+        "Safe warning code when typed sentiment output falls back to prose",
+    ]
     prefetched_evidence: Annotated[
         list[PrefetchedEvidenceBlock],
         "Evidence fetched before an analyst LLM call",

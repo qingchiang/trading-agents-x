@@ -94,6 +94,7 @@ def invoke_structured_or_freetext(
     agent_name: str,
     *,
     structured_prompt: Any | None = None,
+    on_fallback: Callable[[str], None] | None = None,
 ) -> str:
     """Run the structured call and render to markdown; fall back to free-text on any failure.
 
@@ -113,9 +114,15 @@ def invoke_structured_or_freetext(
             return render(result)
         except Exception as exc:
             logger.warning(
-                "%s: structured-output invocation failed (%s); retrying once as free text",
-                agent_name, exc,
+                "%s: structured-output invocation failed (%s); retrying once "
+                "as free text",
+                agent_name,
+                type(exc).__name__,
             )
+            if on_fallback is not None:
+                on_fallback("structured_output_failed")
+    elif on_fallback is not None:
+        on_fallback("structured_output_unavailable")
 
     response = plain_llm.invoke(prompt)
     return response.content

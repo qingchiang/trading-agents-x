@@ -8,7 +8,12 @@ from unittest.mock import MagicMock
 import pytest
 
 import tradingagents.agents.analysts.sentiment_analyst as sentiment
-from tradingagents.agents.schemas import SentimentBand, SentimentReport
+from tradingagents.agents.schemas import (
+    SentimentBand,
+    SentimentReport,
+    SentimentSourceAssessment,
+    SentimentSourceStatus,
+)
 from tradingagents.agents.utils.structured import NO_EXTERNAL_TOOLS
 
 
@@ -19,8 +24,34 @@ def _capturing_llm(captured: dict):
         or SentimentReport(
             overall_band=SentimentBand.BULLISH,
             overall_score=7.5,
-            confidence="high",
-            narrative="Evidence narrative.",
+            executive_summary="The supplied sources are constructive.",
+            source_assessments=(
+                SentimentSourceAssessment(
+                    source_id="news",
+                    status=SentimentSourceStatus.SUBSTANTIVE,
+                    direction=SentimentBand.BULLISH,
+                    summary="News is constructive.",
+                    key_evidence=("A concrete company event was supplied.",),
+                ),
+                SentimentSourceAssessment(
+                    source_id="stocktwits",
+                    status=SentimentSourceStatus.SUBSTANTIVE,
+                    direction=SentimentBand.BULLISH,
+                    summary="Retail positioning is constructive.",
+                    key_evidence=("Bullish messages outweighed bearish ones.",),
+                ),
+                SentimentSourceAssessment(
+                    source_id="reddit",
+                    status=SentimentSourceStatus.SUBSTANTIVE,
+                    direction=SentimentBand.NEUTRAL,
+                    summary="Community discussion is balanced.",
+                    key_evidence=("Discussion contained both positive and negative views.",),
+                ),
+            ),
+            cross_source_consensus=("News and retail views are constructive.",),
+            dominant_themes=("A constructive event narrative dominates.",),
+            risks=("Retail enthusiasm may be crowded.",),
+            limitations=("Public-feed samples are bounded.",),
         )
     )
     llm = MagicMock()

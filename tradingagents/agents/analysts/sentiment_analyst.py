@@ -22,8 +22,8 @@ The agent does not use tool-calling; the data is in the prompt from
 turn 0. Output uses the structured-output pattern (json_schema for
 OpenAI/xAI, response_schema for Gemini, tool-use for Anthropic), falling
 back to free-text generation for providers that lack native support, so
-the sentiment header (band + score + confidence) is deterministic across
-runs and providers instead of free-form per-model prose.
+the report structure is stable and confidence is calculated locally from
+source coverage instead of being self-rated by the model.
 
 See: https://github.com/TauricResearch/TradingAgents/issues/557
 See: https://github.com/TauricResearch/TradingAgents/issues/796
@@ -35,8 +35,16 @@ from datetime import datetime, timezone
 from langchain_core.messages import AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
-from tradingagents.agents.schemas import SentimentReport, render_sentiment_report
-from tradingagents.agents.utils.agent_states import prefetched_evidence_block
+from tradingagents.agents.schemas import (
+    SentimentReport,
+    render_sentiment_report,
+    validate_sentiment_sources,
+)
+from tradingagents.agents.sentiment_sources import (
+    SentimentSourceInput,
+    prepare_sentiment_sources,
+    sentiment_confidence,
+)
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
@@ -57,10 +65,6 @@ from tradingagents.dataflows.market_signals import (
 )
 from tradingagents.dataflows.reddit import fetch_reddit_posts
 from tradingagents.dataflows.stocktwits import fetch_stocktwits_messages
-from tradingagents.provenance import (
-    ProvenanceRecord,
-    extract_provenance,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +111,7 @@ def create_sentiment_analyst(llm):
         # StockTwits and Reddit are US-retail platforms with no coverage of
         # other markets, so for a routed market (e.g. .T, future .SS) skip the
         # pointless network calls and hand the LLM a clear placeholder — prompt
-        # rule 6 then lowers confidence rather than reading noise as signal.
+        # rule 6 then excludes them rather than reading noise as signal.
         # Per-name official positioning signals replace the unavailable social
         # sources. Exchange-section investor flows belong to the News Analyst's
         # market context and must never appear as ticker sentiment here.
@@ -143,6 +147,20 @@ def create_sentiment_analyst(llm):
                 stocktwits_block = historical
                 reddit_block = historical
 
+        sentiment_sources, prefetched_evidence = prepare_sentiment_sources(
+            ticker=ticker,
+            end_date=end_date,
+            news_start_date=news_start_date,
+            social_start_date=social_start_date,
+            live_run=live_run,
+            news_block=news_block,
+            stocktwits_block=stocktwits_block,
+            reddit_block=reddit_block,
+            stocktwits_retrieved_at=stocktwits_retrieved_at,
+            reddit_retrieved_at=reddit_retrieved_at,
+            market_signals=fetched_market_signals,
+        )
+        confidence = sentiment_confidence(sentiment_sources)
         system_message = _build_system_message(
             ticker=ticker,
             news_start_date=news_start_date,
@@ -153,6 +171,7 @@ def create_sentiment_analyst(llm):
             stocktwits_block=stocktwits_block,
             reddit_block=reddit_block,
             market_signals=fetched_market_signals,
+            sentiment_sources=sentiment_sources,
         )
 
         prompt = ChatPromptTemplate.from_messages(
@@ -185,158 +204,61 @@ def create_sentiment_analyst(llm):
             formatted_messages,
         )
 
+        applicable_sources = tuple(
+            source for source in sentiment_sources if source.applicable
+        )
+        expected_statuses = {
+            source.source_id: source.status
+            for source in applicable_sources
+        }
+        source_labels = {
+            source.source_id: source.label
+            for source in applicable_sources
+        }
+
+        def render_structured(report: SentimentReport) -> str:
+            validate_sentiment_sources(report, expected_statuses)
+            return render_sentiment_report(
+                report,
+                confidence=confidence.level,
+                confidence_score=confidence.score,
+                source_labels=source_labels,
+            )
+
+        fallback_reason: str | None = None
+
+        def record_fallback(reason: str) -> None:
+            nonlocal fallback_reason
+            fallback_reason = reason
+
         report_text = invoke_structured_or_freetext(
             structured_llm,
             llm,
             formatted_messages,
-            render_sentiment_report,
+            render_structured,
             "Sentiment Analyst",
             structured_prompt=structured_messages,
+            on_fallback=record_fallback,
         )
-
-        news_records = extract_provenance(news_block)
-        if not news_records:
-            news_records.append(
-                ProvenanceRecord(
-                    evidence="routed ticker news",
-                    source="unknown",
-                    requested=f"{news_start_date} to {end_date}",
-                    effective="unknown",
-                    timing=(
-                        "unavailable"
-                        if "unavailable" in news_block.lower()
-                        else "no auditable source metadata captured"
-                    ),
-                )
-            )
-
-        market_suffix = market_suffix_of(ticker)
-
-        def social_status(
-            body: str, retrieved_at: str | None
-        ) -> tuple[str, str, str | None]:
-            if market_suffix:
-                return "—", "unavailable: no coverage for this market", None
-            if not live_run:
-                return (
-                    "—",
-                    "live-only; unavailable for historical or future date; "
-                    "vendor not queried",
-                    None,
-                )
-            lowered = body.casefold()
-            if "unavailable" in lowered:
-                return "—", "retrieval unavailable", retrieved_at
-            if lowered.startswith("<no "):
-                return (
-                    f"{social_start_date} to {end_date}",
-                    "available; no messages in current public-feed window",
-                    retrieved_at,
-                )
-            return (
-                f"{social_start_date} to {end_date}",
-                "live source; market-calendar window filtered",
-                retrieved_at,
-            )
-
-        stocktwits_effective, stocktwits_timing, stocktwits_retrieved = social_status(
-            stocktwits_block, stocktwits_retrieved_at
-        )
-        reddit_effective, reddit_timing, reddit_retrieved = social_status(
-            reddit_block, reddit_retrieved_at
-        )
-        stocktwits_record = ProvenanceRecord(
-            evidence="retail social messages",
-            source="StockTwits",
-            requested=f"{social_start_date} to {end_date}",
-            effective=stocktwits_effective,
-            timing=stocktwits_timing,
-            retrieved_at=stocktwits_retrieved,
-        )
-        reddit_record = ProvenanceRecord(
-            evidence="community discussion",
-            source="Reddit public feeds",
-            requested=f"{social_start_date} to {end_date}",
-            effective=reddit_effective,
-            timing=reddit_timing,
-            retrieved_at=reddit_retrieved,
-        )
-        prefetched_evidence = [
-            prefetched_evidence_block(
-                news_block,
-                news_records,
-                temporal_scope="point_in_time",
-            ),
-            prefetched_evidence_block(
-                stocktwits_block,
-                (stocktwits_record,),
-                temporal_scope="live_only",
-            ),
-            prefetched_evidence_block(
-                reddit_block,
-                (reddit_record,),
-                temporal_scope="live_only",
-            ),
-        ]
-        if fetched_market_signals:
-            for result in fetched_market_signals:
-                spec = result.spec
-                body = result.body
-                body_records = extract_provenance(body)
-                if not body_records:
-                    lowered = body.casefold()
-                    if "unavailable" in lowered:
-                        record_timing = "unavailable"
-                        record_effective = "—"
-                    elif "skipped" in lowered or "no edinet code" in lowered:
-                        record_timing = "not queried; identifier unavailable"
-                        record_effective = "—"
-                    elif body:
-                        record_timing = spec.timing
-                        record_effective = spec.effective(end_date)
-                    elif spec.live_only:
-                        record_timing = (
-                            "live-only; unavailable for historical or future "
-                            "date; vendor not queried"
-                            if not live_run
-                            else "no analyst snapshot returned; retrieval success unknown"
-                        )
-                        record_effective = "—"
-                    else:
-                        record_timing = "available; no qualifying records"
-                        record_effective = spec.effective(end_date)
-                    body_records = [
-                        ProvenanceRecord(
-                            evidence=spec.evidence,
-                            source=spec.source,
-                            requested=end_date,
-                            effective=record_effective,
-                            timing=record_timing,
-                            retrieved_at=result.retrieved_at,
-                        )
-                    ]
-                prefetched_evidence.append(
-                    prefetched_evidence_block(
-                        body,
-                        body_records,
-                        temporal_scope=(
-                            "live_only"
-                            if spec.live_only
-                            else "point_in_time"
-                        ),
-                    )
-                )
 
         return {
             "messages": [AIMessage(content=report_text)],
             "sentiment_report": report_text,
+            "sentiment_confidence": confidence.score,
+            "sentiment_output_warning": fallback_reason,
             "prefetched_evidence": prefetched_evidence,
         }
 
     return sentiment_analyst_node
 
 
-def _optional_section(title: str, intro: str, tag: str, body: str) -> str:
+def _optional_section(
+    source_id: str,
+    title: str,
+    intro: str,
+    tag: str,
+    body: str,
+) -> str:
     """Render an optional ``### title / intro / <start_of_tag>…<end_of_tag>`` block.
 
     Returns "" when ``body`` is empty, so a market lacking the signal (e.g. US)
@@ -344,7 +266,10 @@ def _optional_section(title: str, intro: str, tag: str, body: str) -> str:
     """
     if not body:
         return ""
-    return f"\n### {title}\n{intro}\n\n<start_of_{tag}>\n{body}\n<end_of_{tag}>\n"
+    return (
+        f"\n### {title} — source_id `{source_id}`\n"
+        f"{intro}\n\n<start_of_{tag}>\n{body}\n<end_of_{tag}>\n"
+    )
 
 
 def _build_system_message(
@@ -358,6 +283,7 @@ def _build_system_message(
     stocktwits_block: str,
     reddit_block: str,
     market_signals: tuple[FetchedSentimentSignal, ...] = (),
+    sentiment_sources: tuple[SentimentSourceInput, ...],
 ) -> str:
     """Assemble the sentiment-analyst system message with structured data blocks.
 
@@ -367,6 +293,7 @@ def _build_system_message(
     """
     optional_sections = "".join(
         _optional_section(
+            f"signal.{result.spec.tag}",
             result.spec.title,
             result.spec.intro,
             result.spec.tag,
@@ -374,17 +301,44 @@ def _build_system_message(
         )
         for result in market_signals
     )
+    applicable_sources = tuple(
+        source for source in sentiment_sources if source.applicable
+    )
+    excluded_sources = tuple(
+        source for source in sentiment_sources if not source.applicable
+    )
+    source_contract = "\n".join(
+        (
+            "Return exactly one `source_assessments` item for each applicable "
+            "source below. Copy both `source_id` and `status` exactly; the "
+            "application validates omissions, duplicates, unknown IDs, and "
+            "status changes.",
+            *(
+                f"- `{source.source_id}` — {source.label}; "
+                f"status=`{source.status.value}`"
+                for source in applicable_sources
+            ),
+            (
+                "Do not return assessments for these non-applicable sources: "
+                + ", ".join(
+                    f"`{source.source_id}`" for source in excluded_sources
+                )
+                if excluded_sources
+                else "There are no non-applicable sources in this run."
+            ),
+        )
+    )
     # Unlike tool-calling analysts, Sentiment receives a large body of source
     # text in its initial prompt. Native-language JP disclosures can therefore
     # overpower a short language reminder placed after the data. Put an
     # explicit contract before every source block, including for English (for
     # which the shared helper intentionally returns an empty string).
     language_instruction = get_language_instruction(
-        "all explanatory prose, including the narrative"
+        "all explanatory prose in every structured text field"
     ).strip()
     if not language_instruction:
         language_instruction = (
-            f"Write all explanatory prose, including the narrative, "
+            "Write all explanatory prose in every structured text field "
             f"in {output_language}."
         )
     return f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} ending on {end_date}, drawing on the complementary data sources and source-specific windows that have already been collected for you.
@@ -392,19 +346,23 @@ def _build_system_message(
 ## Mandatory output-language contract
 
 {language_instruction}
-Write all explanatory prose in the `narrative` field in {output_language},
+Write all explanatory prose in structured text fields in {output_language},
 regardless of the language used by EDINET, TDnet, news media, or any other
 source material. Do not imitate or switch to a source language. Translate or
 summarize foreign-language evidence into {output_language}, retaining only
 proper names, tickers, source names, and necessary original-language terms.
 Keep the structured field names, fixed report headings, and required English
-enum values (such as Bullish / Bearish and low / medium / high) unchanged. The
-same rules apply if structured output is unavailable and you must return a
-free-text report.
+enum values (such as Bullish / Bearish and substantive / no_signal /
+unavailable) unchanged. The same rules apply if structured output is
+unavailable and you must return a free-text report.
+
+## Source assessment contract
+
+{source_contract}
 
 ## Data sources (pre-fetched, in this prompt)
 
-### Routed ticker news — requested window {news_start_date} to {end_date}
+### Routed ticker news — source_id `news` — requested window {news_start_date} to {end_date}
 The inner block header identifies the actual routed source(s). Fact-driven,
 slower-moving signal; do not assume Yahoo Finance when another source is named.
 `[direct]` has explicit ticker or full-name evidence and may be treated as a
@@ -418,14 +376,14 @@ context material as an action taken by, or event confirmed for, {ticker}.
 {news_block}
 <end_of_news>
 
-### StockTwits messages — retail-trader social platform indexed by cashtag ({social_start_date} to {end_date})
+### StockTwits messages — source_id `stocktwits` — retail-trader social platform indexed by cashtag ({social_start_date} to {end_date})
 Fast-moving signal. Each message carries a user-labeled sentiment tag (Bullish / Bearish / no-label) plus the message body.
 
 <start_of_stocktwits>
 {stocktwits_block}
 <end_of_stocktwits>
 
-### Reddit posts — r/wallstreetbets, r/stocks, r/investing ({social_start_date} to {end_date})
+### Reddit posts — source_id `reddit` — r/wallstreetbets, r/stocks, r/investing ({social_start_date} to {end_date})
 Community discussion. Engagement signal via upvote score and comment count. Subreddit character matters (r/wallstreetbets is often contrarian/exuberant; r/stocks more measured; r/investing longer-term).
 
 <start_of_reddit>
@@ -444,7 +402,7 @@ Community discussion. Engagement signal via upvote score and comment count. Subr
 
 5. **Identify recurring narrative themes.** What topic keeps coming up across sources? That's the dominant narrative driving current sentiment.
 
-6. **Be honest about data limits, and never invent data for an unavailable source.** If a block contains an "<unavailable>" / "<no ...>" placeholder (e.g. StockTwits and Reddit have no coverage outside US markets), treat that source as absent: do NOT infer a Bullish/Bearish ratio, divergence, or engagement from it — rules 1–3 simply do not apply to it. Lean on the sources that ARE present and lower the `confidence` field accordingly, stating which sources were missing.
+6. **Be honest about data limits, and never invent data for an unavailable source.** If a block contains an "<unavailable>" / "<no ...>" placeholder (e.g. StockTwits and Reddit have no coverage outside US markets), do NOT infer a Bullish/Bearish ratio, divergence, engagement, direction, or key evidence from it — rules 1–3 simply do not apply. Preserve the application-supplied `status`, use `direction: null` and an empty `key_evidence`, and explain the limitation.
 
 7. **When per-name official exchange/disclosure blocks are present, treat them as the primary sentiment signal.** Margin balances, short disclosures, ownership/control filings, and analyst ratings refer to this company; broad exchange-section flows are deliberately excluded because they are not ticker order flow. Weight the per-name blocks above any thin or placeholder social block, and read each one exactly as the one-line note printed directly above its data explains. These are positioning and professional opinion, not retail chatter — do not force the StockTwits/Reddit Bullish/Bearish-ratio framing (rules 1–3) onto them. A live-snapshot block (analyst consensus) is often absent in backtests; that absence is normal and not itself bearish.
 
@@ -460,6 +418,14 @@ Fill the following fields:
 
 - **overall_band**: Exactly one of Bullish / Mildly Bullish / Neutral / Mixed / Mildly Bearish / Bearish. Use Mixed when sources point in clearly different directions; Neutral only when all sources are genuinely silent.
 - **overall_score**: A number from 0 (maximally bearish) to 10 (maximally bullish); 5 is neutral. Keep it consistent with overall_band.
-- **confidence**: low / medium / high, based on data quality and sample size.
-- **narrative**: Full source-by-source breakdown, divergences, dominant narrative themes, catalysts and risks, and a markdown summary table of key sentiment signals (direction, source, supporting evidence).
+- **executive_summary**: A substantive synthesis of the overall direction, strongest evidence, and why conflicting signals matter.
+- **source_assessments**: Exactly one item for every applicable source_id. A substantive source requires a direction and at least one concrete key-evidence statement. A no-signal or unavailable source must use null direction and no key evidence.
+- **cross_source_consensus**: Concrete points on which independent sources agree; may be empty when only one source is substantive.
+- **cross_source_divergences**: Material conflicts between sources; may be empty when none exist.
+- **dominant_themes**: One or more recurring narratives supported by the supplied evidence.
+- **catalysts**: Evidence-backed sentiment catalysts; may be empty when none are identified.
+- **risks**: One or more risks or contrarian signals surfaced by the evidence.
+- **limitations**: One or more coverage, timing, sample-size, or interpretation constraints.
+
+Do not return a confidence field or a preformatted Markdown table. The application computes confidence from source coverage and quality, and renders the summary table locally.
 """

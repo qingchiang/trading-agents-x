@@ -17,6 +17,7 @@ from tradingagents.application.contracts import (
     ResearchArtifactDraft,
     ResearchDecision,
     ResearchRating,
+    ResearchWarning,
     RunProfile,
 )
 from tradingagents.application.metrics import MetricsCallback
@@ -440,3 +441,22 @@ def test_analyst_warning_is_derived_from_evidence_quality() -> None:
         "historical price from fixture has low evidence quality."
     )
     assert report.warnings[0].evidence_ref == item.ref
+
+
+def test_sentiment_confidence_and_fallback_warning_reach_typed_handoff() -> None:
+    warning = ResearchWarning(
+        code="agent.structured_output_fallback",
+        message="Sentiment output used the free-text fallback.",
+        source="Sentiment Analyst",
+    )
+
+    report = _adapt_analyst_report(
+        "social",
+        "Preserved free-text sentiment report.",
+        [],
+        confidence_override=0.55,
+        extra_warnings=(warning,),
+    )
+
+    assert report.confidence == 0.55
+    assert report.warnings == (warning,)

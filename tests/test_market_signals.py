@@ -5,6 +5,8 @@ from unittest import mock
 import pytest
 
 from tradingagents.agents.analysts import sentiment_analyst
+from tradingagents.agents.schemas import SentimentSourceStatus
+from tradingagents.agents.sentiment_sources import SentimentSourceInput
 from tradingagents.dataflows import market_signals
 
 
@@ -122,7 +124,24 @@ def test_registered_signal_metadata_drives_prompt_rendering():
         stocktwits_block="<unavailable>",
         reddit_block="<unavailable>",
         market_signals=(fetched,),
+        sentiment_sources=(
+            SentimentSourceInput(
+                source_id="news",
+                label="Routed ticker news",
+                status=SentimentSourceStatus.SUBSTANTIVE,
+                applicable=True,
+                degraded=False,
+            ),
+            SentimentSourceInput(
+                source_id="signal.cn_margin",
+                label="China margin positioning",
+                status=SentimentSourceStatus.SUBSTANTIVE,
+                applicable=True,
+                degraded=False,
+            ),
+        ),
     )
 
     assert "### China margin positioning" in prompt
+    assert "source_id `signal.cn_margin`" in prompt
     assert "<start_of_cn_margin>\nCN_SIGNAL\n<end_of_cn_margin>" in prompt

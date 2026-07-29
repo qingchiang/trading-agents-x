@@ -454,6 +454,8 @@ class ResearchGraph:
                 "sentiment_report": "",
                 "news_report": "",
                 "fundamentals_report": "",
+                "sentiment_confidence": None,
+                "sentiment_output_warning": None,
                 "prefetched_evidence": [],
             }
             with use_config(dict(context.dataflow_config)):
@@ -474,7 +476,34 @@ class ResearchGraph:
                 analyst=analyst,
                 prefetched_blocks=result.get("prefetched_evidence", []),
             )
-            typed = _adapt_analyst_report(analyst, narrative, evidence)
+            extra_warnings: tuple[ResearchWarning, ...] = ()
+            if (
+                analyst == "social"
+                and result.get("sentiment_output_warning")
+            ):
+                extra_warnings = (
+                    ResearchWarning(
+                        code="agent.structured_output_fallback",
+                        message=(
+                            "Sentiment structured output was unavailable or "
+                            "invalid; the preserved report is a free-text "
+                            "fallback and no typed sentiment fields were "
+                            "fabricated."
+                        ),
+                        source="Sentiment Analyst",
+                    ),
+                )
+            typed = _adapt_analyst_report(
+                analyst,
+                narrative,
+                evidence,
+                confidence_override=(
+                    result.get("sentiment_confidence")
+                    if analyst == "social"
+                    else None
+                ),
+                extra_warnings=extra_warnings,
+            )
             check_cancelled(context)
             self._write_artifact(
                 runtime,
@@ -1287,9 +1316,12 @@ def _adapt_analyst_report(
     analyst: str,
     narrative: str,
     evidence: list[EvidenceItem],
+    *,
+    confidence_override: float | None = None,
+    extra_warnings: tuple[ResearchWarning, ...] = (),
 ) -> AnalystReport:
     refs = tuple(item.ref for item in evidence)
-    warnings: list[ResearchWarning] = []
+    warnings = list(extra_warnings)
     for item in evidence:
         origin_records = tuple(
             ProvenanceRecord(
@@ -1349,9 +1381,13 @@ def _adapt_analyst_report(
         item.quality is EvidenceQuality.UNAVAILABLE for item in evidence
     )
     low = sum(item.quality is EvidenceQuality.LOW for item in evidence)
-    confidence = max(
-        0.1,
-        min(0.9, 0.85 - unavailable * 0.2 - low * 0.1),
+    confidence = (
+        confidence_override
+        if confidence_override is not None
+        else max(
+            0.1,
+            min(0.9, 0.85 - unavailable * 0.2 - low * 0.1),
+        )
     )
     return AnalystReport(
         analyst=analyst,
