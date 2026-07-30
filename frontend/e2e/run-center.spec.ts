@@ -62,32 +62,32 @@ function result(id: string) {
     reports: {
       market: {
         analyst: "market",
-        executive_summary: "Market evidence is balanced.",
+        markdown:
+          "# Market report\n\nMarket evidence is balanced.[^ev_0123456789ab]\n\n" +
+          "| Signal | Reading |\n|---|---:|\n| Close | 100 USD |",
+        report_sections: [
+          {
+            id: "market.market-report",
+            title: "Market report",
+            anchor: "market-report",
+            source_refs: ["ev_0123456789ab"],
+          },
+        ],
         confidence: 0.7,
-        claims: [
+        key_claims: [
           {
             id: "market.claim_1",
+            section_id: "market.market-report",
             kind: "inference",
+            importance: "primary",
             statement: "The observed market signal is constructive.",
             implication: "Upside sensitivity remains relevant.",
             confidence: 0.7,
             evidence_refs: ["ev_0123456789ab"],
           },
         ],
-        sections: [
-          {
-            id: "market_report",
-            title: "Market report",
-            narrative:
-              "Market evidence cites ev_0123456789ab and remains balanced.",
-            table_ids: [],
-          },
-        ],
-        tables: [],
-        catalysts: ["Demand improves"],
-        risks: ["Demand slows"],
-        invalidation_conditions: ["The observed trend reverses"],
-        evidence_refs: ["ev_0123456789ab"],
+        source_refs: ["ev_0123456789ab"],
+        audit_status: "complete",
         warnings: [
           {
             code: "evidence.partial",
@@ -99,31 +99,31 @@ function result(id: string) {
       },
       news: {
         analyst: "news",
-        executive_summary: "No material change in the news path.",
+        markdown:
+          "# News report\n\nNo material change in the news path.[^ev_0123456789ab]",
+        report_sections: [
+          {
+            id: "news.news-report",
+            title: "News report",
+            anchor: "news-report",
+            source_refs: ["ev_0123456789ab"],
+          },
+        ],
         confidence: 0.6,
-        claims: [
+        key_claims: [
           {
             id: "news.claim_1",
+            section_id: "news.news-report",
             kind: "observation",
+            importance: "supporting",
             statement: "The supplied snapshot contains no adverse event.",
             implication: "The news path does not override the market evidence.",
             confidence: 0.6,
             evidence_refs: ["ev_0123456789ab"],
           },
         ],
-        sections: [
-          {
-            id: "news_report",
-            title: "News report",
-            narrative: "News evidence remains limited.",
-            table_ids: [],
-          },
-        ],
-        tables: [],
-        catalysts: [],
-        risks: ["Coverage remains limited"],
-        invalidation_conditions: ["A material filing changes the event path"],
-        evidence_refs: ["ev_0123456789ab"],
+        source_refs: ["ev_0123456789ab"],
+        audit_status: "complete",
         warnings: [],
       },
     },
@@ -165,9 +165,10 @@ function result(id: string) {
       valuation_assessment: null,
       market_reference_levels: [],
       risk_review_adjustments: [],
+      calculation_records: [],
     },
     evidence: {
-      version: "3",
+      version: "5",
       instrument: "NVDA",
       analysis_date: "2026-07-24",
       sealed_at: timestamp,
@@ -213,28 +214,15 @@ function artifacts(id: string) {
       role: "bull",
       round: 0,
       prompt_version: "research-case-bull-v2",
-      generation_method: "tool_call",
+      generation_method: "markdown_audited",
       created_at: timestamp,
       content: {
         role: "bull",
-        executive_summary: "The constructive case remains conditional.",
-        thesis: "Demand remains **constructive**.",
-        arguments: [
-          {
-            id: "case.bull.argument_1",
-            claim_ids: ["market.claim_1"],
-            statement: "Demand remains constructive.",
-            mechanism: "Demand supports operating leverage.",
-            implication: "Upside sensitivity remains material.",
-            confidence: 0.65,
-            evidence_refs: ["ev_0123456789ab"],
-          },
-        ],
-        strongest_counterarguments: ["Valuation risk is reflected."],
-        fragile_assumptions: ["Demand remains resilient."],
-        catalysts: ["Demand improves."],
-        evidence_refs: ["ev_0123456789ab"],
-        risks: ["Demand could slow."],
+        markdown:
+          "Demand remains **constructive**.[^ev_0123456789ab]\n\n" +
+          "| Case input | Assessment |\n|---|---|\n| Demand | Resilient |",
+        focus_claim_ids: ["market.claim_1"],
+        report_section_refs: ["market.market-report"],
       },
     },
   ];
@@ -539,9 +527,13 @@ test("runs, templates, trash, and restores local research", async ({
     .first()
     .click();
   await expect(
-    page.getByRole("heading", { name: "Price snapshot" }),
+    page.getByRole("dialog", { name: "Source details" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: /Return to deliberation/ }).click();
+  await expect(page).toHaveURL(/view=deliberation/);
+  await expect(
+    page.getByRole("heading", { name: "fixture-feed" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Close", exact: true }).click();
   await page.getByRole("tab", { name: "Reports" }).click();
   await expect(page.getByRole("heading", { name: "Market report" })).toBeVisible();
 
