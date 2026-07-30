@@ -105,7 +105,10 @@ def test_supervisor_prefixes_each_child_output(app_settings) -> None:
     output = []
     supervisor = LocalProcessSupervisor(app_settings, output=output.append)
 
-    supervisor._read_output("web", StringIO("first\nsecond\n"))
+    supervisor._read_output(
+        "web",
+        StringIO("first                    \nsecond\t \r\n"),
+    )
 
     assert output == ["[web] first", "[web] second"]
 
@@ -129,6 +132,28 @@ def test_supervisor_colors_prefixes_without_changing_child_ansi(
     ]
 
 
+def test_supervisor_removes_rich_padding_around_trailing_ansi(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    output = []
+    supervisor = LocalProcessSupervisor(
+        app_settings,
+        output=output.append,
+        color_mode=ColorMode.ALWAYS,
+    )
+
+    supervisor._read_output(
+        "worker",
+        StringIO("\x1b[31mwarning   \x1b[0m                  \n"),
+    )
+
+    assert output == [
+        "\x1b[35m[worker]\x1b[0m \x1b[31mwarning\x1b[0m"
+    ]
+
+
 def test_optional_process_log_rotates(tmp_path: Path) -> None:
     path = tmp_path / "worker.log"
     process_log = _ProcessLog(path, max_bytes=40, backup_count=2)
@@ -146,9 +171,10 @@ def test_process_log_strips_terminal_color_codes(tmp_path: Path) -> None:
     path = tmp_path / "worker.log"
     process_log = _ProcessLog(path)
     try:
-        process_log.write("\x1b[31mwarning\x1b[0m")
+        process_log.write("\x1b[31mwarning   \x1b[0m       ")
     finally:
         process_log.close()
 
     assert "\x1b[" not in path.read_text(encoding="utf-8")
-    assert "warning" in path.read_text(encoding="utf-8")
+    assert "warning\n" in path.read_text(encoding="utf-8")
+    assert "warning " not in path.read_text(encoding="utf-8")

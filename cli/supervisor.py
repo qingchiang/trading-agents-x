@@ -28,6 +28,9 @@ LOG_BACKUP_COUNT = 3
 INTERRUPTED_EXIT_CODE = 130
 
 _ANSI_ESCAPE_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+_TRAILING_ANSI_RE = re.compile(
+    r"(?:\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]))+\Z"
+)
 _PREFIX_COLORS = {
     "web": "36",
     "worker": "35",
@@ -66,7 +69,7 @@ class _ProcessLog:
             level=logging.INFO,
             pathname="",
             lineno=0,
-            msg=_strip_ansi(line).rstrip("\n"),
+            msg=_strip_ansi(_normalize_child_line(line)),
             args=(),
             exc_info=None,
         )
@@ -220,7 +223,7 @@ class LocalProcessSupervisor:
 
     def _read_output(self, name: str, stream: TextIO) -> None:
         for line in iter(stream.readline, ""):
-            self._emit(name, line.rstrip("\n"))
+            self._emit(name, _normalize_child_line(line))
         stream.close()
 
     def _emit(self, name: str, line: str) -> None:
@@ -296,6 +299,19 @@ def _resolve_colors(mode: ColorMode) -> bool:
 
 def _strip_ansi(value: str) -> str:
     return _ANSI_ESCAPE_RE.sub("", value)
+
+
+def _normalize_child_line(value: str) -> str:
+    """Remove pipe-rendering padding without disturbing leading indentation."""
+
+    line = value.rstrip("\r\n").rstrip(" \t")
+    trailing_ansi = _TRAILING_ANSI_RE.search(line)
+    if trailing_ansi is None:
+        return line
+    return (
+        line[: trailing_ansi.start()].rstrip(" \t")
+        + trailing_ansi.group(0)
+    )
 
 
 def _interrupt_process_group(process: Any) -> None:

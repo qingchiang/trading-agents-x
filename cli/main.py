@@ -247,6 +247,7 @@ def worker(
                 RichHandler(
                     console=Console(stderr=True, force_terminal=True),
                     show_path=False,
+                    omit_repeated_times=False,
                     markup=False,
                     rich_tracebacks=True,
                 )

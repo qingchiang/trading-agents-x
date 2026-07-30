@@ -379,6 +379,37 @@ def test_worker_once_processes_at_most_one_item(
     assert "Queue is empty" in result.output
 
 
+def test_worker_colored_logging_repeats_timestamps(
+    monkeypatch,
+    cli_settings: AppSettings,
+) -> None:
+    configured = {}
+
+    class FakeWorker:
+        def __init__(self, settings):
+            assert settings is cli_settings
+
+        def run_once(self):
+            return False
+
+    monkeypatch.setattr(cli, "_settings", lambda: cli_settings)
+    monkeypatch.setattr(cli, "AnalysisWorker", FakeWorker)
+    monkeypatch.setattr(
+        cli.logging,
+        "basicConfig",
+        lambda **kwargs: configured.update(kwargs),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["worker", "--once", "--use-colors"],
+    )
+
+    assert result.exit_code == 0
+    handler = configured["handlers"][0]
+    assert handler._log_render.omit_repeated_times is False
+
+
 def test_runs_list_show_and_cancel(
     monkeypatch,
     cli_service: AnalysisService,
