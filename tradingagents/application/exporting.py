@@ -182,7 +182,7 @@ def render_run_export_markdown(run_export: RunExport) -> str:
                 f"{attempt_metrics.wall_time_seconds:.3f}s |"
             )
 
-    sections.extend(["", "## Evidence Appendix"])
+    sections.extend(["", "## Sources"])
     if run_export.evidence is None:
         sections.extend(["", "_No sealed EvidenceBundle was recorded for this run._"])
     else:

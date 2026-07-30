@@ -29,37 +29,31 @@ export interface components {
       status: components["schemas"]["RunStatus"];
       warnings?: components["schemas"]["ResearchWarning"][];
     };
-    AnalystClaim: {
-      confidence: number;
-      evidence_refs: string[];
-      id: string;
-      implication: string;
-      kind: components["schemas"]["AnalystClaimType"];
-      statement: string;
-    };
     AnalystClaimType: "observation" | "inference" | "forecast";
     AnalystReport: {
       analyst: "market" | "social" | "news" | "fundamentals";
-      catalysts?: string[];
-      claims: components["schemas"]["AnalystClaim"][];
-      confidence: number;
-      evidence_refs: string[];
-      executive_summary: string;
-      invalidation_conditions: string[];
-      risks: string[];
-      sections: components["schemas"]["AnalystSection"][];
-      tables?: components["schemas"]["ResearchTable"][];
+      audit_status: components["schemas"]["ReportAuditStatus"];
+      confidence?: number | null;
+      key_claims?: components["schemas"]["KeyClaim"][];
+      markdown: string;
+      report_sections: components["schemas"]["ReportSection"][];
+      source_refs?: string[];
       warnings?: components["schemas"]["ResearchWarning"][];
     };
-    AnalystSection: {
-      evidence_table_ids?: string[];
-      id: string;
-      narrative: string;
-      research_table_ids?: string[];
-      title: string;
-    };
-    ArtifactGenerationMethod: "tool_call" | "tool_call_recovered" | "json_mode" | "raw_json_recovered" | "json_mode_recovered" | "sectioned_recovery";
+    ArtifactGenerationMethod: "tool_call" | "tool_call_recovered" | "json_mode" | "raw_json_recovered" | "json_mode_recovered" | "sectioned_recovery" | "markdown_audited" | "markdown_audit_incomplete";
     AssetType: "stock" | "crypto";
+    CalculationPurpose: "valuation" | "scenario" | "market_reference";
+    CalculationRecord: {
+      as_of_date: string;
+      formula: string;
+      id: string;
+      input_evidence_refs: string[];
+      inputs: Record<string, number>;
+      limitations: string[];
+      purpose: components["schemas"]["CalculationPurpose"];
+      result: number;
+      unit: string;
+    };
     CapabilitiesResponse: {
       analysts: string[];
       defaults: components["schemas"]["CapabilityDefaults"];
@@ -78,28 +72,16 @@ export interface components {
       quick_reasoning_effort: string | null;
       trash_retention_days: number;
     };
+    ClaimImportance: "primary" | "supporting";
     DebateAgenda: {
-      evidence_refs: string[];
-      executive_summary: string;
       issues: components["schemas"]["DebateIssue"][];
+      summary: string;
     };
     DebateImportance: "critical" | "material" | "secondary";
     DebateIssue: {
-      bear_position: string;
-      bull_position: string;
-      claim_ids: string[];
-      evidence_refs: string[];
       id: string;
       importance: components["schemas"]["DebateImportance"];
       question: string;
-    };
-    DebateResolution: "bull" | "bear" | "mixed" | "unresolved";
-    DerivedValue: {
-      formula: string;
-      input_evidence_refs: string[];
-      inputs: Record<string, number>;
-      result: number;
-      unit?: string | null;
     };
     DiscoveredModelView: {
       compatibility: "supported" | "unknown";
@@ -107,14 +89,6 @@ export interface components {
       id: string;
       label: string;
       reasoning_efforts: string[];
-    };
-    DisputeRuling: {
-      accepted_claim_ids?: string[];
-      agenda_id: string;
-      evidence_refs: string[];
-      rationale: string;
-      rejected_claim_ids?: string[];
-      resolution: components["schemas"]["DebateResolution"];
     };
     EvidenceBundle: {
       analysis_date: string;
@@ -154,13 +128,28 @@ export interface components {
     };
     EvidenceQuality: "high" | "medium" | "low" | "unavailable";
     EvidenceTable: {
-      columns: components["schemas"]["ResearchTableColumn"][];
+      columns: components["schemas"]["EvidenceTableColumn"][];
       evidence_refs: string[];
       id: string;
       purpose: string;
-      rows: components["schemas"]["ResearchTableRow"][];
+      rows: components["schemas"]["EvidenceTableRow"][];
       source_format: "structured" | "markdown" | "csv";
       title: string;
+    };
+    EvidenceTableCell: {
+      raw_value?: string | number | boolean | null;
+      source_refs?: string[];
+    };
+    EvidenceTableColumn: {
+      data_type?: components["schemas"]["TableDataType"];
+      key: string;
+      label: string;
+      unit?: string | null;
+    };
+    EvidenceTableRow: {
+      cells: Record<string, components["schemas"]["EvidenceTableCell"]>;
+      id: string;
+      source_refs?: string[];
     };
     EvidenceTemporalScope: "point_in_time" | "live_only" | "unknown";
     HTTPValidationError: {
@@ -172,19 +161,25 @@ export interface components {
       status: "ok" | "degraded";
       version: string;
     };
+    IssueDisposition: {
+      issue_id: string;
+      status: "upheld" | "rejected" | "unresolved";
+    };
     JudgeDraft: {
-      catalysts?: string[];
       confidence: number;
-      evidence_refs: string[];
-      executive_summary: string;
-      invalidation_conditions: string[];
-      memory_refs?: string[];
+      issue_dispositions: components["schemas"]["IssueDisposition"][];
+      markdown: string;
       preliminary_rating: components["schemas"]["ResearchRating"];
-      risks: string[];
-      rulings: components["schemas"]["DisputeRuling"][];
-      thesis: string;
-      time_horizon: string;
-      unresolved_questions?: string[];
+    };
+    KeyClaim: {
+      confidence: number;
+      evidence_refs?: string[];
+      id: string;
+      implication: string;
+      importance: components["schemas"]["ClaimImportance"];
+      kind: components["schemas"]["AnalystClaimType"];
+      section_id: string;
+      statement: string;
     };
     LoginRequest: {
       token: string;
@@ -254,32 +249,26 @@ export interface components {
       queued: number;
       running: number;
     };
-    RebuttalOutcome: "upheld" | "weakened" | "rejected" | "unresolved";
-    RebuttalPoint: {
-      agenda_id: string;
-      causal_mechanism: string;
-      claim_ids: string[];
-      evidence_refs: string[];
-      new_evidence_refs?: string[];
-      outcome: components["schemas"]["RebuttalOutcome"];
-      remaining_questions?: string[];
-      response: string;
-    };
     RebuttalReview: {
-      evidence_refs: string[];
-      new_evidence_refs?: string[];
-      remaining_questions?: string[];
-      responses: components["schemas"]["RebuttalPoint"][];
+      addressed_issue_ids: string[];
+      markdown: string;
+      open_issue_ids?: string[];
       role: "bull" | "bear";
       round: number;
-      thesis_update: string;
     };
     RecentInstrument: {
       instrument_name?: string | null;
       last_used_at: string;
       ticker: string;
     };
+    ReportAuditStatus: "complete" | "incomplete";
     ReportLanguage: "en" | "zh-CN" | "ja";
+    ReportSection: {
+      anchor: string;
+      id: string;
+      source_refs?: string[];
+      title: string;
+    };
     ResearchArtifact: {
       attempt: number;
       content: components["schemas"]["AnalystReport"] | components["schemas"]["ResearchCase"] | components["schemas"]["DebateAgenda"] | components["schemas"]["RebuttalReview"] | components["schemas"]["JudgeDraft"] | components["schemas"]["RiskReview"] | components["schemas"]["ResearchDecision"];
@@ -294,26 +283,13 @@ export interface components {
       stage: string;
     };
     ResearchCase: {
-      arguments: components["schemas"]["ResearchCaseArgument"][];
-      catalysts?: string[];
-      evidence_refs: string[];
-      executive_summary: string;
-      fragile_assumptions: string[];
-      risks: string[];
+      focus_claim_ids?: string[];
+      markdown: string;
+      report_section_refs?: string[];
       role: "bull" | "bear";
-      strongest_counterarguments: string[];
-      thesis: string;
-    };
-    ResearchCaseArgument: {
-      claim_ids: string[];
-      confidence: number;
-      evidence_refs: string[];
-      id: string;
-      implication: string;
-      mechanism: string;
-      statement: string;
     };
     ResearchDecision: {
+      calculation_records?: components["schemas"]["CalculationRecord"][];
       catalysts?: string[];
       confidence: number;
       evidence_refs?: string[];
@@ -339,60 +315,17 @@ export interface components {
       valuation_range?: components["schemas"]["ValuationRange"] | null;
     };
     ResearchScenarioKind: "base" | "bull" | "bear";
-    ResearchTable: {
-      columns: components["schemas"]["ResearchTableColumn"][];
-      evidence_refs?: string[];
-      id: string;
-      purpose: string;
-      rows: components["schemas"]["ResearchTableRow"][];
-      source_evidence_row_ids?: string[];
-      source_evidence_table_id?: string | null;
-      title: string;
-      total_source_rows?: number | null;
-    };
-    ResearchTableCell: {
-      derived?: components["schemas"]["DerivedValue"] | null;
-      display_value: string;
-      evidence_refs?: string[];
-      kind?: components["schemas"]["TableCellKind"];
-      raw_value?: string | number | boolean | null;
-    };
-    ResearchTableColumn: {
-      data_type?: components["schemas"]["TableDataType"];
-      display?: components["schemas"]["TableDisplaySpec"];
-      key: string;
-      label: string;
-      unit?: string | null;
-    };
-    ResearchTableRow: {
-      cells: Record<string, components["schemas"]["ResearchTableCell"]>;
-      evidence_refs?: string[];
-      id: string;
-    };
     ResearchWarning: {
       code?: string;
       evidence_ref?: string | null;
       message: string;
       source?: string | null;
     };
-    RiskFinding: {
-      evidence_refs: string[];
-      id: string;
-      kind: components["schemas"]["RiskFindingKind"];
-      mechanism: string;
-      related_claim_ids?: string[];
-      severity: components["schemas"]["RiskSeverity"];
-      statement: string;
-    };
-    RiskFindingKind: "upside_omission" | "base_consistency" | "downside" | "tail_risk" | "data_quality" | "invalidation";
     RiskReview: {
-      confidence_adjustment: number;
-      evidence_refs: string[];
-      executive_summary: string;
-      findings: components["schemas"]["RiskFinding"][];
-      invalidation_paths: string[];
-      recommended_changes: string[];
+      challenged_issue_ids?: string[];
+      markdown: string;
       role: "integrated" | "aggressive" | "neutral" | "conservative";
+      unresolved_issue_ids?: string[];
     };
     RiskReviewAdjustment: {
       disposition: components["schemas"]["RiskReviewDisposition"];
@@ -402,7 +335,6 @@ export interface components {
       subject: string;
     };
     RiskReviewDisposition: "retained" | "modified" | "rejected";
-    RiskSeverity: "low" | "medium" | "high" | "critical";
     RunAttemptView: {
       attempt: number;
       error_code?: string | null;
@@ -486,15 +418,7 @@ export interface components {
       trashed_at?: string | null;
       updated_at: string;
     };
-    TableCellKind: "descriptor" | "observation" | "inference" | "derived";
     TableDataType: "text" | "integer" | "number" | "percent" | "currency" | "date" | "datetime" | "boolean";
-    TableDisplaySpec: {
-      fraction_digits?: number;
-      notation?: components["schemas"]["TableNotation"];
-      scale?: number;
-      unit_label?: string | null;
-    };
-    TableNotation: "standard" | "compact" | "percent" | "currency" | "date" | "integer";
     ValidationError: {
       ctx?: {
       };

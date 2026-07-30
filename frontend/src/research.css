@@ -1,9 +1,74 @@
-/* Rich typed report, deliberation, table, and decision views. */
+/* Markdown-first report, deliberation, evidence, and decision views. */
 
 .analyst-report {
   max-height: clamp(660px, 75dvh, 1200px);
   padding: 24px 28px 30px;
   overflow-y: auto;
+}
+
+.report-audit-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.report-audit-summary span {
+  padding: 4px 8px;
+  background: var(--surface-soft);
+  border-radius: 999px;
+}
+
+.audit-incomplete-notice {
+  margin-bottom: 14px;
+  padding: 9px 12px;
+  color: #7a570d;
+  font-size: 13px;
+  background: var(--amber-soft);
+  border: 1px solid #ead7a1;
+  border-radius: 8px;
+}
+
+.claim-audit-details,
+.artifact-navigation-fields {
+  margin-top: 20px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.claim-audit-details summary,
+.artifact-navigation-fields summary {
+  cursor: pointer;
+  font-weight: 750;
+}
+
+.claim-audit-details li {
+  margin-top: 10px;
+}
+
+.claim-audit-details p,
+.artifact-navigation-fields p {
+  margin: 4px 0;
+}
+
+.agenda-list {
+  display: grid;
+  gap: 10px;
+}
+
+.agenda-list li {
+  padding: 10px 12px;
+  background: var(--surface-soft);
+  border-radius: 8px;
+}
+
+.agenda-list li span {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .analyst-report .markdown,
@@ -1029,6 +1094,54 @@
   font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+
+.calculation-records > summary {
+  cursor: pointer;
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.calculation-record-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.calculation-record-list article {
+  padding: 14px 16px;
+  background: #fafbfd;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+
+.calculation-record-list article > header {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.calculation-record-list article > code,
+.calculation-record-list article > small {
+  display: block;
+  margin-top: 8px;
+}
+
+.calculation-record-list dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  margin: 12px 0 0;
+}
+
+.calculation-record-list dl > div {
+  display: flex;
+  gap: 6px;
+}
+
+.calculation-record-list dd {
+  margin: 0;
 }
 
 @media (max-width: 1120px) {

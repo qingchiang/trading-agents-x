@@ -15,6 +15,7 @@ import {
 } from "../api/client";
 import AnalystReportView from "../components/AnalystReportView";
 import DeliberationView from "../components/DeliberationView";
+import EvidenceTableView from "../components/EvidenceTableView";
 import Markdown from "../components/Markdown";
 import ResearchDecisionView from "../components/ResearchDecisionView";
 import {
@@ -78,6 +79,7 @@ export default function RunDetail() {
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   const [error, setError] = useState("");
+  const [sourceDrawerRef, setSourceDrawerRef] = useState<string | null>(null);
   const searchParams = useMemo(
     () => new URLSearchParams(location.search),
     [location.search],
@@ -275,6 +277,9 @@ export default function RunDetail() {
     },
     [activeReport, activeView, navigate, runId],
   );
+  const openSourceDrawer = useCallback((ref: string) => {
+    setSourceDrawerRef(ref);
+  }, []);
 
   const requestedReturnView = searchParams.get("return_view");
   const returnView: ReturnViewName = isReturnViewName(requestedReturnView)
@@ -434,7 +439,7 @@ export default function RunDetail() {
       {activeView === "deliberation" && (
         <DeliberationPanel
           artifacts={artifacts}
-          onEvidence={openEvidence}
+          onEvidence={openSourceDrawer}
           evidenceIndex={evidenceIndex}
         />
       )}
@@ -445,28 +450,33 @@ export default function RunDetail() {
           onReturn={returnFromEvidence}
           returnLabel={returnViewLabel(t, returnView)}
           evidenceIndex={evidenceIndex}
+          onEvidence={openEvidence}
         />
       )}
       {activeView === "reports" && (
         <ReportsPanel
           reports={reports}
-          evidence={result?.evidence ?? null}
           reportNames={reportNames}
           activeReport={activeReport}
           onReport={selectReport}
-          onEvidence={openEvidence}
+          onEvidence={openSourceDrawer}
           evidenceIndex={evidenceIndex}
         />
       )}
       {activeView === "decision" && (
         <DecisionPanel
           decision={result?.decision ?? null}
-          onEvidence={openEvidence}
+          onEvidence={openSourceDrawer}
           evidenceIndex={evidenceIndex}
         />
       )}
 
       <MetricsPanel metrics={run.metrics} attempts={detail.attempts ?? []} />
+      <EvidenceSourceDrawer
+        evidenceRef={sourceDrawerRef}
+        evidenceIndex={evidenceIndex}
+        onClose={() => setSourceDrawerRef(null)}
+      />
     </section>
   );
 }
@@ -590,12 +600,14 @@ function EvidencePanel({
   onReturn,
   returnLabel,
   evidenceIndex,
+  onEvidence,
 }: {
   evidence: EvidenceBundle | null;
   focusedRef: string;
   onReturn: () => void;
   returnLabel: string;
   evidenceIndex: EvidenceReferenceIndex;
+  onEvidence: (ref: string) => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -656,6 +668,19 @@ function EvidencePanel({
               />
             ))}
           </div>
+          {(evidence.tables ?? []).length > 0 && (
+            <section className="evidence-table-list">
+              <h3>{t("rawEvidenceTables")}</h3>
+              {(evidence.tables ?? []).map((table) => (
+                <EvidenceTableView
+                  table={table}
+                  evidenceIndex={evidenceIndex}
+                  onEvidence={onEvidence}
+                  key={table.id}
+                />
+              ))}
+            </section>
+          )}
         </>
       )}
     </article>
@@ -763,9 +788,119 @@ function EvidenceCard({
   );
 }
 
+function EvidenceSourceDrawer({
+  evidenceRef,
+  evidenceIndex,
+  onClose,
+}: {
+  evidenceRef: string | null;
+  evidenceIndex: EvidenceReferenceIndex;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const group = evidenceRef
+    ? evidenceIndex.groups.find((candidate) =>
+        candidate.refs.includes(evidenceRef),
+      )
+    : undefined;
+
+  useEffect(() => {
+    if (!evidenceRef) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [evidenceRef, onClose]);
+
+  if (!evidenceRef) return null;
+  return (
+    <div className="source-drawer-layer" role="presentation">
+      <button
+        type="button"
+        className="source-drawer-backdrop"
+        aria-label={t("closeSourceDetails")}
+        onClick={onClose}
+      />
+      <aside
+        className="source-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t("sourceDetails")}
+      >
+        <header>
+          <div>
+            <p className="eyebrow">{t("sourceDetails")}</p>
+            <h2>{group?.sources.join(", ") || t("unknownSource")}</h2>
+          </div>
+          <button type="button" className="button" onClick={onClose}>
+            {t("close")}
+          </button>
+        </header>
+        {!group ? (
+          <div className="empty-state">{t("evidenceReferenceUnavailable")}</div>
+        ) : (
+          <>
+            <dl className="evidence-metadata">
+              <div>
+                <dt>{t("quality")}</dt>
+                <dd>{group.quality}</dd>
+              </div>
+              <div>
+                <dt>{t("effectiveDate")}</dt>
+                <dd>{evidenceDates(group).join(", ") || "—"}</dd>
+              </div>
+              <div>
+                <dt>{t("fallback")}</dt>
+                <dd>{group.fallback ? t("yes") : t("no")}</dd>
+              </div>
+            </dl>
+            {group.canonical.content && (
+              <div className="source-drawer-content">
+                <Markdown>{group.canonical.content}</Markdown>
+              </div>
+            )}
+            {group.canonical.value !== null &&
+              group.canonical.value !== undefined && (
+                <p className="source-drawer-value">
+                  <strong>{t("value")}:</strong>{" "}
+                  {String(group.canonical.value)}{" "}
+                  {group.canonical.unit ?? ""}
+                </p>
+              )}
+            <details className="provenance-details" open>
+              <summary>{t("canonicalEvidenceAndProvenance")}</summary>
+              <div className="canonical-ref-list">
+                {group.refs.map((ref) => (
+                  <div key={ref}>
+                    <code>{ref}</code>
+                    <button
+                      type="button"
+                      className="copy-ref-button"
+                      onClick={() => void copyEvidenceRef(ref)}
+                    >
+                      {t("copy")}
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <pre>
+                {JSON.stringify(
+                  group.items.map(({ content: _content, ...item }) => item),
+                  null,
+                  2,
+                )}
+              </pre>
+            </details>
+          </>
+        )}
+      </aside>
+    </div>
+  );
+}
+
 function ReportsPanel({
   reports,
-  evidence,
   reportNames,
   activeReport,
   onReport,
@@ -773,7 +908,6 @@ function ReportsPanel({
   evidenceIndex,
 }: {
   reports: Record<string, AnalystReport | string>;
-  evidence: EvidenceBundle | null;
   reportNames: string[];
   activeReport: string;
   onReport: (report: string) => void;
@@ -810,7 +944,6 @@ function ReportsPanel({
           </div>
           <AnalystReportView
             report={reports[activeReport]}
-            evidence={evidence}
             evidenceIndex={evidenceIndex}
             onEvidence={onEvidence}
           />
@@ -857,10 +990,10 @@ function ReportMetadata({
   if (!report || typeof report !== "object") return null;
   const typed = report as {
     warnings?: VisibleWarning[];
-    evidence_refs?: string[];
+    source_refs?: string[];
   };
   const warnings = dedupeWarnings(typed.warnings ?? []);
-  const refs = typed.evidence_refs ?? [];
+  const refs = typed.source_refs ?? [];
   const groups = groupEvidenceRefs(refs, evidenceIndex)
     .map((refGroup) =>
       evidenceIndex.groups.find(
@@ -1203,8 +1336,9 @@ function metricCell(value: number | null): string {
 function isAnalystReport(content: ArtifactContent): content is AnalystReport {
   return (
     "analyst" in content &&
-    "executive_summary" in content &&
-    "sections" in content
+    "markdown" in content &&
+    "report_sections" in content &&
+    "audit_status" in content
   );
 }
 

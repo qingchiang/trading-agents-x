@@ -206,53 +206,6 @@
         "title": "AnalysisResult",
         "type": "object"
       },
-      "AnalystClaim": {
-        "additionalProperties": false,
-        "properties": {
-          "confidence": {
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Confidence",
-            "type": "number"
-          },
-          "evidence_refs": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Evidence Refs",
-            "type": "array"
-          },
-          "id": {
-            "pattern": "^[a-z][a-z0-9_.-]*$",
-            "title": "Id",
-            "type": "string"
-          },
-          "implication": {
-            "minLength": 1,
-            "title": "Implication",
-            "type": "string"
-          },
-          "kind": {
-            "$ref": "#/components/schemas/AnalystClaimType"
-          },
-          "statement": {
-            "minLength": 1,
-            "title": "Statement",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "kind",
-          "statement",
-          "implication",
-          "confidence",
-          "evidence_refs"
-        ],
-        "title": "AnalystClaim",
-        "type": "object"
-      },
       "AnalystClaimType": {
         "enum": [
           "observation",
@@ -264,7 +217,7 @@
       },
       "AnalystReport": {
         "additionalProperties": false,
-        "description": "Rich, typed analyst hand-off shared by users and downstream agents.",
+        "description": "Readable analyst report with a deliberately small audit envelope.",
         "properties": {
           "analyst": {
             "enum": [
@@ -276,71 +229,49 @@
             "title": "Analyst",
             "type": "string"
           },
-          "catalysts": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Catalysts",
-            "type": "array"
-          },
-          "claims": {
-            "items": {
-              "$ref": "#/components/schemas/AnalystClaim"
-            },
-            "minItems": 1,
-            "title": "Claims",
-            "type": "array"
+          "audit_status": {
+            "$ref": "#/components/schemas/ReportAuditStatus"
           },
           "confidence": {
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Confidence",
-            "type": "number"
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
           },
-          "evidence_refs": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Evidence Refs",
-            "type": "array"
-          },
-          "executive_summary": {
-            "minLength": 1,
-            "title": "Executive Summary",
-            "type": "string"
-          },
-          "invalidation_conditions": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Invalidation Conditions",
-            "type": "array"
-          },
-          "risks": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Risks",
-            "type": "array"
-          },
-          "sections": {
-            "items": {
-              "$ref": "#/components/schemas/AnalystSection"
-            },
-            "minItems": 1,
-            "title": "Sections",
-            "type": "array"
-          },
-          "tables": {
+          "key_claims": {
             "default": [],
             "items": {
-              "$ref": "#/components/schemas/ResearchTable"
+              "$ref": "#/components/schemas/KeyClaim"
             },
-            "title": "Tables",
+            "title": "Key Claims",
+            "type": "array"
+          },
+          "markdown": {
+            "minLength": 1,
+            "title": "Markdown",
+            "type": "string"
+          },
+          "report_sections": {
+            "items": {
+              "$ref": "#/components/schemas/ReportSection"
+            },
+            "minItems": 1,
+            "title": "Report Sections",
+            "type": "array"
+          },
+          "source_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Refs",
             "type": "array"
           },
           "warnings": {
@@ -354,58 +285,11 @@
         },
         "required": [
           "analyst",
-          "executive_summary",
-          "confidence",
-          "claims",
-          "sections",
-          "risks",
-          "invalidation_conditions",
-          "evidence_refs"
+          "markdown",
+          "report_sections",
+          "audit_status"
         ],
         "title": "AnalystReport",
-        "type": "object"
-      },
-      "AnalystSection": {
-        "additionalProperties": false,
-        "properties": {
-          "evidence_table_ids": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Evidence Table Ids",
-            "type": "array"
-          },
-          "id": {
-            "pattern": "^[a-z][a-z0-9_.-]*$",
-            "title": "Id",
-            "type": "string"
-          },
-          "narrative": {
-            "minLength": 1,
-            "title": "Narrative",
-            "type": "string"
-          },
-          "research_table_ids": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Research Table Ids",
-            "type": "array"
-          },
-          "title": {
-            "minLength": 1,
-            "title": "Title",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "title",
-          "narrative"
-        ],
-        "title": "AnalystSection",
         "type": "object"
       },
       "ArtifactGenerationMethod": {
@@ -416,7 +300,9 @@
           "json_mode",
           "raw_json_recovered",
           "json_mode_recovered",
-          "sectioned_recovery"
+          "sectioned_recovery",
+          "markdown_audited",
+          "markdown_audit_incomplete"
         ],
         "title": "ArtifactGenerationMethod",
         "type": "string"
@@ -428,6 +314,100 @@
         ],
         "title": "AssetType",
         "type": "string"
+      },
+      "CalculationPurpose": {
+        "enum": [
+          "valuation",
+          "scenario",
+          "market_reference"
+        ],
+        "title": "CalculationPurpose",
+        "type": "string"
+      },
+      "CalculationRecord": {
+        "additionalProperties": false,
+        "description": "A decision-critical calculation, not a presentation-table cell.",
+        "properties": {
+          "as_of_date": {
+            "format": "date",
+            "title": "As Of Date",
+            "type": "string"
+          },
+          "formula": {
+            "minLength": 1,
+            "title": "Formula",
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^calc_[a-z0-9][a-z0-9_.-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "input_evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Input Evidence Refs",
+            "type": "array"
+          },
+          "inputs": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                }
+              ]
+            },
+            "minProperties": 1,
+            "title": "Inputs",
+            "type": "object"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Limitations",
+            "type": "array"
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/CalculationPurpose"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Result"
+          },
+          "unit": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "purpose",
+          "formula",
+          "inputs",
+          "input_evidence_refs",
+          "result",
+          "unit",
+          "as_of_date",
+          "limitations"
+        ],
+        "title": "CalculationRecord",
+        "type": "object"
       },
       "CapabilitiesResponse": {
         "additionalProperties": false,
@@ -543,23 +523,18 @@
         "title": "CapabilityDefaults",
         "type": "object"
       },
+      "ClaimImportance": {
+        "enum": [
+          "primary",
+          "supporting"
+        ],
+        "title": "ClaimImportance",
+        "type": "string"
+      },
       "DebateAgenda": {
         "additionalProperties": false,
-        "description": "Prioritized agenda derived from the independent bull and bear cases.",
+        "description": "Prioritized shallow agenda derived from the two readable cases.",
         "properties": {
-          "evidence_refs": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Evidence Refs",
-            "type": "array"
-          },
-          "executive_summary": {
-            "minLength": 1,
-            "title": "Executive Summary",
-            "type": "string"
-          },
           "issues": {
             "items": {
               "$ref": "#/components/schemas/DebateIssue"
@@ -567,12 +542,16 @@
             "minItems": 1,
             "title": "Issues",
             "type": "array"
+          },
+          "summary": {
+            "minLength": 1,
+            "title": "Summary",
+            "type": "string"
           }
         },
         "required": [
-          "executive_summary",
-          "issues",
-          "evidence_refs"
+          "summary",
+          "issues"
         ],
         "title": "DebateAgenda",
         "type": "object"
@@ -588,34 +567,8 @@
       },
       "DebateIssue": {
         "additionalProperties": false,
-        "description": "One material disagreement that later roles must explicitly resolve.",
+        "description": "One material question used only for graph routing and navigation.",
         "properties": {
-          "bear_position": {
-            "minLength": 1,
-            "title": "Bear Position",
-            "type": "string"
-          },
-          "bull_position": {
-            "minLength": 1,
-            "title": "Bull Position",
-            "type": "string"
-          },
-          "claim_ids": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Claim Ids",
-            "type": "array"
-          },
-          "evidence_refs": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Evidence Refs",
-            "type": "array"
-          },
           "id": {
             "pattern": "^debate\\.issue_[a-z0-9][a-z0-9_.-]*$",
             "title": "Id",
@@ -633,88 +586,9 @@
         "required": [
           "id",
           "question",
-          "claim_ids",
-          "importance",
-          "bull_position",
-          "bear_position",
-          "evidence_refs"
+          "importance"
         ],
         "title": "DebateIssue",
-        "type": "object"
-      },
-      "DebateResolution": {
-        "enum": [
-          "bull",
-          "bear",
-          "mixed",
-          "unresolved"
-        ],
-        "title": "DebateResolution",
-        "type": "string"
-      },
-      "DerivedValue": {
-        "additionalProperties": false,
-        "description": "Reproducible numeric value derived from cited observations.",
-        "properties": {
-          "formula": {
-            "minLength": 1,
-            "title": "Formula",
-            "type": "string"
-          },
-          "input_evidence_refs": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Input Evidence Refs",
-            "type": "array"
-          },
-          "inputs": {
-            "additionalProperties": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                }
-              ]
-            },
-            "minProperties": 1,
-            "title": "Inputs",
-            "type": "object"
-          },
-          "result": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "number"
-              }
-            ],
-            "title": "Result"
-          },
-          "unit": {
-            "anyOf": [
-              {
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Unit"
-          }
-        },
-        "required": [
-          "formula",
-          "inputs",
-          "input_evidence_refs",
-          "result"
-        ],
-        "title": "DerivedValue",
         "type": "object"
       },
       "DiscoveredModelView": {
@@ -765,57 +639,6 @@
         "title": "DiscoveredModelView",
         "type": "object"
       },
-      "DisputeRuling": {
-        "additionalProperties": false,
-        "description": "The judge's auditable resolution of one debate-agenda issue.",
-        "properties": {
-          "accepted_claim_ids": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Accepted Claim Ids",
-            "type": "array"
-          },
-          "agenda_id": {
-            "pattern": "^debate\\.issue_[a-z0-9][a-z0-9_.-]*$",
-            "title": "Agenda Id",
-            "type": "string"
-          },
-          "evidence_refs": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Evidence Refs",
-            "type": "array"
-          },
-          "rationale": {
-            "minLength": 1,
-            "title": "Rationale",
-            "type": "string"
-          },
-          "rejected_claim_ids": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Rejected Claim Ids",
-            "type": "array"
-          },
-          "resolution": {
-            "$ref": "#/components/schemas/DebateResolution"
-          }
-        },
-        "required": [
-          "agenda_id",
-          "resolution",
-          "rationale",
-          "evidence_refs"
-        ],
-        "title": "DisputeRuling",
-        "type": "object"
-      },
       "EvidenceBundle": {
         "additionalProperties": false,
         "description": "Versioned evidence snapshot shared by every agent in one run.",
@@ -861,8 +684,8 @@
             "type": "array"
           },
           "version": {
-            "const": "4",
-            "default": "4",
+            "const": "5",
+            "default": "5",
             "title": "Version",
             "type": "string"
           }
@@ -1090,7 +913,7 @@
         "properties": {
           "columns": {
             "items": {
-              "$ref": "#/components/schemas/ResearchTableColumn"
+              "$ref": "#/components/schemas/EvidenceTableColumn"
             },
             "minItems": 1,
             "title": "Columns",
@@ -1116,7 +939,7 @@
           },
           "rows": {
             "items": {
-              "$ref": "#/components/schemas/ResearchTableRow"
+              "$ref": "#/components/schemas/EvidenceTableRow"
             },
             "minItems": 1,
             "title": "Rows",
@@ -1147,6 +970,113 @@
           "source_format"
         ],
         "title": "EvidenceTable",
+        "type": "object"
+      },
+      "EvidenceTableCell": {
+        "additionalProperties": false,
+        "description": "One raw value in a deterministic source table.",
+        "properties": {
+          "raw_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Value"
+          },
+          "source_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Refs",
+            "type": "array"
+          }
+        },
+        "title": "EvidenceTableCell",
+        "type": "object"
+      },
+      "EvidenceTableColumn": {
+        "additionalProperties": false,
+        "description": "One machine-readable column in a deterministic source table.",
+        "properties": {
+          "data_type": {
+            "$ref": "#/components/schemas/TableDataType",
+            "default": "text"
+          },
+          "key": {
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          }
+        },
+        "required": [
+          "key",
+          "label"
+        ],
+        "title": "EvidenceTableColumn",
+        "type": "object"
+      },
+      "EvidenceTableRow": {
+        "additionalProperties": false,
+        "description": "One stable source row with provenance only where it differs by row.",
+        "properties": {
+          "cells": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/EvidenceTableCell"
+            },
+            "minProperties": 1,
+            "title": "Cells",
+            "type": "object"
+          },
+          "id": {
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "source_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Refs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "cells"
+        ],
+        "title": "EvidenceTableRow",
         "type": "object"
       },
       "EvidenceTemporalScope": {
@@ -1208,18 +1138,72 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "IssueDisposition": {
+        "additionalProperties": false,
+        "description": "A judge routing result without duplicating the readable rationale.",
+        "properties": {
+          "issue_id": {
+            "pattern": "^debate\\.issue_[a-z0-9][a-z0-9_.-]*$",
+            "title": "Issue Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "upheld",
+              "rejected",
+              "unresolved"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "issue_id",
+          "status"
+        ],
+        "title": "IssueDisposition",
+        "type": "object"
+      },
       "JudgeDraft": {
         "additionalProperties": false,
-        "description": "Preliminary research conclusion with explicit dispute rulings.",
+        "description": "Readable preliminary judgment with shallow issue dispositions.",
         "properties": {
-          "catalysts": {
-            "default": [],
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "issue_dispositions": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/IssueDisposition"
             },
-            "title": "Catalysts",
+            "minItems": 1,
+            "title": "Issue Dispositions",
             "type": "array"
           },
+          "markdown": {
+            "minLength": 1,
+            "title": "Markdown",
+            "type": "string"
+          },
+          "preliminary_rating": {
+            "$ref": "#/components/schemas/ResearchRating"
+          }
+        },
+        "required": [
+          "markdown",
+          "preliminary_rating",
+          "confidence",
+          "issue_dispositions"
+        ],
+        "title": "JudgeDraft",
+        "type": "object"
+      },
+      "KeyClaim": {
+        "additionalProperties": false,
+        "description": "A decision-relevant assertion extracted from a readable report.",
+        "properties": {
           "confidence": {
             "maximum": 1.0,
             "minimum": 0.0,
@@ -1227,84 +1211,50 @@
             "type": "number"
           },
           "evidence_refs": {
+            "default": [],
             "items": {
               "type": "string"
             },
-            "minItems": 1,
             "title": "Evidence Refs",
             "type": "array"
           },
-          "executive_summary": {
-            "minLength": 1,
-            "title": "Executive Summary",
+          "id": {
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Id",
             "type": "string"
           },
-          "invalidation_conditions": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Invalidation Conditions",
-            "type": "array"
-          },
-          "memory_refs": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Memory Refs",
-            "type": "array"
-          },
-          "preliminary_rating": {
-            "$ref": "#/components/schemas/ResearchRating"
-          },
-          "risks": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Risks",
-            "type": "array"
-          },
-          "rulings": {
-            "items": {
-              "$ref": "#/components/schemas/DisputeRuling"
-            },
-            "minItems": 1,
-            "title": "Rulings",
-            "type": "array"
-          },
-          "thesis": {
+          "implication": {
             "minLength": 1,
-            "title": "Thesis",
+            "title": "Implication",
             "type": "string"
           },
-          "time_horizon": {
-            "minLength": 1,
-            "title": "Time Horizon",
+          "importance": {
+            "$ref": "#/components/schemas/ClaimImportance"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/AnalystClaimType"
+          },
+          "section_id": {
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Section Id",
             "type": "string"
           },
-          "unresolved_questions": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Unresolved Questions",
-            "type": "array"
+          "statement": {
+            "minLength": 1,
+            "title": "Statement",
+            "type": "string"
           }
         },
         "required": [
-          "preliminary_rating",
-          "confidence",
-          "executive_summary",
-          "thesis",
-          "rulings",
-          "risks",
-          "invalidation_conditions",
-          "time_horizon",
-          "evidence_refs"
+          "id",
+          "section_id",
+          "kind",
+          "importance",
+          "statement",
+          "implication",
+          "confidence"
         ],
-        "title": "JudgeDraft",
+        "title": "KeyClaim",
         "type": "object"
       },
       "LoginRequest": {
@@ -1736,116 +1686,29 @@
         "title": "QueueHealth",
         "type": "object"
       },
-      "RebuttalOutcome": {
-        "enum": [
-          "upheld",
-          "weakened",
-          "rejected",
-          "unresolved"
-        ],
-        "title": "RebuttalOutcome",
-        "type": "string"
-      },
-      "RebuttalPoint": {
-        "additionalProperties": false,
-        "description": "A targeted response to one agenda issue and its analyst claims.",
-        "properties": {
-          "agenda_id": {
-            "pattern": "^debate\\.issue_[a-z0-9][a-z0-9_.-]*$",
-            "title": "Agenda Id",
-            "type": "string"
-          },
-          "causal_mechanism": {
-            "minLength": 1,
-            "title": "Causal Mechanism",
-            "type": "string"
-          },
-          "claim_ids": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Claim Ids",
-            "type": "array"
-          },
-          "evidence_refs": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Evidence Refs",
-            "type": "array"
-          },
-          "new_evidence_refs": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "New Evidence Refs",
-            "type": "array"
-          },
-          "outcome": {
-            "$ref": "#/components/schemas/RebuttalOutcome"
-          },
-          "remaining_questions": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Remaining Questions",
-            "type": "array"
-          },
-          "response": {
-            "minLength": 1,
-            "title": "Response",
-            "type": "string"
-          }
-        },
-        "required": [
-          "agenda_id",
-          "claim_ids",
-          "response",
-          "causal_mechanism",
-          "outcome",
-          "evidence_refs"
-        ],
-        "title": "RebuttalPoint",
-        "type": "object"
-      },
       "RebuttalReview": {
         "additionalProperties": false,
-        "description": "One role's issue-by-issue response in a specific debate round.",
+        "description": "One readable response plus the issue IDs needed by graph control.",
         "properties": {
-          "evidence_refs": {
+          "addressed_issue_ids": {
             "items": {
               "type": "string"
             },
             "minItems": 1,
-            "title": "Evidence Refs",
+            "title": "Addressed Issue Ids",
             "type": "array"
           },
-          "new_evidence_refs": {
+          "markdown": {
+            "minLength": 1,
+            "title": "Markdown",
+            "type": "string"
+          },
+          "open_issue_ids": {
             "default": [],
             "items": {
               "type": "string"
             },
-            "title": "New Evidence Refs",
-            "type": "array"
-          },
-          "remaining_questions": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Remaining Questions",
-            "type": "array"
-          },
-          "responses": {
-            "items": {
-              "$ref": "#/components/schemas/RebuttalPoint"
-            },
-            "minItems": 1,
-            "title": "Responses",
+            "title": "Open Issue Ids",
             "type": "array"
           },
           "role": {
@@ -1860,19 +1723,13 @@
             "minimum": 1.0,
             "title": "Round",
             "type": "integer"
-          },
-          "thesis_update": {
-            "minLength": 1,
-            "title": "Thesis Update",
-            "type": "string"
           }
         },
         "required": [
           "role",
           "round",
-          "thesis_update",
-          "responses",
-          "evidence_refs"
+          "markdown",
+          "addressed_issue_ids"
         ],
         "title": "RebuttalReview",
         "type": "object"
@@ -1908,6 +1765,14 @@
         "title": "RecentInstrument",
         "type": "object"
       },
+      "ReportAuditStatus": {
+        "enum": [
+          "complete",
+          "incomplete"
+        ],
+        "title": "ReportAuditStatus",
+        "type": "string"
+      },
       "ReportLanguage": {
         "enum": [
           "en",
@@ -1916,6 +1781,42 @@
         ],
         "title": "ReportLanguage",
         "type": "string"
+      },
+      "ReportSection": {
+        "additionalProperties": false,
+        "description": "A deterministic heading extracted from the human-readable report.",
+        "properties": {
+          "anchor": {
+            "minLength": 1,
+            "title": "Anchor",
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "source_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Refs",
+            "type": "array"
+          },
+          "title": {
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "anchor"
+        ],
+        "title": "ReportSection",
+        "type": "object"
       },
       "ResearchArtifact": {
         "additionalProperties": false,
@@ -1994,8 +1895,8 @@
             "type": "string"
           },
           "schema_version": {
-            "const": "1",
-            "default": "1",
+            "const": "2",
+            "default": "2",
             "title": "Schema Version",
             "type": "string"
           },
@@ -2022,51 +1923,27 @@
       },
       "ResearchCase": {
         "additionalProperties": false,
-        "description": "A complete constructive or skeptical case grounded in analyst claims.",
+        "description": "A readable constructive or skeptical case with routing metadata.",
         "properties": {
-          "arguments": {
-            "items": {
-              "$ref": "#/components/schemas/ResearchCaseArgument"
-            },
-            "minItems": 1,
-            "title": "Arguments",
-            "type": "array"
-          },
-          "catalysts": {
+          "focus_claim_ids": {
             "default": [],
             "items": {
               "type": "string"
             },
-            "title": "Catalysts",
+            "title": "Focus Claim Ids",
             "type": "array"
           },
-          "evidence_refs": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Evidence Refs",
-            "type": "array"
-          },
-          "executive_summary": {
+          "markdown": {
             "minLength": 1,
-            "title": "Executive Summary",
+            "title": "Markdown",
             "type": "string"
           },
-          "fragile_assumptions": {
+          "report_section_refs": {
+            "default": [],
             "items": {
               "type": "string"
             },
-            "minItems": 1,
-            "title": "Fragile Assumptions",
-            "type": "array"
-          },
-          "risks": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Risks",
+            "title": "Report Section Refs",
             "type": "array"
           },
           "role": {
@@ -2076,97 +1953,27 @@
             ],
             "title": "Role",
             "type": "string"
-          },
-          "strongest_counterarguments": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Strongest Counterarguments",
-            "type": "array"
-          },
-          "thesis": {
-            "minLength": 1,
-            "title": "Thesis",
-            "type": "string"
           }
         },
         "required": [
           "role",
-          "executive_summary",
-          "thesis",
-          "arguments",
-          "strongest_counterarguments",
-          "fragile_assumptions",
-          "risks",
-          "evidence_refs"
+          "markdown"
         ],
         "title": "ResearchCase",
-        "type": "object"
-      },
-      "ResearchCaseArgument": {
-        "additionalProperties": false,
-        "description": "One explicit argument in a bull or bear research case.",
-        "properties": {
-          "claim_ids": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Claim Ids",
-            "type": "array"
-          },
-          "confidence": {
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Confidence",
-            "type": "number"
-          },
-          "evidence_refs": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Evidence Refs",
-            "type": "array"
-          },
-          "id": {
-            "pattern": "^case\\.(?:bull|bear)\\.[a-z0-9][a-z0-9_.-]*$",
-            "title": "Id",
-            "type": "string"
-          },
-          "implication": {
-            "minLength": 1,
-            "title": "Implication",
-            "type": "string"
-          },
-          "mechanism": {
-            "minLength": 1,
-            "title": "Mechanism",
-            "type": "string"
-          },
-          "statement": {
-            "minLength": 1,
-            "title": "Statement",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "claim_ids",
-          "statement",
-          "mechanism",
-          "implication",
-          "confidence",
-          "evidence_refs"
-        ],
-        "title": "ResearchCaseArgument",
         "type": "object"
       },
       "ResearchDecision": {
         "additionalProperties": false,
         "description": "Research-only conclusion; deliberately excludes account-level advice.",
         "properties": {
+          "calculation_records": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CalculationRecord"
+            },
+            "title": "Calculation Records",
+            "type": "array"
+          },
           "catalysts": {
             "default": [],
             "items": {
@@ -2354,224 +2161,6 @@
         "title": "ResearchScenarioKind",
         "type": "string"
       },
-      "ResearchTable": {
-        "additionalProperties": false,
-        "description": "A cited comparison, interpretation, or scenario table in a report.",
-        "properties": {
-          "columns": {
-            "items": {
-              "$ref": "#/components/schemas/ResearchTableColumn"
-            },
-            "minItems": 1,
-            "title": "Columns",
-            "type": "array"
-          },
-          "evidence_refs": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Evidence Refs",
-            "type": "array"
-          },
-          "id": {
-            "pattern": "^rt_[a-z0-9][a-z0-9_.-]*$",
-            "title": "Id",
-            "type": "string"
-          },
-          "purpose": {
-            "minLength": 1,
-            "title": "Purpose",
-            "type": "string"
-          },
-          "rows": {
-            "items": {
-              "$ref": "#/components/schemas/ResearchTableRow"
-            },
-            "minItems": 1,
-            "title": "Rows",
-            "type": "array"
-          },
-          "source_evidence_row_ids": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Source Evidence Row Ids",
-            "type": "array"
-          },
-          "source_evidence_table_id": {
-            "anyOf": [
-              {
-                "pattern": "^et_[a-f0-9]{12}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Evidence Table Id"
-          },
-          "title": {
-            "minLength": 1,
-            "title": "Title",
-            "type": "string"
-          },
-          "total_source_rows": {
-            "anyOf": [
-              {
-                "minimum": 1.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Total Source Rows"
-          }
-        },
-        "required": [
-          "id",
-          "title",
-          "purpose",
-          "columns",
-          "rows"
-        ],
-        "title": "ResearchTable",
-        "type": "object"
-      },
-      "ResearchTableCell": {
-        "additionalProperties": false,
-        "description": "One auditable cell in a fact or model-produced research table.",
-        "properties": {
-          "derived": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/DerivedValue"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "display_value": {
-            "minLength": 1,
-            "title": "Display Value",
-            "type": "string"
-          },
-          "evidence_refs": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Evidence Refs",
-            "type": "array"
-          },
-          "kind": {
-            "$ref": "#/components/schemas/TableCellKind",
-            "default": "observation"
-          },
-          "raw_value": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "integer"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Raw Value"
-          }
-        },
-        "required": [
-          "display_value"
-        ],
-        "title": "ResearchTableCell",
-        "type": "object"
-      },
-      "ResearchTableColumn": {
-        "additionalProperties": false,
-        "description": "One stable column in an evidence or research table.",
-        "properties": {
-          "data_type": {
-            "$ref": "#/components/schemas/TableDataType",
-            "default": "text"
-          },
-          "display": {
-            "$ref": "#/components/schemas/TableDisplaySpec"
-          },
-          "key": {
-            "pattern": "^[a-z][a-z0-9_]*$",
-            "title": "Key",
-            "type": "string"
-          },
-          "label": {
-            "minLength": 1,
-            "title": "Label",
-            "type": "string"
-          },
-          "unit": {
-            "anyOf": [
-              {
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Unit"
-          }
-        },
-        "required": [
-          "key",
-          "label"
-        ],
-        "title": "ResearchTableColumn",
-        "type": "object"
-      },
-      "ResearchTableRow": {
-        "additionalProperties": false,
-        "description": "One stable row keyed by the table's public column identifiers.",
-        "properties": {
-          "cells": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/ResearchTableCell"
-            },
-            "minProperties": 1,
-            "title": "Cells",
-            "type": "object"
-          },
-          "evidence_refs": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Evidence Refs",
-            "type": "array"
-          },
-          "id": {
-            "pattern": "^[a-z][a-z0-9_.-]*$",
-            "title": "Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "cells"
-        ],
-        "title": "ResearchTableRow",
-        "type": "object"
-      },
       "ResearchWarning": {
         "additionalProperties": false,
         "description": "Structured, plain-text warning suitable for APIs and audit exports.",
@@ -2619,117 +2208,22 @@
         "title": "ResearchWarning",
         "type": "object"
       },
-      "RiskFinding": {
+      "RiskReview": {
         "additionalProperties": false,
-        "description": "One concrete challenge raised by a risk-review lens.",
+        "description": "A readable challenge with only navigation metadata typed.",
         "properties": {
-          "evidence_refs": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Evidence Refs",
-            "type": "array"
-          },
-          "id": {
-            "pattern": "^risk\\.[a-z0-9][a-z0-9_.-]*$",
-            "title": "Id",
-            "type": "string"
-          },
-          "kind": {
-            "$ref": "#/components/schemas/RiskFindingKind"
-          },
-          "mechanism": {
-            "minLength": 1,
-            "title": "Mechanism",
-            "type": "string"
-          },
-          "related_claim_ids": {
+          "challenged_issue_ids": {
             "default": [],
             "items": {
               "type": "string"
             },
-            "title": "Related Claim Ids",
+            "title": "Challenged Issue Ids",
             "type": "array"
           },
-          "severity": {
-            "$ref": "#/components/schemas/RiskSeverity"
-          },
-          "statement": {
+          "markdown": {
             "minLength": 1,
-            "title": "Statement",
+            "title": "Markdown",
             "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "kind",
-          "statement",
-          "mechanism",
-          "severity",
-          "evidence_refs"
-        ],
-        "title": "RiskFinding",
-        "type": "object"
-      },
-      "RiskFindingKind": {
-        "enum": [
-          "upside_omission",
-          "base_consistency",
-          "downside",
-          "tail_risk",
-          "data_quality",
-          "invalidation"
-        ],
-        "title": "RiskFindingKind",
-        "type": "string"
-      },
-      "RiskReview": {
-        "additionalProperties": false,
-        "description": "A visible challenge to the judge draft from one risk lens.",
-        "properties": {
-          "confidence_adjustment": {
-            "maximum": 1.0,
-            "minimum": -1.0,
-            "title": "Confidence Adjustment",
-            "type": "number"
-          },
-          "evidence_refs": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Evidence Refs",
-            "type": "array"
-          },
-          "executive_summary": {
-            "minLength": 1,
-            "title": "Executive Summary",
-            "type": "string"
-          },
-          "findings": {
-            "items": {
-              "$ref": "#/components/schemas/RiskFinding"
-            },
-            "minItems": 1,
-            "title": "Findings",
-            "type": "array"
-          },
-          "invalidation_paths": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Invalidation Paths",
-            "type": "array"
-          },
-          "recommended_changes": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Recommended Changes",
-            "type": "array"
           },
           "role": {
             "enum": [
@@ -2740,16 +2234,19 @@
             ],
             "title": "Role",
             "type": "string"
+          },
+          "unresolved_issue_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Unresolved Issue Ids",
+            "type": "array"
           }
         },
         "required": [
           "role",
-          "executive_summary",
-          "findings",
-          "invalidation_paths",
-          "recommended_changes",
-          "confidence_adjustment",
-          "evidence_refs"
+          "markdown"
         ],
         "title": "RiskReview",
         "type": "object"
@@ -2805,16 +2302,6 @@
           "rejected"
         ],
         "title": "RiskReviewDisposition",
-        "type": "string"
-      },
-      "RiskSeverity": {
-        "enum": [
-          "low",
-          "medium",
-          "high",
-          "critical"
-        ],
-        "title": "RiskSeverity",
         "type": "string"
       },
       "RunAttemptView": {
@@ -3410,19 +2897,8 @@
         "title": "RunView",
         "type": "object"
       },
-      "TableCellKind": {
-        "description": "Semantic relationship between a table cell and its evidence.",
-        "enum": [
-          "descriptor",
-          "observation",
-          "inference",
-          "derived"
-        ],
-        "title": "TableCellKind",
-        "type": "string"
-      },
       "TableDataType": {
-        "description": "Machine-readable type of values in one research-table column.",
+        "description": "Machine-readable type of values in one deterministic evidence column.",
         "enum": [
           "text",
           "integer",
@@ -3434,56 +2910,6 @@
           "boolean"
         ],
         "title": "TableDataType",
-        "type": "string"
-      },
-      "TableDisplaySpec": {
-        "additionalProperties": false,
-        "description": "Validated display intent materialized by the application.",
-        "properties": {
-          "fraction_digits": {
-            "default": 2,
-            "maximum": 8.0,
-            "minimum": 0.0,
-            "title": "Fraction Digits",
-            "type": "integer"
-          },
-          "notation": {
-            "$ref": "#/components/schemas/TableNotation",
-            "default": "standard"
-          },
-          "scale": {
-            "default": 1.0,
-            "exclusiveMinimum": 0.0,
-            "title": "Scale",
-            "type": "number"
-          },
-          "unit_label": {
-            "anyOf": [
-              {
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Unit Label"
-          }
-        },
-        "title": "TableDisplaySpec",
-        "type": "object"
-      },
-      "TableNotation": {
-        "description": "Deterministic display strategy for one research-table column.",
-        "enum": [
-          "standard",
-          "compact",
-          "percent",
-          "currency",
-          "date",
-          "integer"
-        ],
-        "title": "TableNotation",
         "type": "string"
       },
       "ValidationError": {

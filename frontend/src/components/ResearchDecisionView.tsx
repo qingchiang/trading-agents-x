@@ -54,6 +54,7 @@ export function ResearchDecisionContent({
   embedded?: boolean;
 }) {
   const { t } = useTranslation();
+  const visibleRefs = (refs: string[]) => (embedded ? [] : refs);
   const scenarios = [...decision.scenarios].sort(
     (left, right) =>
       scenarioOrder.indexOf(left.kind) - scenarioOrder.indexOf(right.kind),
@@ -76,6 +77,7 @@ export function ResearchDecisionContent({
           <h2>{t("executiveSummary")}</h2>
           <Markdown
             evidenceAliases={evidenceIndex.aliases}
+            evidenceStyle="footnote"
             onEvidence={onEvidence}
           >
             {decision.executive_summary}
@@ -83,12 +85,13 @@ export function ResearchDecisionContent({
           <h3>{t("thesis")}</h3>
           <Markdown
             evidenceAliases={evidenceIndex.aliases}
+            evidenceStyle="footnote"
             onEvidence={onEvidence}
           >
             {decision.thesis}
           </Markdown>
           <EvidenceLinks
-            refs={decision.evidence_refs ?? []}
+            refs={visibleRefs(decision.evidence_refs ?? [])}
             evidenceIndex={evidenceIndex}
             onEvidence={onEvidence}
           />
@@ -123,6 +126,7 @@ export function ResearchDecisionContent({
               <h3>{t("scenarioOutcome")}</h3>
               <Markdown
                 evidenceAliases={evidenceIndex.aliases}
+                evidenceStyle="footnote"
                 onEvidence={onEvidence}
               >
                 {scenario.outcome}
@@ -134,7 +138,7 @@ export function ResearchDecisionContent({
                 onEvidence={onEvidence}
               />
               <EvidenceLinks
-                refs={scenario.evidence_refs ?? []}
+                refs={visibleRefs(scenario.evidence_refs ?? [])}
                 evidenceIndex={evidenceIndex}
                 onEvidence={onEvidence}
                 compact
@@ -176,7 +180,9 @@ export function ResearchDecisionContent({
                 onEvidence={onEvidence}
               />
               <EvidenceLinks
-                refs={decision.valuation_assessment.input_evidence_refs}
+                refs={visibleRefs(
+                  decision.valuation_assessment.input_evidence_refs,
+                )}
                 evidenceIndex={evidenceIndex}
                 onEvidence={onEvidence}
                 compact
@@ -205,12 +211,13 @@ export function ResearchDecisionContent({
                       <small>{level.as_of_date}</small>
                       <Markdown
                         evidenceAliases={evidenceIndex.aliases}
+                        evidenceStyle="footnote"
                         onEvidence={onEvidence}
                       >
                         {level.interpretation}
                       </Markdown>
                       <EvidenceLinks
-                        refs={level.evidence_refs}
+                        refs={visibleRefs(level.evidence_refs)}
                         evidenceIndex={evidenceIndex}
                         onEvidence={onEvidence}
                         label={false}
@@ -271,12 +278,13 @@ export function ResearchDecisionContent({
                   <h3>{adjustment.subject}</h3>
                   <Markdown
                     evidenceAliases={evidenceIndex.aliases}
+                    evidenceStyle="footnote"
                     onEvidence={onEvidence}
                   >
                     {adjustment.explanation}
                   </Markdown>
                   <EvidenceLinks
-                    refs={adjustment.evidence_refs ?? []}
+                    refs={visibleRefs(adjustment.evidence_refs ?? [])}
                     evidenceIndex={evidenceIndex}
                     onEvidence={onEvidence}
                     label={false}
@@ -286,6 +294,45 @@ export function ResearchDecisionContent({
               ),
             )}
           </div>
+        </section>
+      )}
+
+      {(decision.calculation_records ?? []).length > 0 && (
+        <section className="decision-section">
+          <details className="calculation-records">
+            <summary>{t("decisionCalculations")}</summary>
+            <div className="calculation-record-list">
+              {(decision.calculation_records ?? []).map((calculation) => (
+                <article key={calculation.id}>
+                  <header>
+                    <div>
+                      <strong>{humanize(calculation.purpose)}</strong>
+                      <small>{calculation.id}</small>
+                    </div>
+                    <span>
+                      {calculation.result.toLocaleString()} {calculation.unit}
+                    </span>
+                  </header>
+                  <code>{calculation.formula}</code>
+                  <small>{calculation.as_of_date}</small>
+                  <dl>
+                    {Object.entries(calculation.inputs).map(([name, value]) => (
+                      <div key={name}>
+                        <dt>{name}</dt>
+                        <dd>{value.toLocaleString()}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                  <EvidenceLinks
+                    refs={visibleRefs(calculation.input_evidence_refs)}
+                    evidenceIndex={evidenceIndex}
+                    onEvidence={onEvidence}
+                    compact
+                  />
+                </article>
+              ))}
+            </div>
+          </details>
         </section>
       )}
 

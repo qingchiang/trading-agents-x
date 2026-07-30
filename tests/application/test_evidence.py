@@ -852,7 +852,7 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
     assert markdown.count("## Research Decision") == 1
     assert markdown.count("## Warnings") == 1
     assert markdown.count("## Performance") == 1
-    assert markdown.count("## Evidence Appendix") == 1
+    assert markdown.count("## Sources") == 1
     assert markdown.count("MODEL REPORT") == 1
     assert markdown.count("Historical coverage is partial.") == 1
     assert "review-artifact" in markdown

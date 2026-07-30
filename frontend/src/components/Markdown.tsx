@@ -11,15 +11,18 @@ type MarkdownNode = {
 
 type EvidenceReferenceOptions = {
   aliases: Record<string, string>;
+  style: "alias" | "footnote";
 };
 
 export default function Markdown({
   children,
   evidenceAliases = {},
+  evidenceStyle = "alias",
   onEvidence,
 }: {
   children: string;
   evidenceAliases?: Record<string, string>;
+  evidenceStyle?: "alias" | "footnote";
   onEvidence?: (ref: string) => void;
 }) {
   return (
@@ -27,7 +30,10 @@ export default function Markdown({
       <ReactMarkdown
         remarkPlugins={[
           remarkGfm,
-          [remarkEvidenceReferences, { aliases: evidenceAliases }],
+          [
+            remarkEvidenceReferences,
+            { aliases: evidenceAliases, style: evidenceStyle },
+          ],
         ]}
         rehypePlugins={[rehypeSanitize]}
         skipHtml
@@ -59,13 +65,14 @@ export default function Markdown({
 
 function remarkEvidenceReferences(options: EvidenceReferenceOptions) {
   return (tree: MarkdownNode) => {
-    transformEvidenceText(tree, options.aliases);
+    transformEvidenceText(tree, options.aliases, options.style);
   };
 }
 
 function transformEvidenceText(
   node: MarkdownNode,
   aliases: Record<string, string>,
+  style: "alias" | "footnote",
 ) {
   if (
     ["code", "inlineCode", "html", "link", "linkReference"].includes(
@@ -79,11 +86,11 @@ function transformEvidenceText(
   const children: MarkdownNode[] = [];
   node.children.forEach((child) => {
     if (child.type !== "text" || !child.value) {
-      transformEvidenceText(child, aliases);
+      transformEvidenceText(child, aliases, style);
       children.push(child);
       return;
     }
-    children.push(...splitEvidenceText(child.value, aliases));
+    children.push(...splitEvidenceText(child.value, aliases, style));
   });
   node.children = children;
 }
@@ -91,12 +98,13 @@ function transformEvidenceText(
 function splitEvidenceText(
   value: string,
   aliases: Record<string, string>,
+  style: "alias" | "footnote",
 ): MarkdownNode[] {
   const nodes: MarkdownNode[] = [];
-  const pattern = /\bev_[a-f0-9]{12}\b/g;
+  const pattern = /\[\^(ev_[a-f0-9]{12})\]|\b(ev_[a-f0-9]{12})\b/g;
   let cursor = 0;
   for (const match of value.matchAll(pattern)) {
-    const ref = match[0];
+    const ref = match[1] ?? match[2];
     const start = match.index ?? 0;
     const alias = aliases[ref];
     if (!alias) continue;
@@ -106,15 +114,25 @@ function splitEvidenceText(
     nodes.push({
       type: "link",
       url: `#evidence-${ref}`,
-      children: [{ type: "text", value: alias }],
+      children: [
+        {
+          type: "text",
+          value: style === "footnote" ? `[${footnoteNumber(alias)}]` : alias,
+        },
+      ],
     });
-    cursor = start + ref.length;
+    cursor = start + match[0].length;
   }
   if (cursor === 0) return [{ type: "text", value }];
   if (cursor < value.length) {
     nodes.push({ type: "text", value: value.slice(cursor) });
   }
   return nodes;
+}
+
+function footnoteNumber(alias: string): string {
+  const match = /^E0*(\d+)$/.exec(alias);
+  return match?.[1] ?? alias;
 }
 
 function evidenceRefFromHref(href: string | undefined): string | null {

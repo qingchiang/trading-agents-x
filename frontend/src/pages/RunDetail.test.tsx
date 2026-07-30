@@ -61,31 +61,30 @@ function analystReport(
 ) {
   return {
     analyst,
-    executive_summary: `${title} summary`,
+    markdown: `# ${title} report\n\nEvidence-grounded narrative.[^ev_0123456789ab]`,
+    report_sections: [
+      {
+        id: "overview",
+        title: `${title} report`,
+        anchor: "overview",
+        source_refs: ["ev_0123456789ab"],
+      },
+    ],
     confidence: 0.7,
-    claims: [
+    key_claims: [
       {
         id: `${analyst}.claim_1`,
+        section_id: "overview",
         kind: "inference",
+        importance: "primary",
         statement: "Evidence is mixed.",
         implication: "The conclusion should preserve uncertainty.",
         confidence: 0.7,
         evidence_refs: ["ev_0123456789ab"],
       },
     ],
-    sections: [
-      {
-        id: "overview",
-        title: `${title} report`,
-        narrative: "Evidence-grounded narrative.",
-        research_table_ids: [],
-      },
-    ],
-    tables: [],
-    catalysts: [],
-    risks: ["Evidence may deteriorate."],
-    invalidation_conditions: ["New evidence contradicts the report."],
-    evidence_refs: ["ev_0123456789ab"],
+    source_refs: ["ev_0123456789ab"],
+    audit_status: "complete",
     warnings,
   };
 }
@@ -176,17 +175,21 @@ const detail = {
             source: "fixture",
           },
         ]),
-        evidence_refs: [
+        source_refs: [
           "ev_0123456789ab",
           "ev_fedcba987654",
         ],
-        sections: [
+        markdown:
+          "# Market report\n\nCompare [^ev_0123456789ab] with [^ev_fedcba987654].",
+        report_sections: [
           {
             id: "overview",
             title: "Market report",
-            narrative:
-              "Compare ev_0123456789ab with ev_fedcba987654.",
-            research_table_ids: [],
+            anchor: "overview",
+            source_refs: [
+              "ev_0123456789ab",
+              "ev_fedcba987654",
+            ],
           },
         ],
       },
@@ -210,9 +213,22 @@ const detail = {
         outcome: `${kind} outcome.`,
         evidence_refs: ["ev_0123456789ab"],
       })),
+      calculation_records: [
+        {
+          id: "calc_market_reference",
+          purpose: "market_reference",
+          formula: "close",
+          inputs: { close: 100 },
+          input_evidence_refs: ["ev_0123456789ab"],
+          result: 100,
+          unit: "USD",
+          as_of_date: "2026-07-24",
+          limitations: ["One point-in-time market observation."],
+        },
+      ],
     },
     evidence: {
-      version: "4",
+      version: "5",
       instrument: "NVDA",
       analysis_date: "2026-07-24",
       sealed_at: "2026-07-24T00:00:30Z",
@@ -284,25 +300,9 @@ const artifacts = [
     created_at: "2026-07-24T00:00:40Z",
     content: {
       role: "bull",
-      executive_summary: "Constructive case summary.",
-      thesis: "**Demand** remains constructive.",
-      arguments: [
-        {
-          id: "case.bull.argument_1",
-          claim_ids: ["market.claim_1"],
-          statement: "Demand remains constructive.",
-          mechanism: "Demand supports operating leverage.",
-          implication: "The constructive case remains viable.",
-          confidence: 0.6,
-          evidence_refs: ["ev_0123456789ab"],
-        },
-      ],
-      strongest_counterarguments: [
-        "Valuation risk is already reflected.",
-      ],
-      fragile_assumptions: ["Demand remains resilient."],
-      evidence_refs: ["ev_0123456789ab"],
-      risks: ["Demand could slow."],
+      markdown: "**Demand** remains constructive.[^ev_0123456789ab]",
+      focus_claim_ids: ["market.claim_1"],
+      report_section_refs: ["overview"],
     },
   },
   {
@@ -318,25 +318,13 @@ const artifacts = [
     content: {
       preliminary_rating: "Hold",
       confidence: 0.62,
-      executive_summary: "Balanced judge draft.",
-      thesis: "The judge draft remains balanced.",
-      rulings: [
+      markdown: "The judge draft remains balanced.",
+      issue_dispositions: [
         {
-          agenda_id: "debate.issue_1",
-          resolution: "mixed",
-          rationale: "Both cases retain support.",
-          accepted_claim_ids: ["market.claim_1"],
-          rejected_claim_ids: [],
-          evidence_refs: ["ev_0123456789ab"],
+          issue_id: "debate.issue_1",
+          status: "unresolved",
         },
       ],
-      evidence_refs: ["ev_0123456789ab"],
-      memory_refs: [],
-      catalysts: [],
-      risks: ["Demand slows"],
-      invalidation_conditions: ["New evidence supersedes the snapshot"],
-      unresolved_questions: ["Which scenario dominates?"],
-      time_horizon: "6-12 months",
     },
   },
 ] as unknown as ResearchArtifact[];
@@ -392,9 +380,12 @@ test("restores deliberation and resolves evidence references across run views", 
       name: "Open evidence ev_0123456789ab",
     })[0],
   );
+  expect(screen.getByRole("dialog", { name: "Source details" })).toBeVisible();
   expect(
-    screen.getByRole("tab", { name: "Evidence" }),
+    screen.getByRole("tab", { name: "Deliberation" }),
   ).toHaveAttribute("aria-selected", "true");
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Evidence" }));
   expect(
     await screen.findByRole("heading", {
       name: "Price snapshot · Composite snapshot",
@@ -454,13 +445,15 @@ test("restores deliberation and resolves evidence references across run views", 
   const inlineRefs = screen.getAllByRole("button", {
     name: /Open evidence ev_/,
   });
-  expect(inlineRefs.some((marker) => marker.textContent === "E01")).toBe(true);
+  expect(inlineRefs.some((marker) => marker.textContent === "[1]")).toBe(true);
   expect(
     screen.queryByText("ev_0123456789ab", { exact: true }),
   ).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("tab", { name: "Decision" }));
   expect(await screen.findByText("Evidence is balanced.")).toBeVisible();
+  fireEvent.click(screen.getByText("Audited decision calculations"));
+  expect(screen.getByText("calc_market_reference")).toBeVisible();
   expect(
     screen.getByRole("link", {
       name: "Open memory memory:legacy-run",
@@ -677,7 +670,7 @@ test("shows persisted run metrics when a failed run has no result", async () => 
   expect(screen.getByText("StructuredOutputError")).toBeVisible();
 });
 
-test("restores report and evidence navigation from the URL", async () => {
+test("keeps report footnote navigation in an in-page source drawer", async () => {
   const initialPath = "/runs/run-1?view=reports&report=news";
   const view = render(
     <Router initialPath={initialPath}>
@@ -694,16 +687,11 @@ test("restores report and evidence navigation from the URL", async () => {
       name: "Open evidence ev_0123456789ab",
     })[0],
   );
-  expect(screen.getByTestId("router-location")).toHaveTextContent(
-    "/runs/run-1?view=evidence&ref=ev_0123456789ab&return_view=reports&return_report=news",
-  );
-
-  fireEvent.click(
-    screen.getByRole("button", { name: /Return to reports/ }),
-  );
+  expect(screen.getByRole("dialog", { name: "Source details" })).toBeVisible();
   expect(screen.getByTestId("router-location")).toHaveTextContent(
     "/runs/run-1?view=reports&report=news",
   );
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
   expect(
     await screen.findByRole("heading", { name: "News report" }),
   ).toBeVisible();

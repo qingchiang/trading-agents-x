@@ -816,7 +816,7 @@ def test_service_export_reads_the_durable_result(
         assert "Fixture report." in body
         assert "_No deliberation artifacts were recorded for this run._" in body
         assert "## Warnings" in body
-        assert "## Evidence Appendix" in body
+        assert "## Sources" in body
         assert "### Attempts" in body
         assert "| 1 | succeeded |" in body
         assert f"### `{evidence_ref}`" in body
