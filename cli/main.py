@@ -50,6 +50,7 @@ _ANALYSTS = ("market", "social", "news", "fundamentals")
 
 
 class ExportFormat(str, Enum):
+    PACKAGE = "package"
     MARKDOWN = "markdown"
     JSON = "json"
 
@@ -388,15 +389,23 @@ def export(
     ] = None,
     force: Annotated[bool, typer.Option("--force")] = False,
 ) -> None:
-    """Export a completed run as Markdown or JSON."""
+    """Export a completed run as a research package, Markdown, or JSON."""
+    if format is ExportFormat.PACKAGE and output is None:
+        event_console.print(
+            "[red]Package export requires --output because ZIP data "
+            "cannot be written to the terminal.[/red]"
+        )
+        raise typer.Exit(code=2)
     try:
         _media_type, content = _service().export(run_id, format=format.value)
     except Exception as exc:
         _lifecycle_error(exc)
     if output is None:
+        if not isinstance(content, str):
+            raise typer.Exit(code=2)
         typer.echo(content)
         return
-    _write_text(output, content, force=force)
+    _write_output(output, content, force=force)
     console.print(f"Wrote {output.expanduser().resolve()}")
 
 
@@ -497,7 +506,7 @@ def _echo_json(value: Any) -> None:
     )
 
 
-def _write_text(path: Path, content: str, *, force: bool) -> None:
+def _write_output(path: Path, content: str | bytes, *, force: bool) -> None:
     destination = path.expanduser().resolve()
     if destination.exists() and not force:
         event_console.print(
@@ -505,7 +514,10 @@ def _write_text(path: Path, content: str, *, force: bool) -> None:
         )
         raise typer.Exit(code=1)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(content, encoding="utf-8")
+    if isinstance(content, bytes):
+        destination.write_bytes(content)
+    else:
+        destination.write_text(content, encoding="utf-8")
 
 
 if __name__ == "__main__":

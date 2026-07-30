@@ -372,6 +372,12 @@ export default function RunDetail() {
             </Link>
           )}
           <a
+            className="button primary"
+            href={`/api/v1/runs/${runId}/export?format=package`}
+          >
+            {t("exportPackage")}
+          </a>
+          <a
             className="button"
             href={`/api/v1/runs/${runId}/export?format=markdown`}
           >

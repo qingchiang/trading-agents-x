@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
+import zipfile
 from datetime import date, datetime, timezone
 
 import pytest
@@ -44,7 +46,10 @@ from tradingagents.application.contracts import (
     ValuationRange,
 )
 from tradingagents.application.evidence import extract_evidence_tables
-from tradingagents.application.exporting import render_run_export_markdown
+from tradingagents.application.exporting import (
+    render_run_export_markdown,
+    render_run_export_package,
+)
 from tradingagents.graph.deliberation import _evidence_payload
 from tradingagents.graph.research_graph import (
     _collect_evidence,
@@ -619,7 +624,7 @@ def test_markdown_export_renders_an_exact_body_once_with_all_refs() -> None:
     assert "source-a, source-b" in markdown
 
 
-def test_markdown_export_contains_every_evidence_table_row() -> None:
+def test_markdown_export_links_raw_evidence_table_without_inlining_rows() -> None:
     item = EvidenceItem.create(
         source="verified fixture",
         evidence_type="market snapshot",
@@ -667,11 +672,36 @@ def test_markdown_export_contains_every_evidence_table_row() -> None:
 
     markdown = render_run_export_markdown(run_export)
 
-    assert "### Complete Evidence Tables" in markdown
+    assert "### Raw Evidence Tables" in markdown
     assert f"- Table: `{tables[0].id}`" in markdown
-    assert "- Rows: `2` (complete)" in markdown
-    assert "| 2026-07-23 | 100.0 |" in markdown
-    assert "| 2026-07-24 | 101.5 |" in markdown
+    assert "- Rows: `2`" in markdown
+    assert f"`tables/{tables[0].id}.csv`" in markdown
+    assert "| 2026-07-23 | 100.0 |" not in markdown
+    assert "| 2026-07-24 | 101.5 |" not in markdown
+
+    package = render_run_export_package(run_export)
+    with zipfile.ZipFile(io.BytesIO(package)) as archive:
+        names = set(archive.namelist())
+        expected = {
+            "report.md",
+            "run.json",
+            "artifacts.json",
+            "evidence.json",
+            f"tables/{tables[0].id}.csv",
+            "manifest.json",
+        }
+        assert names == expected
+        csv_body = archive.read(f"tables/{tables[0].id}.csv").decode()
+        assert "row_id,date,close" in csv_body
+        assert f"{tables[0].rows[0].id},2026-07-23,100.0" in csv_body
+        assert f"{tables[0].rows[1].id},2026-07-24,101.5" in csv_body
+        manifest = json.loads(archive.read("manifest.json"))
+        listed = {item["path"]: item for item in manifest["files"]}
+        assert set(listed) == expected - {"manifest.json"}
+        for path, entry in listed.items():
+            content = archive.read(path)
+            assert entry["size"] == len(content)
+            assert entry["sha256"] == hashlib.sha256(content).hexdigest()
 
 
 def test_markdown_export_uses_canonical_report_order() -> None:

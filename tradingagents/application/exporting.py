@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import csv
+import hashlib
+import io
 import json
+import zipfile
+from typing import Any
 
 from .contracts import (
     AnalystReport,
@@ -143,6 +148,11 @@ def render_run_export_markdown(run_export: RunExport) -> str:
     if run_export.evidence is None:
         sections.extend(["", "_No sealed EvidenceBundle was recorded for this run._"])
     else:
+        table_refs = {
+            ref
+            for table in run_export.evidence.tables
+            for ref in table.evidence_refs
+        }
         sections.extend(
             [
                 "",
@@ -152,9 +162,20 @@ def render_run_export_markdown(run_export: RunExport) -> str:
             ]
         )
         if run_export.evidence.tables:
-            sections.extend(["", "### Complete Evidence Tables"])
+            sections.extend(["", "### Raw Evidence Tables"])
             for table in run_export.evidence.tables:
-                sections.extend(["", *_render_evidence_table(table)])
+                sections.extend(
+                    [
+                        "",
+                        f"#### {table.title}",
+                        "",
+                        f"- Table: `{table.id}`",
+                        f"- Purpose: {table.purpose}",
+                        f"- Rows: `{len(table.rows)}`",
+                        f"- Raw data: `tables/{table.id}.csv` in the research package",
+                        "- Evidence: " + _render_refs(table.evidence_refs),
+                    ]
+                )
             sections.extend(["", "### Evidence Items"])
         for group in group_evidence_by_content(run_export.evidence.items):
             item = group.canonical
@@ -175,13 +196,21 @@ def render_run_export_markdown(run_export: RunExport) -> str:
                     f"- Fallback: `{str(item.fallback).lower()}`",
                 ]
             )
-            if group.content:
+            if group.content and table_refs.isdisjoint(group.refs):
                 sections.extend(
                     [
                         "",
                         "#### Content",
                         "",
                         group.content,
+                    ]
+                )
+            elif group.content:
+                sections.extend(
+                    [
+                        "",
+                        "_Raw tabular content is available in `evidence.json` "
+                        "and the linked `tables/*.csv` files._",
                     ]
                 )
             sections.extend(
@@ -207,42 +236,102 @@ def render_run_export_markdown(run_export: RunExport) -> str:
     return "\n".join(sections)
 
 
-def _render_evidence_table(table: EvidenceTable) -> list[str]:
-    """Render every persisted row; exports never inherit Web pagination."""
+def render_run_export_package(run_export: RunExport) -> bytes:
+    """Build a self-verifying ZIP with a readable report and raw audit data."""
 
-    refs = ", ".join(f"`{ref}`" for ref in table.evidence_refs)
-    headers = "| " + " | ".join(_escape_table_cell(column.label) for column in table.columns) + " |"
-    divider = "|" + "|".join("---" for _column in table.columns) + "|"
-    rows = [
-        "| "
-        + " | ".join(
-            _escape_table_cell(row.cells[column.key].display_value) for column in table.columns
+    payloads: dict[str, bytes] = {
+        "report.md": render_run_export_markdown(run_export).encode(),
+        "run.json": _json_bytes(
+            {
+                "schema_version": run_export.schema_version,
+                "run": run_export.run.model_dump(mode="json"),
+                "result": run_export.result.model_dump(mode="json"),
+            }
+        ),
+        "artifacts.json": _json_bytes(
+            [
+                artifact.model_dump(mode="json")
+                for artifact in run_export.artifacts
+            ]
+        ),
+        "evidence.json": _json_bytes(
+            run_export.evidence.model_dump(mode="json")
+            if run_export.evidence is not None
+            else None
+        ),
+    }
+    if run_export.evidence is not None:
+        for table in run_export.evidence.tables:
+            payloads[f"tables/{table.id}.csv"] = _evidence_table_csv(table)
+
+    manifest = {
+        "schema_version": "1",
+        "run_id": run_export.run.id,
+        "files": [
+            {
+                "path": path,
+                "size": len(content),
+                "sha256": hashlib.sha256(content).hexdigest(),
+            }
+            for path, content in sorted(payloads.items())
+        ],
+    }
+    payloads["manifest.json"] = _json_bytes(manifest)
+
+    output = io.BytesIO()
+    with zipfile.ZipFile(
+        output,
+        mode="w",
+        compression=zipfile.ZIP_DEFLATED,
+        compresslevel=9,
+    ) as archive:
+        for path, content in sorted(payloads.items()):
+            archive.writestr(path, content)
+    return output.getvalue()
+
+
+def _evidence_table_csv(table: EvidenceTable) -> bytes:
+    output = io.StringIO(newline="")
+    writer = csv.writer(output, lineterminator="\n")
+    writer.writerow(["row_id", *(column.key for column in table.columns)])
+    for row in table.rows:
+        writer.writerow(
+            [
+                row.id,
+                *(
+                    _csv_raw_value(row.cells[column.key].raw_value)
+                    for column in table.columns
+                ),
+            ]
         )
-        + " |"
-        for row in table.rows
-    ]
-    lines = [
-        f"#### {table.title}",
-        "",
-        "**Evidence data table**",
-        "",
-        f"- Table: `{table.id}`",
-        f"- Purpose: {table.purpose}",
-        f"- Source format: `{table.source_format}`",
-        f"- Evidence: {refs}",
-        f"- Rows: `{len(table.rows)}` (complete)",
-        "",
-        headers,
-        divider,
-        *rows,
-    ]
-    lines.extend(
-        _render_table_cell_audit(
-            table.rows,
-            table.columns,
+    return output.getvalue().encode()
+
+
+def _csv_raw_value(value: Any) -> Any:
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
         )
-    )
-    return lines
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return value
+
+
+def _json_bytes(value: Any) -> bytes:
+    return (
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    ).encode()
 
 
 def _escape_table_cell(value: str) -> str:

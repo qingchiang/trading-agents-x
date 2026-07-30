@@ -62,7 +62,7 @@ class RunBatchResult(ApiModel):
 
 
 class ExportQuery(ApiModel):
-    format: Literal["markdown", "json"] = "markdown"
+    format: Literal["package", "markdown", "json"] = "package"
 
 
 class HealthResponse(ApiModel):

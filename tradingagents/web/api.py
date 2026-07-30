@@ -340,10 +340,14 @@ def create_app(
     @app.get(f"{API_PREFIX}/runs/{{run_id}}/export")
     def export_run(
         run_id: str,
-        format: Literal["markdown", "json"] = "markdown",
+        format: Literal["package", "markdown", "json"] = "package",
     ):
         media_type, content = service.export(run_id, format=format)
-        extension = "json" if format == "json" else "md"
+        extension = {
+            "package": "zip",
+            "json": "json",
+            "markdown": "md",
+        }[format]
         return Response(
             content=content,
             media_type=media_type,

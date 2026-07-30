@@ -4222,8 +4222,9 @@
             "name": "format",
             "required": false,
             "schema": {
-              "default": "markdown",
+              "default": "package",
               "enum": [
+                "package",
                 "markdown",
                 "json"
               ],

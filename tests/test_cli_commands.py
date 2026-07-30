@@ -554,6 +554,42 @@ def test_export_refuses_overwrite_without_force(
     assert destination.read_text(encoding="utf-8") == "# run-2 (markdown)"
 
 
+def test_package_export_requires_output_and_writes_binary(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    payload = b"PK\x03\x04fixture-package"
+    monkeypatch.setattr(
+        cli,
+        "_service",
+        lambda: SimpleNamespace(
+            export=lambda run_id, format: (
+                "application/zip",
+                payload,
+            )
+        ),
+    )
+
+    refused = runner.invoke(cli.app, ["export", "run-1", "--format", "package"])
+    destination = tmp_path / "research.zip"
+    written = runner.invoke(
+        cli.app,
+        [
+            "export",
+            "run-1",
+            "--format",
+            "package",
+            "--output",
+            str(destination),
+        ],
+    )
+
+    assert refused.exit_code == 2
+    assert "requires --output" in refused.output
+    assert written.exit_code == 0
+    assert destination.read_bytes() == payload
+
+
 def test_database_backup_is_consistent_and_refuses_overwrite(
     monkeypatch,
     cli_service: AnalysisService,

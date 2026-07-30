@@ -50,6 +50,7 @@ const en = {
     templateProviderUnavailable:
       "The source provider {{provider}} is unavailable. Current defaults were selected; review the model settings.",
     sourceOutputLanguage: "From source run: {{value}}",
+    exportPackage: "Export research package",
     exportMarkdown: "Export Markdown",
     exportJson: "Export JSON",
     confidence: "Confidence",
@@ -365,6 +366,7 @@ const zhCN = {
     templateProviderUnavailable:
       "来源模型服务商 {{provider}} 当前不可用，已改用当前默认配置；请复核模型设置。",
     sourceOutputLanguage: "来自来源运行：{{value}}",
+    exportPackage: "导出研究包",
     exportMarkdown: "导出 Markdown",
     exportJson: "导出 JSON",
     confidence: "置信度",
@@ -667,6 +669,7 @@ const ja = {
     templateProviderUnavailable:
       "元のプロバイダー {{provider}} は利用できません。現在の既定値を選択したため、モデル設定を確認してください。",
     sourceOutputLanguage: "元の実行から：{{value}}",
+    exportPackage: "研究パッケージを出力",
     exportMarkdown: "Markdown 出力",
     exportJson: "JSON 出力",
     confidence: "確信度",

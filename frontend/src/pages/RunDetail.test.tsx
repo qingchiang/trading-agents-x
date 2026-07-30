@@ -360,6 +360,12 @@ test("restores deliberation and resolves evidence references across run views", 
     "true",
   );
   expect(screen.getByText("1,200")).toBeVisible();
+  expect(
+    screen.getByRole("link", { name: "Export research package" }),
+  ).toHaveAttribute(
+    "href",
+    "/api/v1/runs/run-1/export?format=package",
+  );
 
   fireEvent.click(screen.getByRole("tab", { name: "Deliberation" }));
   expect(await screen.findByText("Demand")).toBeVisible();

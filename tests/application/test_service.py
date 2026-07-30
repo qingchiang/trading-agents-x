@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 import json
 import operator
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from threading import Barrier, Lock
@@ -668,7 +670,7 @@ def test_cooperative_cancel_deletes_real_pending_checkpoint(
         ) is None
 
 
-@pytest.mark.parametrize("format", ("markdown", "json"))
+@pytest.mark.parametrize("format", ("markdown", "json", "package"))
 def test_service_export_reads_the_durable_result(
     format,
     app_settings,
@@ -689,9 +691,20 @@ def test_service_export_reads_the_durable_result(
 
     media_type, body = service.export(result.run_id, format=format)
 
-    assert media_type.startswith(
-        "text/markdown" if format == "markdown" else "application/json"
-    )
+    expected_media_type = {
+        "markdown": "text/markdown",
+        "json": "application/json",
+        "package": "application/zip",
+    }[format]
+    assert media_type.startswith(expected_media_type)
+    if format == "package":
+        assert isinstance(body, bytes)
+        with zipfile.ZipFile(io.BytesIO(body)) as archive:
+            report = archive.read("report.md").decode()
+            assert result.run_id in report
+            assert "Fixture thesis" in report
+        return
+    assert isinstance(body, str)
     assert result.run_id in body
     assert "Fixture thesis" in body
     if format == "json":

@@ -33,7 +33,10 @@ from .contracts import (
     RunExport,
     RunStatus,
 )
-from .exporting import render_run_export_markdown
+from .exporting import (
+    render_run_export_markdown,
+    render_run_export_package,
+)
 from .llms import create_run_llms
 from .metrics import MetricsCallback
 from .repository import RunRepository, RunView
@@ -335,15 +338,20 @@ class AnalysisService:
         run_id: str,
         *,
         format: str = "markdown",
-    ) -> tuple[str, str]:
+    ) -> tuple[str, str | bytes]:
         run_export = self.get_export(run_id)
         if format == "json":
             return (
                 "application/json",
                 run_export.model_dump_json(indent=2),
             )
+        if format == "package":
+            return (
+                "application/zip",
+                render_run_export_package(run_export),
+            )
         if format != "markdown":
-            raise ValueError("format must be 'markdown' or 'json'")
+            raise ValueError("format must be 'markdown', 'json', or 'package'")
         return (
             "text/markdown; charset=utf-8",
             render_run_export_markdown(run_export),

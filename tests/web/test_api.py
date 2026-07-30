@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import io
+import zipfile
 from datetime import date
 
 import httpx2 as httpx
@@ -403,6 +405,9 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
     empty_attempt = await web_client.get(
         f"/api/v1/runs/{queued.id}/artifacts?attempt=2"
     )
+    package = await web_client.get(
+        f"/api/v1/runs/{queued.id}/export?format=package"
+    )
 
     assert detail.status_code == 200
     assert list(detail.json()["result"]["reports"]) == [
@@ -429,6 +434,19 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
         "Fixture evidence may deteriorate."
     ]
     assert empty_attempt.json() == []
+    assert package.status_code == 200
+    assert package.headers["content-type"] == "application/zip"
+    assert package.headers["content-disposition"].endswith(
+        f'tradingagents-{queued.id}.zip"'
+    )
+    with zipfile.ZipFile(io.BytesIO(package.content)) as archive:
+        assert {
+            "report.md",
+            "run.json",
+            "artifacts.json",
+            "evidence.json",
+            "manifest.json",
+        } <= set(archive.namelist())
 
 
 @pytest.mark.anyio
