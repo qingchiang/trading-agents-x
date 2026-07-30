@@ -5,12 +5,13 @@ from __future__ import annotations
 from typing import Literal
 
 from tradingagents.application.contracts import (
-    AnalystClaim,
     AnalystClaimType,
     AnalystReport,
-    AnalystSection,
+    ClaimImportance,
+    KeyClaim,
+    ReportAuditStatus,
+    ReportSection,
     ResearchCase,
-    ResearchCaseArgument,
     ResearchDecision,
     ResearchRating,
     ResearchScenario,
@@ -26,39 +27,48 @@ def analyst_report(
     *,
     analyst: Literal["market", "social", "news", "fundamentals"] = "market",
     evidence_ref: str = _DEFAULT_REF,
-    executive_summary: str = "Fixture executive summary.",
+    executive_summary: str | None = None,
     narrative: str = "Fixture evidence-grounded analysis.",
     confidence: float = 0.7,
     warnings: tuple[ResearchWarning | str, ...] = (),
 ) -> AnalystReport:
-    """Return the smallest complete V2 analyst report fixture."""
+    """Return the smallest complete Markdown-first analyst report fixture."""
 
     return AnalystReport(
         analyst=analyst,
-        executive_summary=executive_summary,
+        markdown=(
+            "# Overview\n\n"
+            + (
+                f"{executive_summary}\n\n"
+                if executive_summary is not None
+                else ""
+            )
+            + narrative
+            + f"\n\n[^{evidence_ref}]"
+        ),
+        report_sections=(
+            ReportSection(
+                id=f"{analyst}.section.overview",
+                title="Overview",
+                anchor="overview",
+                source_refs=(evidence_ref,),
+            ),
+        ),
         confidence=confidence,
-        claims=(
-            AnalystClaim(
+        key_claims=(
+            KeyClaim(
                 id=f"{analyst}.claim_1",
+                section_id=f"{analyst}.section.overview",
                 kind=AnalystClaimType.INFERENCE,
+                importance=ClaimImportance.PRIMARY,
                 statement="Fixture evidence supports the stated observation.",
                 implication="The committee should preserve this condition.",
                 confidence=confidence,
                 evidence_refs=(evidence_ref,),
             ),
         ),
-        sections=(
-            AnalystSection(
-                id="overview",
-                title="Overview",
-                narrative=narrative,
-            ),
-        ),
-        risks=("Fixture evidence may deteriorate.",),
-        invalidation_conditions=(
-            "New evidence directly contradicts the fixture.",
-        ),
-        evidence_refs=(evidence_ref,),
+        source_refs=(evidence_ref,),
+        audit_status=ReportAuditStatus.COMPLETE,
         warnings=warnings,
     )
 
@@ -80,7 +90,7 @@ def research_decision(
     time_horizon: str = "6-12 months",
     risk_review_adjustments: tuple[RiskReviewAdjustment, ...] = (),
 ) -> ResearchDecision:
-    """Return a complete V2 research-decision fixture."""
+    """Return a complete research-decision fixture."""
 
     return ResearchDecision(
         rating=rating,
@@ -113,27 +123,14 @@ def research_case(
     evidence_ref: str = _DEFAULT_REF,
     claim_id: str = "market.claim_1",
 ) -> ResearchCase:
-    """Return a complete claim-driven research-case fixture."""
+    """Return a shallow Markdown research-case fixture."""
 
     return ResearchCase(
         role=role,
-        executive_summary=f"Fixture {role} case summary.",
-        thesis=f"Fixture {role} thesis.",
-        arguments=(
-            ResearchCaseArgument(
-                id=f"case.{role}.argument_1",
-                claim_ids=(claim_id,),
-                statement="Fixture case statement.",
-                mechanism="Fixture causal mechanism.",
-                implication="Fixture decision implication.",
-                confidence=0.6,
-                evidence_refs=(evidence_ref,),
-            ),
+        markdown=(
+            f"# {role.title()} case\n\n"
+            f"Fixture case statement grounded in [^{evidence_ref}]."
         ),
-        strongest_counterarguments=(
-            "The opposing interpretation remains plausible.",
-        ),
-        fragile_assumptions=("The fixture mechanism remains valid.",),
-        risks=("Fixture evidence may deteriorate.",),
-        evidence_refs=(evidence_ref,),
+        focus_claim_ids=(claim_id,),
+        report_section_refs=("market.section.overview",),
     )

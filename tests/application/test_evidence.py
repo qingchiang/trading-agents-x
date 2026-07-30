@@ -21,7 +21,6 @@ from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
     ArtifactGenerationMethod,
-    DerivedValue,
     EvidenceBundle,
     EvidenceItem,
     EvidenceQuality,
@@ -29,10 +28,6 @@ from tradingagents.application.contracts import (
     MarketReferenceLevel,
     NodeMetrics,
     ResearchArtifact,
-    ResearchTable,
-    ResearchTableCell,
-    ResearchTableColumn,
-    ResearchTableRow,
     ResearchWarning,
     RiskReviewAdjustment,
     RiskReviewDisposition,
@@ -40,7 +35,6 @@ from tradingagents.application.contracts import (
     RunMetrics,
     RunStatus,
     RunView,
-    TableCellKind,
     TableDataType,
     ValuationAssessment,
     ValuationRange,
@@ -50,7 +44,7 @@ from tradingagents.application.exporting import (
     render_run_export_markdown,
     render_run_export_package,
 )
-from tradingagents.graph.deliberation import _evidence_payload
+from tradingagents.graph.evidence_context import build_evidence_catalog
 from tradingagents.graph.research_graph import (
     _collect_evidence,
     _evidence_from_records,
@@ -365,7 +359,7 @@ def test_prompt_catalog_preserves_refs_without_serializing_exact_bodies() -> Non
         items=(first, second),
     )
 
-    index = _evidence_payload(bundle)["items"]
+    index = build_evidence_catalog(bundle)["items"]
 
     assert len(index) == 2
     assert [item["ref"] for item in index] == [first.ref, second.ref]
@@ -423,9 +417,9 @@ def test_bundle_digest_covers_items_and_tables_without_legacy_versions() -> None
         digest=digest,
     )
 
-    assert bundle.version == "4"
+    assert bundle.version == "5"
     assert bundle.digest == digest
-    with pytest.raises(ValidationError, match="Input should be '4'"):
+    with pytest.raises(ValidationError, match="Input should be '5'"):
         EvidenceBundle.model_validate(
             {
                 **bundle.model_dump(mode="json"),
@@ -470,7 +464,11 @@ def test_exact_source_tables_are_extracted_once_without_row_limits() -> None:
     assert len(csv_table.rows) == 28
     assert csv_table.columns[0].data_type is TableDataType.DATE
     assert csv_table.columns[1].data_type is TableDataType.NUMBER
-    assert all(not cell.evidence_refs for row in csv_table.rows for cell in row.cells.values())
+    assert all(
+        not cell.source_refs
+        for row in csv_table.rows
+        for cell in row.cells.values()
+    )
     assert csv_table.evidence_refs == (first.ref, second.ref)
 
 
@@ -494,84 +492,9 @@ def test_source_table_empty_cells_remain_explicit_missing_values() -> None:
     change_cell = category_row.cells["change"]
 
     assert value_cell.raw_value is None
-    assert value_cell.display_value == "—"
     assert change_cell.raw_value is None
-    assert change_cell.display_value == "—"
-    assert value_cell.evidence_refs == ()
+    assert value_cell.source_refs == ()
     assert table.evidence_refs == (item.ref,)
-
-
-def test_table_contract_distinguishes_observed_and_derived_values() -> None:
-    ref = "ev_0123456789ab"
-    columns = (
-        ResearchTableColumn(key="metric", label="Metric"),
-        ResearchTableColumn(
-            key="value",
-            label="Value",
-            data_type=TableDataType.PERCENT,
-            unit="%",
-        ),
-    )
-    table = ResearchTable(
-        id="rt_margin_change",
-        title="Margin change",
-        purpose="Show a reproducible period comparison.",
-        columns=columns,
-        rows=(
-            ResearchTableRow(
-                id="row_0001",
-                cells={
-                    "metric": ResearchTableCell(
-                        raw_value="Operating margin change",
-                        display_value="Operating margin change",
-                        kind=TableCellKind.DESCRIPTOR,
-                    ),
-                    "value": ResearchTableCell(
-                        raw_value=2.5,
-                        display_value="+2.5 pp",
-                        kind=TableCellKind.DERIVED,
-                        evidence_refs=(ref,),
-                        derived=DerivedValue(
-                            formula="current_margin - prior_margin",
-                            inputs={
-                                "current_margin": 12.5,
-                                "prior_margin": 10.0,
-                            },
-                            input_evidence_refs=(ref,),
-                            unit="percentage points",
-                            result=2.5,
-                        ),
-                    ),
-                },
-            ),
-        ),
-    )
-
-    assert table.rows[0].cells["value"].derived.result == 2.5
-    inherited = ResearchTableCell(
-        raw_value=12.5,
-        display_value="12.5%",
-        kind=TableCellKind.OBSERVATION,
-    )
-    with pytest.raises(ValidationError, match="require inherited evidence"):
-        ResearchTable(
-            id="rt_missing_evidence",
-            title="Missing evidence",
-            purpose="Verify inherited evidence validation.",
-            columns=(
-                ResearchTableColumn(
-                    key="value",
-                    label="Value",
-                    data_type=TableDataType.PERCENT,
-                ),
-            ),
-            rows=(
-                ResearchTableRow(
-                    id="row_0001",
-                    cells={"value": inherited},
-                ),
-            ),
-        )
 
 
 def test_markdown_export_renders_an_exact_body_once_with_all_refs() -> None:
@@ -824,7 +747,6 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
     )
     narrative = "MODEL REPORT"
     report = analyst_report(
-        executive_summary="Summary.",
         confidence=0.7,
         warnings=(warning,),
         narrative=narrative,
@@ -936,10 +858,8 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
     assert "review-artifact" in markdown
     assert "analyst-artifact" not in markdown
     assert "decision-artifact" not in markdown
-    assert "#### Auditable Claims" in markdown
-    assert "##### Arguments" in markdown
-    assert "##### Strongest Counterarguments" in markdown
-    assert "##### Fragile Assumptions" in markdown
+    assert "#### Key Claim Audit" in markdown
+    assert "Fixture case statement" in markdown
     assert "Non-personalized research opinion" in markdown
     assert "### Scenarios" in markdown
     assert "### Valuation Assessment" in markdown

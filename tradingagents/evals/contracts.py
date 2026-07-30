@@ -21,11 +21,7 @@ from tradingagents.application.contracts import (
     ResearchArtifact,
     ResearchDecision,
     ResearchRating,
-    ResearchTable,
-    ResearchTableCell,
-    TableCellKind,
 )
-from tradingagents.application.table_display import evaluate_formula
 
 _NUMBER_RE = re.compile(r"(?<![A-Za-z0-9_])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?%?")
 _EVIDENCE_REF_RE = re.compile(r"ev_[a-f0-9]{12}")
@@ -391,55 +387,31 @@ def _audit_bundle_reports(
             issues=issues,
         )
 
-    presented_table_ids: set[str] = set()
+    presented_tables = 0
     for report in reports:
         location = f"report.{report.analyst}"
-        _check_refs(report.evidence_refs, valid_refs, location, issues)
-        _check_text(
-            report.executive_summary,
-            report.evidence_refs,
-            evidence,
-            f"{location}.executive_summary",
-            issues,
-        )
-        report_table_ids = {table.id for table in report.tables}
-        for index, section in enumerate(report.sections):
-            section_location = f"{location}.sections[{index}]"
-            _check_text(
-                section.narrative,
-                report.evidence_refs,
-                evidence,
-                section_location,
-                issues,
+        _check_refs(report.source_refs, valid_refs, location, issues)
+        _check_text_health(report.markdown, f"{location}.markdown", issues)
+        presented_tables += len(
+            re.findall(
+                r"(?m)^\s*\|.+\|\s*\n\s*\|(?:\s*:?-{3,}:?\s*\|)+",
+                report.markdown,
             )
-            for table_id in section.research_table_ids:
-                if table_id not in report_table_ids:
-                    issues.append(
-                        EvalIssue(
-                            severity="severe",
-                            code="table_ref.unresolved",
-                            location=section_location,
-                            message=f"Table {table_id} is not present in the result.",
-                        )
-                    )
-                else:
-                    presented_table_ids.add(table_id)
-            for table_id in section.evidence_table_ids:
-                if table_id not in evidence_tables:
-                    issues.append(
-                        EvalIssue(
-                            severity="severe",
-                            code="source_table_ref.unresolved",
-                            location=section_location,
-                            message=(
-                                f"Source table {table_id} is not present in the sealed evidence."
-                            ),
-                        )
-                    )
-        for index, claim in enumerate(report.claims):
-            claim_location = f"{location}.claims[{index}]"
+        )
+        section_ids = {section.id for section in report.report_sections}
+        for index, claim in enumerate(report.key_claims):
+            claim_location = f"{location}.key_claims[{index}]"
             _check_refs(claim.evidence_refs, valid_refs, claim_location, issues)
-            if not set(claim.evidence_refs).issubset(report.evidence_refs):
+            if claim.section_id not in section_ids:
+                issues.append(
+                    EvalIssue(
+                        severity="severe",
+                        code="report.section_unresolved",
+                        location=claim_location,
+                        message="Key claim section is missing from the report.",
+                    )
+                )
+            if not set(claim.evidence_refs).issubset(report.source_refs):
                 issues.append(
                     EvalIssue(
                         severity="severe",
@@ -462,28 +434,6 @@ def _audit_bundle_reports(
                 f"{claim_location}.implication",
                 issues,
             )
-        for table in report.tables:
-            _check_table(
-                table,
-                evidence=evidence,
-                valid_refs=valid_refs,
-                valid_evidence_tables=evidence_tables,
-                location=f"{location}.tables.{table.id}",
-                issues=issues,
-            )
-        for field, values in (
-            ("catalysts", report.catalysts),
-            ("risks", report.risks),
-            ("invalidation_conditions", report.invalidation_conditions),
-        ):
-            for index, text in enumerate(values):
-                _check_text(
-                    text,
-                    report.evidence_refs,
-                    evidence,
-                    f"{location}.{field}[{index}]",
-                    issues,
-                )
         for warning in report.warnings:
             if warning.evidence_ref:
                 _check_refs(
@@ -493,7 +443,7 @@ def _audit_bundle_reports(
                     issues,
                 )
 
-    if table_expected and not presented_table_ids:
+    if table_expected and not presented_tables:
         issues.append(
             EvalIssue(
                 severity="severe",
@@ -816,7 +766,7 @@ def _audit_payload(
 
 
 def _check_table(
-    table: EvidenceTable | ResearchTable,
+    table: EvidenceTable,
     *,
     evidence: Mapping[str, Any],
     valid_refs: set[str],
@@ -824,132 +774,32 @@ def _check_table(
     location: str,
     issues: list[EvalIssue],
 ) -> None:
-    if isinstance(table, ResearchTable) and table.source_evidence_table_id:
-        source = valid_evidence_tables.get(table.source_evidence_table_id)
-        if source is None:
-            issues.append(
-                EvalIssue(
-                    severity="severe",
-                    code="table.source_unresolved",
-                    location=location,
-                    message=(
-                        "Source evidence table "
-                        f"{table.source_evidence_table_id} is missing."
-                    ),
-                )
-            )
-        else:
-            valid_rows = {row.id for row in source.rows}
-            for row_id in table.source_evidence_row_ids:
-                if row_id not in valid_rows:
-                    issues.append(
-                        EvalIssue(
-                            severity="severe",
-                            code="table.source_row_unresolved",
-                            location=location,
-                            message=f"Source row {row_id} is missing.",
-                        )
-                    )
+    del evidence, valid_evidence_tables
     _check_refs(table.evidence_refs, valid_refs, location, issues)
     for row in table.rows:
         _check_refs(
-            row.evidence_refs,
+            row.source_refs,
             valid_refs,
             f"{location}.rows.{row.id}",
             issues,
         )
-        inherited_refs = row.evidence_refs or table.evidence_refs
+        inherited_refs = set(row.source_refs or table.evidence_refs)
         for key, cell in row.cells.items():
-            _check_table_cell(
-                cell,
-                evidence=evidence,
-                valid_refs=valid_refs,
-                location=f"{location}.rows.{row.id}.{key}",
-                inherited_refs=inherited_refs,
-                issues=issues,
-            )
-
-
-def _check_table_cell(
-    cell: ResearchTableCell,
-    *,
-    evidence: Mapping[str, Any],
-    valid_refs: set[str],
-    location: str,
-    inherited_refs: tuple[str, ...],
-    issues: list[EvalIssue],
-) -> None:
-    _check_refs(cell.evidence_refs, valid_refs, location, issues)
-    effective_refs = cell.evidence_refs or inherited_refs
-    _check_text_health(cell.display_value, f"{location}.display_value", issues)
-    if cell.kind is TableCellKind.DESCRIPTOR:
-        return
-    if cell.kind is TableCellKind.DERIVED:
-        if cell.derived is None:
-            return
-        _check_refs(
-            cell.derived.input_evidence_refs,
-            valid_refs,
-            f"{location}.derived",
-            issues,
-        )
-        for name, value in cell.derived.inputs.items():
-            _check_numeric_value(
-                value,
-                cell.derived.input_evidence_refs,
-                evidence,
-                f"{location}.derived.inputs.{name}",
-                issues,
-                code="derived.input_untraceable",
-            )
-        try:
-            calculated = evaluate_formula(
-                cell.derived.formula,
-                cell.derived.inputs,
-            )
-        except (ValueError, ZeroDivisionError, OverflowError):
-            issues.append(
-                EvalIssue(
-                    severity="severe",
-                    code="derived.formula_invalid",
-                    location=f"{location}.derived.formula",
-                    message="Derived formula cannot be safely evaluated.",
-                )
-            )
-        else:
-            if not math.isclose(
-                calculated,
-                float(cell.derived.result),
-                rel_tol=1e-9,
-                abs_tol=1e-9,
+            cell_location = f"{location}.rows.{row.id}.{key}"
+            _check_refs(cell.source_refs, valid_refs, cell_location, issues)
+            if cell.source_refs and not set(cell.source_refs).issubset(
+                inherited_refs
             ):
                 issues.append(
                     EvalIssue(
                         severity="severe",
-                        code="derived.result_mismatch",
-                        location=f"{location}.derived.result",
-                        message=("Saved derived result does not match formula and inputs."),
+                        code="table.source_refs_invalid",
+                        location=cell_location,
+                        message=(
+                            "Cell source refs are outside inherited table provenance."
+                        ),
                     )
                 )
-        return
-    _check_exact_figures(
-        cell.display_value,
-        effective_refs,
-        evidence,
-        f"{location}.display_value",
-        issues,
-    )
-    if isinstance(cell.raw_value, (int, float)) and not isinstance(
-        cell.raw_value,
-        bool,
-    ):
-        _check_numeric_value(
-            cell.raw_value,
-            effective_refs,
-            evidence,
-            f"{location}.raw_value",
-            issues,
-        )
 
 
 def _check_text(

@@ -448,17 +448,13 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
     )
     assert artifacts.status_code == 200
     assert artifacts.json()[0]["id"] == artifact.id
-    assert artifacts.json()[0]["content"]["sections"][0]["narrative"] == (
-        "Fixture report."
-    )
+    assert "Fixture report." in artifacts.json()[0]["content"]["markdown"]
     review_payload = next(
         item for item in artifacts.json() if item["id"] == review.id
     )
     assert review_payload["generation_method"] == "tool_call"
     assert "diagnostics" not in review_payload
-    assert review_payload["content"]["risks"] == [
-        "Fixture evidence may deteriorate."
-    ]
+    assert "Fixture case statement" in review_payload["content"]["markdown"]
     assert empty_attempt.json() == []
     assert package.status_code == 200
     assert package.headers["content-type"] == "application/zip"

@@ -18,9 +18,6 @@ from .contracts import (
     ResearchArtifactContent,
     ResearchCase,
     ResearchDecision,
-    ResearchTable,
-    ResearchTableColumn,
-    ResearchTableRow,
     ResearchWarning,
     RiskReview,
     RunExport,
@@ -383,138 +380,33 @@ def _escape_table_cell(value: str) -> str:
     return value.replace("\\", "\\\\").replace("|", "\\|").replace("\n", "<br>")
 
 
-def _render_research_table(table: ResearchTable) -> list[str]:
-    headers = "| " + " | ".join(_escape_table_cell(column.label) for column in table.columns) + " |"
-    divider = "|" + "|".join("---" for _column in table.columns) + "|"
-    rows = [
-        "| "
-        + " | ".join(
-            _escape_table_cell(row.cells[column.key].display_value) for column in table.columns
-        )
-        + " |"
-        for row in table.rows
-    ]
-    source_note = (
-        (
-            f"- Source view: `{len(table.rows)}/{table.total_source_rows}` "
-            f"rows from `{table.source_evidence_table_id}`"
-        )
-        if table.source_evidence_table_id is not None
-        else "- Source view: synthesized comparison"
-    )
-    lines = [
-        f"##### {table.title}",
-        "",
-        "**AI research table**",
-        "",
-        f"- Table: `{table.id}`",
-        f"- Purpose: {table.purpose}",
-        "- Evidence: " + _render_refs(table.evidence_refs),
-        source_note,
-        "",
-        headers,
-        divider,
-        *rows,
-    ]
-    lines.extend(_render_table_cell_audit(table.rows, table.columns))
-    return lines
-
-
-def _render_table_cell_audit(
-    rows: tuple[ResearchTableRow, ...],
-    columns: tuple[ResearchTableColumn, ...],
-) -> list[str]:
-    """Render cell provenance and derivations without cluttering data values."""
-
-    entries = []
-    for row in rows:
-        if row.evidence_refs:
-            entries.append(
-                f"- `{row.id}`: evidence "
-                + ", ".join(f"`{ref}`" for ref in row.evidence_refs)
-            )
-        for column in columns:
-            cell = row.cells[column.key]
-            details = []
-            if cell.evidence_refs:
-                details.append("evidence " + ", ".join(f"`{ref}`" for ref in cell.evidence_refs))
-            if cell.derived is not None:
-                inputs = ", ".join(f"{name}={value}" for name, value in cell.derived.inputs.items())
-                details.extend(
-                    [
-                        f"formula `{cell.derived.formula}`",
-                        f"inputs `{inputs}`",
-                        f"result `{cell.derived.result}`",
-                    ]
-                )
-            if details:
-                entries.append(f"- `{row.id}.{column.key}`: " + "; ".join(details))
-    if not entries:
-        return []
-    return ["", "**Cell audit**", "", *entries]
-
-
 def _render_analyst_report(
     report: AnalystReport,
 ) -> str:
-    research_tables = {table.id: table for table in report.tables}
+    confidence = (
+        f"{report.confidence:.0%}"
+        if report.confidence is not None
+        else "not audited"
+    )
     lines = [
-        "#### Executive Summary",
-        "",
         f"- Analyst: `{report.analyst}`",
-        f"- Confidence: `{report.confidence:.0%}`",
-        "- Evidence: " + _render_refs(report.evidence_refs),
+        f"- Audit: `{report.audit_status.value}`",
+        f"- Confidence: `{confidence}`",
         "",
-        report.executive_summary,
+        report.markdown,
     ]
-    for section in report.sections:
-        lines.extend(["", f"#### {section.title}", "", section.narrative])
-        if section.evidence_table_ids:
+    if report.key_claims:
+        lines.extend(["", "#### Key Claim Audit"])
+        for claim in report.key_claims:
             lines.extend(
                 [
                     "",
-                    "- Source data: "
-                    + ", ".join(
-                        f"`{table_id}`"
-                        for table_id in section.evidence_table_ids
-                    ),
+                    f"- `{claim.id}` · {claim.importance.value} · "
+                    f"{claim.kind.value}: {claim.statement}",
+                    f"  - Implication: {claim.implication}",
+                    f"  - Evidence: {_render_refs(claim.evidence_refs)}",
                 ]
             )
-        for table_id in section.research_table_ids:
-            if table_id in research_tables:
-                lines.extend(["", *_render_research_table(research_tables[table_id])])
-    lines.extend(["", "#### Auditable Claims"])
-    for claim in report.claims:
-        lines.extend(
-            [
-                "",
-                f"##### `{claim.id}` · {claim.kind.value}",
-                "",
-                f"- Confidence: `{claim.confidence:.0%}`",
-                "- Evidence: " + _render_refs(claim.evidence_refs),
-                "",
-                claim.statement,
-                "",
-                f"**Implication:** {claim.implication}",
-            ]
-        )
-    lines.extend(
-        [
-            "",
-            "#### Catalysts",
-            *(
-                [f"- {item}" for item in report.catalysts]
-                if report.catalysts
-                else ["- None identified."]
-            ),
-            "",
-            "#### Risks",
-            *[f"- {item}" for item in report.risks],
-            "",
-            "#### Invalidation Conditions",
-            *[f"- {item}" for item in report.invalidation_conditions],
-        ]
-    )
     return "\n".join(lines)
 
 
@@ -539,54 +431,14 @@ def _artifact_human_text(
 
 
 def _render_research_case(content: ResearchCase) -> str:
-    lines = [
-        f"#### {content.role.title()} Case",
-        "",
-        "##### Executive Summary",
-        "",
-        content.executive_summary,
-        "",
-        "##### Thesis",
-        "",
-        content.thesis,
-        "",
-        "##### Arguments",
-    ]
-    for argument in content.arguments:
-        lines.extend(
-            [
-                "",
-                f"###### `{argument.id}`",
-                "",
-                f"- Claims: {_render_ids(argument.claim_ids)}",
-                f"- Confidence: `{argument.confidence:.0%}`",
-                f"- Evidence: {_render_refs(argument.evidence_refs)}",
-                "",
-                argument.statement,
-                "",
-                f"**Mechanism:** {argument.mechanism}",
-                "",
-                f"**Implication:** {argument.implication}",
-            ]
-        )
-    lines.extend(
-        _render_list(
-            "Strongest Counterarguments",
-            content.strongest_counterarguments,
-        )
-    )
-    lines.extend(_render_list("Fragile Assumptions", content.fragile_assumptions))
-    lines.extend(_render_list("Catalysts", content.catalysts))
-    lines.extend(_render_list("Risks", content.risks))
-    lines.extend(["", "##### Evidence", "", _render_refs(content.evidence_refs)])
-    return "\n".join(lines)
+    return content.markdown
 
 
 def _render_debate_agenda(content: DebateAgenda) -> str:
     lines = [
         "#### Debate Agenda",
         "",
-        content.executive_summary,
+        content.summary,
         "",
         "##### Material Issues",
     ]
@@ -598,134 +450,21 @@ def _render_debate_agenda(content: DebateAgenda) -> str:
                 "",
                 issue.question,
                 "",
-                f"- Claims: {_render_ids(issue.claim_ids)}",
-                f"- Evidence: {_render_refs(issue.evidence_refs)}",
-                "",
-                f"**Bull position:** {issue.bull_position}",
-                "",
-                f"**Bear position:** {issue.bear_position}",
             ]
         )
     return "\n".join(lines)
 
 
 def _render_rebuttal_review(content: RebuttalReview) -> str:
-    lines = [
-        f"#### {content.role.title()} Rebuttal · Round {content.round}",
-        "",
-        "##### Thesis Update",
-        "",
-        content.thesis_update,
-        "",
-        "##### Issue-by-Issue Responses",
-    ]
-    for response in content.responses:
-        lines.extend(
-            [
-                "",
-                f"###### `{response.agenda_id}` · {response.outcome.value}",
-                "",
-                f"- Claims: {_render_ids(response.claim_ids)}",
-                f"- Evidence: {_render_refs(response.evidence_refs)}",
-                ("- New evidence: " + _render_refs(response.new_evidence_refs)),
-                "",
-                response.response,
-                "",
-                f"**Causal mechanism:** {response.causal_mechanism}",
-            ]
-        )
-        lines.extend(
-            _render_list(
-                "Remaining Questions",
-                response.remaining_questions,
-                level=6,
-            )
-        )
-    lines.extend(_render_list("Review-level Remaining Questions", content.remaining_questions))
-    lines.extend(
-        [
-            "",
-            "##### New Evidence",
-            "",
-            _render_refs(content.new_evidence_refs),
-        ]
-    )
-    return "\n".join(lines)
+    return content.markdown
 
 
 def _render_judge_draft(content: JudgeDraft) -> str:
-    lines = [
-        "#### Research Judge Draft",
-        "",
-        f"- Preliminary rating: **{content.preliminary_rating.value}**",
-        f"- Confidence: `{content.confidence:.0%}`",
-        f"- Time horizon: {content.time_horizon}",
-        f"- Evidence: {_render_refs(content.evidence_refs)}",
-        f"- Memory: {_render_ids(content.memory_refs)}",
-        "",
-        "##### Executive Summary",
-        "",
-        content.executive_summary,
-        "",
-        "##### Thesis",
-        "",
-        content.thesis,
-        "",
-        "##### Dispute Rulings",
-    ]
-    for ruling in content.rulings:
-        lines.extend(
-            [
-                "",
-                f"###### `{ruling.agenda_id}` · {ruling.resolution.value}",
-                "",
-                f"- Accepted claims: {_render_ids(ruling.accepted_claim_ids)}",
-                f"- Rejected claims: {_render_ids(ruling.rejected_claim_ids)}",
-                f"- Evidence: {_render_refs(ruling.evidence_refs)}",
-                "",
-                ruling.rationale,
-            ]
-        )
-    lines.extend(_render_list("Catalysts", content.catalysts))
-    lines.extend(_render_list("Risks", content.risks))
-    lines.extend(
-        _render_list(
-            "Invalidation Conditions",
-            content.invalidation_conditions,
-        )
-    )
-    lines.extend(_render_list("Unresolved Questions", content.unresolved_questions))
-    return "\n".join(lines)
+    return content.markdown
 
 
 def _render_risk_review(content: RiskReview) -> str:
-    lines = [
-        f"#### {content.role.title()} Risk Review",
-        "",
-        f"- Confidence adjustment: `{content.confidence_adjustment:+.0%}`",
-        f"- Evidence: {_render_refs(content.evidence_refs)}",
-        "",
-        content.executive_summary,
-        "",
-        "##### Findings",
-    ]
-    for finding in content.findings:
-        lines.extend(
-            [
-                "",
-                (f"###### `{finding.id}` · {finding.kind.value} · {finding.severity.value}"),
-                "",
-                f"- Related claims: {_render_ids(finding.related_claim_ids)}",
-                f"- Evidence: {_render_refs(finding.evidence_refs)}",
-                "",
-                finding.statement,
-                "",
-                f"**Mechanism:** {finding.mechanism}",
-            ]
-        )
-    lines.extend(_render_list("Invalidation Paths", content.invalidation_paths))
-    lines.extend(_render_list("Recommended Changes", content.recommended_changes))
-    return "\n".join(lines)
+    return content.markdown
 
 
 def _render_research_decision(content: ResearchDecision) -> str:
@@ -818,6 +557,31 @@ def _render_research_decision(content: ResearchDecision) -> str:
             )
     else:
         lines.extend(["", "_None identified._"])
+    lines.extend(["", "### Decision-Critical Calculations"])
+    if content.calculation_records:
+        for calculation in content.calculation_records:
+            inputs = ", ".join(
+                f"{name}={value}"
+                for name, value in calculation.inputs.items()
+            )
+            lines.extend(
+                [
+                    "",
+                    f"#### `{calculation.id}` · {calculation.purpose.value}",
+                    "",
+                    f"- Formula: `{calculation.formula}`",
+                    f"- Inputs: `{inputs}`",
+                    f"- Result: `{calculation.result}` {calculation.unit}",
+                    f"- As of: `{calculation.as_of_date.isoformat()}`",
+                    "- Evidence: "
+                    + _render_refs(calculation.input_evidence_refs),
+                ]
+            )
+            lines.extend(
+                _render_list("Limitations", calculation.limitations)
+            )
+    else:
+        lines.extend(["", "_No decision-critical calculations were recorded._"])
     lines.extend(_render_list("Catalysts", content.catalysts))
     lines.extend(_render_list("Risks", content.risks))
     lines.extend(

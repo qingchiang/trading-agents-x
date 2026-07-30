@@ -144,36 +144,6 @@ class DebateImportance(str, Enum):
     SECONDARY = "secondary"
 
 
-class DebateResolution(str, Enum):
-    BULL = "bull"
-    BEAR = "bear"
-    MIXED = "mixed"
-    UNRESOLVED = "unresolved"
-
-
-class RebuttalOutcome(str, Enum):
-    UPHELD = "upheld"
-    WEAKENED = "weakened"
-    REJECTED = "rejected"
-    UNRESOLVED = "unresolved"
-
-
-class RiskFindingKind(str, Enum):
-    UPSIDE_OMISSION = "upside_omission"
-    BASE_CONSISTENCY = "base_consistency"
-    DOWNSIDE = "downside"
-    TAIL_RISK = "tail_risk"
-    DATA_QUALITY = "data_quality"
-    INVALIDATION = "invalidation"
-
-
-class RiskSeverity(str, Enum):
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    CRITICAL = "critical"
-
-
 class RiskReviewDisposition(str, Enum):
     RETAINED = "retained"
     MODIFIED = "modified"
@@ -195,6 +165,8 @@ class ArtifactGenerationMethod(str, Enum):
     RAW_JSON_RECOVERED = "raw_json_recovered"
     JSON_MODE_RECOVERED = "json_mode_recovered"
     SECTIONED_RECOVERY = "sectioned_recovery"
+    MARKDOWN_AUDITED = "markdown_audited"
+    MARKDOWN_AUDIT_INCOMPLETE = "markdown_audit_incomplete"
 
 
 class EvidenceQuality(str, Enum):
@@ -213,7 +185,7 @@ class EvidenceTemporalScope(str, Enum):
 
 
 class TableDataType(str, Enum):
-    """Machine-readable type of values in one research-table column."""
+    """Machine-readable type of values in one deterministic evidence column."""
 
     TEXT = "text"
     INTEGER = "integer"
@@ -223,35 +195,6 @@ class TableDataType(str, Enum):
     DATE = "date"
     DATETIME = "datetime"
     BOOLEAN = "boolean"
-
-
-class TableCellKind(str, Enum):
-    """Semantic relationship between a table cell and its evidence."""
-
-    DESCRIPTOR = "descriptor"
-    OBSERVATION = "observation"
-    INFERENCE = "inference"
-    DERIVED = "derived"
-
-
-class TableNotation(str, Enum):
-    """Deterministic display strategy for one research-table column."""
-
-    STANDARD = "standard"
-    COMPACT = "compact"
-    PERCENT = "percent"
-    CURRENCY = "currency"
-    DATE = "date"
-    INTEGER = "integer"
-
-
-class TableDisplaySpec(FrozenModel):
-    """Validated display intent materialized by the application."""
-
-    notation: TableNotation = TableNotation.STANDARD
-    scale: float = Field(default=1.0, gt=0)
-    fraction_digits: int = Field(default=2, ge=0, le=8)
-    unit_label: str | None = Field(default=None, min_length=1)
 
 
 class EvidenceOrigin(FrozenModel):
@@ -339,108 +282,44 @@ class EvidenceItem(FrozenModel):
 TableScalar: TypeAlias = str | int | float | bool | None
 
 
-class ResearchTableColumn(FrozenModel):
-    """One stable column in an evidence or research table."""
+class EvidenceTableColumn(FrozenModel):
+    """One machine-readable column in a deterministic source table."""
 
     key: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
     label: str = Field(min_length=1)
     data_type: TableDataType = TableDataType.TEXT
     unit: str | None = Field(default=None, min_length=1)
-    display: TableDisplaySpec = Field(default_factory=TableDisplaySpec)
 
 
-class DerivedValue(FrozenModel):
-    """Reproducible numeric value derived from cited observations."""
-
-    formula: str = Field(min_length=1)
-    inputs: dict[str, int | float] = Field(min_length=1)
-    input_evidence_refs: tuple[str, ...] = Field(min_length=1)
-    unit: str | None = Field(default=None, min_length=1)
-    result: int | float
-
-    @field_validator("inputs")
-    @classmethod
-    def validate_inputs(
-        cls,
-        value: dict[str, int | float],
-    ) -> dict[str, int | float]:
-        if any(not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", key) for key in value):
-            raise ValueError("derived input names must be identifiers")
-        if any(isinstance(item, bool) for item in value.values()):
-            raise ValueError("derived inputs must be numeric")
-        return value
-
-    @field_validator("input_evidence_refs")
-    @classmethod
-    def validate_input_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        refs = tuple(dict.fromkeys(value))
-        if any(not re.fullmatch(r"ev_[a-f0-9]{12}", ref) for ref in refs):
-            raise ValueError("derived inputs must use valid evidence refs")
-        return refs
-
-
-class ResearchTableCell(FrozenModel):
-    """One auditable cell in a fact or model-produced research table."""
+class EvidenceTableCell(FrozenModel):
+    """One raw value in a deterministic source table."""
 
     raw_value: TableScalar = None
-    display_value: str = Field(min_length=1)
-    kind: TableCellKind = TableCellKind.OBSERVATION
-    evidence_refs: tuple[str, ...] = ()
-    derived: DerivedValue | None = None
+    source_refs: tuple[str, ...] = ()
 
-    @field_validator("evidence_refs")
+    @field_validator("source_refs")
     @classmethod
-    def validate_evidence_refs(
-        cls,
-        value: tuple[str, ...],
-    ) -> tuple[str, ...]:
-        refs = tuple(dict.fromkeys(value))
-        if any(not re.fullmatch(r"ev_[a-f0-9]{12}", ref) for ref in refs):
-            raise ValueError("table cells must use valid evidence refs")
-        return refs
-
-    @model_validator(mode="after")
-    def validate_semantics(self) -> ResearchTableCell:
-        if self.kind is TableCellKind.DESCRIPTOR:
-            if self.derived is not None:
-                raise ValueError("descriptor cells cannot contain a derivation")
-            return self
-        if self.kind is TableCellKind.DERIVED:
-            if self.derived is None:
-                raise ValueError("derived cells require derivation details")
-            if not set(self.derived.input_evidence_refs).issubset(self.evidence_refs):
-                raise ValueError("derived cell refs must include every derivation input ref")
-            if self.raw_value != self.derived.result:
-                raise ValueError("derived cell raw value must equal the saved result")
-            return self
-        if self.derived is not None:
-            raise ValueError("only derived cells may contain derivation details")
-        return self
+    def validate_source_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _unique_evidence_refs(value)
 
 
-class ResearchTableRow(FrozenModel):
-    """One stable row keyed by the table's public column identifiers."""
+class EvidenceTableRow(FrozenModel):
+    """One stable source row with provenance only where it differs by row."""
 
     id: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
-    cells: dict[str, ResearchTableCell] = Field(min_length=1)
-    evidence_refs: tuple[str, ...] = ()
+    cells: dict[str, EvidenceTableCell] = Field(min_length=1)
+    source_refs: tuple[str, ...] = ()
 
-    @field_validator("evidence_refs")
+    @field_validator("source_refs")
     @classmethod
-    def validate_evidence_refs(
-        cls,
-        value: tuple[str, ...],
-    ) -> tuple[str, ...]:
-        refs = tuple(dict.fromkeys(value))
-        if any(not re.fullmatch(r"ev_[a-f0-9]{12}", ref) for ref in refs):
-            raise ValueError("table rows must use valid evidence refs")
-        return refs
+    def validate_source_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _unique_evidence_refs(value)
 
 
-def _validate_table_shape(
+def _validate_evidence_table_shape(
     *,
-    columns: tuple[ResearchTableColumn, ...],
-    rows: tuple[ResearchTableRow, ...],
+    columns: tuple[EvidenceTableColumn, ...],
+    rows: tuple[EvidenceTableRow, ...],
 ) -> None:
     column_keys = tuple(column.key for column in columns)
     if len(column_keys) != len(set(column_keys)):
@@ -460,8 +339,8 @@ class EvidenceTable(FrozenModel):
     id: str = Field(pattern=r"^et_[a-f0-9]{12}$")
     title: str = Field(min_length=1)
     purpose: str = Field(min_length=1)
-    columns: tuple[ResearchTableColumn, ...] = Field(min_length=1)
-    rows: tuple[ResearchTableRow, ...] = Field(min_length=1)
+    columns: tuple[EvidenceTableColumn, ...] = Field(min_length=1)
+    rows: tuple[EvidenceTableRow, ...] = Field(min_length=1)
     evidence_refs: tuple[str, ...] = Field(min_length=1)
     source_format: Literal["structured", "markdown", "csv"]
 
@@ -478,15 +357,13 @@ class EvidenceTable(FrozenModel):
 
     @model_validator(mode="after")
     def validate_table(self) -> EvidenceTable:
-        _validate_table_shape(columns=self.columns, rows=self.rows)
+        _validate_evidence_table_shape(columns=self.columns, rows=self.rows)
         table_refs = set(self.evidence_refs)
         for row in self.rows:
-            if not set(row.evidence_refs).issubset(table_refs):
+            if not set(row.source_refs).issubset(table_refs):
                 raise ValueError("evidence table row refs must belong to the table")
             for cell in row.cells.values():
-                if cell.kind is not TableCellKind.OBSERVATION:
-                    raise ValueError("deterministic evidence tables contain observations only")
-                if not set(cell.evidence_refs).issubset(table_refs):
+                if not set(cell.source_refs).issubset(table_refs):
                     raise ValueError("evidence table cell refs must belong to the table")
         return self
 
@@ -496,8 +373,8 @@ class EvidenceTable(FrozenModel):
         *,
         title: str,
         purpose: str,
-        columns: tuple[ResearchTableColumn, ...],
-        rows: tuple[ResearchTableRow, ...],
+        columns: tuple[EvidenceTableColumn, ...],
+        rows: tuple[EvidenceTableRow, ...],
         evidence_refs: tuple[str, ...],
         source_format: Literal["structured", "markdown", "csv"],
     ) -> EvidenceTable:
@@ -519,16 +396,6 @@ class EvidenceTable(FrozenModel):
                     "cells": {
                         key: {
                             "raw_value": cell.raw_value,
-                            "display_value": cell.display_value,
-                            "kind": cell.kind.value,
-                            "derived": (
-                                cell.derived.model_dump(
-                                    mode="json",
-                                    exclude={"input_evidence_refs"},
-                                )
-                                if cell.derived is not None
-                                else None
-                            ),
                         }
                         for key, cell in row.cells.items()
                     },
@@ -548,98 +415,10 @@ class EvidenceTable(FrozenModel):
         return cls(id=f"et_{digest}", **payload)
 
 
-class ResearchTable(FrozenModel):
-    """A cited comparison, interpretation, or scenario table in a report."""
-
-    id: str = Field(pattern=r"^rt_[a-z0-9][a-z0-9_.-]*$")
-    title: str = Field(min_length=1)
-    purpose: str = Field(min_length=1)
-    columns: tuple[ResearchTableColumn, ...] = Field(min_length=1)
-    rows: tuple[ResearchTableRow, ...] = Field(min_length=1)
-    evidence_refs: tuple[str, ...] = ()
-    source_evidence_table_id: str | None = Field(
-        default=None,
-        pattern=r"^et_[a-f0-9]{12}$",
-    )
-    total_source_rows: int | None = Field(default=None, ge=1)
-    source_evidence_row_ids: tuple[str, ...] = ()
-
-    @field_validator("evidence_refs")
-    @classmethod
-    def validate_evidence_refs(
-        cls,
-        value: tuple[str, ...],
-    ) -> tuple[str, ...]:
-        refs = tuple(dict.fromkeys(value))
-        if any(not re.fullmatch(r"ev_[a-f0-9]{12}", ref) for ref in refs):
-            raise ValueError("research tables must use valid evidence refs")
-        return refs
-
-    @field_validator("source_evidence_row_ids")
-    @classmethod
-    def validate_source_evidence_row_ids(
-        cls,
-        value: tuple[str, ...],
-    ) -> tuple[str, ...]:
-        if any(not re.fullmatch(r"[a-z][a-z0-9_.-]*", row_id) for row_id in value):
-            raise ValueError("research table source row IDs are invalid")
-        return value
-
-    @model_validator(mode="after")
-    def validate_table(self) -> ResearchTable:
-        _validate_table_shape(columns=self.columns, rows=self.rows)
-        if not self.evidence_refs:
-            inferred_refs = tuple(
-                dict.fromkeys(
-                    ref
-                    for row in self.rows
-                    for ref in (
-                        *row.evidence_refs,
-                        *(
-                            cell_ref
-                            for cell in row.cells.values()
-                            for cell_ref in cell.evidence_refs
-                        ),
-                    )
-                )
-            )
-            if inferred_refs:
-                object.__setattr__(self, "evidence_refs", inferred_refs)
-        table_refs = set(self.evidence_refs)
-        for row in self.rows:
-            if row.evidence_refs and not set(row.evidence_refs).issubset(table_refs):
-                raise ValueError("research table row refs must belong to the table")
-            inherited_refs = set(row.evidence_refs) or table_refs
-            for cell in row.cells.values():
-                if cell.kind is TableCellKind.DESCRIPTOR:
-                    continue
-                effective_refs = set(cell.evidence_refs) or inherited_refs
-                if not effective_refs:
-                    raise ValueError("research table values require inherited evidence")
-                if not effective_refs.issubset(table_refs):
-                    raise ValueError("research table cell refs must belong to the table")
-        if (self.source_evidence_table_id is None) != (
-            self.total_source_rows is None
-        ):
-            raise ValueError("source table ID and total source rows must be supplied together")
-        if self.total_source_rows is not None and self.total_source_rows < len(self.rows):
-            raise ValueError("total source rows cannot be less than displayed rows")
-        if self.source_evidence_table_id is None and self.source_evidence_row_ids:
-            raise ValueError("source row IDs require a source evidence table")
-        if self.source_evidence_table_id is not None:
-            if len(self.source_evidence_row_ids) != len(self.rows):
-                raise ValueError("source table views require one source row ID per row")
-            if len(self.source_evidence_row_ids) != len(
-                set(self.source_evidence_row_ids)
-            ):
-                raise ValueError("source row IDs must be unique")
-        return self
-
-
 class EvidenceBundle(FrozenModel):
     """Versioned evidence snapshot shared by every agent in one run."""
 
-    version: Literal["4"] = "4"
+    version: Literal["5"] = "5"
     instrument: str
     analysis_date: date
     items: tuple[EvidenceItem, ...]
@@ -694,13 +473,41 @@ class AnalystClaimType(str, Enum):
     FORECAST = "forecast"
 
 
-class AnalystClaim(FrozenModel):
+class ClaimImportance(str, Enum):
+    PRIMARY = "primary"
+    SUPPORTING = "supporting"
+
+
+class ReportAuditStatus(str, Enum):
+    COMPLETE = "complete"
+    INCOMPLETE = "incomplete"
+
+
+class ReportSection(FrozenModel):
+    """A deterministic heading extracted from the human-readable report."""
+
     id: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
+    title: str = Field(min_length=1)
+    anchor: str = Field(min_length=1)
+    source_refs: tuple[str, ...] = ()
+
+    @field_validator("source_refs")
+    @classmethod
+    def validate_source_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _unique_evidence_refs(value)
+
+
+class KeyClaim(FrozenModel):
+    """A decision-relevant assertion extracted from a readable report."""
+
+    id: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
+    section_id: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
     kind: AnalystClaimType
+    importance: ClaimImportance
     statement: str = Field(min_length=1)
     implication: str = Field(min_length=1)
     confidence: float = Field(ge=0.0, le=1.0)
-    evidence_refs: tuple[str, ...] = Field(min_length=1)
+    evidence_refs: tuple[str, ...] = ()
 
     @field_validator("evidence_refs")
     @classmethod
@@ -710,38 +517,8 @@ class AnalystClaim(FrozenModel):
     ) -> tuple[str, ...]:
         refs = tuple(dict.fromkeys(value))
         if any(not re.fullmatch(r"ev_[a-f0-9]{12}", ref) for ref in refs):
-            raise ValueError("claims must use valid evidence refs")
+            raise ValueError("key claims must use valid evidence refs")
         return refs
-
-
-class AnalystSection(FrozenModel):
-    id: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
-    title: str = Field(min_length=1)
-    narrative: str = Field(min_length=1)
-    research_table_ids: tuple[str, ...] = ()
-    evidence_table_ids: tuple[str, ...] = ()
-
-    @field_validator("research_table_ids")
-    @classmethod
-    def validate_research_table_ids(
-        cls,
-        value: tuple[str, ...],
-    ) -> tuple[str, ...]:
-        ids = tuple(dict.fromkeys(value))
-        if any(not re.fullmatch(r"rt_[a-z0-9][a-z0-9_.-]*", table_id) for table_id in ids):
-            raise ValueError("sections contain an invalid research table ID")
-        return ids
-
-    @field_validator("evidence_table_ids")
-    @classmethod
-    def validate_evidence_table_ids(
-        cls,
-        value: tuple[str, ...],
-    ) -> tuple[str, ...]:
-        ids = tuple(dict.fromkeys(value))
-        if any(not re.fullmatch(r"et_[a-f0-9]{12}", table_id) for table_id in ids):
-            raise ValueError("sections contain an invalid source table ID")
-        return ids
 
 
 class ResearchWarning(FrozenModel):
@@ -781,18 +558,15 @@ def _coerce_warnings(value: Any) -> tuple[ResearchWarning, ...]:
 
 
 class AnalystReport(FrozenModel):
-    """Rich, typed analyst hand-off shared by users and downstream agents."""
+    """Readable analyst report with a deliberately small audit envelope."""
 
     analyst: Literal["market", "social", "news", "fundamentals"]
-    executive_summary: str = Field(min_length=1)
-    confidence: float = Field(ge=0.0, le=1.0)
-    claims: tuple[AnalystClaim, ...] = Field(min_length=1)
-    sections: tuple[AnalystSection, ...] = Field(min_length=1)
-    tables: tuple[ResearchTable, ...] = ()
-    catalysts: tuple[str, ...] = ()
-    risks: tuple[str, ...] = Field(min_length=1)
-    invalidation_conditions: tuple[str, ...] = Field(min_length=1)
-    evidence_refs: tuple[str, ...] = Field(min_length=1)
+    markdown: str = Field(min_length=1)
+    report_sections: tuple[ReportSection, ...] = Field(min_length=1)
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    key_claims: tuple[KeyClaim, ...] = ()
+    source_refs: tuple[str, ...] = ()
+    audit_status: ReportAuditStatus
     warnings: tuple[ResearchWarning, ...] = ()
 
     @field_validator("warnings", mode="before")
@@ -800,339 +574,133 @@ class AnalystReport(FrozenModel):
     def coerce_warnings(cls, value: Any) -> tuple[ResearchWarning, ...]:
         return _coerce_warnings(value)
 
-    @field_validator("evidence_refs")
+    @field_validator("source_refs")
     @classmethod
-    def validate_evidence_refs(
+    def validate_source_refs(
         cls,
         value: tuple[str, ...],
     ) -> tuple[str, ...]:
-        refs = tuple(dict.fromkeys(value))
-        if any(not re.fullmatch(r"ev_[a-f0-9]{12}", ref) for ref in refs):
-            raise ValueError("reports must use valid evidence refs")
-        return refs
+        return _unique_evidence_refs(value)
 
     @model_validator(mode="after")
     def validate_structure(self) -> AnalystReport:
-        claim_ids = tuple(claim.id for claim in self.claims)
+        claim_ids = tuple(claim.id for claim in self.key_claims)
         if len(claim_ids) != len(set(claim_ids)):
             raise ValueError("analyst claim IDs must be unique")
-        section_ids = tuple(section.id for section in self.sections)
+        section_ids = tuple(section.id for section in self.report_sections)
         if len(section_ids) != len(set(section_ids)):
             raise ValueError("analyst section IDs must be unique")
-        table_ids = tuple(table.id for table in self.tables)
-        if len(table_ids) != len(set(table_ids)):
-            raise ValueError("research table IDs must be unique")
-        referenced_table_ids = [
-            table_id
-            for section in self.sections
-            for table_id in section.research_table_ids
-        ]
-        if len(referenced_table_ids) != len(set(referenced_table_ids)):
-            raise ValueError("a research table cannot be placed in multiple sections")
-        if set(table_ids) != set(referenced_table_ids):
-            raise ValueError("every research table must be placed in an analyst section")
+        if any(claim.section_id not in set(section_ids) for claim in self.key_claims):
+            raise ValueError("key claims must identify an existing report section")
+        used_refs = {
+            ref
+            for claim in self.key_claims
+            for ref in claim.evidence_refs
+        }
+        used_refs.update(
+            ref
+            for section in self.report_sections
+            for ref in section.source_refs
+        )
+        if not used_refs.issubset(self.source_refs):
+            raise ValueError("report source refs must include claim and section refs")
+        if self.audit_status is ReportAuditStatus.COMPLETE:
+            if not any(
+                claim.importance is ClaimImportance.PRIMARY
+                for claim in self.key_claims
+            ):
+                raise ValueError("complete report audit requires a primary claim")
+            if any(not claim.evidence_refs for claim in self.key_claims):
+                raise ValueError("complete report audit requires cited claims")
         return self
-
-
-class ResearchCaseArgument(FrozenModel):
-    """One explicit argument in a bull or bear research case."""
-
-    id: str = Field(pattern=r"^case\.(?:bull|bear)\.[a-z0-9][a-z0-9_.-]*$")
-    claim_ids: tuple[str, ...] = Field(min_length=1)
-    statement: str = Field(min_length=1)
-    mechanism: str = Field(min_length=1)
-    implication: str = Field(min_length=1)
-    confidence: float = Field(ge=0.0, le=1.0)
-    evidence_refs: tuple[str, ...] = Field(min_length=1)
-
-    @field_validator("claim_ids")
-    @classmethod
-    def validate_claim_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        return _unique_research_ids(value)
-
-    @field_validator("evidence_refs")
-    @classmethod
-    def validate_evidence_refs(
-        cls,
-        value: tuple[str, ...],
-    ) -> tuple[str, ...]:
-        return _unique_evidence_refs(value)
 
 
 class ResearchCase(FrozenModel):
-    """A complete constructive or skeptical case grounded in analyst claims."""
+    """A readable constructive or skeptical case with routing metadata."""
 
     role: Literal["bull", "bear"]
-    executive_summary: str = Field(min_length=1)
-    thesis: str = Field(min_length=1)
-    arguments: tuple[ResearchCaseArgument, ...] = Field(min_length=1)
-    strongest_counterarguments: tuple[str, ...] = Field(min_length=1)
-    fragile_assumptions: tuple[str, ...] = Field(min_length=1)
-    catalysts: tuple[str, ...] = ()
-    risks: tuple[str, ...] = Field(min_length=1)
-    evidence_refs: tuple[str, ...] = Field(min_length=1)
+    markdown: str = Field(min_length=1)
+    focus_claim_ids: tuple[str, ...] = ()
+    report_section_refs: tuple[str, ...] = ()
 
-    @field_validator("evidence_refs")
+    @field_validator("focus_claim_ids", "report_section_refs")
     @classmethod
-    def validate_evidence_refs(
-        cls,
-        value: tuple[str, ...],
-    ) -> tuple[str, ...]:
-        return _unique_evidence_refs(value)
-
-    @model_validator(mode="after")
-    def validate_case(self) -> ResearchCase:
-        argument_ids = tuple(argument.id for argument in self.arguments)
-        if len(argument_ids) != len(set(argument_ids)):
-            raise ValueError("research case argument IDs must be unique")
-        if any(not argument.id.startswith(f"case.{self.role}.") for argument in self.arguments):
-            raise ValueError("research case argument IDs use the wrong role")
-        used = {ref for argument in self.arguments for ref in argument.evidence_refs}
-        if not used.issubset(self.evidence_refs):
-            raise ValueError("research case refs must include all argument evidence")
-        return self
+    def validate_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _unique_research_ids(value)
 
 
 class DebateIssue(FrozenModel):
-    """One material disagreement that later roles must explicitly resolve."""
+    """One material question used only for graph routing and navigation."""
 
     id: str = Field(pattern=r"^debate\.issue_[a-z0-9][a-z0-9_.-]*$")
     question: str = Field(min_length=1)
-    claim_ids: tuple[str, ...] = Field(min_length=1)
     importance: DebateImportance
-    bull_position: str = Field(min_length=1)
-    bear_position: str = Field(min_length=1)
-    evidence_refs: tuple[str, ...] = Field(min_length=1)
-
-    @field_validator("claim_ids")
-    @classmethod
-    def validate_claim_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        return _unique_research_ids(value)
-
-    @field_validator("evidence_refs")
-    @classmethod
-    def validate_evidence_refs(
-        cls,
-        value: tuple[str, ...],
-    ) -> tuple[str, ...]:
-        return _unique_evidence_refs(value)
 
 
 class DebateAgenda(FrozenModel):
-    """Prioritized agenda derived from the independent bull and bear cases."""
+    """Prioritized shallow agenda derived from the two readable cases."""
 
-    executive_summary: str = Field(min_length=1)
+    summary: str = Field(min_length=1)
     issues: tuple[DebateIssue, ...] = Field(min_length=1)
-    evidence_refs: tuple[str, ...] = Field(min_length=1)
-
-    @field_validator("evidence_refs")
-    @classmethod
-    def validate_evidence_refs(
-        cls,
-        value: tuple[str, ...],
-    ) -> tuple[str, ...]:
-        return _unique_evidence_refs(value)
 
     @model_validator(mode="after")
     def validate_agenda(self) -> DebateAgenda:
         issue_ids = tuple(issue.id for issue in self.issues)
         if len(issue_ids) != len(set(issue_ids)):
             raise ValueError("debate issue IDs must be unique")
-        used = {ref for issue in self.issues for ref in issue.evidence_refs}
-        if not used.issubset(self.evidence_refs):
-            raise ValueError("debate agenda refs must include all issue evidence")
-        return self
-
-
-class RebuttalPoint(FrozenModel):
-    """A targeted response to one agenda issue and its analyst claims."""
-
-    agenda_id: str = Field(pattern=r"^debate\.issue_[a-z0-9][a-z0-9_.-]*$")
-    claim_ids: tuple[str, ...] = Field(min_length=1)
-    response: str = Field(min_length=1)
-    causal_mechanism: str = Field(min_length=1)
-    outcome: RebuttalOutcome
-    evidence_refs: tuple[str, ...] = Field(min_length=1)
-    new_evidence_refs: tuple[str, ...] = ()
-    remaining_questions: tuple[str, ...] = ()
-
-    @field_validator("claim_ids")
-    @classmethod
-    def validate_claim_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        return _unique_research_ids(value)
-
-    @field_validator("evidence_refs", "new_evidence_refs")
-    @classmethod
-    def validate_evidence_refs(
-        cls,
-        value: tuple[str, ...],
-    ) -> tuple[str, ...]:
-        return _unique_evidence_refs(value)
-
-    @model_validator(mode="after")
-    def validate_rebuttal_point(self) -> RebuttalPoint:
-        if not set(self.new_evidence_refs).issubset(self.evidence_refs):
-            raise ValueError("new rebuttal evidence must be included in evidence_refs")
         return self
 
 
 class RebuttalReview(FrozenModel):
-    """One role's issue-by-issue response in a specific debate round."""
+    """One readable response plus the issue IDs needed by graph control."""
 
     role: Literal["bull", "bear"]
     round: int = Field(ge=1)
-    thesis_update: str = Field(min_length=1)
-    responses: tuple[RebuttalPoint, ...] = Field(min_length=1)
-    evidence_refs: tuple[str, ...] = Field(min_length=1)
-    new_evidence_refs: tuple[str, ...] = ()
-    remaining_questions: tuple[str, ...] = ()
+    markdown: str = Field(min_length=1)
+    addressed_issue_ids: tuple[str, ...] = Field(min_length=1)
+    open_issue_ids: tuple[str, ...] = ()
 
-    @field_validator("evidence_refs", "new_evidence_refs")
+    @field_validator("addressed_issue_ids", "open_issue_ids")
     @classmethod
-    def validate_evidence_refs(
-        cls,
-        value: tuple[str, ...],
-    ) -> tuple[str, ...]:
-        return _unique_evidence_refs(value)
-
-    @model_validator(mode="after")
-    def validate_rebuttal(self) -> RebuttalReview:
-        agenda_ids = tuple(response.agenda_id for response in self.responses)
-        if len(agenda_ids) != len(set(agenda_ids)):
-            raise ValueError("one rebuttal cannot answer an agenda issue more than once")
-        response_refs = {ref for response in self.responses for ref in response.evidence_refs}
-        response_new_refs = {
-            ref for response in self.responses for ref in response.new_evidence_refs
-        }
-        if not response_refs.issubset(self.evidence_refs):
-            raise ValueError("rebuttal refs must include all response evidence")
-        if not response_new_refs.issubset(self.new_evidence_refs):
-            raise ValueError("rebuttal new refs must include all response new evidence")
-        if not set(self.new_evidence_refs).issubset(self.evidence_refs):
-            raise ValueError("new rebuttal evidence must be included in evidence_refs")
-        return self
-
-
-class DisputeRuling(FrozenModel):
-    """The judge's auditable resolution of one debate-agenda issue."""
-
-    agenda_id: str = Field(pattern=r"^debate\.issue_[a-z0-9][a-z0-9_.-]*$")
-    resolution: DebateResolution
-    rationale: str = Field(min_length=1)
-    accepted_claim_ids: tuple[str, ...] = ()
-    rejected_claim_ids: tuple[str, ...] = ()
-    evidence_refs: tuple[str, ...] = Field(min_length=1)
-
-    @field_validator("accepted_claim_ids", "rejected_claim_ids")
-    @classmethod
-    def validate_claim_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+    def validate_issue_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return _unique_research_ids(value)
 
-    @field_validator("evidence_refs")
-    @classmethod
-    def validate_evidence_refs(
-        cls,
-        value: tuple[str, ...],
-    ) -> tuple[str, ...]:
-        return _unique_evidence_refs(value)
+
+class IssueDisposition(FrozenModel):
+    """A judge routing result without duplicating the readable rationale."""
+
+    issue_id: str = Field(pattern=r"^debate\.issue_[a-z0-9][a-z0-9_.-]*$")
+    status: Literal["upheld", "rejected", "unresolved"]
 
 
 class JudgeDraft(FrozenModel):
-    """Preliminary research conclusion with explicit dispute rulings."""
+    """Readable preliminary judgment with shallow issue dispositions."""
 
+    markdown: str = Field(min_length=1)
     preliminary_rating: ResearchRating
     confidence: float = Field(ge=0.0, le=1.0)
-    executive_summary: str = Field(min_length=1)
-    thesis: str = Field(min_length=1)
-    rulings: tuple[DisputeRuling, ...] = Field(min_length=1)
-    catalysts: tuple[str, ...] = ()
-    risks: tuple[str, ...] = Field(min_length=1)
-    invalidation_conditions: tuple[str, ...] = Field(min_length=1)
-    unresolved_questions: tuple[str, ...] = ()
-    time_horizon: str = Field(min_length=1)
-    evidence_refs: tuple[str, ...] = Field(min_length=1)
-    memory_refs: tuple[str, ...] = ()
-
-    @field_validator("evidence_refs")
-    @classmethod
-    def validate_evidence_refs(
-        cls,
-        value: tuple[str, ...],
-    ) -> tuple[str, ...]:
-        return _unique_evidence_refs(value)
-
-    @field_validator("memory_refs")
-    @classmethod
-    def validate_memory_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        refs = tuple(dict.fromkeys(value))
-        if any(not _MEMORY_REF_PATTERN.fullmatch(ref) for ref in refs):
-            raise ValueError("memory refs must use the memory:<run_id> format")
-        return refs
+    issue_dispositions: tuple[IssueDisposition, ...] = Field(min_length=1)
 
     @model_validator(mode="after")
     def validate_draft(self) -> JudgeDraft:
-        agenda_ids = tuple(ruling.agenda_id for ruling in self.rulings)
-        if len(agenda_ids) != len(set(agenda_ids)):
-            raise ValueError("judge rulings must use unique agenda IDs")
-        ruling_refs = {ref for ruling in self.rulings for ref in ruling.evidence_refs}
-        if not ruling_refs.issubset(self.evidence_refs):
-            raise ValueError("judge refs must include all ruling evidence")
+        issue_ids = tuple(item.issue_id for item in self.issue_dispositions)
+        if len(issue_ids) != len(set(issue_ids)):
+            raise ValueError("judge dispositions must use unique issue IDs")
         return self
-
-
-class RiskFinding(FrozenModel):
-    """One concrete challenge raised by a risk-review lens."""
-
-    id: str = Field(pattern=r"^risk\.[a-z0-9][a-z0-9_.-]*$")
-    kind: RiskFindingKind
-    statement: str = Field(min_length=1)
-    mechanism: str = Field(min_length=1)
-    severity: RiskSeverity
-    related_claim_ids: tuple[str, ...] = ()
-    evidence_refs: tuple[str, ...] = Field(min_length=1)
-
-    @field_validator("related_claim_ids")
-    @classmethod
-    def validate_claim_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        return _unique_research_ids(value)
-
-    @field_validator("evidence_refs")
-    @classmethod
-    def validate_evidence_refs(
-        cls,
-        value: tuple[str, ...],
-    ) -> tuple[str, ...]:
-        return _unique_evidence_refs(value)
 
 
 class RiskReview(FrozenModel):
-    """A visible challenge to the judge draft from one risk lens."""
+    """A readable challenge with only navigation metadata typed."""
 
     role: Literal["integrated", "aggressive", "neutral", "conservative"]
-    executive_summary: str = Field(min_length=1)
-    findings: tuple[RiskFinding, ...] = Field(min_length=1)
-    invalidation_paths: tuple[str, ...] = Field(min_length=1)
-    recommended_changes: tuple[str, ...] = Field(min_length=1)
-    confidence_adjustment: float = Field(ge=-1.0, le=1.0)
-    evidence_refs: tuple[str, ...] = Field(min_length=1)
+    markdown: str = Field(min_length=1)
+    challenged_issue_ids: tuple[str, ...] = ()
+    unresolved_issue_ids: tuple[str, ...] = ()
 
-    @field_validator("evidence_refs")
+    @field_validator("challenged_issue_ids", "unresolved_issue_ids")
     @classmethod
-    def validate_evidence_refs(
-        cls,
-        value: tuple[str, ...],
-    ) -> tuple[str, ...]:
-        return _unique_evidence_refs(value)
-
-    @model_validator(mode="after")
-    def validate_review(self) -> RiskReview:
-        finding_ids = tuple(finding.id for finding in self.findings)
-        if len(finding_ids) != len(set(finding_ids)):
-            raise ValueError("risk finding IDs must be unique")
-        finding_refs = {ref for finding in self.findings for ref in finding.evidence_refs}
-        if not finding_refs.issubset(self.evidence_refs):
-            raise ValueError("risk review refs must include all finding evidence")
-        return self
+    def validate_issue_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _unique_research_ids(value)
 
 
 class ValuationRange(FrozenModel):
@@ -1221,6 +789,46 @@ class RiskReviewAdjustment(FrozenModel):
         return _unique_evidence_refs(value)
 
 
+class CalculationPurpose(str, Enum):
+    VALUATION = "valuation"
+    SCENARIO = "scenario"
+    MARKET_REFERENCE = "market_reference"
+
+
+class CalculationRecord(FrozenModel):
+    """A decision-critical calculation, not a presentation-table cell."""
+
+    id: str = Field(pattern=r"^calc_[a-z0-9][a-z0-9_.-]*$")
+    purpose: CalculationPurpose
+    formula: str = Field(min_length=1)
+    inputs: dict[str, int | float] = Field(min_length=1)
+    input_evidence_refs: tuple[str, ...] = Field(min_length=1)
+    result: int | float
+    unit: str = Field(min_length=1, max_length=32)
+    as_of_date: date
+    limitations: tuple[str, ...] = Field(min_length=1)
+
+    @field_validator("inputs")
+    @classmethod
+    def validate_inputs(
+        cls,
+        value: dict[str, int | float],
+    ) -> dict[str, int | float]:
+        if any(
+            not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", key)
+            for key in value
+        ):
+            raise ValueError("calculation input names must be identifiers")
+        if any(isinstance(item, bool) for item in value.values()):
+            raise ValueError("calculation inputs must be numeric")
+        return value
+
+    @field_validator("input_evidence_refs")
+    @classmethod
+    def validate_input_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _unique_evidence_refs(value)
+
+
 class ResearchDecision(FrozenModel):
     """Research-only conclusion; deliberately excludes account-level advice."""
 
@@ -1241,6 +849,7 @@ class ResearchDecision(FrozenModel):
     )
     valuation_assessment: ValuationAssessment | None = None
     market_reference_levels: tuple[MarketReferenceLevel, ...] = ()
+    calculation_records: tuple[CalculationRecord, ...] = ()
     risk_review_adjustments: tuple[RiskReviewAdjustment, ...] = ()
 
     @field_validator("memory_refs")
@@ -1271,6 +880,11 @@ class ResearchDecision(FrozenModel):
             nested_refs.update(self.valuation_assessment.input_evidence_refs)
         nested_refs.update(
             ref for level in self.market_reference_levels for ref in level.evidence_refs
+        )
+        nested_refs.update(
+            ref
+            for calculation in self.calculation_records
+            for ref in calculation.input_evidence_refs
         )
         nested_refs.update(
             ref for adjustment in self.risk_review_adjustments for ref in adjustment.evidence_refs
@@ -1448,7 +1062,7 @@ class ResearchArtifactDraft(FrozenModel):
         pattern=r"^[a-z][a-z0-9_.-]*$",
     )
     round: int = Field(default=0, ge=0)
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["2"] = "2"
     prompt_version: str = Field(
         default="research-v1",
         min_length=1,
@@ -1490,7 +1104,7 @@ class ResearchArtifact(FrozenModel):
         pattern=r"^[a-z][a-z0-9_.-]*$",
     )
     round: int = Field(default=0, ge=0)
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["2"] = "2"
     prompt_version: str = Field(
         default="research-v1",
         min_length=1,
@@ -1681,7 +1295,7 @@ class RecentInstrument(FrozenModel):
 class RunExport(FrozenModel):
     """Versioned, self-contained durable run export."""
 
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["2"] = "2"
     run: RunView
     result: AnalysisResult
     evidence: EvidenceBundle | None = None

@@ -12,10 +12,9 @@ from datetime import date, datetime
 from .contracts import (
     EvidenceItem,
     EvidenceTable,
-    ResearchTableCell,
-    ResearchTableColumn,
-    ResearchTableRow,
-    TableCellKind,
+    EvidenceTableCell,
+    EvidenceTableColumn,
+    EvidenceTableRow,
     TableDataType,
 )
 
@@ -129,31 +128,12 @@ def _merge_evidence_tables(
     right: EvidenceTable,
 ) -> EvidenceTable:
     refs = tuple(dict.fromkeys((*left.evidence_refs, *right.evidence_refs)))
-    rows = []
-    for left_row, right_row in zip(left.rows, right.rows, strict=True):
-        cells = {}
-        for column in left.columns:
-            left_cell = left_row.cells[column.key]
-            right_cell = right_row.cells[column.key]
-            cells[column.key] = left_cell.model_copy(
-                update={
-                    "evidence_refs": tuple(
-                        dict.fromkeys(
-                            (
-                                *left_cell.evidence_refs,
-                                *right_cell.evidence_refs,
-                            )
-                        )
-                    )
-                }
-            )
-        rows.append(left_row.model_copy(update={"cells": cells}))
     return EvidenceTable(
         id=left.id,
         title=left.title,
         purpose=left.purpose,
         columns=left.columns,
-        rows=tuple(rows),
+        rows=left.rows,
         evidence_refs=refs,
         source_format=left.source_format,
     )
@@ -299,7 +279,7 @@ def _nearest_heading(
 def _columns(
     headers: list[str],
     rows: list[list[str]],
-) -> tuple[ResearchTableColumn, ...]:
+) -> tuple[EvidenceTableColumn, ...]:
     keys: set[str] = set()
     columns = []
     for index, header in enumerate(headers, start=1):
@@ -316,7 +296,7 @@ def _columns(
         values = [row[index - 1] for row in rows]
         data_type, unit = _infer_column_type(label, values)
         columns.append(
-            ResearchTableColumn(
+            EvidenceTableColumn(
                 key=key,
                 label=label,
                 data_type=data_type,
@@ -327,21 +307,18 @@ def _columns(
 
 
 def _rows(
-    columns: tuple[ResearchTableColumn, ...],
+    columns: tuple[EvidenceTableColumn, ...],
     rows: list[list[str]],
-) -> tuple[ResearchTableRow, ...]:
+) -> tuple[EvidenceTableRow, ...]:
     output = []
     for row_index, values in enumerate(rows, start=1):
         cells = {}
         for column, displayed in zip(columns, values, strict=True):
-            display_value = displayed if displayed.strip() else "—"
-            cells[column.key] = ResearchTableCell(
+            cells[column.key] = EvidenceTableCell(
                 raw_value=_typed_value(displayed, column.data_type),
-                display_value=display_value,
-                kind=TableCellKind.OBSERVATION,
             )
         output.append(
-            ResearchTableRow(
+            EvidenceTableRow(
                 id=f"row_{row_index:04d}",
                 cells=cells,
             )

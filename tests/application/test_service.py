@@ -799,7 +799,7 @@ def test_service_export_reads_the_durable_result(
     assert "Fixture thesis" in body
     if format == "json":
         payload = json.loads(body)
-        assert payload["schema_version"] == "1"
+        assert payload["schema_version"] == "2"
         assert payload["run"]["id"] == result.run_id
         assert payload["attempts"][0]["status"] == "succeeded"
         assert payload["attempts"][0]["metrics"] == payload["run"]["metrics"]
@@ -807,7 +807,7 @@ def test_service_export_reads_the_durable_result(
         assert payload["evidence"]["items"][0]["source"] == "fixture"
         assert payload["artifacts"][0]["stage"] == "analyst"
         content = payload["artifacts"][0]["content"]
-        assert content["sections"][0]["narrative"] == "Fixture report."
+        assert "Fixture report." in content["markdown"]
     else:
         evidence_ref = result.evidence.items[0].ref
         assert "## Research Process" in body

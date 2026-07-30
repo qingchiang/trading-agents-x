@@ -17,27 +17,24 @@ from tests.factories import (
 from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
-    AnalystClaim,
     AnalystClaimType,
     AnalystReport,
-    AnalystSection,
     ArtifactGenerationMethod,
+    ClaimImportance,
     DebateAgenda,
     DebateImportance,
-    DebateResolution,
-    DisputeRuling,
+    DebateIssue,
     EvidenceBundle,
     EvidenceItem,
+    IssueDisposition,
     JudgeDraft,
-    RebuttalOutcome,
-    RebuttalPoint,
+    KeyClaim,
     RebuttalReview,
+    ReportAuditStatus,
+    ReportSection,
     ResearchArtifactDraft,
     ResearchRating,
-    RiskFinding,
-    RiskFindingKind,
     RiskReview,
-    RiskSeverity,
     RunMetrics,
     RunStatus,
     RunTrashState,
@@ -408,11 +405,11 @@ def test_artifacts_are_typed_retained_and_idempotent_across_retries(
         run.id,
         draft.model_copy(
             update={
-                "content": report.model_copy(
-                    update={
-                        "executive_summary": "Recomputed summary."
-                    }
-                )
+                    "content": report.model_copy(
+                        update={
+                            "markdown": "# Overview\n\nRecomputed summary."
+                        }
+                    )
             }
         ),
     )
@@ -439,7 +436,7 @@ def test_artifacts_are_typed_retained_and_idempotent_across_retries(
         "stage": "analyst",
         "role": "market",
         "round": 0,
-        "schema_version": "1",
+            "schema_version": "2",
         "prompt_version": "research-v1",
         "generation_method": "tool_call",
         "content_type": "analyst_report",
@@ -454,7 +451,6 @@ def test_artifact_prompt_version_is_audited_and_part_of_identity(
     run, _ = _create(repository, app_settings)
     repository.claim_run(run.id, "worker", 30)
     report = analyst_report(
-        executive_summary="Fixture summary.",
         confidence=0.8,
         narrative="Fixture narrative.",
     )
@@ -486,19 +482,14 @@ def test_artifact_prompt_version_is_audited_and_part_of_identity(
         (research_case(role="bull"), "research_case", "case", "bull"),
         (
             DebateAgenda(
-                executive_summary="Fixture agenda.",
+                summary="Fixture agenda.",
                 issues=(
-                    {
-                        "id": "debate.issue_1",
-                        "question": "Which mechanism dominates?",
-                        "claim_ids": ("market.claim_1",),
-                        "importance": DebateImportance.MATERIAL,
-                        "bull_position": "Demand persists.",
-                        "bear_position": "Demand fades.",
-                        "evidence_refs": ("ev_0123456789ab",),
-                    },
+                    DebateIssue(
+                        id="debate.issue_1",
+                        question="Which mechanism dominates?",
+                        importance=DebateImportance.MATERIAL,
+                    ),
                 ),
-                evidence_refs=("ev_0123456789ab",),
             ),
             "debate_agenda",
             "agenda",
@@ -508,18 +499,9 @@ def test_artifact_prompt_version_is_audited_and_part_of_identity(
             RebuttalReview(
                 role="bull",
                 round=1,
-                thesis_update="The case remains conditional.",
-                responses=(
-                    RebuttalPoint(
-                        agenda_id="debate.issue_1",
-                        claim_ids=("market.claim_1",),
-                        response="The mechanism remains plausible.",
-                        causal_mechanism="Demand transmits through volume.",
-                        outcome=RebuttalOutcome.UNRESOLVED,
-                        evidence_refs=("ev_0123456789ab",),
-                    ),
-                ),
-                evidence_refs=("ev_0123456789ab",),
+                markdown="The mechanism remains plausible.",
+                addressed_issue_ids=("debate.issue_1",),
+                open_issue_ids=("debate.issue_1",),
             ),
             "rebuttal_review",
             "rebuttal",
@@ -529,21 +511,13 @@ def test_artifact_prompt_version_is_audited_and_part_of_identity(
             JudgeDraft(
                 preliminary_rating=ResearchRating.HOLD,
                 confidence=0.6,
-                executive_summary="Fixture judge summary.",
-                thesis="Fixture judge thesis.",
-                rulings=(
-                    DisputeRuling(
-                        agenda_id="debate.issue_1",
-                        resolution=DebateResolution.MIXED,
-                        rationale="Both cases retain support.",
-                        accepted_claim_ids=("market.claim_1",),
-                        evidence_refs=("ev_0123456789ab",),
+                markdown="Both cases retain support.",
+                issue_dispositions=(
+                    IssueDisposition(
+                        issue_id="debate.issue_1",
+                        status="unresolved",
                     ),
                 ),
-                risks=("Fixture risk.",),
-                invalidation_conditions=("Fixture invalidation.",),
-                time_horizon="6-12 months",
-                evidence_refs=("ev_0123456789ab",),
             ),
             "judge_draft",
             "judge",
@@ -552,22 +526,9 @@ def test_artifact_prompt_version_is_audited_and_part_of_identity(
         (
             RiskReview(
                 role="integrated",
-                executive_summary="Fixture risk summary.",
-                findings=(
-                    RiskFinding(
-                        id="risk.integrated.finding_1",
-                        kind=RiskFindingKind.BASE_CONSISTENCY,
-                        statement="Confidence needs calibration.",
-                        mechanism="Evidence uncertainty widens outcomes.",
-                        severity=RiskSeverity.MEDIUM,
-                        related_claim_ids=("market.claim_1",),
-                        evidence_refs=("ev_0123456789ab",),
-                    ),
-                ),
-                invalidation_paths=("The mechanism fails.",),
-                recommended_changes=("Reduce confidence.",),
-                confidence_adjustment=-0.05,
-                evidence_refs=("ev_0123456789ab",),
+                markdown="Confidence needs calibration.",
+                challenged_issue_ids=("debate.issue_1",),
+                unresolved_issue_ids=("debate.issue_1",),
             ),
             "risk_review",
             "risk",
@@ -661,11 +622,21 @@ def test_complete_persists_result_and_resolved_memory(
     )
     report = AnalystReport(
         analyst="market",
-        executive_summary="Momentum is constructive.",
-        claims=(
-            AnalystClaim(
+        markdown="# Overview\n\nMarket report.",
+        report_sections=(
+            ReportSection(
+                id="market.section.overview",
+                title="Overview",
+                anchor="overview",
+                source_refs=(evidence_item.ref,),
+            ),
+        ),
+        key_claims=(
+            KeyClaim(
                 id="market.claim_1",
+                section_id="market.section.overview",
                 kind=AnalystClaimType.OBSERVATION,
+                importance=ClaimImportance.PRIMARY,
                 statement="Price closed at 100.",
                 implication="Momentum remains constructive.",
                 confidence=0.7,
@@ -673,17 +644,9 @@ def test_complete_persists_result_and_resolved_memory(
             ),
         ),
         confidence=0.7,
-        sections=(
-            AnalystSection(
-                id="overview",
-                title="Overview",
-                narrative="Market report.",
-            ),
-        ),
-        evidence_refs=(evidence_item.ref,),
+        source_refs=(evidence_item.ref,),
+        audit_status=ReportAuditStatus.COMPLETE,
         warnings=("**Historical price** was `partial`.",),
-        risks=("Momentum may reverse.",),
-        invalidation_conditions=("Price evidence reverses.",),
     )
     decision = research_decision(
         rating=ResearchRating.OVERWEIGHT,

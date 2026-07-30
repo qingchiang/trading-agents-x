@@ -321,9 +321,9 @@ class ResearchGraph:
             if report.analyst != analyst:
                 raise ValueError("frozen report key does not match analyst")
             _require_valid_refs(
-                report.evidence_refs,
+                report.source_refs,
                 valid_refs,
-                required=True,
+                required=False,
             )
 
         workflow = StateGraph(ResearchState, context_schema=RunContext)
@@ -559,7 +559,6 @@ class ResearchGraph:
                 "news_report": "",
                 "fundamentals_report": "",
                 "sentiment_confidence": None,
-                "sentiment_output_warning": None,
                 "prefetched_evidence": [],
             }
             with use_config(dict(context.dataflow_config)):
@@ -580,20 +579,6 @@ class ResearchGraph:
                 analyst=analyst,
                 prefetched_blocks=result.get("prefetched_evidence", []),
             )
-            extra_warnings: tuple[ResearchWarning, ...] = ()
-            if analyst == "social" and result.get("sentiment_output_warning"):
-                extra_warnings = (
-                    ResearchWarning(
-                        code="agent.structured_output_fallback",
-                        message=(
-                            "Sentiment structured output was unavailable or "
-                            "invalid; the preserved report is a free-text "
-                            "fallback and no typed sentiment fields were "
-                            "fabricated."
-                        ),
-                        source="Sentiment Analyst",
-                    ),
-                )
             evidence_warnings = _evidence_warnings(evidence)
             synthesis_metadata = {
                 "confidence_override": (
@@ -601,7 +586,7 @@ class ResearchGraph:
                 ),
                 "warnings": [
                     warning.model_dump(mode="json")
-                    for warning in dict.fromkeys((*evidence_warnings, *extra_warnings))
+                    for warning in evidence_warnings
                 ],
             }
             self._finish_node(
@@ -663,20 +648,17 @@ class ResearchGraph:
                 node=f"{node_name}.prepare",
                 runtime=runtime,
                 memo_instruction=(
-                    "Build a complete synthesis blueprint for the analyst "
-                    "report. Inspect the catalog and use read-only tools for "
-                    "every exact value, table comparison, formula input, "
-                    "counter-evidence, or original passage needed. Organize "
-                    "the memo by every required report section. Include "
-                    "claim/evidence mappings, mechanisms, implications, "
-                    "uncertainty, catalysts, risks, invalidation conditions, "
-                    "and every useful reading table with its purpose, "
-                    "localized columns, raw values, formulas, source table "
-                    "IDs, and evidence refs. Do not emit the formal JSON "
-                    "artifact and do not impose a table-size limit."
+                    "Prepare the evidence workset for a complete human-readable "
+                    "analyst report. Verify exact values and original passages "
+                    "through the read-only tools. Identify useful comparisons, "
+                    "counter-evidence, uncertainty, catalysts, risks, and "
+                    "invalidation conditions. Recommend reader-friendly tables "
+                    "but never reproduce a complete raw source table. Do not "
+                    "emit a formal JSON artifact."
                 ),
             )
             output = _invoke_analyst_report(
+                self.quick_llm,
                 self.quick_serializer_llm,
                 analyst=analyst,
                 draft_narrative=narrative,
@@ -697,7 +679,7 @@ class ResearchGraph:
                 role=analyst,
                 content=typed,
                 generation_method=output.generation_method,
-                prompt_version=f"analyst-{analyst}-v4-components",
+                prompt_version=f"analyst-{analyst}-v5-markdown",
             )
             self._finish_node(
                 runtime,
@@ -740,9 +722,9 @@ class ResearchGraph:
         for key, raw in state["analyst_reports"].items():
             report = AnalystReport.model_validate(raw)
             _require_valid_refs(
-                report.evidence_refs,
+                report.source_refs,
                 valid_refs,
-                required=True,
+                required=False,
             )
             reports[key] = report.model_dump(mode="json")
         self._finish_node(
@@ -805,8 +787,8 @@ class ResearchGraph:
                 runtime,
                 node,
                 {
-                    "arguments": len(case.arguments),
-                    "evidence_refs": len(case.evidence_refs),
+                    "focus_claims": len(case.focus_claim_ids),
+                    "report_sections": len(case.report_section_refs),
                 },
             )
             return {
@@ -943,8 +925,8 @@ class ResearchGraph:
                 node,
                 {
                     "round": round_number,
-                    "responses": len(rebuttal.responses),
-                    "new_evidence_refs": len(rebuttal.new_evidence_refs),
+                    "addressed_issues": len(rebuttal.addressed_issue_ids),
+                    "open_issues": len(rebuttal.open_issue_ids),
                 },
             )
             return {
@@ -1105,7 +1087,7 @@ class ResearchGraph:
             self._finish_node(
                 runtime,
                 node,
-                {"findings": len(review.findings)},
+                {"challenged_issues": len(review.challenged_issue_ids)},
             )
             return {
                 "risk_reviews": {spec.key: review.model_dump(mode="json")},

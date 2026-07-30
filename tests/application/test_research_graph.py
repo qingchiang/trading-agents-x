@@ -5,48 +5,41 @@ from datetime import date
 from typing import Any
 
 import pytest
+from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import MemorySaver
 
 import tradingagents.graph.research_graph as research_graph_module
 from tests.factories import analyst_report, research_decision
 from tradingagents.application.contracts import (
     AnalysisRequest,
-    AnalystClaim,
     AnalystClaimType,
+    ClaimImportance,
     DebateAgenda,
     DebateImportance,
-    DebateResolution,
-    DisputeRuling,
+    DebateIssue,
     EvidenceBundle,
     EvidenceItem,
     EvidenceQuality,
+    IssueDisposition,
     JudgeDraft,
+    KeyClaim,
     MemoryContext,
     MemoryOutcome,
     MemoryRecord,
-    RebuttalOutcome,
-    RebuttalPoint,
     RebuttalReview,
     ResearchArtifactDraft,
     ResearchCase,
-    ResearchCaseArgument,
     ResearchDecision,
     ResearchRating,
     ResearchWarning,
-    RiskFinding,
-    RiskFindingKind,
     RiskReview,
     RiskReviewAdjustment,
     RiskReviewDisposition,
-    RiskSeverity,
     RunProfile,
 )
 from tradingagents.application.metrics import MetricsCallback
 from tradingagents.application.runtime import RunContext
-from tradingagents.graph.analyst_report_drafts import (
-    AnalystReportDraft,
-    AnalystSectionDraft,
-)
+from tradingagents.graph.analyst_synthesis import AnalystAuditDraft
 from tradingagents.graph.research_graph import (
     ResearchGraph,
     _evidence_from_record,
@@ -72,110 +65,63 @@ class _StructuredInvoker:
                 )
             )
         )
-        if self.schema is AnalystReportDraft:
+        if self.schema is AnalystAuditDraft:
             analyst = re.search(
-                r"You are the (market|social|news|fundamentals) analyst",
+                r"existing\n(market|social|news|fundamentals) report",
                 prompt,
             ).group(1)
-            section_ids = {
-                "market": (
-                    "trend",
-                    "market_regime",
-                    "price_volume",
-                    "momentum",
-                    "volatility",
-                    "counter_evidence",
-                    "market_reference_levels",
-                ),
-                "social": (
-                    "overall_sentiment",
-                    "source_assessments",
-                    "consensus_divergence",
-                    "dominant_themes",
-                    "catalysts_risks",
-                    "coverage_limits",
-                ),
-                "news": (
-                    "company_events",
-                    "disclosures",
-                    "industry_macro",
-                    "event_timeline",
-                    "impact_paths",
-                    "relevance",
-                ),
-                "fundamentals": (
-                    "business",
-                    "growth",
-                    "profitability_quality",
-                    "cash_flow",
-                    "balance_sheet",
-                    "valuation",
-                    "disclosure_limits",
-                ),
-            }[analyst]
-            parsed = AnalystReportDraft(
-                analyst=analyst,
-                executive_summary="Complete fixture analyst summary.",
+            section_id = f"{analyst}.section_1"
+            parsed = AnalystAuditDraft(
                 confidence=0.6,
-                claims=(
-                    AnalystClaim(
+                key_claims=(
+                    KeyClaim(
                         id=f"{analyst}.claim_1",
+                        section_id=section_id,
                         kind=AnalystClaimType.INFERENCE,
+                        importance=ClaimImportance.PRIMARY,
                         statement="Fixture evidence is mixed.",
                         implication="The conclusion should preserve uncertainty.",
                         confidence=0.6,
                         evidence_refs=refs[-1:],
                     ),
                 ),
-                sections=tuple(
-                    AnalystSectionDraft(
-                        id=section_id,
-                        title=section_id.replace("_", " ").title(),
-                        narrative=(f"Detailed fixture analysis grounded in {refs[-1]}."),
-                    )
-                    for section_id in section_ids
-                ),
-                risks=("Evidence quality may deteriorate.",),
-                invalidation_conditions=("New evidence contradicts the fixture.",),
-                evidence_refs=refs[-1:],
+                section_source_refs={section_id: refs[-1:]},
             )
         elif self.schema is ResearchCase:
             role = "bull" if "Bull Researcher" in prompt else "bear"
+            claim_ids = tuple(
+                dict.fromkeys(
+                    re.findall(
+                        r"(?:market|social|news|fundamentals)\.claim_[a-z0-9_.-]+",
+                        prompt,
+                    )
+                )
+            )
+            section_ids = tuple(
+                dict.fromkeys(
+                    re.findall(
+                        r"(?:market|social|news|fundamentals)\."
+                        r"(?:section(?:_[0-9]+|\.[a-z0-9_.-]+)|root)",
+                        prompt,
+                    )
+                )
+            )
             parsed = ResearchCase(
                 role=role,
-                executive_summary=f"Complete {role} case.",
-                thesis=f"The {role} case remains conditional.",
-                arguments=(
-                    ResearchCaseArgument(
-                        id=f"case.{role}.argument_1",
-                        claim_ids=("market.claim_1",),
-                        statement="A fixture claim supports the case.",
-                        mechanism="The cited mechanism affects the outcome.",
-                        implication="The committee should test this condition.",
-                        confidence=0.6,
-                        evidence_refs=refs[-1:],
-                    ),
-                ),
-                strongest_counterarguments=("The opposing interpretation remains plausible.",),
-                fragile_assumptions=("The mechanism persists.",),
-                risks=("Evidence quality may deteriorate.",),
-                evidence_refs=refs[-1:],
+                markdown=f"## {role.title()} case\n\nThe case remains conditional.",
+                focus_claim_ids=claim_ids[:1],
+                report_section_refs=section_ids[:1],
             )
         elif self.schema is DebateAgenda:
             parsed = DebateAgenda(
-                executive_summary="One material dispute requires resolution.",
+                summary="One material dispute requires resolution.",
                 issues=(
-                    {
-                        "id": "debate.issue_1",
-                        "question": "Will the fixture mechanism persist?",
-                        "claim_ids": ("market.claim_1",),
-                        "importance": DebateImportance.MATERIAL,
-                        "bull_position": "The mechanism persists.",
-                        "bear_position": "The mechanism fades.",
-                        "evidence_refs": refs[-1:],
-                    },
+                    DebateIssue(
+                        id="debate.issue_1",
+                        question="Will the fixture mechanism persist?",
+                        importance=DebateImportance.MATERIAL,
+                    ),
                 ),
-                evidence_refs=refs[-1:],
             )
         elif self.schema is RebuttalReview:
             role = "bull" if "Bull Researcher Rebuttal" in prompt else "bear"
@@ -183,42 +129,21 @@ class _StructuredInvoker:
             parsed = RebuttalReview(
                 role=role,
                 round=round_number,
-                thesis_update="The case remains conditional.",
-                responses=(
-                    RebuttalPoint(
-                        agenda_id="debate.issue_1",
-                        claim_ids=("market.claim_1",),
-                        response="The opposing interpretation is incomplete.",
-                        causal_mechanism=("The fixture mechanism has a role-specific path."),
-                        outcome=RebuttalOutcome.UNRESOLVED,
-                        evidence_refs=refs[-1:],
-                        remaining_questions=("Which mechanism dominates?",),
-                    ),
-                ),
-                evidence_refs=refs[-1:],
-                remaining_questions=("Which mechanism dominates?",),
+                markdown="The opposing interpretation is incomplete.",
+                addressed_issue_ids=("debate.issue_1",),
+                open_issue_ids=("debate.issue_1",),
             )
         elif self.schema is JudgeDraft:
             parsed = JudgeDraft(
                 preliminary_rating=ResearchRating.HOLD,
                 confidence=0.6,
-                executive_summary="The debate supports a balanced draft.",
-                thesis="The fixture conclusion remains conditional.",
-                rulings=(
-                    DisputeRuling(
-                        agenda_id="debate.issue_1",
-                        resolution=DebateResolution.MIXED,
-                        rationale="Both cases retain evidentiary support.",
-                        accepted_claim_ids=("market.claim_1",),
-                        evidence_refs=refs[-1:],
+                markdown="The debate supports a balanced draft.",
+                issue_dispositions=(
+                    IssueDisposition(
+                        issue_id="debate.issue_1",
+                        status="unresolved",
                     ),
                 ),
-                risks=("Evidence quality may deteriorate.",),
-                invalidation_conditions=("New evidence contradicts the fixture.",),
-                unresolved_questions=("Which mechanism dominates?",),
-                time_horizon="6-12 months",
-                evidence_refs=refs[-1:],
-                memory_refs=memory_refs[:1],
             )
         elif self.schema is RiskReview:
             role = next(
@@ -239,22 +164,9 @@ class _StructuredInvoker:
             )
             parsed = RiskReview(
                 role=role,
-                executive_summary="The draft needs a qualification.",
-                findings=(
-                    RiskFinding(
-                        id=f"risk.{role}.finding_1",
-                        kind=RiskFindingKind.BASE_CONSISTENCY,
-                        statement="Confidence exceeds fixture certainty.",
-                        mechanism="Uncertainty widens the result range.",
-                        severity=RiskSeverity.MEDIUM,
-                        related_claim_ids=("market.claim_1",),
-                        evidence_refs=refs[-1:],
-                    ),
-                ),
-                invalidation_paths=("The accepted mechanism fails.",),
-                recommended_changes=("Preserve uncertainty.",),
-                confidence_adjustment=-0.05,
-                evidence_refs=refs[-1:],
+                markdown="The draft needs a qualification.",
+                challenged_issue_ids=("debate.issue_1",),
+                unresolved_issue_ids=("debate.issue_1",),
             )
         elif self.schema is ResearchDecision:
             risk_roles = tuple(
@@ -303,8 +215,22 @@ class _FakeLLM:
     def with_structured_output(self, schema, **_kwargs):
         return _StructuredInvoker(schema, self.calls)
 
-    def invoke(self, _prompt):
-        raise AssertionError("structured output should succeed")
+    def invoke(self, prompt, config=None):
+        assert config is None or "metadata" in config
+        self.calls.append(("MarkdownReport", prompt))
+        refs = tuple(dict.fromkeys(re.findall(r"ev_[a-f0-9]{12}", prompt)))
+        analyst_match = re.search(
+            r"You are the (market|social|news|fundamentals) analyst",
+            prompt,
+        )
+        analyst = analyst_match.group(1) if analyst_match else "market"
+        citation = f"[^{refs[-1]}]" if refs else ""
+        return AIMessage(
+            content=(
+                f"# {analyst.title()} analysis\n\n"
+                f"Fixture evidence is mixed. {citation}"
+            )
+        )
 
 
 class _AnalystSubgraph:
@@ -465,7 +391,7 @@ def test_profiles_share_contract_but_use_distinct_topologies(
     assert required_nodes <= completed
     assert not forbidden_nodes & completed
     assert set(execution.reports) == {"market", "news"}
-    assert execution.evidence.version == "4"
+    assert execution.evidence.version == "5"
     assert execution.evidence.digest
     assert execution.decision.rating is ResearchRating.HOLD
     valid_refs = {item.ref for item in execution.evidence.items}
@@ -477,13 +403,14 @@ def test_profiles_share_contract_but_use_distinct_topologies(
     (
         (
             RunProfile.FAST,
-            {"AnalystReportDraft"},
+            {"MarkdownReport", "AnalystAuditDraft"},
             {"ResearchDecision"},
         ),
         (
             RunProfile.STANDARD,
             {
-                "AnalystReportDraft",
+                "MarkdownReport",
+                "AnalystAuditDraft",
                 "ResearchCase",
                 "DebateAgenda",
                 "RebuttalReview",
@@ -493,7 +420,7 @@ def test_profiles_share_contract_but_use_distinct_topologies(
         ),
         (
             RunProfile.DEEP,
-            {"AnalystReportDraft"},
+            {"MarkdownReport", "AnalystAuditDraft"},
             {
                 "ResearchCase",
                 "DebateAgenda",
@@ -568,12 +495,15 @@ def test_analyst_core_uses_the_dedicated_serializer_client(
     )
 
     assert all(
-        schema != "AnalystReportDraft"
+        schema != "AnalystAuditDraft"
         for schema, _prompt in reasoning.calls
     )
     assert {
         schema for schema, _prompt in serializer.calls
-    } == {"AnalystReportDraft"}
+    } == {"AnalystAuditDraft"}
+    assert {schema for schema, _prompt in reasoning.calls} == {
+        "MarkdownReport"
+    }
 
 
 def test_frozen_execution_uses_production_deliberation_without_analyst_calls(
@@ -624,7 +554,8 @@ def test_frozen_execution_uses_production_deliberation_without_analyst_calls(
     )
 
     assert all(
-        schema != "AnalystReportDraft" for schema, _prompt in llm.calls
+        schema not in {"AnalystAuditDraft", "MarkdownReport"}
+        for schema, _prompt in llm.calls
     )
     assert all(artifact.stage != "analyst" for artifact in artifacts)
     assert execution.evidence == bundle
@@ -679,7 +610,12 @@ def test_memory_only_enters_profile_decision_nodes_and_refs_are_whitelisted(
         prompt
         for schema, prompt in calls
         if schema
-        not in {"ResearchDecision", "JudgeDraft", "AnalystReportDraft"}
+        not in {
+            "ResearchDecision",
+            "JudgeDraft",
+            "AnalystAuditDraft",
+            "MarkdownReport",
+        }
     ]
     assert len(decision_prompts) == decision_prompt_count
     assert all(
@@ -756,8 +692,8 @@ def test_graph_emits_only_typed_visible_research_artifacts(
         for artifact in artifacts
         if artifact.stage == "analyst"
     } == {
-        ("market", "analyst-market-v4-components"),
-        ("news", "analyst-news-v4-components"),
+        ("market", "analyst-market-v5-markdown"),
+        ("news", "analyst-news-v5-markdown"),
     }
     assert all(artifact.prompt_version != "research-v1" for artifact in artifacts)
 

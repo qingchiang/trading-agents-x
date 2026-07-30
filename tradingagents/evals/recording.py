@@ -19,12 +19,12 @@ from tradingagents.application.contracts import (
     EvidenceItem,
     EvidenceQuality,
     EvidenceTable,
+    EvidenceTableCell,
+    EvidenceTableColumn,
+    EvidenceTableRow,
     ResearchArtifact,
     ResearchDecision,
     ResearchRating,
-    ResearchTableCell,
-    ResearchTableColumn,
-    ResearchTableRow,
     RunMetrics,
 )
 
@@ -668,30 +668,28 @@ def _quality_table(
     rows: tuple[tuple[str, str, Any, EvidenceItem], ...],
 ) -> EvidenceTable:
     columns = (
-        ResearchTableColumn(key="metric", label="Metric"),
-        ResearchTableColumn(key="value", label="Observed value"),
-        ResearchTableColumn(key="source", label="Source"),
+        EvidenceTableColumn(key="metric", label="Metric"),
+        EvidenceTableColumn(key="value", label="Observed value"),
+        EvidenceTableColumn(key="source", label="Source"),
     )
     table_rows = tuple(
-        ResearchTableRow(
+        EvidenceTableRow(
             id=key,
             cells={
-                "metric": ResearchTableCell(
+                "metric": EvidenceTableCell(
                     raw_value=label,
-                    display_value=label,
-                    evidence_refs=(item.ref,),
+                    source_refs=(item.ref,),
                 ),
-                "value": ResearchTableCell(
+                "value": EvidenceTableCell(
                     raw_value=item.value,
-                    display_value=str(display),
-                    evidence_refs=(item.ref,),
+                    source_refs=(item.ref,),
                 ),
-                "source": ResearchTableCell(
+                "source": EvidenceTableCell(
                     raw_value=source,
-                    display_value=source,
-                    evidence_refs=(item.ref,),
+                    source_refs=(item.ref,),
                 ),
             },
+            source_refs=(item.ref,),
         )
         for key, label, display, item in rows
     )

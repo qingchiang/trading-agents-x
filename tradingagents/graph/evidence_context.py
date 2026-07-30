@@ -15,7 +15,7 @@ from tradingagents.application.contracts import (
     EvidenceBundle,
     EvidenceItem,
     EvidenceTable,
-    ResearchTableCell,
+    EvidenceTableCell,
 )
 
 _MAX_ROWS = 120
@@ -591,14 +591,13 @@ def _row_payload(
     *,
     default_refs: tuple[str, ...],
 ) -> dict[str, Any]:
-    inherited_refs = row.evidence_refs or default_refs
+    inherited_refs = row.source_refs or default_refs
     return {
         "row_id": row.id,
         "cells": {
             column: {
                 "raw_value": row.cells[column].raw_value,
-                "display_value": row.cells[column].display_value,
-                "evidence_refs": list(row.cells[column].evidence_refs or inherited_refs),
+                "evidence_refs": list(row.cells[column].source_refs or inherited_refs),
             }
             for column in columns
         },
@@ -624,7 +623,7 @@ def _date_column_key(table: EvidenceTable) -> str | None:
     )
 
 
-def _cell_date(cell: ResearchTableCell) -> date | None:
+def _cell_date(cell: EvidenceTableCell) -> date | None:
     value = cell.raw_value
     if not isinstance(value, str):
         return None
@@ -634,7 +633,7 @@ def _cell_date(cell: ResearchTableCell) -> date | None:
         return None
 
 
-def _numeric_value(cell: ResearchTableCell) -> float | None:
+def _numeric_value(cell: EvidenceTableCell) -> float | None:
     value = cell.raw_value
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
