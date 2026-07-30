@@ -190,6 +190,7 @@ class ArtifactGenerationMethod(str, Enum):
     """Auditable method that produced a typed research artifact."""
 
     TOOL_CALL = "tool_call"
+    TOOL_CALL_RECOVERED = "tool_call_recovered"
     JSON_MODE = "json_mode"
     RAW_JSON_RECOVERED = "raw_json_recovered"
     JSON_MODE_RECOVERED = "json_mode_recovered"

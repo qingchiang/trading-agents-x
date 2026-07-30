@@ -6,7 +6,7 @@ import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
@@ -78,6 +78,9 @@ class StructuredOutputRunner(Generic[StructuredModel]):
         node: str,
         event_writer: EventWriter | None = None,
         invoke_config: dict[str, Any] | None = None,
+        repair_mode: Literal["json_mode", "preferred"] = "json_mode",
+        include_candidate_in_repair: bool = False,
+        repair_instructions: str | None = None,
         truncation_recovery: (
             Callable[[], StructuredOutputResult[StructuredModel]] | None
         ) = None,
@@ -88,6 +91,9 @@ class StructuredOutputRunner(Generic[StructuredModel]):
         self.node = node
         self.event_writer = event_writer
         self.invoke_config = invoke_config
+        self.repair_mode = repair_mode
+        self.include_candidate_in_repair = include_candidate_in_repair
+        self.repair_instructions = repair_instructions
         self.truncation_recovery = truncation_recovery
 
     def invoke(
@@ -100,6 +106,7 @@ class StructuredOutputRunner(Generic[StructuredModel]):
     ) -> StructuredOutputResult[StructuredModel]:
         primary_reason = "structured_binding_error"
         primary_validation_issues: tuple[str, ...] = ()
+        primary_candidate: dict[str, Any] | None = None
         primary_generation_method = _primary_generation_method(self.llm)
         bind_kwargs = _structured_output_kwargs(self.llm)
         primary_prompt = (
@@ -134,6 +141,7 @@ class StructuredOutputRunner(Generic[StructuredModel]):
                 if _is_truncated(raw):
                     primary_reason = "output_truncated"
                 elif parsed is not None:
+                    primary_candidate = _safe_candidate(parsed)
                     try:
                         value = self._validate(parsed)
                     except _InvalidOutput as exc:
@@ -146,7 +154,8 @@ class StructuredOutputRunner(Generic[StructuredModel]):
                         )
                 else:
                     try:
-                        value = self._validate(_strict_json_object(raw))
+                        primary_candidate = _strict_json_object(raw)
+                        value = self._validate(primary_candidate)
                     except _InvalidOutput as exc:
                         parser_issues = _validation_issues(parsing_error)
                         primary_reason = (
@@ -221,9 +230,18 @@ class StructuredOutputRunner(Generic[StructuredModel]):
                 validation_issues=failure_validation_issues,
             )
 
+        recovery_method = (
+            ArtifactGenerationMethod.TOOL_CALL_RECOVERED
+            if (
+                self.repair_mode == "preferred"
+                and primary_generation_method
+                is ArtifactGenerationMethod.TOOL_CALL
+            )
+            else ArtifactGenerationMethod.JSON_MODE_RECOVERED
+        )
         self._emit(
             "node.output_retry",
-            method=ArtifactGenerationMethod.JSON_MODE_RECOVERED,
+            method=recovery_method,
             reason_code=primary_reason,
             validation_issues=primary_validation_issues,
         )
@@ -234,32 +252,50 @@ class StructuredOutputRunner(Generic[StructuredModel]):
             allowed_evidence_refs=allowed_evidence_refs,
             allowed_memory_refs=allowed_memory_refs,
             validation_issues=primary_validation_issues,
+            candidate=(
+                primary_candidate
+                if self.include_candidate_in_repair
+                else None
+            ),
+            repair_instructions=self.repair_instructions,
         )
         try:
-            recovery = self.llm.with_structured_output(
-                self.schema,
-                method="json_mode",
-                include_raw=True,
-                **bind_kwargs,
-            )
+            if self.repair_mode == "preferred":
+                recovery = self.llm.with_structured_output(
+                    self.schema,
+                    include_raw=True,
+                    **bind_kwargs,
+                )
+            else:
+                recovery = self.llm.with_structured_output(
+                    self.schema,
+                    method="json_mode",
+                    include_raw=True,
+                    **bind_kwargs,
+                )
         except Exception:
             recovery = None
 
         failure_reason = "structured_binding_error"
         failure_validation_issues: tuple[str, ...] = ()
-        try:
-            response = (
-                self._invoke(recovery, recovery_prompt)
-                if recovery is not None
-                else self._invoke(
-                    self.llm,
-                    recovery_prompt,
-                    **bind_kwargs,
+        response_available = False
+        response = None
+        if recovery is not None or self.repair_mode != "preferred":
+            try:
+                response = (
+                    self._invoke(recovery, recovery_prompt)
+                    if recovery is not None
+                    else self._invoke(
+                        self.llm,
+                        recovery_prompt,
+                        **bind_kwargs,
+                    )
                 )
-            )
-        except Exception:
-            failure_reason = "provider_error"
-        else:
+            except Exception:
+                failure_reason = "provider_error"
+            else:
+                response_available = True
+        if response_available:
             parsed, raw, parsing_error = _unpack_response(
                 response,
                 self.schema,
@@ -292,17 +328,13 @@ class StructuredOutputRunner(Generic[StructuredModel]):
                 else:
                     self._emit(
                         "node.output_recovered",
-                        method=(
-                            ArtifactGenerationMethod.JSON_MODE_RECOVERED
-                        ),
+                        method=recovery_method,
                         reason_code=primary_reason,
                         validation_issues=primary_validation_issues,
                     )
                     return StructuredOutputResult(
                         value=value,
-                        generation_method=(
-                            ArtifactGenerationMethod.JSON_MODE_RECOVERED
-                        ),
+                        generation_method=recovery_method,
                     )
 
         if (
@@ -346,7 +378,7 @@ class StructuredOutputRunner(Generic[StructuredModel]):
 
         self._emit(
             "node.output_failed",
-            method=ArtifactGenerationMethod.JSON_MODE_RECOVERED,
+            method=recovery_method,
             reason_code=failure_reason,
             validation_issues=failure_validation_issues,
         )
@@ -501,6 +533,8 @@ def _recovery_prompt(
     allowed_evidence_refs: tuple[str, ...],
     allowed_memory_refs: tuple[str, ...],
     validation_issues: tuple[str, ...],
+    candidate: dict[str, Any] | None,
+    repair_instructions: str | None,
 ) -> str:
     return _json_contract_prompt(
         original_prompt,
@@ -509,6 +543,8 @@ def _recovery_prompt(
         allowed_evidence_refs=allowed_evidence_refs,
         allowed_memory_refs=allowed_memory_refs,
         validation_issues=validation_issues,
+        candidate=candidate,
+        repair_instructions=repair_instructions,
         retry=True,
     )
 
@@ -528,6 +564,8 @@ def _primary_json_prompt(
         allowed_evidence_refs=allowed_evidence_refs,
         allowed_memory_refs=allowed_memory_refs,
         validation_issues=(),
+        candidate=None,
+        repair_instructions=None,
         retry=False,
     )
 
@@ -540,6 +578,8 @@ def _json_contract_prompt(
     allowed_evidence_refs: tuple[str, ...],
     allowed_memory_refs: tuple[str, ...],
     validation_issues: tuple[str, ...],
+    candidate: dict[str, Any] | None,
+    repair_instructions: str | None,
     retry: bool,
 ) -> str:
     introduction = (
@@ -554,11 +594,28 @@ def _json_contract_prompt(
         if validation_issues
         else ""
     )
+    candidate_section = (
+        "\nINVALID CANDIDATE JSON:\n"
+        + json.dumps(candidate, ensure_ascii=False, sort_keys=True)
+        + "\nPreserve every valid field and change only what is required to "
+        "correct the listed issues.\n"
+        if candidate is not None
+        else ""
+    )
+    repair_section = (
+        "\nAPPLICATION REPAIR RULES:\n"
+        + repair_instructions.strip()
+        + "\n"
+        if repair_instructions
+        else ""
+    )
     return f"""{introduction}
 Return exactly one JSON object and no Markdown, prose, or code fence.
 The object must satisfy the JSON Schema and all semantic requirements in the
 original task. Use only refs from the allowlists below.
 {validation_section}
+{candidate_section}
+{repair_section}
 
 JSON SCHEMA:
 {json.dumps(schema.model_json_schema(), ensure_ascii=False, sort_keys=True)}
@@ -600,6 +657,19 @@ def _validation_issues(error: Any) -> tuple[str, ...]:
         if len(issues) == 8:
             break
     return tuple(dict.fromkeys(issues))
+
+
+def _safe_candidate(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    if not isinstance(value, dict):
+        return None
+    try:
+        serialized = json.dumps(value, ensure_ascii=False)
+        restored = json.loads(serialized)
+    except (TypeError, ValueError):
+        return None
+    return restored if isinstance(restored, dict) else None
 
 
 def _safe_issue_token(value: Any) -> str:

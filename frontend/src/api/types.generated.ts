@@ -58,7 +58,7 @@ export interface components {
       research_table_ids?: string[];
       title: string;
     };
-    ArtifactGenerationMethod: "tool_call" | "json_mode" | "raw_json_recovered" | "json_mode_recovered" | "sectioned_recovery";
+    ArtifactGenerationMethod: "tool_call" | "tool_call_recovered" | "json_mode" | "raw_json_recovered" | "json_mode_recovered" | "sectioned_recovery";
     AssetType: "stock" | "crypto";
     CapabilitiesResponse: {
       analysts: string[];

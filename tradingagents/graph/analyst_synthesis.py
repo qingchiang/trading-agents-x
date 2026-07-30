@@ -6,15 +6,12 @@ import json
 import math
 import re
 from collections.abc import Callable, Iterable
-from typing import Any, Literal
-
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Any
 
 from tradingagents.application.contracts import (
     AnalystClaim,
     AnalystClaimType,
     AnalystReport,
-    AnalystSection,
     ArtifactGenerationMethod,
     EvidenceBundle,
     EvidenceItem,
@@ -29,7 +26,9 @@ from tradingagents.application.table_display import (
 )
 from tradingagents.graph.analyst_report_drafts import (
     AnalystReportDraft,
+    AnalystReportManifestDraft,
     AnalystSectionDraft,
+    AnalystSectionOutline,
     ResearchTableCellDraft,
     ResearchTableDraft,
     ResearchTablePlan,
@@ -120,32 +119,15 @@ _ANALYST_QUALITY_RULES = {
     ),
 }
 
-
-class _StructuredFragment(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-
-class _AnalystSectionPlan(_StructuredFragment):
-    id: str
-    title: str
-    evidence_table_ids: tuple[str, ...] = ()
-
-
-class _AnalystReportManifest(_StructuredFragment):
-    analyst: Literal["market", "social", "news", "fundamentals"]
-    executive_summary: str
-    confidence: float = Field(ge=0.0, le=1.0)
-    claims: tuple[AnalystClaim, ...]
-    sections: tuple[_AnalystSectionPlan, ...]
-    catalysts: tuple[str, ...] = ()
-    risks: tuple[str, ...]
-    invalidation_conditions: tuple[str, ...]
-    evidence_refs: tuple[str, ...]
-
-
-class _AnalystSectionChunk(_StructuredFragment):
-    section: AnalystSection
-    tables: tuple[ResearchTable, ...] = ()
+_COMPONENT_REPAIR_RULES = """Keep all already valid research content.
+- Allowed table data_type values are exactly: text, number, integer, percent,
+  currency, date, boolean.
+- Percent raw values are decimal ratios.
+- Evidence refs and EvidenceTable IDs must come from the supplied allowlists.
+- Derived inputs must be named finite numbers. The application calculates the
+  result and derived raw_value, so a derived draft cell keeps raw_value null.
+- Ordered row cells must exactly match the ordered columns.
+- Do not add public IDs, display_value, source row IDs, or derived result."""
 
 
 def evidence_warnings(
@@ -240,6 +222,19 @@ def invoke_analyst_report(
                 "research_node": f"{node}.serialize.core",
             }
         },
+        repair_mode="preferred",
+        include_candidate_in_repair=True,
+        repair_instructions=_COMPONENT_REPAIR_RULES,
+        truncation_recovery=lambda: _recover_analyst_core_by_section(
+            llm,
+            analyst=analyst,
+            context_prompt=prompt,
+            example=example,
+            bundle=bundle,
+            confidence_override=confidence_override,
+            node=node,
+            event_writer=event_writer,
+        ),
     ).invoke(
         prompt,
         example=example.model_dump(mode="json"),
@@ -274,6 +269,9 @@ def invoke_analyst_report(
                     "research_node": table_node,
                 }
             },
+            repair_mode="preferred",
+            include_candidate_in_repair=True,
+            repair_instructions=_COMPONENT_REPAIR_RULES,
         ).invoke(
             _research_table_draft_prompt(
                 analyst=analyst,
@@ -757,83 +755,194 @@ def _component_generation_method(
         ArtifactGenerationMethod.TOOL_CALL: 0,
         ArtifactGenerationMethod.JSON_MODE: 1,
         ArtifactGenerationMethod.RAW_JSON_RECOVERED: 2,
-        ArtifactGenerationMethod.JSON_MODE_RECOVERED: 3,
-        ArtifactGenerationMethod.SECTIONED_RECOVERY: 4,
+        ArtifactGenerationMethod.TOOL_CALL_RECOVERED: 3,
+        ArtifactGenerationMethod.JSON_MODE_RECOVERED: 4,
+        ArtifactGenerationMethod.SECTIONED_RECOVERY: 5,
     }
     return max(methods, key=priority.__getitem__)
 
 
-def _analyst_report_example(
+def _recover_analyst_core_by_section(
+    llm: Any,
     *,
     analyst: str,
+    context_prompt: str,
+    example: AnalystReportDraft,
     bundle: EvidenceBundle,
     confidence_override: float | None,
-) -> AnalystReport:
+    node: str,
+    event_writer: Callable[[dict[str, Any]], None] | None,
+) -> StructuredOutputResult[AnalystReportDraft]:
     valid_refs = tuple(item.ref for item in bundle.items)
-    first_ref = valid_refs[0]
-    evidence_table_ids = tuple(table.id for table in bundle.tables)
-    example_tables = _example_research_tables(analyst, bundle)
-    example_table_ids = tuple(table.id for table in example_tables)
-    sections = tuple(
-        AnalystSection(
-            id=section_id,
-            title=title,
-            narrative=(
-                "Detailed evidence-grounded analysis with uncertainty and "
-                f"an explicit implication [{first_ref}]."
-            ),
-            research_table_ids=example_table_ids if index == 0 else (),
-            evidence_table_ids=evidence_table_ids if index == 0 else (),
+    manifest_example = AnalystReportManifestDraft(
+        analyst=example.analyst,
+        executive_summary=example.executive_summary,
+        confidence=example.confidence,
+        claims=example.claims,
+        sections=tuple(
+            AnalystSectionOutline(id=section.id, title=section.title)
+            for section in example.sections
+        ),
+        catalysts=example.catalysts,
+        risks=example.risks,
+        invalidation_conditions=example.invalidation_conditions,
+        evidence_refs=example.evidence_refs,
+    )
+
+    def validate_manifest(
+        manifest: AnalystReportManifestDraft,
+    ) -> AnalystReportManifestDraft:
+        if manifest.analyst != analyst:
+            raise OutputValidationError("analyst_manifest.identity")
+        required = {
+            section_id for section_id, _title in _ANALYST_SECTIONS[analyst]
+        }
+        section_ids = tuple(section.id for section in manifest.sections)
+        if (
+            set(section_ids) != required
+            or len(section_ids) != len(set(section_ids))
+        ):
+            raise OutputValidationError("analyst_manifest.sections")
+        require_text(manifest.executive_summary)
+        require_nonempty_texts(manifest.risks)
+        require_nonempty_texts(manifest.invalidation_conditions)
+        require_valid_refs(
+            manifest.evidence_refs,
+            set(valid_refs),
+            required=True,
         )
-        for index, (section_id, title) in enumerate(_ANALYST_SECTIONS[analyst])
-    )
-    return AnalystReport(
-        analyst=analyst,
-        executive_summary=(
-            "The available evidence supports a conditional, uncertainty-aware analyst conclusion."
-        ),
-        confidence=(confidence_override if confidence_override is not None else 0.6),
-        claims=(
-            AnalystClaim(
-                id=f"{analyst}.claim_1",
-                kind=AnalystClaimType.INFERENCE,
-                statement="The cited evidence supports a material observation.",
-                implication=(
-                    "The research committee should retain this condition in its final assessment."
-                ),
-                confidence=0.6,
-                evidence_refs=(first_ref,),
-            ),
-        ),
-        sections=sections,
-        tables=example_tables,
-        catalysts=(),
-        risks=("A material evidence-backed risk could weaken the assessment.",),
-        invalidation_conditions=("New evidence directly contradicts the cited observation.",),
-        evidence_refs=valid_refs,
-    )
+        for claim in manifest.claims:
+            if not claim.id.startswith(f"{analyst}.claim_"):
+                raise OutputValidationError(
+                    "analyst_manifest.claim_id.scope"
+                )
+            require_valid_refs(
+                claim.evidence_refs,
+                set(valid_refs),
+                required=True,
+            )
+        if confidence_override is not None:
+            return manifest.model_copy(
+                update={"confidence": confidence_override}
+            )
+        return manifest
 
+    manifest_node = f"{node}.serialize.core.manifest"
+    manifest = StructuredOutputRunner(
+        llm=llm,
+        schema=AnalystReportManifestDraft,
+        validator=validate_manifest,
+        node=manifest_node,
+        event_writer=event_writer,
+        invoke_config={"metadata": {"research_node": manifest_node}},
+        repair_mode="preferred",
+        include_candidate_in_repair=True,
+        repair_instructions=_COMPONENT_REPAIR_RULES,
+    ).invoke(
+        context_prompt
+        + """
 
-def _example_research_tables(
-    analyst: str,
-    bundle: EvidenceBundle,
-) -> tuple[ResearchTable, ...]:
-    if not bundle.tables:
-        return ()
-    source = bundle.tables[0]
-    selected_rows = (source.rows[0],)
-    return (
-        ResearchTable(
-            id=f"rt_{analyst}_source_view",
-            title="Focused source comparison",
-            purpose=("Show a focused, cited view of facts relevant to the analysis."),
-            columns=source.columns,
-            rows=selected_rows,
-            evidence_refs=source.evidence_refs,
-            source_evidence_table_id=source.id,
-            total_source_rows=len(source.rows),
-            source_evidence_row_ids=(selected_rows[0].id,),
+The report core exceeded the provider output limit. Serialize only a compact
+AnalystReportManifestDraft: executive summary, claims, required section
+outlines, confidence, catalysts, risks, invalidation conditions, and refs.
+Do not write section narratives or table plans in this component.
+""",
+        example=manifest_example.model_dump(mode="json"),
+        allowed_evidence_refs=valid_refs,
+    ).value
+
+    valid_table_ids = {table.id for table in bundle.tables}
+    sections = []
+    for outline in manifest.sections:
+        section_node = (
+            f"{node}.serialize.core.section.{outline.id}"
+        )
+        section_example = next(
+            section for section in example.sections
+            if section.id == outline.id
+        )
+
+        def validate_section(
+            section: AnalystSectionDraft,
+            *,
+            expected: AnalystSectionOutline = outline,
+        ) -> AnalystSectionDraft:
+            if section.id != expected.id or section.title != expected.title:
+                raise OutputValidationError(
+                    "analyst_section.manifest_mismatch"
+                )
+            require_text(section.narrative)
+            if not set(section.evidence_table_ids).issubset(
+                valid_table_ids
+            ):
+                raise OutputValidationError(
+                    "analyst_section.evidence_table_unknown"
+                )
+            for plan in section.research_table_plans:
+                require_text(plan.title)
+                require_text(plan.purpose)
+                require_text(plan.comparison_target)
+                require_nonempty_texts(plan.expected_columns)
+                require_valid_refs(
+                    plan.evidence_refs,
+                    set(valid_refs),
+                    required=True,
+                )
+                if not set(plan.evidence_table_ids).issubset(
+                    valid_table_ids
+                ):
+                    raise OutputValidationError(
+                        "analyst_section.table_plan_source_unknown"
+                    )
+            return section
+
+        section = StructuredOutputRunner(
+            llm=llm,
+            schema=AnalystSectionDraft,
+            validator=validate_section,
+            node=section_node,
+            event_writer=event_writer,
+            invoke_config={
+                "metadata": {"research_node": section_node}
+            },
+            repair_mode="preferred",
+            include_candidate_in_repair=True,
+            repair_instructions=_COMPONENT_REPAIR_RULES,
+        ).invoke(
+            context_prompt
+            + "\n\nREPORT MANIFEST:\n"
+            + json.dumps(manifest.model_dump(mode="json"), ensure_ascii=False)
+            + f"""
+
+Serialize only section `{outline.id}` (`{outline.title}`) as one
+AnalystSectionDraft. Preserve the full detailed narrative and every useful
+ResearchTablePlan from the synthesis blueprint. Do not shorten this section
+because the combined core response was truncated.
+""",
+            example=section_example.model_dump(mode="json"),
+            allowed_evidence_refs=valid_refs,
+        ).value
+        sections.append(section)
+
+    report = AnalystReportDraft(
+        analyst=manifest.analyst,
+        executive_summary=manifest.executive_summary,
+        confidence=manifest.confidence,
+        claims=manifest.claims,
+        sections=tuple(sections),
+        catalysts=manifest.catalysts,
+        risks=manifest.risks,
+        invalidation_conditions=manifest.invalidation_conditions,
+        evidence_refs=manifest.evidence_refs,
+    )
+    return StructuredOutputResult(
+        value=_validate_analyst_report_draft(
+            report,
+            analyst=analyst,
+            bundle=bundle,
+            confidence_override=confidence_override,
         ),
+        generation_method=ArtifactGenerationMethod.SECTIONED_RECOVERY,
     )
 
 
@@ -1014,202 +1123,3 @@ def _raw_values_equal(left: Any, right: Any) -> bool:
             abs_tol=1e-9,
         )
     return left == right
-
-
-def _recover_analyst_report_by_section(
-    llm: Any,
-    *,
-    analyst: str,
-    context_prompt: str,
-    bundle: EvidenceBundle,
-    warnings: tuple[ResearchWarning, ...],
-    confidence_override: float | None,
-    output_language: str,
-    node: str,
-    event_writer: Callable[[dict[str, Any]], None] | None,
-) -> StructuredOutputResult[AnalystReport]:
-    valid_refs = tuple(item.ref for item in bundle.items)
-    evidence_table_ids = tuple(table.id for table in bundle.tables)
-    example_report = _analyst_report_example(
-        analyst=analyst,
-        bundle=bundle,
-        confidence_override=confidence_override,
-    )
-    example_manifest = _AnalystReportManifest(
-        analyst=analyst,
-        executive_summary=example_report.executive_summary,
-        confidence=example_report.confidence,
-        claims=example_report.claims,
-        sections=tuple(
-            _AnalystSectionPlan(
-                id=section.id,
-                title=section.title,
-                evidence_table_ids=section.evidence_table_ids,
-            )
-            for section in example_report.sections
-        ),
-        catalysts=example_report.catalysts,
-        risks=example_report.risks,
-        invalidation_conditions=(example_report.invalidation_conditions),
-        evidence_refs=example_report.evidence_refs,
-    )
-
-    def validate_manifest(
-        manifest: _AnalystReportManifest,
-    ) -> _AnalystReportManifest:
-        if manifest.analyst != analyst:
-            raise OutputValidationError("analyst_manifest.identity")
-        require_text(manifest.executive_summary)
-        require_nonempty_texts(manifest.risks)
-        require_nonempty_texts(manifest.invalidation_conditions)
-        require_valid_refs(
-            manifest.evidence_refs,
-            set(valid_refs),
-            required=True,
-        )
-        claim_ids = [claim.id for claim in manifest.claims]
-        if not claim_ids or len(claim_ids) != len(set(claim_ids)):
-            raise OutputValidationError("analyst_manifest.claim_ids")
-        for claim in manifest.claims:
-            if not claim.id.startswith(f"{analyst}.claim_"):
-                raise OutputValidationError("analyst_manifest.claim_id.scope")
-            require_text(claim.statement)
-            require_text(claim.implication)
-            require_valid_refs(
-                claim.evidence_refs,
-                set(valid_refs),
-                required=True,
-            )
-        required = {section_id for section_id, _title in _ANALYST_SECTIONS[analyst]}
-        section_ids = [section.id for section in manifest.sections]
-        if set(section_ids) != required or len(section_ids) != len(set(section_ids)):
-            raise OutputValidationError("analyst_manifest.sections")
-        assigned = [
-            table_id
-            for section in manifest.sections
-            for table_id in section.evidence_table_ids
-        ]
-        if not set(assigned).issubset(evidence_table_ids):
-            raise OutputValidationError("analyst_manifest.source_table_unknown")
-        if confidence_override is not None:
-            return manifest.model_copy(update={"confidence": confidence_override})
-        return manifest
-
-    manifest = (
-        StructuredOutputRunner(
-            llm=llm,
-            schema=_AnalystReportManifest,
-            validator=validate_manifest,
-            node=f"{node}.manifest",
-            event_writer=event_writer,
-        )
-        .invoke(
-            context_prompt
-            + """
-
-The full report exceeded the provider output limit. Produce a compact report
-manifest only: executive summary, claims, required section plans, catalysts,
-risks, invalidation conditions, confidence, and refs. Link relevant
-EvidenceTable IDs through evidence_table_ids. Do not write section
-narratives or ResearchTable rows yet.
-""",
-            example=example_manifest.model_dump(mode="json"),
-            allowed_evidence_refs=valid_refs,
-        )
-        .value
-    )
-
-    sections: list[AnalystSection] = []
-    tables: list[ResearchTable] = []
-    for plan in manifest.sections:
-        example_section = next(
-            section for section in example_report.sections if section.id == plan.id
-        )
-        example_chunk = _AnalystSectionChunk(
-            section=example_section.model_copy(
-                update={"evidence_table_ids": plan.evidence_table_ids}
-            ),
-            tables=tuple(
-                table
-                for table in example_report.tables
-                if table.id in example_section.research_table_ids
-            ),
-        )
-
-        def validate_chunk(
-            chunk: _AnalystSectionChunk,
-            *,
-            expected: _AnalystSectionPlan = plan,
-        ) -> _AnalystSectionChunk:
-            if chunk.section.id != expected.id or chunk.section.title != expected.title:
-                raise OutputValidationError("analyst_section.manifest_mismatch")
-            require_text(chunk.section.narrative)
-            if set(chunk.section.evidence_table_ids) != set(
-                expected.evidence_table_ids
-            ):
-                raise OutputValidationError("analyst_section.evidence_table_assignment")
-            research_ids = {table.id for table in chunk.tables}
-            if not research_ids.issubset(
-                chunk.section.research_table_ids
-            ):
-                raise OutputValidationError("analyst_section.research_table_placement")
-            for table in chunk.tables:
-                _validate_research_table_against_bundle(
-                    table,
-                    bundle=bundle,
-                )
-            return chunk
-
-        chunk = (
-            StructuredOutputRunner(
-                llm=llm,
-                schema=_AnalystSectionChunk,
-                validator=validate_chunk,
-                node=f"{node}.section.{plan.id}",
-                event_writer=event_writer,
-            )
-            .invoke(
-                context_prompt
-                + "\n\nREPORT MANIFEST:\n"
-                + json.dumps(manifest.model_dump(mode="json"), ensure_ascii=False)
-                + f"""
-
-Generate only section `{plan.id}` (`{plan.title}`) as an
-AnalystSectionChunk. Write the complete detailed narrative for this section.
-Preserve its source EvidenceTable links. Add cited ResearchTables only when
-they materially improve comparison or interpretation; do not copy an existing
-EvidenceTable. Do not shorten the section because the original full response
-was truncated.
-""",
-                example=example_chunk.model_dump(mode="json"),
-                allowed_evidence_refs=valid_refs,
-            )
-            .value
-        )
-        sections.append(chunk.section)
-        tables.extend(chunk.tables)
-
-    report = AnalystReport(
-        analyst=analyst,
-        executive_summary=manifest.executive_summary,
-        confidence=manifest.confidence,
-        claims=manifest.claims,
-        sections=tuple(sections),
-        tables=tuple(tables),
-        catalysts=manifest.catalysts,
-        risks=manifest.risks,
-        invalidation_conditions=manifest.invalidation_conditions,
-        evidence_refs=manifest.evidence_refs,
-        warnings=warnings,
-    )
-    return StructuredOutputResult(
-        value=_validate_analyst_report(
-            report,
-            analyst=analyst,
-            bundle=bundle,
-            warnings=warnings,
-            confidence_override=confidence_override,
-            output_language=output_language,
-        ),
-        generation_method=ArtifactGenerationMethod.SECTIONED_RECOVERY,
-    )

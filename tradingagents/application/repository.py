@@ -1135,7 +1135,9 @@ class RunRepository:
                         if artifact.generation_method
                         in {
                             ArtifactGenerationMethod.RAW_JSON_RECOVERED,
+                            ArtifactGenerationMethod.TOOL_CALL_RECOVERED,
                             ArtifactGenerationMethod.JSON_MODE_RECOVERED,
+                            ArtifactGenerationMethod.SECTIONED_RECOVERY,
                         }
                     ),
                 )

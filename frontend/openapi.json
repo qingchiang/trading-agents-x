@@ -412,6 +412,7 @@
         "description": "Auditable method that produced a typed research artifact.",
         "enum": [
           "tool_call",
+          "tool_call_recovered",
           "json_mode",
           "raw_json_recovered",
           "json_mode_recovered",

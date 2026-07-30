@@ -12,7 +12,6 @@ from pydantic import BaseModel
 from tradingagents.application.contracts import (
     AnalystClaim,
     AnalystClaimType,
-    AnalystSection,
     ArtifactGenerationMethod,
     EvidenceBundle,
     EvidenceItem,
@@ -21,13 +20,14 @@ from tradingagents.application.contracts import (
 from tradingagents.application.evidence import extract_evidence_tables
 from tradingagents.graph.analyst_report_drafts import (
     AnalystReportDraft,
+    AnalystReportManifestDraft,
+    AnalystSectionDraft,
+    AnalystSectionOutline,
     ResearchTableDraft,
 )
 from tradingagents.graph.analyst_synthesis import (
     _ANALYST_SECTIONS,
     _analyst_report_draft_example,
-    _AnalystReportManifest,
-    _AnalystSectionChunk,
     _research_table_draft_example,
     invoke_analyst_report,
 )
@@ -265,6 +265,56 @@ def test_json_mode_recovery_succeeds_with_two_logical_calls() -> None:
     assert _EVIDENCE_REF in recovery_prompt
 
 
+def test_preferred_repair_preserves_safe_candidate_and_uses_schema_tool() -> None:
+    invalid = _review().model_dump(mode="json")
+    invalid["evidence_refs"] = 123
+    events: list[dict[str, Any]] = []
+    llm = _FakeLLM(
+        primary=AssertionError("schema queue must be used"),
+        recovery=AssertionError("schema queue must be used"),
+        schema_responses={
+            "_ReviewOutput": [
+                {
+                    "raw": AIMessage(content=json.dumps(invalid)),
+                    "parsed": None,
+                },
+                {
+                    "raw": AIMessage(content=""),
+                    "parsed": _review(),
+                },
+            ]
+        },
+    )
+    runner = StructuredOutputRunner(
+        llm=llm,
+        schema=_ReviewOutput,
+        validator=_validate_review,
+        node="case.bear",
+        event_writer=events.append,
+        repair_mode="preferred",
+        include_candidate_in_repair=True,
+        repair_instructions=(
+            "Use only the allowed evidence refs and preserve valid fields."
+        ),
+    )
+
+    result = _invoke(runner)
+
+    assert result.generation_method is (
+        ArtifactGenerationMethod.TOOL_CALL_RECOVERED
+    )
+    assert [method for method, _prompt in llm.calls] == [
+        "tool_call",
+        "tool_call",
+    ]
+    repair_prompt = llm.calls[1][1]
+    assert "INVALID CANDIDATE JSON:" in repair_prompt
+    assert '"evidence_refs": 123' in repair_prompt
+    assert "schema.evidence_refs.tuple_type" in repair_prompt
+    assert "APPLICATION REPAIR RULES:" in repair_prompt
+    assert all("candidate" not in event["payload"] for event in events)
+
+
 def test_json_recovery_receives_safe_schema_issue_paths() -> None:
     events: list[dict[str, Any]] = []
     invalid = _review().model_dump(mode="json")
@@ -444,6 +494,7 @@ def _component_llm(
     table: ResearchTableDraft | None,
     *,
     core_recovery: AnalystReportDraft | None = None,
+    table_recovery: ResearchTableDraft | None = None,
 ) -> _FakeLLM:
     responses = {
         "AnalystReportDraft": [
@@ -458,6 +509,13 @@ def _component_llm(
         responses["ResearchTableDraft"] = [
             {"raw": AIMessage(content=""), "parsed": table}
         ]
+        if table_recovery is not None:
+            responses["ResearchTableDraft"].append(
+                {
+                    "raw": AIMessage(content=""),
+                    "parsed": table_recovery,
+                }
+            )
     return _FakeLLM(
         primary=AssertionError("unexpected component primary"),
         recovery=AssertionError("unexpected component recovery"),
@@ -664,6 +722,109 @@ def test_analyst_does_not_fabricate_source_link_for_value_mismatch() -> None:
     assert result.value.tables[0].source_evidence_table_id is None
 
 
+def test_analyst_repairs_only_the_failed_table_component() -> None:
+    bundle = _analyst_bundle()
+    core, valid_table = _analyst_component_responses(
+        analyst="fundamentals",
+        bundle=bundle,
+    )
+    assert valid_table is not None
+    invalid_table = valid_table.model_copy(
+        update={
+            "columns": (
+                valid_table.columns[0].model_copy(
+                    update={"label": "Wrong column"}
+                ),
+                *valid_table.columns[1:],
+            )
+        }
+    )
+    events: list[dict[str, Any]] = []
+    llm = _component_llm(
+        core,
+        invalid_table,
+        table_recovery=valid_table,
+    )
+
+    result = invoke_analyst_report(
+        llm,
+        analyst="fundamentals",
+        draft_narrative="Detailed draft.",
+        bundle=bundle,
+        output_language="English (en)",
+        confidence_override=None,
+        warnings=(),
+        node="analyst.fundamentals",
+        event_writer=events.append,
+    )
+
+    assert len(result.value.tables) == 1
+    assert result.generation_method is (
+        ArtifactGenerationMethod.TOOL_CALL_RECOVERED
+    )
+    assert [method for method, _prompt in llm.calls] == [
+        "tool_call",
+        "tool_call",
+        "tool_call",
+    ]
+    assert llm.calls[1][0] == llm.calls[2][0] == "tool_call"
+    assert "INVALID CANDIDATE JSON:" in llm.calls[2][1]
+    assert "semantic.research_table.columns.plan_mismatch" in (
+        llm.calls[2][1]
+    )
+    assert {
+        event["node"]
+        for event in events
+        if event["event_type"].startswith("node.output_")
+    } == {"analyst.fundamentals.serialize.table.1"}
+
+
+def test_analyst_table_second_failure_does_not_regenerate_core() -> None:
+    bundle = _analyst_bundle()
+    core, valid_table = _analyst_component_responses(
+        analyst="fundamentals",
+        bundle=bundle,
+    )
+    assert valid_table is not None
+    invalid_table = valid_table.model_copy(
+        update={
+            "columns": (
+                valid_table.columns[0].model_copy(
+                    update={"label": "Wrong column"}
+                ),
+                *valid_table.columns[1:],
+            )
+        }
+    )
+    llm = _component_llm(
+        core,
+        invalid_table,
+        table_recovery=invalid_table,
+    )
+
+    with pytest.raises(
+        StructuredOutputError,
+        match="semantic_validation",
+    ) as error:
+        invoke_analyst_report(
+            llm,
+            analyst="fundamentals",
+            draft_narrative="Detailed draft.",
+            bundle=bundle,
+            output_language="English (en)",
+            confidence_override=None,
+            warnings=(),
+            node="analyst.fundamentals",
+        )
+
+    assert error.value.node == "analyst.fundamentals.serialize.table.1"
+    assert [method for method, _prompt in llm.calls] == [
+        "tool_call",
+        "tool_call",
+        "tool_call",
+    ]
+
+
 def test_analyst_semantic_hint_guides_successful_recovery() -> None:
     bundle = _analyst_bundle()
     core, table = _analyst_component_responses(
@@ -706,7 +867,6 @@ class _SectionedInvoker:
     def invoke(self, prompt: str, config=None) -> dict[str, Any]:
         assert config is None or "metadata" in config
         self.owner.calls.append((self.schema.__name__, prompt))
-        ref = self.owner.ref
         if self.schema is AnalystReportDraft:
             return {
                 "raw": AIMessage(
@@ -715,10 +875,10 @@ class _SectionedInvoker:
                 ),
                 "parsed": None,
             }
-        if self.schema is _AnalystReportManifest:
+        if self.schema is AnalystReportManifestDraft:
             return {
                 "raw": AIMessage(content=""),
-                "parsed": _AnalystReportManifest(
+                "parsed": AnalystReportManifestDraft(
                     analyst="market",
                     executive_summary="Complete sectioned summary.",
                     confidence=0.65,
@@ -729,36 +889,35 @@ class _SectionedInvoker:
                             statement="Evidence supports a mixed regime.",
                             implication="Maintain conditional conclusions.",
                             confidence=0.65,
-                            evidence_refs=(ref,),
+                            evidence_refs=(self.owner.ref,),
                         ),
                     ),
                     sections=tuple(
-                        {
-                            "id": section_id,
-                            "title": title,
-                            "evidence_table_ids": (),
-                        }
+                        AnalystSectionOutline(id=section_id, title=title)
                         for section_id, title in _ANALYST_SECTIONS["market"]
                     ),
                     risks=("The observed regime may reverse.",),
-                    invalidation_conditions=("New evidence contradicts the regime.",),
-                    evidence_refs=(ref,),
+                    invalidation_conditions=(
+                        "New evidence contradicts the regime.",
+                    ),
+                    evidence_refs=(self.owner.ref,),
                 ),
             }
-        if self.schema is _AnalystSectionChunk:
-            match = re.search(r"Generate only section `([^`]+)`", prompt)
+        if self.schema is AnalystSectionDraft:
+            match = re.search(
+                r"Serialize only section `([^`]+)`",
+                prompt,
+            )
             assert match is not None
             section_id = match.group(1)
-            title = dict(_ANALYST_SECTIONS["market"])[section_id]
             return {
                 "raw": AIMessage(content=""),
-                "parsed": _AnalystSectionChunk(
-                    section=AnalystSection(
-                        id=section_id,
-                        title=title,
-                        narrative=(
-                            f"Complete detailed analysis for {section_id} grounded in {ref}."
-                        ),
+                "parsed": AnalystSectionDraft(
+                    id=section_id,
+                    title=dict(_ANALYST_SECTIONS["market"])[section_id],
+                    narrative=(
+                        "Complete detailed analysis for "
+                        f"{section_id} grounded in {self.owner.ref}."
                     ),
                 ),
             }
@@ -783,30 +942,37 @@ class _SectionedLLM:
         return _SectionedInvoker(self, schema)
 
 
-def test_truncated_analyst_core_fails_without_fabricating_a_report() -> None:
+def test_truncated_analyst_core_recovers_by_fixed_sections() -> None:
     bundle = _analyst_bundle(with_table=False)
     llm = _SectionedLLM(bundle.items[0].ref)
     events: list[dict[str, Any]] = []
 
-    with pytest.raises(StructuredOutputError, match="output_truncated"):
-        invoke_analyst_report(
-            llm,
-            analyst="market",
-            draft_narrative="Full draft.",
-            bundle=bundle,
-            output_language="English (en)",
-            confidence_override=None,
-            warnings=(),
-            node="analyst.market",
-            event_writer=events.append,
-        )
+    result = invoke_analyst_report(
+        llm,
+        analyst="market",
+        draft_narrative="Full draft.",
+        bundle=bundle,
+        output_language="English (en)",
+        confidence_override=None,
+        warnings=(),
+        node="analyst.market",
+        event_writer=events.append,
+    )
 
     assert [schema for schema, _prompt in llm.calls] == [
         "AnalystReportDraft",
-        "AnalystReportDraft",
+        "AnalystReportManifestDraft",
+        *[
+            "AnalystSectionDraft"
+            for _section in _ANALYST_SECTIONS["market"]
+        ],
     ]
+    assert result.generation_method is (
+        ArtifactGenerationMethod.SECTIONED_RECOVERY
+    )
+    assert len(result.value.sections) == len(_ANALYST_SECTIONS["market"])
     assert events[0]["event_type"] == "node.output_retry"
-    assert events[-1]["event_type"] == "node.output_failed"
+    assert events[-1]["event_type"] == "node.output_recovered"
 
 
 @pytest.mark.parametrize(

@@ -115,6 +115,33 @@ class AnalystReportDraft(_DraftModel):
         return tuple(dict.fromkeys(value))
 
 
+class AnalystSectionOutline(_DraftModel):
+    id: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
+    title: str = Field(min_length=1)
+
+
+class AnalystReportManifestDraft(_DraftModel):
+    """Core fields used only when a report core exceeds provider output."""
+
+    analyst: Literal["market", "social", "news", "fundamentals"]
+    executive_summary: str = Field(min_length=1)
+    confidence: float = Field(ge=0.0, le=1.0)
+    claims: tuple[AnalystClaim, ...] = Field(min_length=1)
+    sections: tuple[AnalystSectionOutline, ...] = Field(min_length=1)
+    catalysts: tuple[str, ...] = ()
+    risks: tuple[str, ...] = Field(min_length=1)
+    invalidation_conditions: tuple[str, ...] = Field(min_length=1)
+    evidence_refs: tuple[str, ...] = Field(min_length=1)
+
+    @field_validator("evidence_refs")
+    @classmethod
+    def deduplicate_evidence_refs(
+        cls,
+        value: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        return tuple(dict.fromkeys(value))
+
+
 class DerivedValueDraft(_DraftModel):
     """A derivation whose result is calculated only by the application."""
 
