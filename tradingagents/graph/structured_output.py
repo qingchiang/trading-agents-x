@@ -77,6 +77,7 @@ class StructuredOutputRunner(Generic[StructuredModel]):
         validator: SemanticValidator[StructuredModel],
         node: str,
         event_writer: EventWriter | None = None,
+        invoke_config: dict[str, Any] | None = None,
         truncation_recovery: (
             Callable[[], StructuredOutputResult[StructuredModel]] | None
         ) = None,
@@ -86,6 +87,7 @@ class StructuredOutputRunner(Generic[StructuredModel]):
         self.validator = validator
         self.node = node
         self.event_writer = event_writer
+        self.invoke_config = invoke_config
         self.truncation_recovery = truncation_recovery
 
     def invoke(
@@ -121,7 +123,7 @@ class StructuredOutputRunner(Generic[StructuredModel]):
             primary = None
         if primary is not None:
             try:
-                response = primary.invoke(primary_prompt)
+                response = self._invoke(primary, primary_prompt)
             except Exception:
                 primary_reason = "provider_error"
             else:
@@ -247,9 +249,13 @@ class StructuredOutputRunner(Generic[StructuredModel]):
         failure_validation_issues: tuple[str, ...] = ()
         try:
             response = (
-                recovery.invoke(recovery_prompt)
+                self._invoke(recovery, recovery_prompt)
                 if recovery is not None
-                else self.llm.invoke(recovery_prompt, **bind_kwargs)
+                else self._invoke(
+                    self.llm,
+                    recovery_prompt,
+                    **bind_kwargs,
+                )
             )
         except Exception:
             failure_reason = "provider_error"
@@ -370,6 +376,20 @@ class StructuredOutputRunner(Generic[StructuredModel]):
             ) from exc
         except Exception as exc:
             raise _InvalidOutput("semantic_validation") from exc
+
+    def _invoke(
+        self,
+        target: Any,
+        prompt: str,
+        **kwargs: Any,
+    ) -> Any:
+        if self.invoke_config is None:
+            return target.invoke(prompt, **kwargs)
+        return target.invoke(
+            prompt,
+            config=self.invoke_config,
+            **kwargs,
+        )
 
     def _emit(
         self,

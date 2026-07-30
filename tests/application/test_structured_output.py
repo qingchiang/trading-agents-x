@@ -12,7 +12,6 @@ from pydantic import BaseModel
 from tradingagents.application.contracts import (
     AnalystClaim,
     AnalystClaimType,
-    AnalystReport,
     AnalystSection,
     ArtifactGenerationMethod,
     EvidenceBundle,
@@ -20,11 +19,16 @@ from tradingagents.application.contracts import (
     MemoryContext,
 )
 from tradingagents.application.evidence import extract_evidence_tables
+from tradingagents.graph.analyst_report_drafts import (
+    AnalystReportDraft,
+    ResearchTableDraft,
+)
 from tradingagents.graph.analyst_synthesis import (
     _ANALYST_SECTIONS,
-    _analyst_report_example,
+    _analyst_report_draft_example,
     _AnalystReportManifest,
     _AnalystSectionChunk,
+    _research_table_draft_example,
     invoke_analyst_report,
 )
 from tradingagents.graph.deliberation import invoke_research_decision
@@ -75,7 +79,9 @@ class _Invoker:
         self.method = method
         self.response = response
 
-    def invoke(self, prompt: str) -> Any:
+    def invoke(self, prompt: str, config=None) -> Any:
+        if config is not None:
+            self.owner.invoke_configs.append(config)
         self.owner.calls.append((self.method, prompt))
         if isinstance(self.response, BaseException):
             raise self.response
@@ -92,6 +98,7 @@ class _FakeLLM:
         reject_json_binding: bool = False,
         preferred_method: str = "function_calling",
         structured_output_max_tokens: int | None = None,
+        schema_responses: dict[str, list[Any]] | None = None,
     ):
         self.primary = primary
         self.recovery = recovery
@@ -99,9 +106,14 @@ class _FakeLLM:
         self.reject_json_binding = reject_json_binding
         self.preferred_structured_output_method = preferred_method
         self.structured_output_max_tokens = structured_output_max_tokens
+        self.schema_responses = {
+            key: list(value)
+            for key, value in (schema_responses or {}).items()
+        }
         self.calls: list[tuple[str, str]] = []
         self.binds: list[tuple[str, dict[str, Any]]] = []
         self.plain_invoke_kwargs: list[dict[str, Any]] = []
+        self.invoke_configs: list[dict[str, Any]] = []
 
     def with_structured_output(
         self,
@@ -118,7 +130,11 @@ class _FakeLLM:
             "json_mode" if self.preferred_structured_output_method == "json_mode" else "tool_call"
         )
         self.binds.append((resolved, dict(_kwargs)))
-        response = self.recovery if method == "json_mode" else self.primary
+        queued = self.schema_responses.get(_schema.__name__)
+        if queued:
+            response = queued.pop(0)
+        else:
+            response = self.recovery if method == "json_mode" else self.primary
         return _Invoker(self, resolved, response)
 
     def invoke(self, prompt: str, **kwargs: Any) -> Any:
@@ -399,45 +415,65 @@ def _analyst_bundle(*, with_table: bool = True) -> EvidenceBundle:
     )
 
 
+def _analyst_component_responses(
+    *,
+    analyst: str,
+    bundle: EvidenceBundle,
+    confidence_override: float | None = None,
+) -> tuple[AnalystReportDraft, ResearchTableDraft | None]:
+    core = _analyst_report_draft_example(
+        analyst=analyst,
+        bundle=bundle,
+        confidence_override=confidence_override,
+    )
+    plans = tuple(
+        plan
+        for section in core.sections
+        for plan in section.research_table_plans
+    )
+    table = (
+        _research_table_draft_example(plan=plans[0], bundle=bundle)
+        if plans
+        else None
+    )
+    return core, table
+
+
+def _component_llm(
+    core: AnalystReportDraft,
+    table: ResearchTableDraft | None,
+    *,
+    core_recovery: AnalystReportDraft | None = None,
+) -> _FakeLLM:
+    responses = {
+        "AnalystReportDraft": [
+            {"raw": AIMessage(content=""), "parsed": core},
+        ],
+    }
+    if core_recovery is not None:
+        responses["AnalystReportDraft"].append(
+            {"raw": AIMessage(content=""), "parsed": core_recovery}
+        )
+    if table is not None:
+        responses["ResearchTableDraft"] = [
+            {"raw": AIMessage(content=""), "parsed": table}
+        ]
+    return _FakeLLM(
+        primary=AssertionError("unexpected component primary"),
+        recovery=AssertionError("unexpected component recovery"),
+        schema_responses=responses,
+    )
+
+
 def test_analyst_report_is_synthesized_from_catalogued_evidence() -> None:
     bundle = _analyst_bundle()
-    report = _analyst_report_example(
+    core, table = _analyst_component_responses(
         analyst="fundamentals",
         bundle=bundle,
-        confidence_override=None,
     )
-    source_view = report.tables[0]
-    first_row = source_view.rows[0]
-    source_view = source_view.model_copy(
-        update={
-            "rows": (
-                first_row.model_copy(
-                    update={
-                        "cells": {
-                            **first_row.cells,
-                            "value": first_row.cells["value"].model_copy(
-                                update={
-                                    "display_value": (
-                                        "MODEL VALUE MUST NOT SURVIVE"
-                                    )
-                                }
-                            ),
-                        }
-                    }
-                ),
-            )
-        }
-    )
-    report = report.model_copy(update={"tables": (source_view,)})
+    assert table is not None
     events: list[dict[str, Any]] = []
-    llm = _FakeLLM(
-        primary={
-            "raw": AIMessage(content=""),
-            "parsed": report,
-            "parsing_error": None,
-        },
-        recovery=AssertionError("recovery must not run"),
-    )
+    llm = _component_llm(core, table)
 
     result = invoke_analyst_report(
         llm,
@@ -456,7 +492,7 @@ def test_analyst_report_is_synthesized_from_catalogued_evidence() -> None:
         bundle.tables[0].id,
     )
     assert result.value.sections[0].research_table_ids == (
-        "rt_fundamentals_source_view",
+        "rt_fundamentals_business_1",
     )
     assert (
         result.value.tables[0].rows[0].cells["value"].display_value
@@ -466,7 +502,6 @@ def test_analyst_report_is_synthesized_from_catalogued_evidence() -> None:
     assert '"Revenue"' not in llm.calls[0][1]
     assert "EVIDENCE CATALOG" in llm.calls[0][1]
     assert bundle.items[0].ref in llm.calls[0][1]
-    assert "There is no" in llm.calls[0][1]
     assert events == []
 
 
@@ -485,22 +520,19 @@ def test_analyst_report_normalizes_redundant_top_level_refs() -> None:
         items=(*base.items, second),
         tables=base.tables,
     )
-    report = _analyst_report_example(
+    core, table = _analyst_component_responses(
         analyst="fundamentals",
         bundle=bundle,
-        confidence_override=None,
     )
-    claim = report.claims[0].model_copy(update={"evidence_refs": (second.ref,)})
-    incomplete_index = report.model_copy(
+    assert table is not None
+    claim = core.claims[0].model_copy(update={"evidence_refs": (second.ref,)})
+    incomplete_index = core.model_copy(
         update={
             "claims": (claim,),
             "evidence_refs": (base.items[0].ref,),
         }
     )
-    llm = _FakeLLM(
-        primary={"raw": AIMessage(content=""), "parsed": incomplete_index},
-        recovery=AssertionError("recovery must not run"),
-    )
+    llm = _component_llm(incomplete_index, table)
 
     result = invoke_analyst_report(
         llm,
@@ -517,20 +549,27 @@ def test_analyst_report_normalizes_redundant_top_level_refs() -> None:
         base.items[0].ref,
         second.ref,
     )
-    assert [method for method, _prompt in llm.calls] == ["tool_call"]
+    assert [method for method, _prompt in llm.calls] == [
+        "tool_call",
+        "tool_call",
+    ]
+    assert all(
+        config["metadata"]["research_node"].startswith(
+            "analyst.fundamentals.serialize."
+        )
+        for config in llm.invoke_configs
+    )
 
 
 def test_sentiment_confidence_uses_deterministic_override() -> None:
     bundle = _analyst_bundle(with_table=False)
-    report = _analyst_report_example(
+    core, table = _analyst_component_responses(
         analyst="social",
         bundle=bundle,
         confidence_override=0.55,
-    ).model_copy(update={"confidence": 0.9})
-    llm = _FakeLLM(
-        primary={"raw": AIMessage(content=""), "parsed": report},
-        recovery=AssertionError("recovery must not run"),
     )
+    core = core.model_copy(update={"confidence": 0.9})
+    llm = _component_llm(core, table)
 
     result = invoke_analyst_report(
         llm,
@@ -544,26 +583,30 @@ def test_sentiment_confidence_uses_deterministic_override() -> None:
     )
 
     assert result.value.confidence == 0.55
-    assert "Set `confidence` exactly to 0.55" in llm.calls[0][1]
+    assert "Set confidence exactly to 0.55" in llm.calls[0][1]
     assert [method for method, _prompt in llm.calls] == ["tool_call"]
 
 
 def test_analyst_semantics_reject_missing_sections_and_fabricated_refs() -> None:
     bundle = _analyst_bundle()
-    report = _analyst_report_example(
+    core, _table = _analyst_component_responses(
         analyst="market",
         bundle=bundle,
-        confidence_override=None,
     )
-    invalid_claim = report.claims[0].model_copy(update={"evidence_refs": ("ev_ffffffffffff",)})
-    invalid = report.model_copy(
+    invalid_claim = core.claims[0].model_copy(
+        update={"evidence_refs": ("ev_ffffffffffff",)}
+    )
+    invalid = core.model_copy(
         update={
             "claims": (invalid_claim,),
-            "sections": report.sections[:1],
+            "sections": core.sections[:1],
         }
     )
-    response = {"raw": AIMessage(content=""), "parsed": invalid}
-    llm = _FakeLLM(primary=response, recovery=response)
+    llm = _component_llm(
+        invalid,
+        None,
+        core_recovery=invalid,
+    )
 
     with pytest.raises(
         StructuredOutputError,
@@ -585,70 +628,54 @@ def test_analyst_semantics_reject_missing_sections_and_fabricated_refs() -> None
     assert issue in llm.calls[1][1]
 
 
-def test_analyst_rejects_source_table_value_mismatch() -> None:
+def test_analyst_does_not_fabricate_source_link_for_value_mismatch() -> None:
     bundle = _analyst_bundle()
-    report = _analyst_report_example(
+    core, table = _analyst_component_responses(
         analyst="market",
         bundle=bundle,
-        confidence_override=None,
     )
-    table = report.tables[0]
+    assert table is not None
     row = table.rows[0]
-    mismatched = row.cells["value"].model_copy(
+    mismatched = row.cells[1].model_copy(
         update={"raw_value": 999}
     )
-    invalid = report.model_copy(
+    table = table.model_copy(
         update={
-            "tables": (
-                table.model_copy(
-                    update={
-                        "rows": (
-                            row.model_copy(
-                                update={
-                                    "cells": {
-                                        **row.cells,
-                                        "value": mismatched,
-                                    }
-                                }
-                            ),
-                        )
-                    }
+            "rows": (
+                row.model_copy(
+                    update={"cells": (row.cells[0], mismatched)}
                 ),
             )
         }
     )
-    response = {"raw": AIMessage(content=""), "parsed": invalid}
-    llm = _FakeLLM(primary=response, recovery=response)
+    llm = _component_llm(core, table)
 
-    with pytest.raises(StructuredOutputError) as error:
-        invoke_analyst_report(
-            llm,
-            analyst="market",
-            draft_narrative="Draft.",
-            bundle=bundle,
-            output_language="English (en)",
-            confidence_override=None,
-            warnings=(),
-            node="analyst.market",
-        )
-
-    assert error.value.validation_issues == (
-        "semantic.research_table.source.value_mismatch",
+    result = invoke_analyst_report(
+        llm,
+        analyst="market",
+        draft_narrative="Draft.",
+        bundle=bundle,
+        output_language="English (en)",
+        confidence_override=None,
+        warnings=(),
+        node="analyst.market",
     )
+
+    assert result.value.tables[0].source_evidence_table_id is None
 
 
 def test_analyst_semantic_hint_guides_successful_recovery() -> None:
     bundle = _analyst_bundle()
-    report = _analyst_report_example(
+    core, table = _analyst_component_responses(
         analyst="fundamentals",
         bundle=bundle,
-        confidence_override=None,
     )
-    incomplete = report.model_copy(update={"sections": report.sections[:1]})
+    incomplete = core.model_copy(update={"sections": core.sections[:1]})
     events: list[dict[str, Any]] = []
-    llm = _FakeLLM(
-        primary={"raw": AIMessage(content=""), "parsed": incomplete},
-        recovery={"raw": AIMessage(content=""), "parsed": report},
+    llm = _component_llm(
+        incomplete,
+        table,
+        core_recovery=core,
     )
 
     result = invoke_analyst_report(
@@ -664,7 +691,8 @@ def test_analyst_semantic_hint_guides_successful_recovery() -> None:
     )
 
     issue = "semantic.analyst.sections.required"
-    assert result.value == report
+    assert result.value.executive_summary == core.executive_summary
+    assert len(result.value.tables) == 1
     assert issue in llm.calls[1][1]
     assert events[0]["payload"]["validation_issues"] == [issue]
     assert events[1]["payload"]["validation_issues"] == [issue]
@@ -675,10 +703,11 @@ class _SectionedInvoker:
         self.owner = owner
         self.schema = schema
 
-    def invoke(self, prompt: str) -> dict[str, Any]:
+    def invoke(self, prompt: str, config=None) -> dict[str, Any]:
+        assert config is None or "metadata" in config
         self.owner.calls.append((self.schema.__name__, prompt))
         ref = self.owner.ref
-        if self.schema is AnalystReport:
+        if self.schema is AnalystReportDraft:
             return {
                 "raw": AIMessage(
                     content="{",
@@ -754,37 +783,30 @@ class _SectionedLLM:
         return _SectionedInvoker(self, schema)
 
 
-def test_truncated_analyst_output_recovers_by_manifest_and_sections() -> None:
+def test_truncated_analyst_core_fails_without_fabricating_a_report() -> None:
     bundle = _analyst_bundle(with_table=False)
     llm = _SectionedLLM(bundle.items[0].ref)
     events: list[dict[str, Any]] = []
 
-    result = invoke_analyst_report(
-        llm,
-        analyst="market",
-        draft_narrative="Full draft.",
-        bundle=bundle,
-        output_language="English (en)",
-        confidence_override=None,
-        warnings=(),
-        node="analyst.market",
-        event_writer=events.append,
-    )
+    with pytest.raises(StructuredOutputError, match="output_truncated"):
+        invoke_analyst_report(
+            llm,
+            analyst="market",
+            draft_narrative="Full draft.",
+            bundle=bundle,
+            output_language="English (en)",
+            confidence_override=None,
+            warnings=(),
+            node="analyst.market",
+            event_writer=events.append,
+        )
 
-    assert result.generation_method is (ArtifactGenerationMethod.SECTIONED_RECOVERY)
-    assert len(result.value.sections) == len(_ANALYST_SECTIONS["market"])
-    assert all(
-        section.narrative.startswith("Complete detailed analysis")
-        for section in result.value.sections
-    )
     assert [schema for schema, _prompt in llm.calls] == [
-        "AnalystReport",
-        "_AnalystReportManifest",
-        *["_AnalystSectionChunk" for _section in _ANALYST_SECTIONS["market"]],
+        "AnalystReportDraft",
+        "AnalystReportDraft",
     ]
     assert events[0]["event_type"] == "node.output_retry"
-    assert events[0]["payload"]["method"] == "sectioned_recovery"
-    assert events[-1]["event_type"] == "node.output_recovered"
+    assert events[-1]["event_type"] == "node.output_failed"
 
 
 @pytest.mark.parametrize(

@@ -226,12 +226,16 @@ class ResearchGraph:
         *,
         quick_llm: Any,
         deep_llm: Any,
+        quick_serializer_llm: Any | None = None,
+        deep_serializer_llm: Any | None = None,
         profile: RunProfile,
         selected_analysts: Iterable[str],
         metrics: MetricsCallback | None = None,
     ):
         self.quick_llm = quick_llm
         self.deep_llm = deep_llm
+        self.quick_serializer_llm = quick_serializer_llm or quick_llm
+        self.deep_serializer_llm = deep_serializer_llm or deep_llm
         self.profile = profile
         self.selected_analysts = tuple(selected_analysts)
         self.metrics = metrics or MetricsCallback()
@@ -656,11 +660,24 @@ class ResearchGraph:
                 llm=self.quick_llm,
                 bundle=analyst_bundle,
                 role_prompt=preparation_prompt,
-                node=node_name,
+                node=f"{node_name}.prepare",
                 runtime=runtime,
+                memo_instruction=(
+                    "Build a complete synthesis blueprint for the analyst "
+                    "report. Inspect the catalog and use read-only tools for "
+                    "every exact value, table comparison, formula input, "
+                    "counter-evidence, or original passage needed. Organize "
+                    "the memo by every required report section. Include "
+                    "claim/evidence mappings, mechanisms, implications, "
+                    "uncertainty, catalysts, risks, invalidation conditions, "
+                    "and every useful reading table with its purpose, "
+                    "localized columns, raw values, formulas, source table "
+                    "IDs, and evidence refs. Do not emit the formal JSON "
+                    "artifact and do not impose a table-size limit."
+                ),
             )
             output = _invoke_analyst_report(
-                self.quick_llm,
+                self.quick_serializer_llm,
                 analyst=analyst,
                 draft_narrative=narrative,
                 bundle=analyst_bundle,
@@ -680,7 +697,7 @@ class ResearchGraph:
                 role=analyst,
                 content=typed,
                 generation_method=output.generation_method,
-                prompt_version=f"analyst-{analyst}-v3-workset",
+                prompt_version=f"analyst-{analyst}-v4-components",
             )
             self._finish_node(
                 runtime,
@@ -1194,12 +1211,14 @@ class ResearchGraph:
         role_prompt: str,
         node: str,
         runtime: Runtime[RunContext],
+        memo_instruction: str | None = None,
     ) -> PreparedEvidence:
         prepared = prepare_evidence(
             llm,
             bundle=bundle,
             role_prompt=role_prompt,
             node=node,
+            memo_instruction=memo_instruction,
             invoke_config={
                 "callbacks": [self.metrics],
                 "metadata": {"research_node": node},

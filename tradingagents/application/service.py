@@ -37,7 +37,7 @@ from .exporting import (
     render_run_export_markdown,
     render_run_export_package,
 )
-from .llms import create_run_llms
+from .llms import RunLLMs, create_run_llms
 from .metrics import MetricsCallback
 from .repository import RunRepository, RunView
 from .runtime import RunCancelled, RunContext, WorkerShutdown
@@ -74,7 +74,9 @@ class AnalysisService:
         settings: AppSettings,
         *,
         repository: RunRepository | None = None,
-        llm_factory: Callable[..., tuple[Any, Any]] = create_run_llms,
+        llm_factory: Callable[..., RunLLMs | tuple[Any, Any]] = (
+            create_run_llms
+        ),
         graph_factory: Callable[..., ResearchGraph] = ResearchGraph,
         identity_resolver: Callable[..., dict[str, str]] = resolve_instrument_identity,
     ):
@@ -189,13 +191,24 @@ class AnalysisService:
                         run.request.ticker,
                         run.request.asset_type.value,
                     )
-                    quick_llm, deep_llm = self.llm_factory(
+                    llms = self.llm_factory(
                         run_settings,
                         callbacks=[metrics],
                     )
+                    if isinstance(llms, RunLLMs):
+                        quick_llm = llms.quick
+                        deep_llm = llms.deep
+                        quick_serializer_llm = llms.quick_serializer
+                        deep_serializer_llm = llms.deep_serializer
+                    else:
+                        quick_llm, deep_llm = llms
+                        quick_serializer_llm = quick_llm
+                        deep_serializer_llm = deep_llm
                 graph = self.graph_factory(
                     quick_llm=quick_llm,
                     deep_llm=deep_llm,
+                    quick_serializer_llm=quick_serializer_llm,
+                    deep_serializer_llm=deep_serializer_llm,
                     profile=run.request.profile,
                     selected_analysts=run.request.analysts,
                     metrics=metrics,

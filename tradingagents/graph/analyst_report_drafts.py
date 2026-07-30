@@ -328,6 +328,67 @@ def assemble_analyst_report(
     )
 
 
+def validate_research_table_draft(
+    plan: ResearchTablePlan,
+    draft: ResearchTableDraft,
+    *,
+    bundle: EvidenceBundle,
+) -> ResearchTableDraft:
+    """Validate one component before any other table is generated."""
+
+    if tuple(column.label for column in draft.columns) != plan.expected_columns:
+        raise OutputValidationError("research_table.columns.plan_mismatch")
+    valid_refs = {item.ref for item in bundle.items}
+    valid_table_ids = {table.id for table in bundle.tables}
+    _require_subset(
+        plan.evidence_refs,
+        valid_refs,
+        "research_table.plan.evidence_refs",
+    )
+    _require_subset(
+        plan.evidence_table_ids,
+        valid_table_ids,
+        "research_table.plan.evidence_table_ids",
+    )
+    _require_subset(
+        draft.evidence_refs,
+        valid_refs,
+        "research_table.evidence_refs",
+    )
+    for row in draft.rows:
+        _require_subset(
+            row.evidence_refs,
+            valid_refs,
+            "research_table.row.evidence_refs",
+        )
+        for cell in row.cells:
+            _require_subset(
+                cell.evidence_refs,
+                valid_refs,
+                "research_table.cell.evidence_refs",
+            )
+            if cell.derivation is not None:
+                _require_subset(
+                    cell.derivation.input_evidence_refs,
+                    valid_refs,
+                    "research_table.derived.evidence_refs",
+                )
+                try:
+                    evaluate_formula(
+                        cell.derivation.formula,
+                        cell.derivation.inputs,
+                    )
+                except (
+                    ValueError,
+                    ZeroDivisionError,
+                    OverflowError,
+                ) as exc:
+                    raise OutputValidationError(
+                        "research_table.derived.formula"
+                    ) from exc
+    return draft
+
+
 def _assemble_research_table(
     *,
     analyst: str,

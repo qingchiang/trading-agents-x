@@ -13,8 +13,6 @@ from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalystClaim,
     AnalystClaimType,
-    AnalystReport,
-    AnalystSection,
     DebateAgenda,
     DebateImportance,
     DebateResolution,
@@ -45,6 +43,10 @@ from tradingagents.application.contracts import (
 )
 from tradingagents.application.metrics import MetricsCallback
 from tradingagents.application.runtime import RunContext
+from tradingagents.graph.analyst_report_drafts import (
+    AnalystReportDraft,
+    AnalystSectionDraft,
+)
 from tradingagents.graph.research_graph import (
     ResearchGraph,
     _evidence_from_record,
@@ -58,7 +60,8 @@ class _StructuredInvoker:
         self.schema = schema
         self.calls = calls
 
-    def invoke(self, prompt):
+    def invoke(self, prompt, config=None):
+        assert config is None or "metadata" in config
         self.calls.append((self.schema.__name__, prompt))
         refs = tuple(dict.fromkeys(re.findall(r"ev_[a-f0-9]{12}", prompt)))
         memory_refs = tuple(
@@ -69,7 +72,7 @@ class _StructuredInvoker:
                 )
             )
         )
-        if self.schema is AnalystReport:
+        if self.schema is AnalystReportDraft:
             analyst = re.search(
                 r"You are the (market|social|news|fundamentals) analyst",
                 prompt,
@@ -110,7 +113,7 @@ class _StructuredInvoker:
                     "disclosure_limits",
                 ),
             }[analyst]
-            parsed = AnalystReport(
+            parsed = AnalystReportDraft(
                 analyst=analyst,
                 executive_summary="Complete fixture analyst summary.",
                 confidence=0.6,
@@ -125,7 +128,7 @@ class _StructuredInvoker:
                     ),
                 ),
                 sections=tuple(
-                    AnalystSection(
+                    AnalystSectionDraft(
                         id=section_id,
                         title=section_id.replace("_", " ").title(),
                         narrative=(f"Detailed fixture analysis grounded in {refs[-1]}."),
@@ -474,13 +477,13 @@ def test_profiles_share_contract_but_use_distinct_topologies(
     (
         (
             RunProfile.FAST,
-            {"AnalystReport"},
+            {"AnalystReportDraft"},
             {"ResearchDecision"},
         ),
         (
             RunProfile.STANDARD,
             {
-                "AnalystReport",
+                "AnalystReportDraft",
                 "ResearchCase",
                 "DebateAgenda",
                 "RebuttalReview",
@@ -490,7 +493,7 @@ def test_profiles_share_contract_but_use_distinct_topologies(
         ),
         (
             RunProfile.DEEP,
-            {"AnalystReport"},
+            {"AnalystReportDraft"},
             {
                 "ResearchCase",
                 "DebateAgenda",
@@ -530,6 +533,47 @@ def test_profiles_route_quality_roles_to_the_configured_model_tier(
 
     assert {schema for schema, _prompt in quick.calls} == quick_schemas
     assert {schema for schema, _prompt in deep.calls} == deep_schemas
+
+
+def test_analyst_core_uses_the_dedicated_serializer_client(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _AnalystSubgraph(analyst)
+            for analyst in self.selected_analysts
+        },
+    )
+    reasoning = _FakeLLM()
+    serializer = _FakeLLM()
+    deep = _FakeLLM()
+    graph = ResearchGraph(
+        quick_llm=reasoning,
+        deep_llm=deep,
+        quick_serializer_llm=serializer,
+        profile=RunProfile.FAST,
+        selected_analysts=("market",),
+    )
+
+    graph.execute(
+        _context(
+            app_settings,
+            RunProfile.FAST,
+            analysts=("market",),
+        ),
+        checkpoint_thread_id="dedicated-serializer",
+    )
+
+    assert all(
+        schema != "AnalystReportDraft"
+        for schema, _prompt in reasoning.calls
+    )
+    assert {
+        schema for schema, _prompt in serializer.calls
+    } == {"AnalystReportDraft"}
 
 
 def test_frozen_execution_uses_production_deliberation_without_analyst_calls(
@@ -579,7 +623,9 @@ def test_frozen_execution_uses_production_deliberation_without_analyst_calls(
         reports={"market": report},
     )
 
-    assert all(schema != "AnalystReport" for schema, _prompt in llm.calls)
+    assert all(
+        schema != "AnalystReportDraft" for schema, _prompt in llm.calls
+    )
     assert all(artifact.stage != "analyst" for artifact in artifacts)
     assert execution.evidence == bundle
     assert execution.reports == {"market": report}
@@ -632,7 +678,8 @@ def test_memory_only_enters_profile_decision_nodes_and_refs_are_whitelisted(
     nondecision_prompts = [
         prompt
         for schema, prompt in calls
-        if schema not in {"ResearchDecision", "JudgeDraft", "AnalystReport"}
+        if schema
+        not in {"ResearchDecision", "JudgeDraft", "AnalystReportDraft"}
     ]
     assert len(decision_prompts) == decision_prompt_count
     assert all(
@@ -709,8 +756,8 @@ def test_graph_emits_only_typed_visible_research_artifacts(
         for artifact in artifacts
         if artifact.stage == "analyst"
     } == {
-        ("market", "analyst-market-v3-workset"),
-        ("news", "analyst-news-v3-workset"),
+        ("market", "analyst-market-v4-components"),
+        ("news", "analyst-news-v4-components"),
     }
     assert all(artifact.prompt_version != "research-v1" for artifact in artifacts)
 

@@ -21,10 +21,23 @@ from tradingagents.application.contracts import (
     EvidenceQuality,
     ResearchTable,
     ResearchWarning,
+    TableCellKind,
 )
 from tradingagents.application.table_display import (
     evaluate_formula,
     materialize_research_table,
+)
+from tradingagents.graph.analyst_report_drafts import (
+    AnalystReportDraft,
+    AnalystSectionDraft,
+    ResearchTableCellDraft,
+    ResearchTableDraft,
+    ResearchTablePlan,
+    ResearchTableRowDraft,
+    TableColumnDataType,
+    TableColumnIntent,
+    assemble_analyst_report,
+    validate_research_table_draft,
 )
 from tradingagents.graph.evidence_context import (
     PreparedEvidence,
@@ -191,15 +204,15 @@ def invoke_analyst_report(
     prepared_evidence: PreparedEvidence | None = None,
     event_writer: Callable[[dict[str, Any]], None] | None = None,
 ) -> StructuredOutputResult[AnalystReport]:
-    """Synthesize and validate one complete V2 analyst report."""
+    """Serialize the report core and each planned table independently."""
 
     valid_refs = tuple(item.ref for item in bundle.items)
-    example = _analyst_report_example(
+    example = _analyst_report_draft_example(
         analyst=analyst,
         bundle=bundle,
         confidence_override=confidence_override,
     )
-    prompt = analyst_report_prompt(
+    prompt = _analyst_report_core_prompt(
         analyst=analyst,
         draft_narrative=draft_narrative,
         bundle=bundle,
@@ -208,46 +221,94 @@ def invoke_analyst_report(
         prepared_evidence=prepared_evidence,
     )
 
-    def validate(report: AnalystReport) -> AnalystReport:
-        return _validate_analyst_report(
+    def validate_core(report: AnalystReportDraft) -> AnalystReportDraft:
+        return _validate_analyst_report_draft(
             report,
             analyst=analyst,
             bundle=bundle,
-            warnings=warnings,
             confidence_override=confidence_override,
-            output_language=output_language,
         )
 
-    def recover_truncation() -> StructuredOutputResult[AnalystReport]:
-        return _recover_analyst_report_by_section(
-            llm,
-            analyst=analyst,
-            context_prompt=_analyst_context_prompt(
-                analyst=analyst,
-                draft_narrative=draft_narrative,
-                bundle=bundle,
-                output_language=output_language,
-                prepared_evidence=prepared_evidence,
-            ),
-            bundle=bundle,
-            warnings=warnings,
-            confidence_override=confidence_override,
-            output_language=output_language,
-            node=node,
-            event_writer=event_writer,
-        )
-
-    return StructuredOutputRunner(
+    core = StructuredOutputRunner(
         llm=llm,
-        schema=AnalystReport,
-        validator=validate,
-        node=node,
+        schema=AnalystReportDraft,
+        validator=validate_core,
+        node=f"{node}.serialize.core",
         event_writer=event_writer,
-        truncation_recovery=recover_truncation,
+        invoke_config={
+            "metadata": {
+                "research_node": f"{node}.serialize.core",
+            }
+        },
     ).invoke(
         prompt,
         example=example.model_dump(mode="json"),
         allowed_evidence_refs=valid_refs,
+    )
+    table_results = []
+    plans = tuple(
+        plan
+        for section in core.value.sections
+        for plan in section.research_table_plans
+    )
+    for index, plan in enumerate(plans, start=1):
+        table_node = f"{node}.serialize.table.{index}"
+        table_example = _research_table_draft_example(
+            plan=plan,
+            bundle=bundle,
+        )
+        table_result = StructuredOutputRunner(
+            llm=llm,
+            schema=ResearchTableDraft,
+            validator=lambda table, expected=plan: (
+                validate_research_table_draft(
+                    expected,
+                    table,
+                    bundle=bundle,
+                )
+            ),
+            node=table_node,
+            event_writer=event_writer,
+            invoke_config={
+                "metadata": {
+                    "research_node": table_node,
+                }
+            },
+        ).invoke(
+            _research_table_draft_prompt(
+                analyst=analyst,
+                plan=plan,
+                report=core.value,
+                prepared_evidence=prepared_evidence,
+                output_language=output_language,
+            ),
+            example=table_example.model_dump(mode="json"),
+            allowed_evidence_refs=valid_refs,
+        )
+        table_results.append(table_result)
+
+    report = assemble_analyst_report(
+        core.value,
+        tuple(result.value for result in table_results),
+        bundle=bundle,
+        output_language=output_language,
+        warnings=warnings,
+        confidence_override=confidence_override,
+    )
+    report = _validate_analyst_report(
+        report,
+        analyst=analyst,
+        bundle=bundle,
+        warnings=warnings,
+        confidence_override=confidence_override,
+        output_language=output_language,
+    )
+    return StructuredOutputResult(
+        value=report,
+        generation_method=_component_generation_method(
+            core.generation_method,
+            *(result.generation_method for result in table_results),
+        ),
     )
 
 
@@ -280,49 +341,134 @@ def analyst_report_prompt(
         )
         + f"""
 
-Produce one complete AnalystReport object.
+Prepare a complete synthesis blueprint for the formal report serializer.
 
 Required section coverage:
 {section_contract}
 
-Report rules:
+Blueprint rules:
 - Preserve the useful depth of the draft, but verify every claim against the
-  evidence snapshot. Do not summarize the report down to a few sentences.
-- Each claim needs a stable `{analyst}.claim_*` ID, a type
-  (observation/inference/forecast), an implication, confidence, and the
-  smallest relevant set of evidence refs.
-- Put the full human-readable analysis in sections. Sections may use Markdown
-  prose, but do not embed Markdown tables in narrative fields.
-- EvidenceTable is a complete deterministic audit table. Link relevant source
-  tables through `evidence_table_ids`; never place an EvidenceTable in
-  `research_table_ids` or copy its complete rows into the reading report.
-- Use ResearchTable only for a useful comparison, synthesis, explanation, or
-  scenario that is not already represented by an EvidenceTable. There is no
-  table-count, row-count, column-count, or cell-length limit.
-- Put common evidence refs at ResearchTable level. Add row refs only when a row
-  overrides that default, and cell refs only for a source difference, conflict,
-  or derivation. Derived cells must save their formula, named numeric inputs,
-  input evidence refs, unit, and result.
-- For every column choose a TableDisplaySpec: notation, positive scale,
-  fraction_digits, and a localized unit_label when useful. Use localized
-  human-readable column labels. Percentage raw values are decimal ratios
-  (`0.123`, not `12.3`) and the application renders `12.3%`.
-- `display_value` is only a schema placeholder. The application recomputes it
-  from raw_value and TableDisplaySpec for both Web and Markdown.
-- When a ResearchTable shows a subset of an EvidenceTable, set
-  source_evidence_table_id, total_source_rows, and one
-  source_evidence_row_id per displayed row.
-- Tables must have a clear purpose and must not merely repeat prose.
-- Catalysts may be empty. Risks and invalidation conditions must be substantive.
-- Exact figures in prose, claims, or tables must resolve to supplied evidence.
-- Top-level evidence_refs is a report index. Include the valid refs used by
-  claims, section prose, and ResearchTable cells; the application verifies and
-  normalizes this redundant index.
+  evidence snapshot. Do not compress it to a few sentences.
+- Organize the full reasoning by every required section. For each section,
+  state its claims, mechanisms, implications, counter-evidence, uncertainty,
+  exact evidence refs, and any evidence queries still required.
+- Design every useful reading table: title, purpose, comparison target,
+  expected localized columns, relevant evidence refs, source EvidenceTable
+  IDs, raw values to compare, and any formulas with named numeric inputs.
+  There is no table-count, row-count, or column-count limit.
+- EvidenceTable is a complete deterministic audit table. A reading table may
+  summarize or compare it, but must not copy hundreds of raw rows merely to
+  display them in the report.
+- Include catalysts, substantive risks, invalidation conditions, and the
+  smallest relevant ref set for every material claim.
+- Exact figures and formula inputs must resolve to supplied evidence.
 {confidence_rule}
-- Return no provenance appendix and no warning appendix. The application
-  injects source-quality warnings from structured provenance.
+- Do not produce the formal JSON object yet. Finish with a self-contained
+  blueprint that a non-reasoning schema serializer can faithfully encode
+  without inventing research content.
 """
     )
+
+
+def _analyst_report_core_prompt(
+    *,
+    analyst: str,
+    draft_narrative: str,
+    bundle: EvidenceBundle,
+    output_language: str,
+    confidence_override: float | None,
+    prepared_evidence: PreparedEvidence | None,
+) -> str:
+    section_contract = "\n".join(
+        f"- `{section_id}`: {title}"
+        for section_id, title in _ANALYST_SECTIONS[analyst]
+    )
+    confidence_rule = (
+        f"Set confidence exactly to {confidence_override}."
+        if confidence_override is not None
+        else "Calibrate confidence to the verified coverage and uncertainty."
+    )
+    return (
+        _analyst_context_prompt(
+            analyst=analyst,
+            draft_narrative=draft_narrative,
+            bundle=bundle,
+            output_language=output_language,
+            prepared_evidence=prepared_evidence,
+        )
+        + f"""
+
+Serialize the prepared research into one AnalystReportDraft core. This is a
+schema serialization task, not a new research pass.
+
+Required sections:
+{section_contract}
+
+Core rules:
+- Preserve the complete section analysis and claim/evidence mapping from the
+  synthesis blueprint.
+- Each claim uses a stable `{analyst}.claim_*` ID and the smallest relevant
+  evidence refs.
+- Each section contains full narrative, source EvidenceTable IDs, and zero or
+  more ResearchTablePlan objects. Plans contain no table rows or public IDs.
+- Each table plan defines its localized title, purpose, comparison target,
+  relevant refs/source tables, and ordered expected column labels.
+- Include every useful table proposed by the blueprint. Do not impose a table,
+  row, or column limit and do not move raw rows into this core object.
+- Catalysts may be empty. Risks and invalidation conditions are substantive.
+- Never invent refs, values, formulas, or source-table relationships.
+- {confidence_rule}
+- Return no warnings, provenance appendix, public table IDs, row IDs,
+  display_value, formula result, or source-row IDs. The application owns those
+  fields.
+"""
+    )
+
+
+def _research_table_draft_prompt(
+    *,
+    analyst: str,
+    plan: ResearchTablePlan,
+    report: AnalystReportDraft,
+    prepared_evidence: PreparedEvidence | None,
+    output_language: str,
+) -> str:
+    prepared = prepared_evidence or PreparedEvidence(
+        catalog={},
+        memo="No separate evidence memo was available.",
+    )
+    return f"""You are a schema serializer for one {analyst} research table.
+Write labels and human-readable units in {output_language}. Serialize the
+table plan faithfully using only the supplied blueprint and verified workset.
+
+TABLE PLAN:
+{json.dumps(plan.model_dump(mode="json"), ensure_ascii=False)}
+
+REPORT CORE:
+{json.dumps(report.model_dump(mode="json"), ensure_ascii=False)}
+
+VERIFIED WORKSET:
+{prepared_evidence_prompt(prepared)}
+
+Rules:
+- Return exactly the ordered columns named in expected_columns and one ordered
+  cell per column in every row. The application creates column, table, and row
+  IDs from this order.
+- Choose data_type from text, number, integer, percent, currency, date, or
+  boolean. Use percent raw values as decimal ratios.
+- Set compact, positive scale, fraction_digits 0-8, unit, and localized
+  unit_label to express the table clearly.
+- Return raw values only. Never return display_value or any public ID.
+- Observation, inference, and derived values require applicable evidence refs,
+  inherited at table/row level when appropriate.
+- A derived cell supplies formula, named numeric inputs, input evidence refs,
+  and unit. Leave raw_value null; the application calculates result and raw
+  value.
+- Never guess a source row link. The application establishes it only when all
+  relevant raw values exactly match one source EvidenceTable row.
+- Preserve every material row required by the plan. There is no row or column
+  count limit.
+"""
 
 
 def _analyst_context_prompt(
@@ -366,6 +512,255 @@ PREPARED EVIDENCE WORKSET:
 TOOL-AGENT DRAFT (untrusted until checked against evidence):
 {draft_narrative}
 """
+
+
+def _analyst_report_draft_example(
+    *,
+    analyst: str,
+    bundle: EvidenceBundle,
+    confidence_override: float | None,
+) -> AnalystReportDraft:
+    first_ref = bundle.items[0].ref
+    table_plans = ()
+    if bundle.tables:
+        source = bundle.tables[0]
+        table_plans = (
+            ResearchTablePlan(
+                title="Focused evidence comparison",
+                purpose=(
+                    "Compare the material observations that support this "
+                    "section without copying the complete source table."
+                ),
+                comparison_target="Material observations in the source data",
+                evidence_refs=source.evidence_refs,
+                evidence_table_ids=(source.id,),
+                expected_columns=tuple(
+                    column.label for column in source.columns
+                ),
+            ),
+        )
+    return AnalystReportDraft(
+        analyst=analyst,
+        executive_summary=(
+            "The verified evidence supports a conditional analyst conclusion."
+        ),
+        confidence=(
+            confidence_override if confidence_override is not None else 0.6
+        ),
+        claims=(
+            AnalystClaim(
+                id=f"{analyst}.claim_1",
+                kind=AnalystClaimType.INFERENCE,
+                statement="The cited evidence supports a material observation.",
+                implication=(
+                    "The research committee should retain this condition."
+                ),
+                confidence=0.6,
+                evidence_refs=(first_ref,),
+            ),
+        ),
+        sections=tuple(
+            AnalystSectionDraft(
+                id=section_id,
+                title=title,
+                narrative=(
+                    "Detailed evidence-grounded analysis with uncertainty "
+                    f"and an explicit implication [{first_ref}]."
+                ),
+                evidence_table_ids=(
+                    tuple(table.id for table in bundle.tables)
+                    if index == 0
+                    else ()
+                ),
+                research_table_plans=(
+                    table_plans if index == 0 else ()
+                ),
+            )
+            for index, (section_id, title) in enumerate(
+                _ANALYST_SECTIONS[analyst]
+            )
+        ),
+        catalysts=(),
+        risks=("A material risk could weaken the assessment.",),
+        invalidation_conditions=(
+            "New evidence directly contradicts the cited observation.",
+        ),
+        evidence_refs=(first_ref,),
+    )
+
+
+def _research_table_draft_example(
+    *,
+    plan: ResearchTablePlan,
+    bundle: EvidenceBundle,
+) -> ResearchTableDraft:
+    first_ref = plan.evidence_refs[0]
+    source_tables = {table.id: table for table in bundle.tables}
+    source = next(
+        (
+            source_tables[table_id]
+            for table_id in plan.evidence_table_ids
+            if table_id in source_tables
+        ),
+        None,
+    )
+    if source is not None and tuple(
+        column.label for column in source.columns
+    ) == plan.expected_columns:
+        columns = tuple(
+            _column_intent_from_source(column) for column in source.columns
+        )
+        source_row = source.rows[0]
+        cells = tuple(
+            ResearchTableCellDraft(
+                raw_value=source_row.cells[column.key].raw_value,
+                kind=source_row.cells[column.key].kind,
+                evidence_refs=source_row.cells[column.key].evidence_refs,
+            )
+            for column in source.columns
+        )
+        row_refs = source_row.evidence_refs
+    else:
+        columns = tuple(
+            TableColumnIntent(
+                label=label,
+                data_type=TableColumnDataType.TEXT,
+            )
+            for label in plan.expected_columns
+        )
+        cells = tuple(
+            ResearchTableCellDraft(
+                raw_value=(
+                    "Evidence-grounded row"
+                    if index == 0
+                    else "Verified value"
+                ),
+                kind=(
+                    TableCellKind.DESCRIPTOR
+                    if index == 0
+                    else TableCellKind.OBSERVATION
+                ),
+                evidence_refs=(() if index == 0 else (first_ref,)),
+            )
+            for index, _label in enumerate(plan.expected_columns)
+        )
+        row_refs = ()
+    return ResearchTableDraft(
+        columns=columns,
+        rows=(
+            ResearchTableRowDraft(
+                cells=cells,
+                evidence_refs=row_refs,
+            ),
+        ),
+        evidence_refs=plan.evidence_refs,
+    )
+
+
+def _column_intent_from_source(column: Any) -> TableColumnIntent:
+    data_type = (
+        TableColumnDataType.DATE
+        if column.data_type.value == "datetime"
+        else TableColumnDataType(column.data_type.value)
+    )
+    return TableColumnIntent(
+        label=column.label,
+        data_type=data_type,
+        compact=column.display.notation.value == "compact",
+        scale=column.display.scale,
+        fraction_digits=column.display.fraction_digits,
+        unit=column.unit,
+        unit_label=column.display.unit_label,
+    )
+
+
+def _validate_analyst_report_draft(
+    report: AnalystReportDraft,
+    *,
+    analyst: str,
+    bundle: EvidenceBundle,
+    confidence_override: float | None,
+) -> AnalystReportDraft:
+    if report.analyst != analyst:
+        raise OutputValidationError("analyst.identity")
+    require_text(report.executive_summary)
+    require_nonempty_texts(report.risks)
+    require_nonempty_texts(report.invalidation_conditions)
+    valid_refs = {item.ref for item in bundle.items}
+    valid_table_ids = {table.id for table in bundle.tables}
+    require_valid_refs(report.evidence_refs, valid_refs, required=True)
+    required_sections = {
+        section_id for section_id, _title in _ANALYST_SECTIONS[analyst]
+    }
+    section_ids = tuple(section.id for section in report.sections)
+    if (
+        set(section_ids) != required_sections
+        or len(section_ids) != len(set(section_ids))
+    ):
+        raise OutputValidationError("analyst.sections.required")
+    claim_ids = tuple(claim.id for claim in report.claims)
+    if len(claim_ids) != len(set(claim_ids)):
+        raise OutputValidationError("analyst.claim_ids")
+    used_refs = list(report.evidence_refs)
+    plan_count = 0
+    for claim in report.claims:
+        if not claim.id.startswith(f"{analyst}.claim_"):
+            raise OutputValidationError("analyst.claim_id.scope")
+        require_text(claim.statement)
+        require_text(claim.implication)
+        require_valid_refs(claim.evidence_refs, valid_refs, required=True)
+        used_refs.extend(claim.evidence_refs)
+    for section in report.sections:
+        require_text(section.title)
+        require_text(section.narrative)
+        if not set(section.evidence_table_ids).issubset(valid_table_ids):
+            raise OutputValidationError(
+                "analyst.section.evidence_table_unknown"
+            )
+        inline_refs = tuple(
+            dict.fromkeys(
+                re.findall(r"ev_[a-f0-9]{12}", section.narrative)
+            )
+        )
+        require_valid_refs(inline_refs, valid_refs, required=False)
+        used_refs.extend(inline_refs)
+        for plan in section.research_table_plans:
+            plan_count += 1
+            require_text(plan.title)
+            require_text(plan.purpose)
+            require_text(plan.comparison_target)
+            require_valid_refs(
+                plan.evidence_refs,
+                valid_refs,
+                required=True,
+            )
+            if not set(plan.evidence_table_ids).issubset(valid_table_ids):
+                raise OutputValidationError(
+                    "analyst.table_plan.evidence_table_unknown"
+                )
+            require_nonempty_texts(plan.expected_columns)
+            used_refs.extend(plan.evidence_refs)
+    if bundle.tables and plan_count == 0:
+        raise OutputValidationError("analyst.research_table.required")
+    updates: dict[str, Any] = {
+        "evidence_refs": tuple(dict.fromkeys(used_refs)),
+    }
+    if confidence_override is not None:
+        updates["confidence"] = confidence_override
+    return report.model_copy(update=updates)
+
+
+def _component_generation_method(
+    *methods: ArtifactGenerationMethod,
+) -> ArtifactGenerationMethod:
+    priority = {
+        ArtifactGenerationMethod.TOOL_CALL: 0,
+        ArtifactGenerationMethod.JSON_MODE: 1,
+        ArtifactGenerationMethod.RAW_JSON_RECOVERED: 2,
+        ArtifactGenerationMethod.JSON_MODE_RECOVERED: 3,
+        ArtifactGenerationMethod.SECTIONED_RECOVERY: 4,
+    }
+    return max(methods, key=priority.__getitem__)
 
 
 def _analyst_report_example(

@@ -109,6 +109,22 @@ def test_deepseek_role_efforts_are_not_cross_wired(monkeypatch):
         data_config=build_default_config({}),
     )
 
-    create_run_llms(settings)
+    llms = create_run_llms(settings)
 
-    assert [call["reasoning_effort"] for call in calls] == ["high", "max"]
+    assert [call["reasoning_effort"] for call in calls[:2]] == [
+        "high",
+        "max",
+    ]
+    assert all("reasoning_effort" not in call for call in calls[2:])
+    assert [call["model"] for call in calls] == [
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
+    ]
+    assert all(
+        call["extra_body"] == {"thinking": {"type": "disabled"}}
+        for call in calls[2:]
+    )
+    assert llms.quick is not llms.quick_serializer
+    assert llms.deep is not llms.deep_serializer

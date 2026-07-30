@@ -183,6 +183,7 @@ def prepare_evidence(
     role_prompt: str,
     node: str,
     invoke_config: dict[str, Any] | None = None,
+    memo_instruction: str | None = None,
 ) -> PreparedEvidence:
     """Let one role inspect catalogued evidence before formal synthesis."""
 
@@ -256,14 +257,18 @@ def prepare_evidence(
     messages: list[Any] = [
         SystemMessage(
             content=(
-                "Prepare an evidence memo for the formal research output that "
-                "follows. Inspect the typed context and compact EvidenceCatalog. "
-                "Use the read-only tools whenever an exact value, original text, "
-                "table slice, resampling, summary, or extrema check would improve "
-                "the result. Do not draft the formal JSON artifact. Finish with a "
-                "concise memo listing verified facts, relevant claim/table/ref IDs, "
-                "important uncertainty, and any requested slices. Never treat "
-                "historical memory as current evidence."
+                memo_instruction
+                or (
+                    "Prepare an evidence memo for the formal research output "
+                    "that follows. Inspect the typed context and compact "
+                    "EvidenceCatalog. Use the read-only tools whenever an "
+                    "exact value, original text, table slice, resampling, "
+                    "summary, or extrema check would improve the result. Do "
+                    "not draft the formal JSON artifact. Finish with a concise "
+                    "memo listing verified facts, relevant claim/table/ref "
+                    "IDs, important uncertainty, and any requested slices. "
+                    "Never treat historical memory as current evidence."
+                )
             )
         ),
         HumanMessage(

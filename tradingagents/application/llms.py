@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from tradingagents.llm_clients import create_llm_client
@@ -13,11 +14,27 @@ from tradingagents.llm_clients.reasoning_effort import (
 from .settings import RunSettings
 
 
+@dataclass(frozen=True)
+class RunLLMs:
+    """Reasoning clients plus schema-focused serializers for one run."""
+
+    quick: Any
+    deep: Any
+    quick_serializer: Any
+    deep_serializer: Any
+
+    def __iter__(self):
+        """Keep two-value unpacking for outcome reflection and callers."""
+
+        yield self.quick
+        yield self.deep
+
+
 def create_run_llms(
     settings: RunSettings,
     *,
     callbacks: list[Any] | None = None,
-) -> tuple[Any, Any]:
+) -> RunLLMs:
     config = {
         **dict(settings.data_config),
         "llm_provider": settings.llm_provider,
@@ -57,4 +74,30 @@ def create_run_llms(
         base_url=settings.backend_url,
         **role_kwargs("deep"),
     ).get_llm()
-    return quick, deep
+
+    def serializer(model: str, fallback: Any) -> Any:
+        if (
+            settings.llm_provider != "deepseek"
+            or model not in {"deepseek-v4-flash", "deepseek-v4-pro"}
+        ):
+            return fallback
+        kwargs = {
+            key: value
+            for key, value in common.items()
+            if key != "temperature"
+        }
+        kwargs["temperature"] = 0.0
+        kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+        return create_llm_client(
+            provider=settings.llm_provider,
+            model=model,
+            base_url=settings.backend_url,
+            **kwargs,
+        ).get_llm()
+
+    return RunLLMs(
+        quick=quick,
+        deep=deep,
+        quick_serializer=serializer(settings.quick_model, quick),
+        deep_serializer=serializer(settings.deep_model, deep),
+    )
