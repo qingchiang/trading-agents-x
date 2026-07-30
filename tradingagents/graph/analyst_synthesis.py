@@ -23,6 +23,7 @@ from tradingagents.application.contracts import (
 )
 from tradingagents.application.evidence import group_evidence_by_content
 from tradingagents.graph.output_validation import (
+    OutputValidationError,
     require_nonempty_texts,
     require_text,
     require_valid_refs,
@@ -427,7 +428,7 @@ def _validate_analyst_report(
     confidence_override: float | None,
 ) -> AnalystReport:
     if report.analyst != analyst:
-        raise ValueError("analyst output uses the wrong analyst identity")
+        raise OutputValidationError("analyst.identity")
     require_text(report.executive_summary)
     require_nonempty_texts(report.risks)
     require_nonempty_texts(report.invalidation_conditions)
@@ -440,12 +441,12 @@ def _validate_analyst_report(
     }
     actual_sections = {section.id for section in report.sections}
     if not required_sections.issubset(actual_sections):
-        raise ValueError("analyst output is missing required sections")
+        raise OutputValidationError("analyst.sections.required")
 
     used_refs: set[str] = set()
     for claim in report.claims:
         if not claim.id.startswith(f"{analyst}.claim_"):
-            raise ValueError("claim IDs must be scoped to their analyst")
+            raise OutputValidationError("analyst.claim_id.scope")
         require_text(claim.statement)
         require_text(claim.implication)
         require_valid_refs(
@@ -467,11 +468,9 @@ def _validate_analyst_report(
         table_id not in allowed_table_ids
         for table_id in referenced_table_ids
     ):
-        raise ValueError("analyst section references an unknown table")
+        raise OutputValidationError("analyst.section.table_unknown")
     if not set(evidence_tables).issubset(referenced_table_ids):
-        raise ValueError(
-            "every complete evidence table must be placed in the report"
-        )
+        raise OutputValidationError("analyst.evidence_table.unplaced")
     for section in report.sections:
         require_text(section.title)
         require_text(section.narrative)
@@ -490,17 +489,12 @@ def _validate_analyst_report(
             )
         )
     if not used_refs.issubset(report.evidence_refs):
-        raise ValueError(
-            "top-level report refs must include every claim, section, and "
-            "table ref"
-        )
+        raise OutputValidationError("analyst.evidence_refs.incomplete")
     if (
         confidence_override is not None
         and abs(report.confidence - confidence_override) > 1e-9
     ):
-        raise ValueError(
-            "sentiment confidence must match the deterministic source score"
-        )
+        raise OutputValidationError("analyst.sentiment_confidence.mismatch")
     return report.model_copy(update={"warnings": warnings})
 
 
@@ -524,14 +518,12 @@ def _validate_research_table_against_bundle(
     source_tables = {item.id: item for item in bundle.tables}
     source = source_tables.get(table.source_table_id)
     if source is None:
-        raise ValueError("research table references an unknown evidence table")
+        raise OutputValidationError("research_table.source.unknown")
     if table.total_source_rows != len(source.rows):
-        raise ValueError(
-            "research table total_source_rows does not match its source"
-        )
+        raise OutputValidationError("research_table.source.row_count")
     valid_row_ids = {row.id for row in source.rows}
     if any(row_id not in valid_row_ids for row_id in table.source_row_ids):
-        raise ValueError("research table references an unknown source row")
+        raise OutputValidationError("research_table.source.row_unknown")
     return used_refs
 
 
@@ -578,7 +570,7 @@ def _recover_analyst_report_by_section(
         manifest: _AnalystReportManifest,
     ) -> _AnalystReportManifest:
         if manifest.analyst != analyst:
-            raise ValueError("manifest analyst mismatch")
+            raise OutputValidationError("analyst_manifest.identity")
         require_text(manifest.executive_summary)
         require_nonempty_texts(manifest.risks)
         require_nonempty_texts(manifest.invalidation_conditions)
@@ -589,10 +581,10 @@ def _recover_analyst_report_by_section(
         )
         claim_ids = [claim.id for claim in manifest.claims]
         if not claim_ids or len(claim_ids) != len(set(claim_ids)):
-            raise ValueError("manifest claim IDs must be non-empty and unique")
+            raise OutputValidationError("analyst_manifest.claim_ids")
         for claim in manifest.claims:
             if not claim.id.startswith(f"{analyst}.claim_"):
-                raise ValueError("manifest claim ID has the wrong scope")
+                raise OutputValidationError("analyst_manifest.claim_id.scope")
             require_text(claim.statement)
             require_text(claim.implication)
             require_valid_refs(
@@ -609,7 +601,7 @@ def _recover_analyst_report_by_section(
             set(section_ids) != required
             or len(section_ids) != len(set(section_ids))
         ):
-            raise ValueError("manifest sections are incomplete or duplicated")
+            raise OutputValidationError("analyst_manifest.sections")
         assigned = [
             table_id
             for section in manifest.sections
@@ -619,14 +611,14 @@ def _recover_analyst_report_by_section(
             set(assigned) != set(evidence_table_ids)
             or len(assigned) != len(set(assigned))
         ):
-            raise ValueError(
-                "manifest must place each evidence table exactly once"
+            raise OutputValidationError(
+                "analyst_manifest.evidence_table_placement"
             )
         if (
             confidence_override is not None
             and abs(manifest.confidence - confidence_override) > 1e-9
         ):
-            raise ValueError("manifest confidence mismatch")
+            raise OutputValidationError("analyst_manifest.confidence")
         return manifest
 
     manifest = StructuredOutputRunner(
@@ -672,7 +664,7 @@ narratives or ResearchTable rows yet.
                 chunk.section.id != expected.id
                 or chunk.section.title != expected.title
             ):
-                raise ValueError("section chunk does not match its manifest")
+                raise OutputValidationError("analyst_section.manifest_mismatch")
             require_text(chunk.section.narrative)
             evidence_ids = {
                 table_id
@@ -680,13 +672,13 @@ narratives or ResearchTable rows yet.
                 if table_id.startswith("et_")
             }
             if evidence_ids != set(expected.evidence_table_ids):
-                raise ValueError(
-                    "section chunk changed its evidence table assignments"
+                raise OutputValidationError(
+                    "analyst_section.evidence_table_assignment"
                 )
             research_ids = {table.id for table in chunk.tables}
             if not research_ids.issubset(chunk.section.table_ids):
-                raise ValueError(
-                    "section chunk did not place every research table"
+                raise OutputValidationError(
+                    "analyst_section.research_table_placement"
                 )
             for table in chunk.tables:
                 _validate_research_table_against_bundle(

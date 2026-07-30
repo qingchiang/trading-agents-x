@@ -259,6 +259,34 @@ def test_json_mode_recovery_succeeds_with_two_logical_calls() -> None:
     assert _EVIDENCE_REF in recovery_prompt
 
 
+def test_json_recovery_receives_safe_schema_issue_paths() -> None:
+    events: list[dict[str, Any]] = []
+    invalid = _review().model_dump(mode="json")
+    invalid["evidence_refs"] = 123
+    llm = _FakeLLM(
+        primary={
+            "raw": AIMessage(content=json.dumps(invalid)),
+            "parsed": None,
+            "parsing_error": None,
+        },
+        recovery={
+            "raw": AIMessage(content=""),
+            "parsed": _review(),
+            "parsing_error": None,
+        },
+    )
+
+    result = _invoke(_runner(llm, events))
+
+    assert result.generation_method is (
+        ArtifactGenerationMethod.JSON_MODE_RECOVERED
+    )
+    issue = "schema.evidence_refs.tuple_type"
+    assert issue in llm.calls[1][1]
+    assert events[0]["payload"]["validation_issues"] == [issue]
+    assert events[1]["payload"]["validation_issues"] == [issue]
+
+
 def test_truncated_primary_output_retries_with_specific_reason() -> None:
     events: list[dict[str, Any]] = []
     truncated = {
@@ -449,7 +477,7 @@ def test_analyst_semantics_reject_missing_sections_and_fabricated_refs() -> None
     with pytest.raises(
         StructuredOutputError,
         match="semantic_validation",
-    ):
+    ) as error:
         invoke_analyst_report(
             llm,
             analyst="market",
@@ -460,6 +488,43 @@ def test_analyst_semantics_reject_missing_sections_and_fabricated_refs() -> None
             warnings=(),
             node="analyst.market",
         )
+
+    issue = "semantic.analyst.sections.required"
+    assert error.value.validation_issues == (issue,)
+    assert issue in llm.calls[1][1]
+
+
+def test_analyst_semantic_hint_guides_successful_recovery() -> None:
+    bundle = _analyst_bundle()
+    report = _analyst_report_example(
+        analyst="fundamentals",
+        bundle=bundle,
+        confidence_override=None,
+    )
+    incomplete = report.model_copy(update={"sections": report.sections[:1]})
+    events: list[dict[str, Any]] = []
+    llm = _FakeLLM(
+        primary={"raw": AIMessage(content=""), "parsed": incomplete},
+        recovery={"raw": AIMessage(content=""), "parsed": report},
+    )
+
+    result = invoke_analyst_report(
+        llm,
+        analyst="fundamentals",
+        draft_narrative="Detailed draft.",
+        bundle=bundle,
+        output_language="Simplified Chinese (简体中文, zh-CN)",
+        confidence_override=None,
+        warnings=(),
+        node="analyst.fundamentals",
+        event_writer=events.append,
+    )
+
+    issue = "semantic.analyst.sections.required"
+    assert result.value == report
+    assert issue in llm.calls[1][1]
+    assert events[0]["payload"]["validation_issues"] == [issue]
+    assert events[1]["payload"]["validation_issues"] == [issue]
 
 
 class _SectionedInvoker:
