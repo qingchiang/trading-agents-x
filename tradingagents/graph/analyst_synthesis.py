@@ -200,6 +200,7 @@ def invoke_analyst_report(
         draft_narrative=draft_narrative,
         bundle=bundle,
         output_language=output_language,
+        confidence_override=confidence_override,
     )
 
     def validate(report: AnalystReport) -> AnalystReport:
@@ -248,10 +249,18 @@ def analyst_report_prompt(
     draft_narrative: str,
     bundle: EvidenceBundle,
     output_language: str,
+    confidence_override: float | None = None,
 ) -> str:
     section_contract = "\n".join(
         f"- `{section_id}`: {title}"
         for section_id, title in _ANALYST_SECTIONS[analyst]
+    )
+    confidence_rule = (
+        "- Set `confidence` exactly to "
+        f"{confidence_override}; this value is calculated deterministically "
+        "from applicable source coverage and quality."
+        if confidence_override is not None
+        else ""
     )
     return (
         _analyst_context_prompt(
@@ -287,6 +296,10 @@ Report rules:
 - Tables must have a clear purpose and must not merely repeat prose.
 - Catalysts may be empty. Risks and invalidation conditions must be substantive.
 - Exact figures in prose, claims, or tables must resolve to supplied evidence.
+- Top-level evidence_refs is a report index. Include the valid refs used by
+  claims, section prose, and ResearchTable cells; the application verifies and
+  normalizes this redundant index.
+{confidence_rule}
 - Return no provenance appendix and no warning appendix. The application
   injects source-quality warnings from structured provenance.
 """
@@ -443,7 +456,7 @@ def _validate_analyst_report(
     if not required_sections.issubset(actual_sections):
         raise OutputValidationError("analyst.sections.required")
 
-    used_refs: set[str] = set()
+    used_refs: list[str] = []
     for claim in report.claims:
         if not claim.id.startswith(f"{analyst}.claim_"):
             raise OutputValidationError("analyst.claim_id.scope")
@@ -454,7 +467,7 @@ def _validate_analyst_report(
             valid_refs,
             required=True,
         )
-        used_refs.update(claim.evidence_refs)
+        used_refs.extend(claim.evidence_refs)
 
     evidence_tables = {table.id: table for table in bundle.tables}
     research_tables = {table.id: table for table in report.tables}
@@ -480,31 +493,32 @@ def _validate_analyst_report(
             )
         )
         require_valid_refs(inline_refs, valid_refs, required=False)
-        used_refs.update(inline_refs)
+        used_refs.extend(inline_refs)
     for table in report.tables:
-        used_refs.update(
+        used_refs.extend(
             _validate_research_table_against_bundle(
                 table,
                 bundle=bundle,
             )
         )
-    if not used_refs.issubset(report.evidence_refs):
-        raise OutputValidationError("analyst.evidence_refs.incomplete")
-    if (
-        confidence_override is not None
-        and abs(report.confidence - confidence_override) > 1e-9
-    ):
-        raise OutputValidationError("analyst.sentiment_confidence.mismatch")
-    return report.model_copy(update={"warnings": warnings})
+    updates: dict[str, Any] = {
+        "warnings": warnings,
+        "evidence_refs": tuple(
+            dict.fromkeys((*report.evidence_refs, *used_refs))
+        ),
+    }
+    if confidence_override is not None:
+        updates["confidence"] = confidence_override
+    return report.model_copy(update=updates)
 
 
 def _validate_research_table_against_bundle(
     table: ResearchTable,
     *,
     bundle: EvidenceBundle,
-) -> set[str]:
+) -> tuple[str, ...]:
     valid_refs = {item.ref for item in bundle.items}
-    used_refs: set[str] = set()
+    used_refs: list[str] = []
     for row in table.rows:
         for cell in row.cells.values():
             require_valid_refs(
@@ -512,9 +526,9 @@ def _validate_research_table_against_bundle(
                 valid_refs,
                 required=cell.kind.value != "descriptor",
             )
-            used_refs.update(cell.evidence_refs)
+            used_refs.extend(cell.evidence_refs)
     if table.source_table_id is None:
-        return used_refs
+        return tuple(dict.fromkeys(used_refs))
     source_tables = {item.id: item for item in bundle.tables}
     source = source_tables.get(table.source_table_id)
     if source is None:
@@ -524,7 +538,7 @@ def _validate_research_table_against_bundle(
     valid_row_ids = {row.id for row in source.rows}
     if any(row_id not in valid_row_ids for row_id in table.source_row_ids):
         raise OutputValidationError("research_table.source.row_unknown")
-    return used_refs
+    return tuple(dict.fromkeys(used_refs))
 
 
 def _recover_analyst_report_by_section(
@@ -614,11 +628,10 @@ def _recover_analyst_report_by_section(
             raise OutputValidationError(
                 "analyst_manifest.evidence_table_placement"
             )
-        if (
-            confidence_override is not None
-            and abs(manifest.confidence - confidence_override) > 1e-9
-        ):
-            raise OutputValidationError("analyst_manifest.confidence")
+        if confidence_override is not None:
+            return manifest.model_copy(
+                update={"confidence": confidence_override}
+            )
         return manifest
 
     manifest = StructuredOutputRunner(

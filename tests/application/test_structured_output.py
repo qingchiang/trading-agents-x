@@ -455,6 +455,86 @@ def test_analyst_report_is_synthesized_directly_from_complete_evidence() -> None
     assert events == []
 
 
+def test_analyst_report_normalizes_redundant_top_level_refs() -> None:
+    base = _analyst_bundle()
+    second = EvidenceItem.create(
+        source="second fixture",
+        evidence_type="fundamental detail",
+        requested_date=date(2026, 7, 24),
+        effective_date=date(2026, 7, 24),
+        content="Second evidence body.",
+    )
+    bundle = EvidenceBundle(
+        instrument=base.instrument,
+        analysis_date=base.analysis_date,
+        items=(*base.items, second),
+        tables=base.tables,
+    )
+    report = _analyst_report_example(
+        analyst="fundamentals",
+        bundle=bundle,
+        confidence_override=None,
+    )
+    claim = report.claims[0].model_copy(
+        update={"evidence_refs": (second.ref,)}
+    )
+    incomplete_index = report.model_copy(
+        update={
+            "claims": (claim,),
+            "evidence_refs": (base.items[0].ref,),
+        }
+    )
+    llm = _FakeLLM(
+        primary={"raw": AIMessage(content=""), "parsed": incomplete_index},
+        recovery=AssertionError("recovery must not run"),
+    )
+
+    result = invoke_analyst_report(
+        llm,
+        analyst="fundamentals",
+        draft_narrative="Detailed draft.",
+        bundle=bundle,
+        output_language="English (en)",
+        confidence_override=None,
+        warnings=(),
+        node="analyst.fundamentals",
+    )
+
+    assert result.value.evidence_refs == (
+        base.items[0].ref,
+        second.ref,
+    )
+    assert [method for method, _prompt in llm.calls] == ["tool_call"]
+
+
+def test_sentiment_confidence_uses_deterministic_override() -> None:
+    bundle = _analyst_bundle(with_table=False)
+    report = _analyst_report_example(
+        analyst="social",
+        bundle=bundle,
+        confidence_override=0.55,
+    ).model_copy(update={"confidence": 0.9})
+    llm = _FakeLLM(
+        primary={"raw": AIMessage(content=""), "parsed": report},
+        recovery=AssertionError("recovery must not run"),
+    )
+
+    result = invoke_analyst_report(
+        llm,
+        analyst="social",
+        draft_narrative="Detailed sentiment draft.",
+        bundle=bundle,
+        output_language="Simplified Chinese (简体中文, zh-CN)",
+        confidence_override=0.55,
+        warnings=(),
+        node="analyst.social",
+    )
+
+    assert result.value.confidence == 0.55
+    assert "Set `confidence` exactly to 0.55" in llm.calls[0][1]
+    assert [method for method, _prompt in llm.calls] == ["tool_call"]
+
+
 def test_analyst_semantics_reject_missing_sections_and_fabricated_refs() -> None:
     bundle = _analyst_bundle()
     report = _analyst_report_example(
