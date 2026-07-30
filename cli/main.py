@@ -26,6 +26,7 @@ from tradingagents.application.worker import AnalysisWorker
 from tradingagents.dataflows.symbol_utils import market_today
 from tradingagents.version import __version__
 from tradingagents.web import create_app
+from tradingagents.web.access_logging import uvicorn_log_config
 
 from .supervisor import ColorMode, LocalProcessSupervisor
 
@@ -186,6 +187,7 @@ def serve(
         port=settings.port,
         log_level=log_level,
         use_colors=use_colors,
+        log_config=uvicorn_log_config(),
     )
 
 

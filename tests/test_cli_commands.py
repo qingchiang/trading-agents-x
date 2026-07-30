@@ -315,6 +315,9 @@ def test_serve_uses_the_validated_application_binding(
     assert calls["port"] == 8000
     assert calls["log_level"] == "warning"
     assert calls["use_colors"] is None
+    assert calls["log_config"]["handlers"]["access"]["filters"] == [
+        "successful_static_assets"
+    ]
 
 
 def test_start_supervises_web_and_worker(
