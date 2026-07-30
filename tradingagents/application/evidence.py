@@ -358,9 +358,10 @@ def _rows(
     for row_index, values in enumerate(rows, start=1):
         cells = {}
         for column, displayed in zip(columns, values, strict=True):
+            display_value = displayed if displayed.strip() else "—"
             cells[column.key] = ResearchTableCell(
                 raw_value=_typed_value(displayed, column.data_type),
-                display_value=displayed,
+                display_value=display_value,
                 kind=TableCellKind.OBSERVATION,
                 evidence_refs=evidence_refs,
             )

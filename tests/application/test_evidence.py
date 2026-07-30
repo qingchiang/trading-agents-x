@@ -446,6 +446,32 @@ def test_exact_source_tables_are_extracted_once_without_row_limits() -> None:
     )
 
 
+def test_source_table_empty_cells_remain_explicit_missing_values() -> None:
+    item = EvidenceItem.create(
+        source="macro fixture",
+        evidence_type="macro panel",
+        requested_date=date(2026, 7, 29),
+        content=(
+            "## Global macro panel\n\n"
+            "| Series | Value | Change |\n"
+            "|---|---:|---:|\n"
+            "| Rates |  |  |\n"
+            "| Policy rate | 0.75 | — |"
+        ),
+    )
+
+    table = extract_evidence_tables((item,))[0]
+    category_row = table.rows[0]
+    value_cell = category_row.cells["value"]
+    change_cell = category_row.cells["change"]
+
+    assert value_cell.raw_value is None
+    assert value_cell.display_value == "—"
+    assert change_cell.raw_value is None
+    assert change_cell.display_value == "—"
+    assert value_cell.evidence_refs == (item.ref,)
+
+
 def test_table_contract_distinguishes_observed_and_derived_values() -> None:
     ref = "ev_0123456789ab"
     columns = (
