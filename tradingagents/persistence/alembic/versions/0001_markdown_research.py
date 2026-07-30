@@ -1,6 +1,6 @@
 """Create the local run-center schema.
 
-Revision ID: 0001_application_core
+Revision ID: 0001_markdown_research
 Revises:
 Create Date: 2026-07-27
 """
@@ -12,7 +12,7 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0001_application_core"
+revision: str = "0001_markdown_research"
 down_revision: str | Sequence[str] | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

@@ -11,7 +11,7 @@ _REQUIRED_FILES = {
     "cli/main.py",
     "tradingagents/client.py",
     "tradingagents/graph/research_graph.py",
-    "tradingagents/persistence/alembic/versions/0001_application_core.py",
+    "tradingagents/persistence/alembic/versions/0001_markdown_research.py",
     "tradingagents/web/static/index.html",
 }
 _FORBIDDEN_FILES = {
