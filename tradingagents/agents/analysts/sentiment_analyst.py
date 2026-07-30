@@ -18,12 +18,10 @@ clear unavailable placeholders plus any supported per-name official signals.
 Exchange-section investor flows are deliberately excluded: they belong to the
 News Analyst as regional context and cannot be attributed to a target ticker.
 
-The agent does not use tool-calling; the data is in the prompt from
-turn 0. Output uses the structured-output pattern (json_schema for
-OpenAI/xAI, response_schema for Gemini, tool-use for Anthropic), falling
-back to free-text generation for providers that lack native support, so
-the report structure is stable and confidence is calculated locally from
-source coverage instead of being self-rated by the model.
+The agent does not use tool-calling; the data is in the prompt from turn 0.
+It writes a rich Markdown research draft. The application separately seals
+the source evidence and calculates confidence from source coverage, while the
+common Analyst pipeline performs the small, non-fatal key-claim audit.
 
 See: https://github.com/TauricResearch/TradingAgents/issues/557
 See: https://github.com/TauricResearch/TradingAgents/issues/796
@@ -35,11 +33,6 @@ from datetime import datetime, timezone
 from langchain_core.messages import AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
-from tradingagents.agents.schemas import (
-    SentimentReport,
-    render_sentiment_report,
-    validate_sentiment_sources,
-)
 from tradingagents.agents.sentiment_sources import (
     SentimentSourceInput,
     prepare_sentiment_sources,
@@ -52,9 +45,6 @@ from tradingagents.agents.utils.agent_utils import (
 )
 from tradingagents.agents.utils.structured import (
     NO_EXTERNAL_TOOLS,
-    bind_structured,
-    invoke_structured_or_freetext,
-    structured_prompt_for,
 )
 from tradingagents.dataflows.config import get_config
 from tradingagents.dataflows.lookahead import is_near_live, lookback_start_date
@@ -74,10 +64,8 @@ def create_sentiment_analyst(llm):
 
     Pre-fetches news + StockTwits + Reddit data, injects them into the
     prompt as structured blocks, and produces a deterministic sentiment
-    report via structured output (with a free-text fallback for providers
-    that do not support it).
+    Markdown report for the common Markdown-first Analyst pipeline.
     """
-    structured_llm = bind_structured(llm, SentimentReport, "Sentiment Analyst")
 
     def sentiment_analyst_node(state):
         ticker = state["company_of_interest"]
@@ -194,62 +182,37 @@ def create_sentiment_analyst(llm):
         prompt = prompt.partial(current_date=end_date)
         prompt = prompt.partial(instrument_context=instrument_context)
 
-        # Format the template into a concrete message list so the structured
-        # and free-text paths receive the same input. No bind_tools — the
-        # data is already in the prompt.
+        # No bind_tools or intermediate typed report: the data is already in
+        # the prompt, and the common Analyst stage owns the small audit envelope.
         formatted_messages = prompt.format_messages(messages=state["messages"])
-        structured_messages = structured_prompt_for(
-            llm,
-            SentimentReport,
-            formatted_messages,
-        )
-
-        applicable_sources = tuple(
-            source for source in sentiment_sources if source.applicable
-        )
-        expected_statuses = {
-            source.source_id: source.status
-            for source in applicable_sources
-        }
-        source_labels = {
-            source.source_id: source.label
-            for source in applicable_sources
-        }
-
-        def render_structured(report: SentimentReport) -> str:
-            validate_sentiment_sources(report, expected_statuses)
-            return render_sentiment_report(
-                report,
-                confidence=confidence.level,
-                confidence_score=confidence.score,
-                source_labels=source_labels,
-            )
-
-        fallback_reason: str | None = None
-
-        def record_fallback(reason: str) -> None:
-            nonlocal fallback_reason
-            fallback_reason = reason
-
-        report_text = invoke_structured_or_freetext(
-            structured_llm,
-            llm,
-            formatted_messages,
-            render_structured,
-            "Sentiment Analyst",
-            structured_prompt=structured_messages,
-            on_fallback=record_fallback,
-        )
+        response = llm.invoke(formatted_messages)
+        report_text = _response_text(response)
+        if not report_text:
+            raise ValueError("sentiment analyst returned an empty Markdown draft")
 
         return {
             "messages": [AIMessage(content=report_text)],
             "sentiment_report": report_text,
             "sentiment_confidence": confidence.score,
-            "sentiment_output_warning": fallback_reason,
             "prefetched_evidence": prefetched_evidence,
         }
 
     return sentiment_analyst_node
+
+
+def _response_text(response) -> str:
+    content = getattr(response, "content", response)
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+        return "\n".join(parts).strip()
+    return str(content).strip()
 
 
 def _optional_section(
@@ -309,10 +272,9 @@ def _build_system_message(
     )
     source_contract = "\n".join(
         (
-            "Return exactly one `source_assessments` item for each applicable "
-            "source below. Copy both `source_id` and `status` exactly; the "
-            "application validates omissions, duplicates, unknown IDs, and "
-            "status changes.",
+            "Discuss every applicable source below in its own report subsection. "
+            "Preserve the source_id and status labels so the later audit can "
+            "link the narrative to the sealed evidence.",
             *(
                 f"- `{source.source_id}` — {source.label}; "
                 f"status=`{source.status.value}`"
@@ -351,10 +313,8 @@ regardless of the language used by EDINET, TDnet, news media, or any other
 source material. Do not imitate or switch to a source language. Translate or
 summarize foreign-language evidence into {output_language}, retaining only
 proper names, tickers, source names, and necessary original-language terms.
-Keep the structured field names, fixed report headings, and required English
-enum values (such as Bullish / Bearish and substantive / no_signal /
-unavailable) unchanged. The same rules apply if structured output is
-unavailable and you must return a free-text report.
+Keep source IDs and status values (substantive / no_signal / unavailable)
+unchanged. The report itself must be readable Markdown, not JSON.
 
 ## Source assessment contract
 

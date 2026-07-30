@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Literal
 
-from tradingagents.agents.schemas import SentimentSourceStatus
 from tradingagents.agents.utils.agent_states import (
     PrefetchedEvidenceBlock,
     prefetched_evidence_block,
@@ -13,6 +13,14 @@ from tradingagents.agents.utils.agent_states import (
 from tradingagents.dataflows.market_context import market_suffix_of
 from tradingagents.dataflows.market_signals import FetchedSentimentSignal
 from tradingagents.provenance import ProvenanceRecord, extract_provenance
+
+
+class SentimentSourceStatus(str, Enum):
+    """Whether one applicable source contains a substantive signal."""
+
+    SUBSTANTIVE = "substantive"
+    NO_SIGNAL = "no_signal"
+    UNAVAILABLE = "unavailable"
 
 
 @dataclass(frozen=True)

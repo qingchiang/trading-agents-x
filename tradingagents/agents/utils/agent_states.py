@@ -35,10 +35,6 @@ class AgentState(MessagesState):
         float | None,
         "Locally calculated confidence shared with the research graph",
     ]
-    sentiment_output_warning: Annotated[
-        str | None,
-        "Safe warning code when typed sentiment output falls back to prose",
-    ]
     prefetched_evidence: Annotated[
         list[PrefetchedEvidenceBlock],
         "Evidence fetched before an analyst LLM call",

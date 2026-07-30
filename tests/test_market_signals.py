@@ -5,8 +5,10 @@ from unittest import mock
 import pytest
 
 from tradingagents.agents.analysts import sentiment_analyst
-from tradingagents.agents.schemas import SentimentSourceStatus
-from tradingagents.agents.sentiment_sources import SentimentSourceInput
+from tradingagents.agents.sentiment_sources import (
+    SentimentSourceInput,
+    SentimentSourceStatus,
+)
 from tradingagents.dataflows import market_signals
 
 

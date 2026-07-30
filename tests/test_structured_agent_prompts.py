@@ -1,4 +1,4 @@
-"""Schema-only analyst prompts must not invite external tool calls."""
+"""Analyst prompts must preserve their tool-use boundaries."""
 
 from __future__ import annotations
 
@@ -8,55 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import tradingagents.agents.analysts.sentiment_analyst as sentiment
-from tradingagents.agents.schemas import (
-    SentimentBand,
-    SentimentReport,
-    SentimentSourceAssessment,
-    SentimentSourceStatus,
-)
 from tradingagents.agents.utils.structured import NO_EXTERNAL_TOOLS
-
-
-def _capturing_llm(captured: dict):
-    structured = MagicMock()
-    structured.invoke.side_effect = lambda prompt: (
-        captured.__setitem__("prompt", prompt)
-        or SentimentReport(
-            overall_band=SentimentBand.BULLISH,
-            overall_score=7.5,
-            executive_summary="The supplied sources are constructive.",
-            source_assessments=(
-                SentimentSourceAssessment(
-                    source_id="news",
-                    status=SentimentSourceStatus.SUBSTANTIVE,
-                    direction=SentimentBand.BULLISH,
-                    summary="News is constructive.",
-                    key_evidence=("A concrete company event was supplied.",),
-                ),
-                SentimentSourceAssessment(
-                    source_id="stocktwits",
-                    status=SentimentSourceStatus.SUBSTANTIVE,
-                    direction=SentimentBand.BULLISH,
-                    summary="Retail positioning is constructive.",
-                    key_evidence=("Bullish messages outweighed bearish ones.",),
-                ),
-                SentimentSourceAssessment(
-                    source_id="reddit",
-                    status=SentimentSourceStatus.SUBSTANTIVE,
-                    direction=SentimentBand.NEUTRAL,
-                    summary="Community discussion is balanced.",
-                    key_evidence=("Discussion contained both positive and negative views.",),
-                ),
-            ),
-            cross_source_consensus=("News and retail views are constructive.",),
-            dominant_themes=("A constructive event narrative dominates.",),
-            risks=("Retail enthusiasm may be crowded.",),
-            limitations=("Public-feed samples are bounded.",),
-        )
-    )
-    llm = MagicMock()
-    llm.with_structured_output.return_value = structured
-    return llm
 
 
 @pytest.mark.unit
@@ -77,14 +29,16 @@ def test_sentiment_prompt_states_no_external_tool_constraint(monkeypatch):
         lambda *args, **kwargs: "news",
         raising=False,
     )
-    monkeypatch.setattr(
-        sentiment,
-        "is_near_live",
-        lambda _date, _ticker: True,
-    )
+    monkeypatch.setattr(sentiment, "is_near_live", lambda _date, _ticker: True)
     captured = {}
+    llm = MagicMock()
 
-    sentiment.create_sentiment_analyst(_capturing_llm(captured))(
+    def invoke(prompt):
+        captured["prompt"] = prompt
+        return MagicMock(content="# Sentiment\n\nComplete draft.")
+
+    llm.invoke.side_effect = invoke
+    sentiment.create_sentiment_analyst(llm)(
         {
             "company_of_interest": "NVDA",
             "trade_date": "2026-01-15",
