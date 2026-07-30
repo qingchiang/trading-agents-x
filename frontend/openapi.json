@@ -1543,6 +1543,24 @@
         "additionalProperties": false,
         "description": "Resource usage attributed to one research graph node.",
         "properties": {
+          "cache_hit_input_tokens": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Cache Hit Input Tokens",
+            "type": "integer"
+          },
+          "cache_miss_input_tokens": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Cache Miss Input Tokens",
+            "type": "integer"
+          },
+          "detailed_usage_calls": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Detailed Usage Calls",
+            "type": "integer"
+          },
           "input_tokens": {
             "default": 0,
             "minimum": 0.0,
@@ -1559,6 +1577,12 @@
             "default": 0,
             "minimum": 0.0,
             "title": "Output Tokens",
+            "type": "integer"
+          },
+          "reasoning_output_tokens": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Reasoning Output Tokens",
             "type": "integer"
           },
           "tool_calls": {
@@ -3050,6 +3074,24 @@
       "RunMetrics": {
         "additionalProperties": false,
         "properties": {
+          "cache_hit_input_tokens": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Cache Hit Input Tokens",
+            "type": "integer"
+          },
+          "cache_miss_input_tokens": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Cache Miss Input Tokens",
+            "type": "integer"
+          },
+          "detailed_usage_calls": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Detailed Usage Calls",
+            "type": "integer"
+          },
           "input_tokens": {
             "default": 0,
             "minimum": 0.0,
@@ -3073,6 +3115,12 @@
             "default": 0,
             "minimum": 0.0,
             "title": "Output Tokens",
+            "type": "integer"
+          },
+          "reasoning_output_tokens": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Reasoning Output Tokens",
             "type": "integer"
           },
           "tool_calls": {

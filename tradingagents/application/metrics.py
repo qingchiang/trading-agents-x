@@ -20,6 +20,20 @@ class _NodeAccumulator:
     tool_calls: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_hit_input_tokens: int = 0
+    cache_miss_input_tokens: int = 0
+    reasoning_output_tokens: int = 0
+    detailed_usage_calls: int = 0
+
+
+@dataclass(frozen=True)
+class _TokenUsage:
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_hit_input_tokens: int = 0
+    cache_miss_input_tokens: int = 0
+    reasoning_output_tokens: int = 0
+    has_details: bool = False
 
 
 class MetricsCallback(BaseCallbackHandler):
@@ -36,6 +50,10 @@ class MetricsCallback(BaseCallbackHandler):
         self.tool_calls = 0
         self.input_tokens = 0
         self.output_tokens = 0
+        self.cache_hit_input_tokens = 0
+        self.cache_miss_input_tokens = 0
+        self.reasoning_output_tokens = 0
+        self.detailed_usage_calls = 0
 
     def on_llm_start(
         self,
@@ -55,15 +73,27 @@ class MetricsCallback(BaseCallbackHandler):
 
     def on_llm_end(self, response: LLMResult, **kwargs: Any) -> None:
         node = self._finish_callback(self._llm_runs, kwargs)
-        input_tokens, output_tokens = _token_usage(response)
-        if not input_tokens and not output_tokens:
+        token_usage = _token_usage(response)
+        if not (
+            token_usage.input_tokens
+            or token_usage.output_tokens
+            or token_usage.has_details
+        ):
             return
         with self._lock:
-            self.input_tokens += input_tokens
-            self.output_tokens += output_tokens
+            self.input_tokens += token_usage.input_tokens
+            self.output_tokens += token_usage.output_tokens
+            self.cache_hit_input_tokens += token_usage.cache_hit_input_tokens
+            self.cache_miss_input_tokens += token_usage.cache_miss_input_tokens
+            self.reasoning_output_tokens += token_usage.reasoning_output_tokens
+            self.detailed_usage_calls += int(token_usage.has_details)
             usage = self._node_usage.setdefault(node, _NodeAccumulator())
-            usage.input_tokens += input_tokens
-            usage.output_tokens += output_tokens
+            usage.input_tokens += token_usage.input_tokens
+            usage.output_tokens += token_usage.output_tokens
+            usage.cache_hit_input_tokens += token_usage.cache_hit_input_tokens
+            usage.cache_miss_input_tokens += token_usage.cache_miss_input_tokens
+            usage.reasoning_output_tokens += token_usage.reasoning_output_tokens
+            usage.detailed_usage_calls += int(token_usage.has_details)
 
     def on_llm_error(self, error: BaseException, **kwargs: Any) -> None:
         self._finish_callback(self._llm_runs, kwargs)
@@ -147,6 +177,10 @@ class MetricsCallback(BaseCallbackHandler):
                     tool_calls=usage.tool_calls,
                     input_tokens=usage.input_tokens,
                     output_tokens=usage.output_tokens,
+                    cache_hit_input_tokens=usage.cache_hit_input_tokens,
+                    cache_miss_input_tokens=usage.cache_miss_input_tokens,
+                    reasoning_output_tokens=usage.reasoning_output_tokens,
+                    detailed_usage_calls=usage.detailed_usage_calls,
                     wall_time_seconds=node_times.get(node, 0.0),
                 )
             return RunMetrics(
@@ -154,6 +188,10 @@ class MetricsCallback(BaseCallbackHandler):
                 tool_calls=self.tool_calls,
                 input_tokens=self.input_tokens,
                 output_tokens=self.output_tokens,
+                cache_hit_input_tokens=self.cache_hit_input_tokens,
+                cache_miss_input_tokens=self.cache_miss_input_tokens,
+                reasoning_output_tokens=self.reasoning_output_tokens,
+                detailed_usage_calls=self.detailed_usage_calls,
                 wall_time_seconds=max(0.0, now - self._started_at),
                 node_metrics=node_metrics,
             )
@@ -170,37 +208,126 @@ def _callback_node(kwargs: dict[str, Any]) -> str:
     return "unattributed"
 
 
-def _token_usage(response: LLMResult) -> tuple[int, int]:
+def _token_usage(response: LLMResult) -> _TokenUsage:
     try:
         generation = response.generations[0][0]
     except (IndexError, TypeError):
         generation = None
     message = getattr(generation, "message", None)
-    usage = (
+    normalized_usage = (
         message.usage_metadata
         if isinstance(message, AIMessage)
         and getattr(message, "usage_metadata", None)
         else None
     )
-    if usage:
-        return (
-            int(usage.get("input_tokens", 0)),
-            int(usage.get("output_tokens", 0)),
-        )
-    token_usage = (response.llm_output or {}).get("token_usage", {})
-    if not isinstance(token_usage, dict):
-        return 0, 0
-    return (
-        int(
-            token_usage.get(
-                "input_tokens",
-                token_usage.get("prompt_tokens", 0),
-            )
-        ),
-        int(
-            token_usage.get(
-                "output_tokens",
-                token_usage.get("completion_tokens", 0),
-            )
-        ),
+    response_metadata = (
+        message.response_metadata
+        if isinstance(message, AIMessage)
+        and isinstance(getattr(message, "response_metadata", None), dict)
+        else {}
     )
+    raw_usage = response_metadata.get("token_usage")
+    if not isinstance(raw_usage, dict):
+        raw_usage = (response.llm_output or {}).get("token_usage", {})
+    if not isinstance(raw_usage, dict):
+        raw_usage = {}
+
+    input_tokens = _first_int(
+        normalized_usage,
+        ("input_tokens",),
+        fallback=_first_int(raw_usage, ("input_tokens", "prompt_tokens")),
+    )
+    output_tokens = _first_int(
+        normalized_usage,
+        ("output_tokens",),
+        fallback=_first_int(raw_usage, ("output_tokens", "completion_tokens")),
+    )
+    hit, hit_present = _detail_int(
+        raw_usage,
+        ("prompt_cache_hit_tokens", "cache_hit_input_tokens"),
+    )
+    miss, miss_present = _detail_int(
+        raw_usage,
+        ("prompt_cache_miss_tokens", "cache_miss_input_tokens"),
+    )
+    reasoning, reasoning_present = _detail_int(
+        raw_usage,
+        ("reasoning_tokens",),
+    )
+
+    input_details = (
+        normalized_usage.get("input_token_details", {})
+        if isinstance(normalized_usage, dict)
+        else {}
+    )
+    output_details = (
+        normalized_usage.get("output_token_details", {})
+        if isinstance(normalized_usage, dict)
+        else {}
+    )
+    completion_details = raw_usage.get("completion_tokens_details", {})
+    if not isinstance(input_details, dict):
+        input_details = {}
+    if not isinstance(output_details, dict):
+        output_details = {}
+    if not isinstance(completion_details, dict):
+        completion_details = {}
+    if not hit_present:
+        hit, hit_present = _detail_int(
+            input_details,
+            ("cache_read", "cache_hit"),
+        )
+    if not reasoning_present:
+        reasoning, reasoning_present = _detail_int(
+            output_details,
+            ("reasoning",),
+        )
+    if not reasoning_present:
+        reasoning, reasoning_present = _detail_int(
+            completion_details,
+            ("reasoning_tokens",),
+        )
+    if hit_present and not miss_present and input_tokens >= hit:
+        miss = input_tokens - hit
+        miss_present = True
+    if hit_present and miss_present:
+        input_tokens = hit + miss
+
+    return _TokenUsage(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cache_hit_input_tokens=hit,
+        cache_miss_input_tokens=miss,
+        reasoning_output_tokens=reasoning,
+        has_details=hit_present or miss_present or reasoning_present,
+    )
+
+
+def _first_int(
+    values: Any,
+    keys: tuple[str, ...],
+    *,
+    fallback: int = 0,
+) -> int:
+    if not isinstance(values, dict):
+        return fallback
+    for key in keys:
+        value = values.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return max(0, int(value))
+    return fallback
+
+
+def _detail_int(
+    values: Any,
+    keys: tuple[str, ...],
+) -> tuple[int, bool]:
+    if not isinstance(values, dict):
+        return 0, False
+    for key in keys:
+        if key not in values:
+            continue
+        value = values[key]
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return max(0, int(value)), True
+    return 0, False

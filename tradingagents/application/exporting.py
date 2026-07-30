@@ -117,6 +117,13 @@ def render_run_export_markdown(run_export: RunExport) -> str:
             f"- Tool calls: `{metrics.tool_calls}`",
             f"- Input tokens: `{metrics.input_tokens}`",
             f"- Output tokens: `{metrics.output_tokens}`",
+            f"- Cache-hit input tokens: `{metrics.cache_hit_input_tokens}`",
+            f"- Cache-miss input tokens: `{metrics.cache_miss_input_tokens}`",
+            f"- Reasoning output tokens: `{metrics.reasoning_output_tokens}`",
+            (
+                "- Detailed usage coverage: "
+                f"`{metrics.detailed_usage_calls}/{metrics.llm_calls}` calls"
+            ),
             f"- Wall time: `{metrics.wall_time_seconds:.3f}s`",
         ]
     )
@@ -125,8 +132,9 @@ def render_run_export_markdown(run_export: RunExport) -> str:
         sections.extend(
             [
                 "",
-                "| Node | LLM calls | Tool calls | Input tokens | Output tokens | Wall time |",
-                "|---|---:|---:|---:|---:|---:|",
+                "| Node | LLM calls | Tool calls | Input tokens | Cache hit | "
+                "Cache miss | Output tokens | Reasoning | Detailed calls | Wall time |",
+                "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
             ]
         )
         for node in sorted(
@@ -140,7 +148,11 @@ def render_run_export_markdown(run_export: RunExport) -> str:
             sections.append(
                 f"| `{node}` | {node_usage.llm_calls} | "
                 f"{node_usage.tool_calls} | {node_usage.input_tokens} | "
+                f"{node_usage.cache_hit_input_tokens} | "
+                f"{node_usage.cache_miss_input_tokens} | "
                 f"{node_usage.output_tokens} | "
+                f"{node_usage.reasoning_output_tokens} | "
+                f"{node_usage.detailed_usage_calls} | "
                 f"{node_usage.wall_time_seconds:.3f}s |"
             )
 

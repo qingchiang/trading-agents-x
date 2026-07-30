@@ -1036,7 +1036,23 @@ function MetricsPanel({ metrics }: { metrics: RunMetrics | undefined }) {
         <Metric label={t("llmCalls")} value={metrics?.llm_calls ?? 0} />
         <Metric label={t("toolCalls")} value={metrics?.tool_calls ?? 0} />
         <Metric label={t("inputTokens")} value={metrics?.input_tokens ?? 0} />
+        <Metric
+          label={t("cacheHitInputTokens")}
+          value={metrics?.cache_hit_input_tokens ?? 0}
+        />
+        <Metric
+          label={t("cacheMissInputTokens")}
+          value={metrics?.cache_miss_input_tokens ?? 0}
+        />
         <Metric label={t("outputTokens")} value={metrics?.output_tokens ?? 0} />
+        <Metric
+          label={t("reasoningOutputTokens")}
+          value={metrics?.reasoning_output_tokens ?? 0}
+        />
+        <Metric
+          label={t("detailedUsageCoverage")}
+          value={`${metrics?.detailed_usage_calls ?? 0}/${metrics?.llm_calls ?? 0}`}
+        />
         <Metric
           label={t("wallTime")}
           value={`${(metrics?.wall_time_seconds ?? 0).toFixed(1)}s`}
@@ -1055,7 +1071,11 @@ function MetricsPanel({ metrics }: { metrics: RunMetrics | undefined }) {
                   <th>{t("llmCalls")}</th>
                   <th>{t("toolCalls")}</th>
                   <th>{t("inputTokens")}</th>
+                  <th>{t("cacheHitInputTokens")}</th>
+                  <th>{t("cacheMissInputTokens")}</th>
                   <th>{t("outputTokens")}</th>
+                  <th>{t("reasoningOutputTokens")}</th>
+                  <th>{t("detailedUsageCalls")}</th>
                   <th>{t("wallTime")}</th>
                 </tr>
               </thead>
@@ -1068,7 +1088,11 @@ function MetricsPanel({ metrics }: { metrics: RunMetrics | undefined }) {
                     <td>{metricCell(row.llmCalls)}</td>
                     <td>{metricCell(row.toolCalls)}</td>
                     <td>{metricCell(row.inputTokens)}</td>
+                    <td>{metricCell(row.cacheHitInputTokens)}</td>
+                    <td>{metricCell(row.cacheMissInputTokens)}</td>
                     <td>{metricCell(row.outputTokens)}</td>
+                    <td>{metricCell(row.reasoningOutputTokens)}</td>
+                    <td>{metricCell(row.detailedUsageCalls)}</td>
                     <td>{row.wallTime.toFixed(1)}s</td>
                   </tr>
                 ))}
@@ -1086,7 +1110,11 @@ type NodeMetricRow = {
   llmCalls: number | null;
   toolCalls: number | null;
   inputTokens: number | null;
+  cacheHitInputTokens: number | null;
+  cacheMissInputTokens: number | null;
   outputTokens: number | null;
+  reasoningOutputTokens: number | null;
+  detailedUsageCalls: number | null;
   wallTime: number;
 };
 
@@ -1100,7 +1128,11 @@ function nodeMetricRows(metrics: RunMetrics | undefined): NodeMetricRow[] {
         llmCalls: usage.llm_calls ?? 0,
         toolCalls: usage.tool_calls ?? 0,
         inputTokens: usage.input_tokens ?? 0,
+        cacheHitInputTokens: usage.cache_hit_input_tokens ?? 0,
+        cacheMissInputTokens: usage.cache_miss_input_tokens ?? 0,
         outputTokens: usage.output_tokens ?? 0,
+        reasoningOutputTokens: usage.reasoning_output_tokens ?? 0,
+        detailedUsageCalls: usage.detailed_usage_calls ?? 0,
         wallTime: usage.wall_time_seconds ?? 0,
       };
     })

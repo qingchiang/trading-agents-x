@@ -227,6 +227,10 @@ const detail = {
       tool_calls: 3,
       input_tokens: 1200,
       output_tokens: 400,
+      cache_hit_input_tokens: 300,
+      cache_miss_input_tokens: 900,
+      reasoning_output_tokens: 150,
+      detailed_usage_calls: 1,
       wall_time_seconds: 12.4,
       node_metrics: {
         "analyst.market": {
@@ -234,6 +238,10 @@ const detail = {
           tool_calls: 3,
           input_tokens: 800,
           output_tokens: 220,
+          cache_hit_input_tokens: 300,
+          cache_miss_input_tokens: 500,
+          reasoning_output_tokens: 100,
+          detailed_usage_calls: 1,
           wall_time_seconds: 2.1,
         },
         "committee.final": {
@@ -360,6 +368,7 @@ test("restores deliberation and resolves evidence references across run views", 
     "true",
   );
   expect(screen.getByText("1,200")).toBeVisible();
+  expect(screen.getByText("1/4")).toBeVisible();
   expect(
     screen.getByRole("link", { name: "Export research package" }),
   ).toHaveAttribute(

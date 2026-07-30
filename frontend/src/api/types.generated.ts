@@ -222,9 +222,13 @@ export interface components {
       message: string;
     };
     NodeMetrics: {
+      cache_hit_input_tokens?: number;
+      cache_miss_input_tokens?: number;
+      detailed_usage_calls?: number;
       input_tokens?: number;
       llm_calls?: number;
       output_tokens?: number;
+      reasoning_output_tokens?: number;
       tool_calls?: number;
       wall_time_seconds?: number;
     };
@@ -434,10 +438,14 @@ export interface components {
       sequence: number;
     };
     RunMetrics: {
+      cache_hit_input_tokens?: number;
+      cache_miss_input_tokens?: number;
+      detailed_usage_calls?: number;
       input_tokens?: number;
       llm_calls?: number;
       node_metrics?: Record<string, components["schemas"]["NodeMetrics"]>;
       output_tokens?: number;
+      reasoning_output_tokens?: number;
       tool_calls?: number;
       wall_time_seconds?: number;
     };

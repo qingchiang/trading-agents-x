@@ -804,8 +804,14 @@ def test_markdown_export_includes_total_and_per_node_metrics() -> None:
 
     assert "## Performance" in markdown
     assert "- Input tokens: `1200`" in markdown
-    assert "| `committee.final` | 1 | 0 | 300 | 100 | 4.000s |" in markdown
-    assert "| `analyst.market` | 2 | 2 | 900 | 200 | 2.500s |" in markdown
+    assert (
+        "| `committee.final` | 1 | 0 | 300 | 0 | 0 | 100 | 0 | 0 | "
+        "4.000s |"
+    ) in markdown
+    assert (
+        "| `analyst.market` | 2 | 2 | 900 | 0 | 0 | 200 | 0 | 0 | "
+        "2.500s |"
+    ) in markdown
     assert markdown.index("committee.final") < markdown.index("analyst.market")
 
 
