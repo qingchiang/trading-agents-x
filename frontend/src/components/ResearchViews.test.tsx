@@ -17,7 +17,7 @@ const firstRef = "ev_0123456789ab";
 const secondRef = "ev_111111111111";
 
 const evidence = {
-  version: "3",
+  version: "4",
   instrument: "NVDA",
   analysis_date: "2026-07-24",
   sealed_at: "2026-07-24T00:00:00Z",
@@ -93,7 +93,7 @@ const report = {
       id: "snapshot",
       title: "Snapshot section",
       narrative: "First narrative.",
-      table_ids: ["et_0123456789ab"],
+      source_table_ids: ["et_0123456789ab"],
     },
     {
       id: "comparison",
@@ -240,7 +240,7 @@ beforeEach(async () => {
   });
 });
 
-test("interleaves complete typed tables with report sections", () => {
+test("keeps source tables out of the reading report", () => {
   const onEvidence = vi.fn();
   render(
     <AnalystReportView
@@ -252,42 +252,35 @@ test("interleaves complete typed tables with report sections", () => {
   );
 
   const firstNarrative = screen.getByText("First narrative.");
-  const evidenceTitle = screen.getByRole("heading", {
-    name: "Complete evidence snapshot",
-  });
   const secondNarrative = screen.getByText("Second narrative.");
   const researchTitle = screen.getByRole("heading", { name: "AI comparison" });
   expect(
-    firstNarrative.compareDocumentPosition(evidenceTitle) &
-      Node.DOCUMENT_POSITION_FOLLOWING,
-  ).not.toBe(0);
-  expect(
-    evidenceTitle.compareDocumentPosition(secondNarrative) &
+    firstNarrative.compareDocumentPosition(secondNarrative) &
       Node.DOCUMENT_POSITION_FOLLOWING,
   ).not.toBe(0);
   expect(
     secondNarrative.compareDocumentPosition(researchTitle) &
       Node.DOCUMENT_POSITION_FOLLOWING,
   ).not.toBe(0);
-  expect(screen.getByText("Evidence data table")).toBeVisible();
+  expect(
+    screen.queryByRole("heading", { name: "Complete evidence snapshot" }),
+  ).not.toBeInTheDocument();
   expect(screen.getByText("AI research table")).toBeVisible();
   expect(
     screen.getByText("Current report view: 2/14 source rows."),
   ).toBeVisible();
   expect(screen.getByText("Derived value details")).toBeVisible();
 
-  const evidenceCard = evidenceTitle.closest("section");
-  expect(evidenceCard).not.toBeNull();
-  expect(within(evidenceCard!).queryByText("Value 14")).not.toBeInTheDocument();
-  fireEvent.click(
-    within(evidenceCard!).getByRole("button", { name: "Expand all rows" }),
-  );
-  expect(within(evidenceCard!).getByText("Value 14")).toBeVisible();
-
   fireEvent.click(
     screen.getByRole("button", { name: "Open complete evidence table" }),
   );
   expect(screen.getByText("Complete evidence table")).toBeVisible();
+  const evidenceTitle = screen.getByRole("heading", {
+    name: "Complete evidence snapshot",
+  });
+  const evidenceCard = evidenceTitle.closest("section");
+  expect(evidenceCard).not.toBeNull();
+  expect(within(evidenceCard!).queryByText("Value 14")).not.toBeInTheDocument();
   fireEvent.click(
     screen.getAllByRole("button", {
       name: `Open evidence ${firstRef}`,

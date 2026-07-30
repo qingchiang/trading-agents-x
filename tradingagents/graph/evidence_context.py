@@ -449,7 +449,7 @@ def _row_page(
         "operation": "rows",
         "evidence_refs": list(table.evidence_refs),
         "columns": list(columns),
-        "rows": [_row_payload(row, columns) for row in selected],
+        "rows": [_row_payload(row, columns, default_refs=table.evidence_refs) for row in selected],
         "returned_rows": len(selected),
         "matched_rows": len(rows),
         "cursor": str(next_offset) if next_offset < len(rows) else None,
@@ -502,8 +502,16 @@ def _extrema(
         minimum = min(material, key=lambda item: item[0])
         maximum = max(material, key=lambda item: item[0])
         output[column] = {
-            "min": _row_payload(minimum[1], (column,)),
-            "max": _row_payload(maximum[1], (column,)),
+            "min": _row_payload(
+                minimum[1],
+                (column,),
+                default_refs=table.evidence_refs,
+            ),
+            "max": _row_payload(
+                maximum[1],
+                (column,),
+                default_refs=table.evidence_refs,
+            ),
         }
     return {
         "table_id": table.id,
@@ -572,14 +580,20 @@ def _resample(
     }
 
 
-def _row_payload(row: Any, columns: tuple[str, ...]) -> dict[str, Any]:
+def _row_payload(
+    row: Any,
+    columns: tuple[str, ...],
+    *,
+    default_refs: tuple[str, ...],
+) -> dict[str, Any]:
+    inherited_refs = row.evidence_refs or default_refs
     return {
         "row_id": row.id,
         "cells": {
             column: {
                 "raw_value": row.cells[column].raw_value,
                 "display_value": row.cells[column].display_value,
-                "evidence_refs": list(row.cells[column].evidence_refs),
+                "evidence_refs": list(row.cells[column].evidence_refs or inherited_refs),
             }
             for column in columns
         },

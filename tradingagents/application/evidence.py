@@ -21,9 +21,7 @@ from .contracts import (
 
 _MARKDOWN_DIVIDER = re.compile(r"^:?-{3,}:?$")
 _INTEGER = re.compile(r"^[+-]?\d+$")
-_NUMBER = re.compile(
-    r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$"
-)
+_NUMBER = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$")
 _UNAVAILABLE_VALUES = {"", "-", "—", "n/a", "na", "null", "none"}
 _CSV_HEADER_HINTS = {
     "date",
@@ -79,16 +77,9 @@ def group_evidence_by_content(
     """Group only exact, non-empty bodies while retaining stable item order."""
     groups: dict[tuple[str, str], list[EvidenceItem]] = {}
     for item in items:
-        key = (
-            ("content", item.content)
-            if item.content
-            else ("ref", item.ref)
-        )
+        key = ("content", item.content) if item.content else ("ref", item.ref)
         groups.setdefault(key, []).append(item)
-    return tuple(
-        EvidenceContentGroup(items=tuple(group))
-        for group in groups.values()
-    )
+    return tuple(EvidenceContentGroup(items=tuple(group)) for group in groups.values())
 
 
 def extract_evidence_tables(
@@ -107,8 +98,7 @@ def extract_evidence_tables(
             continue
         source = group.canonical
         purpose = (
-            "Deterministically parsed from the complete "
-            f"{source.evidence_type} source payload."
+            f"Deterministically parsed from the complete {source.evidence_type} source payload."
         )
         candidates = [
             *_markdown_table_candidates(group.content),
@@ -116,7 +106,7 @@ def extract_evidence_tables(
         ]
         for title, headers, raw_rows, source_format in candidates:
             columns = _columns(headers, raw_rows)
-            rows = _rows(columns, raw_rows, group.refs)
+            rows = _rows(columns, raw_rows)
             if not rows:
                 continue
             table = EvidenceTable.create(
@@ -129,9 +119,7 @@ def extract_evidence_tables(
             )
             existing = tables.get(table.id)
             tables[table.id] = (
-                _merge_evidence_tables(existing, table)
-                if existing is not None
-                else table
+                _merge_evidence_tables(existing, table) if existing is not None else table
             )
     return tuple(tables.values())
 
@@ -221,11 +209,7 @@ def _csv_table_candidates(
     index = 0
     while index + 1 < len(lines):
         line = lines[index]
-        if (
-            not line.strip()
-            or line.lstrip().startswith(("#", "|"))
-            or "," not in line
-        ):
+        if not line.strip() or line.lstrip().startswith(("#", "|")) or "," not in line:
             index += 1
             continue
         headers = _csv_cells(line)
@@ -236,10 +220,7 @@ def _csv_table_candidates(
         cursor = index + 1
         while cursor < len(lines):
             candidate = lines[cursor]
-            if (
-                not candidate.strip()
-                or candidate.lstrip().startswith(("#", "|"))
-            ):
+            if not candidate.strip() or candidate.lstrip().startswith(("#", "|")):
                 break
             cells = _csv_cells(candidate)
             if cells is None or len(cells) != len(headers):
@@ -289,14 +270,10 @@ def _looks_like_csv_header(
     if len(rows) < 2:
         return False
     header_is_text = all(
-        _parse_number(header) is None and not _is_date(header)
-        for header in headers
-        if header
+        _parse_number(header) is None and not _is_date(header) for header in headers if header
     )
     data_has_typed_value = any(
-        _parse_number(cell) is not None or _is_date(cell)
-        for row in rows
-        for cell in row
+        _parse_number(cell) is not None or _is_date(cell) for row in rows for cell in row
     )
     return header_is_text and data_has_typed_value
 
@@ -352,7 +329,6 @@ def _columns(
 def _rows(
     columns: tuple[ResearchTableColumn, ...],
     rows: list[list[str]],
-    evidence_refs: tuple[str, ...],
 ) -> tuple[ResearchTableRow, ...]:
     output = []
     for row_index, values in enumerate(rows, start=1):
@@ -363,7 +339,6 @@ def _rows(
                 raw_value=_typed_value(displayed, column.data_type),
                 display_value=display_value,
                 kind=TableCellKind.OBSERVATION,
-                evidence_refs=evidence_refs,
             )
         output.append(
             ResearchTableRow(
@@ -379,9 +354,7 @@ def _infer_column_type(
     values: list[str],
 ) -> tuple[TableDataType, str | None]:
     material = [
-        value.strip()
-        for value in values
-        if value.strip().casefold() not in _UNAVAILABLE_VALUES
+        value.strip() for value in values if value.strip().casefold() not in _UNAVAILABLE_VALUES
     ]
     lowered_label = label.casefold()
     if not material:
@@ -399,16 +372,9 @@ def _infer_column_type(
     if all(number is not None for number in numbers):
         if currency:
             return TableDataType.CURRENCY, currency
-        if (
-            "%" in label
-            or "percent" in lowered_label
-            or "percentage" in lowered_label
-        ):
+        if "%" in label or "percent" in lowered_label or "percentage" in lowered_label:
             return TableDataType.PERCENTAGE, "%"
-        if all(
-            isinstance(number, int) and not isinstance(number, bool)
-            for number in numbers
-        ):
+        if all(isinstance(number, int) and not isinstance(number, bool) for number in numbers):
             return TableDataType.INTEGER, None
         return TableDataType.NUMBER, None
     return TableDataType.TEXT, currency

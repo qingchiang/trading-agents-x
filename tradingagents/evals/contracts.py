@@ -27,9 +27,7 @@ from tradingagents.application.contracts import (
     TableCellKind,
 )
 
-_NUMBER_RE = re.compile(
-    r"(?<![A-Za-z0-9_])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?%?"
-)
+_NUMBER_RE = re.compile(r"(?<![A-Za-z0-9_])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?%?")
 _EVIDENCE_REF_RE = re.compile(r"ev_[a-f0-9]{12}")
 _PROHIBITED_RE = re.compile(
     r"\b(?:"
@@ -164,9 +162,7 @@ class EvalMeasurement(_FrozenModel):
     def validate_variant(self) -> EvalMeasurement:
         expected = _VARIANT_CONTRACT[self.variant]
         if (self.layer, self.profile) != expected:
-            raise ValueError(
-                f"{self.variant} requires layer/profile {expected[0]}/{expected[1]}"
-            )
+            raise ValueError(f"{self.variant} requires layer/profile {expected[0]}/{expected[1]}")
         return self
 
 
@@ -247,15 +243,11 @@ def validate_research_output(
                 severity="severe",
                 code="decision.rating_inconsistent",
                 location="decision.rating",
-                message=(
-                    f"Expected {expected_rating.value}, got {decision.rating.value}."
-                ),
+                message=(f"Expected {expected_rating.value}, got {decision.rating.value}."),
             )
         )
 
-    expected_terms = tuple(
-        term.strip().casefold() for term in expected_risk_terms if term.strip()
-    )
+    expected_terms = tuple(term.strip().casefold() for term in expected_risk_terms if term.strip())
     risk_text = "\n".join(decision.risks).casefold()
     risk_recall = (
         sum(term in risk_text for term in expected_terms) / len(expected_terms)
@@ -301,20 +293,14 @@ def evaluate_release_gates(
         for label in ("baseline_analyst", "current_analyst")
     }
     if len(analyst_case_sets) != 1:
-        raise ValueError(
-            "main and V2 Analyst groups must cover the same cases"
-        )
+        raise ValueError("main and V2 Analyst groups must cover the same cases")
     graph_case_sets = {
         frozenset(item.case_id for item in groups[label])
         for label in ("baseline_medium", "current_standard", "current_deep")
     }
     if len(graph_case_sets) != 1:
-        raise ValueError(
-            "main Medium, V2 Standard, and V2 Deep must cover the same cases"
-        )
-    all_measurements = tuple(
-        item for measurements in groups.values() for item in measurements
-    )
+        raise ValueError("main Medium, V2 Standard, and V2 Deep must cover the same cases")
+    all_measurements = tuple(item for measurements in groups.values() for item in measurements)
     _validate_recorded_identity(all_measurements)
     _validate_case_evidence_hashes(all_measurements)
     _validate_commit_identity(groups)
@@ -325,21 +311,13 @@ def evaluate_release_gates(
             summary[f"{label}_{dimension}"] = median(
                 getattr(item.quality, dimension) for item in measurements
             )
-        summary[f"{label}_llm_calls"] = median(
-            item.llm_calls for item in measurements
-        )
-        summary[f"{label}_input_tokens"] = median(
-            item.input_tokens for item in measurements
-        )
-        summary[f"{label}_output_tokens"] = median(
-            item.output_tokens for item in measurements
-        )
+        summary[f"{label}_llm_calls"] = median(item.llm_calls for item in measurements)
+        summary[f"{label}_input_tokens"] = median(item.input_tokens for item in measurements)
+        summary[f"{label}_output_tokens"] = median(item.output_tokens for item in measurements)
         summary[f"{label}_wall_time_seconds"] = median(
             item.wall_time_seconds for item in measurements
         )
-        summary[f"{label}_risk_recall"] = median(
-            item.risk_recall for item in measurements
-        )
+        summary[f"{label}_risk_recall"] = median(item.risk_recall for item in measurements)
 
     checks = {
         "zero_severe_regressions": all(
@@ -350,16 +328,13 @@ def evaluate_release_gates(
     }
     for dimension in _QUALITY_DIMENSIONS:
         checks[f"analyst_{dimension}_not_lower"] = (
-            summary[f"current_analyst_{dimension}"]
-            >= summary[f"baseline_analyst_{dimension}"]
+            summary[f"current_analyst_{dimension}"] >= summary[f"baseline_analyst_{dimension}"]
         )
         checks[f"standard_{dimension}_not_lower"] = (
-            summary[f"current_standard_{dimension}"]
-            >= summary[f"baseline_medium_{dimension}"]
+            summary[f"current_standard_{dimension}"] >= summary[f"baseline_medium_{dimension}"]
         )
         checks[f"deep_{dimension}_not_lower"] = (
-            summary[f"current_deep_{dimension}"]
-            >= summary[f"current_standard_{dimension}"]
+            summary[f"current_deep_{dimension}"] >= summary[f"current_standard_{dimension}"]
         )
     checks["deep_risk_recall_plus_10pp"] = (
         summary["current_deep_risk_recall"] + 1e-12
@@ -438,7 +413,7 @@ def _audit_bundle_reports(
                 issues,
             )
             for table_id in section.table_ids:
-                if table_id not in report_table_ids and table_id not in evidence_tables:
+                if table_id not in report_table_ids:
                     issues.append(
                         EvalIssue(
                             severity="severe",
@@ -449,6 +424,18 @@ def _audit_bundle_reports(
                     )
                 else:
                     presented_table_ids.add(table_id)
+            for table_id in section.source_table_ids:
+                if table_id not in evidence_tables:
+                    issues.append(
+                        EvalIssue(
+                            severity="severe",
+                            code="source_table_ref.unresolved",
+                            location=section_location,
+                            message=(
+                                f"Source table {table_id} is not present in the sealed evidence."
+                            ),
+                        )
+                    )
         for index, claim in enumerate(report.claims):
             claim_location = f"{location}.claims[{index}]"
             _check_refs(claim.evidence_refs, valid_refs, claim_location, issues)
@@ -513,8 +500,7 @@ def _audit_bundle_reports(
                 code="table.required",
                 location="reports",
                 message=(
-                    "Suitable tabular evidence exists but no table was placed "
-                    "in a report section."
+                    "Suitable tabular evidence exists but no table was placed in a report section."
                 ),
             )
         )
@@ -551,19 +537,13 @@ def _check_decision(
 ) -> None:
     _check_refs(decision.evidence_refs, valid_refs, "decision", issues)
     valid_memory_refs = set(memory.refs if memory is not None else ())
-    if (
-        memory is not None
-        and memory.instrument.casefold() != bundle.instrument.casefold()
-    ):
+    if memory is not None and memory.instrument.casefold() != bundle.instrument.casefold():
         issues.append(
             EvalIssue(
                 severity="severe",
                 code="memory.instrument_mismatch",
                 location="memory.instrument",
-                message=(
-                    f"Memory for {memory.instrument} cannot calibrate "
-                    f"{bundle.instrument}."
-                ),
+                message=(f"Memory for {memory.instrument} cannot calibrate {bundle.instrument}."),
             )
         )
     for ref in decision.memory_refs:
@@ -764,9 +744,7 @@ def _audit_payload(
     if isinstance(value, BaseModel):
         value = value.model_dump(mode="python")
     if isinstance(value, Mapping):
-        raw_refs = value.get("evidence_refs") or value.get(
-            "input_evidence_refs"
-        )
+        raw_refs = value.get("evidence_refs") or value.get("input_evidence_refs")
         refs = (
             tuple(str(ref) for ref in raw_refs)
             if isinstance(raw_refs, (list, tuple))
@@ -854,9 +832,7 @@ def _check_table(
                     severity="severe",
                     code="table.source_unresolved",
                     location=location,
-                    message=(
-                        f"Source evidence table {table.source_table_id} is missing."
-                    ),
+                    message=(f"Source evidence table {table.source_table_id} is missing."),
                 )
             )
         else:
@@ -871,15 +847,22 @@ def _check_table(
                             message=f"Source row {row_id} is missing.",
                         )
                     )
-    if isinstance(table, EvidenceTable):
-        _check_refs(table.evidence_refs, valid_refs, location, issues)
+    _check_refs(table.evidence_refs, valid_refs, location, issues)
     for row in table.rows:
+        _check_refs(
+            row.evidence_refs,
+            valid_refs,
+            f"{location}.rows.{row.id}",
+            issues,
+        )
+        inherited_refs = row.evidence_refs or table.evidence_refs
         for key, cell in row.cells.items():
             _check_table_cell(
                 cell,
                 evidence=evidence,
                 valid_refs=valid_refs,
                 location=f"{location}.rows.{row.id}.{key}",
+                inherited_refs=inherited_refs,
                 issues=issues,
             )
 
@@ -890,9 +873,11 @@ def _check_table_cell(
     evidence: Mapping[str, Any],
     valid_refs: set[str],
     location: str,
+    inherited_refs: tuple[str, ...],
     issues: list[EvalIssue],
 ) -> None:
     _check_refs(cell.evidence_refs, valid_refs, location, issues)
+    effective_refs = cell.evidence_refs or inherited_refs
     _check_text_health(cell.display_value, f"{location}.display_value", issues)
     if cell.kind is TableCellKind.DESCRIPTOR:
         return
@@ -940,15 +925,13 @@ def _check_table_cell(
                         severity="severe",
                         code="derived.result_mismatch",
                         location=f"{location}.derived.result",
-                        message=(
-                            "Saved derived result does not match formula and inputs."
-                        ),
+                        message=("Saved derived result does not match formula and inputs."),
                     )
                 )
         return
     _check_exact_figures(
         cell.display_value,
-        cell.evidence_refs,
+        effective_refs,
         evidence,
         f"{location}.display_value",
         issues,
@@ -959,7 +942,7 @@ def _check_table_cell(
     ):
         _check_numeric_value(
             cell.raw_value,
-            cell.evidence_refs,
+            effective_refs,
             evidence,
             f"{location}.raw_value",
             issues,
@@ -1055,9 +1038,7 @@ def _check_exact_figures(
     numbers = tuple(dict.fromkeys(_NUMBER_RE.findall(clean_text)))
     if not numbers:
         return
-    payload = "\n".join(
-        _evidence_payload(evidence[ref]) for ref in refs if ref in evidence
-    )
+    payload = "\n".join(_evidence_payload(evidence[ref]) for ref in refs if ref in evidence)
     payload_numbers = _numeric_values(payload)
     for number in numbers:
         if number in payload:
@@ -1087,15 +1068,10 @@ def _check_numeric_value(
     *,
     code: str = "figure.untraceable",
 ) -> None:
-    payload = "\n".join(
-        _evidence_payload(evidence[ref]) for ref in refs if ref in evidence
-    )
+    payload = "\n".join(_evidence_payload(evidence[ref]) for ref in refs if ref in evidence)
     candidates = _numeric_values(payload)
     target = float(value)
-    if any(
-        math.isclose(target, candidate, rel_tol=1e-9, abs_tol=1e-9)
-        for candidate in candidates
-    ):
+    if any(math.isclose(target, candidate, rel_tol=1e-9, abs_tol=1e-9) for candidate in candidates):
         return
     issues.append(
         EvalIssue(
@@ -1131,9 +1107,7 @@ def _evidence_payload(item: Any) -> str:
             json.dumps(provenance, ensure_ascii=False, sort_keys=True),
             json.dumps(
                 [
-                    origin.model_dump(mode="json")
-                    if isinstance(origin, BaseModel)
-                    else origin
+                    origin.model_dump(mode="json") if isinstance(origin, BaseModel) else origin
                     for origin in origins
                 ],
                 ensure_ascii=False,
@@ -1223,34 +1197,22 @@ def _validate_measurement_matrix(
     prompt_hashes: dict[str, set[str]] = defaultdict(set)
     for item in measurements:
         if item.variant != expected_variant:
-            raise ValueError(
-                f"{label} requires variant {expected_variant}, got {item.variant}"
-            )
+            raise ValueError(f"{label} requires variant {expected_variant}, got {item.variant}")
         key = (item.case_id, item.repetition)
         if key in seen:
             raise ValueError(
-                f"{label} contains duplicate measurement "
-                f"{item.case_id}/{item.repetition}"
+                f"{label} contains duplicate measurement {item.case_id}/{item.repetition}"
             )
         seen.add(key)
         repetitions[item.case_id].add(item.repetition)
         prompt_hashes[item.case_id].add(item.prompt_hash)
-    incomplete = [
-        case_id
-        for case_id, values in repetitions.items()
-        if values != {1, 2, 3}
-    ]
+    incomplete = [case_id for case_id, values in repetitions.items() if values != {1, 2, 3}]
     if incomplete:
-        raise ValueError(
-            f"{label} requires repetitions 1, 2, 3 for: {', '.join(incomplete)}"
-        )
-    unstable_prompts = [
-        case_id for case_id, values in prompt_hashes.items() if len(values) != 1
-    ]
+        raise ValueError(f"{label} requires repetitions 1, 2, 3 for: {', '.join(incomplete)}")
+    unstable_prompts = [case_id for case_id, values in prompt_hashes.items() if len(values) != 1]
     if unstable_prompts:
         raise ValueError(
-            f"{label} prompt hash changed across repetitions for: "
-            f"{', '.join(unstable_prompts)}"
+            f"{label} prompt hash changed across repetitions for: {', '.join(unstable_prompts)}"
         )
 
 
@@ -1270,9 +1232,7 @@ def _validate_recorded_identity(
     )
     for field in fields:
         if len({getattr(item, field) for item in measurements}) != 1:
-            raise ValueError(
-                f"all release-gate measurements must use the same {field}"
-            )
+            raise ValueError(f"all release-gate measurements must use the same {field}")
 
 
 def _validate_case_evidence_hashes(
@@ -1284,8 +1244,7 @@ def _validate_case_evidence_hashes(
     mismatched = [case_id for case_id, values in hashes.items() if len(values) != 1]
     if mismatched:
         raise ValueError(
-            "all variants must use the same frozen evidence for: "
-            + ", ".join(mismatched)
+            "all variants must use the same frozen evidence for: " + ", ".join(mismatched)
         )
 
 

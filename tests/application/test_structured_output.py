@@ -429,7 +429,8 @@ def test_analyst_report_is_synthesized_from_catalogued_evidence() -> None:
     )
 
     assert result.generation_method is ArtifactGenerationMethod.TOOL_CALL
-    assert result.value.sections[0].table_ids == (bundle.tables[0].id,)
+    assert result.value.sections[0].source_table_ids == (bundle.tables[0].id,)
+    assert result.value.sections[0].table_ids == ("rt_fundamentals_source_view",)
     assert '"row_count": 1' in llm.calls[0][1]
     assert '"Revenue"' not in llm.calls[0][1]
     assert "EVIDENCE CATALOG" in llm.calls[0][1]
@@ -623,7 +624,7 @@ class _SectionedInvoker:
                         {
                             "id": section_id,
                             "title": title,
-                            "evidence_table_ids": (),
+                            "source_table_ids": (),
                         }
                         for section_id, title in _ANALYST_SECTIONS["market"]
                     ),

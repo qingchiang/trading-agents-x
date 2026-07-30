@@ -462,7 +462,7 @@ def test_profiles_share_contract_but_use_distinct_topologies(
     assert required_nodes <= completed
     assert not forbidden_nodes & completed
     assert set(execution.reports) == {"market", "news"}
-    assert execution.evidence.version == "3"
+    assert execution.evidence.version == "4"
     assert execution.evidence.digest
     assert execution.decision.rating is ResearchRating.HOLD
     valid_refs = {item.ref for item in execution.evidence.items}

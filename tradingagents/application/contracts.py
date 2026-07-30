@@ -25,9 +25,7 @@ from tradingagents.dataflows.symbol_utils import (
 )
 
 _SYMBOL_PATTERN = re.compile(r"^[A-Z0-9^][A-Z0-9.^=_-]*$")
-_MEMORY_REF_PATTERN = re.compile(
-    r"^memory:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
-)
+_MEMORY_REF_PATTERN = re.compile(r"^memory:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _EVIDENCE_REF_PATTERN = re.compile(r"^ev_[a-f0-9]{12}$")
 _RESEARCH_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_.-]*$")
 
@@ -72,9 +70,7 @@ class ReportLanguage(str, Enum):
     def prompt_label(self) -> str:
         return {
             ReportLanguage.ENGLISH: "English (en)",
-            ReportLanguage.SIMPLIFIED_CHINESE: (
-                "Simplified Chinese (简体中文, zh-CN)"
-            ),
+            ReportLanguage.SIMPLIFIED_CHINESE: ("Simplified Chinese (简体中文, zh-CN)"),
             ReportLanguage.JAPANESE: "Japanese (日本語, ja)",
         }[self]
 
@@ -298,9 +294,7 @@ class EvidenceItem(FrozenModel):
             "provenance": provenance or {},
         }
         if origins:
-            payload["origins"] = [
-                origin.model_dump(mode="json") for origin in origins
-            ]
+            payload["origins"] = [origin.model_dump(mode="json") for origin in origins]
         digest = hashlib.sha256(
             json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode()
         ).hexdigest()[:12]
@@ -348,10 +342,7 @@ class DerivedValue(FrozenModel):
         cls,
         value: dict[str, int | float],
     ) -> dict[str, int | float]:
-        if any(
-            not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", key)
-            for key in value
-        ):
+        if any(not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", key) for key in value):
             raise ValueError("derived input names must be identifiers")
         if any(isinstance(item, bool) for item in value.values()):
             raise ValueError("derived inputs must be numeric")
@@ -395,25 +386,13 @@ class ResearchTableCell(FrozenModel):
         if self.kind is TableCellKind.DERIVED:
             if self.derived is None:
                 raise ValueError("derived cells require derivation details")
-            if not set(self.derived.input_evidence_refs).issubset(
-                self.evidence_refs
-            ):
-                raise ValueError(
-                    "derived cell refs must include every derivation input ref"
-                )
+            if not set(self.derived.input_evidence_refs).issubset(self.evidence_refs):
+                raise ValueError("derived cell refs must include every derivation input ref")
             if self.raw_value != self.derived.result:
-                raise ValueError(
-                    "derived cell raw value must equal the saved result"
-                )
+                raise ValueError("derived cell raw value must equal the saved result")
             return self
         if self.derived is not None:
-            raise ValueError(
-                "only derived cells may contain derivation details"
-            )
-        if not self.evidence_refs:
-            raise ValueError(
-                "observations and inferences require evidence refs"
-            )
+            raise ValueError("only derived cells may contain derivation details")
         return self
 
 
@@ -422,6 +401,18 @@ class ResearchTableRow(FrozenModel):
 
     id: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
     cells: dict[str, ResearchTableCell] = Field(min_length=1)
+    evidence_refs: tuple[str, ...] = ()
+
+    @field_validator("evidence_refs")
+    @classmethod
+    def validate_evidence_refs(
+        cls,
+        value: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        refs = tuple(dict.fromkeys(value))
+        if any(not re.fullmatch(r"ev_[a-f0-9]{12}", ref) for ref in refs):
+            raise ValueError("table rows must use valid evidence refs")
+        return refs
 
 
 def _validate_table_shape(
@@ -438,9 +429,7 @@ def _validate_table_shape(
     expected = set(column_keys)
     for row in rows:
         if set(row.cells) != expected:
-            raise ValueError(
-                f"table row {row.id} cells must exactly match its columns"
-            )
+            raise ValueError(f"table row {row.id} cells must exactly match its columns")
 
 
 class EvidenceTable(FrozenModel):
@@ -470,15 +459,13 @@ class EvidenceTable(FrozenModel):
         _validate_table_shape(columns=self.columns, rows=self.rows)
         table_refs = set(self.evidence_refs)
         for row in self.rows:
+            if not set(row.evidence_refs).issubset(table_refs):
+                raise ValueError("evidence table row refs must belong to the table")
             for cell in row.cells.values():
                 if cell.kind is not TableCellKind.OBSERVATION:
-                    raise ValueError(
-                        "deterministic evidence tables contain observations only"
-                    )
+                    raise ValueError("deterministic evidence tables contain observations only")
                 if not set(cell.evidence_refs).issubset(table_refs):
-                    raise ValueError(
-                        "evidence table cell refs must belong to the table"
-                    )
+                    raise ValueError("evidence table cell refs must belong to the table")
         return self
 
     @classmethod
@@ -495,9 +482,7 @@ class EvidenceTable(FrozenModel):
         payload = {
             "title": title,
             "purpose": purpose,
-            "columns": [
-                column.model_dump(mode="json") for column in columns
-            ],
+            "columns": [column.model_dump(mode="json") for column in columns],
             "rows": [row.model_dump(mode="json") for row in rows],
             "evidence_refs": list(dict.fromkeys(evidence_refs)),
             "source_format": source_format,
@@ -549,6 +534,7 @@ class ResearchTable(FrozenModel):
     purpose: str = Field(min_length=1)
     columns: tuple[ResearchTableColumn, ...] = Field(min_length=1)
     rows: tuple[ResearchTableRow, ...] = Field(min_length=1)
+    evidence_refs: tuple[str, ...] = ()
     source_table_id: str | None = Field(
         default=None,
         pattern=r"^et_[a-f0-9]{12}$",
@@ -556,44 +542,69 @@ class ResearchTable(FrozenModel):
     total_source_rows: int | None = Field(default=None, ge=1)
     source_row_ids: tuple[str, ...] = ()
 
+    @field_validator("evidence_refs")
+    @classmethod
+    def validate_evidence_refs(
+        cls,
+        value: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        refs = tuple(dict.fromkeys(value))
+        if any(not re.fullmatch(r"ev_[a-f0-9]{12}", ref) for ref in refs):
+            raise ValueError("research tables must use valid evidence refs")
+        return refs
+
     @field_validator("source_row_ids")
     @classmethod
     def validate_source_row_ids(
         cls,
         value: tuple[str, ...],
     ) -> tuple[str, ...]:
-        if any(
-            not re.fullmatch(r"[a-z][a-z0-9_.-]*", row_id)
-            for row_id in value
-        ):
+        if any(not re.fullmatch(r"[a-z][a-z0-9_.-]*", row_id) for row_id in value):
             raise ValueError("research table source row IDs are invalid")
         return value
 
     @model_validator(mode="after")
     def validate_table(self) -> ResearchTable:
         _validate_table_shape(columns=self.columns, rows=self.rows)
-        if (self.source_table_id is None) != (
-            self.total_source_rows is None
-        ):
-            raise ValueError(
-                "source table ID and total source rows must be supplied together"
+        if not self.evidence_refs:
+            inferred_refs = tuple(
+                dict.fromkeys(
+                    ref
+                    for row in self.rows
+                    for ref in (
+                        *row.evidence_refs,
+                        *(
+                            cell_ref
+                            for cell in row.cells.values()
+                            for cell_ref in cell.evidence_refs
+                        ),
+                    )
+                )
             )
-        if (
-            self.total_source_rows is not None
-            and self.total_source_rows < len(self.rows)
-        ):
-            raise ValueError(
-                "total source rows cannot be less than displayed rows"
-            )
+            if inferred_refs:
+                object.__setattr__(self, "evidence_refs", inferred_refs)
+        table_refs = set(self.evidence_refs)
+        for row in self.rows:
+            if row.evidence_refs and not set(row.evidence_refs).issubset(table_refs):
+                raise ValueError("research table row refs must belong to the table")
+            inherited_refs = set(row.evidence_refs) or table_refs
+            for cell in row.cells.values():
+                if cell.kind is TableCellKind.DESCRIPTOR:
+                    continue
+                effective_refs = set(cell.evidence_refs) or inherited_refs
+                if not effective_refs:
+                    raise ValueError("research table values require inherited evidence")
+                if not effective_refs.issubset(table_refs):
+                    raise ValueError("research table cell refs must belong to the table")
+        if (self.source_table_id is None) != (self.total_source_rows is None):
+            raise ValueError("source table ID and total source rows must be supplied together")
+        if self.total_source_rows is not None and self.total_source_rows < len(self.rows):
+            raise ValueError("total source rows cannot be less than displayed rows")
         if self.source_table_id is None and self.source_row_ids:
-            raise ValueError(
-                "source row IDs require a source evidence table"
-            )
+            raise ValueError("source row IDs require a source evidence table")
         if self.source_table_id is not None:
             if len(self.source_row_ids) != len(self.rows):
-                raise ValueError(
-                    "source table views require one source row ID per row"
-                )
+                raise ValueError("source table views require one source row ID per row")
             if len(self.source_row_ids) != len(set(self.source_row_ids)):
                 raise ValueError("source row IDs must be unique")
         return self
@@ -602,7 +613,7 @@ class ResearchTable(FrozenModel):
 class EvidenceBundle(FrozenModel):
     """Versioned evidence snapshot shared by every agent in one run."""
 
-    version: Literal["3"] = "3"
+    version: Literal["4"] = "4"
     instrument: str
     analysis_date: date
     items: tuple[EvidenceItem, ...]
@@ -617,37 +628,27 @@ class EvidenceBundle(FrozenModel):
             raise ValueError("evidence refs must be unique")
         for item in self.items:
             if item.effective_date and item.effective_date > self.analysis_date:
-                raise ValueError(
-                    f"{item.ref} effective_date is after the analysis cutoff"
-                )
+                raise ValueError(f"{item.ref} effective_date is after the analysis cutoff")
             if item.available_at:
                 if item.available_at.utcoffset() is None:
-                    raise ValueError(
-                        f"{item.ref} available_at must include a timezone"
-                    )
+                    raise ValueError(f"{item.ref} available_at must include a timezone")
                 available_date = item.available_at.astimezone(
                     market_timezone(self.instrument)
                 ).date()
                 if available_date > self.analysis_date:
-                    raise ValueError(
-                        f"{item.ref} available_at is after the analysis cutoff"
-                    )
+                    raise ValueError(f"{item.ref} available_at is after the analysis cutoff")
         table_ids = [table.id for table in self.tables]
         if len(table_ids) != len(set(table_ids)):
             raise ValueError("evidence table IDs must be unique")
         valid_refs = set(refs)
         for table in self.tables:
             if not set(table.evidence_refs).issubset(valid_refs):
-                raise ValueError(
-                    f"{table.id} contains refs outside this evidence bundle"
-                )
+                raise ValueError(f"{table.id} contains refs outside this evidence bundle")
         serialized_items = [item.model_dump(mode="json") for item in self.items]
         canonical = json.dumps(
             {
                 "items": serialized_items,
-                "tables": [
-                    table.model_dump(mode="json") for table in self.tables
-                ],
+                "tables": [table.model_dump(mode="json") for table in self.tables],
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -692,19 +693,25 @@ class AnalystSection(FrozenModel):
     title: str = Field(min_length=1)
     narrative: str = Field(min_length=1)
     table_ids: tuple[str, ...] = ()
+    source_table_ids: tuple[str, ...] = ()
 
     @field_validator("table_ids")
     @classmethod
     def validate_table_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         ids = tuple(dict.fromkeys(value))
-        if any(
-            not re.fullmatch(
-                r"(?:et_[a-f0-9]{12}|rt_[a-z0-9][a-z0-9_.-]*)",
-                table_id,
-            )
-            for table_id in ids
-        ):
-            raise ValueError("sections contain an invalid table ID")
+        if any(not re.fullmatch(r"rt_[a-z0-9][a-z0-9_.-]*", table_id) for table_id in ids):
+            raise ValueError("sections contain an invalid research table ID")
+        return ids
+
+    @field_validator("source_table_ids")
+    @classmethod
+    def validate_source_table_ids(
+        cls,
+        value: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        ids = tuple(dict.fromkeys(value))
+        if any(not re.fullmatch(r"et_[a-f0-9]{12}", table_id) for table_id in ids):
+            raise ValueError("sections contain an invalid source table ID")
         return ids
 
 
@@ -786,24 +793,20 @@ class AnalystReport(FrozenModel):
         table_ids = tuple(table.id for table in self.tables)
         if len(table_ids) != len(set(table_ids)):
             raise ValueError("research table IDs must be unique")
-        referenced_table_ids = {
-            table_id
-            for section in self.sections
-            for table_id in section.table_ids
-        }
-        if not set(table_ids).issubset(referenced_table_ids):
-            raise ValueError(
-                "every research table must be placed in an analyst section"
-            )
+        referenced_table_ids = [
+            table_id for section in self.sections for table_id in section.table_ids
+        ]
+        if len(referenced_table_ids) != len(set(referenced_table_ids)):
+            raise ValueError("a research table cannot be placed in multiple sections")
+        if set(table_ids) != set(referenced_table_ids):
+            raise ValueError("every research table must be placed in an analyst section")
         return self
 
 
 class ResearchCaseArgument(FrozenModel):
     """One explicit argument in a bull or bear research case."""
 
-    id: str = Field(
-        pattern=r"^case\.(?:bull|bear)\.[a-z0-9][a-z0-9_.-]*$"
-    )
+    id: str = Field(pattern=r"^case\.(?:bull|bear)\.[a-z0-9][a-z0-9_.-]*$")
     claim_ids: tuple[str, ...] = Field(min_length=1)
     statement: str = Field(min_length=1)
     mechanism: str = Field(min_length=1)
@@ -851,20 +854,11 @@ class ResearchCase(FrozenModel):
         argument_ids = tuple(argument.id for argument in self.arguments)
         if len(argument_ids) != len(set(argument_ids)):
             raise ValueError("research case argument IDs must be unique")
-        if any(
-            not argument.id.startswith(f"case.{self.role}.")
-            for argument in self.arguments
-        ):
+        if any(not argument.id.startswith(f"case.{self.role}.") for argument in self.arguments):
             raise ValueError("research case argument IDs use the wrong role")
-        used = {
-            ref
-            for argument in self.arguments
-            for ref in argument.evidence_refs
-        }
+        used = {ref for argument in self.arguments for ref in argument.evidence_refs}
         if not used.issubset(self.evidence_refs):
-            raise ValueError(
-                "research case refs must include all argument evidence"
-            )
+            raise ValueError("research case refs must include all argument evidence")
         return self
 
 
@@ -913,22 +907,16 @@ class DebateAgenda(FrozenModel):
         issue_ids = tuple(issue.id for issue in self.issues)
         if len(issue_ids) != len(set(issue_ids)):
             raise ValueError("debate issue IDs must be unique")
-        used = {
-            ref for issue in self.issues for ref in issue.evidence_refs
-        }
+        used = {ref for issue in self.issues for ref in issue.evidence_refs}
         if not used.issubset(self.evidence_refs):
-            raise ValueError(
-                "debate agenda refs must include all issue evidence"
-            )
+            raise ValueError("debate agenda refs must include all issue evidence")
         return self
 
 
 class RebuttalPoint(FrozenModel):
     """A targeted response to one agenda issue and its analyst claims."""
 
-    agenda_id: str = Field(
-        pattern=r"^debate\.issue_[a-z0-9][a-z0-9_.-]*$"
-    )
+    agenda_id: str = Field(pattern=r"^debate\.issue_[a-z0-9][a-z0-9_.-]*$")
     claim_ids: tuple[str, ...] = Field(min_length=1)
     response: str = Field(min_length=1)
     causal_mechanism: str = Field(min_length=1)
@@ -953,9 +941,7 @@ class RebuttalPoint(FrozenModel):
     @model_validator(mode="after")
     def validate_rebuttal_point(self) -> RebuttalPoint:
         if not set(self.new_evidence_refs).issubset(self.evidence_refs):
-            raise ValueError(
-                "new rebuttal evidence must be included in evidence_refs"
-            )
+            raise ValueError("new rebuttal evidence must be included in evidence_refs")
         return self
 
 
@@ -982,38 +968,24 @@ class RebuttalReview(FrozenModel):
     def validate_rebuttal(self) -> RebuttalReview:
         agenda_ids = tuple(response.agenda_id for response in self.responses)
         if len(agenda_ids) != len(set(agenda_ids)):
-            raise ValueError(
-                "one rebuttal cannot answer an agenda issue more than once"
-            )
-        response_refs = {
-            ref for response in self.responses for ref in response.evidence_refs
-        }
+            raise ValueError("one rebuttal cannot answer an agenda issue more than once")
+        response_refs = {ref for response in self.responses for ref in response.evidence_refs}
         response_new_refs = {
-            ref
-            for response in self.responses
-            for ref in response.new_evidence_refs
+            ref for response in self.responses for ref in response.new_evidence_refs
         }
         if not response_refs.issubset(self.evidence_refs):
-            raise ValueError(
-                "rebuttal refs must include all response evidence"
-            )
+            raise ValueError("rebuttal refs must include all response evidence")
         if not response_new_refs.issubset(self.new_evidence_refs):
-            raise ValueError(
-                "rebuttal new refs must include all response new evidence"
-            )
+            raise ValueError("rebuttal new refs must include all response new evidence")
         if not set(self.new_evidence_refs).issubset(self.evidence_refs):
-            raise ValueError(
-                "new rebuttal evidence must be included in evidence_refs"
-            )
+            raise ValueError("new rebuttal evidence must be included in evidence_refs")
         return self
 
 
 class DisputeRuling(FrozenModel):
     """The judge's auditable resolution of one debate-agenda issue."""
 
-    agenda_id: str = Field(
-        pattern=r"^debate\.issue_[a-z0-9][a-z0-9_.-]*$"
-    )
+    agenda_id: str = Field(pattern=r"^debate\.issue_[a-z0-9][a-z0-9_.-]*$")
     resolution: DebateResolution
     rationale: str = Field(min_length=1)
     accepted_claim_ids: tuple[str, ...] = ()
@@ -1063,9 +1035,7 @@ class JudgeDraft(FrozenModel):
     def validate_memory_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         refs = tuple(dict.fromkeys(value))
         if any(not _MEMORY_REF_PATTERN.fullmatch(ref) for ref in refs):
-            raise ValueError(
-                "memory refs must use the memory:<run_id> format"
-            )
+            raise ValueError("memory refs must use the memory:<run_id> format")
         return refs
 
     @model_validator(mode="after")
@@ -1073,13 +1043,9 @@ class JudgeDraft(FrozenModel):
         agenda_ids = tuple(ruling.agenda_id for ruling in self.rulings)
         if len(agenda_ids) != len(set(agenda_ids)):
             raise ValueError("judge rulings must use unique agenda IDs")
-        ruling_refs = {
-            ref for ruling in self.rulings for ref in ruling.evidence_refs
-        }
+        ruling_refs = {ref for ruling in self.rulings for ref in ruling.evidence_refs}
         if not ruling_refs.issubset(self.evidence_refs):
-            raise ValueError(
-                "judge refs must include all ruling evidence"
-            )
+            raise ValueError("judge refs must include all ruling evidence")
         return self
 
 
@@ -1132,13 +1098,9 @@ class RiskReview(FrozenModel):
         finding_ids = tuple(finding.id for finding in self.findings)
         if len(finding_ids) != len(set(finding_ids)):
             raise ValueError("risk finding IDs must be unique")
-        finding_refs = {
-            ref for finding in self.findings for ref in finding.evidence_refs
-        }
+        finding_refs = {ref for finding in self.findings for ref in finding.evidence_refs}
         if not finding_refs.issubset(self.evidence_refs):
-            raise ValueError(
-                "risk review refs must include all finding evidence"
-            )
+            raise ValueError("risk review refs must include all finding evidence")
         return self
 
 
@@ -1270,34 +1232,21 @@ class ResearchDecision(FrozenModel):
     def validate_decision(self) -> ResearchDecision:
         scenario_kinds = tuple(scenario.kind for scenario in self.scenarios)
         if set(scenario_kinds) != set(ResearchScenarioKind):
-            raise ValueError(
-                "research decision requires one base, bull, and bear scenario"
-            )
+            raise ValueError("research decision requires one base, bull, and bear scenario")
         if len(scenario_kinds) != len(set(scenario_kinds)):
             raise ValueError("research scenario kinds must be unique")
-        nested_refs = {
-            ref
-            for scenario in self.scenarios
-            for ref in scenario.evidence_refs
-        }
+        nested_refs = {ref for scenario in self.scenarios for ref in scenario.evidence_refs}
         if self.valuation_assessment is not None:
-            nested_refs.update(
-                self.valuation_assessment.input_evidence_refs
-            )
+            nested_refs.update(self.valuation_assessment.input_evidence_refs)
         nested_refs.update(
-            ref
-            for level in self.market_reference_levels
-            for ref in level.evidence_refs
+            ref for level in self.market_reference_levels for ref in level.evidence_refs
         )
         nested_refs.update(
-            ref
-            for adjustment in self.risk_review_adjustments
-            for ref in adjustment.evidence_refs
+            ref for adjustment in self.risk_review_adjustments for ref in adjustment.evidence_refs
         )
         if not nested_refs.issubset(self.evidence_refs):
             raise ValueError(
-                "decision refs must include scenario, valuation, and "
-                "market-reference evidence"
+                "decision refs must include scenario, valuation, and market-reference evidence"
             )
         return self
 
@@ -1334,13 +1283,9 @@ class MemoryRecord(FrozenModel):
             raise ValueError("memory ref must identify its run_id")
         if self.scope == "same_ticker":
             if self.decision is None or self.outcome is None:
-                raise ValueError(
-                    "same-ticker memory requires decision and outcome"
-                )
+                raise ValueError("same-ticker memory requires decision and outcome")
         elif self.decision is not None or self.outcome is not None:
-            raise ValueError(
-                "same-market memory must contain reflection-only feedback"
-            )
+            raise ValueError("same-market memory must contain reflection-only feedback")
         return self
 
     def prompt_text(self, max_chars: int = 2000) -> str:
@@ -1348,10 +1293,7 @@ class MemoryRecord(FrozenModel):
         parts = [
             f"REF: {self.ref}",
             f"SCOPE: {self.scope}",
-            (
-                f"PAST RUN: {self.analysis_date} | {self.ticker} | "
-                f"{self.market or 'unknown market'}"
-            ),
+            (f"PAST RUN: {self.analysis_date} | {self.ticker} | {self.market or 'unknown market'}"),
         ]
         if self.decision is not None:
             parts.append(
@@ -1399,21 +1341,15 @@ class MemoryContext(FrozenModel):
             raise ValueError("memory refs must be unique")
         instrument = self.instrument.casefold()
         for item in self.items:
-            if (
-                item.scope == "same_ticker"
-                and item.ticker.casefold() != instrument
-            ):
-                raise ValueError(
-                    "same-ticker memory must match the current instrument"
-                )
+            if item.scope == "same_ticker" and item.ticker.casefold() != instrument:
+                raise ValueError("same-ticker memory must match the current instrument")
             if item.scope == "same_market" and (
                 item.ticker.casefold() == instrument
                 or self.market is None
                 or item.market != self.market
             ):
                 raise ValueError(
-                    "same-market memory must be another instrument "
-                    "in the current market"
+                    "same-market memory must be another instrument in the current market"
                 )
         return self
 
@@ -1434,9 +1370,7 @@ class MemoryContext(FrozenModel):
         per_item = min(item_max_chars, available // len(self.items))
         if per_item <= 0:
             return ""
-        return "\n\n".join(
-            item.prompt_text(per_item) for item in self.items
-        )[:max_chars]
+        return "\n\n".join(item.prompt_text(per_item) for item in self.items)[:max_chars]
 
 
 ResearchArtifactContent = (
@@ -1565,9 +1499,12 @@ class AnalysisRequest(FrozenModel):
     analysis_date: date
     asset_type: AssetType | None = None
     profile: RunProfile = RunProfile.STANDARD
-    analysts: tuple[
-        Literal["market", "social", "news", "fundamentals"], ...
-    ] = ("market", "social", "news", "fundamentals")
+    analysts: tuple[Literal["market", "social", "news", "fundamentals"], ...] = (
+        "market",
+        "social",
+        "news",
+        "fundamentals",
+    )
     llm_provider: str | None = None
     quick_model: str | None = None
     deep_model: str | None = None
@@ -1616,13 +1553,9 @@ class AnalysisRequest(FrozenModel):
         elif self.asset_type != inferred and inferred is AssetType.CRYPTO:
             raise ValueError("known crypto symbols must use asset_type='crypto'")
         if inferred is AssetType.CRYPTO and "fundamentals" in self.analysts:
-            compatible = tuple(
-                analyst for analyst in self.analysts if analyst != "fundamentals"
-            )
+            compatible = tuple(analyst for analyst in self.analysts if analyst != "fundamentals")
             if not compatible:
-                raise ValueError(
-                    "crypto analysis requires a non-fundamentals analyst"
-                )
+                raise ValueError("crypto analysis requires a non-fundamentals analyst")
             object.__setattr__(self, "analysts", compatible)
         return self
 

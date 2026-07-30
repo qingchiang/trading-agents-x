@@ -54,6 +54,7 @@ export interface components {
     AnalystSection: {
       id: string;
       narrative: string;
+      source_table_ids?: string[];
       table_ids?: string[];
       title: string;
     };
@@ -336,6 +337,7 @@ export interface components {
     ResearchScenarioKind: "base" | "bull" | "bear";
     ResearchTable: {
       columns: components["schemas"]["ResearchTableColumn"][];
+      evidence_refs?: string[];
       id: string;
       purpose: string;
       rows: components["schemas"]["ResearchTableRow"][];
@@ -359,6 +361,7 @@ export interface components {
     };
     ResearchTableRow: {
       cells: Record<string, components["schemas"]["ResearchTableCell"]>;
+      evidence_refs?: string[];
       id: string;
     };
     ResearchWarning: {

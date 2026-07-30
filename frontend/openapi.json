@@ -378,6 +378,14 @@
             "title": "Narrative",
             "type": "string"
           },
+          "source_table_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Table Ids",
+            "type": "array"
+          },
           "table_ids": {
             "default": [],
             "items": {
@@ -852,8 +860,8 @@
             "type": "array"
           },
           "version": {
-            "const": "3",
-            "default": "3",
+            "const": "4",
+            "default": "4",
             "title": "Version",
             "type": "string"
           }
@@ -2333,6 +2341,14 @@
             "title": "Columns",
             "type": "array"
           },
+          "evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
           "id": {
             "pattern": "^rt_[a-z0-9][a-z0-9_.-]*$",
             "title": "Id",
@@ -2506,6 +2522,14 @@
             "minProperties": 1,
             "title": "Cells",
             "type": "object"
+          },
+          "evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
           },
           "id": {
             "pattern": "^[a-z][a-z0-9_.-]*$",

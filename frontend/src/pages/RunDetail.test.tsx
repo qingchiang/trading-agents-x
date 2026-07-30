@@ -186,7 +186,7 @@ const detail = {
       })),
     },
     evidence: {
-      version: "3",
+      version: "4",
       instrument: "NVDA",
       analysis_date: "2026-07-24",
       sealed_at: "2026-07-24T00:00:30Z",

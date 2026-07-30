@@ -71,10 +71,8 @@ export default function AnalystReportView({
             {section.narrative}
           </Markdown>
           {section.table_ids?.map((tableId) => {
-            const evidenceTable = evidenceTables.get(tableId);
             const researchTable = researchTables.get(tableId);
-            const table = evidenceTable ?? researchTable;
-            if (!table) {
+            if (!researchTable) {
               return (
                 <div className="missing-table" key={tableId}>
                   {t("missingResearchTable", { id: tableId })}
@@ -83,8 +81,11 @@ export default function AnalystReportView({
             }
             return (
               <ResearchTableView
-                table={table}
-                sourceTable={sourceTableFor(table, evidenceTables)}
+                table={researchTable}
+                sourceTable={sourceTableFor(
+                  researchTable,
+                  evidenceTables,
+                )}
                 evidenceIndex={evidenceIndex}
                 onEvidence={onEvidence}
                 key={tableId}

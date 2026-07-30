@@ -418,9 +418,9 @@ def test_bundle_digest_covers_items_and_tables_without_legacy_versions() -> None
         digest=digest,
     )
 
-    assert bundle.version == "3"
+    assert bundle.version == "4"
     assert bundle.digest == digest
-    with pytest.raises(ValidationError, match="Input should be '3'"):
+    with pytest.raises(ValidationError, match="Input should be '4'"):
         EvidenceBundle.model_validate(
             {
                 **bundle.model_dump(mode="json"),
@@ -465,11 +465,8 @@ def test_exact_source_tables_are_extracted_once_without_row_limits() -> None:
     assert len(csv_table.rows) == 28
     assert csv_table.columns[0].data_type is TableDataType.DATE
     assert csv_table.columns[1].data_type is TableDataType.NUMBER
-    assert all(
-        cell.evidence_refs == (first.ref, second.ref)
-        for row in csv_table.rows
-        for cell in row.cells.values()
-    )
+    assert all(not cell.evidence_refs for row in csv_table.rows for cell in row.cells.values())
+    assert csv_table.evidence_refs == (first.ref, second.ref)
 
 
 def test_source_table_empty_cells_remain_explicit_missing_values() -> None:
@@ -495,7 +492,8 @@ def test_source_table_empty_cells_remain_explicit_missing_values() -> None:
     assert value_cell.display_value == "—"
     assert change_cell.raw_value is None
     assert change_cell.display_value == "—"
-    assert value_cell.evidence_refs == (item.ref,)
+    assert value_cell.evidence_refs == ()
+    assert table.evidence_refs == (item.ref,)
 
 
 def test_table_contract_distinguishes_observed_and_derived_values() -> None:
@@ -545,11 +543,29 @@ def test_table_contract_distinguishes_observed_and_derived_values() -> None:
     )
 
     assert table.rows[0].cells["value"].derived.result == 2.5
-    with pytest.raises(ValidationError, match="require evidence refs"):
-        ResearchTableCell(
-            raw_value=12.5,
-            display_value="12.5%",
-            kind=TableCellKind.OBSERVATION,
+    inherited = ResearchTableCell(
+        raw_value=12.5,
+        display_value="12.5%",
+        kind=TableCellKind.OBSERVATION,
+    )
+    with pytest.raises(ValidationError, match="require inherited evidence"):
+        ResearchTable(
+            id="rt_missing_evidence",
+            title="Missing evidence",
+            purpose="Verify inherited evidence validation.",
+            columns=(
+                ResearchTableColumn(
+                    key="value",
+                    label="Value",
+                    data_type=TableDataType.PERCENTAGE,
+                ),
+            ),
+            rows=(
+                ResearchTableRow(
+                    id="row_0001",
+                    cells={"value": inherited},
+                ),
+            ),
         )
 
 

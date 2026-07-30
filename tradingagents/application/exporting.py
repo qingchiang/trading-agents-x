@@ -26,11 +26,6 @@ from .evidence import group_evidence_by_content
 def render_run_export_markdown(run_export: RunExport) -> str:
     """Render a human-readable audit document without hidden model messages."""
     result = run_export.result
-    evidence_tables = (
-        {table.id: table for table in run_export.evidence.tables}
-        if run_export.evidence is not None
-        else {}
-    )
     process_artifacts = tuple(
         artifact
         for artifact in run_export.artifacts
@@ -50,12 +45,7 @@ def render_run_export_markdown(run_export: RunExport) -> str:
         sections.extend(["", "_No final reports were recorded._"])
     for name, report in result.reports.items():
         narrative = (
-            _render_analyst_report(
-                report,
-                evidence_tables=evidence_tables,
-            )
-            if isinstance(report, AnalystReport)
-            else str(report)
+            _render_analyst_report(report) if isinstance(report, AnalystReport) else str(report)
         )
         sections.extend(
             [
@@ -78,10 +68,7 @@ def render_run_export_markdown(run_export: RunExport) -> str:
         sections.extend(
             [
                 "",
-                (
-                    f"### {artifact.stage} · {artifact.role} · "
-                    f"round {artifact.round}"
-                ),
+                (f"### {artifact.stage} · {artifact.role} · round {artifact.round}"),
                 "",
                 f"- Artifact: `{artifact.id}`",
                 f"- Attempt: `{artifact.attempt}`",
@@ -113,9 +100,7 @@ def render_run_export_markdown(run_export: RunExport) -> str:
             if warning.evidence_ref:
                 details.append(f"evidence: `{warning.evidence_ref}`")
             suffix = f" ({'; '.join(details)})" if details else ""
-            sections.append(
-                f"- **{warning.code}**: {warning.message}{suffix}"
-            )
+            sections.append(f"- **{warning.code}**: {warning.message}{suffix}")
 
     metrics = result.metrics
     sections.extend(
@@ -135,8 +120,7 @@ def render_run_export_markdown(run_export: RunExport) -> str:
         sections.extend(
             [
                 "",
-                "| Node | LLM calls | Tool calls | Input tokens | "
-                "Output tokens | Wall time |",
+                "| Node | LLM calls | Tool calls | Input tokens | Output tokens | Wall time |",
                 "|---|---:|---:|---:|---:|---:|",
             ]
         )
@@ -157,9 +141,7 @@ def render_run_export_markdown(run_export: RunExport) -> str:
 
     sections.extend(["", "## Evidence Appendix"])
     if run_export.evidence is None:
-        sections.extend(
-            ["", "_No sealed EvidenceBundle was recorded for this run._"]
-        )
+        sections.extend(["", "_No sealed EvidenceBundle was recorded for this run._"])
     else:
         sections.extend(
             [
@@ -178,22 +160,15 @@ def render_run_export_markdown(run_export: RunExport) -> str:
             item = group.canonical
             sources = tuple(
                 dict.fromkeys(
-                    origin.source
-                    for grouped_item in group.items
-                    for origin in grouped_item.origins
+                    origin.source for grouped_item in group.items for origin in grouped_item.origins
                 )
-            ) or tuple(
-                dict.fromkeys(
-                    grouped_item.source for grouped_item in group.items
-                )
-            )
+            ) or tuple(dict.fromkeys(grouped_item.source for grouped_item in group.items))
             sections.extend(
                 [
                     "",
                     f"### `{item.ref}`",
                     "",
-                    "- Refs: "
-                    + ", ".join(f"`{ref}`" for ref in group.refs),
+                    "- Refs: " + ", ".join(f"`{ref}`" for ref in group.refs),
                     f"- Sources: {', '.join(sources)}",
                     f"- Type: {item.evidence_type}",
                     f"- Quality: `{item.quality.value}`",
@@ -236,15 +211,12 @@ def _render_evidence_table(table: EvidenceTable) -> list[str]:
     """Render every persisted row; exports never inherit Web pagination."""
 
     refs = ", ".join(f"`{ref}`" for ref in table.evidence_refs)
-    headers = "| " + " | ".join(
-        _escape_table_cell(column.label) for column in table.columns
-    ) + " |"
+    headers = "| " + " | ".join(_escape_table_cell(column.label) for column in table.columns) + " |"
     divider = "|" + "|".join("---" for _column in table.columns) + "|"
     rows = [
         "| "
         + " | ".join(
-            _escape_table_cell(row.cells[column.key].display_value)
-            for column in table.columns
+            _escape_table_cell(row.cells[column.key].display_value) for column in table.columns
         )
         + " |"
         for row in table.rows
@@ -273,15 +245,12 @@ def _escape_table_cell(value: str) -> str:
 
 
 def _render_research_table(table: ResearchTable) -> list[str]:
-    headers = "| " + " | ".join(
-        _escape_table_cell(column.label) for column in table.columns
-    ) + " |"
+    headers = "| " + " | ".join(_escape_table_cell(column.label) for column in table.columns) + " |"
     divider = "|" + "|".join("---" for _column in table.columns) + "|"
     rows = [
         "| "
         + " | ".join(
-            _escape_table_cell(row.cells[column.key].display_value)
-            for column in table.columns
+            _escape_table_cell(row.cells[column.key].display_value) for column in table.columns
         )
         + " |"
         for row in table.rows
@@ -323,15 +292,9 @@ def _render_table_cell_audit(
             cell = row.cells[column.key]
             details = []
             if cell.evidence_refs:
-                details.append(
-                    "evidence "
-                    + ", ".join(f"`{ref}`" for ref in cell.evidence_refs)
-                )
+                details.append("evidence " + ", ".join(f"`{ref}`" for ref in cell.evidence_refs))
             if cell.derived is not None:
-                inputs = ", ".join(
-                    f"{name}={value}"
-                    for name, value in cell.derived.inputs.items()
-                )
+                inputs = ", ".join(f"{name}={value}" for name, value in cell.derived.inputs.items())
                 details.extend(
                     [
                         f"formula `{cell.derived.formula}`",
@@ -340,9 +303,7 @@ def _render_table_cell_audit(
                     ]
                 )
             if details:
-                entries.append(
-                    f"- `{row.id}.{column.key}`: " + "; ".join(details)
-                )
+                entries.append(f"- `{row.id}.{column.key}`: " + "; ".join(details))
     if not entries:
         return []
     return ["", "**Cell audit**", "", *entries]
@@ -350,8 +311,6 @@ def _render_table_cell_audit(
 
 def _render_analyst_report(
     report: AnalystReport,
-    *,
-    evidence_tables: dict[str, EvidenceTable],
 ) -> str:
     research_tables = {table.id: table for table in report.tables}
     lines = [
@@ -365,15 +324,17 @@ def _render_analyst_report(
     ]
     for section in report.sections:
         lines.extend(["", f"#### {section.title}", "", section.narrative])
+        if section.source_table_ids:
+            lines.extend(
+                [
+                    "",
+                    "- Source data: "
+                    + ", ".join(f"`{table_id}`" for table_id in section.source_table_ids),
+                ]
+            )
         for table_id in section.table_ids:
-            if table_id in evidence_tables:
-                lines.extend(
-                    ["", *_render_evidence_table(evidence_tables[table_id])]
-                )
-            elif table_id in research_tables:
-                lines.extend(
-                    ["", *_render_research_table(research_tables[table_id])]
-                )
+            if table_id in research_tables:
+                lines.extend(["", *_render_research_table(research_tables[table_id])])
     lines.extend(["", "#### Auditable Claims"])
     for claim in report.claims:
         lines.extend(
@@ -413,7 +374,7 @@ def _artifact_human_text(
     content: ResearchArtifactContent,
 ) -> str:
     if isinstance(content, AnalystReport):
-        return _render_analyst_report(content, evidence_tables={})
+        return _render_analyst_report(content)
     if isinstance(content, ResearchCase):
         return _render_research_case(content)
     if isinstance(content, DebateAgenda):
@@ -466,9 +427,7 @@ def _render_research_case(content: ResearchCase) -> str:
             content.strongest_counterarguments,
         )
     )
-    lines.extend(
-        _render_list("Fragile Assumptions", content.fragile_assumptions)
-    )
+    lines.extend(_render_list("Fragile Assumptions", content.fragile_assumptions))
     lines.extend(_render_list("Catalysts", content.catalysts))
     lines.extend(_render_list("Risks", content.risks))
     lines.extend(["", "##### Evidence", "", _render_refs(content.evidence_refs)])
@@ -520,10 +479,7 @@ def _render_rebuttal_review(content: RebuttalReview) -> str:
                 "",
                 f"- Claims: {_render_ids(response.claim_ids)}",
                 f"- Evidence: {_render_refs(response.evidence_refs)}",
-                (
-                    "- New evidence: "
-                    + _render_refs(response.new_evidence_refs)
-                ),
+                ("- New evidence: " + _render_refs(response.new_evidence_refs)),
                 "",
                 response.response,
                 "",
@@ -537,9 +493,7 @@ def _render_rebuttal_review(content: RebuttalReview) -> str:
                 level=6,
             )
         )
-    lines.extend(
-        _render_list("Review-level Remaining Questions", content.remaining_questions)
-    )
+    lines.extend(_render_list("Review-level Remaining Questions", content.remaining_questions))
     lines.extend(
         [
             "",
@@ -592,9 +546,7 @@ def _render_judge_draft(content: JudgeDraft) -> str:
             content.invalidation_conditions,
         )
     )
-    lines.extend(
-        _render_list("Unresolved Questions", content.unresolved_questions)
-    )
+    lines.extend(_render_list("Unresolved Questions", content.unresolved_questions))
     return "\n".join(lines)
 
 
@@ -613,10 +565,7 @@ def _render_risk_review(content: RiskReview) -> str:
         lines.extend(
             [
                 "",
-                (
-                    f"###### `{finding.id}` · {finding.kind.value} · "
-                    f"{finding.severity.value}"
-                ),
+                (f"###### `{finding.id}` · {finding.kind.value} · {finding.severity.value}"),
                 "",
                 f"- Related claims: {_render_ids(finding.related_claim_ids)}",
                 f"- Evidence: {_render_refs(finding.evidence_refs)}",
@@ -626,12 +575,8 @@ def _render_risk_review(content: RiskReview) -> str:
                 f"**Mechanism:** {finding.mechanism}",
             ]
         )
-    lines.extend(
-        _render_list("Invalidation Paths", content.invalidation_paths)
-    )
-    lines.extend(
-        _render_list("Recommended Changes", content.recommended_changes)
-    )
+    lines.extend(_render_list("Invalidation Paths", content.invalidation_paths))
+    lines.extend(_render_list("Recommended Changes", content.recommended_changes))
     return "\n".join(lines)
 
 
@@ -704,10 +649,7 @@ def _render_research_decision(content: ResearchDecision) -> str:
                     f"{assessment.currency}"
                 ),
                 f"- As of: `{assessment.as_of_date.isoformat()}`",
-                (
-                    "- Input evidence: "
-                    + _render_refs(assessment.input_evidence_refs)
-                ),
+                ("- Input evidence: " + _render_refs(assessment.input_evidence_refs)),
             ]
         )
         lines.extend(_render_list("Limitations", assessment.limitations))
@@ -736,19 +678,14 @@ def _render_research_decision(content: ResearchDecision) -> str:
             content.invalidation_conditions,
         )
     )
-    lines.extend(
-        _render_list("Unresolved Questions", content.unresolved_questions)
-    )
+    lines.extend(_render_list("Unresolved Questions", content.unresolved_questions))
     lines.extend(["", "### Final Committee Response to Risk Review"])
     if content.risk_review_adjustments:
         for adjustment in content.risk_review_adjustments:
             lines.extend(
                 [
                     "",
-                    (
-                        f"#### {adjustment.source_role.title()} · "
-                        f"{adjustment.disposition.value}"
-                    ),
+                    (f"#### {adjustment.source_role.title()} · {adjustment.disposition.value}"),
                     "",
                     f"**{adjustment.subject}**",
                     "",
