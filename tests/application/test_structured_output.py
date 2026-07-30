@@ -115,9 +115,7 @@ class _FakeLLM:
         if method == "json_mode" and self.reject_json_binding:
             raise ValueError("json mode unsupported")
         resolved = method or (
-            "json_mode"
-            if self.preferred_structured_output_method == "json_mode"
-            else "tool_call"
+            "json_mode" if self.preferred_structured_output_method == "json_mode" else "tool_call"
         )
         self.binds.append((resolved, dict(_kwargs)))
         response = self.recovery if method == "json_mode" else self.primary
@@ -188,9 +186,7 @@ def test_primary_json_mode_is_a_normal_validated_output() -> None:
     assert result.generation_method is ArtifactGenerationMethod.JSON_MODE
     assert [method for method, _ in llm.calls] == ["json_mode"]
     primary_prompt = llm.calls[0][1]
-    assert "Produce the required structured result using JSON Output." in (
-        primary_prompt
-    )
+    assert "Produce the required structured result using JSON Output." in (primary_prompt)
     assert "Return exactly one JSON object" in primary_prompt
     assert "JSON SCHEMA:" in primary_prompt
     assert "VALID EXAMPLE:" in primary_prompt
@@ -217,13 +213,9 @@ def test_raw_json_is_recovered_without_another_logical_call() -> None:
 
     result = _invoke(_runner(llm, events))
 
-    assert result.generation_method is (
-        ArtifactGenerationMethod.RAW_JSON_RECOVERED
-    )
+    assert result.generation_method is (ArtifactGenerationMethod.RAW_JSON_RECOVERED)
     assert [method for method, _ in llm.calls] == ["tool_call"]
-    assert [event["event_type"] for event in events] == [
-        "node.output_recovered"
-    ]
+    assert [event["event_type"] for event in events] == ["node.output_recovered"]
 
 
 def test_json_mode_recovery_succeeds_with_two_logical_calls() -> None:
@@ -243,9 +235,7 @@ def test_json_mode_recovery_succeeds_with_two_logical_calls() -> None:
 
     result = _invoke(_runner(llm, events))
 
-    assert result.generation_method is (
-        ArtifactGenerationMethod.JSON_MODE_RECOVERED
-    )
+    assert result.generation_method is (ArtifactGenerationMethod.JSON_MODE_RECOVERED)
     assert [method for method, _ in llm.calls] == [
         "tool_call",
         "json_mode",
@@ -278,9 +268,7 @@ def test_json_recovery_receives_safe_schema_issue_paths() -> None:
 
     result = _invoke(_runner(llm, events))
 
-    assert result.generation_method is (
-        ArtifactGenerationMethod.JSON_MODE_RECOVERED
-    )
+    assert result.generation_method is (ArtifactGenerationMethod.JSON_MODE_RECOVERED)
     issue = "schema.evidence_refs.tuple_type"
     assert issue in llm.calls[1][1]
     assert events[0]["payload"]["validation_issues"] == [issue]
@@ -308,9 +296,7 @@ def test_truncated_primary_output_retries_with_specific_reason() -> None:
 
     result = _invoke(_runner(llm, events))
 
-    assert result.generation_method is (
-        ArtifactGenerationMethod.JSON_MODE_RECOVERED
-    )
+    assert result.generation_method is (ArtifactGenerationMethod.JSON_MODE_RECOVERED)
     assert [event["event_type"] for event in events] == [
         "node.output_retry",
         "node.output_recovered",
@@ -351,9 +337,7 @@ def test_prompt_json_recovery_is_strict_when_provider_has_no_json_mode() -> None
 
     result = _invoke(_runner(llm, events))
 
-    assert result.generation_method is (
-        ArtifactGenerationMethod.JSON_MODE_RECOVERED
-    )
+    assert result.generation_method is (ArtifactGenerationMethod.JSON_MODE_RECOVERED)
     assert [method for method, _ in llm.calls] == [
         "tool_call",
         "prompt_json",
@@ -395,10 +379,7 @@ def test_two_invalid_outputs_fail_without_leaking_provider_content() -> None:
 
 def _analyst_bundle(*, with_table: bool = True) -> EvidenceBundle:
     content = (
-        "## Verified snapshot\n\n"
-        "| Metric | Value |\n"
-        "|---|---:|\n"
-        "| Revenue | 120 |"
+        "## Verified snapshot\n\n| Metric | Value |\n|---|---:|\n| Revenue | 120 |"
         if with_table
         else "Fixture evidence body."
     )
@@ -418,7 +399,7 @@ def _analyst_bundle(*, with_table: bool = True) -> EvidenceBundle:
     )
 
 
-def test_analyst_report_is_synthesized_directly_from_complete_evidence() -> None:
+def test_analyst_report_is_synthesized_from_catalogued_evidence() -> None:
     bundle = _analyst_bundle()
     report = _analyst_report_example(
         analyst="fundamentals",
@@ -449,7 +430,9 @@ def test_analyst_report_is_synthesized_directly_from_complete_evidence() -> None
 
     assert result.generation_method is ArtifactGenerationMethod.TOOL_CALL
     assert result.value.sections[0].table_ids == (bundle.tables[0].id,)
-    assert "Revenue" in llm.calls[0][1]
+    assert '"row_count": 1' in llm.calls[0][1]
+    assert '"Revenue"' not in llm.calls[0][1]
+    assert "EVIDENCE CATALOG" in llm.calls[0][1]
     assert bundle.items[0].ref in llm.calls[0][1]
     assert "There is no" in llm.calls[0][1]
     assert events == []
@@ -475,9 +458,7 @@ def test_analyst_report_normalizes_redundant_top_level_refs() -> None:
         bundle=bundle,
         confidence_override=None,
     )
-    claim = report.claims[0].model_copy(
-        update={"evidence_refs": (second.ref,)}
-    )
+    claim = report.claims[0].model_copy(update={"evidence_refs": (second.ref,)})
     incomplete_index = report.model_copy(
         update={
             "claims": (claim,),
@@ -542,9 +523,7 @@ def test_analyst_semantics_reject_missing_sections_and_fabricated_refs() -> None
         bundle=bundle,
         confidence_override=None,
     )
-    invalid_claim = report.claims[0].model_copy(
-        update={"evidence_refs": ("ev_ffffffffffff",)}
-    )
+    invalid_claim = report.claims[0].model_copy(update={"evidence_refs": ("ev_ffffffffffff",)})
     invalid = report.model_copy(
         update={
             "claims": (invalid_claim,),
@@ -649,9 +628,7 @@ class _SectionedInvoker:
                         for section_id, title in _ANALYST_SECTIONS["market"]
                     ),
                     risks=("The observed regime may reverse.",),
-                    invalidation_conditions=(
-                        "New evidence contradicts the regime.",
-                    ),
+                    invalidation_conditions=("New evidence contradicts the regime.",),
                     evidence_refs=(ref,),
                 ),
             }
@@ -667,8 +644,7 @@ class _SectionedInvoker:
                         id=section_id,
                         title=title,
                         narrative=(
-                            f"Complete detailed analysis for {section_id} "
-                            f"grounded in {ref}."
+                            f"Complete detailed analysis for {section_id} grounded in {ref}."
                         ),
                     ),
                 ),
@@ -711,9 +687,7 @@ def test_truncated_analyst_output_recovers_by_manifest_and_sections() -> None:
         event_writer=events.append,
     )
 
-    assert result.generation_method is (
-        ArtifactGenerationMethod.SECTIONED_RECOVERY
-    )
+    assert result.generation_method is (ArtifactGenerationMethod.SECTIONED_RECOVERY)
     assert len(result.value.sections) == len(_ANALYST_SECTIONS["market"])
     assert all(
         section.narrative.startswith("Complete detailed analysis")
@@ -722,10 +696,7 @@ def test_truncated_analyst_output_recovers_by_manifest_and_sections() -> None:
     assert [schema for schema, _prompt in llm.calls] == [
         "AnalystReport",
         "_AnalystReportManifest",
-        *[
-            "_AnalystSectionChunk"
-            for _section in _ANALYST_SECTIONS["market"]
-        ],
+        *["_AnalystSectionChunk" for _section in _ANALYST_SECTIONS["market"]],
     ]
     assert events[0]["event_type"] == "node.output_retry"
     assert events[0]["payload"]["method"] == "sectioned_recovery"
@@ -790,10 +761,10 @@ def _decision_payload(evidence_ref: str) -> dict[str, Any]:
 
 @pytest.mark.parametrize(
     ("field", "value", "expected_reason"),
-        (
-            ("rating", "StrongBuy", "schema_validation"),
-            ("risks", [], "schema_validation"),
-            ("invalidation_conditions", [], "schema_validation"),
+    (
+        ("rating", "StrongBuy", "schema_validation"),
+        ("risks", [], "schema_validation"),
+        ("invalidation_conditions", [], "schema_validation"),
         ("evidence_refs", ["ev_ffffffffffff"], "semantic_validation"),
         ("memory_refs", ["memory:invented"], "semantic_validation"),
         ("time_horizon", "Unspecified", "semantic_validation"),

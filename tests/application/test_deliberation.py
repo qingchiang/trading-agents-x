@@ -72,7 +72,7 @@ def _state(*, content: str = "Fixture evidence.") -> dict[str, Any]:
     }
 
 
-def test_research_prompt_keeps_complete_reports_and_long_evidence() -> None:
+def test_research_prompt_keeps_complete_reports_but_catalogs_long_evidence() -> None:
     evidence = "START-" + ("x" * 1_500) + "-TAIL-MARKER"
     state = _state(content=evidence)
 
@@ -84,9 +84,10 @@ def test_research_prompt_keeps_complete_reports_and_long_evidence() -> None:
     )
 
     assert "Complete analyst section with a unique report marker." in prompt
-    assert "START-" in prompt
-    assert "-TAIL-MARKER" in prompt
-    assert "content_excerpt" not in prompt
+    assert "START-" not in prompt
+    assert "-TAIL-MARKER" not in prompt
+    assert '"content_characters": 1518' in prompt
+    assert "EVIDENCE CATALOG" in prompt
 
 
 def test_research_case_rejects_unknown_claim_after_bounded_recovery() -> None:
@@ -151,9 +152,7 @@ def test_debate_progress_requires_open_issue_and_new_material() -> None:
         update={
             "round": 2,
             "responses": (
-                first.responses[0].model_copy(
-                    update={"outcome": RebuttalOutcome.UPHELD}
-                ),
+                first.responses[0].model_copy(update={"outcome": RebuttalOutcome.UPHELD}),
             ),
         }
     )

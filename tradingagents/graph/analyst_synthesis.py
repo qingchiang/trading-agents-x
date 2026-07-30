@@ -21,7 +21,11 @@ from tradingagents.application.contracts import (
     ResearchTable,
     ResearchWarning,
 )
-from tradingagents.application.evidence import group_evidence_by_content
+from tradingagents.graph.evidence_context import (
+    PreparedEvidence,
+    build_evidence_catalog,
+    prepared_evidence_prompt,
+)
 from tradingagents.graph.output_validation import (
     OutputValidationError,
     require_nonempty_texts,
@@ -149,18 +153,12 @@ def evidence_warnings(
             warnings.append(
                 ResearchWarning(
                     code=f"evidence.{issue.code}",
-                    message=(
-                        f"{issue.evidence} ({issue.source}): {issue.reason}"
-                    ),
+                    message=(f"{issue.evidence} ({issue.source}): {issue.reason}"),
                     evidence_ref=item.ref,
                     source=issue.source,
                 )
             )
-        if (
-            not issues
-            and item.quality
-            in {EvidenceQuality.LOW, EvidenceQuality.UNAVAILABLE}
-        ):
+        if not issues and item.quality in {EvidenceQuality.LOW, EvidenceQuality.UNAVAILABLE}:
             warnings.append(
                 ResearchWarning(
                     code=f"evidence.{item.quality.value}",
@@ -185,6 +183,7 @@ def invoke_analyst_report(
     confidence_override: float | None,
     warnings: tuple[ResearchWarning, ...],
     node: str,
+    prepared_evidence: PreparedEvidence | None = None,
     event_writer: Callable[[dict[str, Any]], None] | None = None,
 ) -> StructuredOutputResult[AnalystReport]:
     """Synthesize and validate one complete V2 analyst report."""
@@ -201,6 +200,7 @@ def invoke_analyst_report(
         bundle=bundle,
         output_language=output_language,
         confidence_override=confidence_override,
+        prepared_evidence=prepared_evidence,
     )
 
     def validate(report: AnalystReport) -> AnalystReport:
@@ -221,6 +221,7 @@ def invoke_analyst_report(
                 draft_narrative=draft_narrative,
                 bundle=bundle,
                 output_language=output_language,
+                prepared_evidence=prepared_evidence,
             ),
             bundle=bundle,
             warnings=warnings,
@@ -250,10 +251,10 @@ def analyst_report_prompt(
     bundle: EvidenceBundle,
     output_language: str,
     confidence_override: float | None = None,
+    prepared_evidence: PreparedEvidence | None = None,
 ) -> str:
     section_contract = "\n".join(
-        f"- `{section_id}`: {title}"
-        for section_id, title in _ANALYST_SECTIONS[analyst]
+        f"- `{section_id}`: {title}" for section_id, title in _ANALYST_SECTIONS[analyst]
     )
     confidence_rule = (
         "- Set `confidence` exactly to "
@@ -268,6 +269,7 @@ def analyst_report_prompt(
             draft_narrative=draft_narrative,
             bundle=bundle,
             output_language=output_language,
+            prepared_evidence=prepared_evidence,
         )
         + f"""
 
@@ -312,7 +314,15 @@ def _analyst_context_prompt(
     draft_narrative: str,
     bundle: EvidenceBundle,
     output_language: str,
+    prepared_evidence: PreparedEvidence | None = None,
 ) -> str:
+    prepared = prepared_evidence or PreparedEvidence(
+        catalog=build_evidence_catalog(bundle),
+        memo=(
+            "Use the tool-agent draft and the compact catalog. No additional "
+            "read-only evidence slice was requested."
+        ),
+    )
     return f"""You are the {analyst} analyst in an evidence-first investment
 research system. Create a detailed report for users and downstream research
 agents. Write every human-readable field in {output_language}.
@@ -333,46 +343,12 @@ Research boundary:
 Instrument: {bundle.instrument}
 Analysis cutoff: {bundle.analysis_date.isoformat()}
 
-COMPLETE SEALED EVIDENCE:
-{json.dumps(_full_evidence_payload(bundle), ensure_ascii=False)}
+PREPARED EVIDENCE WORKSET:
+{prepared_evidence_prompt(prepared)}
 
 TOOL-AGENT DRAFT (untrusted until checked against evidence):
 {draft_narrative}
 """
-
-
-def _full_evidence_payload(bundle: EvidenceBundle) -> dict[str, Any]:
-    groups = []
-    for group in group_evidence_by_content(bundle.items):
-        groups.append(
-            {
-                "canonical_ref": group.canonical.ref,
-                "equivalent_refs": list(group.refs),
-                "source": group.canonical.source,
-                "evidence_type": group.canonical.evidence_type,
-                "effective_date": (
-                    group.canonical.effective_date.isoformat()
-                    if group.canonical.effective_date
-                    else None
-                ),
-                "quality": group.canonical.quality.value,
-                "fallback": group.canonical.fallback,
-                "origins": [
-                    origin.model_dump(mode="json")
-                    for item in group.items
-                    for origin in item.origins
-                ],
-                "content": group.content,
-                "value": group.canonical.value,
-                "unit": group.canonical.unit,
-            }
-        )
-    return {
-        "items": groups,
-        "tables": [
-            table.model_dump(mode="json") for table in bundle.tables
-        ],
-    }
 
 
 def _analyst_report_example(
@@ -394,29 +370,21 @@ def _analyst_report_example(
             ),
             table_ids=evidence_table_ids if index == 0 else (),
         )
-        for index, (section_id, title) in enumerate(
-            _ANALYST_SECTIONS[analyst]
-        )
+        for index, (section_id, title) in enumerate(_ANALYST_SECTIONS[analyst])
     )
     return AnalystReport(
         analyst=analyst,
         executive_summary=(
-            "The available evidence supports a conditional, uncertainty-aware "
-            "analyst conclusion."
+            "The available evidence supports a conditional, uncertainty-aware analyst conclusion."
         ),
-        confidence=(
-            confidence_override
-            if confidence_override is not None
-            else 0.6
-        ),
+        confidence=(confidence_override if confidence_override is not None else 0.6),
         claims=(
             AnalystClaim(
                 id=f"{analyst}.claim_1",
                 kind=AnalystClaimType.INFERENCE,
                 statement="The cited evidence supports a material observation.",
                 implication=(
-                    "The research committee should retain this condition in "
-                    "its final assessment."
+                    "The research committee should retain this condition in its final assessment."
                 ),
                 confidence=0.6,
                 evidence_refs=(first_ref,),
@@ -425,9 +393,7 @@ def _analyst_report_example(
         sections=sections,
         catalysts=(),
         risks=("A material evidence-backed risk could weaken the assessment.",),
-        invalidation_conditions=(
-            "New evidence directly contradicts the cited observation.",
-        ),
+        invalidation_conditions=("New evidence directly contradicts the cited observation.",),
         evidence_refs=valid_refs,
     )
 
@@ -449,9 +415,7 @@ def _validate_analyst_report(
         require_text(catalyst)
     valid_refs = {item.ref for item in bundle.items}
     require_valid_refs(report.evidence_refs, valid_refs, required=True)
-    required_sections = {
-        section_id for section_id, _title in _ANALYST_SECTIONS[analyst]
-    }
+    required_sections = {section_id for section_id, _title in _ANALYST_SECTIONS[analyst]}
     actual_sections = {section.id for section in report.sections}
     if not required_sections.issubset(actual_sections):
         raise OutputValidationError("analyst.sections.required")
@@ -473,25 +437,16 @@ def _validate_analyst_report(
     research_tables = {table.id: table for table in report.tables}
     allowed_table_ids = set(evidence_tables) | set(research_tables)
     referenced_table_ids = {
-        table_id
-        for section in report.sections
-        for table_id in section.table_ids
+        table_id for section in report.sections for table_id in section.table_ids
     }
-    if any(
-        table_id not in allowed_table_ids
-        for table_id in referenced_table_ids
-    ):
+    if any(table_id not in allowed_table_ids for table_id in referenced_table_ids):
         raise OutputValidationError("analyst.section.table_unknown")
     if not set(evidence_tables).issubset(referenced_table_ids):
         raise OutputValidationError("analyst.evidence_table.unplaced")
     for section in report.sections:
         require_text(section.title)
         require_text(section.narrative)
-        inline_refs = tuple(
-            dict.fromkeys(
-                re.findall(r"ev_[a-f0-9]{12}", section.narrative)
-            )
-        )
+        inline_refs = tuple(dict.fromkeys(re.findall(r"ev_[a-f0-9]{12}", section.narrative)))
         require_valid_refs(inline_refs, valid_refs, required=False)
         used_refs.extend(inline_refs)
     for table in report.tables:
@@ -503,9 +458,7 @@ def _validate_analyst_report(
         )
     updates: dict[str, Any] = {
         "warnings": warnings,
-        "evidence_refs": tuple(
-            dict.fromkeys((*report.evidence_refs, *used_refs))
-        ),
+        "evidence_refs": tuple(dict.fromkeys((*report.evidence_refs, *used_refs))),
     }
     if confidence_override is not None:
         updates["confidence"] = confidence_override
@@ -574,9 +527,7 @@ def _recover_analyst_report_by_section(
         ),
         catalysts=example_report.catalysts,
         risks=example_report.risks,
-        invalidation_conditions=(
-            example_report.invalidation_conditions
-        ),
+        invalidation_conditions=(example_report.invalidation_conditions),
         evidence_refs=example_report.evidence_refs,
     )
 
@@ -606,43 +557,30 @@ def _recover_analyst_report_by_section(
                 set(valid_refs),
                 required=True,
             )
-        required = {
-            section_id
-            for section_id, _title in _ANALYST_SECTIONS[analyst]
-        }
+        required = {section_id for section_id, _title in _ANALYST_SECTIONS[analyst]}
         section_ids = [section.id for section in manifest.sections]
-        if (
-            set(section_ids) != required
-            or len(section_ids) != len(set(section_ids))
-        ):
+        if set(section_ids) != required or len(section_ids) != len(set(section_ids)):
             raise OutputValidationError("analyst_manifest.sections")
         assigned = [
-            table_id
-            for section in manifest.sections
-            for table_id in section.evidence_table_ids
+            table_id for section in manifest.sections for table_id in section.evidence_table_ids
         ]
-        if (
-            set(assigned) != set(evidence_table_ids)
-            or len(assigned) != len(set(assigned))
-        ):
-            raise OutputValidationError(
-                "analyst_manifest.evidence_table_placement"
-            )
+        if set(assigned) != set(evidence_table_ids) or len(assigned) != len(set(assigned)):
+            raise OutputValidationError("analyst_manifest.evidence_table_placement")
         if confidence_override is not None:
-            return manifest.model_copy(
-                update={"confidence": confidence_override}
-            )
+            return manifest.model_copy(update={"confidence": confidence_override})
         return manifest
 
-    manifest = StructuredOutputRunner(
-        llm=llm,
-        schema=_AnalystReportManifest,
-        validator=validate_manifest,
-        node=f"{node}.manifest",
-        event_writer=event_writer,
-    ).invoke(
-        context_prompt
-        + """
+    manifest = (
+        StructuredOutputRunner(
+            llm=llm,
+            schema=_AnalystReportManifest,
+            validator=validate_manifest,
+            node=f"{node}.manifest",
+            event_writer=event_writer,
+        )
+        .invoke(
+            context_prompt
+            + """
 
 The full report exceeded the provider output limit. Produce a compact report
 manifest only: executive summary, claims, required section plans, catalysts,
@@ -650,22 +588,20 @@ risks, invalidation conditions, confidence, and refs. Assign every supplied
 EvidenceTable ID to exactly one relevant section plan. Do not write section
 narratives or ResearchTable rows yet.
 """,
-        example=example_manifest.model_dump(mode="json"),
-        allowed_evidence_refs=valid_refs,
-    ).value
+            example=example_manifest.model_dump(mode="json"),
+            allowed_evidence_refs=valid_refs,
+        )
+        .value
+    )
 
     sections: list[AnalystSection] = []
     tables: list[ResearchTable] = []
     for plan in manifest.sections:
         example_section = next(
-            section
-            for section in example_report.sections
-            if section.id == plan.id
+            section for section in example_report.sections if section.id == plan.id
         )
         example_chunk = _AnalystSectionChunk(
-            section=example_section.model_copy(
-                update={"table_ids": plan.evidence_table_ids}
-            ),
+            section=example_section.model_copy(update={"table_ids": plan.evidence_table_ids}),
         )
 
         def validate_chunk(
@@ -673,26 +609,17 @@ narratives or ResearchTable rows yet.
             *,
             expected: _AnalystSectionPlan = plan,
         ) -> _AnalystSectionChunk:
-            if (
-                chunk.section.id != expected.id
-                or chunk.section.title != expected.title
-            ):
+            if chunk.section.id != expected.id or chunk.section.title != expected.title:
                 raise OutputValidationError("analyst_section.manifest_mismatch")
             require_text(chunk.section.narrative)
             evidence_ids = {
-                table_id
-                for table_id in chunk.section.table_ids
-                if table_id.startswith("et_")
+                table_id for table_id in chunk.section.table_ids if table_id.startswith("et_")
             }
             if evidence_ids != set(expected.evidence_table_ids):
-                raise OutputValidationError(
-                    "analyst_section.evidence_table_assignment"
-                )
+                raise OutputValidationError("analyst_section.evidence_table_assignment")
             research_ids = {table.id for table in chunk.tables}
             if not research_ids.issubset(chunk.section.table_ids):
-                raise OutputValidationError(
-                    "analyst_section.research_table_placement"
-                )
+                raise OutputValidationError("analyst_section.research_table_placement")
             for table in chunk.tables:
                 _validate_research_table_against_bundle(
                     table,
@@ -700,17 +627,19 @@ narratives or ResearchTable rows yet.
                 )
             return chunk
 
-        chunk = StructuredOutputRunner(
-            llm=llm,
-            schema=_AnalystSectionChunk,
-            validator=validate_chunk,
-            node=f"{node}.section.{plan.id}",
-            event_writer=event_writer,
-        ).invoke(
-            context_prompt
-            + "\n\nREPORT MANIFEST:\n"
-            + json.dumps(manifest.model_dump(mode="json"), ensure_ascii=False)
-            + f"""
+        chunk = (
+            StructuredOutputRunner(
+                llm=llm,
+                schema=_AnalystSectionChunk,
+                validator=validate_chunk,
+                node=f"{node}.section.{plan.id}",
+                event_writer=event_writer,
+            )
+            .invoke(
+                context_prompt
+                + "\n\nREPORT MANIFEST:\n"
+                + json.dumps(manifest.model_dump(mode="json"), ensure_ascii=False)
+                + f"""
 
 Generate only section `{plan.id}` (`{plan.title}`) as an
 AnalystSectionChunk. Write the complete detailed narrative for this section.
@@ -719,9 +648,11 @@ they materially improve comparison or interpretation; do not copy an existing
 EvidenceTable. Do not shorten the section because the original full response
 was truncated.
 """,
-            example=example_chunk.model_dump(mode="json"),
-            allowed_evidence_refs=valid_refs,
-        ).value
+                example=example_chunk.model_dump(mode="json"),
+                allowed_evidence_refs=valid_refs,
+            )
+            .value
+        )
         sections.append(chunk.section)
         tables.extend(chunk.tables)
 

@@ -5,7 +5,9 @@ from datetime import date
 from typing import Any
 
 import pytest
+from langgraph.checkpoint.memory import MemorySaver
 
+import tradingagents.graph.research_graph as research_graph_module
 from tests.factories import analyst_report, research_decision
 from tradingagents.application.contracts import (
     AnalysisRequest,
@@ -126,17 +128,12 @@ class _StructuredInvoker:
                     AnalystSection(
                         id=section_id,
                         title=section_id.replace("_", " ").title(),
-                        narrative=(
-                            "Detailed fixture analysis grounded in "
-                            f"{refs[-1]}."
-                        ),
+                        narrative=(f"Detailed fixture analysis grounded in {refs[-1]}."),
                     )
                     for section_id in section_ids
                 ),
                 risks=("Evidence quality may deteriorate.",),
-                invalidation_conditions=(
-                    "New evidence contradicts the fixture.",
-                ),
+                invalidation_conditions=("New evidence contradicts the fixture.",),
                 evidence_refs=refs[-1:],
             )
         elif self.schema is ResearchCase:
@@ -156,9 +153,7 @@ class _StructuredInvoker:
                         evidence_refs=refs[-1:],
                     ),
                 ),
-                strongest_counterarguments=(
-                    "The opposing interpretation remains plausible.",
-                ),
+                strongest_counterarguments=("The opposing interpretation remains plausible.",),
                 fragile_assumptions=("The mechanism persists.",),
                 risks=("Evidence quality may deteriorate.",),
                 evidence_refs=refs[-1:],
@@ -181,9 +176,7 @@ class _StructuredInvoker:
             )
         elif self.schema is RebuttalReview:
             role = "bull" if "Bull Researcher Rebuttal" in prompt else "bear"
-            round_number = int(
-                re.search(r"CURRENT ROUND: (\d+)", prompt).group(1)
-            )
+            round_number = int(re.search(r"CURRENT ROUND: (\d+)", prompt).group(1))
             parsed = RebuttalReview(
                 role=role,
                 round=round_number,
@@ -193,9 +186,7 @@ class _StructuredInvoker:
                         agenda_id="debate.issue_1",
                         claim_ids=("market.claim_1",),
                         response="The opposing interpretation is incomplete.",
-                        causal_mechanism=(
-                            "The fixture mechanism has a role-specific path."
-                        ),
+                        causal_mechanism=("The fixture mechanism has a role-specific path."),
                         outcome=RebuttalOutcome.UNRESOLVED,
                         evidence_refs=refs[-1:],
                         remaining_questions=("Which mechanism dominates?",),
@@ -220,9 +211,7 @@ class _StructuredInvoker:
                     ),
                 ),
                 risks=("Evidence quality may deteriorate.",),
-                invalidation_conditions=(
-                    "New evidence contradicts the fixture.",
-                ),
+                invalidation_conditions=("New evidence contradicts the fixture.",),
                 unresolved_questions=("Which mechanism dominates?",),
                 time_horizon="6-12 months",
                 evidence_refs=refs[-1:],
@@ -240,10 +229,7 @@ class _StructuredInvoker:
                     )
                     if (
                         candidate.title() in prompt
-                        or (
-                            candidate == "integrated"
-                            and "Integrated Risk Reviewer" in prompt
-                        )
+                        or (candidate == "integrated" and "Integrated Risk Reviewer" in prompt)
                     )
                 ),
                 "integrated",
@@ -331,9 +317,7 @@ class _AnalystSubgraph:
 
     def invoke(self, state, **_kwargs):
         assert state["past_context"] == ""
-        assert _kwargs["config"]["metadata"] == {
-            "research_node": f"analyst.{self.analyst}"
-        }
+        assert _kwargs["config"]["metadata"] == {"research_node": f"analyst.{self.analyst}.collect"}
         return {
             **state,
             self._REPORT_KEYS[self.analyst]: (
@@ -455,10 +439,7 @@ def test_profiles_share_contract_but_use_distinct_topologies(
     monkeypatch.setattr(
         ResearchGraph,
         "_build_analyst_subgraphs",
-        lambda self: {
-            analyst: _AnalystSubgraph(analyst)
-            for analyst in self.selected_analysts
-        },
+        lambda self: {analyst: _AnalystSubgraph(analyst) for analyst in self.selected_analysts},
     )
     quick = _FakeLLM()
     deep = _FakeLLM()
@@ -477,11 +458,7 @@ def test_profiles_share_contract_but_use_distinct_topologies(
         on_event=events.append,
     )
 
-    completed = {
-        event["node"]
-        for event in events
-        if event["event_type"] == "node.completed"
-    }
+    completed = {event["node"] for event in events if event["event_type"] == "node.completed"}
     assert required_nodes <= completed
     assert not forbidden_nodes & completed
     assert set(execution.reports) == {"market", "news"}
@@ -535,10 +512,7 @@ def test_profiles_route_quality_roles_to_the_configured_model_tier(
     monkeypatch.setattr(
         ResearchGraph,
         "_build_analyst_subgraphs",
-        lambda self: {
-            analyst: _AnalystSubgraph(analyst)
-            for analyst in self.selected_analysts
-        },
+        lambda self: {analyst: _AnalystSubgraph(analyst) for analyst in self.selected_analysts},
     )
     quick = _FakeLLM()
     deep = _FakeLLM()
@@ -629,10 +603,7 @@ def test_memory_only_enters_profile_decision_nodes_and_refs_are_whitelisted(
     monkeypatch.setattr(
         ResearchGraph,
         "_build_analyst_subgraphs",
-        lambda self: {
-            analyst: _AnalystSubgraph(analyst)
-            for analyst in self.selected_analysts
-        },
+        lambda self: {analyst: _AnalystSubgraph(analyst) for analyst in self.selected_analysts},
     )
     quick = _FakeLLM()
     deep = _FakeLLM()
@@ -656,9 +627,7 @@ def test_memory_only_enters_profile_decision_nodes_and_refs_are_whitelisted(
 
     calls = [*quick.calls, *deep.calls]
     decision_prompts = [
-        prompt
-        for schema, prompt in calls
-        if schema in {"ResearchDecision", "JudgeDraft"}
+        prompt for schema, prompt in calls if schema in {"ResearchDecision", "JudgeDraft"}
     ]
     nondecision_prompts = [
         prompt
@@ -676,9 +645,7 @@ def test_memory_only_enters_profile_decision_nodes_and_refs_are_whitelisted(
     )
     assert execution.decision.memory_refs == memory.refs
     assert "memory:invented" not in execution.decision.memory_refs
-    assert not any(
-        ref.startswith("memory:") for ref in execution.decision.evidence_refs
-    )
+    assert not any(ref.startswith("memory:") for ref in execution.decision.evidence_refs)
 
 
 def test_graph_emits_only_typed_visible_research_artifacts(
@@ -688,10 +655,7 @@ def test_graph_emits_only_typed_visible_research_artifacts(
     monkeypatch.setattr(
         ResearchGraph,
         "_build_analyst_subgraphs",
-        lambda self: {
-            analyst: _AnalystSubgraph(analyst)
-            for analyst in self.selected_analysts
-        },
+        lambda self: {analyst: _AnalystSubgraph(analyst) for analyst in self.selected_analysts},
     )
     llm = _FakeLLM()
     artifacts: list[ResearchArtifactDraft] = []
@@ -738,22 +702,17 @@ def test_graph_emits_only_typed_visible_research_artifacts(
     )
     assert all("messages" not in artifact.content.model_fields for artifact in artifacts)
     assert {
-        artifact.generation_method.value
-        for artifact in artifacts
-        if artifact.stage != "analyst"
+        artifact.generation_method.value for artifact in artifacts if artifact.stage != "analyst"
     } == {"tool_call"}
     assert {
         (artifact.role, artifact.prompt_version)
         for artifact in artifacts
         if artifact.stage == "analyst"
     } == {
-        ("market", "analyst-market-v2"),
-        ("news", "analyst-news-v2"),
+        ("market", "analyst-market-v3-workset"),
+        ("news", "analyst-news-v3-workset"),
     }
-    assert all(
-        artifact.prompt_version != "research-v1"
-        for artifact in artifacts
-    )
+    assert all(artifact.prompt_version != "research-v1" for artifact in artifacts)
 
 
 def test_deep_debate_stops_when_rebuttals_add_no_new_information(
@@ -763,10 +722,7 @@ def test_deep_debate_stops_when_rebuttals_add_no_new_information(
     monkeypatch.setattr(
         ResearchGraph,
         "_build_analyst_subgraphs",
-        lambda self: {
-            analyst: _AnalystSubgraph(analyst)
-            for analyst in self.selected_analysts
-        },
+        lambda self: {analyst: _AnalystSubgraph(analyst) for analyst in self.selected_analysts},
     )
     llm = _FakeLLM()
     graph = ResearchGraph(
@@ -782,6 +738,72 @@ def test_deep_debate_stops_when_rebuttals_add_no_new_information(
     )
 
     assert execution.state["rebuttal_round"] <= 3
+
+
+def test_retry_reuses_checkpointed_analyst_tool_artifacts(
+    app_settings,
+    monkeypatch,
+) -> None:
+    subgraph = _AnalystSubgraph("market")
+    collection_calls = 0
+    original_invoke = subgraph.invoke
+
+    def counted_invoke(state, **kwargs):
+        nonlocal collection_calls
+        collection_calls += 1
+        return original_invoke(state, **kwargs)
+
+    subgraph.invoke = counted_invoke
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda _self: {"market": subgraph},
+    )
+    original_synthesis = research_graph_module._invoke_analyst_report
+    synthesis_calls = 0
+
+    def fail_once(*args, **kwargs):
+        nonlocal synthesis_calls
+        synthesis_calls += 1
+        if synthesis_calls == 1:
+            raise RuntimeError("fixture synthesis failure")
+        return original_synthesis(*args, **kwargs)
+
+    monkeypatch.setattr(
+        research_graph_module,
+        "_invoke_analyst_report",
+        fail_once,
+    )
+    graph = ResearchGraph(
+        quick_llm=_FakeLLM(),
+        deep_llm=_FakeLLM(),
+        profile=RunProfile.FAST,
+        selected_analysts=("market",),
+    )
+    context = _context(
+        app_settings,
+        RunProfile.FAST,
+        analysts=("market",),
+    )
+    checkpointer = MemorySaver()
+
+    with pytest.raises(RuntimeError, match="fixture synthesis failure"):
+        graph.execute(
+            context,
+            checkpointer=checkpointer,
+            checkpoint_thread_id="analyst-artifact-retry",
+        )
+
+    execution = graph.execute(
+        context,
+        checkpointer=checkpointer,
+        checkpoint_thread_id="analyst-artifact-retry",
+        resume=True,
+    )
+
+    assert execution.decision.rating is ResearchRating.HOLD
+    assert collection_calls == 1
+    assert synthesis_calls == 2
 
 
 def test_future_dated_provenance_is_withheld_before_bundle_sealing() -> None:
@@ -815,9 +837,7 @@ def test_analyst_warning_is_derived_from_evidence_quality() -> None:
     warnings = _evidence_warnings([item])
 
     assert len(warnings) == 1
-    assert warnings[0].message == (
-        "historical price from fixture has low evidence quality."
-    )
+    assert warnings[0].message == ("historical price from fixture has low evidence quality.")
     assert warnings[0].evidence_ref == item.ref
 
 

@@ -48,12 +48,10 @@ def test_complete_ohlcv_is_kept_in_artifact_not_model_content() -> None:
     )
 
     assert artifact["source_content"].count("\n") >= 488
-    assert "2024-01-02,99.00,102.00,98.00,100.00,1000000" in artifact[
-        "source_content"
-    ]
+    assert "2024-01-02,99.00,102.00,98.00,100.00,1000000" in artifact["source_content"]
     assert artifact["analytical_views"]["row_count"] == 488
     assert artifact["dataset_id"] in overview
-    assert "complete source table is stored outside" in overview
+    assert "complete source table is retained outside" in overview
     assert "2024-01-02,99.00,102.00,98.00,100.00,1000000" not in overview
     assert len(overview) < len(artifact["source_content"]) // 4
 
@@ -71,14 +69,9 @@ def test_analytical_views_are_reproducible_and_cutoff_safe() -> None:
     assert views["effective_end"] == "2024-01-31"
     assert views["row_count"] == 30
     assert views["latest"]["Close"] == 107.25
-    assert views["returns"]["1_session"] == pytest.approx(
-        107.25 / 107.0 - 1
-    )
+    assert views["returns"]["1_session"] == pytest.approx(107.25 / 107.0 - 1)
     assert views["drawdown"]["maximum"] == 0.0
-    assert all(
-        row["month"] == "2024-01"
-        for row in views["monthly"]
-    )
+    assert all(row["month"] == "2024-01" for row in views["monthly"])
 
 
 @pytest.mark.unit

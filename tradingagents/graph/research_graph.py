@@ -74,6 +74,7 @@ from tradingagents.application.reporting import order_reports
 from tradingagents.application.runtime import RunContext, check_cancelled
 from tradingagents.dataflows.config import use_config
 from tradingagents.graph.analyst_synthesis import (
+    analyst_report_prompt,
     evidence_warnings as _evidence_warnings,
     invoke_analyst_report as _invoke_analyst_report,
 )
@@ -86,6 +87,10 @@ from tradingagents.graph.deliberation import (
     invoke_research_decision,
     invoke_risk_review,
     research_prompt,
+)
+from tradingagents.graph.evidence_context import (
+    PreparedEvidence,
+    prepare_evidence,
 )
 from tradingagents.graph.output_validation import (
     require_valid_refs as _require_valid_refs,
@@ -102,9 +107,9 @@ from tradingagents.provenance import (
 )
 
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
-_CONTROL_COMMENT_RE = re.compile(
-    r"<!--\s*tradingagents-data-provenance:(?:start|end)\s*-->"
-)
+_CONTROL_COMMENT_RE = re.compile(r"<!--\s*tradingagents-data-provenance:(?:start|end)\s*-->")
+
+
 def _merge_dicts(
     left: dict[str, Any] | None,
     right: dict[str, Any] | None,
@@ -119,8 +124,16 @@ class ResearchState(TypedDict, total=False):
     profile: str
     output_language: str
     analysts: list[str]
+    analyst_drafts: Annotated[dict[str, str], _merge_dicts]
+    analyst_evidence_items: Annotated[
+        dict[str, list[dict[str, Any]]],
+        _merge_dicts,
+    ]
+    analyst_synthesis_metadata: Annotated[
+        dict[str, dict[str, Any]],
+        _merge_dicts,
+    ]
     analyst_reports: Annotated[dict[str, dict[str, Any]], _merge_dicts]
-    evidence_items: Annotated[list[dict[str, Any]], operator.add]
     evidence_bundle: dict[str, Any]
     cases: Annotated[dict[str, dict[str, Any]], _merge_dicts]
     debate_agenda: dict[str, Any]
@@ -265,8 +278,7 @@ class ResearchGraph:
         )
         decision = ResearchDecision.model_validate(final_state["final_decision"])
         warnings = tuple(
-            ResearchWarning.model_validate(value)
-            for value in final_state.get("warnings", [])
+            ResearchWarning.model_validate(value) for value in final_state.get("warnings", [])
         )
         return GraphExecution(
             state=final_state,
@@ -332,8 +344,7 @@ class ResearchGraph:
             raise RuntimeError("frozen research graph produced no state")
         decision = ResearchDecision.model_validate(final_state["final_decision"])
         warnings = tuple(
-            ResearchWarning.model_validate(value)
-            for value in final_state.get("warnings", [])
+            ResearchWarning.model_validate(value) for value in final_state.get("warnings", [])
         )
         return GraphExecution(
             state=final_state,
@@ -350,12 +361,12 @@ class ResearchGraph:
             "analysis_date": request.analysis_date.isoformat(),
             "asset_type": request.asset_type.value,
             "profile": request.profile.value,
-            "output_language": report_language_prompt_label(
-                context.settings.output_language
-            ),
+            "output_language": report_language_prompt_label(context.settings.output_language),
             "analysts": list(request.analysts),
+            "analyst_drafts": {},
+            "analyst_evidence_items": {},
+            "analyst_synthesis_metadata": {},
             "analyst_reports": {},
-            "evidence_items": [],
             "cases": {},
             "rebuttals": [],
             "risk_reviews": {},
@@ -373,8 +384,7 @@ class ResearchGraph:
     ) -> ResearchState:
         state = self._initial_state(context)
         state["analyst_reports"] = {
-            key: report.model_dump(mode="json")
-            for key, report in reports.items()
+            key: report.model_dump(mode="json") for key, report in reports.items()
         }
         state["evidence_bundle"] = evidence.model_dump(mode="json")
         return state
@@ -431,8 +441,17 @@ class ResearchGraph:
         workflow = StateGraph(ResearchState, context_schema=RunContext)
         for analyst in self.selected_analysts:
             node_name = f"analyst.{analyst}"
-            workflow.add_node(node_name, self._create_analyst_node(analyst))
-            workflow.add_edge(START, node_name)
+            collect_name = f"{node_name}.collect"
+            workflow.add_node(
+                collect_name,
+                self._create_analyst_collect_node(analyst),
+            )
+            workflow.add_node(
+                node_name,
+                self._create_analyst_synthesis_node(analyst),
+            )
+            workflow.add_edge(START, collect_name)
+            workflow.add_edge(collect_name, node_name)
             workflow.add_edge(node_name, "evidence.seal")
         workflow.add_node("evidence.seal", self._seal_evidence)
         self._attach_research_workflow(workflow, "evidence.seal")
@@ -493,9 +512,7 @@ class ResearchGraph:
                 self._create_risk_node(_PERSPECTIVE_SPECS["risk"]),
             )
             workflow.add_edge("judge.research", "risk.review")
-            workflow.add_node(
-                "committee.final", self._create_final_committee(fast=False)
-            )
+            workflow.add_node("committee.final", self._create_final_committee(fast=False))
             workflow.add_edge("risk.review", "committee.final")
         else:
             for key in ("aggressive", "neutral", "conservative"):
@@ -506,13 +523,11 @@ class ResearchGraph:
                 )
                 workflow.add_edge("judge.research", name)
                 workflow.add_edge(name, "committee.final")
-            workflow.add_node(
-                "committee.final", self._create_final_committee(fast=False)
-            )
+            workflow.add_node("committee.final", self._create_final_committee(fast=False))
 
         workflow.add_edge("committee.final", END)
 
-    def _create_analyst_node(self, analyst: str):
+    def _create_analyst_collect_node(self, analyst: str):
         report_key = {
             "market": "market_report",
             "social": "sentiment_report",
@@ -520,12 +535,12 @@ class ResearchGraph:
             "fundamentals": "fundamentals_report",
         }[analyst]
 
-        def analyst_node(
+        def collect_node(
             state: ResearchState,
             runtime: Runtime[RunContext],
         ) -> dict[str, Any]:
             context = runtime.context
-            node_name = f"analyst.{analyst}"
+            node_name = f"analyst.{analyst}.collect"
             self._start_node(runtime, node_name)
             check_cancelled(context)
             local_state: dict[str, Any] = {
@@ -562,10 +577,7 @@ class ResearchGraph:
                 prefetched_blocks=result.get("prefetched_evidence", []),
             )
             extra_warnings: tuple[ResearchWarning, ...] = ()
-            if (
-                analyst == "social"
-                and result.get("sentiment_output_warning")
-            ):
+            if analyst == "social" and result.get("sentiment_output_warning"):
                 extra_warnings = (
                     ResearchWarning(
                         code="agent.structured_output_fallback",
@@ -579,29 +591,84 @@ class ResearchGraph:
                     ),
                 )
             evidence_warnings = _evidence_warnings(evidence)
+            synthesis_metadata = {
+                "confidence_override": (
+                    result.get("sentiment_confidence") if analyst == "social" else None
+                ),
+                "warnings": [
+                    warning.model_dump(mode="json")
+                    for warning in dict.fromkeys((*evidence_warnings, *extra_warnings))
+                ],
+            }
+            self._finish_node(
+                runtime,
+                node_name,
+                {
+                    "evidence_count": len(evidence),
+                    "draft_characters": len(narrative),
+                },
+            )
+            return {
+                "analyst_drafts": {analyst: narrative},
+                "analyst_evidence_items": {
+                    analyst: [item.model_dump(mode="json") for item in evidence]
+                },
+                "analyst_synthesis_metadata": {analyst: synthesis_metadata},
+            }
+
+        return collect_node
+
+    def _create_analyst_synthesis_node(self, analyst: str):
+        def synthesis_node(
+            state: ResearchState,
+            runtime: Runtime[RunContext],
+        ) -> dict[str, Any]:
+            context = runtime.context
+            node_name = f"analyst.{analyst}"
+            self._start_node(runtime, node_name)
+            check_cancelled(context)
+            narrative = state["analyst_drafts"][analyst]
+            evidence = tuple(
+                EvidenceItem.model_validate(item)
+                for item in state["analyst_evidence_items"][analyst]
+            )
+            synthesis_metadata = state["analyst_synthesis_metadata"][analyst]
+            confidence_override = synthesis_metadata.get("confidence_override")
+            warnings = tuple(
+                ResearchWarning.model_validate(warning)
+                for warning in synthesis_metadata.get("warnings", [])
+            )
             analyst_bundle = EvidenceBundle(
                 instrument=context.request.ticker,
                 analysis_date=context.request.analysis_date,
-                items=tuple(evidence),
+                items=evidence,
                 tables=extract_evidence_tables(evidence),
+            )
+            output_language = report_language_prompt_label(context.settings.output_language)
+            preparation_prompt = analyst_report_prompt(
+                analyst=analyst,
+                draft_narrative=narrative,
+                bundle=analyst_bundle,
+                output_language=output_language,
+                confidence_override=confidence_override,
+            )
+            prepared_evidence = self._prepare_node_evidence(
+                llm=self.quick_llm,
+                bundle=analyst_bundle,
+                role_prompt=preparation_prompt,
+                node=node_name,
+                runtime=runtime,
             )
             output = _invoke_analyst_report(
                 self.quick_llm,
                 analyst=analyst,
                 draft_narrative=narrative,
                 bundle=analyst_bundle,
-                output_language=report_language_prompt_label(
-                    context.settings.output_language
-                ),
-                confidence_override=(
-                    result.get("sentiment_confidence")
-                    if analyst == "social"
-                    else None
-                ),
-                warnings=tuple(
-                    dict.fromkeys((*evidence_warnings, *extra_warnings))
-                ),
+                output_language=output_language,
+                confidence_override=confidence_override,
+                warnings=warnings,
                 node=node_name,
+                prepared_evidence=prepared_evidence,
                 event_writer=runtime.stream_writer,
             )
             typed = output.value
@@ -613,7 +680,7 @@ class ResearchGraph:
                 role=analyst,
                 content=typed,
                 generation_method=output.generation_method,
-                prompt_version=f"analyst-{analyst}-v2",
+                prompt_version=f"analyst-{analyst}-v3-workset",
             )
             self._finish_node(
                 runtime,
@@ -625,20 +692,12 @@ class ResearchGraph:
                 },
             )
             return {
-                "analyst_reports": {
-                    analyst: typed.model_dump(mode="json")
-                },
-                "evidence_items": [
-                    item.model_dump(mode="json") for item in evidence
-                ],
-                "warnings": [
-                    warning.model_dump(mode="json")
-                    for warning in typed.warnings
-                ]
+                "analyst_reports": {analyst: typed.model_dump(mode="json")},
+                "warnings": [warning.model_dump(mode="json") for warning in typed.warnings]
                 + _structured_recovery_warnings(node_name, output),
             }
 
-        return analyst_node
+        return synthesis_node
 
     def _seal_evidence(
         self,
@@ -649,9 +708,10 @@ class ResearchGraph:
         self._start_node(runtime, node)
         check_cancelled(runtime.context)
         deduped: dict[str, EvidenceItem] = {}
-        for raw in state.get("evidence_items", []):
-            item = EvidenceItem.model_validate(raw)
-            deduped[item.ref] = item
+        for analyst_items in state.get("analyst_evidence_items", {}).values():
+            for raw in analyst_items:
+                item = EvidenceItem.model_validate(raw)
+                deduped[item.ref] = item
         bundle = EvidenceBundle(
             instrument=state["ticker"],
             analysis_date=date.fromisoformat(state["analysis_date"]),
@@ -692,8 +752,11 @@ class ResearchGraph:
             node = f"case.{spec.key}"
             self._start_node(runtime, node)
             check_cancelled(runtime.context)
-            prompt = research_prompt(
-                state,
+            prompt = self._research_prompt_with_preparation(
+                llm=llm,
+                state=state,
+                runtime=runtime,
+                node=node,
                 title=spec.label,
                 objective=spec.objective,
                 extra=(
@@ -719,7 +782,7 @@ class ResearchGraph:
                 role=spec.key,
                 content=case,
                 generation_method=output.generation_method,
-                prompt_version=f"research-case-{spec.key}-v2",
+                prompt_version=f"research-case-{spec.key}-v3-workset",
             )
             self._finish_node(
                 runtime,
@@ -744,8 +807,12 @@ class ResearchGraph:
             node = "debate.agenda"
             self._start_node(runtime, node)
             check_cancelled(runtime.context)
-            prompt = research_prompt(
-                state,
+            llm = self._deliberation_llm()
+            prompt = self._research_prompt_with_preparation(
+                llm=llm,
+                state=state,
+                runtime=runtime,
+                node=node,
                 title="Research Debate Moderator",
                 objective=(
                     "Compare the independent bull and bear cases and produce a "
@@ -760,7 +827,7 @@ class ResearchGraph:
                 ),
             )
             output = invoke_debate_agenda(
-                self._deliberation_llm(),
+                llm,
                 prompt=prompt,
                 state=state,
                 node=node,
@@ -774,7 +841,7 @@ class ResearchGraph:
                 role="moderator",
                 content=agenda,
                 generation_method=output.generation_method,
-                prompt_version="debate-agenda-v2",
+                prompt_version="debate-agenda-v3-workset",
             )
             self._finish_node(
                 runtime,
@@ -782,8 +849,7 @@ class ResearchGraph:
                 {
                     "issues": len(agenda.issues),
                     "critical": sum(
-                        issue.importance.value == "critical"
-                        for issue in agenda.issues
+                        issue.importance.value == "critical" for issue in agenda.issues
                     ),
                 },
             )
@@ -805,8 +871,11 @@ class ResearchGraph:
             round_number = int(state.get("rebuttal_round", 0))
             self._start_node(runtime, node)
             check_cancelled(runtime.context)
-            prompt = research_prompt(
-                state,
+            prompt = self._research_prompt_with_preparation(
+                llm=llm,
+                state=state,
+                runtime=runtime,
+                node=node,
                 title=f"{spec.label} Rebuttal",
                 objective=(
                     "Answer the DebateAgenda issue by issue. Challenge exact "
@@ -850,7 +919,7 @@ class ResearchGraph:
                 round=round_number,
                 content=rebuttal,
                 generation_method=output.generation_method,
-                prompt_version=f"rebuttal-{spec.key}-v2",
+                prompt_version=f"rebuttal-{spec.key}-v3-workset",
             )
             self._finish_node(
                 runtime,
@@ -880,15 +949,10 @@ class ResearchGraph:
         if round_number == 0:
             should_continue = True
         else:
-            max_rounds = (
-                3 if self.profile is RunProfile.DEEP else 1
-            )
-            should_continue = (
-                round_number < max_rounds
-                and debate_round_has_material_progress(
-                    state,
-                    round_number=round_number,
-                )
+            max_rounds = 3 if self.profile is RunProfile.DEEP else 1
+            should_continue = round_number < max_rounds and debate_round_has_material_progress(
+                state,
+                round_number=round_number,
             )
         next_round = round_number + 1 if should_continue else round_number
         self._finish_node(
@@ -915,8 +979,11 @@ class ResearchGraph:
         node = "judge.research"
         self._start_node(runtime, node)
         check_cancelled(runtime.context)
-        prompt = research_prompt(
-            state,
+        prompt = self._research_prompt_with_preparation(
+            llm=self.deep_llm,
+            state=state,
+            runtime=runtime,
+            node=node,
             title="Research Judge",
             objective=(
                 "Rule on every DebateAgenda issue, explain why specific claims "
@@ -957,7 +1024,7 @@ class ResearchGraph:
             role="research_judge",
             content=draft,
             generation_method=output.generation_method,
-            prompt_version="research-judge-v2",
+            prompt_version="research-judge-v3-workset",
         )
         self._finish_node(
             runtime,
@@ -977,15 +1044,15 @@ class ResearchGraph:
             state: ResearchState,
             runtime: Runtime[RunContext],
         ) -> dict[str, Any]:
-            node = (
-                "risk.review"
-                if spec.key == "integrated"
-                else f"risk.{spec.key}"
-            )
+            node = "risk.review" if spec.key == "integrated" else f"risk.{spec.key}"
             self._start_node(runtime, node)
             check_cancelled(runtime.context)
-            prompt = research_prompt(
-                state,
+            llm = self._deliberation_llm(spec)
+            prompt = self._research_prompt_with_preparation(
+                llm=llm,
+                state=state,
+                runtime=runtime,
+                node=node,
                 title=spec.label,
                 objective=spec.objective,
                 extra=(
@@ -1001,7 +1068,7 @@ class ResearchGraph:
                 ),
             )
             output = invoke_risk_review(
-                self._deliberation_llm(spec),
+                llm,
                 role=spec.key,
                 prompt=prompt,
                 state=state,
@@ -1016,7 +1083,7 @@ class ResearchGraph:
                 role=spec.key,
                 content=review,
                 generation_method=output.generation_method,
-                prompt_version=f"risk-review-{spec.key}-v2",
+                prompt_version=f"risk-review-{spec.key}-v3-workset",
             )
             self._finish_node(
                 runtime,
@@ -1066,8 +1133,11 @@ class ResearchGraph:
                     "risk_review_adjustment. Keep the rating, thesis, scenarios, "
                     "risks, and invalidation conditions internally consistent."
                 )
-            prompt = research_prompt(
-                state,
+            prompt = self._research_prompt_with_preparation(
+                llm=self.deep_llm,
+                state=state,
+                runtime=runtime,
+                node=node,
                 title="Final Research Committee",
                 objective=objective,
                 extra=extra,
@@ -1090,7 +1160,7 @@ class ResearchGraph:
                 role="final_committee",
                 content=decision,
                 generation_method=output.generation_method,
-                prompt_version="final-committee-v2",
+                prompt_version="final-committee-v3-workset",
             )
             self._finish_node(
                 runtime,
@@ -1115,6 +1185,84 @@ class ResearchGraph:
         if spec is not None and spec.model == "deep":
             return self.deep_llm
         return self.quick_llm
+
+    def _prepare_node_evidence(
+        self,
+        *,
+        llm: Any,
+        bundle: EvidenceBundle,
+        role_prompt: str,
+        node: str,
+        runtime: Runtime[RunContext],
+    ) -> PreparedEvidence:
+        prepared = prepare_evidence(
+            llm,
+            bundle=bundle,
+            role_prompt=role_prompt,
+            node=node,
+            invoke_config={
+                "callbacks": [self.metrics],
+                "metadata": {"research_node": node},
+            },
+        )
+        for lookup in prepared.lookups:
+            runtime.stream_writer(
+                {
+                    "event_type": "evidence.lookup",
+                    "node": node,
+                    "payload": lookup.event_payload(),
+                }
+            )
+        runtime.stream_writer(
+            {
+                "event_type": "node.context_prepared",
+                "node": node,
+                "payload": {
+                    "inline_characters": prepared.inline_characters,
+                    "catalog_items": len(prepared.catalog.get("items", [])),
+                    "catalog_tables": len(prepared.catalog.get("tables", [])),
+                    "lookup_count": len(prepared.lookups),
+                    "returned_rows": sum(lookup.returned_rows for lookup in prepared.lookups),
+                },
+            }
+        )
+        return prepared
+
+    def _research_prompt_with_preparation(
+        self,
+        *,
+        llm: Any,
+        state: ResearchState,
+        runtime: Runtime[RunContext],
+        node: str,
+        title: str,
+        objective: str,
+        extra: str,
+        memory: Any = None,
+    ) -> str:
+        initial_prompt = research_prompt(
+            state,
+            title=title,
+            objective=objective,
+            extra=extra,
+            memory=memory,
+        )
+        bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
+        prepared = self._prepare_node_evidence(
+            llm=llm,
+            bundle=bundle,
+            role_prompt=initial_prompt,
+            node=node,
+            runtime=runtime,
+        )
+        return research_prompt(
+            state,
+            title=title,
+            objective=objective,
+            extra=extra,
+            memory=memory,
+            prepared_evidence=prepared,
+        )
 
     @staticmethod
     def _write_artifact(
@@ -1190,15 +1338,18 @@ def _collect_evidence(
         tuple[str, EvidenceTemporalScope],
         list[ProvenanceRecord],
     ] = {}
+    content_metadata: dict[
+        tuple[str, EvidenceTemporalScope],
+        dict[str, Any],
+    ] = {}
     content_order: list[tuple[str, EvidenceTemporalScope]] = []
-    empty_payloads: list[
-        tuple[tuple[ProvenanceRecord, ...], EvidenceTemporalScope]
-    ] = []
+    empty_payloads: list[tuple[tuple[ProvenanceRecord, ...], EvidenceTemporalScope]] = []
 
     def collect_payload(
         records: Iterable[ProvenanceRecord],
         content: str | None,
         temporal_scope: str | EvidenceTemporalScope | None = None,
+        provenance_metadata: dict[str, Any] | None = None,
     ) -> None:
         records = tuple(dict.fromkeys(records))
         if not records:
@@ -1209,6 +1360,9 @@ def _collect_evidence(
             if key not in content_groups:
                 content_groups[key] = []
                 content_order.append(key)
+                content_metadata[key] = dict(provenance_metadata or {})
+            elif provenance_metadata:
+                content_metadata[key].update(provenance_metadata)
             existing = content_groups[key]
             for record in records:
                 if record not in existing:
@@ -1216,9 +1370,7 @@ def _collect_evidence(
         else:
             empty_payloads.append((records, scope))
 
-    tool_messages = [
-        message for message in messages if isinstance(message, ToolMessage)
-    ]
+    tool_messages = [message for message in messages if isinstance(message, ToolMessage)]
     for message in tool_messages:
         artifact = getattr(message, "artifact", None)
         if is_evidence_tool_artifact(artifact):
@@ -1241,11 +1393,13 @@ def _collect_evidence(
                 records,
                 str(artifact["source_content"]).strip() or None,
                 artifact.get("temporal_scope"),
+                {
+                    "dataset_id": artifact.get("dataset_id"),
+                    "analytical_views": artifact.get("analytical_views", {}),
+                },
             )
             continue
-        content = message.content if isinstance(message.content, str) else str(
-            message.content
-        )
+        content = message.content if isinstance(message.content, str) else str(message.content)
         spans = extract_evidence_spans(content)
         if spans:
             for span in spans:
@@ -1253,14 +1407,12 @@ def _collect_evidence(
                 if not records:
                     records = [
                         ProvenanceRecord(
-                            evidence=getattr(message, "name", None)
-                            or f"{analyst} tool",
+                            evidence=getattr(message, "name", None) or f"{analyst} tool",
                             source="unknown",
                             requested=requested_date.isoformat(),
                             effective="unknown",
                             timing=(
-                                f"{span.temporal_scope} span without "
-                                "auditable source metadata"
+                                f"{span.temporal_scope} span without auditable source metadata"
                             ),
                         )
                     ]
@@ -1306,6 +1458,7 @@ def _collect_evidence(
             requested_date=requested_date,
             content=content,
             temporal_scope=scope,
+            provenance_metadata=content_metadata[(content, scope)],
         )
         items[item.ref] = item
     for records, scope in empty_payloads:
@@ -1351,6 +1504,7 @@ def _evidence_from_records(
     requested_date: date,
     content: str | None,
     temporal_scope: str | EvidenceTemporalScope | None = None,
+    provenance_metadata: dict[str, Any] | None = None,
 ) -> EvidenceItem:
     records = tuple(records)
     if not records:
@@ -1368,22 +1522,14 @@ def _evidence_from_records(
     valid_effective_dates = [
         origin.effective_date
         for origin in origins
-        if origin.effective_date is not None
-        and origin.effective_date <= requested_date
+        if origin.effective_date is not None and origin.effective_date <= requested_date
     ]
-    effective = (
-        max(valid_effective_dates) if valid_effective_dates else None
-    )
-    all_unavailable = all(
-        origin.quality is EvidenceQuality.UNAVAILABLE for origin in origins
-    )
+    effective = max(valid_effective_dates) if valid_effective_dates else None
+    all_unavailable = all(origin.quality is EvidenceQuality.UNAVAILABLE for origin in origins)
     all_reliable = all(
-        origin.quality is EvidenceQuality.HIGH and not origin.fallback
-        for origin in origins
+        origin.quality is EvidenceQuality.HIGH and not origin.fallback for origin in origins
     )
-    temporal_scopes = tuple(
-        dict.fromkeys(origin.temporal_scope for origin in origins)
-    )
+    temporal_scopes = tuple(dict.fromkeys(origin.temporal_scope for origin in origins))
     mixed_temporal_scope = len(temporal_scopes) > 1
     quality = (
         EvidenceQuality.UNAVAILABLE
@@ -1393,16 +1539,10 @@ def _evidence_from_records(
         else EvidenceQuality.LOW
     )
     sources = tuple(dict.fromkeys(origin.source for origin in origins))
-    evidence_types = tuple(
-        dict.fromkeys(origin.evidence_type for origin in origins)
-    )
+    evidence_types = tuple(dict.fromkeys(origin.evidence_type for origin in origins))
     composite = len(origins) > 1
     source = sources[0] if not composite else "composite"
-    evidence_type = (
-        evidence_types[0]
-        if len(evidence_types) == 1
-        else "composite tool response"
-    )
+    evidence_type = evidence_types[0] if len(evidence_types) == 1 else "composite tool response"
     fallback = any(origin.fallback for origin in origins)
     provenance = (
         {
@@ -1415,22 +1555,17 @@ def _evidence_from_records(
         else {
             "composite": True,
             "origin_count": len(origins),
-            "temporal_scopes": [
-                scope.value for scope in temporal_scopes
-            ],
+            "temporal_scopes": [scope.value for scope in temporal_scopes],
             "mixed_temporal_scope_unseparated": mixed_temporal_scope,
         }
     )
+    provenance.update(provenance_metadata or {})
     return EvidenceItem.create(
         source=source,
         evidence_type=evidence_type,
         requested_date=requested_date,
         effective_date=effective,
-        content=(
-            None
-            if future_dated or all_unavailable or mixed_temporal_scope
-            else content
-        ),
+        content=(None if future_dated or all_unavailable or mixed_temporal_scope else content),
         quality=quality,
         fallback=fallback,
         origins=origins,
@@ -1448,17 +1583,20 @@ def _origin_from_record(
     future_dated = bool(effective and effective > requested_date)
     timing = record.timing.casefold()
     scope = _coerce_temporal_scope(temporal_scope, (record,))
-    unavailable = any(
-        token in timing
-        for token in (
-            "unavailable",
-            "failed",
-            "not requested",
-            "not queried",
-            "no usable data",
-            "no auditable source metadata",
+    unavailable = (
+        any(
+            token in timing
+            for token in (
+                "unavailable",
+                "failed",
+                "not requested",
+                "not queried",
+                "no usable data",
+                "no auditable source metadata",
+            )
         )
-    ) or future_dated
+        or future_dated
+    )
     degraded = scope is EvidenceTemporalScope.LIVE_ONLY or any(
         token in timing
         for token in (
@@ -1478,17 +1616,11 @@ def _origin_from_record(
         EvidenceQuality.UNAVAILABLE
         if unavailable
         else EvidenceQuality.LOW
-        if (
-            degraded
-            or missing_effective
-            or record.source.casefold() in {"unknown", "—", ""}
-        )
+        if (degraded or missing_effective or record.source.casefold() in {"unknown", "—", ""})
         else EvidenceQuality.HIGH
     )
     display_timing = (
-        f"{record.timing}; future-dated evidence withheld"
-        if future_dated
-        else record.timing
+        f"{record.timing}; future-dated evidence withheld" if future_dated else record.timing
     )
     return (
         EvidenceOrigin(
@@ -1513,9 +1645,7 @@ def _coerce_temporal_scope(
 ) -> EvidenceTemporalScope:
     if isinstance(value, EvidenceTemporalScope):
         return (
-            EvidenceTemporalScope(
-                temporal_scope_from_records(records)
-            )
+            EvidenceTemporalScope(temporal_scope_from_records(records))
             if value is EvidenceTemporalScope.UNKNOWN
             else value
         )

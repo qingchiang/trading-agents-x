@@ -282,14 +282,8 @@ def test_explicit_temporal_spans_split_composite_tool_content() -> None:
     )
 
     assert len(items) == 2
-    by_scope = {
-        item.origins[0].temporal_scope: item
-        for item in items
-    }
-    assert (
-        by_scope[EvidenceTemporalScope.POINT_IN_TIME].content
-        == "DISCLOSURE-SAFE BODY"
-    )
+    by_scope = {item.origins[0].temporal_scope: item for item in items}
+    assert by_scope[EvidenceTemporalScope.POINT_IN_TIME].content == "DISCLOSURE-SAFE BODY"
     live_item = by_scope[EvidenceTemporalScope.LIVE_ONLY]
     assert live_item.content == "RETRIEVAL SNAPSHOT BODY"
     assert live_item.quality is EvidenceQuality.LOW
@@ -304,10 +298,7 @@ def test_unavailable_live_span_keeps_audit_record_without_body() -> None:
                 "analyst consensus",
                 "yfinance",
                 effective="—",
-                timing=(
-                    "live-only; unavailable for historical or future date; "
-                    "vendor not queried"
-                ),
+                timing=("live-only; unavailable for historical or future date; vendor not queried"),
             ),
         ),
         temporal_scope="live_only",
@@ -348,7 +339,7 @@ def test_unbounded_mixed_temporal_content_fails_closed() -> None:
     assert item.provenance["mixed_temporal_scope_unseparated"] is True
 
 
-def test_prompt_groups_exact_bodies_without_rewriting_refs() -> None:
+def test_prompt_catalog_preserves_refs_without_serializing_exact_bodies() -> None:
     first = EvidenceItem.create(
         source="source-a",
         evidence_type="filing",
@@ -371,14 +362,11 @@ def test_prompt_groups_exact_bodies_without_rewriting_refs() -> None:
 
     index = _evidence_payload(bundle)["items"]
 
-    assert len(index) == 1
-    assert index[0]["canonical_ref"] == first.ref
-    assert index[0]["equivalent_refs"] == [first.ref, second.ref]
-    assert [origin["source"] for origin in index[0]["origins"]] == [
-        "source-a",
-        "source-b",
-    ]
-    assert json.dumps(index).count("EXACT HISTORICAL BODY") == 1
+    assert len(index) == 2
+    assert [item["ref"] for item in index] == [first.ref, second.ref]
+    assert all("content" not in item for item in index)
+    assert all(item["content_characters"] == 21 for item in index)
+    assert "EXACT HISTORICAL BODY" not in json.dumps(index)
 
 
 def test_bundle_digest_covers_items_and_tables_without_legacy_versions() -> None:
@@ -442,10 +430,7 @@ def test_bundle_digest_covers_items_and_tables_without_legacy_versions() -> None
 
 
 def test_exact_source_tables_are_extracted_once_without_row_limits() -> None:
-    csv_rows = "\n".join(
-        f"2026-05-{index:02d},{100 + index}.5"
-        for index in range(1, 29)
-    )
+    csv_rows = "\n".join(f"2026-05-{index:02d},{100 + index}.5" for index in range(1, 29))
     content = (
         "## Verified snapshot\n\n"
         "| Field | Value |\n"
@@ -912,6 +897,4 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
     assert "### Final Committee Response to Risk Review" in markdown
     assert "Confidence calibration" in markdown
     assert markdown.index("## Reports") < markdown.index("## Research Process")
-    assert markdown.index("## Research Process") < markdown.index(
-        "## Research Decision"
-    )
+    assert markdown.index("## Research Process") < markdown.index("## Research Decision")
