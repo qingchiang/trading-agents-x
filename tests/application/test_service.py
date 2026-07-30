@@ -8,8 +8,11 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from threading import Barrier, Lock
 from typing import Annotated
+from uuid import uuid4
 
 import pytest
+from langchain_core.messages import AIMessage
+from langchain_core.outputs import ChatGeneration, LLMResult
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from typing_extensions import TypedDict
@@ -110,6 +113,40 @@ class _ArtifactGraph:
             )
         )
         return execution
+
+
+class _MetricFailureGraph:
+    def __init__(self, *, metrics, **_kwargs):
+        self.metrics = metrics
+
+    def execute(self, _context, **_kwargs):
+        run_id = uuid4()
+        self.metrics.on_llm_start(
+            {},
+            ["fixture"],
+            run_id=run_id,
+            metadata={"research_node": "analyst.market.serialize.core"},
+        )
+        self.metrics.on_llm_end(
+            LLMResult(
+                generations=[
+                    [
+                        ChatGeneration(
+                            message=AIMessage(
+                                content="fixture",
+                                usage_metadata={
+                                    "input_tokens": 250,
+                                    "output_tokens": 25,
+                                    "total_tokens": 275,
+                                },
+                            )
+                        )
+                    ]
+                ]
+            ),
+            run_id=run_id,
+        )
+        raise RuntimeError("fixture structured output failure")
 
 
 class _CheckpointState(TypedDict):
@@ -516,6 +553,40 @@ def test_failure_is_redacted_and_checkpoint_is_retained(
     assert failed.status is RunStatus.FAILED
     assert "private-value" not in failed.error_message
     assert repository.checkpoint_thread(queued.id) == checkpoint
+
+
+def test_failure_persists_observed_metrics_and_emits_the_aggregate(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(
+        app_settings,
+        repository,
+        graph_factory=_MetricFailureGraph,
+    )
+    queued = service.enqueue(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+    claimed = repository.claim_run(queued.id, "worker", 30)
+
+    with pytest.raises(RuntimeError, match="structured output failure"):
+        service.execute_claimed(claimed, worker_id="worker")
+
+    failed = repository.get_run(queued.id)
+    event = repository.list_events(queued.id)[-1]
+    assert failed.metrics.llm_calls == 1
+    assert failed.metrics.input_tokens == 250
+    assert failed.metrics.output_tokens == 25
+    assert (
+        failed.metrics.node_metrics["analyst.market.serialize.core"].llm_calls
+        == 1
+    )
+    assert event.event_type == "run.failed"
+    assert event.payload["metrics"]["input_tokens"] == 250
 
 
 def test_cooperative_cancel_cleans_checkpoint(

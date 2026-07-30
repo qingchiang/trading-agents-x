@@ -56,6 +56,7 @@ from .database import (
     RunRecord,
     create_sqlite_engine,
 )
+from .metrics import merge_run_metrics
 from .outcome_schedule import earliest_outcome_check_at
 from .reporting import order_reports
 from .settings import AppSettings
@@ -67,6 +68,17 @@ _TERMINAL_STATUSES = {
     RunStatus.SUCCEEDED.value,
     RunStatus.FAILED.value,
     RunStatus.CANCELLED.value,
+}
+_SAFE_METRIC_KEYS = {
+    "llm_calls",
+    "tool_calls",
+    "input_tokens",
+    "output_tokens",
+    "cache_hit_input_tokens",
+    "cache_miss_input_tokens",
+    "reasoning_output_tokens",
+    "detailed_usage_calls",
+    "wall_time_seconds",
 }
 
 
@@ -86,6 +98,8 @@ def _sanitize_text(value: str | None, limit: int = 2000) -> str | None:
 
 
 def _sanitize_payload(value: Any, key: str = "") -> Any:
+    if key in _SAFE_METRIC_KEYS and isinstance(value, int | float):
+        return value
     if any(
         fragment in key.casefold()
         for fragment in ("key", "secret", "token", "password", "authorization")
@@ -190,6 +204,7 @@ class RunRepository:
                         attempt=1,
                         status=RunStatus.QUEUED.value,
                         checkpoint_thread_id=self.checkpoint_thread_id(run_id, 1),
+                        metrics_json=RunMetrics().model_dump(mode="json"),
                     )
                 )
         except IntegrityError as exc:
@@ -604,7 +619,13 @@ class RunRepository:
                 )
         return bool(changed)
 
-    def release_claim(self, run_id: str, worker_id: str) -> RunView:
+    def release_claim(
+        self,
+        run_id: str,
+        worker_id: str,
+        *,
+        metrics: RunMetrics | None = None,
+    ) -> RunView:
         """Return an interrupted run to the queue without changing its attempt."""
         now = _utc_naive()
         with self.sessions.begin() as session:
@@ -626,6 +647,7 @@ class RunRepository:
             attempt.status = RunStatus.QUEUED.value
             attempt.lease_owner = None
             attempt.lease_expires_at = None
+            self._merge_metrics(record, attempt, metrics)
         return self.get_run(run_id)
 
     def request_cancel(self, run_id: str) -> RunView:
@@ -698,6 +720,7 @@ class RunRepository:
                     attempt=record.current_attempt,
                     status=RunStatus.QUEUED.value,
                     checkpoint_thread_id=checkpoint_thread_id,
+                    metrics_json=RunMetrics().model_dump(mode="json"),
                 )
             )
         return self.get_run(run_id)
@@ -922,7 +945,7 @@ class RunRepository:
         *,
         evidence: EvidenceBundle,
         benchmark: str,
-    ) -> None:
+    ) -> RunMetrics:
         now = _utc_naive()
         with self.sessions.begin() as session:
             record = session.get(RunRecord, run_id)
@@ -983,7 +1006,6 @@ class RunRepository:
                     )
                 )
             record.status = RunStatus.SUCCEEDED.value
-            record.metrics_json = result.metrics.model_dump(mode="json")
             record.finished_at = now
             record.updated_at = now
             record.lease_owner = None
@@ -993,8 +1015,16 @@ class RunRepository:
             attempt.finished_at = now
             attempt.lease_owner = None
             attempt.lease_expires_at = None
+            aggregate = self._merge_metrics(record, attempt, result.metrics)
+        return aggregate
 
-    def fail(self, run_id: str, error: BaseException) -> None:
+    def fail(
+        self,
+        run_id: str,
+        error: BaseException,
+        *,
+        metrics: RunMetrics | None = None,
+    ) -> RunMetrics:
         now = _utc_naive()
         code = type(error).__name__[:80]
         message = _sanitize_text(str(error)) or code
@@ -1016,8 +1046,15 @@ class RunRepository:
             attempt.finished_at = now
             attempt.lease_owner = None
             attempt.lease_expires_at = None
+            aggregate = self._merge_metrics(record, attempt, metrics)
+        return aggregate
 
-    def finish_cancel(self, run_id: str) -> None:
+    def finish_cancel(
+        self,
+        run_id: str,
+        *,
+        metrics: RunMetrics | None = None,
+    ) -> RunMetrics:
         now = _utc_naive()
         with self.sessions.begin() as session:
             record = session.get(RunRecord, run_id)
@@ -1033,6 +1070,8 @@ class RunRepository:
             attempt.finished_at = now
             attempt.lease_owner = None
             attempt.lease_expires_at = None
+            aggregate = self._merge_metrics(record, attempt, metrics)
+        return aggregate
 
     def get_result(self, run_id: str) -> AnalysisResult:
         view = self.get_run(run_id)
@@ -1579,6 +1618,7 @@ class RunRepository:
                     checkpoint_thread_id=self.checkpoint_thread_id(run_id, 1),
                     started_at=now,
                     finished_at=now,
+                    metrics_json=RunMetrics().model_dump(mode="json"),
                 )
             )
             session.flush()
@@ -1680,6 +1720,26 @@ class RunRepository:
                 RunAttemptRecord.attempt == record.current_attempt,
             )
         )
+
+    @staticmethod
+    def _merge_metrics(
+        record: RunRecord,
+        attempt: RunAttemptRecord,
+        segment: RunMetrics | None,
+    ) -> RunMetrics:
+        if segment is None:
+            return RunMetrics.model_validate(record.metrics_json or {})
+        attempt_metrics = merge_run_metrics(
+            RunMetrics.model_validate(attempt.metrics_json or {}),
+            segment,
+        )
+        aggregate = merge_run_metrics(
+            RunMetrics.model_validate(record.metrics_json or {}),
+            segment,
+        )
+        attempt.metrics_json = attempt_metrics.model_dump(mode="json")
+        record.metrics_json = aggregate.model_dump(mode="json")
+        return aggregate
 
     @staticmethod
     def _view(record: RunRecord) -> RunView:

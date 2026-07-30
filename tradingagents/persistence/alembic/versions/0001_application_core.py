@@ -74,6 +74,7 @@ def upgrade() -> None:
         sa.Column("finished_at", sa.DateTime(), nullable=True),
         sa.Column("error_code", sa.String(length=80), nullable=True),
         sa.Column("error_message", sa.Text(), nullable=True),
+        sa.Column("metrics_json", sa.JSON(), nullable=False),
         sa.ForeignKeyConstraint(["run_id"], ["runs.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("run_id", "attempt"),

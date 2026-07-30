@@ -38,6 +38,7 @@ from tradingagents.application.contracts import (
     RiskFindingKind,
     RiskReview,
     RiskSeverity,
+    RunMetrics,
     RunStatus,
     RunTrashState,
 )
@@ -150,6 +151,90 @@ def test_retry_reuses_compatible_checkpoint_across_attempts(
 
         assert retried.attempt == expected_attempt
         assert repository.checkpoint_thread(run.id) == initial_checkpoint
+
+
+def test_failed_retry_metrics_are_preserved_per_attempt_and_aggregated(
+    repository: RunRepository,
+    app_settings: AppSettings,
+) -> None:
+    run, _ = _create(repository, app_settings)
+    repository.claim_run(run.id, "worker-1", 30)
+    first = RunMetrics(
+        llm_calls=2,
+        input_tokens=1_000,
+        output_tokens=100,
+        detailed_usage_calls=1,
+        wall_time_seconds=2.5,
+    )
+    repository.fail(run.id, RuntimeError("first failed"), metrics=first)
+    repository.retry(run.id)
+    repository.claim_run(run.id, "worker-2", 30)
+    second = RunMetrics(
+        llm_calls=1,
+        input_tokens=400,
+        output_tokens=40,
+        detailed_usage_calls=1,
+        wall_time_seconds=1.25,
+    )
+
+    aggregate = repository.fail(
+        run.id,
+        RuntimeError("second failed"),
+        metrics=second,
+    )
+
+    assert aggregate.llm_calls == 3
+    assert aggregate.input_tokens == 1_400
+    assert aggregate.wall_time_seconds == 3.75
+    assert repository.get_run(run.id).metrics == aggregate
+    with repository.sessions() as session:
+        attempts = list(
+            session.scalars(
+                select(RunAttemptRecord)
+                .where(RunAttemptRecord.run_id == run.id)
+                .order_by(RunAttemptRecord.attempt)
+            )
+        )
+    assert [
+        RunMetrics.model_validate(attempt.metrics_json).llm_calls
+        for attempt in attempts
+    ] == [2, 1]
+
+
+def test_interrupted_segments_accumulate_within_the_same_attempt(
+    repository: RunRepository,
+    app_settings: AppSettings,
+) -> None:
+    run, _ = _create(repository, app_settings)
+    repository.claim_run(run.id, "worker-1", 30)
+    repository.release_claim(
+        run.id,
+        "worker-1",
+        metrics=RunMetrics(
+            llm_calls=1,
+            input_tokens=300,
+            wall_time_seconds=1.0,
+        ),
+    )
+    repository.claim_run(run.id, "worker-2", 30)
+    aggregate = repository.fail(
+        run.id,
+        RuntimeError("failed after resume"),
+        metrics=RunMetrics(
+            llm_calls=2,
+            input_tokens=700,
+            wall_time_seconds=2.0,
+        ),
+    )
+
+    assert aggregate.llm_calls == 3
+    assert aggregate.input_tokens == 1_000
+    assert aggregate.wall_time_seconds == 3.0
+    with repository.sessions() as session:
+        attempt = session.scalar(
+            select(RunAttemptRecord).where(RunAttemptRecord.run_id == run.id)
+        )
+    assert RunMetrics.model_validate(attempt.metrics_json) == aggregate
 
 
 def test_release_claim_requeues_same_attempt_and_checkpoint(

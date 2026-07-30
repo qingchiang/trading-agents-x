@@ -256,11 +256,14 @@ class AnalysisService:
                         run.request.ticker,
                         dataflow_config,
                     )
-                    self.repository.complete(
+                    aggregate_metrics = self.repository.complete(
                         run.id,
                         result,
                         evidence=execution.evidence,
                         benchmark=benchmark,
+                    )
+                    result = result.model_copy(
+                        update={"metrics": aggregate_metrics}
                     )
                     saver.delete_thread(checkpoint_thread)
                 self._emit(
@@ -271,12 +274,17 @@ class AnalysisService:
                 )
                 return result
             except RunCancelled:
-                self.repository.finish_cancel(run.id)
+                aggregate_metrics = self.repository.finish_cancel(
+                    run.id,
+                    metrics=metrics.snapshot(),
+                )
                 self._clear_checkpoint(checkpoint_thread)
                 self._emit(
                     run.id,
                     "run.cancelled",
-                    payload={},
+                    payload={
+                        "metrics": aggregate_metrics.model_dump(mode="json")
+                    },
                     on_event=on_event,
                 )
                 return AnalysisResult(
@@ -286,29 +294,63 @@ class AnalysisService:
                     instrument_name=instrument_name,
                     reports={},
                     decision=None,
-                    metrics=metrics.snapshot(),
+                    metrics=aggregate_metrics,
                     warnings=("Run cancelled at a graph node boundary.",),
                 )
             except WorkerShutdown:
-                self.repository.release_claim(run.id, worker_id)
+                released = self.repository.release_claim(
+                    run.id,
+                    worker_id,
+                    metrics=metrics.snapshot(),
+                )
                 self._emit(
                     run.id,
                     "run.interrupted",
-                    payload={"reason": "worker_shutdown"},
+                    payload={
+                        "reason": "worker_shutdown",
+                        "metrics": released.metrics.model_dump(mode="json"),
+                    },
                     on_event=on_event,
                 )
                 raise
             except Exception as exc:
-                self.repository.fail(run.id, exc)
-                self._emit(
-                    run.id,
-                    "run.failed",
-                    payload={
-                        "error_code": type(exc).__name__,
-                        "message": "Analysis failed; inspect the server log.",
-                    },
-                    on_event=on_event,
-                )
+                segment_metrics = metrics.snapshot()
+                try:
+                    aggregate_metrics = self.repository.fail(
+                        run.id,
+                        exc,
+                        metrics=segment_metrics,
+                    )
+                except Exception as persistence_exc:
+                    logger.error(
+                        "failed to persist terminal state for run %s "
+                        "(analysis=%s persistence=%s)",
+                        run.id,
+                        type(exc).__name__,
+                        type(persistence_exc).__name__,
+                    )
+                    aggregate_metrics = segment_metrics
+                try:
+                    self._emit(
+                        run.id,
+                        "run.failed",
+                        payload={
+                            "error_code": type(exc).__name__,
+                            "message": (
+                                "Analysis failed; inspect the server log."
+                            ),
+                            "metrics": aggregate_metrics.model_dump(mode="json"),
+                        },
+                        on_event=on_event,
+                    )
+                except Exception as event_exc:
+                    logger.error(
+                        "failed to persist failure event for run %s "
+                        "(analysis=%s event=%s)",
+                        run.id,
+                        type(exc).__name__,
+                        type(event_exc).__name__,
+                    )
                 raise
 
     def cancel(self, run_id: str) -> RunView:

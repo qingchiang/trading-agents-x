@@ -90,6 +90,9 @@ class RunAttemptRecord(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metrics_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
 
     run: Mapped[RunRecord] = relationship(back_populates="attempts")
 

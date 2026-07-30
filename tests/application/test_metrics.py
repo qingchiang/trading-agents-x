@@ -6,8 +6,8 @@ import pytest
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, LLMResult
 
-from tradingagents.application.contracts import RunMetrics
-from tradingagents.application.metrics import MetricsCallback
+from tradingagents.application.contracts import NodeMetrics, RunMetrics
+from tradingagents.application.metrics import MetricsCallback, merge_run_metrics
 
 
 def _result(input_tokens: int, output_tokens: int) -> LLMResult:
@@ -212,3 +212,65 @@ def test_metrics_reject_removed_duplicate_node_wall_times() -> None:
                 "node_wall_times": {"analyst.market": 1.25},
             }
         )
+
+
+def test_merge_run_metrics_adds_totals_nodes_and_usage_coverage() -> None:
+    first = RunMetrics(
+        llm_calls=1,
+        input_tokens=100,
+        output_tokens=10,
+        cache_hit_input_tokens=40,
+        cache_miss_input_tokens=60,
+        detailed_usage_calls=1,
+        wall_time_seconds=1.5,
+        node_metrics={
+            "analyst.market": NodeMetrics(
+                llm_calls=1,
+                input_tokens=100,
+                output_tokens=10,
+                detailed_usage_calls=1,
+                wall_time_seconds=1.5,
+            )
+        },
+    )
+    second = RunMetrics(
+        llm_calls=2,
+        tool_calls=1,
+        input_tokens=250,
+        output_tokens=25,
+        reasoning_output_tokens=12,
+        detailed_usage_calls=1,
+        wall_time_seconds=2.0,
+        node_metrics={
+            "analyst.market": NodeMetrics(
+                llm_calls=1,
+                input_tokens=150,
+                output_tokens=15,
+                reasoning_output_tokens=12,
+                wall_time_seconds=1.25,
+            ),
+            "committee.final": NodeMetrics(
+                llm_calls=1,
+                tool_calls=1,
+                input_tokens=100,
+                output_tokens=10,
+                detailed_usage_calls=1,
+                wall_time_seconds=0.75,
+            ),
+        },
+    )
+
+    merged = merge_run_metrics(first, second)
+
+    assert merged.llm_calls == 3
+    assert merged.tool_calls == 1
+    assert merged.input_tokens == 350
+    assert merged.output_tokens == 35
+    assert merged.cache_hit_input_tokens == 40
+    assert merged.cache_miss_input_tokens == 60
+    assert merged.reasoning_output_tokens == 12
+    assert merged.detailed_usage_calls == 2
+    assert merged.wall_time_seconds == 3.5
+    assert merged.node_metrics["analyst.market"].llm_calls == 2
+    assert merged.node_metrics["analyst.market"].input_tokens == 250
+    assert merged.node_metrics["committee.final"].tool_calls == 1
