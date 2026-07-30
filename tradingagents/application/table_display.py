@@ -176,7 +176,7 @@ def _effective_spec(column: ResearchTableColumn) -> TableDisplaySpec:
     if spec.notation is not TableNotation.STANDARD:
         return spec
     notation = {
-        TableDataType.PERCENTAGE: TableNotation.PERCENT,
+        TableDataType.PERCENT: TableNotation.PERCENT,
         TableDataType.CURRENCY: TableNotation.CURRENCY,
         TableDataType.INTEGER: TableNotation.INTEGER,
         TableDataType.DATE: TableNotation.DATE,

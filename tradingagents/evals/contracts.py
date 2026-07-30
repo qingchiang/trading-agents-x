@@ -412,7 +412,7 @@ def _audit_bundle_reports(
                 section_location,
                 issues,
             )
-            for table_id in section.table_ids:
+            for table_id in section.research_table_ids:
                 if table_id not in report_table_ids:
                     issues.append(
                         EvalIssue(
@@ -424,7 +424,7 @@ def _audit_bundle_reports(
                     )
                 else:
                     presented_table_ids.add(table_id)
-            for table_id in section.source_table_ids:
+            for table_id in section.evidence_table_ids:
                 if table_id not in evidence_tables:
                     issues.append(
                         EvalIssue(
@@ -824,20 +824,23 @@ def _check_table(
     location: str,
     issues: list[EvalIssue],
 ) -> None:
-    if isinstance(table, ResearchTable) and table.source_table_id:
-        source = valid_evidence_tables.get(table.source_table_id)
+    if isinstance(table, ResearchTable) and table.source_evidence_table_id:
+        source = valid_evidence_tables.get(table.source_evidence_table_id)
         if source is None:
             issues.append(
                 EvalIssue(
                     severity="severe",
                     code="table.source_unresolved",
                     location=location,
-                    message=(f"Source evidence table {table.source_table_id} is missing."),
+                    message=(
+                        "Source evidence table "
+                        f"{table.source_evidence_table_id} is missing."
+                    ),
                 )
             )
         else:
             valid_rows = {row.id for row in source.rows}
-            for row_id in table.source_row_ids:
+            for row_id in table.source_evidence_row_ids:
                 if row_id not in valid_rows:
                     issues.append(
                         EvalIssue(

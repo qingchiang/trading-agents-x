@@ -80,7 +80,7 @@ def test_percentage_raw_value_is_a_decimal_ratio() -> None:
         column=ResearchTableColumn(
             key="margin",
             label="Margin",
-            data_type=TableDataType.PERCENTAGE,
+            data_type=TableDataType.PERCENT,
             display=TableDisplaySpec(
                 notation=TableNotation.PERCENT,
                 fraction_digits=1,

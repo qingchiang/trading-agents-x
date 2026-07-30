@@ -236,7 +236,7 @@ def _derived_report(bundle, report, *, result: float = 20) -> AnalystReport:
         ),
     )
     section = report.sections[0].model_copy(
-        update={"table_ids": (table.id,)}
+        update={"research_table_ids": (table.id,)}
     )
     return report.model_copy(update={"sections": (section,), "tables": (table,)})
 

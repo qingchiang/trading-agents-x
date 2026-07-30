@@ -70,7 +70,7 @@ export default function AnalystReportView({
           >
             {section.narrative}
           </Markdown>
-          {section.table_ids?.map((tableId) => {
+          {section.research_table_ids?.map((tableId) => {
             const researchTable = researchTables.get(tableId);
             if (!researchTable) {
               return (
@@ -200,8 +200,11 @@ function sourceTableFor(
   table: EvidenceTable | ResearchTable,
   evidenceTables: Map<string, EvidenceTable>,
 ): EvidenceTable | undefined {
-  if ("source_table_id" in table && table.source_table_id) {
-    return evidenceTables.get(table.source_table_id);
+  if (
+    "source_evidence_table_id" in table &&
+    table.source_evidence_table_id
+  ) {
+    return evidenceTables.get(table.source_evidence_table_id);
   }
   return undefined;
 }

@@ -452,8 +452,12 @@ def test_analyst_report_is_synthesized_from_catalogued_evidence() -> None:
     )
 
     assert result.generation_method is ArtifactGenerationMethod.TOOL_CALL
-    assert result.value.sections[0].source_table_ids == (bundle.tables[0].id,)
-    assert result.value.sections[0].table_ids == ("rt_fundamentals_source_view",)
+    assert result.value.sections[0].evidence_table_ids == (
+        bundle.tables[0].id,
+    )
+    assert result.value.sections[0].research_table_ids == (
+        "rt_fundamentals_source_view",
+    )
     assert (
         result.value.tables[0].rows[0].cells["value"].display_value
         == "120"
@@ -703,7 +707,7 @@ class _SectionedInvoker:
                         {
                             "id": section_id,
                             "title": title,
-                            "source_table_ids": (),
+                            "evidence_table_ids": (),
                         }
                         for section_id, title in _ANALYST_SECTIONS["market"]
                     ),

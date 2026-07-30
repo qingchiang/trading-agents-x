@@ -217,7 +217,7 @@ class TableDataType(str, Enum):
     TEXT = "text"
     INTEGER = "integer"
     NUMBER = "number"
-    PERCENTAGE = "percentage"
+    PERCENT = "percent"
     CURRENCY = "currency"
     DATE = "date"
     DATETIME = "datetime"
@@ -556,12 +556,12 @@ class ResearchTable(FrozenModel):
     columns: tuple[ResearchTableColumn, ...] = Field(min_length=1)
     rows: tuple[ResearchTableRow, ...] = Field(min_length=1)
     evidence_refs: tuple[str, ...] = ()
-    source_table_id: str | None = Field(
+    source_evidence_table_id: str | None = Field(
         default=None,
         pattern=r"^et_[a-f0-9]{12}$",
     )
     total_source_rows: int | None = Field(default=None, ge=1)
-    source_row_ids: tuple[str, ...] = ()
+    source_evidence_row_ids: tuple[str, ...] = ()
 
     @field_validator("evidence_refs")
     @classmethod
@@ -574,9 +574,9 @@ class ResearchTable(FrozenModel):
             raise ValueError("research tables must use valid evidence refs")
         return refs
 
-    @field_validator("source_row_ids")
+    @field_validator("source_evidence_row_ids")
     @classmethod
-    def validate_source_row_ids(
+    def validate_source_evidence_row_ids(
         cls,
         value: tuple[str, ...],
     ) -> tuple[str, ...]:
@@ -617,16 +617,20 @@ class ResearchTable(FrozenModel):
                     raise ValueError("research table values require inherited evidence")
                 if not effective_refs.issubset(table_refs):
                     raise ValueError("research table cell refs must belong to the table")
-        if (self.source_table_id is None) != (self.total_source_rows is None):
+        if (self.source_evidence_table_id is None) != (
+            self.total_source_rows is None
+        ):
             raise ValueError("source table ID and total source rows must be supplied together")
         if self.total_source_rows is not None and self.total_source_rows < len(self.rows):
             raise ValueError("total source rows cannot be less than displayed rows")
-        if self.source_table_id is None and self.source_row_ids:
+        if self.source_evidence_table_id is None and self.source_evidence_row_ids:
             raise ValueError("source row IDs require a source evidence table")
-        if self.source_table_id is not None:
-            if len(self.source_row_ids) != len(self.rows):
+        if self.source_evidence_table_id is not None:
+            if len(self.source_evidence_row_ids) != len(self.rows):
                 raise ValueError("source table views require one source row ID per row")
-            if len(self.source_row_ids) != len(set(self.source_row_ids)):
+            if len(self.source_evidence_row_ids) != len(
+                set(self.source_evidence_row_ids)
+            ):
                 raise ValueError("source row IDs must be unique")
         return self
 
@@ -713,20 +717,23 @@ class AnalystSection(FrozenModel):
     id: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
     title: str = Field(min_length=1)
     narrative: str = Field(min_length=1)
-    table_ids: tuple[str, ...] = ()
-    source_table_ids: tuple[str, ...] = ()
+    research_table_ids: tuple[str, ...] = ()
+    evidence_table_ids: tuple[str, ...] = ()
 
-    @field_validator("table_ids")
+    @field_validator("research_table_ids")
     @classmethod
-    def validate_table_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+    def validate_research_table_ids(
+        cls,
+        value: tuple[str, ...],
+    ) -> tuple[str, ...]:
         ids = tuple(dict.fromkeys(value))
         if any(not re.fullmatch(r"rt_[a-z0-9][a-z0-9_.-]*", table_id) for table_id in ids):
             raise ValueError("sections contain an invalid research table ID")
         return ids
 
-    @field_validator("source_table_ids")
+    @field_validator("evidence_table_ids")
     @classmethod
-    def validate_source_table_ids(
+    def validate_evidence_table_ids(
         cls,
         value: tuple[str, ...],
     ) -> tuple[str, ...]:
@@ -815,7 +822,9 @@ class AnalystReport(FrozenModel):
         if len(table_ids) != len(set(table_ids)):
             raise ValueError("research table IDs must be unique")
         referenced_table_ids = [
-            table_id for section in self.sections for table_id in section.table_ids
+            table_id
+            for section in self.sections
+            for table_id in section.research_table_ids
         ]
         if len(referenced_table_ids) != len(set(referenced_table_ids)):
             raise ValueError("a research table cannot be placed in multiple sections")

@@ -115,7 +115,7 @@ class _StructuredFragment(BaseModel):
 class _AnalystSectionPlan(_StructuredFragment):
     id: str
     title: str
-    source_table_ids: tuple[str, ...] = ()
+    evidence_table_ids: tuple[str, ...] = ()
 
 
 class _AnalystReportManifest(_StructuredFragment):
@@ -294,8 +294,8 @@ Report rules:
 - Put the full human-readable analysis in sections. Sections may use Markdown
   prose, but do not embed Markdown tables in narrative fields.
 - EvidenceTable is a complete deterministic audit table. Link relevant source
-  tables through `source_table_ids`; never place an EvidenceTable in
-  `table_ids` or copy its complete rows into the reading report.
+  tables through `evidence_table_ids`; never place an EvidenceTable in
+  `research_table_ids` or copy its complete rows into the reading report.
 - Use ResearchTable only for a useful comparison, synthesis, explanation, or
   scenario that is not already represented by an EvidenceTable. There is no
   table-count, row-count, column-count, or cell-length limit.
@@ -310,7 +310,8 @@ Report rules:
 - `display_value` is only a schema placeholder. The application recomputes it
   from raw_value and TableDisplaySpec for both Web and Markdown.
 - When a ResearchTable shows a subset of an EvidenceTable, set
-  source_table_id, total_source_rows, and one source_row_id per displayed row.
+  source_evidence_table_id, total_source_rows, and one
+  source_evidence_row_id per displayed row.
 - Tables must have a clear purpose and must not merely repeat prose.
 - Catalysts may be empty. Risks and invalidation conditions must be substantive.
 - Exact figures in prose, claims, or tables must resolve to supplied evidence.
@@ -386,8 +387,8 @@ def _analyst_report_example(
                 "Detailed evidence-grounded analysis with uncertainty and "
                 f"an explicit implication [{first_ref}]."
             ),
-            table_ids=example_table_ids if index == 0 else (),
-            source_table_ids=evidence_table_ids if index == 0 else (),
+            research_table_ids=example_table_ids if index == 0 else (),
+            evidence_table_ids=evidence_table_ids if index == 0 else (),
         )
         for index, (section_id, title) in enumerate(_ANALYST_SECTIONS[analyst])
     )
@@ -434,9 +435,9 @@ def _example_research_tables(
             columns=source.columns,
             rows=selected_rows,
             evidence_refs=source.evidence_refs,
-            source_table_id=source.id,
+            source_evidence_table_id=source.id,
             total_source_rows=len(source.rows),
-            source_row_ids=(selected_rows[0].id,),
+            source_evidence_row_ids=(selected_rows[0].id,),
         ),
     )
 
@@ -480,7 +481,9 @@ def _validate_analyst_report(
     evidence_tables = {table.id: table for table in bundle.tables}
     research_tables = {table.id: table for table in report.tables}
     referenced_table_ids = [
-        table_id for section in report.sections for table_id in section.table_ids
+        table_id
+        for section in report.sections
+        for table_id in section.research_table_ids
     ]
     if any(table_id not in research_tables for table_id in referenced_table_ids):
         raise OutputValidationError("analyst.section.table_unknown")
@@ -488,10 +491,12 @@ def _validate_analyst_report(
         raise OutputValidationError("analyst.research_table.repeated")
     if set(research_tables) != set(referenced_table_ids):
         raise OutputValidationError("analyst.research_table.unplaced")
-    source_table_ids = {
-        table_id for section in report.sections for table_id in section.source_table_ids
+    evidence_table_ids = {
+        table_id
+        for section in report.sections
+        for table_id in section.evidence_table_ids
     }
-    if not source_table_ids.issubset(evidence_tables):
+    if not evidence_table_ids.issubset(evidence_tables):
         raise OutputValidationError("analyst.section.source_table_unknown")
     if evidence_tables and not research_tables:
         raise OutputValidationError("analyst.research_table.required")
@@ -562,21 +567,24 @@ def _validate_research_table_against_bundle(
                     raise OutputValidationError(
                         "research_table.derived.result"
                     )
-    if table.source_table_id is None:
+    if table.source_evidence_table_id is None:
         return tuple(dict.fromkeys(used_refs))
     source_tables = {item.id: item for item in bundle.tables}
-    source = source_tables.get(table.source_table_id)
+    source = source_tables.get(table.source_evidence_table_id)
     if source is None:
         raise OutputValidationError("research_table.source.unknown")
     if table.total_source_rows != len(source.rows):
         raise OutputValidationError("research_table.source.row_count")
     valid_row_ids = {row.id for row in source.rows}
-    if any(row_id not in valid_row_ids for row_id in table.source_row_ids):
+    if any(
+        row_id not in valid_row_ids
+        for row_id in table.source_evidence_row_ids
+    ):
         raise OutputValidationError("research_table.source.row_unknown")
     source_rows = {row.id: row for row in source.rows}
     for row, source_row_id in zip(
         table.rows,
-        table.source_row_ids,
+        table.source_evidence_row_ids,
         strict=True,
     ):
         source_row = source_rows[source_row_id]
@@ -641,7 +649,7 @@ def _recover_analyst_report_by_section(
             _AnalystSectionPlan(
                 id=section.id,
                 title=section.title,
-                source_table_ids=section.source_table_ids,
+                evidence_table_ids=section.evidence_table_ids,
             )
             for section in example_report.sections
         ),
@@ -682,7 +690,9 @@ def _recover_analyst_report_by_section(
         if set(section_ids) != required or len(section_ids) != len(set(section_ids)):
             raise OutputValidationError("analyst_manifest.sections")
         assigned = [
-            table_id for section in manifest.sections for table_id in section.source_table_ids
+            table_id
+            for section in manifest.sections
+            for table_id in section.evidence_table_ids
         ]
         if not set(assigned).issubset(evidence_table_ids):
             raise OutputValidationError("analyst_manifest.source_table_unknown")
@@ -705,7 +715,7 @@ def _recover_analyst_report_by_section(
 The full report exceeded the provider output limit. Produce a compact report
 manifest only: executive summary, claims, required section plans, catalysts,
 risks, invalidation conditions, confidence, and refs. Link relevant
-EvidenceTable IDs through source_table_ids. Do not write section
+EvidenceTable IDs through evidence_table_ids. Do not write section
 narratives or ResearchTable rows yet.
 """,
             example=example_manifest.model_dump(mode="json"),
@@ -721,9 +731,13 @@ narratives or ResearchTable rows yet.
             section for section in example_report.sections if section.id == plan.id
         )
         example_chunk = _AnalystSectionChunk(
-            section=example_section.model_copy(update={"source_table_ids": plan.source_table_ids}),
+            section=example_section.model_copy(
+                update={"evidence_table_ids": plan.evidence_table_ids}
+            ),
             tables=tuple(
-                table for table in example_report.tables if table.id in example_section.table_ids
+                table
+                for table in example_report.tables
+                if table.id in example_section.research_table_ids
             ),
         )
 
@@ -735,10 +749,14 @@ narratives or ResearchTable rows yet.
             if chunk.section.id != expected.id or chunk.section.title != expected.title:
                 raise OutputValidationError("analyst_section.manifest_mismatch")
             require_text(chunk.section.narrative)
-            if set(chunk.section.source_table_ids) != set(expected.source_table_ids):
+            if set(chunk.section.evidence_table_ids) != set(
+                expected.evidence_table_ids
+            ):
                 raise OutputValidationError("analyst_section.evidence_table_assignment")
             research_ids = {table.id for table in chunk.tables}
-            if not research_ids.issubset(chunk.section.table_ids):
+            if not research_ids.issubset(
+                chunk.section.research_table_ids
+            ):
                 raise OutputValidationError("analyst_section.research_table_placement")
             for table in chunk.tables:
                 _validate_research_table_against_bundle(

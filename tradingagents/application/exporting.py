@@ -364,9 +364,9 @@ def _render_research_table(table: ResearchTable) -> list[str]:
     source_note = (
         (
             f"- Source view: `{len(table.rows)}/{table.total_source_rows}` "
-            f"rows from `{table.source_table_id}`"
+            f"rows from `{table.source_evidence_table_id}`"
         )
-        if table.source_table_id is not None
+        if table.source_evidence_table_id is not None
         else "- Source view: synthesized comparison"
     )
     lines = [
@@ -436,15 +436,18 @@ def _render_analyst_report(
     ]
     for section in report.sections:
         lines.extend(["", f"#### {section.title}", "", section.narrative])
-        if section.source_table_ids:
+        if section.evidence_table_ids:
             lines.extend(
                 [
                     "",
                     "- Source data: "
-                    + ", ".join(f"`{table_id}`" for table_id in section.source_table_ids),
+                    + ", ".join(
+                        f"`{table_id}`"
+                        for table_id in section.evidence_table_ids
+                    ),
                 ]
             )
-        for table_id in section.table_ids:
+        for table_id in section.research_table_ids:
             if table_id in research_tables:
                 lines.extend(["", *_render_research_table(research_tables[table_id])])
     lines.extend(["", "#### Auditable Claims"])

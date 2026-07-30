@@ -366,14 +366,14 @@ def _infer_column_type(
     if all(value.casefold() in {"true", "false", "yes", "no"} for value in material):
         return TableDataType.BOOLEAN, None
     if all(value.rstrip().endswith("%") for value in material):
-        return TableDataType.PERCENTAGE, "%"
+        return TableDataType.PERCENT, "%"
     currency = _currency_unit(label, material)
     numbers = [_parse_number(value) for value in material]
     if all(number is not None for number in numbers):
         if currency:
             return TableDataType.CURRENCY, currency
         if "%" in label or "percent" in lowered_label or "percentage" in lowered_label:
-            return TableDataType.PERCENTAGE, "%"
+            return TableDataType.PERCENT, "%"
         if all(isinstance(number, int) and not isinstance(number, bool) for number in numbers):
             return TableDataType.INTEGER, None
         return TableDataType.NUMBER, None
@@ -389,7 +389,7 @@ def _typed_value(value: str, data_type: TableDataType):
     if data_type in {
         TableDataType.INTEGER,
         TableDataType.NUMBER,
-        TableDataType.PERCENTAGE,
+        TableDataType.PERCENT,
         TableDataType.CURRENCY,
     }:
         parsed = _parse_number(stripped)

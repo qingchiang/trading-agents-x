@@ -77,7 +77,7 @@ function analystReport(
         id: "overview",
         title: `${title} report`,
         narrative: "Evidence-grounded narrative.",
-        table_ids: [],
+        research_table_ids: [],
       },
     ],
     tables: [],
@@ -160,7 +160,7 @@ const detail = {
             title: "Market report",
             narrative:
               "Compare ev_0123456789ab with ev_fedcba987654.",
-            table_ids: [],
+            research_table_ids: [],
           },
         ],
       },

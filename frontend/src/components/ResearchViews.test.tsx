@@ -91,13 +91,13 @@ const report = {
       id: "snapshot",
       title: "Snapshot section",
       narrative: "First narrative.",
-      source_table_ids: ["et_0123456789ab"],
+      evidence_table_ids: ["et_0123456789ab"],
     },
     {
       id: "comparison",
       title: "Comparison section",
       narrative: "Second narrative.",
-      table_ids: ["rt_market_comparison"],
+      research_table_ids: ["rt_market_comparison"],
     },
   ],
   tables: [
@@ -105,9 +105,9 @@ const report = {
       id: "rt_market_comparison",
       title: "AI comparison",
       purpose: "Explain the evidence rather than duplicate it.",
-      source_table_id: "et_0123456789ab",
+      source_evidence_table_id: "et_0123456789ab",
       total_source_rows: 14,
-      source_row_ids: ["row.1", "row.2"],
+      source_evidence_row_ids: ["row.1", "row.2"],
       evidence_refs: [firstRef, secondRef],
       columns: [
         { key: "period", label: "Period", data_type: "text" },

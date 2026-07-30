@@ -52,10 +52,10 @@ export interface components {
       warnings?: components["schemas"]["ResearchWarning"][];
     };
     AnalystSection: {
+      evidence_table_ids?: string[];
       id: string;
       narrative: string;
-      source_table_ids?: string[];
-      table_ids?: string[];
+      research_table_ids?: string[];
       title: string;
     };
     ArtifactGenerationMethod: "tool_call" | "json_mode" | "raw_json_recovered" | "json_mode_recovered" | "sectioned_recovery";
@@ -345,8 +345,8 @@ export interface components {
       id: string;
       purpose: string;
       rows: components["schemas"]["ResearchTableRow"][];
-      source_row_ids?: string[];
-      source_table_id?: string | null;
+      source_evidence_row_ids?: string[];
+      source_evidence_table_id?: string | null;
       title: string;
       total_source_rows?: number | null;
     };
@@ -477,7 +477,7 @@ export interface components {
       updated_at: string;
     };
     TableCellKind: "descriptor" | "observation" | "inference" | "derived";
-    TableDataType: "text" | "integer" | "number" | "percentage" | "currency" | "date" | "datetime" | "boolean";
+    TableDataType: "text" | "integer" | "number" | "percent" | "currency" | "date" | "datetime" | "boolean";
     TableDisplaySpec: {
       fraction_digits?: number;
       notation?: components["schemas"]["TableNotation"];

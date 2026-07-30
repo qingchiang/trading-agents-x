@@ -368,6 +368,14 @@
       "AnalystSection": {
         "additionalProperties": false,
         "properties": {
+          "evidence_table_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Table Ids",
+            "type": "array"
+          },
           "id": {
             "pattern": "^[a-z][a-z0-9_.-]*$",
             "title": "Id",
@@ -378,20 +386,12 @@
             "title": "Narrative",
             "type": "string"
           },
-          "source_table_ids": {
+          "research_table_ids": {
             "default": [],
             "items": {
               "type": "string"
             },
-            "title": "Source Table Ids",
-            "type": "array"
-          },
-          "table_ids": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Table Ids",
+            "title": "Research Table Ids",
             "type": "array"
           },
           "title": {
@@ -2391,15 +2391,15 @@
             "title": "Rows",
             "type": "array"
           },
-          "source_row_ids": {
+          "source_evidence_row_ids": {
             "default": [],
             "items": {
               "type": "string"
             },
-            "title": "Source Row Ids",
+            "title": "Source Evidence Row Ids",
             "type": "array"
           },
-          "source_table_id": {
+          "source_evidence_table_id": {
             "anyOf": [
               {
                 "pattern": "^et_[a-f0-9]{12}$",
@@ -2409,7 +2409,7 @@
                 "type": "null"
               }
             ],
-            "title": "Source Table Id"
+            "title": "Source Evidence Table Id"
           },
           "title": {
             "minLength": 1,
@@ -3354,7 +3354,7 @@
           "text",
           "integer",
           "number",
-          "percentage",
+          "percent",
           "currency",
           "date",
           "datetime",

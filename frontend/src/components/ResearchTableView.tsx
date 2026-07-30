@@ -83,7 +83,7 @@ export default function ResearchTableView({
         />
       </header>
 
-      {!evidenceTable && table.source_table_id && (
+      {!evidenceTable && table.source_evidence_table_id && (
         <div className="source-view-notice">
           <span>
             {t("sourceRowsDisplayed", {

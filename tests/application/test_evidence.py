@@ -508,7 +508,7 @@ def test_table_contract_distinguishes_observed_and_derived_values() -> None:
         ResearchTableColumn(
             key="value",
             label="Value",
-            data_type=TableDataType.PERCENTAGE,
+            data_type=TableDataType.PERCENT,
             unit="%",
         ),
     )
@@ -562,7 +562,7 @@ def test_table_contract_distinguishes_observed_and_derived_values() -> None:
                 ResearchTableColumn(
                     key="value",
                     label="Value",
-                    data_type=TableDataType.PERCENTAGE,
+                    data_type=TableDataType.PERCENT,
                 ),
             ),
             rows=(
