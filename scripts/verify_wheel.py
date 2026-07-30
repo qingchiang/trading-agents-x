@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 from email.parser import BytesParser
 from pathlib import Path
 from zipfile import ZipFile
@@ -20,6 +21,13 @@ _FORBIDDEN_FILES = {
     "tradingagents/graph/trading_graph.py",
     "tradingagents/graph/checkpointer.py",
     "tradingagents/graph/reflection.py",
+    "tradingagents/agents/schemas.py",
+    "tradingagents/application/table_display.py",
+    "tradingagents/graph/analyst_report_drafts.py",
+    (
+        "tradingagents/persistence/alembic/versions/"
+        "0001_application_core.py"
+    ),
 }
 _FORBIDDEN_REQUIREMENTS = {
     "backtrader",
@@ -42,18 +50,31 @@ def verify(wheel: Path) -> None:
             raise ValueError(
                 f"wheel contains removed runtime files: {', '.join(forbidden)}"
             )
-        if not any(
-            name.startswith("tradingagents/web/static/assets/")
-            and name.endswith(".js")
+        index = archive.read("tradingagents/web/static/index.html").decode("utf-8")
+        referenced_assets = {
+            f"tradingagents/web/static{path}"
+            for path in re.findall(
+                r'(?:src|href)="(/assets/[^"]+\.(?:js|css))"',
+                index,
+            )
+        }
+        packaged_assets = {
+            name
             for name in names
-        ):
+            if name.startswith("tradingagents/web/static/assets/")
+            and name.endswith((".js", ".css"))
+        }
+        if not any(name.endswith(".js") for name in referenced_assets):
             raise ValueError("wheel is missing the compiled Web JavaScript asset")
-        if not any(
-            name.startswith("tradingagents/web/static/assets/")
-            and name.endswith(".css")
-            for name in names
-        ):
+        if not any(name.endswith(".css") for name in referenced_assets):
             raise ValueError("wheel is missing the compiled Web CSS asset")
+        if packaged_assets != referenced_assets:
+            unexpected = sorted(packaged_assets - referenced_assets)
+            missing_assets = sorted(referenced_assets - packaged_assets)
+            raise ValueError(
+                "wheel static assets do not match index.html: "
+                f"unexpected={unexpected}, missing={missing_assets}"
+            )
         if not any(name.endswith(".dist-info/licenses/LICENSE") for name in names):
             raise ValueError("wheel is missing LICENSE")
         if not any(name.endswith(".dist-info/licenses/NOTICE") for name in names):
