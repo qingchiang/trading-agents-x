@@ -233,6 +233,26 @@ class TableCellKind(str, Enum):
     DERIVED = "derived"
 
 
+class TableNotation(str, Enum):
+    """Deterministic display strategy for one research-table column."""
+
+    STANDARD = "standard"
+    COMPACT = "compact"
+    PERCENT = "percent"
+    CURRENCY = "currency"
+    DATE = "date"
+    INTEGER = "integer"
+
+
+class TableDisplaySpec(FrozenModel):
+    """Validated display intent materialized by the application."""
+
+    notation: TableNotation = TableNotation.STANDARD
+    scale: float = Field(default=1.0, gt=0)
+    fraction_digits: int = Field(default=2, ge=0, le=8)
+    unit_label: str | None = Field(default=None, min_length=1)
+
+
 class EvidenceOrigin(FrozenModel):
     """One source record contributing to an evidence payload."""
 
@@ -325,6 +345,7 @@ class ResearchTableColumn(FrozenModel):
     label: str = Field(min_length=1)
     data_type: TableDataType = TableDataType.TEXT
     unit: str | None = Field(default=None, min_length=1)
+    display: TableDisplaySpec = Field(default_factory=TableDisplaySpec)
 
 
 class DerivedValue(FrozenModel):

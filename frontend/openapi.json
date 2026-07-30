@@ -2481,6 +2481,9 @@
             "$ref": "#/components/schemas/TableDataType",
             "default": "text"
           },
+          "display": {
+            "$ref": "#/components/schemas/TableDisplaySpec"
+          },
           "key": {
             "pattern": "^[a-z][a-z0-9_]*$",
             "title": "Key",
@@ -3310,6 +3313,56 @@
           "boolean"
         ],
         "title": "TableDataType",
+        "type": "string"
+      },
+      "TableDisplaySpec": {
+        "additionalProperties": false,
+        "description": "Validated display intent materialized by the application.",
+        "properties": {
+          "fraction_digits": {
+            "default": 2,
+            "maximum": 8.0,
+            "minimum": 0.0,
+            "title": "Fraction Digits",
+            "type": "integer"
+          },
+          "notation": {
+            "$ref": "#/components/schemas/TableNotation",
+            "default": "standard"
+          },
+          "scale": {
+            "default": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Scale",
+            "type": "number"
+          },
+          "unit_label": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Label"
+          }
+        },
+        "title": "TableDisplaySpec",
+        "type": "object"
+      },
+      "TableNotation": {
+        "description": "Deterministic display strategy for one research-table column.",
+        "enum": [
+          "standard",
+          "compact",
+          "percent",
+          "currency",
+          "date",
+          "integer"
+        ],
+        "title": "TableNotation",
         "type": "string"
       },
       "ValidationError": {

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import json
 import math
 import re
@@ -26,6 +25,7 @@ from tradingagents.application.contracts import (
     ResearchTableCell,
     TableCellKind,
 )
+from tradingagents.application.table_display import evaluate_formula
 
 _NUMBER_RE = re.compile(r"(?<![A-Za-z0-9_])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?%?")
 _EVIDENCE_REF_RE = re.compile(r"ev_[a-f0-9]{12}")
@@ -900,7 +900,7 @@ def _check_table_cell(
                 code="derived.input_untraceable",
             )
         try:
-            calculated = _evaluate_formula(
+            calculated = evaluate_formula(
                 cell.derived.formula,
                 cell.derived.inputs,
             )
@@ -1133,55 +1133,6 @@ def _parse_number(token: str) -> float | None:
         return float(normalized)
     except ValueError:
         return None
-
-
-def _evaluate_formula(
-    formula: str,
-    inputs: Mapping[str, int | float],
-) -> float:
-    tree = ast.parse(formula, mode="eval")
-
-    def evaluate(node: ast.AST) -> float:
-        if isinstance(node, ast.Expression):
-            return evaluate(node.body)
-        if isinstance(node, ast.Constant):
-            if isinstance(node.value, bool) or not isinstance(
-                node.value,
-                (int, float),
-            ):
-                raise ValueError("formula constants must be numeric")
-            return float(node.value)
-        if isinstance(node, ast.Name):
-            if node.id not in inputs:
-                raise ValueError("formula uses an unknown input")
-            return float(inputs[node.id])
-        if isinstance(node, ast.UnaryOp) and isinstance(
-            node.op,
-            (ast.UAdd, ast.USub),
-        ):
-            value = evaluate(node.operand)
-            return value if isinstance(node.op, ast.UAdd) else -value
-        if isinstance(node, ast.BinOp):
-            left = evaluate(node.left)
-            right = evaluate(node.right)
-            if isinstance(node.op, ast.Add):
-                return left + right
-            if isinstance(node.op, ast.Sub):
-                return left - right
-            if isinstance(node.op, ast.Mult):
-                return left * right
-            if isinstance(node.op, ast.Div):
-                return left / right
-            if isinstance(node.op, ast.Pow):
-                if abs(right) > 12:
-                    raise ValueError("formula exponent is too large")
-                return left**right
-        raise ValueError("formula contains an unsupported operation")
-
-    result = evaluate(tree)
-    if not math.isfinite(result):
-        raise ValueError("formula result must be finite")
-    return result
 
 
 def _validate_measurement_matrix(

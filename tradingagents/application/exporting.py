@@ -236,7 +236,12 @@ def _render_evidence_table(table: EvidenceTable) -> list[str]:
         divider,
         *rows,
     ]
-    lines.extend(_render_table_cell_audit(table.rows, table.columns))
+    lines.extend(
+        _render_table_cell_audit(
+            table.rows,
+            table.columns,
+        )
+    )
     return lines
 
 
@@ -270,6 +275,7 @@ def _render_research_table(table: ResearchTable) -> list[str]:
         "",
         f"- Table: `{table.id}`",
         f"- Purpose: {table.purpose}",
+        "- Evidence: " + _render_refs(table.evidence_refs),
         source_note,
         "",
         headers,
@@ -288,6 +294,11 @@ def _render_table_cell_audit(
 
     entries = []
     for row in rows:
+        if row.evidence_refs:
+            entries.append(
+                f"- `{row.id}`: evidence "
+                + ", ".join(f"`{ref}`" for ref in row.evidence_refs)
+            )
         for column in columns:
             cell = row.cells[column.key]
             details = []

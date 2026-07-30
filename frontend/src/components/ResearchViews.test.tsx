@@ -60,13 +60,11 @@ const evidence = {
             raw_value: `2026-${String(index + 1).padStart(2, "0")}`,
             display_value: `Period ${index + 1}`,
             kind: "observation",
-            evidence_refs: [firstRef],
           },
           value: {
             raw_value: index + 1,
             display_value: `Value ${index + 1}`,
             kind: "observation",
-            evidence_refs: [firstRef],
           },
         },
       })),
@@ -110,6 +108,7 @@ const report = {
       source_table_id: "et_0123456789ab",
       total_source_rows: 14,
       source_row_ids: ["row.1", "row.2"],
+      evidence_refs: [firstRef, secondRef],
       columns: [
         { key: "period", label: "Period", data_type: "text" },
         { key: "change", label: "Change", data_type: "number", unit: "%" },
@@ -122,7 +121,6 @@ const report = {
               raw_value: "Period 1",
               display_value: "Period 1",
               kind: "inference",
-              evidence_refs: [firstRef],
             },
             change: {
               raw_value: 10,
@@ -141,18 +139,17 @@ const report = {
         },
         {
           id: "comparison.2",
+          evidence_refs: [secondRef],
           cells: {
             period: {
               raw_value: "Period 2",
               display_value: "Period 2",
               kind: "inference",
-              evidence_refs: [firstRef],
             },
             change: {
               raw_value: 5,
               display_value: "5%",
               kind: "inference",
-              evidence_refs: [secondRef],
             },
           },
         },
@@ -270,6 +267,13 @@ test("keeps source tables out of the reading report", () => {
     screen.getByText("Current report view: 2/14 source rows."),
   ).toBeVisible();
   expect(screen.getByText("Derived value details")).toBeVisible();
+  const inheritedCell = screen.getByText("Period 1").closest("td");
+  expect(inheritedCell).not.toBeNull();
+  expect(
+    within(inheritedCell!).queryByRole("button", {
+      name: `Open evidence ${firstRef}`,
+    }),
+  ).not.toBeInTheDocument();
 
   fireEvent.click(
     screen.getByRole("button", { name: "Open complete evidence table" }),
@@ -281,6 +285,9 @@ test("keeps source tables out of the reading report", () => {
   const evidenceCard = evidenceTitle.closest("section");
   expect(evidenceCard).not.toBeNull();
   expect(within(evidenceCard!).queryByText("Value 14")).not.toBeInTheDocument();
+  expect(
+    within(evidenceCard!).queryByText("Row evidence"),
+  ).not.toBeInTheDocument();
   fireEvent.click(
     screen.getAllByRole("button", {
       name: `Open evidence ${firstRef}`,

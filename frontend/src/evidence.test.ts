@@ -67,6 +67,7 @@ test("assigns one stable alias to exact duplicate evidence bodies", () => {
       alias: "E01",
       targetRef: "ev_000000000001",
       refs: ["ev_000000000001", "ev_000000000002"],
+      sources: ["source-a", "source-b"],
     },
   ]);
 });

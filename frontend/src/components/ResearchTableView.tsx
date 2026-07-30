@@ -43,17 +43,11 @@ export default function ResearchTableView({
     ? table.rows.length
     : Math.min((safePage + 1) * visualPageSize, table.rows.length);
   const titleRefs = useMemo(
-    () =>
-      evidenceTable
-        ? table.evidence_refs
-        : uniqueRefs(
-            table.rows.flatMap((row) =>
-              Object.values(row.cells).flatMap(
-                (cell) => cell.evidence_refs ?? [],
-              ),
-            ),
-          ),
-    [evidenceTable, table],
+    () => uniqueRefs(table.evidence_refs ?? []),
+    [table.evidence_refs],
+  );
+  const hasRowOverrides = table.rows.some(
+    (row) => (row.evidence_refs?.length ?? 0) > 0,
   );
 
   useEffect(() => {
@@ -118,11 +112,17 @@ export default function ResearchTableView({
         <table>
           <thead>
             <tr>
-              <th className="table-row-audit">{t("rowEvidence")}</th>
+              {hasRowOverrides && (
+                <th className="table-row-audit">{t("rowEvidence")}</th>
+              )}
               {table.columns.map((column) => (
                 <th key={column.key}>
                   <span>{column.label}</span>
-                  {column.unit && <small>{column.unit}</small>}
+                  {(column.display?.unit_label ?? column.unit) && (
+                    <small>
+                      {column.display?.unit_label ?? column.unit}
+                    </small>
+                  )}
                 </th>
               ))}
             </tr>
@@ -134,6 +134,8 @@ export default function ResearchTableView({
                 row={row}
                 evidenceIndex={evidenceIndex}
                 onEvidence={onEvidence}
+                tableRefs={titleRefs}
+                showRowAudit={hasRowOverrides}
                 key={row.id}
               />
             ))}
@@ -218,31 +220,37 @@ function ResearchRow({
   row,
   evidenceIndex,
   onEvidence,
+  tableRefs,
+  showRowAudit,
 }: {
   columns: EvidenceTable["columns"];
   row: ResearchTableRow;
   evidenceIndex: EvidenceReferenceIndex;
   onEvidence: (ref: string) => void;
+  tableRefs: string[];
+  showRowAudit: boolean;
 }) {
-  const rowRefs = uniqueRefs(
-    Object.values(row.cells).flatMap((cell) => cell.evidence_refs ?? []),
-  );
+  const rowRefs = uniqueRefs(row.evidence_refs ?? []);
+  const inheritedRefs = rowRefs.length > 0 ? rowRefs : tableRefs;
   return (
     <tr data-row-id={row.id}>
-      <th className="table-row-audit" scope="row" title={row.id}>
-        <EvidenceLinks
-          refs={rowRefs}
-          evidenceIndex={evidenceIndex}
-          onEvidence={onEvidence}
-          label={false}
-          compact
-        />
-      </th>
+      {showRowAudit && (
+        <th className="table-row-audit" scope="row" title={row.id}>
+          <EvidenceLinks
+            refs={rowRefs}
+            evidenceIndex={evidenceIndex}
+            onEvidence={onEvidence}
+            label={false}
+            compact
+          />
+        </th>
+      )}
       {columns.map((column) => (
         <ResearchCell
           cell={row.cells[column.key]}
           evidenceIndex={evidenceIndex}
           onEvidence={onEvidence}
+          inheritedRefs={inheritedRefs}
           key={column.key}
         />
       ))}
@@ -254,17 +262,24 @@ function ResearchCell({
   cell,
   evidenceIndex,
   onEvidence,
+  inheritedRefs,
 }: {
   cell: ResearchTableCell;
   evidenceIndex: EvidenceReferenceIndex;
   onEvidence: (ref: string) => void;
+  inheritedRefs: string[];
 }) {
   const { t } = useTranslation();
+  const explicitRefs = uniqueRefs(cell.evidence_refs ?? []);
+  const visibleRefs =
+    cell.derived || !sameRefs(explicitRefs, inheritedRefs)
+      ? explicitRefs
+      : [];
   return (
     <td className={`table-cell-${cell.kind ?? "observation"}`}>
       <span className="table-cell-value">{cell.display_value}</span>
       <EvidenceLinks
-        refs={cell.evidence_refs ?? []}
+        refs={visibleRefs}
         evidenceIndex={evidenceIndex}
         onEvidence={onEvidence}
         label={false}
@@ -302,4 +317,10 @@ function isEvidenceTable(
 
 function uniqueRefs(refs: string[]): string[] {
   return Array.from(new Set(refs));
+}
+
+function sameRefs(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) return false;
+  const rightSet = new Set(right);
+  return left.every((ref) => rightSet.has(ref));
 }

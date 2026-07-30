@@ -43,7 +43,7 @@ export default function EvidenceLinks({
               className="open-evidence-button"
               onClick={() => onEvidence(group.targetRef)}
               aria-label={`${t("openEvidence")} ${group.targetRef}`}
-              title={group.refs.join("\n")}
+              title={[...group.sources, ...group.refs].join("\n")}
             >
               <code>{group.alias}</code>
             </button>

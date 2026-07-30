@@ -48,6 +48,8 @@ from .contracts import (
     RunStatus,
     TableCellKind,
     TableDataType,
+    TableDisplaySpec,
+    TableNotation,
     ValuationAssessment,
     ValuationRange,
 )
@@ -103,6 +105,8 @@ __all__ = [
     "RunStatus",
     "TableCellKind",
     "TableDataType",
+    "TableDisplaySpec",
+    "TableNotation",
     "ValuationAssessment",
     "ValuationRange",
 ]

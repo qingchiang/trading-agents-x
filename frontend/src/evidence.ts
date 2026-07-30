@@ -25,6 +25,7 @@ export type EvidenceRefGroup = {
   alias: string;
   targetRef: string;
   refs: string[];
+  sources: string[];
 };
 
 const qualityRank: Record<
@@ -113,6 +114,8 @@ export function groupEvidenceRefs(
       alias,
       targetRef: index.primaryRefs[ref] ?? ref,
       refs: index.refsByAlias[alias] ?? [ref],
+      sources:
+        index.groups.find((group) => group.alias === alias)?.sources ?? [],
     });
   });
   return groups;

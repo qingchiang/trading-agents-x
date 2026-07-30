@@ -43,6 +43,8 @@ from .application.contracts import (
     RunProfile,
     TableCellKind,
     TableDataType,
+    TableDisplaySpec,
+    TableNotation,
     ValuationAssessment,
     ValuationRange,
 )
@@ -91,6 +93,8 @@ __all__ = [
     "RunProfile",
     "TableCellKind",
     "TableDataType",
+    "TableDisplaySpec",
+    "TableNotation",
     "TradingAgents",
     "ValuationAssessment",
     "ValuationRange",

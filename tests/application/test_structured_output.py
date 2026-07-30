@@ -406,6 +406,29 @@ def test_analyst_report_is_synthesized_from_catalogued_evidence() -> None:
         bundle=bundle,
         confidence_override=None,
     )
+    source_view = report.tables[0]
+    first_row = source_view.rows[0]
+    source_view = source_view.model_copy(
+        update={
+            "rows": (
+                first_row.model_copy(
+                    update={
+                        "cells": {
+                            **first_row.cells,
+                            "value": first_row.cells["value"].model_copy(
+                                update={
+                                    "display_value": (
+                                        "MODEL VALUE MUST NOT SURVIVE"
+                                    )
+                                }
+                            ),
+                        }
+                    }
+                ),
+            )
+        }
+    )
+    report = report.model_copy(update={"tables": (source_view,)})
     events: list[dict[str, Any]] = []
     llm = _FakeLLM(
         primary={
@@ -431,6 +454,10 @@ def test_analyst_report_is_synthesized_from_catalogued_evidence() -> None:
     assert result.generation_method is ArtifactGenerationMethod.TOOL_CALL
     assert result.value.sections[0].source_table_ids == (bundle.tables[0].id,)
     assert result.value.sections[0].table_ids == ("rt_fundamentals_source_view",)
+    assert (
+        result.value.tables[0].rows[0].cells["value"].display_value
+        == "120"
+    )
     assert '"row_count": 1' in llm.calls[0][1]
     assert '"Revenue"' not in llm.calls[0][1]
     assert "EVIDENCE CATALOG" in llm.calls[0][1]
@@ -552,6 +579,58 @@ def test_analyst_semantics_reject_missing_sections_and_fabricated_refs() -> None
     issue = "semantic.analyst.sections.required"
     assert error.value.validation_issues == (issue,)
     assert issue in llm.calls[1][1]
+
+
+def test_analyst_rejects_source_table_value_mismatch() -> None:
+    bundle = _analyst_bundle()
+    report = _analyst_report_example(
+        analyst="market",
+        bundle=bundle,
+        confidence_override=None,
+    )
+    table = report.tables[0]
+    row = table.rows[0]
+    mismatched = row.cells["value"].model_copy(
+        update={"raw_value": 999}
+    )
+    invalid = report.model_copy(
+        update={
+            "tables": (
+                table.model_copy(
+                    update={
+                        "rows": (
+                            row.model_copy(
+                                update={
+                                    "cells": {
+                                        **row.cells,
+                                        "value": mismatched,
+                                    }
+                                }
+                            ),
+                        )
+                    }
+                ),
+            )
+        }
+    )
+    response = {"raw": AIMessage(content=""), "parsed": invalid}
+    llm = _FakeLLM(primary=response, recovery=response)
+
+    with pytest.raises(StructuredOutputError) as error:
+        invoke_analyst_report(
+            llm,
+            analyst="market",
+            draft_narrative="Draft.",
+            bundle=bundle,
+            output_language="English (en)",
+            confidence_override=None,
+            warnings=(),
+            node="analyst.market",
+        )
+
+    assert error.value.validation_issues == (
+        "semantic.research_table.source.value_mismatch",
+    )
 
 
 def test_analyst_semantic_hint_guides_successful_recovery() -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from collections.abc import Callable, Iterable
 from typing import Any, Literal
@@ -20,6 +21,10 @@ from tradingagents.application.contracts import (
     EvidenceQuality,
     ResearchTable,
     ResearchWarning,
+)
+from tradingagents.application.table_display import (
+    evaluate_formula,
+    materialize_research_table,
 )
 from tradingagents.graph.evidence_context import (
     PreparedEvidence,
@@ -210,6 +215,7 @@ def invoke_analyst_report(
             bundle=bundle,
             warnings=warnings,
             confidence_override=confidence_override,
+            output_language=output_language,
         )
 
     def recover_truncation() -> StructuredOutputResult[AnalystReport]:
@@ -226,6 +232,7 @@ def invoke_analyst_report(
             bundle=bundle,
             warnings=warnings,
             confidence_override=confidence_override,
+            output_language=output_language,
             node=node,
             event_writer=event_writer,
         )
@@ -296,6 +303,12 @@ Report rules:
   overrides that default, and cell refs only for a source difference, conflict,
   or derivation. Derived cells must save their formula, named numeric inputs,
   input evidence refs, unit, and result.
+- For every column choose a TableDisplaySpec: notation, positive scale,
+  fraction_digits, and a localized unit_label when useful. Use localized
+  human-readable column labels. Percentage raw values are decimal ratios
+  (`0.123`, not `12.3`) and the application renders `12.3%`.
+- `display_value` is only a schema placeholder. The application recomputes it
+  from raw_value and TableDisplaySpec for both Web and Markdown.
 - When a ResearchTable shows a subset of an EvidenceTable, set
   source_table_id, total_source_rows, and one source_row_id per displayed row.
 - Tables must have a clear purpose and must not merely repeat prose.
@@ -435,6 +448,7 @@ def _validate_analyst_report(
     bundle: EvidenceBundle,
     warnings: tuple[ResearchWarning, ...],
     confidence_override: float | None,
+    output_language: str,
 ) -> AnalystReport:
     if report.analyst != analyst:
         raise OutputValidationError("analyst.identity")
@@ -487,15 +501,22 @@ def _validate_analyst_report(
         inline_refs = tuple(dict.fromkeys(re.findall(r"ev_[a-f0-9]{12}", section.narrative)))
         require_valid_refs(inline_refs, valid_refs, required=False)
         used_refs.extend(inline_refs)
+    normalized_tables = []
     for table in report.tables:
+        table = materialize_research_table(
+            table,
+            output_language=output_language,
+        )
         used_refs.extend(
             _validate_research_table_against_bundle(
                 table,
                 bundle=bundle,
             )
         )
+        normalized_tables.append(table)
     updates: dict[str, Any] = {
         "warnings": warnings,
+        "tables": tuple(normalized_tables),
         "evidence_refs": tuple(dict.fromkeys((*report.evidence_refs, *used_refs))),
     }
     if confidence_override is not None:
@@ -522,6 +543,25 @@ def _validate_research_table_against_bundle(
                 required=cell.kind.value == "derived",
             )
             used_refs.extend(cell.evidence_refs)
+            if cell.derived is not None:
+                try:
+                    calculated = evaluate_formula(
+                        cell.derived.formula,
+                        cell.derived.inputs,
+                    )
+                except (ValueError, ZeroDivisionError, OverflowError) as exc:
+                    raise OutputValidationError(
+                        "research_table.derived.formula"
+                    ) from exc
+                if not math.isclose(
+                    calculated,
+                    float(cell.derived.result),
+                    rel_tol=1e-9,
+                    abs_tol=1e-9,
+                ):
+                    raise OutputValidationError(
+                        "research_table.derived.result"
+                    )
     if table.source_table_id is None:
         return tuple(dict.fromkeys(used_refs))
     source_tables = {item.id: item for item in bundle.tables}
@@ -533,7 +573,44 @@ def _validate_research_table_against_bundle(
     valid_row_ids = {row.id for row in source.rows}
     if any(row_id not in valid_row_ids for row_id in table.source_row_ids):
         raise OutputValidationError("research_table.source.row_unknown")
+    source_rows = {row.id: row for row in source.rows}
+    for row, source_row_id in zip(
+        table.rows,
+        table.source_row_ids,
+        strict=True,
+    ):
+        source_row = source_rows[source_row_id]
+        for column in table.columns:
+            cell = row.cells[column.key]
+            source_cell = source_row.cells.get(column.key)
+            if (
+                cell.kind.value == "observation"
+                and source_cell is not None
+                and not _raw_values_equal(
+                    cell.raw_value,
+                    source_cell.raw_value,
+                )
+            ):
+                raise OutputValidationError(
+                    "research_table.source.value_mismatch"
+                )
     return tuple(dict.fromkeys(used_refs))
+
+
+def _raw_values_equal(left: Any, right: Any) -> bool:
+    if (
+        isinstance(left, (int, float))
+        and not isinstance(left, bool)
+        and isinstance(right, (int, float))
+        and not isinstance(right, bool)
+    ):
+        return math.isclose(
+            float(left),
+            float(right),
+            rel_tol=1e-9,
+            abs_tol=1e-9,
+        )
+    return left == right
 
 
 def _recover_analyst_report_by_section(
@@ -544,6 +621,7 @@ def _recover_analyst_report_by_section(
     bundle: EvidenceBundle,
     warnings: tuple[ResearchWarning, ...],
     confidence_override: float | None,
+    output_language: str,
     node: str,
     event_writer: Callable[[dict[str, Any]], None] | None,
 ) -> StructuredOutputResult[AnalystReport]:
@@ -718,6 +796,7 @@ was truncated.
             bundle=bundle,
             warnings=warnings,
             confidence_override=confidence_override,
+            output_language=output_language,
         ),
         generation_method=ArtifactGenerationMethod.SECTIONED_RECOVERY,
     )

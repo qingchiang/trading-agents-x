@@ -355,6 +355,7 @@ export interface components {
     };
     ResearchTableColumn: {
       data_type?: components["schemas"]["TableDataType"];
+      display?: components["schemas"]["TableDisplaySpec"];
       key: string;
       label: string;
       unit?: string | null;
@@ -469,6 +470,13 @@ export interface components {
     };
     TableCellKind: "descriptor" | "observation" | "inference" | "derived";
     TableDataType: "text" | "integer" | "number" | "percentage" | "currency" | "date" | "datetime" | "boolean";
+    TableDisplaySpec: {
+      fraction_digits?: number;
+      notation?: components["schemas"]["TableNotation"];
+      scale?: number;
+      unit_label?: string | null;
+    };
+    TableNotation: "standard" | "compact" | "percent" | "currency" | "date" | "integer";
     ValidationError: {
       ctx?: {
       };
