@@ -108,7 +108,10 @@ def test_market_tool_node_injects_trade_date_as_end_date():
         "2020-01-15",
         _provenance=True,
     )
-    assert result["messages"][0].content == "SAFE"
+    message = result["messages"][0]
+    assert "Market data analytical overview" in message.content
+    assert "SAFE" not in message.content
+    assert message.artifact["source_content"] == "SAFE"
 
 
 @pytest.mark.unit
@@ -154,7 +157,10 @@ def test_tool_node_accepts_typed_run_context_without_serialization_warning(
         "2020-01-15",
         _provenance=True,
     )
-    assert result["messages"][0].content == "SAFE"
+    message = result["messages"][0]
+    assert "Market data analytical overview" in message.content
+    assert "SAFE" not in message.content
+    assert message.artifact["source_content"] == "SAFE"
     assert not any(
         "PydanticSerializationUnexpectedValue" in str(item.message)
         or "Expected `none`" in str(item.message)

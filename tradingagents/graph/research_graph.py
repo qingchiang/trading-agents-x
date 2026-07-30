@@ -65,6 +65,10 @@ from tradingagents.application.contracts import (
 from tradingagents.application.evidence import (
     extract_evidence_tables,
 )
+from tradingagents.application.evidence_workset import (
+    artifact_records,
+    is_evidence_tool_artifact,
+)
 from tradingagents.application.metrics import MetricsCallback
 from tradingagents.application.reporting import order_reports
 from tradingagents.application.runtime import RunContext, check_cancelled
@@ -1216,6 +1220,29 @@ def _collect_evidence(
         message for message in messages if isinstance(message, ToolMessage)
     ]
     for message in tool_messages:
+        artifact = getattr(message, "artifact", None)
+        if is_evidence_tool_artifact(artifact):
+            records = artifact_records(artifact)
+            if not records:
+                records = (
+                    ProvenanceRecord(
+                        evidence=str(
+                            artifact.get("evidence_type")
+                            or getattr(message, "name", None)
+                            or f"{analyst} tool"
+                        ),
+                        source="unknown",
+                        requested=requested_date.isoformat(),
+                        effective="unknown",
+                        timing="no auditable source metadata captured",
+                    ),
+                )
+            collect_payload(
+                records,
+                str(artifact["source_content"]).strip() or None,
+                artifact.get("temporal_scope"),
+            )
+            continue
         content = message.content if isinstance(message.content, str) else str(
             message.content
         )

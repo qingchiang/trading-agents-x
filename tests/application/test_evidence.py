@@ -110,6 +110,47 @@ def test_composite_tool_payload_creates_one_item_with_all_origins() -> None:
     ]
 
 
+def test_complete_artifact_is_collected_instead_of_model_overview() -> None:
+    record = _record("get_stock_data", "yfinance")
+    artifact = {
+        "schema_version": "1",
+        "kind": "source",
+        "dataset_id": "ds_0123456789ab",
+        "evidence_type": "get_stock_data",
+        "source_content": "Date,Close\n2026-07-24,123.45",
+        "provenance": [
+            {
+                "evidence": record.evidence,
+                "source": record.source,
+                "requested": record.requested,
+                "effective": record.effective,
+                "timing": record.timing,
+                "retrieved_at": record.retrieved_at,
+            }
+        ],
+        "temporal_scope": "point_in_time",
+        "analytical_views": {"row_count": 1},
+    }
+
+    items = _collect_evidence(
+        [
+            ToolMessage(
+                content="MODEL-SAFE OVERVIEW",
+                artifact=artifact,
+                tool_call_id="fixture",
+            )
+        ],
+        "",
+        requested_date=date(2026, 7, 24),
+        analyst="market",
+    )
+
+    assert len(items) == 1
+    assert items[0].content == artifact["source_content"]
+    assert "MODEL-SAFE OVERVIEW" not in items[0].content
+    assert items[0].source == "yfinance"
+
+
 def test_exact_prefetched_bodies_are_aggregated_with_all_origins() -> None:
     blocks = [
         {
