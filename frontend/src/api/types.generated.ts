@@ -403,6 +403,15 @@ export interface components {
     };
     RiskReviewDisposition: "retained" | "modified" | "rejected";
     RiskSeverity: "low" | "medium" | "high" | "critical";
+    RunAttemptView: {
+      attempt: number;
+      error_code?: string | null;
+      finished_at?: string | null;
+      metrics?: components["schemas"]["RunMetrics"];
+      resume_count?: number;
+      started_at?: string | null;
+      status: components["schemas"]["RunStatus"];
+    };
     RunBatchRequest: {
       run_ids: string[];
     };
@@ -425,6 +434,7 @@ export interface components {
       ticker: string;
     };
     RunDetail: {
+      attempts?: components["schemas"]["RunAttemptView"][];
       result?: components["schemas"]["AnalysisResult"] | null;
       run: components["schemas"]["RunView"];
     };

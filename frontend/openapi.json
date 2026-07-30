@@ -2817,6 +2817,70 @@
         "title": "RiskSeverity",
         "type": "string"
       },
+      "RunAttemptView": {
+        "additionalProperties": false,
+        "description": "Observed execution usage and lifecycle for one retry attempt.",
+        "properties": {
+          "attempt": {
+            "minimum": 1.0,
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "metrics": {
+            "$ref": "#/components/schemas/RunMetrics"
+          },
+          "resume_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Resume Count",
+            "type": "integer"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          }
+        },
+        "required": [
+          "attempt",
+          "status"
+        ],
+        "title": "RunAttemptView",
+        "type": "object"
+      },
       "RunBatchRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2999,6 +3063,14 @@
       "RunDetail": {
         "additionalProperties": false,
         "properties": {
+          "attempts": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RunAttemptView"
+            },
+            "title": "Attempts",
+            "type": "array"
+          },
           "result": {
             "anyOf": [
               {

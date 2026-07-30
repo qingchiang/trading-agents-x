@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 
@@ -100,6 +101,38 @@ function LocationProbe() {
   );
 }
 
+const runMetrics = {
+  llm_calls: 4,
+  tool_calls: 3,
+  input_tokens: 1200,
+  output_tokens: 400,
+  cache_hit_input_tokens: 300,
+  cache_miss_input_tokens: 900,
+  reasoning_output_tokens: 150,
+  detailed_usage_calls: 1,
+  wall_time_seconds: 12.4,
+  node_metrics: {
+    "analyst.market": {
+      llm_calls: 2,
+      tool_calls: 3,
+      input_tokens: 800,
+      output_tokens: 220,
+      cache_hit_input_tokens: 300,
+      cache_miss_input_tokens: 500,
+      reasoning_output_tokens: 100,
+      detailed_usage_calls: 1,
+      wall_time_seconds: 2.1,
+    },
+    "committee.final": {
+      llm_calls: 2,
+      tool_calls: 0,
+      input_tokens: 400,
+      output_tokens: 180,
+      wall_time_seconds: 4.5,
+    },
+  },
+};
+
 const detail = {
   run: {
     id: "run-1",
@@ -123,14 +156,7 @@ const detail = {
     config_snapshot: {},
     attempt: 1,
     cancel_requested: false,
-    metrics: {
-      llm_calls: 0,
-      tool_calls: 0,
-      input_tokens: 0,
-      output_tokens: 0,
-      wall_time_seconds: 0,
-      node_metrics: {},
-    },
+    metrics: runMetrics,
     created_at: "2026-07-24T00:00:00Z",
     updated_at: "2026-07-24T00:01:00Z",
   },
@@ -222,37 +248,7 @@ const detail = {
         },
       ],
     },
-    metrics: {
-      llm_calls: 4,
-      tool_calls: 3,
-      input_tokens: 1200,
-      output_tokens: 400,
-      cache_hit_input_tokens: 300,
-      cache_miss_input_tokens: 900,
-      reasoning_output_tokens: 150,
-      detailed_usage_calls: 1,
-      wall_time_seconds: 12.4,
-      node_metrics: {
-        "analyst.market": {
-          llm_calls: 2,
-          tool_calls: 3,
-          input_tokens: 800,
-          output_tokens: 220,
-          cache_hit_input_tokens: 300,
-          cache_miss_input_tokens: 500,
-          reasoning_output_tokens: 100,
-          detailed_usage_calls: 1,
-          wall_time_seconds: 2.1,
-        },
-        "committee.final": {
-          llm_calls: 2,
-          tool_calls: 0,
-          input_tokens: 400,
-          output_tokens: 180,
-          wall_time_seconds: 4.5,
-        },
-      },
-    },
+    metrics: runMetrics,
     warnings: [
       {
         code: "structured_output.recovered",
@@ -262,6 +258,17 @@ const detail = {
       },
     ],
   },
+  attempts: [
+    {
+      attempt: 1,
+      status: "succeeded",
+      resume_count: 1,
+      metrics: runMetrics,
+      started_at: "2026-07-24T00:00:01Z",
+      finished_at: "2026-07-24T00:01:00Z",
+      error_code: null,
+    },
+  ],
 } as unknown as RunDetailType;
 
 const artifacts = [
@@ -367,7 +374,7 @@ test("restores deliberation and resolves evidence references across run views", 
     "aria-selected",
     "true",
   );
-  expect(screen.getByText("1,200")).toBeVisible();
+  expect(screen.getAllByText("1,200")[0]).toBeVisible();
   expect(screen.getByText("1/4")).toBeVisible();
   expect(
     screen.getByRole("link", { name: "Export research package" }),
@@ -628,6 +635,46 @@ test("shows a collapsed per-node metrics table", async () => {
     committee!.compareDocumentPosition(analyst!) &
       Node.DOCUMENT_POSITION_FOLLOWING,
   ).not.toBe(0);
+
+  const attemptSummary = screen.getByText("Attempt metrics", { exact: false });
+  fireEvent.click(attemptSummary);
+  const attemptRow = within(attemptSummary.closest("details")!).getByText(
+    "Succeeded",
+  ).closest("tr");
+  expect(attemptRow).toHaveTextContent("Succeeded");
+  expect(attemptRow).toHaveTextContent("1,200");
+  expect(attemptRow).toHaveTextContent("12.4s");
+});
+
+test("shows persisted run metrics when a failed run has no result", async () => {
+  vi.mocked(api.run).mockResolvedValue({
+    ...detail,
+    run: {
+      ...detail.run,
+      status: "failed",
+      error_code: "StructuredOutputError",
+      error_message: "Validated output failed.",
+    },
+    result: null,
+    attempts: [
+      {
+        ...detail.attempts![0],
+        status: "failed",
+        error_code: "StructuredOutputError",
+      },
+    ],
+  } as RunDetailType);
+
+  render(
+    <Router initialPath="/runs/run-1">
+      <RunDetail />
+    </Router>,
+  );
+
+  expect(await screen.findByText("Validated output failed.")).toBeVisible();
+  expect(screen.getAllByText("1,200")[0]).toBeVisible();
+  fireEvent.click(screen.getByText("Attempt metrics", { exact: false }));
+  expect(screen.getByText("StructuredOutputError")).toBeVisible();
 });
 
 test("restores report and evidence navigation from the URL", async () => {

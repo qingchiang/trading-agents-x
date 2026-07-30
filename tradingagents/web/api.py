@@ -252,7 +252,11 @@ def create_app(
             if view.status in _TERMINAL
             else None
         )
-        return RunDetail(run=view, result=result)
+        return RunDetail(
+            run=view,
+            result=result,
+            attempts=repository.list_attempts(run_id),
+        )
 
     @app.get(
         f"{API_PREFIX}/runs/{{run_id}}/artifacts",

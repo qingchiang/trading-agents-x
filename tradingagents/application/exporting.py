@@ -113,6 +113,12 @@ def render_run_export_markdown(run_export: RunExport) -> str:
             "",
             "## Performance",
             "",
+            (
+                "_Usage is the cumulative amount observed and persisted by this "
+                "application. A hard process crash can prevent the final provider "
+                "callback from being recorded._"
+            ),
+            "",
             f"- LLM calls: `{metrics.llm_calls}`",
             f"- Tool calls: `{metrics.tool_calls}`",
             f"- Input tokens: `{metrics.input_tokens}`",
@@ -154,6 +160,29 @@ def render_run_export_markdown(run_export: RunExport) -> str:
                 f"{node_usage.reasoning_output_tokens} | "
                 f"{node_usage.detailed_usage_calls} | "
                 f"{node_usage.wall_time_seconds:.3f}s |"
+            )
+
+    sections.extend(["", "### Attempts"])
+    if not run_export.attempts:
+        sections.extend(["", "_No attempt metrics were recorded._"])
+    else:
+        sections.extend(
+            [
+                "",
+                "| Attempt | Status | Resumes | Error | LLM calls | Tool calls | "
+                "Input tokens | Output tokens | Wall time |",
+                "|---:|---|---:|---|---:|---:|---:|---:|---:|",
+            ]
+        )
+        for attempt in run_export.attempts:
+            attempt_metrics = attempt.metrics
+            sections.append(
+                f"| {attempt.attempt} | {attempt.status.value} | "
+                f"{attempt.resume_count} | {attempt.error_code or '—'} | "
+                f"{attempt_metrics.llm_calls} | {attempt_metrics.tool_calls} | "
+                f"{attempt_metrics.input_tokens} | "
+                f"{attempt_metrics.output_tokens} | "
+                f"{attempt_metrics.wall_time_seconds:.3f}s |"
             )
 
     sections.extend(["", "## Evidence Appendix"])
@@ -258,6 +287,10 @@ def render_run_export_package(run_export: RunExport) -> bytes:
                 "schema_version": run_export.schema_version,
                 "run": run_export.run.model_dump(mode="json"),
                 "result": run_export.result.model_dump(mode="json"),
+                "attempts": [
+                    attempt.model_dump(mode="json")
+                    for attempt in run_export.attempts
+                ],
             }
         ),
         "artifacts.json": _json_bytes(

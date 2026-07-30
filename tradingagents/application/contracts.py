@@ -1653,6 +1653,18 @@ class RunView(FrozenModel):
     updated_at: datetime
 
 
+class RunAttemptView(FrozenModel):
+    """Observed execution usage and lifecycle for one retry attempt."""
+
+    attempt: int = Field(ge=1)
+    status: RunStatus
+    resume_count: int = Field(default=0, ge=0)
+    metrics: RunMetrics = Field(default_factory=RunMetrics)
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    error_code: str | None = None
+
+
 class RunPage(FrozenModel):
     items: tuple[RunView, ...]
     total: int = Field(ge=0)
@@ -1674,3 +1686,4 @@ class RunExport(FrozenModel):
     result: AnalysisResult
     evidence: EvidenceBundle | None = None
     artifacts: tuple[ResearchArtifact, ...] = ()
+    attempts: tuple[RunAttemptView, ...] = ()

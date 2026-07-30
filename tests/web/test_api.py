@@ -95,6 +95,28 @@ async def test_run_lifecycle_routes_and_filters(
 
     assert detail.status_code == 200
     assert detail.json()["run"]["id"] == run_id
+    assert detail.json()["attempts"] == [
+        {
+            "attempt": 1,
+            "status": "queued",
+            "resume_count": 0,
+            "metrics": {
+                "llm_calls": 0,
+                "tool_calls": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_hit_input_tokens": 0,
+                "cache_miss_input_tokens": 0,
+                "reasoning_output_tokens": 0,
+                "detailed_usage_calls": 0,
+                "wall_time_seconds": 0.0,
+                "node_metrics": {},
+            },
+            "started_at": None,
+            "finished_at": None,
+            "error_code": None,
+        }
+    ]
     assert [run["id"] for run in queued.json()["items"]] == [run_id]
     assert queued.json()["total"] == 1
     assert cancelled.json()["status"] == "cancelled"
@@ -419,6 +441,10 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
     assert detail.json()["result"]["evidence"]["digest"] == evidence.digest
     assert detail.json()["result"]["evidence"]["items"][0]["ref"] == (
         evidence_item.ref
+    )
+    assert detail.json()["attempts"][0]["status"] == "succeeded"
+    assert detail.json()["attempts"][0]["metrics"] == (
+        detail.json()["run"]["metrics"]
     )
     assert artifacts.status_code == 200
     assert artifacts.json()[0]["id"] == artifact.id

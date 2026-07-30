@@ -187,6 +187,16 @@ def test_failed_retry_metrics_are_preserved_per_attempt_and_aggregated(
     assert aggregate.input_tokens == 1_400
     assert aggregate.wall_time_seconds == 3.75
     assert repository.get_run(run.id).metrics == aggregate
+    attempt_views = repository.list_attempts(run.id)
+    assert [attempt.status for attempt in attempt_views] == [
+        RunStatus.FAILED,
+        RunStatus.FAILED,
+    ]
+    assert [attempt.metrics.llm_calls for attempt in attempt_views] == [2, 1]
+    assert [attempt.error_code for attempt in attempt_views] == [
+        "RuntimeError",
+        "RuntimeError",
+    ]
     with repository.sessions() as session:
         attempts = list(
             session.scalars(
@@ -235,6 +245,9 @@ def test_interrupted_segments_accumulate_within_the_same_attempt(
             select(RunAttemptRecord).where(RunAttemptRecord.run_id == run.id)
         )
     assert RunMetrics.model_validate(attempt.metrics_json) == aggregate
+    attempt_view = repository.list_attempts(run.id)[0]
+    assert attempt_view.resume_count == 1
+    assert attempt_view.metrics == aggregate
 
 
 def test_release_claim_requeues_same_attempt_and_checkpoint(

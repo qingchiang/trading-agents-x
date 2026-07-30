@@ -10,6 +10,7 @@ import {
   type ResearchDecision,
   type RunDetail as RunDetailType,
   type RunEvent,
+  type RunAttemptView,
   type RunMetrics,
 } from "../api/client";
 import AnalystReportView from "../components/AnalystReportView";
@@ -465,7 +466,7 @@ export default function RunDetail() {
         />
       )}
 
-      {result && <MetricsPanel metrics={result.metrics} />}
+      <MetricsPanel metrics={run.metrics} attempts={detail.attempts ?? []} />
     </section>
   );
 }
@@ -1027,11 +1028,18 @@ function Metric({ label, value }: { label: string; value: number | string }) {
   );
 }
 
-function MetricsPanel({ metrics }: { metrics: RunMetrics | undefined }) {
+function MetricsPanel({
+  metrics,
+  attempts,
+}: {
+  metrics: RunMetrics | undefined;
+  attempts: RunAttemptView[];
+}) {
   const { t } = useTranslation();
   const rows = useMemo(() => nodeMetricRows(metrics), [metrics]);
   return (
     <article className="panel run-metrics">
+      <p className="metrics-observation-note">{t("observedUsageNote")}</p>
       <div className="metrics-strip">
         <Metric label={t("llmCalls")} value={metrics?.llm_calls ?? 0} />
         <Metric label={t("toolCalls")} value={metrics?.tool_calls ?? 0} />
@@ -1101,8 +1109,53 @@ function MetricsPanel({ metrics }: { metrics: RunMetrics | undefined }) {
           </div>
         </details>
       )}
+      <details className="node-metrics attempt-metrics">
+        <summary>
+          {t("attemptMetrics")} <span>{attempts.length}</span>
+        </summary>
+        {attempts.length === 0 ? (
+          <p className="metrics-empty">{t("noAttemptMetrics")}</p>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>{t("attempt")}</th>
+                  <th>{t("status")}</th>
+                  <th>{t("resumeCount")}</th>
+                  <th>{t("errorType")}</th>
+                  <th>{t("llmCalls")}</th>
+                  <th>{t("toolCalls")}</th>
+                  <th>{t("inputTokens")}</th>
+                  <th>{t("outputTokens")}</th>
+                  <th>{t("wallTime")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {attempts.map((attempt) => (
+                  <tr key={attempt.attempt}>
+                    <td>{attempt.attempt}</td>
+                    <td>{t(runStatusKey(attempt.status))}</td>
+                    <td>{attempt.resume_count}</td>
+                    <td>{attempt.error_code ?? "—"}</td>
+                    <td>{(attempt.metrics?.llm_calls ?? 0).toLocaleString()}</td>
+                    <td>{(attempt.metrics?.tool_calls ?? 0).toLocaleString()}</td>
+                    <td>{(attempt.metrics?.input_tokens ?? 0).toLocaleString()}</td>
+                    <td>{(attempt.metrics?.output_tokens ?? 0).toLocaleString()}</td>
+                    <td>{(attempt.metrics?.wall_time_seconds ?? 0).toFixed(1)}s</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </details>
     </article>
   );
+}
+
+function runStatusKey(status: RunAttemptView["status"]): string {
+  return `status${status[0].toUpperCase()}${status.slice(1)}`;
 }
 
 type NodeMetricRow = {

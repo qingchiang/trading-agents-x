@@ -36,6 +36,7 @@ from .contracts import (
     ResearchDecision,
     ResearchWarning,
     RiskReview,
+    RunAttemptView,
     RunEvent,
     RunMetrics,
     RunPage,
@@ -510,6 +511,14 @@ class RunRepository:
                     RunRecord.id,
                     RunRecord.status,
                     RunRecord.current_attempt,
+                    RunAttemptRecord.started_at.label("attempt_started_at"),
+                )
+                .join(
+                    RunAttemptRecord,
+                    and_(
+                        RunAttemptRecord.run_id == RunRecord.id,
+                        RunAttemptRecord.attempt == RunRecord.current_attempt,
+                    ),
                 )
                 .where(
                     RunRecord.trashed_at.is_(None),
@@ -528,7 +537,7 @@ class RunRepository:
             if candidate is None:
                 connection.commit()
                 return None
-            recovering = candidate["status"] == RunStatus.RUNNING.value
+            resuming = candidate["attempt_started_at"] is not None
             connection.execute(
                 update(RunRecord)
                 .where(RunRecord.id == candidate["id"])
@@ -546,7 +555,7 @@ class RunRepository:
                 "lease_expires_at": expires,
                 "started_at": func.coalesce(RunAttemptRecord.started_at, now),
             }
-            if recovering:
+            if resuming:
                 attempt_values["resume_count"] = RunAttemptRecord.resume_count + 1
             connection.execute(
                 update(RunAttemptRecord)
@@ -591,6 +600,8 @@ class RunRepository:
             attempt.status = RunStatus.RUNNING.value
             attempt.lease_owner = worker_id
             attempt.lease_expires_at = expires
+            if attempt.started_at is not None:
+                attempt.resume_count += 1
             attempt.started_at = attempt.started_at or now
         return self.get_run(run_id)
 
@@ -1153,6 +1164,30 @@ class RunRepository:
             evidence=evidence,
             metrics=view.metrics,
             warnings=warnings,
+        )
+
+    def list_attempts(self, run_id: str) -> tuple[RunAttemptView, ...]:
+        if not self._run_exists(run_id):
+            raise RunNotFoundError(run_id)
+        with self.sessions() as session:
+            records = tuple(
+                session.scalars(
+                    select(RunAttemptRecord)
+                    .where(RunAttemptRecord.run_id == run_id)
+                    .order_by(RunAttemptRecord.attempt)
+                )
+            )
+        return tuple(
+            RunAttemptView(
+                attempt=record.attempt,
+                status=RunStatus(record.status),
+                resume_count=record.resume_count,
+                metrics=RunMetrics.model_validate(record.metrics_json or {}),
+                started_at=_aware(record.started_at),
+                finished_at=_aware(record.finished_at),
+                error_code=record.error_code,
+            )
+            for record in records
         )
 
     def _run_exists(self, run_id: str) -> bool:

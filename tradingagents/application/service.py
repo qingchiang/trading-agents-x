@@ -420,6 +420,7 @@ class AnalysisService:
             result=result,
             evidence=result.evidence,
             artifacts=tuple(self.repository.list_artifacts(run_id)),
+            attempts=self.repository.list_attempts(run_id),
         )
 
     def backup_database(self, destination: Path) -> Path:

@@ -11,6 +11,7 @@ from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
     ResearchDecision,
+    RunAttemptView,
     RunView,
 )
 
@@ -26,6 +27,7 @@ class LoginRequest(ApiModel):
 class RunDetail(ApiModel):
     run: RunView
     result: AnalysisResult | None = None
+    attempts: tuple[RunAttemptView, ...] = ()
 
 
 class RunCreateRequest(AnalysisRequest):

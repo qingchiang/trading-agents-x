@@ -588,6 +588,23 @@ def test_failure_persists_observed_metrics_and_emits_the_aggregate(
     assert event.event_type == "run.failed"
     assert event.payload["metrics"]["input_tokens"] == 250
 
+    _, json_body = service.export(queued.id, format="json")
+    json_payload = json.loads(json_body)
+    assert json_payload["run"]["metrics"]["input_tokens"] == 250
+    assert json_payload["attempts"][0]["status"] == "failed"
+    assert json_payload["attempts"][0]["metrics"]["input_tokens"] == 250
+
+    _, markdown_body = service.export(queued.id, format="markdown")
+    assert "## Performance" in markdown_body
+    assert "| 1 | failed |" in markdown_body
+    assert "Input tokens: `250`" in markdown_body
+
+    _, package_body = service.export(queued.id, format="package")
+    with zipfile.ZipFile(io.BytesIO(package_body)) as archive:
+        run_payload = json.loads(archive.read("run.json"))
+    assert run_payload["attempts"][0]["status"] == "failed"
+    assert run_payload["run"]["metrics"]["input_tokens"] == 250
+
 
 def test_cooperative_cancel_cleans_checkpoint(
     app_settings,
@@ -774,6 +791,8 @@ def test_service_export_reads_the_durable_result(
             report = archive.read("report.md").decode()
             assert result.run_id in report
             assert "Fixture thesis" in report
+            run_payload = json.loads(archive.read("run.json"))
+            assert run_payload["attempts"][0]["status"] == "succeeded"
         return
     assert isinstance(body, str)
     assert result.run_id in body
@@ -782,6 +801,8 @@ def test_service_export_reads_the_durable_result(
         payload = json.loads(body)
         assert payload["schema_version"] == "1"
         assert payload["run"]["id"] == result.run_id
+        assert payload["attempts"][0]["status"] == "succeeded"
+        assert payload["attempts"][0]["metrics"] == payload["run"]["metrics"]
         assert payload["result"]["evidence"] == payload["evidence"]
         assert payload["evidence"]["items"][0]["source"] == "fixture"
         assert payload["artifacts"][0]["stage"] == "analyst"
@@ -796,6 +817,8 @@ def test_service_export_reads_the_durable_result(
         assert "_No deliberation artifacts were recorded for this run._" in body
         assert "## Warnings" in body
         assert "## Evidence Appendix" in body
+        assert "### Attempts" in body
+        assert "| 1 | succeeded |" in body
         assert f"### `{evidence_ref}`" in body
         assert '"source": "fixture"' in body
 

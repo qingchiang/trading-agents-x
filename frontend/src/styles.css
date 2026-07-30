@@ -1656,6 +1656,19 @@ label small {
   overflow: hidden;
 }
 
+.metrics-observation-note,
+.metrics-empty {
+  margin: 0;
+  padding: 12px 20px;
+  color: var(--muted-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.metrics-observation-note {
+  border-bottom: 1px solid var(--line-soft);
+}
+
 .metrics-strip {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -1727,6 +1740,13 @@ label small {
 .node-metrics th:not(:first-child) {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+.attempt-metrics th:nth-child(2),
+.attempt-metrics th:nth-child(4),
+.attempt-metrics td:nth-child(2),
+.attempt-metrics td:nth-child(4) {
+  text-align: left;
 }
 
 .filter-bar {
