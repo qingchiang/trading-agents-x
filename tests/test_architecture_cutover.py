@@ -89,6 +89,8 @@ def test_public_api_exposes_typed_application_contract():
         "RunProfile",
         "TableCellKind",
         "TableDataType",
+        "TableDisplaySpec",
+        "TableNotation",
         "TradingAgents",
         "ValuationAssessment",
         "ValuationRange",
