@@ -36,7 +36,6 @@ import { formatUtcDate, trashDeadline } from "../trash";
 const terminal = new Set(["succeeded", "failed", "cancelled"]);
 const reportOrder = ["fundamentals", "market", "news", "social"] as const;
 const timelineOrderStorageKey = "tradingagents-timeline-order";
-const auditDetailsStorageKey = "tradingagents-audit-details-open";
 const eventNames = [
   "run.queued",
   "run.started",
@@ -441,7 +440,7 @@ export default function RunDetail() {
           {t("partialResearchAvailable")}
         </div>
       )}
-      <RunWarnings warnings={runWarnings} />
+      <RunWarnings warnings={runWarnings} key={runId} />
 
       <nav
         className="panel view-tabs"
@@ -512,6 +511,7 @@ export default function RunDetail() {
         evidenceRef={sourceDrawerRef}
         evidenceIndex={evidenceIndex}
         onClose={() => setSourceDrawerRef(null)}
+        key={sourceDrawerRef ?? "closed"}
       />
     </section>
   );
@@ -913,7 +913,7 @@ function EvidenceSourceDrawer({
                   {group.canonical.unit ?? ""}
                 </p>
               )}
-            <details className="provenance-details" open>
+            <details className="provenance-details">
               <summary>{t("canonicalEvidenceAndProvenance")}</summary>
               <div className="canonical-ref-list">
                 {group.refs.map((ref) => (
@@ -996,6 +996,7 @@ function ReportsPanel({
             report={reports[activeReport]}
             onEvidence={onEvidence}
             evidenceIndex={evidenceIndex}
+            key={activeReport}
           />
         </>
       )}
@@ -1031,7 +1032,7 @@ function ReportMetadata({
   evidenceIndex: EvidenceReferenceIndex;
 }) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(readAuditDetailsOpen);
+  const [open, setOpen] = useState(false);
   if (!report || typeof report !== "object") return null;
   const typed = report as {
     warnings?: VisibleWarning[];
@@ -1057,7 +1058,6 @@ function ReportMetadata({
           event.preventDefault();
           const next = !open;
           setOpen(next);
-          persistAuditDetailsOpen(next);
         }}
       >
         <strong>{t("auditDetails")}</strong>
@@ -1084,7 +1084,7 @@ function ReportMetadata({
         {groups.length > 0 && (
           <div>
             <strong>{t("evidenceRefs")}</strong>
-            <ul className="audit-evidence-list">
+            <ul className="audit-evidence-grid">
               {groups.map((group) => (
                 <li key={group.alias}>
                   <button
@@ -1096,13 +1096,15 @@ function ReportMetadata({
                   >
                     {group.alias}
                   </button>
-                  <span>{group.sources.join(", ")}</span>
-                  <small>
+                  <span className="audit-source-name">
+                    {group.sources.join(", ")}
+                  </span>
+                  <span className={`quality quality-${group.quality}`}>
                     {group.quality}
-                    {" · "}
-                    {evidenceDates(group).join(", ") || "—"}
-                    {group.fallback ? ` · ${t("fallback")}` : ""}
-                  </small>
+                  </span>
+                  {group.fallback && (
+                    <span className="audit-fallback-chip">{t("fallback")}</span>
+                  )}
                 </li>
               ))}
             </ul>
@@ -1115,7 +1117,7 @@ function ReportMetadata({
 
 function RunWarnings({ warnings }: { warnings: VisibleWarning[] }) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(readAuditDetailsOpen);
+  const [open, setOpen] = useState(false);
   if (!warnings.length) return null;
   return (
     <details
@@ -1127,7 +1129,6 @@ function RunWarnings({ warnings }: { warnings: VisibleWarning[] }) {
           event.preventDefault();
           const next = !open;
           setOpen(next);
-          persistAuditDetailsOpen(next);
         }}
       >
         <strong>{t("runWarnings")}</strong>
@@ -1187,14 +1188,6 @@ function evidenceDates(group: EvidenceDisplayGroup): string[] {
       ),
     ),
   );
-}
-
-function readAuditDetailsOpen(): boolean {
-  return localStorage.getItem(auditDetailsStorageKey) === "true";
-}
-
-function persistAuditDetailsOpen(open: boolean): void {
-  localStorage.setItem(auditDetailsStorageKey, String(open));
 }
 
 function Metric({ label, value }: { label: string; value: number | string }) {

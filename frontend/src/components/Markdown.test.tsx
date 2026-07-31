@@ -47,3 +47,35 @@ test("links evidence refs only in ordinary markdown text", () => {
     screen.getByRole("link", { name: "existing ev_fedcba987654" }),
   ).toHaveAttribute("href", "https://example.com");
 });
+
+test("replaces evidence footnote AST nodes without native footer or backrefs", () => {
+  const firstRef = "ev_0123456789ab";
+  const secondRef = "ev_fedcba987654";
+  const openEvidence = vi.fn();
+  const { container } = render(
+    <Markdown
+      evidenceAliases={{
+        [firstRef]: "E01",
+        [secondRef]: "E02",
+      }}
+      onEvidence={openEvidence}
+    >
+      {`Adjacent references[^${firstRef}][^${secondRef}] and repeated[^${firstRef}].
+
+[^${firstRef}]: Model-authored source definition.
+[^${secondRef}]: Another source definition.`}
+    </Markdown>,
+  );
+
+  const markers = screen.getAllByRole("button", { name: /Open evidence/ });
+  expect(markers.map((marker) => marker.textContent)).toEqual([
+    "E01",
+    "E02",
+    "E01",
+  ]);
+  expect(screen.queryByText(/Model-authored source definition/)).toBeNull();
+  expect(container.querySelector("[data-footnotes]")).toBeNull();
+  expect(container).not.toHaveTextContent("↩");
+  fireEvent.click(markers[1]);
+  expect(openEvidence).toHaveBeenCalledWith(secondRef);
+});

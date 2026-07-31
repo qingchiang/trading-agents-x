@@ -77,7 +77,6 @@ export function ResearchDecisionContent({
           <h2>{t("executiveSummary")}</h2>
           <Markdown
             evidenceAliases={evidenceIndex.aliases}
-            evidenceStyle="footnote"
             onEvidence={onEvidence}
           >
             {decision.executive_summary}
@@ -85,7 +84,6 @@ export function ResearchDecisionContent({
           <h3>{t("thesis")}</h3>
           <Markdown
             evidenceAliases={evidenceIndex.aliases}
-            evidenceStyle="footnote"
             onEvidence={onEvidence}
           >
             {decision.thesis}
@@ -126,7 +124,6 @@ export function ResearchDecisionContent({
               <h3>{t("scenarioOutcome")}</h3>
               <Markdown
                 evidenceAliases={evidenceIndex.aliases}
-                evidenceStyle="footnote"
                 onEvidence={onEvidence}
               >
                 {scenario.outcome}
@@ -211,7 +208,6 @@ export function ResearchDecisionContent({
                       <small>{level.as_of_date}</small>
                       <Markdown
                         evidenceAliases={evidenceIndex.aliases}
-                        evidenceStyle="footnote"
                         onEvidence={onEvidence}
                       >
                         {level.interpretation}
@@ -278,7 +274,6 @@ export function ResearchDecisionContent({
                   <h3>{adjustment.subject}</h3>
                   <Markdown
                     evidenceAliases={evidenceIndex.aliases}
-                    evidenceStyle="footnote"
                     onEvidence={onEvidence}
                   >
                     {adjustment.explanation}

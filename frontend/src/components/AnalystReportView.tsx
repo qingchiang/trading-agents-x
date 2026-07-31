@@ -19,7 +19,6 @@ export default function AnalystReportView({
     return (
       <Markdown
         evidenceAliases={evidenceIndex.aliases}
-        evidenceStyle="footnote"
         onEvidence={onEvidence}
       >
         {report}
@@ -47,7 +46,6 @@ export default function AnalystReportView({
       )}
       <Markdown
         evidenceAliases={evidenceIndex.aliases}
-        evidenceStyle="footnote"
         onEvidence={onEvidence}
       >
         {report.markdown}
@@ -91,7 +89,6 @@ export function MarkdownList({
             <li key={`${index}:${item}`}>
               <Markdown
                 evidenceAliases={evidenceIndex.aliases}
-                evidenceStyle="footnote"
                 onEvidence={onEvidence}
               >
                 {item}

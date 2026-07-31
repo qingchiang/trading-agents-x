@@ -471,7 +471,7 @@ test("restores deliberation and resolves evidence references across run views", 
   const inlineRefs = screen.getAllByRole("button", {
     name: /Open evidence ev_/,
   });
-  expect(inlineRefs.some((marker) => marker.textContent === "[1]")).toBe(true);
+  expect(inlineRefs.some((marker) => marker.textContent === "E01")).toBe(true);
   expect(
     screen.queryByText("ev_0123456789ab", { exact: true }),
   ).not.toBeInTheDocument();
@@ -586,8 +586,9 @@ test("shows trashed retention details and restores without deleting data", async
   );
 });
 
-test("persists the collapsed audit-details display preference", async () => {
-  const first = render(
+test("always enters report audit details collapsed", async () => {
+  localStorage.setItem("tradingagents-audit-details-open", "true");
+  const view = render(
     <Router initialPath="/runs/run-1?view=reports&report=market">
       <RunDetail />
     </Router>,
@@ -598,18 +599,15 @@ test("persists the collapsed audit-details display preference", async () => {
   await act(async () => {
     fireEvent.click(screen.getByText("Audit details"));
   });
-  expect(localStorage.getItem("tradingagents-audit-details-open")).toBe("true");
-  first.unmount();
-
-  render(
-    <Router initialPath="/runs/run-1?view=reports&report=market">
-      <RunDetail />
-    </Router>,
+  expect(screen.getByText("Historical source was partial.")).toBeVisible();
+  expect(view.container.querySelector(".audit-evidence-grid")).toBeVisible();
+  expect(view.container.querySelector(".audit-source-name")).toHaveTextContent(
+    "fixture, alternate-fixture",
   );
-
-  expect(
-    await screen.findByText("Historical source was partial."),
-  ).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "News" }));
+  fireEvent.click(screen.getByRole("button", { name: "Market" }));
+  expect(screen.getByText("Historical source was partial.")).not.toBeVisible();
+  expect(localStorage.getItem("tradingagents-audit-details-open")).toBe("true");
 });
 
 test("labels runs that have no recorded artifacts", async () => {
@@ -878,6 +876,10 @@ test("keeps report footnote navigation in an in-page source drawer", async () =>
     })[0],
   );
   expect(screen.getByRole("dialog", { name: "Source details" })).toBeVisible();
+  const provenance = screen.getByText("Canonical IDs and provenance");
+  expect(provenance.closest("details")).not.toHaveAttribute("open");
+  fireEvent.click(provenance);
+  expect(provenance.closest("details")).toHaveAttribute("open");
   expect(screen.getByTestId("router-location")).toHaveTextContent(
     "/runs/run-1?view=reports&report=news",
   );
@@ -885,6 +887,15 @@ test("keeps report footnote navigation in an in-page source drawer", async () =>
   expect(
     await screen.findByRole("heading", { name: "News report" }),
   ).toBeVisible();
+  fireEvent.click(
+    screen.getAllByRole("button", {
+      name: "Open evidence ev_0123456789ab",
+    })[0],
+  );
+  expect(
+    screen.getByText("Canonical IDs and provenance").closest("details"),
+  ).not.toHaveAttribute("open");
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
 
   const restoredPath =
     screen.getByTestId("router-location").textContent ?? initialPath;

@@ -59,7 +59,6 @@ export default function DeliberationView({
   const markdown = (value: string) => (
     <Markdown
       evidenceAliases={evidenceIndex.aliases}
-      evidenceStyle="footnote"
       onEvidence={onEvidence}
     >
       {value}

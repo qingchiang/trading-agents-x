@@ -6,23 +6,22 @@ type MarkdownNode = {
   type: string;
   value?: string;
   url?: string;
+  identifier?: string;
+  label?: string;
   children?: MarkdownNode[];
 };
 
 type EvidenceReferenceOptions = {
   aliases: Record<string, string>;
-  style: "alias" | "footnote";
 };
 
 export default function Markdown({
   children,
   evidenceAliases = {},
-  evidenceStyle = "alias",
   onEvidence,
 }: {
   children: string;
   evidenceAliases?: Record<string, string>;
-  evidenceStyle?: "alias" | "footnote";
   onEvidence?: (ref: string) => void;
 }) {
   return (
@@ -32,7 +31,7 @@ export default function Markdown({
           remarkGfm,
           [
             remarkEvidenceReferences,
-            { aliases: evidenceAliases, style: evidenceStyle },
+            { aliases: evidenceAliases },
           ],
         ]}
         rehypePlugins={[rehypeSanitize]}
@@ -65,14 +64,13 @@ export default function Markdown({
 
 function remarkEvidenceReferences(options: EvidenceReferenceOptions) {
   return (tree: MarkdownNode) => {
-    transformEvidenceText(tree, options.aliases, options.style);
+    transformEvidenceTree(tree, options.aliases);
   };
 }
 
-function transformEvidenceText(
+function transformEvidenceTree(
   node: MarkdownNode,
   aliases: Record<string, string>,
-  style: "alias" | "footnote",
 ) {
   if (
     ["code", "inlineCode", "html", "link", "linkReference"].includes(
@@ -85,12 +83,25 @@ function transformEvidenceText(
 
   const children: MarkdownNode[] = [];
   node.children.forEach((child) => {
+    const footnoteRef = evidenceRefFromFootnoteNode(child);
+    if (child.type === "footnoteDefinition" && footnoteRef) {
+      return;
+    }
+    if (child.type === "footnoteReference" && footnoteRef) {
+      const alias = aliases[footnoteRef];
+      children.push(
+        alias
+          ? evidenceLink(footnoteRef, alias)
+          : { type: "text", value: `[^${footnoteRef}]` },
+      );
+      return;
+    }
     if (child.type !== "text" || !child.value) {
-      transformEvidenceText(child, aliases, style);
+      transformEvidenceTree(child, aliases);
       children.push(child);
       return;
     }
-    children.push(...splitEvidenceText(child.value, aliases, style));
+    children.push(...splitEvidenceText(child.value, aliases));
   });
   node.children = children;
 }
@@ -98,7 +109,6 @@ function transformEvidenceText(
 function splitEvidenceText(
   value: string,
   aliases: Record<string, string>,
-  style: "alias" | "footnote",
 ): MarkdownNode[] {
   const nodes: MarkdownNode[] = [];
   const pattern = /\[\^(ev_[a-f0-9]{12})\]|\b(ev_[a-f0-9]{12})\b/g;
@@ -111,16 +121,7 @@ function splitEvidenceText(
     if (start > cursor) {
       nodes.push({ type: "text", value: value.slice(cursor, start) });
     }
-    nodes.push({
-      type: "link",
-      url: `#evidence-${ref}`,
-      children: [
-        {
-          type: "text",
-          value: style === "footnote" ? `[${footnoteNumber(alias)}]` : alias,
-        },
-      ],
-    });
+    nodes.push(evidenceLink(ref, alias));
     cursor = start + match[0].length;
   }
   if (cursor === 0) return [{ type: "text", value }];
@@ -130,9 +131,18 @@ function splitEvidenceText(
   return nodes;
 }
 
-function footnoteNumber(alias: string): string {
-  const match = /^E0*(\d+)$/.exec(alias);
-  return match?.[1] ?? alias;
+function evidenceLink(ref: string, alias: string): MarkdownNode {
+  return {
+    type: "link",
+    url: `#evidence-${ref}`,
+    children: [{ type: "text", value: alias }],
+  };
+}
+
+function evidenceRefFromFootnoteNode(node: MarkdownNode): string | null {
+  const candidate = node.identifier ?? node.label ?? "";
+  const match = /^(ev_[a-f0-9]{12})$/.exec(candidate);
+  return match?.[1] ?? null;
 }
 
 function evidenceRefFromHref(href: string | undefined): string | null {

@@ -109,7 +109,7 @@ test("renders natural Markdown tables and unobtrusive evidence footnotes", () =>
   const footnote = screen.getByRole("button", {
     name: `Open evidence ${evidenceRef}`,
   });
-  expect(footnote).toHaveTextContent("[1]");
+  expect(footnote).toHaveTextContent("E01");
   fireEvent.click(footnote);
   expect(onEvidence).toHaveBeenCalledWith(evidenceRef);
 });
