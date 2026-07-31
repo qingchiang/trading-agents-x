@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type {
@@ -45,6 +45,40 @@ export default function DeliberationView({
     });
     return [...grouped.entries()].sort(([left], [right]) => left - right);
   }, [rebuttals]);
+  const navigation = useMemo<DeliberationNavigationEntry[]>(() => {
+    const entries: DeliberationNavigationEntry[] = [];
+    if (cases.length > 0) {
+      entries.push({ id: "deliberation-case", label: t("bullBearCases") });
+    }
+    agendas.forEach((_, index) =>
+      entries.push({
+        id: `deliberation-agenda-${index + 1}`,
+        label: numberedLabel(t("debateAgenda"), index, agendas.length),
+      }),
+    );
+    rebuttalsByRound.forEach(([round]) =>
+      entries.push({
+        id: `deliberation-rebuttal-${round}`,
+        label: t("rebuttalRound", { round }),
+      }),
+    );
+    judges.forEach((_, index) =>
+      entries.push({
+        id: `deliberation-judge-${index + 1}`,
+        label: numberedLabel(t("judgeDraft"), index, judges.length),
+      }),
+    );
+    if (risks.length > 0) {
+      entries.push({ id: "deliberation-risk", label: t("riskLenses") });
+    }
+    decisions.forEach((_, index) =>
+      entries.push({
+        id: `deliberation-final-${index + 1}`,
+        label: numberedLabel(t("finalResearchOpinion"), index, decisions.length),
+      }),
+    );
+    return entries;
+  }, [agendas, cases, decisions, judges, rebuttalsByRound, risks, t]);
 
   if (visible.length === 0) {
     return (
@@ -66,9 +100,15 @@ export default function DeliberationView({
   );
 
   return (
-    <div className="deliberation-flow">
+    <div className="deliberation-reading-layout">
+      <DeliberationNavigation entries={navigation} />
+      <div className="deliberation-flow">
       {cases.length > 0 && (
-        <section className="deliberation-stage">
+        <section
+          className="deliberation-stage"
+          id="deliberation-case"
+          tabIndex={-1}
+        >
           <StageHeading title={t("bullBearCases")} />
           <div className="case-comparison">
             {cases.map((artifact) => (
@@ -87,8 +127,13 @@ export default function DeliberationView({
         </section>
       )}
 
-      {agendas.map((artifact) => (
-        <section className="deliberation-stage" key={artifact.id}>
+      {agendas.map((artifact, index) => (
+        <section
+          className="deliberation-stage"
+          id={`deliberation-agenda-${index + 1}`}
+          tabIndex={-1}
+          key={artifact.id}
+        >
           <StageHeading title={t("debateAgenda")} />
           <ArtifactFrame artifact={artifact}>
             <p>{artifact.content.summary}</p>
@@ -110,7 +155,12 @@ export default function DeliberationView({
       ))}
 
       {rebuttalsByRound.map(([round, entries]) => (
-        <section className="deliberation-stage" key={round}>
+        <section
+          className="deliberation-stage"
+          id={`deliberation-rebuttal-${round}`}
+          tabIndex={-1}
+          key={round}
+        >
           <StageHeading title={t("rebuttalRound", { round })} />
           <div className="rebuttal-round">
             {entries.map((artifact) => (
@@ -131,8 +181,13 @@ export default function DeliberationView({
         </section>
       ))}
 
-      {judges.map((artifact) => (
-        <section className="deliberation-stage" key={artifact.id}>
+      {judges.map((artifact, index) => (
+        <section
+          className="deliberation-stage"
+          id={`deliberation-judge-${index + 1}`}
+          tabIndex={-1}
+          key={artifact.id}
+        >
           <StageHeading title={t("judgeDraft")} />
           <ArtifactFrame artifact={artifact}>
             <div className="artifact-rating">
@@ -150,7 +205,11 @@ export default function DeliberationView({
       ))}
 
       {risks.length > 0 && (
-        <section className="deliberation-stage">
+        <section
+          className="deliberation-stage"
+          id="deliberation-risk"
+          tabIndex={-1}
+        >
           <StageHeading title={t("riskLenses")} />
           <div className="risk-review-grid">
             {risks.map((artifact) => (
@@ -174,8 +233,13 @@ export default function DeliberationView({
         </section>
       )}
 
-      {decisions.map((artifact) => (
-        <section className="deliberation-stage" key={artifact.id}>
+      {decisions.map((artifact, index) => (
+        <section
+          className="deliberation-stage"
+          id={`deliberation-final-${index + 1}`}
+          tabIndex={-1}
+          key={artifact.id}
+        >
           <StageHeading title={t("finalResearchOpinion")} />
           <ArtifactFrame artifact={artifact}>
             <ResearchDecisionContent
@@ -187,8 +251,89 @@ export default function DeliberationView({
           </ArtifactFrame>
         </section>
       ))}
+      </div>
     </div>
   );
+}
+
+type DeliberationNavigationEntry = {
+  id: string;
+  label: string;
+};
+
+function DeliberationNavigation({
+  entries,
+}: {
+  entries: DeliberationNavigationEntry[];
+}) {
+  const { t } = useTranslation();
+  const [active, setActive] = useState(entries[0]?.id ?? "");
+  const entryIds = entries.map((entry) => entry.id).join("|");
+
+  useEffect(() => {
+    setActive(entries[0]?.id ?? "");
+    if (typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (observations) => {
+        const visible = observations
+          .filter((item) => item.isIntersecting)
+          .sort((left, right) => left.boundingClientRect.top - right.boundingClientRect.top);
+        const id = visible[0]?.target.id;
+        if (id) setActive(id);
+      },
+      { rootMargin: "-18% 0px -68% 0px", threshold: 0 },
+    );
+    entries.forEach((entry) => {
+      const target = document.getElementById(entry.id);
+      if (target) observer.observe(target);
+    });
+    return () => observer.disconnect();
+  }, [entryIds]);
+
+  if (entries.length === 0) return null;
+  const jump = (id: string) => {
+    const target = document.getElementById(id);
+    if (!target) return;
+    target.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    target.focus({ preventScroll: true });
+    setActive(id);
+  };
+
+  return (
+    <>
+      <nav
+        className="deliberation-stage-nav"
+        aria-label={t("deliberationNavigation")}
+      >
+        <strong>{t("researchStages")}</strong>
+        {entries.map((entry) => (
+          <button
+            type="button"
+            className={active === entry.id ? "active" : ""}
+            aria-current={active === entry.id ? "step" : undefined}
+            onClick={() => jump(entry.id)}
+            key={entry.id}
+          >
+            {entry.label}
+          </button>
+        ))}
+      </nav>
+      <label className="deliberation-stage-select">
+        <span>{t("jumpToStage")}</span>
+        <select value={active} onChange={(event) => jump(event.target.value)}>
+          {entries.map((entry) => (
+            <option value={entry.id} key={entry.id}>
+              {entry.label}
+            </option>
+          ))}
+        </select>
+      </label>
+    </>
+  );
+}
+
+function numberedLabel(label: string, index: number, count: number): string {
+  return count > 1 ? `${label} ${index + 1}` : label;
 }
 
 function ArtifactFrame({

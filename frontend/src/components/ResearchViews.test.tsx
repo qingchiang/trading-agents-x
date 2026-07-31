@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import type {
@@ -209,6 +209,20 @@ test("organizes shallow Markdown deliberation by role and issue", () => {
     },
     {
       ...base,
+      id: "rebuttal-bull-1",
+      stage: "rebuttal",
+      role: "bull",
+      round: 1,
+      content: {
+        role: "bull",
+        round: 1,
+        markdown: "Demand concerns are addressable.",
+        addressed_issue_ids: ["issue.1"],
+        open_issue_ids: [],
+      },
+    },
+    {
+      ...base,
       id: "judge",
       stage: "judge",
       role: "research_judge",
@@ -220,6 +234,45 @@ test("organizes shallow Markdown deliberation by role and issue", () => {
         issue_dispositions: [
           { issue_id: "issue.1", status: "unresolved" },
         ],
+      },
+    },
+    {
+      ...base,
+      id: "risk",
+      stage: "risk",
+      role: "neutral",
+      round: 0,
+      content: {
+        role: "neutral",
+        markdown: "Demand durability remains the principal risk.",
+        challenged_issue_ids: ["issue.1"],
+        unresolved_issue_ids: ["issue.1"],
+      },
+    },
+    {
+      ...base,
+      id: "final",
+      stage: "decision",
+      role: "final_committee",
+      round: 0,
+      content: {
+        rating: "Hold",
+        confidence: 0.6,
+        executive_summary: "Evidence remains balanced.",
+        thesis: "Demand durability determines the outcome.",
+        evidence_refs: [evidenceRef],
+        memory_refs: [],
+        catalysts: [],
+        risks: ["Demand may weaken."],
+        invalidation_conditions: ["Demand evidence deteriorates."],
+        unresolved_questions: ["Is demand durable?"],
+        time_horizon: "6-12 months",
+        scenarios: (["base", "bull", "bear"] as const).map((kind) => ({
+          kind,
+          core_assumptions: ["Current evidence remains representative."],
+          outcome: `${kind} outcome.`,
+          evidence_refs: [evidenceRef],
+        })),
       },
     },
   ] as ResearchArtifact[];
@@ -235,7 +288,22 @@ test("organizes shallow Markdown deliberation by role and issue", () => {
   expect(screen.getByRole("heading", { name: "Bull and bear cases" })).toBeVisible();
   expect(screen.getByText("Bull thesis.")).toBeVisible();
   expect(screen.getByText("Bear thesis.")).toBeVisible();
-  expect(screen.getByText("Is demand durable?")).toBeVisible();
+  expect(screen.getAllByText("Is demand durable?")[0]).toBeVisible();
   expect(screen.getByText(/material · unresolved/)).toBeVisible();
   expect(screen.getByText("Evidence remains mixed.")).toBeVisible();
+  const navigation = screen.getByRole("navigation", {
+    name: "Research stage navigation",
+  });
+  for (const label of [
+    "Bull and bear cases",
+    "Debate agenda",
+    "Rebuttal round 1",
+    "Judge draft",
+    "Risk lenses",
+    "Final research opinion",
+  ]) {
+    expect(within(navigation).getByRole("button", { name: label })).toBeVisible();
+  }
+  fireEvent.click(within(navigation).getByRole("button", { name: "Judge draft" }));
+  expect(document.activeElement).toHaveAttribute("id", "deliberation-judge-1");
 });
