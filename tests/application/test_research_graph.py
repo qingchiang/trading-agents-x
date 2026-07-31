@@ -21,18 +21,14 @@ from tradingagents.application.contracts import (
     EvidenceItem,
     EvidenceQuality,
     IssueDisposition,
-    JudgeDraft,
     KeyClaim,
     MemoryContext,
     MemoryOutcome,
     MemoryRecord,
-    RebuttalReview,
     ResearchArtifactDraft,
-    ResearchCase,
     ResearchDecision,
     ResearchRating,
     ResearchWarning,
-    RiskReview,
     RiskReviewAdjustment,
     RiskReviewDisposition,
     RunProfile,
@@ -40,6 +36,12 @@ from tradingagents.application.contracts import (
 from tradingagents.application.metrics import MetricsCallback
 from tradingagents.application.runtime import RunContext
 from tradingagents.graph.analyst_synthesis import AnalystAuditDraft
+from tradingagents.graph.deliberation import (
+    JudgeAudit,
+    RebuttalAudit,
+    ResearchCaseAudit,
+    RiskAudit,
+)
 from tradingagents.graph.evidence_context import EvidenceWorksetPlan
 from tradingagents.graph.research_graph import (
     ResearchGraph,
@@ -93,8 +95,7 @@ class _StructuredInvoker:
                 memo="The catalog is sufficient for the fixture.",
                 lookups=(),
             )
-        elif self.schema is ResearchCase:
-            role = "bull" if "Bull Researcher" in prompt else "bear"
+        elif self.schema is ResearchCaseAudit:
             claim_ids = tuple(
                 dict.fromkeys(
                     re.findall(
@@ -112,9 +113,7 @@ class _StructuredInvoker:
                     )
                 )
             )
-            parsed = ResearchCase(
-                role=role,
-                markdown=f"## {role.title()} case\n\nThe case remains conditional.",
+            parsed = ResearchCaseAudit(
                 focus_claim_ids=claim_ids[:1],
                 report_section_refs=section_ids[:1],
             )
@@ -129,21 +128,15 @@ class _StructuredInvoker:
                     ),
                 ),
             )
-        elif self.schema is RebuttalReview:
-            role = "bull" if "Bull Researcher Rebuttal" in prompt else "bear"
-            round_number = int(re.search(r"CURRENT ROUND: (\d+)", prompt).group(1))
-            parsed = RebuttalReview(
-                role=role,
-                round=round_number,
-                markdown="The opposing interpretation is incomplete.",
+        elif self.schema is RebuttalAudit:
+            parsed = RebuttalAudit(
                 addressed_issue_ids=("debate.issue_1",),
                 open_issue_ids=("debate.issue_1",),
             )
-        elif self.schema is JudgeDraft:
-            parsed = JudgeDraft(
+        elif self.schema is JudgeAudit:
+            parsed = JudgeAudit(
                 preliminary_rating=ResearchRating.HOLD,
                 confidence=0.6,
-                markdown="The debate supports a balanced draft.",
                 issue_dispositions=(
                     IssueDisposition(
                         issue_id="debate.issue_1",
@@ -151,26 +144,8 @@ class _StructuredInvoker:
                     ),
                 ),
             )
-        elif self.schema is RiskReview:
-            role = next(
-                (
-                    candidate
-                    for candidate in (
-                        "integrated",
-                        "aggressive",
-                        "neutral",
-                        "conservative",
-                    )
-                    if (
-                        candidate.title() in prompt
-                        or (candidate == "integrated" and "Integrated Risk Reviewer" in prompt)
-                    )
-                ),
-                "integrated",
-            )
-            parsed = RiskReview(
-                role=role,
-                markdown="The draft needs a qualification.",
+        elif self.schema is RiskAudit:
+            parsed = RiskAudit(
                 challenged_issue_ids=("debate.issue_1",),
                 unresolved_issue_ids=("debate.issue_1",),
             )
@@ -231,7 +206,15 @@ class _FakeLLM:
                     "material claims."
                 )
             )
-        self.calls.append(("MarkdownReport", prompt))
+        call_type = (
+            "MarkdownReport"
+            if re.search(
+                r"You are the (market|social|news|fundamentals) analyst",
+                prompt,
+            )
+            else "ResearchMarkdown"
+        )
+        self.calls.append((call_type, prompt))
         refs = tuple(dict.fromkeys(re.findall(r"ev_[a-f0-9]{12}", prompt)))
         analyst_match = re.search(
             r"You are the (market|social|news|fundamentals) analyst",
@@ -410,6 +393,17 @@ def test_profiles_share_contract_but_use_distinct_topologies(
     assert execution.decision.rating is ResearchRating.HOLD
     valid_refs = {item.ref for item in execution.evidence.items}
     assert set(execution.decision.evidence_refs) <= valid_refs
+    if profile is RunProfile.STANDARD:
+        node_metrics = graph.metrics.snapshot().node_metrics
+        assert {
+            "case.bull.prepare",
+            "case.bull.write",
+            "case.bull.audit",
+            "committee.final.prepare",
+            "committee.final.reason",
+            "committee.final.serialize",
+        } <= set(node_metrics)
+        assert "case.bull" not in node_metrics
 
 
 @pytest.mark.parametrize(
@@ -425,6 +419,7 @@ def test_profiles_share_contract_but_use_distinct_topologies(
             },
             {
                 "ResearchDecision",
+                "ResearchMarkdown",
                 "EvidenceBlueprint",
                 "EvidenceWorksetPlan",
             },
@@ -434,16 +429,18 @@ def test_profiles_share_contract_but_use_distinct_topologies(
             {
                 "MarkdownReport",
                 "AnalystAuditDraft",
-                "ResearchCase",
+                "ResearchCaseAudit",
                 "DebateAgenda",
-                "RebuttalReview",
-                "RiskReview",
+                "RebuttalAudit",
+                "RiskAudit",
+                "ResearchMarkdown",
                 "EvidenceBlueprint",
                 "EvidenceWorksetPlan",
             },
             {
-                "JudgeDraft",
+                "JudgeAudit",
                 "ResearchDecision",
+                "ResearchMarkdown",
                 "EvidenceBlueprint",
                 "EvidenceWorksetPlan",
             },
@@ -457,12 +454,13 @@ def test_profiles_share_contract_but_use_distinct_topologies(
                 "EvidenceWorksetPlan",
             },
             {
-                "ResearchCase",
+                "ResearchCaseAudit",
                 "DebateAgenda",
-                "RebuttalReview",
-                "JudgeDraft",
-                "RiskReview",
+                "RebuttalAudit",
+                "JudgeAudit",
+                "RiskAudit",
                 "ResearchDecision",
+                "ResearchMarkdown",
                 "EvidenceBlueprint",
                 "EvidenceWorksetPlan",
             },
@@ -642,18 +640,19 @@ def test_memory_only_enters_profile_decision_nodes_and_refs_are_whitelisted(
 
     calls = [*quick.calls, *deep.calls]
     decision_prompts = [
-        prompt for schema, prompt in calls if schema in {"ResearchDecision", "JudgeDraft"}
-    ]
-    nondecision_prompts = [
         prompt
         for schema, prompt in calls
-        if schema
-        not in {
-            "ResearchDecision",
-            "JudgeDraft",
-            "AnalystAuditDraft",
-            "MarkdownReport",
-        }
+        if schema == "ResearchMarkdown"
+        and (
+            "Research Judge" in str(prompt)
+            or "Final Research Committee" in str(prompt)
+        )
+    ]
+    memory_prompts = [
+        str(prompt)
+        for _schema, prompt in calls
+        if "Calibration lesson: demand evidence was overweighted."
+        in str(prompt)
     ]
     assert len(decision_prompts) == decision_prompt_count
     assert all(
@@ -661,8 +660,12 @@ def test_memory_only_enters_profile_decision_nodes_and_refs_are_whitelisted(
         for prompt in decision_prompts
     )
     assert all(
-        "Calibration lesson: demand evidence was overweighted." not in prompt
-        for prompt in nondecision_prompts
+        (
+            "Research Judge" in prompt
+            or "Final Research Committee" in prompt
+            or "DECISION SYNTHESIS BRIEF" in prompt
+        )
+        for prompt in memory_prompts
     )
     assert execution.decision.memory_refs == memory.refs
     assert "memory:invented" not in execution.decision.memory_refs

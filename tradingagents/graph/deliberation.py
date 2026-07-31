@@ -8,6 +8,8 @@ import math
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from tradingagents.application.contracts import (
     AnalystReport,
     DebateAgenda,
@@ -38,11 +40,84 @@ from tradingagents.graph.output_validation import (
     require_valid_refs,
 )
 from tradingagents.graph.structured_output import (
+    StructuredOutputError,
     StructuredOutputResult,
     StructuredOutputRunner,
 )
 
 EventWriter = Callable[[dict[str, Any]], None]
+
+
+class ResearchCaseAudit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    focus_claim_ids: tuple[str, ...] = ()
+    report_section_refs: tuple[str, ...] = ()
+
+
+class RebuttalAudit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    addressed_issue_ids: tuple[str, ...] = Field(min_length=1)
+    open_issue_ids: tuple[str, ...] = ()
+
+
+class JudgeAudit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    preliminary_rating: ResearchRating
+    confidence: float = Field(ge=0.0, le=1.0)
+    issue_dispositions: tuple[IssueDisposition, ...] = Field(min_length=1)
+
+
+class RiskAudit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    challenged_issue_ids: tuple[str, ...] = ()
+    unresolved_issue_ids: tuple[str, ...] = ()
+
+
+def write_research_markdown(
+    llm: Any,
+    *,
+    prompt: str,
+    node: str,
+    invoke_config: dict[str, Any] | None = None,
+) -> str:
+    """Generate one readable deliberation document without a JSON contract."""
+
+    response = llm.invoke(
+        prompt
+        + "\n\nWrite the complete research reasoning as readable Markdown. "
+        "Use headings, concise tables, and evidence footnotes where they help "
+        "the reader. Do not emit JSON, schema fields, or hidden chain-of-thought.",
+        config=invoke_config,
+    )
+    markdown = _message_text(response).strip()
+    if not markdown:
+        raise StructuredOutputError(
+            node=node,
+            schema="ResearchMarkdown",
+            reason_code="empty_output",
+        )
+    if _is_truncated(response):
+        continuation = llm.invoke(
+            (
+                "Continue the prior Markdown from its last complete block. "
+                "Do not repeat prior content and finish the document."
+            ),
+            config=invoke_config,
+        )
+        if _is_truncated(continuation):
+            raise StructuredOutputError(
+                node=node,
+                schema="ResearchMarkdown",
+                reason_code="truncated_output",
+            )
+        continued = _message_text(continuation).strip()
+        if continued:
+            markdown = f"{markdown.rstrip()}\n\n{continued}"
+    return markdown
 
 
 def research_prompt(
@@ -114,7 +189,7 @@ def invoke_research_case(
     llm: Any,
     *,
     role: str,
-    prompt: str,
+    markdown: str,
     state: Mapping[str, Any],
     node: str,
     event_writer: EventWriter | None = None,
@@ -122,36 +197,39 @@ def invoke_research_case(
     valid_claims = _claim_ids(state)
     valid_sections = _section_ids(state)
 
-    def validate(result: ResearchCase) -> ResearchCase:
-        if result.role != role:
-            raise ValueError("research case uses the wrong role")
-        require_text(result.markdown)
+    def validate(result: ResearchCaseAudit) -> ResearchCaseAudit:
         if not set(result.focus_claim_ids).issubset(valid_claims):
             raise ValueError("research case references an unknown claim")
         if not set(result.report_section_refs).issubset(valid_sections):
             raise ValueError("research case references an unknown report section")
         return result
 
-    return _runner(
+    audited = _runner(
         llm,
-        ResearchCase,
+        ResearchCaseAudit,
         validate,
         node,
         event_writer,
     ).invoke(
-        prompt
-        + "\n\nReturn a complete Markdown case plus only the claim and report "
-        "section IDs used for navigation.",
-        example=ResearchCase(
-            role=role,
-            markdown=(
-                "## Thesis\nA conditional case grounded in the analyst reports.\n\n"
-                "## Counterargument\nThe opposing interpretation remains plausible."
-            ),
+        (
+            "Extract only shallow navigation metadata from this completed "
+            f"{role} research case. Do not rewrite the Markdown.\n\n"
+            f"MARKDOWN:\n{markdown}"
+        ),
+        example=ResearchCaseAudit(
             focus_claim_ids=tuple(sorted(valid_claims)[:1]),
             report_section_refs=tuple(sorted(valid_sections)[:1]),
         ).model_dump(mode="json"),
         allowed_evidence_refs=_evidence_refs(state),
+    )
+    return StructuredOutputResult(
+        value=ResearchCase(
+            role=role,
+            markdown=markdown,
+            focus_claim_ids=audited.value.focus_claim_ids,
+            report_section_refs=audited.value.report_section_refs,
+        ),
+        generation_method=audited.generation_method,
     )
 
 
@@ -198,7 +276,7 @@ def invoke_rebuttal(
     *,
     role: str,
     round_number: int,
-    prompt: str,
+    markdown: str,
     state: Mapping[str, Any],
     node: str,
     event_writer: EventWriter | None = None,
@@ -206,10 +284,7 @@ def invoke_rebuttal(
     agenda = DebateAgenda.model_validate(state["debate_agenda"])
     valid_issues = {issue.id for issue in agenda.issues}
 
-    def validate(result: RebuttalReview) -> RebuttalReview:
-        if result.role != role or result.round != round_number:
-            raise ValueError("rebuttal role or round does not match its node")
-        require_text(result.markdown)
+    def validate(result: RebuttalAudit) -> RebuttalAudit:
         addressed = set(result.addressed_issue_ids)
         opened = set(result.open_issue_ids)
         if not addressed.issubset(valid_issues) or not opened.issubset(
@@ -221,33 +296,40 @@ def invoke_rebuttal(
         return result
 
     first_issue = agenda.issues[0].id
-    return _runner(
+    audited = _runner(
         llm,
-        RebuttalReview,
+        RebuttalAudit,
         validate,
         node,
         event_writer,
     ).invoke(
-        prompt
-        + "\n\nWrite the issue-by-issue response as Markdown. Keep only "
-        "addressed and still-open issue IDs in typed fields.",
-        example=RebuttalReview(
-            role=role,
-            round=round_number,
-            markdown=(
-                f"## {first_issue}\nThe case remains conditional after review."
-            ),
+        (
+            "Extract only addressed and still-open DebateAgenda issue IDs "
+            "from this completed rebuttal. Do not rewrite the Markdown.\n\n"
+            f"MARKDOWN:\n{markdown}"
+        ),
+        example=RebuttalAudit(
             addressed_issue_ids=(first_issue,),
             open_issue_ids=(first_issue,),
         ).model_dump(mode="json"),
         allowed_evidence_refs=_evidence_refs(state),
+    )
+    return StructuredOutputResult(
+        value=RebuttalReview(
+            role=role,
+            round=round_number,
+            markdown=markdown,
+            addressed_issue_ids=audited.value.addressed_issue_ids,
+            open_issue_ids=audited.value.open_issue_ids,
+        ),
+        generation_method=audited.generation_method,
     )
 
 
 def invoke_judge_draft(
     llm: Any,
     *,
-    prompt: str,
+    markdown: str,
     state: Mapping[str, Any],
     node: str,
     memory: MemoryContext | None = None,
@@ -257,8 +339,7 @@ def invoke_judge_draft(
     agenda = DebateAgenda.model_validate(state["debate_agenda"])
     issue_ids = {issue.id for issue in agenda.issues}
 
-    def validate(result: JudgeDraft) -> JudgeDraft:
-        require_text(result.markdown)
+    def validate(result: JudgeAudit) -> JudgeAudit:
         actual = {item.issue_id for item in result.issue_dispositions}
         if actual != issue_ids:
             raise ValueError("judge must dispose every debate issue")
@@ -268,27 +349,34 @@ def invoke_judge_draft(
         IssueDisposition(issue_id=issue.id, status="unresolved")
         for issue in agenda.issues
     )
-    return _runner(
+    audited = _runner(
         llm,
-        JudgeDraft,
+        JudgeAudit,
         validate,
         node,
         event_writer,
     ).invoke(
-        prompt
-        + "\n\nWrite the full ruling and preliminary research view as Markdown. "
-        "Typed fields contain only the preliminary rating, confidence, and one "
-        "routing disposition for every agenda issue.",
-        example=JudgeDraft(
-            markdown=(
-                "## Preliminary judgment\nThe evidence supports a balanced, "
-                "conditional view."
-            ),
+        (
+            "Extract the preliminary rating, calibrated confidence, and one "
+            "routing disposition for every agenda issue from this completed "
+            "judge Markdown. Do not rewrite the Markdown.\n\n"
+            f"MARKDOWN:\n{markdown}"
+        ),
+        example=JudgeAudit(
             preliminary_rating=ResearchRating.HOLD,
             confidence=0.55,
             issue_dispositions=example_dispositions,
         ).model_dump(mode="json"),
         allowed_evidence_refs=_evidence_refs(state),
+    )
+    return StructuredOutputResult(
+        value=JudgeDraft(
+            markdown=markdown,
+            preliminary_rating=audited.value.preliminary_rating,
+            confidence=audited.value.confidence,
+            issue_dispositions=audited.value.issue_dispositions,
+        ),
+        generation_method=audited.generation_method,
     )
 
 
@@ -296,7 +384,7 @@ def invoke_risk_review(
     llm: Any,
     *,
     role: str,
-    prompt: str,
+    markdown: str,
     state: Mapping[str, Any],
     node: str,
     event_writer: EventWriter | None = None,
@@ -304,10 +392,7 @@ def invoke_risk_review(
     agenda = DebateAgenda.model_validate(state["debate_agenda"])
     valid_issues = {issue.id for issue in agenda.issues}
 
-    def validate(result: RiskReview) -> RiskReview:
-        if result.role != role:
-            raise ValueError("risk review uses the wrong role")
-        require_text(result.markdown)
+    def validate(result: RiskAudit) -> RiskAudit:
         if not set(result.challenged_issue_ids).issubset(valid_issues):
             raise ValueError("risk review challenges an unknown issue")
         if not set(result.unresolved_issue_ids).issubset(valid_issues):
@@ -315,26 +400,32 @@ def invoke_risk_review(
         return result
 
     first_issue = agenda.issues[0].id
-    return _runner(
+    audited = _runner(
         llm,
-        RiskReview,
+        RiskAudit,
         validate,
         node,
         event_writer,
     ).invoke(
-        prompt
-        + "\n\nWrite the full risk challenge as Markdown. Typed fields contain "
-        "only issue IDs needed for navigation.",
-        example=RiskReview(
-            role=role,
-            markdown=(
-                "## Risk challenge\nThe preliminary view requires a material "
-                "qualification."
-            ),
+        (
+            "Extract only challenged and unresolved DebateAgenda issue IDs "
+            "from this completed risk review. Do not rewrite the Markdown.\n\n"
+            f"MARKDOWN:\n{markdown}"
+        ),
+        example=RiskAudit(
             challenged_issue_ids=(first_issue,),
             unresolved_issue_ids=(first_issue,),
         ).model_dump(mode="json"),
         allowed_evidence_refs=_evidence_refs(state),
+    )
+    return StructuredOutputResult(
+        value=RiskReview(
+            role=role,
+            markdown=markdown,
+            challenged_issue_ids=audited.value.challenged_issue_ids,
+            unresolved_issue_ids=audited.value.unresolved_issue_ids,
+        ),
+        generation_method=audited.generation_method,
     )
 
 
@@ -461,6 +552,7 @@ def invoke_research_decision(
         event_writer=event_writer,
         repair_mode="preferred",
         include_candidate_in_repair=True,
+        invoke_config={"metadata": {"research_node": node}},
         repair_instructions=(
             "Keep valid research content. Use only allowed evidence and memory "
             "refs. Every decision-critical calculation must be reproducible "
@@ -563,11 +655,13 @@ def _runner(
         validator=validator,
         node=node,
         event_writer=event_writer,
+        invoke_config={"metadata": {"research_node": node}},
         repair_mode="preferred",
         include_candidate_in_repair=True,
         repair_instructions=(
-            "Preserve the readable Markdown. Repair only invalid shallow "
-            "routing metadata such as role, round, issue IDs, or dispositions."
+            "Repair only invalid shallow routing metadata such as claim IDs, "
+            "section IDs, issue IDs, confidence, or dispositions. The readable "
+            "Markdown is already complete and must not be regenerated."
         ),
     )
 
@@ -590,6 +684,36 @@ def _section_ids(state: Mapping[str, Any]) -> set[str]:
         section.id
         for raw in state["analyst_reports"].values()
         for section in AnalystReport.model_validate(raw).report_sections
+    }
+
+
+def _message_text(response: Any) -> str:
+    content = getattr(response, "content", response)
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts: list[str] = []
+    for block in content:
+        if isinstance(block, str):
+            parts.append(block)
+        elif isinstance(block, dict):
+            text = block.get("text")
+            if isinstance(text, str):
+                parts.append(text)
+    return "\n".join(parts)
+
+
+def _is_truncated(response: Any) -> bool:
+    metadata = getattr(response, "response_metadata", None)
+    if not isinstance(metadata, dict) and isinstance(response, dict):
+        metadata = response.get("response_metadata")
+    if not isinstance(metadata, dict):
+        return False
+    return metadata.get("finish_reason") in {
+        "length",
+        "max_tokens",
+        "max_output_tokens",
     }
 
 

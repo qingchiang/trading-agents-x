@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from tests.factories import analyst_report, research_case, research_decision
+from tests.factories import analyst_report, research_decision
 from tradingagents.application.contracts import (
     CalculationPurpose,
     CalculationRecord,
@@ -19,6 +19,7 @@ from tradingagents.application.contracts import (
     ValuationRange,
 )
 from tradingagents.graph.deliberation import (
+    ResearchCaseAudit,
     debate_round_has_material_progress,
     invoke_research_case,
     invoke_research_decision,
@@ -97,10 +98,9 @@ def test_research_prompt_keeps_complete_reports_but_catalogs_long_evidence() -> 
 
 def test_research_case_rejects_unknown_claim_after_bounded_recovery() -> None:
     state = _state()
-    invalid = research_case(
-        role="bull",
-        evidence_ref=state["evidence_bundle"]["items"][0]["ref"],
-        claim_id="market.claim_invented",
+    invalid = ResearchCaseAudit(
+        focus_claim_ids=("market.claim_invented",),
+        report_section_refs=("market.section.overview",),
     )
     llm = _StaticLLM(invalid)
 
@@ -108,13 +108,36 @@ def test_research_case_rejects_unknown_claim_after_bounded_recovery() -> None:
         invoke_research_case(
             llm,
             role="bull",
-            prompt="Produce the bull case.",
+            markdown="## Bull case\n\nFixture argument.",
             state=state,
             node="case.bull",
         )
 
     assert error.value.reason_code == "semantic_validation"
     assert len(llm.prompts) == 2
+
+
+def test_research_case_audit_preserves_completed_markdown() -> None:
+    state = _state()
+    markdown = (
+        "## Constructive case\n\n"
+        "| Measure | Reading |\n|---|---:|\n| Growth | 12.3% |\n"
+    )
+    audit = ResearchCaseAudit(
+        focus_claim_ids=("market.claim_1",),
+        report_section_refs=("market.section.overview",),
+    )
+
+    result = invoke_research_case(
+        _StaticLLM(audit),
+        role="bull",
+        markdown=markdown,
+        state=state,
+        node="case.bull.audit",
+    )
+
+    assert result.value.markdown == markdown
+    assert result.value.focus_claim_ids == ("market.claim_1",)
 
 
 def test_debate_progress_requires_a_changed_open_issue_set() -> None:

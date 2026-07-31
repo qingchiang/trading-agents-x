@@ -87,6 +87,7 @@ from tradingagents.graph.deliberation import (
     invoke_research_decision,
     invoke_risk_review,
     research_prompt,
+    write_research_markdown,
 )
 from tradingagents.graph.evidence_context import (
     PreparedEvidence,
@@ -752,7 +753,7 @@ class ResearchGraph:
             runtime: Runtime[RunContext],
         ) -> dict[str, Any]:
             node = f"case.{spec.key}"
-            self._start_node(runtime, node)
+            self._start_node(runtime, node, measure=False)
             check_cancelled(runtime.context)
             prompt = self._research_prompt_with_preparation(
                 llm=llm,
@@ -768,14 +769,31 @@ class ResearchGraph:
                     "the evidence to its implication."
                 ),
             )
-            output = invoke_research_case(
-                llm,
-                role=spec.key,
-                prompt=prompt,
-                state=state,
-                node=node,
+            with self.metrics.phase(
+                f"{node}.write",
                 event_writer=runtime.stream_writer,
-            )
+            ):
+                markdown = write_research_markdown(
+                    llm,
+                    prompt=prompt,
+                    node=f"{node}.write",
+                    invoke_config={
+                        "callbacks": [self.metrics],
+                        "metadata": {"research_node": f"{node}.write"},
+                    },
+                )
+            with self.metrics.phase(
+                f"{node}.audit",
+                event_writer=runtime.stream_writer,
+            ):
+                output = invoke_research_case(
+                    self._deliberation_serializer_llm(spec),
+                    role=spec.key,
+                    markdown=markdown,
+                    state=state,
+                    node=f"{node}.audit",
+                    event_writer=runtime.stream_writer,
+                )
             case = output.value
             self._write_artifact(
                 runtime,
@@ -784,7 +802,7 @@ class ResearchGraph:
                 role=spec.key,
                 content=case,
                 generation_method=output.generation_method,
-                prompt_version=f"research-case-{spec.key}-v3-workset",
+                prompt_version=f"research-case-{spec.key}-v4-split",
             )
             self._finish_node(
                 runtime,
@@ -793,6 +811,7 @@ class ResearchGraph:
                     "focus_claims": len(case.focus_claim_ids),
                     "report_sections": len(case.report_section_refs),
                 },
+                measure=False,
             )
             return {
                 "cases": {spec.key: case.model_dump(mode="json")},
@@ -807,7 +826,7 @@ class ResearchGraph:
             runtime: Runtime[RunContext],
         ) -> dict[str, Any]:
             node = "debate.agenda"
-            self._start_node(runtime, node)
+            self._start_node(runtime, node, measure=False)
             check_cancelled(runtime.context)
             llm = self._deliberation_llm()
             prompt = self._research_prompt_with_preparation(
@@ -828,13 +847,34 @@ class ResearchGraph:
                     "mere missing data into a bearish assertion."
                 ),
             )
-            output = invoke_debate_agenda(
-                llm,
-                prompt=prompt,
-                state=state,
-                node=node,
+            with self.metrics.phase(
+                f"{node}.write",
                 event_writer=runtime.stream_writer,
-            )
+            ):
+                brief = write_research_markdown(
+                    llm,
+                    prompt=prompt,
+                    node=f"{node}.write",
+                    invoke_config={
+                        "callbacks": [self.metrics],
+                        "metadata": {"research_node": f"{node}.write"},
+                    },
+                )
+            with self.metrics.phase(
+                f"{node}.audit",
+                event_writer=runtime.stream_writer,
+            ):
+                output = invoke_debate_agenda(
+                    self._deliberation_serializer_llm(),
+                    prompt=(
+                        "Convert this completed moderator brief into the "
+                        "shallow DebateAgenda.\n\n"
+                        f"MODERATOR BRIEF:\n{brief}"
+                    ),
+                    state=state,
+                    node=f"{node}.audit",
+                    event_writer=runtime.stream_writer,
+                )
             agenda = output.value
             self._write_artifact(
                 runtime,
@@ -843,7 +883,7 @@ class ResearchGraph:
                 role="moderator",
                 content=agenda,
                 generation_method=output.generation_method,
-                prompt_version="debate-agenda-v3-workset",
+                prompt_version="debate-agenda-v4-split",
             )
             self._finish_node(
                 runtime,
@@ -854,6 +894,7 @@ class ResearchGraph:
                         issue.importance.value == "critical" for issue in agenda.issues
                     ),
                 },
+                measure=False,
             )
             return {
                 "debate_agenda": agenda.model_dump(mode="json"),
@@ -871,7 +912,7 @@ class ResearchGraph:
         ) -> dict[str, Any]:
             node = f"rebuttal.{spec.key}"
             round_number = int(state.get("rebuttal_round", 0))
-            self._start_node(runtime, node)
+            self._start_node(runtime, node, measure=False)
             check_cancelled(runtime.context)
             prompt = self._research_prompt_with_preparation(
                 llm=llm,
@@ -903,15 +944,32 @@ class ResearchGraph:
                     "remaining question for each response."
                 ),
             )
-            output = invoke_rebuttal(
-                llm,
-                role=spec.key,
-                round_number=round_number,
-                prompt=prompt,
-                state=state,
-                node=node,
+            with self.metrics.phase(
+                f"{node}.write",
                 event_writer=runtime.stream_writer,
-            )
+            ):
+                markdown = write_research_markdown(
+                    llm,
+                    prompt=prompt,
+                    node=f"{node}.write",
+                    invoke_config={
+                        "callbacks": [self.metrics],
+                        "metadata": {"research_node": f"{node}.write"},
+                    },
+                )
+            with self.metrics.phase(
+                f"{node}.audit",
+                event_writer=runtime.stream_writer,
+            ):
+                output = invoke_rebuttal(
+                    self._deliberation_serializer_llm(spec),
+                    role=spec.key,
+                    round_number=round_number,
+                    markdown=markdown,
+                    state=state,
+                    node=f"{node}.audit",
+                    event_writer=runtime.stream_writer,
+                )
             rebuttal = output.value
             self._write_artifact(
                 runtime,
@@ -921,7 +979,7 @@ class ResearchGraph:
                 round=round_number,
                 content=rebuttal,
                 generation_method=output.generation_method,
-                prompt_version=f"rebuttal-{spec.key}-v3-workset",
+                prompt_version=f"rebuttal-{spec.key}-v4-split",
             )
             self._finish_node(
                 runtime,
@@ -931,6 +989,7 @@ class ResearchGraph:
                     "addressed_issues": len(rebuttal.addressed_issue_ids),
                     "open_issues": len(rebuttal.open_issue_ids),
                 },
+                measure=False,
             )
             return {
                 "rebuttals": [rebuttal.model_dump(mode="json")],
@@ -979,7 +1038,7 @@ class ResearchGraph:
         runtime: Runtime[RunContext],
     ) -> dict[str, Any]:
         node = "judge.research"
-        self._start_node(runtime, node)
+        self._start_node(runtime, node, measure=False)
         check_cancelled(runtime.context)
         prompt = self._research_prompt_with_preparation(
             llm=self.deep_llm,
@@ -1010,14 +1069,31 @@ class ResearchGraph:
             ),
             memory=runtime.context.memory,
         )
-        output = invoke_judge_draft(
-            self.deep_llm,
-            prompt=prompt,
-            state=state,
-            node=node,
+        with self.metrics.phase(
+            f"{node}.write",
             event_writer=runtime.stream_writer,
-            memory=runtime.context.memory,
-        )
+        ):
+            markdown = write_research_markdown(
+                self.deep_llm,
+                prompt=prompt,
+                node=f"{node}.write",
+                invoke_config={
+                    "callbacks": [self.metrics],
+                    "metadata": {"research_node": f"{node}.write"},
+                },
+            )
+        with self.metrics.phase(
+            f"{node}.audit",
+            event_writer=runtime.stream_writer,
+        ):
+            output = invoke_judge_draft(
+                self.deep_serializer_llm,
+                markdown=markdown,
+                state=state,
+                node=f"{node}.audit",
+                event_writer=runtime.stream_writer,
+                memory=runtime.context.memory,
+            )
         draft = output.value
         self._write_artifact(
             runtime,
@@ -1026,7 +1102,7 @@ class ResearchGraph:
             role="research_judge",
             content=draft,
             generation_method=output.generation_method,
-            prompt_version="research-judge-v3-workset",
+            prompt_version="research-judge-v4-split",
         )
         self._finish_node(
             runtime,
@@ -1035,6 +1111,7 @@ class ResearchGraph:
                 "rating": draft.preliminary_rating.value,
                 "confidence": draft.confidence,
             },
+            measure=False,
         )
         return {
             "judge_draft": draft.model_dump(mode="json"),
@@ -1047,7 +1124,7 @@ class ResearchGraph:
             runtime: Runtime[RunContext],
         ) -> dict[str, Any]:
             node = "risk.review" if spec.key == "integrated" else f"risk.{spec.key}"
-            self._start_node(runtime, node)
+            self._start_node(runtime, node, measure=False)
             check_cancelled(runtime.context)
             llm = self._deliberation_llm(spec)
             prompt = self._research_prompt_with_preparation(
@@ -1069,14 +1146,31 @@ class ResearchGraph:
                     "make. Unknowns are not automatically downside."
                 ),
             )
-            output = invoke_risk_review(
-                llm,
-                role=spec.key,
-                prompt=prompt,
-                state=state,
-                node=node,
+            with self.metrics.phase(
+                f"{node}.write",
                 event_writer=runtime.stream_writer,
-            )
+            ):
+                markdown = write_research_markdown(
+                    llm,
+                    prompt=prompt,
+                    node=f"{node}.write",
+                    invoke_config={
+                        "callbacks": [self.metrics],
+                        "metadata": {"research_node": f"{node}.write"},
+                    },
+                )
+            with self.metrics.phase(
+                f"{node}.audit",
+                event_writer=runtime.stream_writer,
+            ):
+                output = invoke_risk_review(
+                    self._deliberation_serializer_llm(spec),
+                    role=spec.key,
+                    markdown=markdown,
+                    state=state,
+                    node=f"{node}.audit",
+                    event_writer=runtime.stream_writer,
+                )
             review = output.value
             self._write_artifact(
                 runtime,
@@ -1085,12 +1179,13 @@ class ResearchGraph:
                 role=spec.key,
                 content=review,
                 generation_method=output.generation_method,
-                prompt_version=f"risk-review-{spec.key}-v3-workset",
+                prompt_version=f"risk-review-{spec.key}-v4-split",
             )
             self._finish_node(
                 runtime,
                 node,
                 {"challenged_issues": len(review.challenged_issue_ids)},
+                measure=False,
             )
             return {
                 "risk_reviews": {spec.key: review.model_dump(mode="json")},
@@ -1105,7 +1200,7 @@ class ResearchGraph:
             runtime: Runtime[RunContext],
         ) -> dict[str, Any]:
             node = "committee.final"
-            self._start_node(runtime, node)
+            self._start_node(runtime, node, measure=False)
             check_cancelled(runtime.context)
             if fast:
                 objective = (
@@ -1145,15 +1240,45 @@ class ResearchGraph:
                 extra=extra,
                 memory=runtime.context.memory,
             )
-            output = invoke_research_decision(
-                self.deep_llm,
-                prompt=prompt,
-                state=state,
-                node=node,
+            with self.metrics.phase(
+                f"{node}.reason",
                 event_writer=runtime.stream_writer,
-                memory=runtime.context.memory,
-                require_risk_adjustments=not fast,
-            )
+            ):
+                decision_brief = write_research_markdown(
+                    self.deep_llm,
+                    prompt=(
+                        prompt
+                        + "\n\nForm a complete decision synthesis brief. "
+                        "Cover the rating rationale, thesis, three scenarios, "
+                        "catalysts, risks, invalidation, unresolved questions, "
+                        "time horizon, any valuation or market-reference "
+                        "calculations, and risk-review dispositions."
+                    ),
+                    node=f"{node}.reason",
+                    invoke_config={
+                        "callbacks": [self.metrics],
+                        "metadata": {"research_node": f"{node}.reason"},
+                    },
+                )
+            with self.metrics.phase(
+                f"{node}.serialize",
+                event_writer=runtime.stream_writer,
+            ):
+                output = invoke_research_decision(
+                    self.deep_serializer_llm,
+                    prompt=(
+                        "Map the completed decision synthesis brief to the "
+                        "strict final decision contract. Preserve its research "
+                        "judgment; do not add unsupported facts.\n\n"
+                        f"DECISION SYNTHESIS BRIEF:\n{decision_brief}\n\n"
+                        f"RESEARCH CONTEXT:\n{prompt}"
+                    ),
+                    state=state,
+                    node=f"{node}.serialize",
+                    event_writer=runtime.stream_writer,
+                    memory=runtime.context.memory,
+                    require_risk_adjustments=not fast,
+                )
             decision = output.value
             self._write_artifact(
                 runtime,
@@ -1162,7 +1287,7 @@ class ResearchGraph:
                 role="final_committee",
                 content=decision,
                 generation_method=output.generation_method,
-                prompt_version="final-committee-v3-workset",
+                prompt_version="final-committee-v4-split",
             )
             self._finish_node(
                 runtime,
@@ -1171,6 +1296,7 @@ class ResearchGraph:
                     "rating": decision.rating.value,
                     "confidence": decision.confidence,
                 },
+                measure=False,
             )
             return {
                 "final_decision": decision.model_dump(mode="json"),
@@ -1187,6 +1313,16 @@ class ResearchGraph:
         if spec is not None and spec.model == "deep":
             return self.deep_llm
         return self.quick_llm
+
+    def _deliberation_serializer_llm(
+        self,
+        spec: RoleSpec | None = None,
+    ) -> Any:
+        if self.profile is RunProfile.DEEP:
+            return self.deep_serializer_llm
+        if spec is not None and spec.model == "deep":
+            return self.deep_serializer_llm
+        return self.quick_serializer_llm
 
     def _prepare_node_evidence(
         self,
@@ -1267,7 +1403,7 @@ class ResearchGraph:
             llm=llm,
             bundle=bundle,
             role_prompt=initial_prompt,
-            node=node,
+            node=f"{node}.prepare",
             runtime=runtime,
         )
         return research_prompt(
