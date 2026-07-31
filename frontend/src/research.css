@@ -1167,14 +1167,7 @@
   border-radius: 0;
 }
 
-.valuation-reference-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.valuation-card,
-.market-reference-card {
+.valuation-card {
   min-width: 0;
   padding: 20px;
   background: #fafbfd;
@@ -1212,30 +1205,79 @@
   font-size: 12px;
 }
 
-.market-reference-list {
-  display: grid;
-  gap: 10px;
+.market-reference-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 9px;
 }
 
-.market-reference-list > section {
-  padding: 12px 13px;
-  background: #fff;
-  border: 1px solid var(--line-soft);
-  border-radius: 8px;
+.market-reference-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: auto;
 }
 
-.market-reference-list header {
-  display: flex;
-  gap: 10px;
-  justify-content: space-between;
+.market-reference-table th,
+.market-reference-table td {
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--line-soft);
 }
 
-.market-reference-list header strong {
-  text-transform: capitalize;
+.market-reference-table thead th {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  background: #f5f8fb;
+  text-transform: uppercase;
 }
 
-.market-reference-list > section > small {
-  color: var(--muted-2);
+.market-reference-table tbody th {
+  min-width: 150px;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.market-reference-table tbody tr:last-child > * {
+  border-bottom: 0;
+}
+
+.market-reference-value,
+.market-reference-date {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.market-reference-interpretation {
+  width: 100%;
+  min-width: 260px;
+}
+
+.market-reference-interpretation .markdown p {
+  margin: 0;
+}
+
+.market-reference-evidence .evidence-ref-group {
+  margin: 0;
+}
+
+.reference-basis {
+  display: inline-flex;
+  padding: 3px 7px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+  white-space: nowrap;
+  background: #edf2f7;
+  border-radius: 999px;
+}
+
+.reference-basis.basis-derived {
+  color: #72520f;
+  background: #fff3c4;
 }
 
 .adjustment-list {
@@ -1363,10 +1405,6 @@
   .decision-lists-grid,
   .judge-list-grid,
   .case-list-grid,
-  .valuation-reference-grid {
-    grid-template-columns: 1fr;
-  }
-
   .decision-hero {
     grid-template-columns: 1fr;
   }
@@ -1406,5 +1444,57 @@
   .decision-summary,
   .decision-section {
     padding-inline: 16px;
+  }
+
+  .market-reference-table-wrap {
+    overflow: visible;
+    border: 0;
+  }
+
+  .market-reference-table,
+  .market-reference-table tbody,
+  .market-reference-table tr,
+  .market-reference-table th,
+  .market-reference-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .market-reference-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+
+  .market-reference-table tbody tr {
+    margin-bottom: 10px;
+    padding: 12px 13px;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+  }
+
+  .market-reference-table tbody th,
+  .market-reference-table tbody td {
+    display: grid;
+    grid-template-columns: minmax(88px, 0.35fr) minmax(0, 1fr);
+    gap: 10px;
+    min-width: 0;
+    padding: 6px 0;
+    border: 0;
+  }
+
+  .market-reference-table tbody th::before,
+  .market-reference-table tbody td::before {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 700;
+    content: attr(data-label);
+  }
+
+  .market-reference-interpretation {
+    min-width: 0;
   }
 }

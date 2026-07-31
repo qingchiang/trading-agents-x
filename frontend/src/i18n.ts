@@ -296,6 +296,13 @@ const en = {
     formula: "Formula",
     inputs: "Inputs",
     decisionCalculations: "Audited decision calculations",
+    referenceItem: "Reference",
+    referenceBasis: "Basis",
+    interpretation: "Interpretation",
+    marketReferenceBasis: {
+      observed: "Observed",
+      derived: "Derived",
+    },
     unverifiedNumericDrafts: "Unverified numeric drafts",
     unverifiedNumericBoundary:
       "These model-proposed values did not pass numeric audit and were not used in the rating, thesis, memory, outcomes, or canonical numeric conclusions.",
@@ -697,6 +704,13 @@ const zhCN = {
     formula: "公式",
     inputs: "输入值",
     decisionCalculations: "决策关键计算审计",
+    referenceItem: "参考项",
+    referenceBasis: "类型",
+    interpretation: "解释",
+    marketReferenceBasis: {
+      observed: "观察值",
+      derived: "推导值",
+    },
     unverifiedNumericDrafts: "未验证数值草案",
     unverifiedNumericBoundary:
       "这些模型建议值未通过数值审计，未用于研究评级、核心论点、Memory、Outcome 或正式数值结论。",
@@ -1104,6 +1118,13 @@ const ja = {
     formula: "式",
     inputs: "入力値",
     decisionCalculations: "意思決定に関する計算監査",
+    referenceItem: "参考項目",
+    referenceBasis: "種別",
+    interpretation: "説明",
+    marketReferenceBasis: {
+      observed: "観測値",
+      derived: "導出値",
+    },
     unverifiedNumericDrafts: "未検証の数値ドラフト",
     unverifiedNumericBoundary:
       "これらのモデル提案値は数値監査を通過しておらず、評価、投資仮説、Memory、Outcome、正式な数値結論には使用されていません。",

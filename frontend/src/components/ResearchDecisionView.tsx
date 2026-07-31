@@ -177,11 +177,9 @@ export function ResearchDecisionContent({
         </div>
       </section>
 
-      {(decision.valuation_assessment ||
-        (decision.market_reference_levels ?? []).length > 0) && (
-        <section className="decision-section valuation-reference-grid">
-          {decision.valuation_assessment && (
-            <article className="valuation-card">
+      {decision.valuation_assessment && (
+        <section className="decision-section valuation-section">
+          <article className="valuation-card">
               <span className="decision-section-label">
                 {t("valuationAssessment")}
               </span>
@@ -216,47 +214,74 @@ export function ResearchDecisionContent({
                 onEvidence={onEvidence}
                 compact
               />
-            </article>
-          )}
+          </article>
+        </section>
+      )}
 
-          {(decision.market_reference_levels ?? []).length > 0 && (
-            <article className="market-reference-card">
-              <span className="decision-section-label">
-                {t("marketReferenceLevels")}
-              </span>
-              <p className="reference-level-notice">
-                {t("marketReferenceNotice")}
-              </p>
-              <div className="market-reference-list">
+      {(decision.market_reference_levels ?? []).length > 0 && (
+        <section className="decision-section market-reference-section">
+          <span className="decision-section-label">
+            {t("marketReferenceLevels")}
+          </span>
+          <p className="reference-level-notice">
+            {t("marketReferenceNotice")}
+          </p>
+          <div className="market-reference-table-wrap">
+            <table
+              className="market-reference-table"
+              aria-label={t("marketReferenceLevels")}
+            >
+              <thead>
+                <tr>
+                  <th>{t("referenceItem")}</th>
+                  <th>{t("value")}</th>
+                  <th>{t("asOfDate")}</th>
+                  <th>{t("referenceBasis")}</th>
+                  <th>{t("interpretation")}</th>
+                  <th>{t("evidence")}</th>
+                </tr>
+              </thead>
+              <tbody>
                 {(decision.market_reference_levels ?? []).map(
                   (level, index) => (
-                    <section key={`${level.label}:${index}`}>
-                      <header>
-                        <strong>{level.label}</strong>
-                        <span>
-                          {level.value.toLocaleString()} {level.unit}
+                    <tr key={`${level.label}:${index}`}>
+                      <th data-label={t("referenceItem")}>{level.label}</th>
+                      <td className="market-reference-value" data-label={t("value")}>
+                        {level.value.toLocaleString()} {level.unit}
+                      </td>
+                      <td className="market-reference-date" data-label={t("asOfDate")}>
+                        {level.as_of_date}
+                      </td>
+                      <td data-label={t("referenceBasis")}>
+                        <span
+                          className={`reference-basis basis-${level.basis ?? "observed"}`}
+                        >
+                          {t(`marketReferenceBasis.${level.basis ?? "observed"}`)}
                         </span>
-                      </header>
-                      <small>{level.as_of_date}</small>
-                      <Markdown
-                        evidenceAliases={evidenceIndex.aliases}
-                        onEvidence={onEvidence}
-                      >
-                        {level.interpretation}
-                      </Markdown>
-                      <EvidenceLinks
-                        refs={visibleRefs(level.evidence_refs)}
-                        evidenceIndex={evidenceIndex}
-                        onEvidence={onEvidence}
-                        label={false}
-                        compact
-                      />
-                    </section>
+                      </td>
+                      <td className="market-reference-interpretation" data-label={t("interpretation")}>
+                        <Markdown
+                          evidenceAliases={evidenceIndex.aliases}
+                          onEvidence={onEvidence}
+                        >
+                          {level.interpretation}
+                        </Markdown>
+                      </td>
+                      <td className="market-reference-evidence" data-label={t("evidence")}>
+                        <EvidenceLinks
+                          refs={visibleRefs(level.evidence_refs)}
+                          evidenceIndex={evidenceIndex}
+                          onEvidence={onEvidence}
+                          label={false}
+                          compact
+                        />
+                      </td>
+                    </tr>
                   ),
                 )}
-              </div>
-            </article>
-          )}
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
 

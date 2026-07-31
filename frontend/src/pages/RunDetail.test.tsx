@@ -232,6 +232,18 @@ const detail = {
         outcome: `${kind} outcome.`,
         evidence_refs: ["ev_0123456789ab"],
       })),
+      market_reference_levels: [
+        {
+          label: "Recent close",
+          value: 100,
+          unit: "USD",
+          as_of_date: "2026-07-24",
+          interpretation: "Observed reference, not an execution instruction.",
+          evidence_refs: ["ev_0123456789ab"],
+          basis: "observed",
+          calculation_ids: [],
+        },
+      ],
       calculation_records: [
         {
           id: "calc_market_reference",
@@ -480,6 +492,14 @@ test("restores deliberation and resolves evidence references across run views", 
   expect(await screen.findByText("Evidence is balanced.")).toBeVisible();
   fireEvent.click(screen.getByText("Audited decision calculations"));
   expect(screen.getByText("calc_market_reference")).toBeVisible();
+  const referenceTable = screen.getByRole("table", {
+    name: "Market reference levels",
+  });
+  expect(referenceTable).toHaveTextContent("Reference");
+  expect(referenceTable).toHaveTextContent("Value");
+  expect(referenceTable).toHaveTextContent("As-of date");
+  expect(referenceTable).toHaveTextContent("Basis");
+  expect(referenceTable).toHaveTextContent("Observed");
   expect(
     screen.getByRole("link", {
       name: "Open memory memory:legacy-run",
