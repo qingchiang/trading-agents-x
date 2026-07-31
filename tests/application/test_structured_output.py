@@ -284,13 +284,9 @@ def _decision_payload(evidence_ref: str) -> dict[str, Any]:
                 "core_assumptions": ["Current evidence remains representative."],
                 "outcome": f"The {kind} outcome materializes.",
                 "evidence_refs": [evidence_ref],
-                "valuation_range": None,
             }
             for kind in ("base", "bull", "bear")
         ],
-        "valuation_assessment": None,
-        "market_reference_levels": [],
-        "calculation_records": [],
         "risk_review_adjustments": [],
     }
 

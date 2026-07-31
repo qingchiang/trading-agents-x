@@ -16,6 +16,9 @@ from tradingagents.application.contracts import (
     EvidenceBundle,
     EvidenceItem,
     JudgeDraft,
+    MarketReferenceBasis,
+    MarketReferenceLevel,
+    NumericAuditStatus,
     RebuttalReview,
     RiskReview,
     ValuationAssessment,
@@ -24,6 +27,8 @@ from tradingagents.application.contracts import (
 from tradingagents.graph.deliberation import (
     CalculationInputDraft,
     CalculationRecordDraft,
+    DecisionNumericDraft,
+    ResearchDecisionCoreDraft,
     _evaluate_formula,
     debate_round_has_material_progress,
     invoke_debate_agenda,
@@ -39,13 +44,28 @@ from tradingagents.graph.structured_output import StructuredOutputError
 
 
 class _StaticInvoker:
-    def __init__(self, owner: _StaticLLM):
+    def __init__(self, owner: _StaticLLM, schema: Any):
         self.owner = owner
+        self.schema = schema
 
     def invoke(self, prompt: str, config: Any = None) -> dict[str, Any]:
         del config
         self.owner.prompts.append(prompt)
-        return {"raw": None, "parsed": self.owner.value}
+        parsed = self.owner.value
+        if hasattr(parsed, "model_dump"):
+            payload = parsed.model_dump(mode="json")
+            if self.schema is ResearchDecisionCoreDraft:
+                payload.pop("valuation_assessment", None)
+                payload.pop("market_reference_levels", None)
+                payload.pop("calculation_records", None)
+                payload.pop("numeric_audit_status", None)
+                for scenario in payload["scenarios"]:
+                    scenario.pop("valuation_range", None)
+                    scenario.pop("valuation_calculation_ids", None)
+                parsed = ResearchDecisionCoreDraft.model_validate(payload)
+            elif self.schema is DecisionNumericDraft:
+                parsed = _numeric_draft_from_decision(payload)
+        return {"raw": None, "parsed": parsed}
 
 
 class _StaticLLM:
@@ -55,8 +75,64 @@ class _StaticLLM:
         self.value = value
         self.prompts: list[str] = []
 
-    def with_structured_output(self, _schema: Any, **_kwargs: Any) -> _StaticInvoker:
-        return _StaticInvoker(self)
+    def with_structured_output(self, schema: Any, **_kwargs: Any) -> _StaticInvoker:
+        return _StaticInvoker(self, schema)
+
+
+def _numeric_draft_from_decision(payload: dict[str, Any]) -> DecisionNumericDraft:
+    scenario_valuations = []
+    for scenario in payload["scenarios"]:
+        if scenario.get("valuation_range") is not None:
+            scenario_valuations.append(
+                {
+                    "kind": scenario["kind"],
+                    "valuation_range": scenario["valuation_range"],
+                    "calculation_ids": scenario["valuation_calculation_ids"],
+                }
+            )
+    calculations = []
+    for calculation in payload.get("calculation_records") or ():
+        calculations.append(
+            {
+                **calculation,
+                "inputs": [
+                    {"name": name, "value": value}
+                    for name, value in calculation["inputs"].items()
+                ],
+            }
+        )
+    has_content = bool(
+        scenario_valuations
+        or payload.get("valuation_assessment")
+        or payload.get("market_reference_levels")
+        or calculations
+    )
+    return DecisionNumericDraft.model_validate(
+        {
+            "requested": has_content,
+            "scenario_valuations": scenario_valuations,
+            "valuation_assessment": payload.get("valuation_assessment"),
+            "market_reference_levels": payload.get("market_reference_levels"),
+            "calculation_records": calculations,
+        }
+    )
+
+
+def _core_draft_from_decision(payload: dict[str, Any]) -> ResearchDecisionCoreDraft:
+    payload = {**payload}
+    payload.pop("valuation_assessment", None)
+    payload.pop("market_reference_levels", None)
+    payload.pop("calculation_records", None)
+    payload.pop("numeric_audit_status", None)
+    payload["scenarios"] = [
+        {
+            key: value
+            for key, value in scenario.items()
+            if key not in {"valuation_range", "valuation_calculation_ids"}
+        }
+        for scenario in payload["scenarios"]
+    ]
+    return ResearchDecisionCoreDraft.model_validate(payload)
 
 
 class _MarkdownLLM:
@@ -73,6 +149,29 @@ class _MarkdownLLM:
                 "response_metadata": {"finish_reason": "stop"},
             },
         )()
+
+
+class _SequenceInvoker:
+    def __init__(self, owner: _SequenceLLM, schema: Any):
+        self.owner = owner
+        self.schema = schema
+
+    def invoke(self, prompt: str, config: Any = None) -> dict[str, Any]:
+        del config
+        self.owner.prompts.append((self.schema.__name__, prompt))
+        response = self.owner.responses[self.schema.__name__].pop(0)
+        return {"raw": None, "parsed": response}
+
+
+class _SequenceLLM:
+    preferred_structured_output_method = "function_calling"
+
+    def __init__(self, responses: dict[str, list[Any]]):
+        self.responses = responses
+        self.prompts: list[tuple[str, str]] = []
+
+    def with_structured_output(self, schema: Any, **_kwargs: Any) -> _SequenceInvoker:
+        return _SequenceInvoker(self, schema)
 
 
 def _state(*, content: str = "Fixture evidence.") -> dict[str, Any]:
@@ -351,9 +450,10 @@ def test_final_decision_accepts_reproducible_critical_calculation() -> None:
                 valuation_range=ValuationRange(low=90, high=110),
                 currency="USD",
                 as_of_date=date(2026, 7, 24),
-                input_evidence_refs=(ref,),
-                limitations=("The multiple is scenario-dependent.",),
-            ),
+                    input_evidence_refs=(ref,),
+                    limitations=("The multiple is scenario-dependent.",),
+                    calculation_ids=("calc_valuation",),
+                ),
             "calculation_records": (
                 CalculationRecord(
                     id="calc_valuation",
@@ -379,6 +479,131 @@ def test_final_decision_accepts_reproducible_critical_calculation() -> None:
     )
 
     assert result.value.calculation_records[0].result == 100
+    assert result.value.numeric_audit_status is NumericAuditStatus.COMPLETE
+
+
+def test_final_decision_accepts_observed_reference_without_calculation() -> None:
+    state = _state()
+    ref = state["evidence_bundle"]["items"][0]["ref"]
+    decision = research_decision(evidence_refs=(ref,)).model_copy(
+        update={
+            "market_reference_levels": (
+                MarketReferenceLevel(
+                    label="Observed close",
+                    value=100,
+                    unit="USD",
+                    as_of_date=date(2026, 7, 24),
+                    interpretation="Observed reference only.",
+                    evidence_refs=(ref,),
+                    basis=MarketReferenceBasis.OBSERVED,
+                ),
+            ),
+        }
+    )
+
+    result = invoke_research_decision(
+        _StaticLLM(decision),
+        prompt="Form the final decision.",
+        state=state,
+        node="committee.final",
+        require_risk_adjustments=False,
+    )
+
+    assert result.value.market_reference_levels == decision.market_reference_levels
+    assert result.value.calculation_records == ()
+    assert result.value.numeric_audit_status is NumericAuditStatus.COMPLETE
+
+
+def test_final_decision_drops_derived_reference_without_calculation() -> None:
+    state = _state()
+    ref = state["evidence_bundle"]["items"][0]["ref"]
+    decision = research_decision(evidence_refs=(ref,)).model_copy(
+        update={
+            "market_reference_levels": (
+                MarketReferenceLevel(
+                    label="Derived fair value",
+                    value=100,
+                    unit="USD",
+                    as_of_date=date(2026, 7, 24),
+                    interpretation="A derived reference only.",
+                    evidence_refs=(ref,),
+                    basis=MarketReferenceBasis.DERIVED,
+                ),
+            ),
+        }
+    )
+
+    result = invoke_research_decision(
+        _StaticLLM(decision),
+        prompt="Form the final decision.",
+        state=state,
+        node="committee.final",
+        require_risk_adjustments=False,
+    )
+
+    assert result.value.market_reference_levels == ()
+    assert result.value.numeric_audit_status is NumericAuditStatus.INCOMPLETE
+    assert result.warnings[0].code == "decision.numeric_audit_incomplete"
+
+
+def test_numeric_serializer_repairs_seven_invalid_input_names() -> None:
+    state = _state()
+    ref = state["evidence_bundle"]["items"][0]["ref"]
+    core = _core_draft_from_decision(
+        research_decision(evidence_refs=(ref,)).model_dump(mode="json")
+    )
+    invalid_records = [
+        {
+            "id": f"calc_valuation_{index}",
+            "purpose": "valuation",
+            "formula": "earnings * multiple",
+            "inputs": [
+                {"name": "盈利", "value": 10},
+                {"name": "倍数", "value": 10},
+            ],
+            "input_evidence_refs": [ref],
+            "result": 100,
+            "unit": "USD",
+            "as_of_date": "2026-07-24",
+            "limitations": ["Illustrative only."],
+        }
+        for index in range(7)
+    ]
+    invalid_numeric = {
+        "requested": True,
+        "scenario_valuations": [],
+        "valuation_assessment": None,
+        "market_reference_levels": [],
+        "calculation_records": invalid_records,
+    }
+    recovered_numeric = DecisionNumericDraft(
+        requested=False,
+    )
+    llm = _SequenceLLM(
+        {
+            "ResearchDecisionCoreDraft": [core],
+            "DecisionNumericDraft": [invalid_numeric, recovered_numeric],
+        }
+    )
+    events: list[dict[str, Any]] = []
+
+    result = invoke_research_decision(
+        llm,
+        prompt="Form the final decision.",
+        state=state,
+        node="committee.final",
+        require_risk_adjustments=False,
+        event_writer=events.append,
+    )
+
+    assert result.value.numeric_audit_status is NumericAuditStatus.NOT_APPLICABLE
+    assert [event["event_type"] for event in events] == [
+        "node.numeric_audit_retry",
+        "node.numeric_audit_recovered",
+    ]
+    issues = events[0]["payload"]["validation_issues"]
+    assert len(issues) == 8  # Structured diagnostics are deliberately bounded.
+    assert issues[0].startswith("schema.calculation_records.0.inputs")
 
 
 def test_calculation_draft_exposes_identifier_inputs_in_json_schema() -> None:
@@ -440,7 +665,7 @@ def test_formula_validation_reports_component_scoped_input_issues(
     assert error.value.issue_code == issue
 
 
-def test_final_decision_rejects_unreproducible_critical_calculation() -> None:
+def test_final_decision_omits_unreproducible_optional_calculation() -> None:
     state = _state()
     ref = state["evidence_bundle"]["items"][0]["ref"]
     decision = research_decision(evidence_refs=(ref,)).model_copy(
@@ -462,19 +687,74 @@ def test_final_decision_rejects_unreproducible_critical_calculation() -> None:
     )
     llm = _StaticLLM(decision)
 
-    with pytest.raises(StructuredOutputError) as error:
-        invoke_research_decision(
-            llm,
-            prompt="Form the final decision.",
-            state=state,
-            node="committee.final",
-            require_risk_adjustments=False,
-        )
-
-    assert len(llm.prompts) == 2
-    assert error.value.validation_issues == (
-        "semantic.decision.calculation.result_mismatch",
+    result = invoke_research_decision(
+        llm,
+        prompt="Form the final decision.",
+        state=state,
+        node="committee.final",
+        require_risk_adjustments=False,
     )
+
+    assert len(llm.prompts) == 3
+    assert result.value.calculation_records == ()
+    assert result.value.numeric_audit_status is NumericAuditStatus.INCOMPLETE
+    assert result.warnings[0].code == "decision.numeric_audit_incomplete"
+
+
+def test_final_decision_preserves_valid_numeric_components_after_repair_failure() -> None:
+    state = _state()
+    ref = state["evidence_bundle"]["items"][0]["ref"]
+    decision = research_decision(evidence_refs=(ref,)).model_copy(
+        update={
+            "valuation_assessment": ValuationAssessment(
+                method="Earnings multiple",
+                valuation_range=ValuationRange(low=90, high=110),
+                currency="USD",
+                as_of_date=date(2026, 7, 24),
+                input_evidence_refs=(ref,),
+                limitations=("The multiple is scenario-dependent.",),
+                calculation_ids=("calc_valuation",),
+            ),
+            "market_reference_levels": (
+                MarketReferenceLevel(
+                    label="Observed close",
+                    value=100,
+                    unit="USD",
+                    as_of_date=date(2026, 7, 24),
+                    interpretation="Observed reference only.",
+                    evidence_refs=(ref,),
+                    basis=MarketReferenceBasis.OBSERVED,
+                ),
+            ),
+            "calculation_records": (
+                CalculationRecord(
+                    id="calc_valuation",
+                    purpose=CalculationPurpose.VALUATION,
+                    formula="earnings * multiple",
+                    inputs={"earnings": 10, "multiple": 10},
+                    input_evidence_refs=(ref,),
+                    result=999,
+                    unit="USD",
+                    as_of_date=date(2026, 7, 24),
+                    limitations=("The multiple is scenario-dependent.",),
+                ),
+            ),
+        }
+    )
+
+    result = invoke_research_decision(
+        _StaticLLM(decision),
+        prompt="Form the final decision.",
+        state=state,
+        node="committee.final",
+        require_risk_adjustments=False,
+    )
+
+    assert result.value.valuation_assessment is None
+    assert result.value.market_reference_levels == decision.market_reference_levels
+    assert result.value.calculation_records == ()
+    assert result.value.numeric_audit_status is NumericAuditStatus.PARTIAL
+    assert result.warnings[0].code == "decision.numeric_audit_partial"
 
 
 def test_final_decision_reports_stable_duplicate_scenario_issue() -> None:
@@ -501,5 +781,5 @@ def test_final_decision_reports_stable_duplicate_scenario_issue() -> None:
         )
 
     assert error.value.validation_issues == (
-        "schema.root.decision_scenarios_duplicate_kind",
+        "semantic.decision.scenarios.duplicate_kind",
     )

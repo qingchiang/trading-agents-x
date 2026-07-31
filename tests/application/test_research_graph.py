@@ -26,7 +26,6 @@ from tradingagents.application.contracts import (
     MemoryOutcome,
     MemoryRecord,
     ResearchArtifactDraft,
-    ResearchDecision,
     ResearchRating,
     ResearchWarning,
     RiskReviewAdjustment,
@@ -37,8 +36,10 @@ from tradingagents.application.metrics import MetricsCallback
 from tradingagents.application.runtime import RunContext
 from tradingagents.graph.analyst_synthesis import AnalystAuditDraft
 from tradingagents.graph.deliberation import (
+    DecisionNumericDraft,
     JudgeAudit,
     RebuttalAudit,
+    ResearchDecisionCoreDraft,
 )
 from tradingagents.graph.research_graph import (
     ResearchGraph,
@@ -114,7 +115,7 @@ class _StructuredInvoker:
                     ),
                 ),
             )
-        elif self.schema is ResearchDecision:
+        elif self.schema is ResearchDecisionCoreDraft:
             risk_roles = tuple(
                 role
                 for role in (
@@ -139,7 +140,7 @@ class _StructuredInvoker:
                 if "REQUIRED RISK REVIEW ROLES:" in prompt
                 else ()
             )
-            parsed = research_decision(
+            decision = research_decision(
                 confidence=0.65,
                 thesis="The available evidence supports a balanced conclusion.",
                 evidence_refs=refs[-1:],
@@ -149,6 +150,17 @@ class _StructuredInvoker:
                 invalidation_conditions=("The cited evidence is superseded",),
                 risk_review_adjustments=adjustments,
             )
+            payload = decision.model_dump(mode="json")
+            payload.pop("valuation_assessment", None)
+            payload.pop("market_reference_levels", None)
+            payload.pop("calculation_records", None)
+            payload.pop("numeric_audit_status", None)
+            for scenario in payload["scenarios"]:
+                scenario.pop("valuation_range", None)
+                scenario.pop("valuation_calculation_ids", None)
+            parsed = ResearchDecisionCoreDraft.model_validate(payload)
+        elif self.schema is DecisionNumericDraft:
+            parsed = DecisionNumericDraft(requested=False)
         else:
             raise AssertionError(self.schema)
         return {"raw": None, "parsed": parsed, "parsing_error": None}
@@ -383,7 +395,7 @@ def test_profiles_share_contract_but_use_distinct_topologies(
         final_prompt = next(
             prompt
             for schema, prompt in deep.calls
-            if schema == "ResearchDecision"
+            if schema == "ResearchDecisionCoreDraft"
         )
         assert "DECISION SYNTHESIS BRIEF:" in final_prompt
         assert "RESEARCH CONTEXT:" not in final_prompt
@@ -400,7 +412,8 @@ def test_profiles_share_contract_but_use_distinct_topologies(
                 "AnalystAuditDraft",
             },
             {
-                "ResearchDecision",
+                "ResearchDecisionCoreDraft",
+                "DecisionNumericDraft",
                 "ResearchMarkdown",
             },
         ),
@@ -415,7 +428,8 @@ def test_profiles_share_contract_but_use_distinct_topologies(
             },
             {
                 "JudgeAudit",
-                "ResearchDecision",
+                "ResearchDecisionCoreDraft",
+                "DecisionNumericDraft",
                 "ResearchMarkdown",
             },
         ),
@@ -429,7 +443,8 @@ def test_profiles_share_contract_but_use_distinct_topologies(
                 "DebateAgenda",
                 "RebuttalAudit",
                 "JudgeAudit",
-                "ResearchDecision",
+                "ResearchDecisionCoreDraft",
+                "DecisionNumericDraft",
                 "ResearchMarkdown",
             },
         ),

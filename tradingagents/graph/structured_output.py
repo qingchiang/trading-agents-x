@@ -33,11 +33,16 @@ class StructuredOutputError(RuntimeError):
         schema: str,
         reason_code: str,
         validation_issues: tuple[str, ...] = (),
+        candidate: dict[str, Any] | None = None,
     ):
         self.node = node
         self.schema = schema
         self.reason_code = reason_code
         self.validation_issues = validation_issues
+        # Kept only in memory so a caller can salvage independently valid
+        # optional components. It is deliberately omitted from the message,
+        # events, logs, and persisted error payloads.
+        self.candidate = candidate
         issue_suffix = (
             f"; issues={','.join(validation_issues)}"
             if validation_issues
@@ -281,6 +286,7 @@ class StructuredOutputRunner(Generic[StructuredModel]):
 
         failure_reason = "structured_binding_error"
         failure_validation_issues: tuple[str, ...] = ()
+        recovery_candidate: dict[str, Any] | None = None
         response_available = False
         response = None
         if recovery is not None or self.repair_mode != "preferred":
@@ -323,6 +329,7 @@ class StructuredOutputRunner(Generic[StructuredModel]):
                     )
                     candidate = None
             if candidate is not None:
+                recovery_candidate = _safe_candidate(candidate)
                 try:
                     value = self._validate(candidate)
                 except _InvalidOutput as exc:
@@ -390,6 +397,7 @@ class StructuredOutputRunner(Generic[StructuredModel]):
             schema=self.schema.__name__,
             reason_code=failure_reason,
             validation_issues=failure_validation_issues,
+            candidate=recovery_candidate or primary_candidate,
         )
 
     def _validate(self, candidate: Any) -> StructuredModel:

@@ -53,6 +53,7 @@ def test_research_decision_accepts_audited_nonpersonalized_opinions() -> None:
                 "as_of_date": "2026-07-24",
                 "input_evidence_refs": ["ev_0123456789ab"],
                 "limitations": ["Peer comparability is imperfect."],
+                "calculation_ids": ["calc_valuation"],
             },
             "market_reference_levels": [
                 {

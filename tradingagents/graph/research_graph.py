@@ -1332,7 +1332,7 @@ class ResearchGraph:
                 role="final_committee",
                 content=decision,
                 generation_method=output.generation_method,
-                prompt_version="final-committee-v6-stable",
+                prompt_version="final-committee-v7-numeric-isolation",
             )
             self._finish_node(
                 runtime,
@@ -1348,6 +1348,7 @@ class ResearchGraph:
                 "warnings": [
                     *_structured_recovery_warnings(node, output),
                     *_research_markdown_warnings(written),
+                    *(warning.model_dump(mode="json") for warning in output.warnings),
                 ],
             }
 

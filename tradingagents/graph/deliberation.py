@@ -16,13 +16,17 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from tradingagents.application.contracts import (
     ArtifactGenerationMethod,
     CalculationPurpose,
+    CalculationRecord,
     DebateAgenda,
     DebateImportance,
     DebateIssue,
     EvidenceBundle,
     IssueDisposition,
     JudgeDraft,
+    MarketReferenceBasis,
+    MarketReferenceLevel,
     MemoryContext,
+    NumericAuditStatus,
     RebuttalReview,
     ResearchCase,
     ResearchDecision,
@@ -33,6 +37,8 @@ from tradingagents.application.contracts import (
     RiskReview,
     RiskReviewAdjustment,
     RiskReviewDisposition,
+    ValuationAssessment,
+    ValuationRange,
 )
 from tradingagents.application.markdown_evidence import normalize_evidence_markdown
 from tradingagents.graph.output_validation import (
@@ -110,6 +116,90 @@ class CalculationRecordDraft(BaseModel):
 
     def input_mapping(self) -> dict[str, int | float]:
         return {item.name: item.value for item in self.inputs}
+
+
+class ResearchScenarioCoreDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: ResearchScenarioKind
+    core_assumptions: tuple[str, ...] = Field(min_length=1)
+    outcome: str = Field(min_length=1)
+    evidence_refs: tuple[str, ...] = Field(min_length=1)
+
+
+class ResearchDecisionCoreDraft(BaseModel):
+    """Strict decision fields that must survive optional numeric failures."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    rating: ResearchRating
+    confidence: float = Field(ge=0.0, le=1.0)
+    executive_summary: str = Field(min_length=1)
+    thesis: str = Field(min_length=1)
+    evidence_refs: tuple[str, ...] = Field(min_length=1)
+    memory_refs: tuple[str, ...] = ()
+    catalysts: tuple[str, ...] = ()
+    risks: tuple[str, ...] = Field(min_length=1)
+    invalidation_conditions: tuple[str, ...] = Field(min_length=1)
+    unresolved_questions: tuple[str, ...] = ()
+    time_horizon: str = Field(min_length=1)
+    scenarios: tuple[ResearchScenarioCoreDraft, ...] = Field(
+        min_length=3,
+        max_length=3,
+    )
+    risk_review_adjustments: tuple[RiskReviewAdjustment, ...] = ()
+
+
+class ScenarioValuationDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: ResearchScenarioKind
+    valuation_range: ValuationRange
+    calculation_ids: tuple[str, ...] = Field(min_length=1)
+
+
+class ValuationAssessmentDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    method: str = Field(min_length=1)
+    valuation_range: ValuationRange
+    currency: str = Field(min_length=1, max_length=16)
+    as_of_date: date
+    input_evidence_refs: tuple[str, ...] = Field(min_length=1)
+    limitations: tuple[str, ...] = Field(min_length=1)
+    calculation_ids: tuple[str, ...] = Field(min_length=1)
+
+
+class MarketReferenceLevelDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    label: str = Field(min_length=1, max_length=120)
+    value: float
+    unit: str = Field(min_length=1, max_length=32)
+    as_of_date: date
+    interpretation: str = Field(min_length=1)
+    evidence_refs: tuple[str, ...] = Field(min_length=1)
+    basis: MarketReferenceBasis
+    calculation_ids: tuple[str, ...] = ()
+
+
+class DecisionNumericDraft(BaseModel):
+    """Optional valuation and market-reference payload for a decision."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    requested: bool
+    scenario_valuations: tuple[ScenarioValuationDraft, ...] = ()
+    valuation_assessment: ValuationAssessmentDraft | None = None
+    market_reference_levels: tuple[MarketReferenceLevelDraft, ...] = ()
+    calculation_records: tuple[CalculationRecordDraft, ...] = ()
+
+
+@dataclass(frozen=True)
+class ResearchDecisionOutput:
+    value: ResearchDecision
+    generation_method: ArtifactGenerationMethod
+    warnings: tuple[ResearchWarning, ...] = ()
 
 
 def write_research_markdown(
@@ -436,7 +526,7 @@ def invoke_research_decision(
     memory: MemoryContext | None = None,
     require_risk_adjustments: bool,
     event_writer: EventWriter | None = None,
-) -> StructuredOutputResult[ResearchDecision]:
+) -> ResearchDecisionOutput:
     bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
     valid_refs = tuple(item.ref for item in bundle.items)
     valid_memory_refs = tuple(memory.refs if memory is not None else ())
@@ -456,7 +546,9 @@ def invoke_research_decision(
         else ()
     )
 
-    def validate(result: ResearchDecision) -> ResearchDecision:
+    def validate_core(
+        result: ResearchDecisionCoreDraft,
+    ) -> ResearchDecisionCoreDraft:
         scenario_kinds = tuple(item.kind for item in result.scenarios)
         if len(set(scenario_kinds)) != len(scenario_kinds):
             raise OutputValidationError("decision.scenarios.duplicate_kind")
@@ -481,69 +573,6 @@ def invoke_research_decision(
                 set(valid_refs),
                 required=True,
             )
-        if result.valuation_assessment is not None:
-            if result.valuation_assessment.as_of_date > bundle.analysis_date:
-                raise OutputValidationError("decision.valuation.future_date")
-            require_valid_refs(
-                result.valuation_assessment.input_evidence_refs,
-                set(valid_refs),
-                required=True,
-            )
-            require_nonempty_texts(result.valuation_assessment.limitations)
-        for level in result.market_reference_levels:
-            if level.as_of_date > bundle.analysis_date:
-                raise OutputValidationError(
-                    "decision.market_reference.future_date"
-                )
-            require_text(level.interpretation)
-            require_valid_refs(
-                level.evidence_refs,
-                set(valid_refs),
-                required=True,
-            )
-        for calculation in result.calculation_records:
-            if calculation.as_of_date > bundle.analysis_date:
-                raise OutputValidationError("decision.calculation.future_date")
-            require_nonempty_texts(calculation.limitations)
-            require_valid_refs(
-                calculation.input_evidence_refs,
-                set(valid_refs),
-                required=True,
-            )
-            calculated = _evaluate_formula(
-                calculation.formula,
-                calculation.inputs,
-            )
-            if not math.isclose(
-                calculated,
-                float(calculation.result),
-                rel_tol=1e-9,
-                abs_tol=1e-9,
-            ):
-                raise OutputValidationError(
-                    "decision.calculation.result_mismatch"
-                )
-        if result.valuation_assessment is not None and not any(
-            item.purpose.value == "valuation"
-            for item in result.calculation_records
-        ):
-            raise OutputValidationError(
-                "decision.calculation.valuation_missing"
-            )
-        if any(scenario.valuation_range is not None for scenario in result.scenarios) and not any(
-            item.purpose.value == "scenario"
-            for item in result.calculation_records
-        ):
-            raise OutputValidationError(
-                "decision.calculation.scenario_missing"
-            )
-        if result.market_reference_levels and not any(
-            item.purpose.value == "market_reference"
-            for item in result.calculation_records
-        ):
-            raise OutputValidationError(
-                "decision.calculation.market_reference_missing"
-            )
         if require_risk_adjustments:
             adjusted_roles = {
                 item.source_role for item in result.risk_review_adjustments
@@ -561,30 +590,29 @@ def invoke_research_decision(
             )
         return result
 
-    return StructuredOutputRunner(
+    core = StructuredOutputRunner(
         llm=llm,
-        schema=ResearchDecision,
-        validator=validate,
-        node=node,
+        schema=ResearchDecisionCoreDraft,
+        validator=validate_core,
+        node=f"{node}.core",
         event_writer=event_writer,
         repair_mode="preferred",
         include_candidate_in_repair=True,
         candidate_only_repair=True,
-        invoke_config={"metadata": {"research_node": node}},
+        invoke_config={"metadata": {"research_node": f"{node}.core"}},
         repair_instructions=(
             "Keep valid research content. Use only allowed evidence and memory "
-            "refs. Every decision-critical calculation must be reproducible "
-            "from its named numeric inputs. The scenarios must contain exactly "
-            "one base, one bull, and one bear case. Market-reference labels are "
-            "reader-facing localized text, not machine identifiers. Required "
+            "refs. Do not include valuation ranges, market-reference levels, "
+            "or calculations in this core object. The scenarios must contain "
+            "exactly one base, one bull, and one bear case. Required "
             f"risk-review roles: {json.dumps(risk_roles)}."
         ),
     ).invoke(
         prompt
-        + "\n\nThe final decision is the strict audit boundary. Include only "
-        "decision-critical calculations; ordinary report-table arithmetic does "
-        "not belong in calculation_records.",
-        example=ResearchDecision(
+        + "\n\nSerialize only the strict qualitative decision core. Numeric "
+        "valuation, scenario ranges, market reference levels, and calculations "
+        "are handled by a separate audit step.",
+        example=ResearchDecisionCoreDraft(
             rating=ResearchRating.HOLD,
             confidence=0.5,
             executive_summary="The evidence supports a balanced conclusion.",
@@ -597,7 +625,7 @@ def invoke_research_decision(
             unresolved_questions=("Which scenario will dominate?",),
             time_horizon="6-12 months",
             scenarios=(
-                ResearchScenario(
+                    ResearchScenarioCoreDraft(
                     kind=ResearchScenarioKind.BASE,
                     core_assumptions=(
                         "Current evidence remains representative.",
@@ -605,7 +633,7 @@ def invoke_research_decision(
                     outcome="The thesis develops broadly as expected.",
                     evidence_refs=(first_ref,),
                 ),
-                ResearchScenario(
+                    ResearchScenarioCoreDraft(
                     kind=ResearchScenarioKind.BULL,
                     core_assumptions=(
                         "The constructive mechanism strengthens.",
@@ -613,7 +641,7 @@ def invoke_research_decision(
                     outcome="The result exceeds the base case.",
                     evidence_refs=(first_ref,),
                 ),
-                ResearchScenario(
+                    ResearchScenarioCoreDraft(
                     kind=ResearchScenarioKind.BEAR,
                     core_assumptions=("The principal risk materializes.",),
                     outcome="The result falls below the base case.",
@@ -625,6 +653,460 @@ def invoke_research_decision(
         allowed_evidence_refs=valid_refs,
         allowed_memory_refs=valid_memory_refs,
     )
+
+    numeric = _invoke_decision_numeric(
+        llm,
+        prompt=prompt,
+        node=f"{node}.numeric",
+        bundle=bundle,
+        allowed_evidence_refs=valid_refs,
+        event_writer=event_writer,
+    )
+    core_value = core.value
+    scenario_values = []
+    for scenario in core_value.scenarios:
+        numeric_scenario = numeric.scenario_valuations.get(scenario.kind)
+        scenario_values.append(
+            ResearchScenario(
+                kind=scenario.kind,
+                core_assumptions=scenario.core_assumptions,
+                outcome=scenario.outcome,
+                evidence_refs=scenario.evidence_refs,
+                valuation_range=(
+                    numeric_scenario.valuation_range
+                    if numeric_scenario is not None
+                    else None
+                ),
+                valuation_calculation_ids=(
+                    numeric_scenario.calculation_ids
+                    if numeric_scenario is not None
+                    else ()
+                ),
+            )
+        )
+    decision = ResearchDecision(
+        rating=core_value.rating,
+        confidence=core_value.confidence,
+        executive_summary=core_value.executive_summary,
+        thesis=core_value.thesis,
+        evidence_refs=core_value.evidence_refs,
+        memory_refs=core_value.memory_refs,
+        catalysts=core_value.catalysts,
+        risks=core_value.risks,
+        invalidation_conditions=core_value.invalidation_conditions,
+        unresolved_questions=core_value.unresolved_questions,
+        time_horizon=core_value.time_horizon,
+        scenarios=tuple(scenario_values),
+        valuation_assessment=numeric.valuation_assessment,
+        market_reference_levels=numeric.market_reference_levels,
+        calculation_records=numeric.calculation_records,
+        risk_review_adjustments=core_value.risk_review_adjustments,
+        numeric_audit_status=numeric.status,
+    )
+    return ResearchDecisionOutput(
+        value=decision,
+        generation_method=core.generation_method,
+        warnings=numeric.warnings,
+    )
+
+
+@dataclass(frozen=True)
+class _NumericDecisionAssembly:
+    scenario_valuations: dict[ResearchScenarioKind, ScenarioValuationDraft]
+    valuation_assessment: ValuationAssessment | None
+    market_reference_levels: tuple[MarketReferenceLevel, ...]
+    calculation_records: tuple[CalculationRecord, ...]
+    status: NumericAuditStatus
+    warnings: tuple[ResearchWarning, ...] = ()
+
+
+def _invoke_decision_numeric(
+    llm: Any,
+    *,
+    prompt: str,
+    node: str,
+    bundle: EvidenceBundle,
+    allowed_evidence_refs: tuple[str, ...],
+    event_writer: EventWriter | None,
+) -> _NumericDecisionAssembly:
+    allowed = set(allowed_evidence_refs)
+
+    def validate(draft: DecisionNumericDraft) -> DecisionNumericDraft:
+        _assemble_numeric_draft(
+            draft,
+            bundle=bundle,
+            allowed_evidence_refs=allowed,
+            salvage=False,
+            node=node,
+        )
+        return draft
+
+    def numeric_event(raw: dict[str, Any]) -> None:
+        if event_writer is None:
+            return
+        mapped = {
+            "node.output_retry": "node.numeric_audit_retry",
+            "node.output_recovered": "node.numeric_audit_recovered",
+            "node.output_failed": "node.numeric_audit_degraded",
+        }.get(raw.get("event_type"), raw.get("event_type"))
+        event_writer({**raw, "event_type": mapped})
+
+    example = DecisionNumericDraft(
+        requested=True,
+        valuation_assessment=ValuationAssessmentDraft(
+            method="Evidence-backed earnings multiple",
+            valuation_range=ValuationRange(low=90, high=110),
+            currency="USD",
+            as_of_date=bundle.analysis_date,
+            input_evidence_refs=(allowed_evidence_refs[0],),
+            limitations=("The multiple is scenario-dependent.",),
+            calculation_ids=("calc_valuation",),
+        ),
+        market_reference_levels=(
+            MarketReferenceLevelDraft(
+                label="Observed recent close",
+                value=100,
+                unit="USD",
+                as_of_date=bundle.analysis_date,
+                interpretation=(
+                    "A directly observed reference, not an execution order."
+                ),
+                evidence_refs=(allowed_evidence_refs[0],),
+                basis=MarketReferenceBasis.OBSERVED,
+            ),
+        ),
+        calculation_records=(
+            CalculationRecordDraft(
+                id="calc_valuation",
+                purpose=CalculationPurpose.VALUATION,
+                formula="earnings * multiple",
+                inputs=(
+                    CalculationInputDraft(name="earnings", value=10),
+                    CalculationInputDraft(name="multiple", value=10),
+                ),
+                input_evidence_refs=(allowed_evidence_refs[0],),
+                result=100,
+                unit="USD",
+                as_of_date=bundle.analysis_date,
+                limitations=("The multiple is scenario-dependent.",),
+            ),
+        ),
+    )
+    runner = StructuredOutputRunner(
+        llm=llm,
+        schema=DecisionNumericDraft,
+        validator=validate,
+        node=node,
+        event_writer=numeric_event,
+        repair_mode="preferred",
+        include_candidate_in_repair=True,
+        candidate_only_repair=True,
+        invoke_config={"metadata": {"research_node": node}},
+        repair_instructions=(
+            "Repair only the optional numeric appendix. Calculation input "
+            "names must be ASCII identifiers and the formula must use every "
+            "input exactly. Observed market references require evidence but "
+            "no calculation. Derived references, valuation assessments, and "
+            "scenario valuation ranges must name calculation IDs with matching "
+            "purposes. Do not change the qualitative decision core."
+        ),
+    )
+    try:
+        output = runner.invoke(
+            prompt
+            + "\n\nExtract only optional decision-critical numeric content. "
+            "Set requested=false and return empty collections when the brief "
+            "does not support a numeric appendix. Do not copy ordinary report "
+            "table arithmetic.",
+            example=example.model_dump(mode="json"),
+            allowed_evidence_refs=allowed_evidence_refs,
+        )
+    except StructuredOutputError as exc:
+        draft = _numeric_candidate(exc.candidate)
+        if draft is None:
+            return _empty_numeric_assembly(
+                node=node,
+                status=NumericAuditStatus.INCOMPLETE,
+            )
+        return _assemble_numeric_draft(
+            draft,
+            bundle=bundle,
+            allowed_evidence_refs=allowed,
+            salvage=True,
+            node=node,
+        )
+    return _assemble_numeric_draft(
+        output.value,
+        bundle=bundle,
+        allowed_evidence_refs=allowed,
+        salvage=False,
+        node=node,
+    )
+
+
+def _numeric_candidate(candidate: dict[str, Any] | None) -> DecisionNumericDraft | None:
+    if candidate is None:
+        return None
+    try:
+        return DecisionNumericDraft.model_validate(candidate)
+    except Exception:
+        return None
+
+
+def _empty_numeric_assembly(
+    *,
+    node: str,
+    status: NumericAuditStatus,
+) -> _NumericDecisionAssembly:
+    return _NumericDecisionAssembly(
+        scenario_valuations={},
+        valuation_assessment=None,
+        market_reference_levels=(),
+        calculation_records=(),
+        status=status,
+        warnings=(
+            ResearchWarning(
+                code=f"decision.numeric_audit_{status.value}",
+                message=(
+                    "Optional valuation and market-reference figures were "
+                    "omitted because their calculations could not be fully "
+                    "validated. The qualitative decision remains audited."
+                ),
+                source=node,
+            ),
+        ),
+    )
+
+
+def _assemble_numeric_draft(
+    draft: DecisionNumericDraft,
+    *,
+    bundle: EvidenceBundle,
+    allowed_evidence_refs: set[str],
+    salvage: bool,
+    node: str,
+) -> _NumericDecisionAssembly:
+    issues: list[str] = []
+    calculations: dict[str, CalculationRecord] = {}
+    duplicate_ids = {
+        item.id
+        for item in draft.calculation_records
+        if sum(other.id == item.id for other in draft.calculation_records) > 1
+    }
+    for item in draft.calculation_records:
+        prefix = f"numeric.calculation.{item.id}"
+        if item.id in duplicate_ids:
+            issues.append(f"{prefix}.duplicate_id")
+            continue
+        try:
+            if item.as_of_date > bundle.analysis_date:
+                raise OutputValidationError(f"{prefix}.future_date")
+            require_nonempty_texts(item.limitations)
+            require_valid_refs(
+                item.input_evidence_refs,
+                allowed_evidence_refs,
+                required=True,
+            )
+            inputs = item.input_mapping()
+            calculated = _evaluate_formula(
+                item.formula,
+                inputs,
+                issue_prefix=prefix,
+            )
+            if not math.isclose(
+                calculated,
+                float(item.result),
+                rel_tol=1e-9,
+                abs_tol=1e-9,
+            ):
+                raise OutputValidationError(f"{prefix}.result_mismatch")
+            calculations[item.id] = CalculationRecord(
+                id=item.id,
+                purpose=item.purpose,
+                formula=item.formula,
+                inputs=inputs,
+                input_evidence_refs=item.input_evidence_refs,
+                result=item.result,
+                unit=item.unit,
+                as_of_date=item.as_of_date,
+                limitations=item.limitations,
+            )
+        except OutputValidationError as exc:
+            issues.append(exc.issue_code)
+
+    scenario_values: dict[ResearchScenarioKind, ScenarioValuationDraft] = {}
+    linked_ids: set[str] = set()
+    seen_scenarios: set[ResearchScenarioKind] = set()
+    for scenario in draft.scenario_valuations:
+        prefix = f"numeric.scenario.{scenario.kind.value}"
+        if scenario.kind in seen_scenarios:
+            issues.append(f"{prefix}.duplicate")
+            continue
+        seen_scenarios.add(scenario.kind)
+        if _valid_component_calculations(
+            scenario.calculation_ids,
+            purpose=CalculationPurpose.SCENARIO,
+            calculations=calculations,
+            issues=issues,
+            prefix=prefix,
+        ):
+            scenario_values[scenario.kind] = scenario
+            linked_ids.update(scenario.calculation_ids)
+
+    valuation: ValuationAssessment | None = None
+    if draft.valuation_assessment is not None:
+        item = draft.valuation_assessment
+        prefix = "numeric.valuation"
+        valid = True
+        if item.as_of_date > bundle.analysis_date:
+            issues.append(f"{prefix}.future_date")
+            valid = False
+        try:
+            require_valid_refs(
+                item.input_evidence_refs,
+                allowed_evidence_refs,
+                required=True,
+            )
+            require_nonempty_texts(item.limitations)
+        except OutputValidationError as exc:
+            issues.append(f"{prefix}.{exc.issue_code}")
+            valid = False
+        if not _valid_component_calculations(
+            item.calculation_ids,
+            purpose=CalculationPurpose.VALUATION,
+            calculations=calculations,
+            issues=issues,
+            prefix=prefix,
+        ):
+            valid = False
+        if valid:
+            valuation = ValuationAssessment(
+                method=item.method,
+                valuation_range=item.valuation_range,
+                currency=item.currency,
+                as_of_date=item.as_of_date,
+                input_evidence_refs=item.input_evidence_refs,
+                limitations=item.limitations,
+                calculation_ids=item.calculation_ids,
+            )
+            linked_ids.update(item.calculation_ids)
+
+    reference_levels: list[MarketReferenceLevel] = []
+    for index, item in enumerate(draft.market_reference_levels):
+        prefix = f"numeric.market_reference.{index}"
+        valid = True
+        if item.as_of_date > bundle.analysis_date:
+            issues.append(f"{prefix}.future_date")
+            valid = False
+        try:
+            require_text(item.interpretation)
+            require_valid_refs(
+                item.evidence_refs,
+                allowed_evidence_refs,
+                required=True,
+            )
+        except OutputValidationError as exc:
+            issues.append(f"{prefix}.{exc.issue_code}")
+            valid = False
+        if item.basis is MarketReferenceBasis.OBSERVED:
+            if item.calculation_ids:
+                issues.append(f"{prefix}.observed_has_calculation")
+                valid = False
+        elif not _valid_component_calculations(
+            item.calculation_ids,
+            purpose=CalculationPurpose.MARKET_REFERENCE,
+            calculations=calculations,
+            issues=issues,
+            prefix=prefix,
+        ):
+            valid = False
+        if valid:
+            reference_levels.append(
+                MarketReferenceLevel(
+                    label=item.label,
+                    value=item.value,
+                    unit=item.unit,
+                    as_of_date=item.as_of_date,
+                    interpretation=item.interpretation,
+                    evidence_refs=item.evidence_refs,
+                    basis=item.basis,
+                    calculation_ids=item.calculation_ids,
+                )
+            )
+            linked_ids.update(item.calculation_ids)
+
+    orphaned = set(calculations).difference(linked_ids)
+    if orphaned:
+        issues.append("numeric.calculation.orphaned")
+    if draft.requested and not (
+        scenario_values or valuation is not None or reference_levels
+    ):
+        issues.append("numeric.requested.empty")
+    if not draft.requested and (
+        draft.scenario_valuations
+        or draft.valuation_assessment is not None
+        or draft.market_reference_levels
+        or draft.calculation_records
+    ):
+        issues.append("numeric.not_requested.has_content")
+
+    if issues and not salvage:
+        raise OutputValidationError(issues[0])
+
+    kept_calculations = tuple(
+        calculation
+        for calculation_id, calculation in calculations.items()
+        if calculation_id in linked_ids
+    )
+    has_content = bool(
+        scenario_values or valuation is not None or reference_levels
+    )
+    if issues:
+        status = (
+            NumericAuditStatus.PARTIAL
+            if has_content
+            else NumericAuditStatus.INCOMPLETE
+        )
+        warnings = _empty_numeric_assembly(node=node, status=status).warnings
+    else:
+        status = (
+            NumericAuditStatus.COMPLETE
+            if has_content
+            else NumericAuditStatus.NOT_APPLICABLE
+        )
+        warnings = ()
+    return _NumericDecisionAssembly(
+        scenario_valuations=scenario_values,
+        valuation_assessment=valuation,
+        market_reference_levels=tuple(reference_levels),
+        calculation_records=kept_calculations,
+        status=status,
+        warnings=warnings,
+    )
+
+
+def _valid_component_calculations(
+    calculation_ids: tuple[str, ...],
+    *,
+    purpose: CalculationPurpose,
+    calculations: Mapping[str, CalculationRecord],
+    issues: list[str],
+    prefix: str,
+) -> bool:
+    if not calculation_ids:
+        issues.append(f"{prefix}.missing_calculation")
+        return False
+    if len(calculation_ids) != len(set(calculation_ids)):
+        issues.append(f"{prefix}.duplicate_calculation")
+        return False
+    missing = [item for item in calculation_ids if item not in calculations]
+    if missing:
+        issues.append(f"{prefix}.unknown_calculation")
+        return False
+    if any(calculations[item].purpose is not purpose for item in calculation_ids):
+        issues.append(f"{prefix}.calculation_purpose_mismatch")
+        return False
+    return True
 
 
 def debate_round_has_material_progress(

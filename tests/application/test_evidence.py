@@ -819,6 +819,7 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
                 as_of_date=date(2026, 7, 24),
                 input_evidence_refs=("ev_0123456789ab",),
                 limitations=("Cycle duration remains uncertain.",),
+                calculation_ids=("calc_valuation",),
             ),
             "market_reference_levels": (
                 MarketReferenceLevel(

@@ -157,6 +157,18 @@ class ResearchScenarioKind(str, Enum):
     BEAR = "bear"
 
 
+class NumericAuditStatus(str, Enum):
+    COMPLETE = "complete"
+    PARTIAL = "partial"
+    INCOMPLETE = "incomplete"
+    NOT_APPLICABLE = "not_applicable"
+
+
+class MarketReferenceBasis(str, Enum):
+    OBSERVED = "observed"
+    DERIVED = "derived"
+
+
 class ArtifactGenerationMethod(str, Enum):
     """Auditable method that produced a typed research artifact."""
 
@@ -713,6 +725,7 @@ class ResearchScenario(FrozenModel):
     outcome: str = Field(min_length=1)
     evidence_refs: tuple[str, ...] = ()
     valuation_range: ValuationRange | None = None
+    valuation_calculation_ids: tuple[str, ...] = ()
 
     @field_validator("evidence_refs")
     @classmethod
@@ -721,6 +734,11 @@ class ResearchScenario(FrozenModel):
         value: tuple[str, ...],
     ) -> tuple[str, ...]:
         return _unique_evidence_refs(value)
+
+    @field_validator("valuation_calculation_ids")
+    @classmethod
+    def validate_calculation_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _unique_research_ids(value)
 
 
 class ValuationAssessment(FrozenModel):
@@ -730,6 +748,7 @@ class ValuationAssessment(FrozenModel):
     as_of_date: date
     input_evidence_refs: tuple[str, ...] = Field(min_length=1)
     limitations: tuple[str, ...] = Field(min_length=1)
+    calculation_ids: tuple[str, ...] = Field(min_length=1)
 
     @field_validator("input_evidence_refs")
     @classmethod
@@ -739,6 +758,11 @@ class ValuationAssessment(FrozenModel):
     ) -> tuple[str, ...]:
         return _unique_evidence_refs(value)
 
+    @field_validator("calculation_ids")
+    @classmethod
+    def validate_calculation_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _unique_research_ids(value)
+
 
 class MarketReferenceLevel(FrozenModel):
     label: str = Field(min_length=1, max_length=120)
@@ -747,6 +771,8 @@ class MarketReferenceLevel(FrozenModel):
     as_of_date: date
     interpretation: str = Field(min_length=1)
     evidence_refs: tuple[str, ...] = Field(min_length=1)
+    basis: MarketReferenceBasis = MarketReferenceBasis.OBSERVED
+    calculation_ids: tuple[str, ...] = ()
 
     @field_validator("evidence_refs")
     @classmethod
@@ -755,6 +781,11 @@ class MarketReferenceLevel(FrozenModel):
         value: tuple[str, ...],
     ) -> tuple[str, ...]:
         return _unique_evidence_refs(value)
+
+    @field_validator("calculation_ids")
+    @classmethod
+    def validate_calculation_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _unique_research_ids(value)
 
 
 class RiskReviewAdjustment(FrozenModel):
@@ -840,6 +871,7 @@ class ResearchDecision(FrozenModel):
     market_reference_levels: tuple[MarketReferenceLevel, ...] = ()
     calculation_records: tuple[CalculationRecord, ...] = ()
     risk_review_adjustments: tuple[RiskReviewAdjustment, ...] = ()
+    numeric_audit_status: NumericAuditStatus | None = None
 
     @model_validator(mode="before")
     @classmethod

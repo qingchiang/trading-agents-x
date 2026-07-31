@@ -80,6 +80,7 @@ scenarios[base, bull, bear]
 valuation_assessment
 market_reference_levels
 risk_review_adjustments
+numeric_audit_status
 ```
 
 Non-personalized ratings, conditional investment views, auditable valuation
@@ -330,9 +331,14 @@ continues with no open rebuttal issues, Deep conservatively keeps agenda issues
 open, and a judge fallback leaves rating/confidence unknown while marking every
 issue unresolved. Graph routing depends on stable issue IDs and dispositions,
 not on parsing prose. The Final Committee uses a reasoning pass to form the
-synthesis brief and a separate strict serializer for `ResearchDecision`. Only
+synthesis brief, a strict serializer for the qualitative decision core, and a
+small serializer for the optional numeric appendix. Only derived,
 decision-critical valuation, scenario, or market-reference arithmetic uses
-`CalculationRecord`.
+`CalculationRecord`; directly observed market references remain evidence-backed
+observations. A numeric appendix gets one bounded repair. If it still cannot be
+fully audited, independently valid components are retained and the remaining
+numeric fields are omitted with an explicit warning instead of discarding the
+strict qualitative conclusion.
 
 Every artifact records its prompt version and structured generation method. No
 artifact stores hidden reasoning traces or raw provider conversations.
