@@ -33,7 +33,7 @@ test("links evidence refs only in ordinary markdown text", () => {
   const marker = screen.getByRole("button", {
     name: "Open evidence ev_0123456789ab",
   });
-  expect(marker).toHaveTextContent("E01");
+  expect(marker).toHaveTextContent("[E01]");
   expect(marker).toHaveAttribute("title", "ev_0123456789ab");
   fireEvent.click(marker);
   expect(openEvidence).toHaveBeenCalledWith("ev_0123456789ab");
@@ -69,10 +69,12 @@ test("replaces evidence footnote AST nodes without native footer or backrefs", (
 
   const markers = screen.getAllByRole("button", { name: /Open evidence/ });
   expect(markers.map((marker) => marker.textContent)).toEqual([
-    "E01",
-    "E02",
-    "E01",
+    "[E01]",
+    "[E02]",
+    "[E01]",
   ]);
+  expect(markers[0]).not.toBe(markers[1]);
+  expect(container).toHaveTextContent("[E01] [E02]");
   expect(screen.queryByText(/Model-authored source definition/)).toBeNull();
   expect(container.querySelector("[data-footnotes]")).toBeNull();
   expect(container).not.toHaveTextContent("↩");

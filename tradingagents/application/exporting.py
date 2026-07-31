@@ -459,11 +459,12 @@ def _render_export_markdown(
         allowed_refs=set(aliases),
         source="markdown export",
     )
-    return re.sub(
+    rendered = re.sub(
         r"\[\^(ev_[a-f0-9]{12})\]",
-        lambda match: f"`{aliases[match.group(1)]}`",
+        lambda match: f"[{aliases[match.group(1)]}]",
         normalized.markdown,
     )
+    return re.sub(r"(\[E\d+\])(?=\[E\d+\])", r"\1 ", rendered)
 
 
 def _artifact_human_text(

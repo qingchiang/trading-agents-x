@@ -1129,14 +1129,14 @@ label small {
 .inline-evidence-ref {
   display: inline-flex;
   align-items: center;
-  margin: 0 3px;
-  padding: 1px 6px;
+  margin: 0 2px;
+  padding: 1px 5px;
   color: #2f5fb9;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.82em;
   font-weight: 800;
   line-height: 1.45;
-  vertical-align: 0.08em;
+  vertical-align: baseline;
   background: #eaf1ff;
   border: 1px solid #cbdcff;
   border-radius: 5px;

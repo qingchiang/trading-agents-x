@@ -134,6 +134,9 @@ function transformEvidenceTree(
     }
     if (child.type === "footnoteReference" && footnoteRef) {
       const alias = aliases[footnoteRef];
+      if (alias && isEvidenceLink(children.at(-1))) {
+        children.push({ type: "text", value: " " });
+      }
       children.push(
         alias
           ? evidenceLink(footnoteRef, alias)
@@ -165,6 +168,8 @@ function splitEvidenceText(
     if (!alias) continue;
     if (start > cursor) {
       nodes.push({ type: "text", value: value.slice(cursor, start) });
+    } else if (start === cursor && isEvidenceLink(nodes.at(-1))) {
+      nodes.push({ type: "text", value: " " });
     }
     nodes.push(evidenceLink(ref, alias));
     cursor = start + match[0].length;
@@ -176,11 +181,15 @@ function splitEvidenceText(
   return nodes;
 }
 
+function isEvidenceLink(node: MarkdownNode | undefined): boolean {
+  return node?.type === "link" && /^#evidence-ev_[a-f0-9]{12}$/.test(node.url ?? "");
+}
+
 function evidenceLink(ref: string, alias: string): MarkdownNode {
   return {
     type: "link",
     url: `#evidence-${ref}`,
-    children: [{ type: "text", value: alias }],
+    children: [{ type: "text", value: `[${alias}]` }],
   };
 }
 

@@ -498,7 +498,7 @@ test("restores deliberation and resolves evidence references across run views", 
   const inlineRefs = screen.getAllByRole("button", {
     name: /Open evidence ev_/,
   });
-  expect(inlineRefs.some((marker) => marker.textContent === "E01")).toBe(true);
+  expect(inlineRefs.some((marker) => marker.textContent === "[E01]")).toBe(true);
   expect(
     screen.queryByText("ev_0123456789ab", { exact: true }),
   ).not.toBeInTheDocument();
