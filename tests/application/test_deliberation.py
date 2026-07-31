@@ -114,6 +114,9 @@ def test_research_case_rejects_unknown_claim_after_bounded_recovery() -> None:
         )
 
     assert error.value.reason_code == "semantic_validation"
+    assert error.value.validation_issues == (
+        "semantic.navigation.claim.unknown",
+    )
     assert len(llm.prompts) == 2
 
 
@@ -242,7 +245,7 @@ def test_final_decision_rejects_unreproducible_critical_calculation() -> None:
     )
     llm = _StaticLLM(decision)
 
-    with pytest.raises(StructuredOutputError):
+    with pytest.raises(StructuredOutputError) as error:
         invoke_research_decision(
             llm,
             prompt="Form the final decision.",
@@ -252,3 +255,6 @@ def test_final_decision_rejects_unreproducible_critical_calculation() -> None:
         )
 
     assert len(llm.prompts) == 2
+    assert error.value.validation_issues == (
+        "semantic.decision.calculation.result_mismatch",
+    )

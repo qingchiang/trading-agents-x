@@ -35,6 +35,7 @@ from tradingagents.graph.evidence_context import (
     prepared_evidence_prompt,
 )
 from tradingagents.graph.output_validation import (
+    OutputValidationError,
     require_nonempty_texts,
     require_text,
     require_valid_refs,
@@ -199,9 +200,9 @@ def invoke_research_case(
 
     def validate(result: ResearchCaseAudit) -> ResearchCaseAudit:
         if not set(result.focus_claim_ids).issubset(valid_claims):
-            raise ValueError("research case references an unknown claim")
+            raise OutputValidationError("navigation.claim.unknown")
         if not set(result.report_section_refs).issubset(valid_sections):
-            raise ValueError("research case references an unknown report section")
+            raise OutputValidationError("navigation.section.unknown")
         return result
 
     audited = _runner(
@@ -290,9 +291,9 @@ def invoke_rebuttal(
         if not addressed.issubset(valid_issues) or not opened.issubset(
             valid_issues
         ):
-            raise ValueError("rebuttal references an unknown agenda issue")
+            raise OutputValidationError("navigation.issue.unknown")
         if not addressed:
-            raise ValueError("rebuttal must address at least one agenda issue")
+            raise OutputValidationError("navigation.issue.missing_addressed")
         return result
 
     first_issue = agenda.issues[0].id
@@ -342,7 +343,9 @@ def invoke_judge_draft(
     def validate(result: JudgeAudit) -> JudgeAudit:
         actual = {item.issue_id for item in result.issue_dispositions}
         if actual != issue_ids:
-            raise ValueError("judge must dispose every debate issue")
+            raise OutputValidationError(
+                "navigation.issue.disposition_incomplete"
+            )
         return result
 
     example_dispositions = tuple(
@@ -394,9 +397,9 @@ def invoke_risk_review(
 
     def validate(result: RiskAudit) -> RiskAudit:
         if not set(result.challenged_issue_ids).issubset(valid_issues):
-            raise ValueError("risk review challenges an unknown issue")
+            raise OutputValidationError("navigation.issue.unknown_challenged")
         if not set(result.unresolved_issue_ids).issubset(valid_issues):
-            raise ValueError("risk review leaves an unknown issue unresolved")
+            raise OutputValidationError("navigation.issue.unknown_unresolved")
         return result
 
     first_issue = agenda.issues[0].id
@@ -480,7 +483,7 @@ def invoke_research_decision(
             )
         if result.valuation_assessment is not None:
             if result.valuation_assessment.as_of_date > bundle.analysis_date:
-                raise ValueError("valuation assessment is future dated")
+                raise OutputValidationError("decision.valuation.future_date")
             require_valid_refs(
                 result.valuation_assessment.input_evidence_refs,
                 set(valid_refs),
@@ -489,7 +492,9 @@ def invoke_research_decision(
             require_nonempty_texts(result.valuation_assessment.limitations)
         for level in result.market_reference_levels:
             if level.as_of_date > bundle.analysis_date:
-                raise ValueError("market reference level is future dated")
+                raise OutputValidationError(
+                    "decision.market_reference.future_date"
+                )
             require_text(level.interpretation)
             require_valid_refs(
                 level.evidence_refs,
@@ -498,7 +503,7 @@ def invoke_research_decision(
             )
         for calculation in result.calculation_records:
             if calculation.as_of_date > bundle.analysis_date:
-                raise ValueError("calculation record is future dated")
+                raise OutputValidationError("decision.calculation.future_date")
             require_nonempty_texts(calculation.limitations)
             require_valid_refs(
                 calculation.input_evidence_refs,
@@ -515,33 +520,45 @@ def invoke_research_decision(
                 rel_tol=1e-9,
                 abs_tol=1e-9,
             ):
-                raise ValueError("calculation result cannot be reproduced")
+                raise OutputValidationError(
+                    "decision.calculation.result_mismatch"
+                )
         if result.valuation_assessment is not None and not any(
             item.purpose.value == "valuation"
             for item in result.calculation_records
         ):
-            raise ValueError("valuation assessment requires a calculation record")
+            raise OutputValidationError(
+                "decision.calculation.valuation_missing"
+            )
         if any(scenario.valuation_range is not None for scenario in result.scenarios) and not any(
             item.purpose.value == "scenario"
             for item in result.calculation_records
         ):
-            raise ValueError("scenario valuation requires a calculation record")
+            raise OutputValidationError(
+                "decision.calculation.scenario_missing"
+            )
         if result.market_reference_levels and not any(
             item.purpose.value == "market_reference"
             for item in result.calculation_records
         ):
-            raise ValueError("market reference levels require a calculation record")
+            raise OutputValidationError(
+                "decision.calculation.market_reference_missing"
+            )
         if require_risk_adjustments:
             adjusted_roles = {
                 item.source_role for item in result.risk_review_adjustments
             }
             if not set(risk_roles).issubset(adjusted_roles):
-                raise ValueError("final committee must address every risk role")
+                raise OutputValidationError(
+                    "decision.risk_review.missing_role"
+                )
         if any(
             item.source_role not in risk_roles
             for item in result.risk_review_adjustments
         ):
-            raise ValueError("final committee references an unavailable risk role")
+            raise OutputValidationError(
+                "decision.risk_review.unknown_role"
+            )
         return result
 
     return StructuredOutputRunner(
@@ -721,7 +738,12 @@ def _evaluate_formula(
     formula: str,
     inputs: Mapping[str, int | float],
 ) -> float:
-    tree = ast.parse(formula, mode="eval")
+    try:
+        tree = ast.parse(formula, mode="eval")
+    except SyntaxError as exc:
+        raise OutputValidationError(
+            "calculation.formula.invalid_syntax"
+        ) from exc
 
     def evaluate(node: ast.AST) -> float:
         if isinstance(node, ast.Expression):
@@ -731,11 +753,15 @@ def _evaluate_formula(
                 node.value,
                 (int, float),
             ):
-                raise ValueError("formula constants must be numeric")
+                raise OutputValidationError(
+                    "calculation.formula.non_numeric_constant"
+                )
             return float(node.value)
         if isinstance(node, ast.Name):
             if node.id not in inputs:
-                raise ValueError("formula uses an unknown input")
+                raise OutputValidationError(
+                    "calculation.formula.unknown_input"
+                )
             return float(inputs[node.id])
         if isinstance(node, ast.UnaryOp) and isinstance(
             node.op,
@@ -753,12 +779,23 @@ def _evaluate_formula(
             if isinstance(node.op, ast.Mult):
                 return left * right
             if isinstance(node.op, ast.Div):
+                if right == 0:
+                    raise OutputValidationError(
+                        "calculation.formula.division_by_zero"
+                    )
                 return left / right
             if isinstance(node.op, ast.Pow) and abs(right) <= 12:
-                return left**right
-        raise ValueError("formula contains an unsupported operation")
+                try:
+                    return left**right
+                except OverflowError as exc:
+                    raise OutputValidationError(
+                        "calculation.formula.overflow"
+                    ) from exc
+        raise OutputValidationError(
+            "calculation.formula.unsupported_operation"
+        )
 
     result = evaluate(tree)
     if not math.isfinite(result):
-        raise ValueError("formula result must be finite")
+        raise OutputValidationError("calculation.formula.non_finite_result")
     return result

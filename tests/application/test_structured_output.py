@@ -261,18 +261,34 @@ def _decision_payload(evidence_ref: str) -> dict[str, Any]:
 
 
 @pytest.mark.parametrize(
-    ("field", "value", "expected_reason"),
+    ("field", "value", "expected_reason", "expected_issue"),
     (
-        ("rating", "StrongBuy", "schema_validation"),
-        ("risks", [], "schema_validation"),
-        ("invalidation_conditions", [], "schema_validation"),
-        ("evidence_refs", ["ev_ffffffffffff"], "semantic_validation"),
-        ("memory_refs", ["memory:invented"], "semantic_validation"),
-        ("time_horizon", "Unspecified", "semantic_validation"),
+        ("rating", "StrongBuy", "schema_validation", None),
+        ("risks", [], "schema_validation", None),
+        ("invalidation_conditions", [], "schema_validation", None),
+        (
+            "evidence_refs",
+            ["ev_ffffffffffff"],
+            "semantic_validation",
+            "semantic.refs.invalid",
+        ),
+        (
+            "memory_refs",
+            ["memory:invented"],
+            "semantic_validation",
+            "semantic.refs.invalid",
+        ),
+        (
+            "time_horizon",
+            "Unspecified",
+            "semantic_validation",
+            "semantic.text.fallback_sentinel",
+        ),
         (
             "thesis",
             '{"rating":"Overweight","confidence":0.4}',
             "semantic_validation",
+            "semantic.text.empty_or_nested_json",
         ),
     ),
 )
@@ -280,6 +296,7 @@ def test_invalid_decision_contract_fails_after_one_recovery(
     field: str,
     value: Any,
     expected_reason: str,
+    expected_issue: str | None,
 ) -> None:
     item = EvidenceItem.create(
         source="fixture",
@@ -315,6 +332,8 @@ def test_invalid_decision_contract_fails_after_one_recovery(
         )
 
     assert error.value.reason_code == expected_reason
+    if expected_issue is not None:
+        assert error.value.validation_issues == (expected_issue,)
     assert [method for method, _prompt in llm.calls] == [
         "tool_call",
         "tool_call",

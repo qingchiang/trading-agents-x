@@ -1350,6 +1350,7 @@ class ResearchGraph:
                 role_prompt=role_prompt,
                 node=node,
                 memo_instruction=memo_instruction,
+                event_writer=runtime.stream_writer,
                 invoke_config={
                     "callbacks": [self.metrics],
                     "metadata": {"research_node": node},

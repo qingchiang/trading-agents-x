@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from typing import Any, Literal
@@ -17,6 +18,7 @@ from tradingagents.application.contracts import (
     EvidenceTable,
     EvidenceTableCell,
 )
+from tradingagents.graph.output_validation import OutputValidationError
 from tradingagents.graph.structured_output import (
     StructuredOutputError,
     StructuredOutputRunner,
@@ -227,6 +229,7 @@ def prepare_evidence(
     node: str,
     invoke_config: dict[str, Any] | None = None,
     memo_instruction: str | None = None,
+    event_writer: Callable[[dict[str, Any]], None] | None = None,
 ) -> PreparedEvidence:
     """Plan once, serialize one batch, then execute immutable local lookups."""
 
@@ -275,6 +278,7 @@ def prepare_evidence(
                 bundle,
             ),
             node=node,
+            event_writer=event_writer,
             invoke_config=invoke_config,
             repair_mode="preferred",
         ).invoke(
@@ -346,17 +350,17 @@ def _validate_workset_plan(
     for request in plan.lookups:
         if request.tool == "get_evidence_item":
             if request.evidence_ref not in item_refs:
-                raise ValueError("workset plan references unknown evidence")
+                raise OutputValidationError("workset.evidence_ref.unknown")
             continue
         table = tables.get(request.table_id or "")
         if table is None:
-            raise ValueError("workset plan references unknown evidence table")
+            raise OutputValidationError("workset.table.unknown")
         valid_columns = {column.key for column in table.columns}
         if not set(request.columns).issubset(valid_columns):
-            raise ValueError("workset plan references unknown table columns")
+            raise OutputValidationError("workset.column.unknown")
         valid_rows = {row.id for row in table.rows}
         if not set(request.row_ids).issubset(valid_rows):
-            raise ValueError("workset plan references unknown table rows")
+            raise OutputValidationError("workset.row.unknown")
         if request.operation == "resample" and request.frequency not in {
             "day",
             "week",
@@ -364,22 +368,22 @@ def _validate_workset_plan(
             "quarter",
             "year",
         }:
-            raise ValueError("resample lookup requires a supported frequency")
+            raise OutputValidationError("workset.frequency.invalid")
         for raw_date in (request.start_date, request.end_date):
             if raw_date is None:
                 continue
             try:
                 parsed = date.fromisoformat(raw_date)
             except ValueError as exc:
-                raise ValueError("workset plan contains an invalid date") from exc
+                raise OutputValidationError("workset.date.invalid") from exc
             if parsed > bundle.analysis_date:
-                raise ValueError("workset plan requests evidence after the cutoff")
+                raise OutputValidationError("workset.date.future")
         if request.cursor is not None:
             try:
                 if int(request.cursor) < 0:
                     raise ValueError
             except ValueError as exc:
-                raise ValueError("workset plan contains an invalid cursor") from exc
+                raise OutputValidationError("workset.cursor.invalid") from exc
     return plan
 
 

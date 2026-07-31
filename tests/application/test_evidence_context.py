@@ -205,6 +205,41 @@ def test_role_preparation_executes_one_deduplicated_lookup_batch() -> None:
     assert serializer.configs[0]["metadata"]["research_node"] == "case.bull"
 
 
+def test_invalid_workset_plan_emits_actionable_issue_and_falls_back() -> None:
+    bundle = _bundle()
+    llm = _PreparationLLM()
+    serializer = _PlanSerializer(
+        EvidenceWorksetPlan(
+            memo="Request an invalid future slice.",
+            lookups=(
+                EvidenceLookupRequest(
+                    tool="query_evidence_table",
+                    table_id=bundle.tables[0].id,
+                    operation="rows",
+                    end_date="2026-07-29",
+                ),
+            ),
+        )
+    )
+    events: list[dict[str, Any]] = []
+
+    prepared = prepare_evidence(
+        llm,
+        serializer_llm=serializer,
+        bundle=bundle,
+        role_prompt="Check the price range.",
+        node="case.bull.prepare",
+        event_writer=events.append,
+    )
+
+    assert prepared.lookups == ()
+    assert serializer.calls == 2
+    assert events[-1]["event_type"] == "node.output_failed"
+    assert events[-1]["payload"]["validation_issues"] == [
+        "semantic.workset.date.future"
+    ]
+
+
 def test_post_analyst_prompt_size_does_not_scale_with_raw_rows() -> None:
     short_bundle = _bundle(20)
     long_bundle = _bundle(500)
