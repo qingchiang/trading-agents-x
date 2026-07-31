@@ -31,11 +31,6 @@ from tradingagents.application.contracts import (
     RiskReviewAdjustment,
     RiskReviewDisposition,
 )
-from tradingagents.graph.evidence_context import (
-    PreparedEvidence,
-    build_evidence_catalog,
-    prepared_evidence_prompt,
-)
 from tradingagents.graph.output_validation import (
     OutputValidationError,
     require_nonempty_texts,
@@ -107,71 +102,6 @@ def write_research_markdown(
         if continued:
             markdown = f"{markdown.rstrip()}\n\n{continued}"
     return markdown
-
-
-def research_prompt(
-    state: Mapping[str, Any],
-    *,
-    title: str,
-    objective: str,
-    extra: str,
-    memory: MemoryContext | None = None,
-    prepared_evidence: PreparedEvidence | None = None,
-) -> str:
-    """Render readable reports plus a compact, query-backed evidence workset."""
-
-    bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
-    reports = {
-        key: AnalystReport.model_validate(value).model_dump(mode="json")
-        for key, value in state["analyst_reports"].items()
-    }
-    memory_text = memory.prompt_text() if memory is not None else ""
-    memory_section = (
-        "HISTORICAL FEEDBACK MEMORY (NOT CURRENT EVIDENCE):\n" + memory_text
-        if memory_text
-        else "HISTORICAL FEEDBACK MEMORY: none supplied"
-    )
-    prepared = prepared_evidence or PreparedEvidence(
-        catalog=build_evidence_catalog(bundle),
-        memo=(
-            "Use the complete readable analyst reports and compact evidence "
-            "catalog. Request exact source material through read-only tools."
-        ),
-    )
-    return f"""You are the {title} in an evidence-first investment research
-system.
-
-Objective:
-{objective}
-
-Research rules:
-- Read every complete analyst Markdown report, including its tables. Do not
-  reduce reports to extracted claims.
-- Key claims are navigation and audit aids, not a substitute for the report.
-- Evidence footnotes may be used for material facts, but do not cite every
-  sentence or table cell.
-- Never invent report section IDs, claim IDs, issue IDs, evidence refs, sources,
-  dates, values, or portfolio context.
-- Missing evidence is uncertainty, not a neutral or bearish signal.
-- Historical memory may calibrate confidence, risks, and invalidation only; it
-  is not current evidence.
-- Non-personalized ratings, valuation scenarios, and market reference levels
-  are allowed. Do not provide account allocation, position percentages, order
-  quantities/types, or mandatory entry, stop, or take-profit instructions.
-- Write human-readable Markdown in
-  {state.get("output_language", "English")}. Keep schema enums and IDs unchanged.
-
-ANALYST REPORTS:
-{json.dumps(reports, ensure_ascii=False)}
-
-EVIDENCE WORKSET:
-{prepared_evidence_prompt(prepared)}
-
-{memory_section}
-
-ADDITIONAL CONTEXT:
-{extra}
-"""
 
 
 def invoke_research_case(

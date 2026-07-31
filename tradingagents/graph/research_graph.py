@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import operator
 import re
 from collections.abc import Callable, Iterable
@@ -85,17 +84,15 @@ from tradingagents.graph.deliberation import (
     invoke_research_case,
     invoke_research_decision,
     invoke_risk_review,
-    research_prompt,
     write_research_markdown,
 )
 from tradingagents.graph.evidence_context import (
-    PreparedEvidence,
     build_analyst_evidence_context,
-    prepare_evidence,
 )
 from tradingagents.graph.output_validation import (
     require_valid_refs as _require_valid_refs,
 )
+from tradingagents.graph.role_context import RoleContext, RoleContextBuilder
 from tradingagents.graph.structured_output import (
     StructuredOutputResult,
 )
@@ -794,14 +791,18 @@ class ResearchGraph:
             node = f"case.{spec.key}"
             self._start_node(runtime, node, measure=False)
             check_cancelled(runtime.context)
-            prompt = self._research_prompt_with_preparation(
-                llm=llm,
+            context = self._role_context(
                 state=state,
                 runtime=runtime,
                 node=node,
                 title=spec.label,
                 objective=spec.objective,
-                extra=(
+                stage="opening_case",
+                report_mode="full",
+                evidence_refs=RoleContextBuilder(
+                    state
+                ).primary_evidence_refs(),
+                instructions=(
                     "Build an independent complete case before seeing the "
                     "opposing case. Every argument must identify the analyst "
                     "claim IDs it relies on and the causal mechanism connecting "
@@ -814,7 +815,7 @@ class ResearchGraph:
             ):
                 markdown = write_research_markdown(
                     llm,
-                    prompt=prompt,
+                    prompt=context.prompt,
                     node=f"{node}.write",
                     invoke_config={
                         "callbacks": [self.metrics],
@@ -841,7 +842,7 @@ class ResearchGraph:
                 role=spec.key,
                 content=case,
                 generation_method=output.generation_method,
-                prompt_version=f"research-case-{spec.key}-v4-split",
+                prompt_version=f"research-case-{spec.key}-v5-compact",
             )
             self._finish_node(
                 runtime,
@@ -867,9 +868,7 @@ class ResearchGraph:
             node = "debate.agenda"
             self._start_node(runtime, node, measure=False)
             check_cancelled(runtime.context)
-            llm = self._deliberation_llm()
-            prompt = self._research_prompt_with_preparation(
-                llm=llm,
+            context = self._role_context(
                 state=state,
                 runtime=runtime,
                 node=node,
@@ -878,40 +877,23 @@ class ResearchGraph:
                     "Compare the independent bull and bear cases and produce a "
                     "prioritized agenda of genuine material disagreements."
                 ),
-                extra=(
-                    "BULL AND BEAR CASES:\n"
-                    + json.dumps(state.get("cases", {}), ensure_ascii=False)
-                    + "\n\nCreate one issue per distinct material question. "
+                stage="debate_agenda",
+                artifacts={"cases": state.get("cases", {})},
+                instructions=(
+                    "Create one issue per distinct material question. "
                     "Attach the exact analyst claim IDs at stake. Do not turn "
                     "mere missing data into a bearish assertion."
                 ),
             )
             with self.metrics.phase(
-                f"{node}.write",
-                event_writer=runtime.stream_writer,
-            ):
-                brief = write_research_markdown(
-                    llm,
-                    prompt=prompt,
-                    node=f"{node}.write",
-                    invoke_config={
-                        "callbacks": [self.metrics],
-                        "metadata": {"research_node": f"{node}.write"},
-                    },
-                )
-            with self.metrics.phase(
-                f"{node}.audit",
+                f"{node}.serialize",
                 event_writer=runtime.stream_writer,
             ):
                 output = invoke_debate_agenda(
                     self._deliberation_serializer_llm(),
-                    prompt=(
-                        "Convert this completed moderator brief into the "
-                        "shallow DebateAgenda.\n\n"
-                        f"MODERATOR BRIEF:\n{brief}"
-                    ),
+                    prompt=context.prompt,
                     state=state,
-                    node=f"{node}.audit",
+                    node=f"{node}.serialize",
                     event_writer=runtime.stream_writer,
                 )
             agenda = output.value
@@ -922,7 +904,7 @@ class ResearchGraph:
                 role="moderator",
                 content=agenda,
                 generation_method=output.generation_method,
-                prompt_version="debate-agenda-v4-split",
+                prompt_version="debate-agenda-v5-direct",
             )
             self._finish_node(
                 runtime,
@@ -953,8 +935,7 @@ class ResearchGraph:
             round_number = int(state.get("rebuttal_round", 0))
             self._start_node(runtime, node, measure=False)
             check_cancelled(runtime.context)
-            prompt = self._research_prompt_with_preparation(
-                llm=llm,
+            context = self._role_context(
                 state=state,
                 runtime=runtime,
                 node=node,
@@ -963,20 +944,14 @@ class ResearchGraph:
                     "Answer the DebateAgenda issue by issue. Challenge exact "
                     "claims and mechanisms rather than repeating the opening case."
                 ),
-                extra=(
-                    "OPENING CASES:\n"
-                    + json.dumps(state.get("cases", {}), ensure_ascii=False)
-                    + "\nDEBATE AGENDA:\n"
-                    + json.dumps(
-                        state.get("debate_agenda", {}),
-                        ensure_ascii=False,
-                    )
-                    + "\nPRIOR REBUTTALS:\n"
-                    + json.dumps(
-                        state.get("rebuttals", []),
-                        ensure_ascii=False,
-                    )
-                    + f"\nCURRENT ROUND: {round_number}\n"
+                stage="rebuttal",
+                artifacts={
+                    "cases": state.get("cases", {}),
+                    "debate_agenda": state.get("debate_agenda", {}),
+                    "prior_rebuttals": state.get("rebuttals", []),
+                    "current_round": round_number,
+                },
+                instructions=(
                     "Respond only to listed agenda issues. Mark evidence as new "
                     "only if this role did not cite it in its opening case or "
                     "an earlier rebuttal. State the causal mechanism and any "
@@ -989,7 +964,7 @@ class ResearchGraph:
             ):
                 markdown = write_research_markdown(
                     llm,
-                    prompt=prompt,
+                    prompt=context.prompt,
                     node=f"{node}.write",
                     invoke_config={
                         "callbacks": [self.metrics],
@@ -1019,7 +994,7 @@ class ResearchGraph:
                 round=round_number,
                 content=rebuttal,
                 generation_method=output.generation_method,
-                prompt_version=f"rebuttal-{spec.key}-v4-split",
+                prompt_version=f"rebuttal-{spec.key}-v5-compact",
             )
             self._finish_node(
                 runtime,
@@ -1080,8 +1055,7 @@ class ResearchGraph:
         node = "judge.research"
         self._start_node(runtime, node, measure=False)
         check_cancelled(runtime.context)
-        prompt = self._research_prompt_with_preparation(
-            llm=self.deep_llm,
+        context = self._role_context(
             state=state,
             runtime=runtime,
             node=node,
@@ -1091,23 +1065,18 @@ class ResearchGraph:
                 "are accepted or rejected, preserve unresolved questions, and "
                 "form a preliminary research conclusion."
             ),
-            extra=(
-                "OPENING CASES:\n"
-                + json.dumps(state.get("cases", {}), ensure_ascii=False)
-                + "\nDEBATE AGENDA:\n"
-                + json.dumps(
-                    state.get("debate_agenda", {}),
-                    ensure_ascii=False,
-                )
-                + "\nREBUTTALS:\n"
-                + json.dumps(
-                    state.get("rebuttals", []),
-                    ensure_ascii=False,
-                )
-                + "\nRule on every agenda issue even when the correct ruling "
+            stage="research_judge",
+            artifacts={
+                "cases": state.get("cases", {}),
+                "debate_agenda": state.get("debate_agenda", {}),
+                "rebuttals": state.get("rebuttals", []),
+            },
+            report_mode="full",
+            include_memory=True,
+            instructions=(
+                "Rule on every agenda issue even when the correct ruling "
                 "is unresolved. Cite exact claim IDs and evidence refs."
             ),
-            memory=runtime.context.memory,
         )
         with self.metrics.phase(
             f"{node}.write",
@@ -1115,7 +1084,7 @@ class ResearchGraph:
         ):
             markdown = write_research_markdown(
                 self.deep_llm,
-                prompt=prompt,
+                prompt=context.prompt,
                 node=f"{node}.write",
                 invoke_config={
                     "callbacks": [self.metrics],
@@ -1142,7 +1111,7 @@ class ResearchGraph:
             role="research_judge",
             content=draft,
             generation_method=output.generation_method,
-            prompt_version="research-judge-v4-split",
+            prompt_version="research-judge-v5-compact",
         )
         self._finish_node(
             runtime,
@@ -1171,20 +1140,20 @@ class ResearchGraph:
             self._start_node(runtime, node, measure=False)
             check_cancelled(runtime.context)
             llm = self._deliberation_llm(spec)
-            prompt = self._research_prompt_with_preparation(
-                llm=llm,
+            context = self._role_context(
                 state=state,
                 runtime=runtime,
                 node=node,
                 title=spec.label,
                 objective=spec.objective,
-                extra=(
-                    "JUDGE DRAFT:\n"
-                    + json.dumps(
-                        state.get("judge_draft", {}),
-                        ensure_ascii=False,
-                    )
-                    + "\nIdentify explicit findings, their mechanisms and "
+                stage="risk_review",
+                artifacts={
+                    "judge_draft": state.get("judge_draft", {}),
+                    "debate_agenda": state.get("debate_agenda", {}),
+                },
+                report_mode="risk",
+                instructions=(
+                    "Identify explicit findings, their mechanisms and "
                     "severity, the analyst claims they challenge, concrete "
                     "invalidation paths, and changes the final committee should "
                     "make. Unknowns are not automatically downside."
@@ -1196,7 +1165,7 @@ class ResearchGraph:
             ):
                 markdown = write_research_markdown(
                     llm,
-                    prompt=prompt,
+                    prompt=context.prompt,
                     node=f"{node}.write",
                     invoke_config={
                         "callbacks": [self.metrics],
@@ -1223,7 +1192,7 @@ class ResearchGraph:
                 role=spec.key,
                 content=review,
                 generation_method=output.generation_method,
-                prompt_version=f"risk-review-{spec.key}-v4-split",
+                prompt_version=f"risk-review-{spec.key}-v5-compact",
             )
             self._finish_node(
                 runtime,
@@ -1252,37 +1221,43 @@ class ResearchGraph:
                     "research-only decision. Explicitly preserve uncertainty and "
                     "cite evidence refs."
                 )
-                extra = ""
+                artifacts: dict[str, Any] = {}
             else:
                 objective = (
                     "Produce the final research decision after considering the "
                     "judge draft and every risk review. State which risk findings "
                     "were retained, modified, or rejected and why."
                 )
-                extra = (
-                    "JUDGE DRAFT:\n"
-                    + json.dumps(
-                        state.get("judge_draft", {}),
-                        ensure_ascii=False,
-                    )
-                    + "\nRISK REVIEWS:\n"
-                    + json.dumps(
-                        state.get("risk_reviews", {}),
-                        ensure_ascii=False,
-                    )
-                    + "\nFor every risk-review role, add at least one structured "
-                    "risk_review_adjustment. Keep the rating, thesis, scenarios, "
-                    "risks, and invalidation conditions internally consistent."
-                )
-            prompt = self._research_prompt_with_preparation(
-                llm=self.deep_llm,
+                artifacts = {
+                    "judge_draft": state.get("judge_draft", {}),
+                    "risk_reviews": state.get("risk_reviews", {}),
+                    "unresolved_issue_ids": RoleContextBuilder(
+                        state
+                    ).unresolved_issue_ids(),
+                }
+            context = self._role_context(
                 state=state,
                 runtime=runtime,
                 node=node,
                 title="Final Research Committee",
                 objective=objective,
-                extra=extra,
-                memory=runtime.context.memory,
+                stage="final_committee",
+                artifacts=artifacts,
+                report_mode="full",
+                evidence_refs=RoleContextBuilder(
+                    state
+                ).primary_evidence_refs(),
+                include_memory=True,
+                instructions=(
+                    "For every risk-review role, add at least one structured "
+                    "risk_review_adjustment. Keep the rating, thesis, scenarios, "
+                    "risks, and invalidation conditions internally consistent."
+                    if not fast
+                    else (
+                        "Preserve material uncertainty and ground the direct "
+                        "decision in primary analyst evidence."
+                    )
+                ),
             )
             with self.metrics.phase(
                 f"{node}.reason",
@@ -1291,7 +1266,7 @@ class ResearchGraph:
                 decision_brief = write_research_markdown(
                     self.deep_llm,
                     prompt=(
-                        prompt
+                        context.prompt
                         + "\n\nForm a complete decision synthesis brief. "
                         "Cover the rating rationale, thesis, three scenarios, "
                         "catalysts, risks, invalidation, unresolved questions, "
@@ -1315,7 +1290,7 @@ class ResearchGraph:
                         "strict final decision contract. Preserve its research "
                         "judgment; do not add unsupported facts.\n\n"
                         f"DECISION SYNTHESIS BRIEF:\n{decision_brief}\n\n"
-                        f"RESEARCH CONTEXT:\n{prompt}"
+                        f"RESEARCH CONTEXT:\n{context.prompt}"
                     ),
                     state=state,
                     node=f"{node}.serialize",
@@ -1331,7 +1306,7 @@ class ResearchGraph:
                 role="final_committee",
                 content=decision,
                 generation_method=output.generation_method,
-                prompt_version="final-committee-v4-split",
+                prompt_version="final-committee-v5-compact",
             )
             self._finish_node(
                 runtime,
@@ -1368,97 +1343,50 @@ class ResearchGraph:
             return self.deep_serializer_llm
         return self.quick_serializer_llm
 
-    def _prepare_node_evidence(
+    def _role_context(
         self,
         *,
-        llm: Any,
-        bundle: EvidenceBundle,
-        role_prompt: str,
-        node: str,
-        runtime: Runtime[RunContext],
-        memo_instruction: str | None = None,
-    ) -> PreparedEvidence:
-        serializer_llm = (
-            self.deep_serializer_llm
-            if llm is self.deep_llm
-            else self.quick_serializer_llm
-        )
-        with self.metrics.phase(
-            node,
-            event_writer=runtime.stream_writer,
-        ):
-            prepared = prepare_evidence(
-                llm,
-                serializer_llm=serializer_llm,
-                bundle=bundle,
-                role_prompt=role_prompt,
-                node=node,
-                memo_instruction=memo_instruction,
-                event_writer=runtime.stream_writer,
-                invoke_config={
-                    "callbacks": [self.metrics],
-                    "metadata": {"research_node": node},
-                },
-            )
-            self.metrics.record_tool_calls(node, len(prepared.lookups))
-        for lookup in prepared.lookups:
-            runtime.stream_writer(
-                {
-                    "event_type": "evidence.lookup",
-                    "node": node,
-                    "payload": lookup.event_payload(),
-                }
-            )
-        runtime.stream_writer(
-            {
-                "event_type": "node.context_prepared",
-                "node": node,
-                "payload": {
-                    "inline_characters": prepared.inline_characters,
-                    "catalog_items": len(prepared.catalog.get("items", [])),
-                    "catalog_tables": len(prepared.catalog.get("tables", [])),
-                    "lookup_count": len(prepared.lookups),
-                    "returned_rows": sum(lookup.returned_rows for lookup in prepared.lookups),
-                },
-            }
-        )
-        return prepared
-
-    def _research_prompt_with_preparation(
-        self,
-        *,
-        llm: Any,
         state: ResearchState,
         runtime: Runtime[RunContext],
         node: str,
         title: str,
         objective: str,
-        extra: str,
-        memory: Any = None,
-    ) -> str:
-        initial_prompt = research_prompt(
+        stage: str,
+        artifacts: dict[str, Any] | None = None,
+        report_mode: Literal["none", "full", "risk"] = "none",
+        evidence_refs: tuple[str, ...] = (),
+        include_memory: bool = False,
+        instructions: str = "",
+    ) -> RoleContext:
+        context = RoleContextBuilder(
             state,
+            memory=runtime.context.memory if include_memory else None,
+        ).build(
             title=title,
             objective=objective,
-            extra=extra,
-            memory=memory,
+            stage=stage,
+            artifacts=artifacts,
+            report_mode=report_mode,
+            evidence_refs=evidence_refs,
+            include_memory=include_memory,
+            instructions=instructions,
         )
-        bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
-        prepared = self._prepare_node_evidence(
-            llm=llm,
-            bundle=bundle,
-            role_prompt=initial_prompt,
-            node=f"{node}.prepare",
-            runtime=runtime,
+        runtime.stream_writer(
+            {
+                "event_type": "node.context_prepared",
+                "node": f"{node}.context",
+                "payload": {
+                    "inline_characters": context.inline_characters,
+                    "catalog_items": context.catalog_items,
+                    "catalog_tables": context.catalog_tables,
+                    "reference_count": len(context.evidence_refs),
+                    "table_summary_count": context.table_summary_count,
+                    "lookup_count": 0,
+                    "returned_rows": 0,
+                },
+            }
         )
-        return research_prompt(
-            state,
-            title=title,
-            objective=objective,
-            extra=extra,
-            memory=memory,
-            prepared_evidence=prepared,
-        )
+        return context
 
     @staticmethod
     def _write_artifact(

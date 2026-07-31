@@ -40,7 +40,6 @@ from tradingagents.graph.deliberation import (
     JudgeAudit,
     RebuttalAudit,
 )
-from tradingagents.graph.evidence_context import EvidenceWorksetPlan
 from tradingagents.graph.research_graph import (
     ResearchGraph,
     _evidence_from_record,
@@ -88,11 +87,6 @@ class _StructuredInvoker:
                 ),
                 section_source_refs={section_id: refs[-1:]},
             )
-        elif self.schema is EvidenceWorksetPlan:
-            parsed = EvidenceWorksetPlan(
-                memo="The catalog is sufficient for the fixture.",
-                lookups=(),
-            )
         elif self.schema is DebateAgenda:
             parsed = DebateAgenda(
                 summary="One material dispute requires resolution.",
@@ -129,7 +123,7 @@ class _StructuredInvoker:
                     "neutral",
                     "conservative",
                 )
-                if f'"role": "{role}"' in prompt
+                if f'"role":"{role}"' in prompt
             )
             adjustments = (
                 tuple(
@@ -142,7 +136,7 @@ class _StructuredInvoker:
                     )
                     for role in risk_roles
                 )
-                if "RISK REVIEWS:" in prompt
+                if '"risk_reviews":' in prompt
                 else ()
             )
             parsed = research_decision(
@@ -169,14 +163,9 @@ class _FakeLLM:
 
     def invoke(self, prompt, config=None):
         assert config is None or "metadata" in config
-        if isinstance(prompt, list):
-            self.calls.append(("EvidenceBlueprint", prompt))
-            return AIMessage(
-                content=(
-                    "Use the catalog and request only evidence needed for "
-                    "material claims."
-                )
-            )
+        assert not isinstance(prompt, list), (
+            "research graph must not invoke an LLM evidence-preparation pass"
+        )
         call_type = (
             "MarkdownReport"
             if re.search(
@@ -378,19 +367,18 @@ def test_profiles_share_contract_but_use_distinct_topologies(
         for analyst in ("market", "news")
     ) < event_positions[("node.completed", "reports.ready")]
     assert not any(
-        node.startswith("analyst.") and node.endswith(".prepare")
+        node.endswith(".prepare")
         for node in graph.metrics.snapshot().node_metrics
     )
     if profile is RunProfile.STANDARD:
         node_metrics = graph.metrics.snapshot().node_metrics
         assert {
-            "case.bull.prepare",
             "case.bull.write",
             "case.bull.audit",
-            "committee.final.prepare",
             "committee.final.reason",
             "committee.final.serialize",
         } <= set(node_metrics)
+        assert not any(node.endswith(".prepare") for node in node_metrics)
         assert "case.bull" not in node_metrics
 
 
@@ -406,8 +394,6 @@ def test_profiles_share_contract_but_use_distinct_topologies(
             {
                 "ResearchDecision",
                 "ResearchMarkdown",
-                "EvidenceBlueprint",
-                "EvidenceWorksetPlan",
             },
         ),
         (
@@ -418,15 +404,11 @@ def test_profiles_share_contract_but_use_distinct_topologies(
                 "DebateAgenda",
                 "RebuttalAudit",
                 "ResearchMarkdown",
-                "EvidenceBlueprint",
-                "EvidenceWorksetPlan",
             },
             {
                 "JudgeAudit",
                 "ResearchDecision",
                 "ResearchMarkdown",
-                "EvidenceBlueprint",
-                "EvidenceWorksetPlan",
             },
         ),
         (
@@ -441,8 +423,6 @@ def test_profiles_share_contract_but_use_distinct_topologies(
                 "JudgeAudit",
                 "ResearchDecision",
                 "ResearchMarkdown",
-                "EvidenceBlueprint",
-                "EvidenceWorksetPlan",
             },
         ),
     ),

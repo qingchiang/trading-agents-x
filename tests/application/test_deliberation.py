@@ -29,7 +29,6 @@ from tradingagents.graph.deliberation import (
     invoke_research_case,
     invoke_research_decision,
     invoke_risk_review,
-    research_prompt,
 )
 from tradingagents.graph.structured_output import StructuredOutputError
 
@@ -82,24 +81,6 @@ def _state(*, content: str = "Fixture evidence.") -> dict[str, Any]:
         "rebuttals": [],
         "risk_reviews": {},
     }
-
-
-def test_research_prompt_keeps_complete_reports_but_catalogs_long_evidence() -> None:
-    evidence = "START-" + ("x" * 1_500) + "-TAIL-MARKER"
-    state = _state(content=evidence)
-
-    prompt = research_prompt(
-        state,
-        title="Fixture Role",
-        objective="Inspect the full research record.",
-        extra="No additional artifact.",
-    )
-
-    assert "Complete analyst Markdown with a unique report marker." in prompt
-    assert "START-" not in prompt
-    assert "-TAIL-MARKER" not in prompt
-    assert '"content_characters": 1518' in prompt
-    assert "EVIDENCE WORKSET" in prompt
 
 
 def test_research_case_uses_deterministic_valid_id_intersection() -> None:

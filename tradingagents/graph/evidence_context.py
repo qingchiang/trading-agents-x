@@ -1,27 +1,18 @@
-"""Compact evidence catalogs and audited, read-only role worksets."""
+"""Compact evidence catalogs and deterministic read-only queries."""
 
 from __future__ import annotations
 
 import json
 import math
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from typing import Any, Literal
-
-from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from tradingagents.application.contracts import (
     EvidenceBundle,
     EvidenceItem,
     EvidenceTable,
     EvidenceTableCell,
-)
-from tradingagents.graph.output_validation import OutputValidationError
-from tradingagents.graph.structured_output import (
-    StructuredOutputError,
-    StructuredOutputRunner,
 )
 
 _MAX_ROWS = 120
@@ -81,45 +72,6 @@ class PreparedEvidence:
                 ensure_ascii=False,
             )
         )
-
-
-class EvidenceLookupRequest(BaseModel):
-    """One batchable read-only lookup selected during evidence preparation."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    tool: Literal["get_evidence_item", "query_evidence_table"]
-    evidence_ref: str | None = None
-    table_id: str | None = None
-    operation: Literal["rows", "resample", "summary", "extrema"] | None = None
-    columns: tuple[str, ...] = ()
-    start_date: str | None = None
-    end_date: str | None = None
-    frequency: str | None = None
-    row_ids: tuple[str, ...] = ()
-    cursor: str | None = None
-
-    @model_validator(mode="after")
-    def validate_shape(self) -> EvidenceLookupRequest:
-        if self.tool == "get_evidence_item":
-            if not self.evidence_ref or self.table_id is not None:
-                raise ValueError(
-                    "item lookup requires evidence_ref and forbids table_id"
-                )
-        elif not self.table_id or self.evidence_ref is not None:
-            raise ValueError(
-                "table lookup requires table_id and forbids evidence_ref"
-            )
-        return self
-
-
-class EvidenceWorksetPlan(BaseModel):
-    """Small typed plan produced after the thinking model's blueprint."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    memo: str = Field(min_length=1)
-    lookups: tuple[EvidenceLookupRequest, ...] = ()
 
 
 def build_evidence_catalog(bundle: EvidenceBundle) -> dict[str, Any]:
@@ -308,232 +260,6 @@ def query_evidence_table_payload(
             frequency=frequency,
         )
     return {"error": "unsupported_operation", "operation": operation}
-
-
-def prepare_evidence(
-    llm: Any,
-    *,
-    serializer_llm: Any | None = None,
-    bundle: EvidenceBundle,
-    role_prompt: str,
-    node: str,
-    invoke_config: dict[str, Any] | None = None,
-    memo_instruction: str | None = None,
-    event_writer: Callable[[dict[str, Any]], None] | None = None,
-) -> PreparedEvidence:
-    """Plan once, serialize one batch, then execute immutable local lookups."""
-
-    catalog = build_evidence_catalog(bundle)
-    fallback_memo = (
-        "Use the complete typed research context and the evidence catalog. "
-        "No additional evidence slice was requested."
-    )
-    try:
-        response = llm.invoke(
-            [
-                SystemMessage(
-                    content=(
-                        memo_instruction
-                        or (
-                            "Create a detailed evidence-preparation blueprint "
-                            "for the formal research output that follows. "
-                            "Identify the exact source passages, values, table "
-                            "operations, columns, ranges, comparisons, "
-                            "counter-evidence, and uncertainty worth checking. "
-                            "Do not write the formal artifact and do not invent "
-                            "IDs outside the supplied catalog."
-                        )
-                    )
-                ),
-                HumanMessage(
-                    content=(
-                        f"NODE: {node}\n\nROLE CONTEXT:\n{role_prompt}\n\n"
-                        "EVIDENCE CATALOG:\n"
-                        + json.dumps(catalog, ensure_ascii=False)
-                    )
-                ),
-            ],
-            config=invoke_config,
-        )
-    except Exception:
-        return PreparedEvidence(catalog=catalog, memo=fallback_memo)
-    blueprint = _message_text(response).strip() or fallback_memo
-    serializer = serializer_llm or llm
-    try:
-        plan = StructuredOutputRunner(
-            llm=serializer,
-            schema=EvidenceWorksetPlan,
-            validator=lambda candidate: _validate_workset_plan(
-                candidate,
-                bundle,
-            ),
-            node=node,
-            event_writer=event_writer,
-            invoke_config=invoke_config,
-            repair_mode="preferred",
-        ).invoke(
-            (
-                "Convert this evidence-preparation blueprint into one batch of "
-                "read-only lookups. Preserve the useful research memo. Use "
-                "get_evidence_item for exact source text/value and "
-                "query_evidence_table for rows, summary, extrema, or resample. "
-                "Do not request data merely because it exists.\n\n"
-                f"BLUEPRINT:\n{blueprint}\n\n"
-                "EVIDENCE CATALOG:\n"
-                + json.dumps(catalog, ensure_ascii=False)
-            ),
-            example={
-                "memo": "Verify the latest price range and the relevant passage.",
-                "lookups": [
-                    {
-                        "tool": "get_evidence_item",
-                        "evidence_ref": (
-                            bundle.items[0].ref if bundle.items else None
-                        ),
-                    }
-                ]
-                if bundle.items
-                else [],
-            },
-            allowed_evidence_refs=tuple(item.ref for item in bundle.items),
-        ).value
-    except StructuredOutputError:
-        return PreparedEvidence(catalog=catalog, memo=blueprint)
-
-    lookup_records: list[EvidenceLookup] = []
-    query_results: list[dict[str, Any]] = []
-    for request in _dedupe_lookup_requests(plan.lookups):
-        payload, lookup = _execute_lookup(bundle, request)
-        query_results.append(payload)
-        lookup_records.append(lookup)
-    return PreparedEvidence(
-        catalog=catalog,
-        memo=plan.memo,
-        query_results=tuple(query_results),
-        lookups=tuple(lookup_records),
-    )
-
-
-def _message_text(response: Any) -> str:
-    content = getattr(response, "content", response)
-    if isinstance(content, str):
-        return content
-    if not isinstance(content, list):
-        return ""
-    parts: list[str] = []
-    for block in content:
-        if isinstance(block, str):
-            parts.append(block)
-        elif isinstance(block, dict):
-            text = block.get("text")
-            if isinstance(text, str):
-                parts.append(text)
-    return "\n".join(parts)
-
-
-def _validate_workset_plan(
-    plan: EvidenceWorksetPlan,
-    bundle: EvidenceBundle,
-) -> EvidenceWorksetPlan:
-    item_refs = {item.ref for item in bundle.items}
-    tables = {table.id: table for table in bundle.tables}
-    for request in plan.lookups:
-        if request.tool == "get_evidence_item":
-            if request.evidence_ref not in item_refs:
-                raise OutputValidationError("workset.evidence_ref.unknown")
-            continue
-        table = tables.get(request.table_id or "")
-        if table is None:
-            raise OutputValidationError("workset.table.unknown")
-        valid_columns = {column.key for column in table.columns}
-        if not set(request.columns).issubset(valid_columns):
-            raise OutputValidationError("workset.column.unknown")
-        valid_rows = {row.id for row in table.rows}
-        if not set(request.row_ids).issubset(valid_rows):
-            raise OutputValidationError("workset.row.unknown")
-        if request.operation == "resample" and request.frequency not in {
-            "day",
-            "week",
-            "month",
-            "quarter",
-            "year",
-        }:
-            raise OutputValidationError("workset.frequency.invalid")
-        for raw_date in (request.start_date, request.end_date):
-            if raw_date is None:
-                continue
-            try:
-                parsed = date.fromisoformat(raw_date)
-            except ValueError as exc:
-                raise OutputValidationError("workset.date.invalid") from exc
-            if parsed > bundle.analysis_date:
-                raise OutputValidationError("workset.date.future")
-        if request.cursor is not None:
-            try:
-                if int(request.cursor) < 0:
-                    raise ValueError
-            except ValueError as exc:
-                raise OutputValidationError("workset.cursor.invalid") from exc
-    return plan
-
-
-def _dedupe_lookup_requests(
-    requests: tuple[EvidenceLookupRequest, ...],
-) -> tuple[EvidenceLookupRequest, ...]:
-    deduped: dict[str, EvidenceLookupRequest] = {}
-    for request in requests:
-        identity = json.dumps(
-            request.model_dump(mode="json"),
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        deduped.setdefault(identity, request)
-    return tuple(deduped.values())
-
-
-def _execute_lookup(
-    bundle: EvidenceBundle,
-    request: EvidenceLookupRequest,
-) -> tuple[dict[str, Any], EvidenceLookup]:
-    if request.tool == "get_evidence_item":
-        payload = get_evidence_item_payload(
-            bundle,
-            request.evidence_ref or "",
-        )
-        return (
-            payload,
-            EvidenceLookup(
-                tool=request.tool,
-                evidence_ref=request.evidence_ref,
-            ),
-        )
-    payload = query_evidence_table_payload(
-        bundle,
-        table_id=request.table_id or "",
-        operation=request.operation or "rows",
-        columns=request.columns,
-        start_date=request.start_date,
-        end_date=request.end_date,
-        frequency=request.frequency,
-        row_ids=request.row_ids,
-        cursor=request.cursor,
-    )
-    return (
-        payload,
-        EvidenceLookup(
-            tool=request.tool,
-            table_id=request.table_id,
-            operation=request.operation or "rows",
-            columns=request.columns,
-            start_date=request.start_date,
-            end_date=request.end_date,
-            frequency=request.frequency,
-            row_ids=request.row_ids,
-            cursor=request.cursor,
-            returned_rows=int(payload.get("returned_rows", 0)),
-        ),
-    )
 
 
 def prepared_evidence_prompt(prepared: PreparedEvidence) -> str:

@@ -291,9 +291,24 @@ artifacts without recontacting the provider.
 
 ### Markdown-first deliberation
 
-Post-analyst roles consume the complete Analyst Markdown, available key claims,
-the Evidence catalog, and a deduplicated role-specific lookup workset. The full
-raw EvidenceBundle is not broadcast to every role.
+Post-analyst roles use a deterministic `RoleContextBuilder`. Every prompt starts
+with byte-identical system rules and a stable Research Dossier containing the
+instrument, cutoff, report/claim index, and metadata-only Evidence catalog.
+Role-specific material comes afterwards:
+
+- bull/bear receive complete Analyst Markdown and primary evidence summaries;
+- the agenda receives the two cases and claim index, and is generated directly
+  as a small typed artifact;
+- rebuttals receive the agenda, cases, prior rounds, and evidence already cited
+  by those artifacts;
+- the judge receives complete reports plus cases, agenda, and rebuttals;
+- risk receives the judge, agenda, report risk sections, and cited evidence;
+- final receives complete reports, judge, risk reviews, unresolved issues, and
+  decision-critical evidence, but not complete case/rebuttal history.
+
+There is no post-analyst LLM evidence-planning pass. The full raw
+EvidenceBundle is never broadcast to research roles, while the stable prefix
+allows the same provider/model to reuse its automatic context cache.
 
 Visible research-process artifacts have separate contracts:
 
@@ -372,7 +387,7 @@ responsibility rather than separate public graph nodes:
 | Phase | Meaning |
 | --- | --- |
 | `collect` (or the base `analyst.<role>` node) | Deterministic data/tool collection; normally no LLM call |
-| `prepare` | Reasoning-model evidence blueprint plus a validated, batched local lookup plan |
+| `context` | Deterministic role-context assembly; no provider call |
 | `report`, `write`, `reason` | Reasoning-model report, deliberation Markdown, or final synthesis brief |
 | `audit` | Non-thinking extraction of a small report/deliberation audit envelope |
 | `serialize` | Non-thinking mapping of the final synthesis to the strict decision contract |
