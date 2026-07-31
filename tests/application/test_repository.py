@@ -24,11 +24,16 @@ from tradingagents.application.contracts import (
     DebateAgenda,
     DebateImportance,
     DebateIssue,
+    DecisionNumericAuditAppendix,
     EvidenceBundle,
     EvidenceItem,
     IssueDisposition,
     JudgeDraft,
     KeyClaim,
+    NumericAuditAppendixStatus,
+    NumericAuditOmission,
+    NumericAuditPhase,
+    NumericAuditSnapshot,
     NumericAuditStatus,
     RebuttalReview,
     ReportAuditStatus,
@@ -683,6 +688,35 @@ def test_complete_persists_result_and_resolved_memory(
         risks=("Multiple compression",),
         invalidation_conditions=("Growth misses expectations",),
         time_horizon="6-12 months",
+    ).model_copy(update={"numeric_audit_status": NumericAuditStatus.PARTIAL})
+    numeric_audit = DecisionNumericAuditAppendix(
+        status=NumericAuditAppendixStatus.PARTIAL,
+        snapshots=(
+            NumericAuditSnapshot(
+                phase=NumericAuditPhase.REPAIR,
+                method=ArtifactGenerationMethod.TOOL_CALL_RECOVERED,
+                reason_code="semantic_validation",
+                validation_issues=(
+                    "semantic.numeric.calculation.calc_1.result_mismatch",
+                ),
+                schema_valid=True,
+                candidate={
+                    "requested": True,
+                    "appendix_only_marker": "must-not-enter-memory",
+                    "calculation_records": [],
+                },
+                candidate_digest="a" * 64,
+            ),
+        ),
+        omitted_components=(
+            NumericAuditOmission(
+                component_path="numeric.calculation.calc_1",
+                label="calc_1",
+                issue_codes=(
+                    "numeric.calculation.calc_1.result_mismatch",
+                ),
+            ),
+        ),
     )
     result = AnalysisResult(
         run_id=run.id,
@@ -690,6 +724,7 @@ def test_complete_persists_result_and_resolved_memory(
         instrument="NVDA",
         reports={"market": report},
         decision=decision,
+        numeric_audit=numeric_audit,
     )
 
     repository.append_artifact(
@@ -749,6 +784,7 @@ def test_complete_persists_result_and_resolved_memory(
 
     assert restored.status is RunStatus.SUCCEEDED
     assert restored.decision == decision
+    assert restored.numeric_audit == numeric_audit
     assert restored.evidence == evidence
     assert isinstance(restored.reports["market"], AnalystReport)
     assert restored.warnings[0].message == "Historical price was partial."
@@ -756,6 +792,7 @@ def test_complete_persists_result_and_resolved_memory(
     assert len(context.items) == 1
     assert context.items[0].ticker == "NVDA"
     assert "The thesis worked" in context.items[0].reflection
+    assert "appendix_only_marker" not in context.prompt_text()
     repository.trash_runs((run.id,))
     assert repository.memory_context("NVDA", "stock").items == ()
     assert repository.memory_entries() == []

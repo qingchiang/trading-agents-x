@@ -164,9 +164,15 @@ class NumericAuditStatus(str, Enum):
     NOT_APPLICABLE = "not_applicable"
 
 
-class MarketReferenceBasis(str, Enum):
-    OBSERVED = "observed"
-    DERIVED = "derived"
+class NumericAuditAppendixStatus(str, Enum):
+    RECOVERED = "recovered"
+    PARTIAL = "partial"
+    INCOMPLETE = "incomplete"
+
+
+class NumericAuditPhase(str, Enum):
+    INITIAL = "initial"
+    REPAIR = "repair"
 
 
 class ArtifactGenerationMethod(str, Enum):
@@ -180,6 +186,57 @@ class ArtifactGenerationMethod(str, Enum):
     SECTIONED_RECOVERY = "sectioned_recovery"
     MARKDOWN_AUDITED = "markdown_audited"
     MARKDOWN_AUDIT_INCOMPLETE = "markdown_audit_incomplete"
+
+
+class NumericAuditSnapshot(FrozenModel):
+    """One sanitized failed numeric serializer candidate."""
+
+    phase: NumericAuditPhase
+    method: ArtifactGenerationMethod
+    reason_code: str = Field(pattern=r"^[a-z0-9_.-]+$")
+    validation_issues: tuple[str, ...] = ()
+    schema_valid: bool
+    candidate: dict[str, Any] | None = None
+    candidate_digest: str | None = Field(
+        default=None,
+        pattern=r"^[a-f0-9]{64}$",
+    )
+    candidate_omitted: Literal["oversize"] | None = None
+
+    @field_validator("validation_issues")
+    @classmethod
+    def validate_issue_codes(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        issues = tuple(dict.fromkeys(value))
+        if any(not re.fullmatch(r"[a-z0-9_.-]+", item) for item in issues):
+            raise ValueError("numeric audit issues must be stable codes")
+        return issues
+
+
+class NumericAuditOmission(FrozenModel):
+    component_path: str = Field(pattern=r"^[a-z0-9_.-]+$")
+    label: str = Field(min_length=1, max_length=200)
+    issue_codes: tuple[str, ...] = Field(min_length=1)
+
+    @field_validator("issue_codes")
+    @classmethod
+    def validate_issue_codes(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        issues = tuple(dict.fromkeys(value))
+        if any(not re.fullmatch(r"[a-z0-9_.-]+", item) for item in issues):
+            raise ValueError("numeric audit issues must be stable codes")
+        return issues
+
+
+class DecisionNumericAuditAppendix(FrozenModel):
+    """Unverified numeric proposals kept outside the canonical decision."""
+
+    status: NumericAuditAppendixStatus
+    snapshots: tuple[NumericAuditSnapshot, ...] = Field(min_length=1, max_length=2)
+    omitted_components: tuple[NumericAuditOmission, ...] = ()
+
+
+class MarketReferenceBasis(str, Enum):
+    OBSERVED = "observed"
+    DERIVED = "derived"
 
 
 class EvidenceQuality(str, Enum):
@@ -1269,6 +1326,7 @@ class AnalysisResult(FrozenModel):
     instrument_name: str | None = None
     reports: dict[str, AnalystReport | str]
     decision: ResearchDecision | None
+    numeric_audit: DecisionNumericAuditAppendix | None = None
     evidence: EvidenceBundle | None = None
     metrics: RunMetrics = Field(default_factory=RunMetrics)
     warnings: tuple[ResearchWarning, ...] = ()

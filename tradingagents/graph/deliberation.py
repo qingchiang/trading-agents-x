@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import math
 import re
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from typing import Any
 
@@ -20,12 +21,17 @@ from tradingagents.application.contracts import (
     DebateAgenda,
     DebateImportance,
     DebateIssue,
+    DecisionNumericAuditAppendix,
     EvidenceBundle,
     IssueDisposition,
     JudgeDraft,
     MarketReferenceBasis,
     MarketReferenceLevel,
     MemoryContext,
+    NumericAuditAppendixStatus,
+    NumericAuditOmission,
+    NumericAuditPhase,
+    NumericAuditSnapshot,
     NumericAuditStatus,
     RebuttalReview,
     ResearchCase,
@@ -49,6 +55,7 @@ from tradingagents.graph.output_validation import (
 )
 from tradingagents.graph.structured_output import (
     StructuredOutputError,
+    StructuredOutputFailure,
     StructuredOutputResult,
     StructuredOutputRunner,
 )
@@ -200,6 +207,7 @@ class ResearchDecisionOutput:
     value: ResearchDecision
     generation_method: ArtifactGenerationMethod
     warnings: tuple[ResearchWarning, ...] = ()
+    numeric_audit: DecisionNumericAuditAppendix | None = None
 
 
 def write_research_markdown(
@@ -707,6 +715,7 @@ def invoke_research_decision(
         value=decision,
         generation_method=core.generation_method,
         warnings=numeric.warnings,
+        numeric_audit=numeric.audit,
     )
 
 
@@ -718,6 +727,9 @@ class _NumericDecisionAssembly:
     calculation_records: tuple[CalculationRecord, ...]
     status: NumericAuditStatus
     warnings: tuple[ResearchWarning, ...] = ()
+    issues: tuple[str, ...] = ()
+    omissions: tuple[NumericAuditOmission, ...] = ()
+    audit: DecisionNumericAuditAppendix | None = None
 
 
 def _invoke_decision_numeric(
@@ -824,24 +836,67 @@ def _invoke_decision_numeric(
     except StructuredOutputError as exc:
         draft = _numeric_candidate(exc.candidate)
         if draft is None:
-            return _empty_numeric_assembly(
+            empty = _empty_numeric_assembly(
                 node=node,
                 status=NumericAuditStatus.INCOMPLETE,
             )
-        return _assemble_numeric_draft(
+            return replace(
+                empty,
+                audit=_numeric_audit_appendix(
+                    status=NumericAuditAppendixStatus.INCOMPLETE,
+                    failures=exc.failures,
+                    omissions=(
+                        NumericAuditOmission(
+                            component_path="numeric.appendix",
+                            label="Optional numeric appendix",
+                            issue_codes=tuple(
+                                dict.fromkeys(
+                                    issue
+                                    for failure in exc.failures
+                                    for issue in failure.validation_issues
+                                )
+                            )
+                            or ("numeric.appendix.invalid",),
+                        ),
+                    ),
+                ),
+            )
+        assembly = _assemble_numeric_draft(
             draft,
             bundle=bundle,
             allowed_evidence_refs=allowed,
             salvage=True,
             node=node,
         )
-    return _assemble_numeric_draft(
+        return replace(
+            assembly,
+            audit=_numeric_audit_appendix(
+                status=(
+                    NumericAuditAppendixStatus.PARTIAL
+                    if assembly.status is NumericAuditStatus.PARTIAL
+                    else NumericAuditAppendixStatus.INCOMPLETE
+                ),
+                failures=exc.failures,
+                omissions=assembly.omissions,
+            ),
+        )
+    assembly = _assemble_numeric_draft(
         output.value,
         bundle=bundle,
         allowed_evidence_refs=allowed,
         salvage=False,
         node=node,
     )
+    if output.failed_attempts:
+        return replace(
+            assembly,
+            audit=_numeric_audit_appendix(
+                status=NumericAuditAppendixStatus.RECOVERED,
+                failures=output.failed_attempts,
+                omissions=(),
+            ),
+        )
+    return assembly
 
 
 def _numeric_candidate(candidate: dict[str, Any] | None) -> DecisionNumericDraft | None:
@@ -851,6 +906,102 @@ def _numeric_candidate(candidate: dict[str, Any] | None) -> DecisionNumericDraft
         return DecisionNumericDraft.model_validate(candidate)
     except Exception:
         return None
+
+
+_NUMERIC_CANDIDATE_MAX_BYTES = 256 * 1024
+_SENSITIVE_CANDIDATE_KEY = re.compile(
+    r"(?i)(api.?key|authorization|bearer|password|secret|token)"
+)
+_SENSITIVE_CANDIDATE_VALUE = re.compile(
+    r"(?i)(api[-_ ]?key|authorization|bearer|password|secret|token)"
+    r"(\s*[:=]\s*)(\S+)"
+)
+
+
+def _numeric_audit_appendix(
+    *,
+    status: NumericAuditAppendixStatus,
+    failures: tuple[StructuredOutputFailure, ...],
+    omissions: tuple[NumericAuditOmission, ...],
+) -> DecisionNumericAuditAppendix:
+    snapshots = tuple(_numeric_audit_snapshot(failure) for failure in failures)
+    if not snapshots:
+        raise ValueError("numeric audit appendix requires a failed attempt")
+    return DecisionNumericAuditAppendix(
+        status=status,
+        snapshots=snapshots[-2:],
+        omitted_components=omissions,
+    )
+
+
+def _numeric_audit_snapshot(
+    failure: StructuredOutputFailure,
+) -> NumericAuditSnapshot:
+    candidate = _sanitize_numeric_candidate(failure.candidate)
+    if candidate is None:
+        return NumericAuditSnapshot(
+            phase=NumericAuditPhase(failure.phase),
+            method=failure.method,
+            reason_code=failure.reason_code,
+            validation_issues=failure.validation_issues,
+            schema_valid=False,
+        )
+    encoded = json.dumps(
+        candidate,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    digest = hashlib.sha256(encoded).hexdigest()
+    schema_valid = _numeric_candidate(candidate) is not None
+    if len(encoded) > _NUMERIC_CANDIDATE_MAX_BYTES:
+        return NumericAuditSnapshot(
+            phase=NumericAuditPhase(failure.phase),
+            method=failure.method,
+            reason_code=failure.reason_code,
+            validation_issues=failure.validation_issues,
+            schema_valid=schema_valid,
+            candidate_digest=digest,
+            candidate_omitted="oversize",
+        )
+    return NumericAuditSnapshot(
+        phase=NumericAuditPhase(failure.phase),
+        method=failure.method,
+        reason_code=failure.reason_code,
+        validation_issues=failure.validation_issues,
+        schema_valid=schema_valid,
+        candidate=candidate,
+        candidate_digest=digest,
+    )
+
+
+def _sanitize_numeric_candidate(
+    candidate: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if candidate is None:
+        return None
+
+    def sanitize(value: Any, key: str | None = None) -> Any:
+        if key is not None and _SENSITIVE_CANDIDATE_KEY.search(key):
+            return "[REDACTED]"
+        if isinstance(value, dict):
+            return {
+                str(item_key): sanitize(item_value, str(item_key))
+                for item_key, item_value in value.items()
+            }
+        if isinstance(value, (list, tuple)):
+            return [sanitize(item) for item in value]
+        if isinstance(value, str):
+            return _SENSITIVE_CANDIDATE_VALUE.sub(
+                r"\1\2[REDACTED]",
+                value,
+            )
+        if value is None or isinstance(value, (int, float, bool)):
+            return value
+        return str(value)
+
+    sanitized = sanitize(candidate)
+    return sanitized if isinstance(sanitized, dict) else None
 
 
 def _empty_numeric_assembly(
@@ -1036,8 +1187,8 @@ def _assemble_numeric_draft(
             linked_ids.update(item.calculation_ids)
 
     orphaned = set(calculations).difference(linked_ids)
-    if orphaned:
-        issues.append("numeric.calculation.orphaned")
+    for calculation_id in sorted(orphaned):
+        issues.append(f"numeric.calculation.{calculation_id}.orphaned")
     if draft.requested and not (
         scenario_values or valuation is not None or reference_levels
     ):
@@ -1051,7 +1202,10 @@ def _assemble_numeric_draft(
         issues.append("numeric.not_requested.has_content")
 
     if issues and not salvage:
-        raise OutputValidationError(issues[0])
+        raise OutputValidationError(
+            issues[0],
+            issue_codes=tuple(issues),
+        )
 
     kept_calculations = tuple(
         calculation
@@ -1061,13 +1215,26 @@ def _assemble_numeric_draft(
     has_content = bool(
         scenario_values or valuation is not None or reference_levels
     )
+    omissions = _numeric_omissions(draft, tuple(issues))
     if issues:
         status = (
             NumericAuditStatus.PARTIAL
             if has_content
             else NumericAuditStatus.INCOMPLETE
         )
-        warnings = _empty_numeric_assembly(node=node, status=status).warnings
+        omitted = ", ".join(item.label for item in omissions)
+        warnings = (
+            ResearchWarning(
+                code=f"decision.numeric_audit_{status.value}",
+                message=(
+                    "Optional numeric components were omitted because their "
+                    "audit failed"
+                    + (f": {omitted}." if omitted else ".")
+                    + " The qualitative decision remains audited."
+                ),
+                source=node,
+            ),
+        )
     else:
         status = (
             NumericAuditStatus.COMPLETE
@@ -1082,6 +1249,44 @@ def _assemble_numeric_draft(
         calculation_records=kept_calculations,
         status=status,
         warnings=warnings,
+        issues=tuple(issues),
+        omissions=omissions,
+    )
+
+
+def _numeric_omissions(
+    draft: DecisionNumericDraft,
+    issues: tuple[str, ...],
+) -> tuple[NumericAuditOmission, ...]:
+    grouped: dict[tuple[str, str], list[str]] = {}
+    reference_labels = {
+        str(index): item.label
+        for index, item in enumerate(draft.market_reference_levels)
+    }
+    for issue in issues:
+        parts = issue.split(".")
+        path = "numeric.appendix"
+        label = "Optional numeric appendix"
+        if len(parts) >= 4 and parts[:2] == ["numeric", "calculation"]:
+            path = ".".join(parts[:3])
+            label = parts[2]
+        elif len(parts) >= 4 and parts[:2] == ["numeric", "scenario"]:
+            path = ".".join(parts[:3])
+            label = f"{parts[2].title()} scenario range"
+        elif parts[:2] == ["numeric", "valuation"]:
+            path = "numeric.valuation"
+            label = "Valuation assessment"
+        elif len(parts) >= 4 and parts[:2] == ["numeric", "market_reference"]:
+            path = ".".join(parts[:3])
+            label = reference_labels.get(parts[2], f"Market reference {parts[2]}")
+        grouped.setdefault((path, label), []).append(issue)
+    return tuple(
+        NumericAuditOmission(
+            component_path=path,
+            label=label,
+            issue_codes=tuple(dict.fromkeys(component_issues)),
+        )
+        for (path, label), component_issues in grouped.items()
     )
 
 

@@ -22,6 +22,7 @@ from .contracts import (
     AnalystReport,
     ArtifactGenerationMethod,
     DebateAgenda,
+    DecisionNumericAuditAppendix,
     EvidenceBundle,
     EvidenceSealView,
     JudgeDraft,
@@ -71,6 +72,19 @@ _TERMINAL_STATUSES = {
     RunStatus.FAILED.value,
     RunStatus.CANCELLED.value,
 }
+
+
+def _numeric_audit_warning_message(
+    appendix: DecisionNumericAuditAppendix | None,
+) -> str:
+    labels = tuple(
+        item.label for item in (appendix.omitted_components if appendix else ())
+    )
+    omitted = f": {', '.join(labels)}" if labels else ""
+    return (
+        "Optional numeric components were omitted because their audit failed"
+        f"{omitted}. The qualitative decision remains audited."
+    )
 _SAFE_METRIC_KEYS = {
     "llm_calls",
     "tool_calls",
@@ -1131,6 +1145,11 @@ class RunRepository:
                     rating=result.decision.rating.value,
                     confidence=result.decision.confidence,
                     decision_json=result.decision.model_dump(mode="json"),
+                    numeric_audit_json=(
+                        result.numeric_audit.model_dump(mode="json")
+                        if result.numeric_audit is not None
+                        else None
+                    ),
                     created_at=now,
                 )
                 session.add(decision)
@@ -1249,6 +1268,13 @@ class RunRepository:
                 None,
             )
         )
+        numeric_audit = (
+            DecisionNumericAuditAppendix.model_validate(
+                decision_record.numeric_audit_json
+            )
+            if decision_record and decision_record.numeric_audit_json
+            else None
+        )
         evidence = (
             EvidenceBundle.model_validate(evidence_record.bundle_json)
             if evidence_record
@@ -1290,10 +1316,7 @@ class RunRepository:
                                     f"{decision.numeric_audit_status.value}"
                                 ),
                                 message=(
-                                    "Optional valuation and market-reference "
-                                    "figures were omitted because their "
-                                    "calculations could not be fully validated. "
-                                    "The qualitative decision remains audited."
+                                    _numeric_audit_warning_message(numeric_audit)
                                 ),
                                 source="committee.final.serialize.numeric",
                             ),
@@ -1316,6 +1339,7 @@ class RunRepository:
             instrument_name=view.instrument_name,
             reports=reports,
             decision=decision,
+            numeric_audit=numeric_audit,
             evidence=evidence,
             metrics=view.metrics,
             warnings=warnings,

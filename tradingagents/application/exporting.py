@@ -15,6 +15,7 @@ from tradingagents.application.markdown_evidence import normalize_evidence_markd
 from .contracts import (
     AnalystReport,
     DebateAgenda,
+    DecisionNumericAuditAppendix,
     EvidenceTable,
     JudgeDraft,
     RebuttalReview,
@@ -104,6 +105,14 @@ def render_run_export_markdown(run_export: RunExport) -> str:
                     _render_research_decision(result.decision),
                     evidence_aliases,
                 ),
+            ]
+        )
+
+    if result.numeric_audit is not None:
+        sections.extend(
+            [
+                "",
+                _render_numeric_audit_appendix(result.numeric_audit),
             ]
         )
 
@@ -675,6 +684,63 @@ def _render_research_decision(content: ResearchDecision) -> str:
             )
     else:
         lines.extend(["", "_No risk-review adjustments were recorded._"])
+    return "\n".join(lines)
+
+
+def _render_numeric_audit_appendix(
+    appendix: DecisionNumericAuditAppendix,
+) -> str:
+    lines = [
+        "## Unverified Numeric Drafts",
+        "",
+        "> **Warning:** The following model-proposed numeric content did not "
+        "pass audit and was not used in the canonical research decision.",
+        "",
+        f"- Status: `{appendix.status.value}`",
+    ]
+    if appendix.omitted_components:
+        lines.extend(["", "### Omitted Components"])
+        for item in appendix.omitted_components:
+            lines.append(
+                f"- **{item.label}** (`{item.component_path}`): "
+                + ", ".join(f"`{code}`" for code in item.issue_codes)
+            )
+    for snapshot in appendix.snapshots:
+        lines.extend(
+            [
+                "",
+                f"### {snapshot.phase.value.title()} Candidate",
+                "",
+                f"- Method: `{snapshot.method.value}`",
+                f"- Reason: `{snapshot.reason_code}`",
+                f"- Schema valid: `{str(snapshot.schema_valid).lower()}`",
+                (
+                    "- Issues: "
+                    + (
+                        ", ".join(
+                            f"`{code}`" for code in snapshot.validation_issues
+                        )
+                        or "_none recorded_"
+                    )
+                ),
+            ]
+        )
+        if snapshot.candidate is not None:
+            lines.extend(
+                [
+                    "",
+                    "```json",
+                    json.dumps(snapshot.candidate, ensure_ascii=False, indent=2),
+                    "```",
+                ]
+            )
+        elif snapshot.candidate_omitted:
+            lines.append(
+                f"- Candidate omitted: `{snapshot.candidate_omitted}` "
+                f"(digest `{snapshot.candidate_digest}`)"
+            )
+        else:
+            lines.append("- Candidate: _not parseable as a JSON object_")
     return "\n".join(lines)
 
 

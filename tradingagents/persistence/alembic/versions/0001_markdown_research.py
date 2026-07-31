@@ -166,6 +166,7 @@ def upgrade() -> None:
         sa.Column("rating", sa.String(length=20), nullable=False),
         sa.Column("confidence", sa.Float(), nullable=False),
         sa.Column("decision_json", sa.JSON(), nullable=False),
+        sa.Column("numeric_audit_json", sa.JSON(), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(["run_id"], ["runs.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),

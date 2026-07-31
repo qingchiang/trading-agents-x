@@ -18,6 +18,7 @@ from tradingagents.application.contracts import (
     JudgeDraft,
     MarketReferenceBasis,
     MarketReferenceLevel,
+    NumericAuditAppendixStatus,
     NumericAuditStatus,
     RebuttalReview,
     RiskReview,
@@ -30,6 +31,7 @@ from tradingagents.graph.deliberation import (
     DecisionNumericDraft,
     ResearchDecisionCoreDraft,
     _evaluate_formula,
+    _numeric_audit_snapshot,
     debate_round_has_material_progress,
     invoke_debate_agenda,
     invoke_judge_draft,
@@ -40,7 +42,10 @@ from tradingagents.graph.deliberation import (
     write_research_markdown,
 )
 from tradingagents.graph.output_validation import OutputValidationError
-from tradingagents.graph.structured_output import StructuredOutputError
+from tradingagents.graph.structured_output import (
+    StructuredOutputError,
+    StructuredOutputFailure,
+)
 
 
 class _StaticInvoker:
@@ -597,13 +602,23 @@ def test_numeric_serializer_repairs_seven_invalid_input_names() -> None:
     )
 
     assert result.value.numeric_audit_status is NumericAuditStatus.NOT_APPLICABLE
+    assert result.numeric_audit is not None
+    assert result.numeric_audit.status is NumericAuditAppendixStatus.RECOVERED
+    assert [item.phase.value for item in result.numeric_audit.snapshots] == [
+        "initial"
+    ]
+    assert result.numeric_audit.snapshots[0].candidate == invalid_numeric
     assert [event["event_type"] for event in events] == [
         "node.numeric_audit_retry",
         "node.numeric_audit_recovered",
     ]
     issues = events[0]["payload"]["validation_issues"]
-    assert len(issues) == 8  # Structured diagnostics are deliberately bounded.
+    assert len(issues) > 8
     assert issues[0].startswith("schema.calculation_records.0.inputs")
+    assert any(
+        issue.startswith("schema.calculation_records.6.inputs")
+        for issue in issues
+    )
 
 
 def test_calculation_draft_exposes_identifier_inputs_in_json_schema() -> None:
@@ -699,6 +714,12 @@ def test_final_decision_omits_unreproducible_optional_calculation() -> None:
     assert result.value.calculation_records == ()
     assert result.value.numeric_audit_status is NumericAuditStatus.INCOMPLETE
     assert result.warnings[0].code == "decision.numeric_audit_incomplete"
+    assert result.numeric_audit is not None
+    assert [item.phase.value for item in result.numeric_audit.snapshots] == [
+        "initial",
+        "repair",
+    ]
+    assert result.numeric_audit.snapshots[-1].candidate is not None
 
 
 def test_final_decision_preserves_valid_numeric_components_after_repair_failure() -> None:
@@ -755,6 +776,58 @@ def test_final_decision_preserves_valid_numeric_components_after_repair_failure(
     assert result.value.calculation_records == ()
     assert result.value.numeric_audit_status is NumericAuditStatus.PARTIAL
     assert result.warnings[0].code == "decision.numeric_audit_partial"
+    assert result.numeric_audit is not None
+    assert result.numeric_audit.status is NumericAuditAppendixStatus.PARTIAL
+    assert {
+        item.component_path for item in result.numeric_audit.omitted_components
+    } == {
+        "numeric.calculation.calc_valuation",
+        "numeric.valuation",
+    }
+
+
+def test_numeric_audit_snapshot_redacts_secrets_and_omits_oversize_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "tradingagents.graph.deliberation._NUMERIC_CANDIDATE_MAX_BYTES",
+        32,
+    )
+    snapshot = _numeric_audit_snapshot(
+        StructuredOutputFailure(
+            phase="repair",
+            method=ArtifactGenerationMethod.TOOL_CALL_RECOVERED,
+            reason_code="semantic_validation",
+            validation_issues=("semantic.numeric.appendix.invalid",),
+            candidate={"api_key": "private", "payload": "x" * 100},
+        )
+    )
+
+    assert snapshot.candidate is None
+    assert snapshot.candidate_omitted == "oversize"
+    assert snapshot.candidate_digest is not None
+
+
+def test_numeric_audit_snapshot_keeps_only_sanitized_json_candidate() -> None:
+    snapshot = _numeric_audit_snapshot(
+        StructuredOutputFailure(
+            phase="initial",
+            method=ArtifactGenerationMethod.TOOL_CALL,
+            reason_code="schema_validation",
+            candidate={
+                "token": "private",
+                "requested": True,
+                "note": "Authorization: Bearer-private",
+            },
+        )
+    )
+
+    assert snapshot.candidate == {
+        "token": "[REDACTED]",
+        "requested": True,
+        "note": "Authorization: [REDACTED]",
+    }
+    assert snapshot.schema_valid is False
 
 
 def test_final_decision_reports_stable_duplicate_scenario_issue() -> None:

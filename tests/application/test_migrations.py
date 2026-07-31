@@ -48,6 +48,9 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
         evidence_columns = {
             column["name"] for column in inspector.get_columns("run_evidence")
         }
+        decision_columns = {
+            column["name"] for column in inspector.get_columns("decisions")
+        }
         table_names = set(inspector.get_table_names())
     finally:
         engine.dispose()
@@ -89,6 +92,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     assert "ix_runs_trash" in run_indexes
     assert "next_check_at" in outcome_columns
     assert "ix_outcomes_due" in outcome_indexes
+    assert "numeric_audit_json" in decision_columns
 
 
 def test_unreleased_revision_requires_explicit_database_reset(

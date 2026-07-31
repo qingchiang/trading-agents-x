@@ -50,6 +50,7 @@ from tradingagents.agents.utils.technical_indicators_tools import (
 from tradingagents.application.contracts import (
     AnalystReport,
     ArtifactGenerationMethod,
+    DecisionNumericAuditAppendix,
     EvidenceBundle,
     EvidenceItem,
     EvidenceOrigin,
@@ -140,6 +141,7 @@ class ResearchState(TypedDict, total=False):
     risk_reviews: Annotated[dict[str, dict[str, Any]], _merge_dicts]
     judge_draft: dict[str, Any]
     final_decision: dict[str, Any]
+    numeric_audit: dict[str, Any] | None
     rebuttal_round: int
     debate_continue: bool
     warnings: Annotated[list[dict[str, Any]], operator.add]
@@ -159,6 +161,7 @@ class GraphExecution:
     evidence: EvidenceBundle
     reports: dict[str, AnalystReport]
     decision: ResearchDecision
+    numeric_audit: DecisionNumericAuditAppendix | None = None
     warnings: tuple[ResearchWarning, ...] = ()
 
 
@@ -280,6 +283,11 @@ class ResearchGraph:
             }
         )
         decision = ResearchDecision.model_validate(final_state["final_decision"])
+        numeric_audit = (
+            DecisionNumericAuditAppendix.model_validate(final_state["numeric_audit"])
+            if final_state.get("numeric_audit")
+            else None
+        )
         warnings = tuple(
             ResearchWarning.model_validate(value) for value in final_state.get("warnings", [])
         )
@@ -288,6 +296,7 @@ class ResearchGraph:
             evidence=evidence,
             reports=reports,
             decision=decision,
+            numeric_audit=numeric_audit,
             warnings=tuple(dict.fromkeys(warnings)),
         )
 
@@ -346,6 +355,11 @@ class ResearchGraph:
         if final_state is None:
             raise RuntimeError("frozen research graph produced no state")
         decision = ResearchDecision.model_validate(final_state["final_decision"])
+        numeric_audit = (
+            DecisionNumericAuditAppendix.model_validate(final_state["numeric_audit"])
+            if final_state.get("numeric_audit")
+            else None
+        )
         warnings = tuple(
             ResearchWarning.model_validate(value) for value in final_state.get("warnings", [])
         )
@@ -354,6 +368,7 @@ class ResearchGraph:
             evidence=evidence,
             reports=order_reports(reports),
             decision=decision,
+            numeric_audit=numeric_audit,
             warnings=tuple(dict.fromkeys(warnings)),
         )
 
@@ -1345,6 +1360,11 @@ class ResearchGraph:
             )
             return {
                 "final_decision": decision.model_dump(mode="json"),
+                "numeric_audit": (
+                    output.numeric_audit.model_dump(mode="json")
+                    if output.numeric_audit is not None
+                    else None
+                ),
                 "warnings": [
                     *_structured_recovery_warnings(node, output),
                     *_research_markdown_warnings(written),

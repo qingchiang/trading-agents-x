@@ -21,12 +21,17 @@ from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
     ArtifactGenerationMethod,
+    DecisionNumericAuditAppendix,
     EvidenceBundle,
     EvidenceItem,
     EvidenceQuality,
     EvidenceTemporalScope,
     MarketReferenceLevel,
     NodeMetrics,
+    NumericAuditAppendixStatus,
+    NumericAuditOmission,
+    NumericAuditPhase,
+    NumericAuditSnapshot,
     NumericAuditStatus,
     ResearchArtifact,
     ResearchWarning,
@@ -896,6 +901,34 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
             instrument="NVDA",
             reports={"market": report},
             decision=decision,
+            numeric_audit=DecisionNumericAuditAppendix(
+                status=NumericAuditAppendixStatus.PARTIAL,
+                snapshots=(
+                    NumericAuditSnapshot(
+                        phase=NumericAuditPhase.INITIAL,
+                        method=ArtifactGenerationMethod.TOOL_CALL,
+                        reason_code="semantic_validation",
+                        validation_issues=(
+                            "semantic.numeric.calculation.calc_valuation.result_mismatch",
+                        ),
+                        schema_valid=True,
+                        candidate={
+                            "requested": True,
+                            "calculation_records": [{"id": "calc_valuation"}],
+                        },
+                        candidate_digest="b" * 64,
+                    ),
+                ),
+                omitted_components=(
+                    NumericAuditOmission(
+                        component_path="numeric.calculation.calc_valuation",
+                        label="calc_valuation",
+                        issue_codes=(
+                            "numeric.calculation.calc_valuation.result_mismatch",
+                        ),
+                    ),
+                ),
+            ),
             warnings=(warning,),
         ),
         artifacts=artifacts,
@@ -925,5 +958,11 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
     assert "Observation only, not an entry order." in markdown
     assert "### Final Committee Response to Risk Review" in markdown
     assert "Confidence calibration" in markdown
+    assert markdown.count("## Unverified Numeric Drafts") == 1
+    assert "calc_valuation" in markdown
+    package = render_run_export_package(run_export)
+    with zipfile.ZipFile(io.BytesIO(package)) as archive:
+        exported = json.loads(archive.read("run.json"))
+    assert exported["result"]["numeric_audit"]["status"] == "partial"
     assert markdown.index("## Reports") < markdown.index("## Research Process")
     assert markdown.index("## Research Process") < markdown.index("## Research Decision")

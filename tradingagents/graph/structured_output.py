@@ -23,6 +23,17 @@ _JSON_FENCE_RE = re.compile(
 )
 
 
+@dataclass(frozen=True)
+class StructuredOutputFailure:
+    """One failed structured candidate kept in memory for bounded auditing."""
+
+    phase: Literal["initial", "repair"]
+    method: ArtifactGenerationMethod
+    reason_code: str
+    validation_issues: tuple[str, ...] = ()
+    candidate: dict[str, Any] | None = None
+
+
 class StructuredOutputError(RuntimeError):
     """A provider response could not satisfy the requested typed contract."""
 
@@ -34,6 +45,7 @@ class StructuredOutputError(RuntimeError):
         reason_code: str,
         validation_issues: tuple[str, ...] = (),
         candidate: dict[str, Any] | None = None,
+        failures: tuple[StructuredOutputFailure, ...] = (),
     ):
         self.node = node
         self.schema = schema
@@ -43,6 +55,7 @@ class StructuredOutputError(RuntimeError):
         # optional components. It is deliberately omitted from the message,
         # events, logs, and persisted error payloads.
         self.candidate = candidate
+        self.failures = failures
         issue_suffix = (
             f"; issues={','.join(validation_issues)}"
             if validation_issues
@@ -58,6 +71,7 @@ class StructuredOutputError(RuntimeError):
 class StructuredOutputResult(Generic[StructuredModel]):
     value: StructuredModel
     generation_method: ArtifactGenerationMethod
+    failed_attempts: tuple[StructuredOutputFailure, ...] = ()
 
 
 class _InvalidOutput(ValueError):
@@ -246,6 +260,13 @@ class StructuredOutputRunner(Generic[StructuredModel]):
             )
             else ArtifactGenerationMethod.JSON_MODE_RECOVERED
         )
+        primary_failure = StructuredOutputFailure(
+            phase="initial",
+            method=primary_generation_method,
+            reason_code=primary_reason,
+            validation_issues=primary_validation_issues,
+            candidate=primary_candidate,
+        )
         self._emit(
             "node.output_retry",
             method=recovery_method,
@@ -345,6 +366,7 @@ class StructuredOutputRunner(Generic[StructuredModel]):
                     return StructuredOutputResult(
                         value=value,
                         generation_method=recovery_method,
+                        failed_attempts=(primary_failure,),
                     )
 
         if (
@@ -398,6 +420,16 @@ class StructuredOutputRunner(Generic[StructuredModel]):
             reason_code=failure_reason,
             validation_issues=failure_validation_issues,
             candidate=recovery_candidate or primary_candidate,
+            failures=(
+                primary_failure,
+                StructuredOutputFailure(
+                    phase="repair",
+                    method=recovery_method,
+                    reason_code=failure_reason,
+                    validation_issues=failure_validation_issues,
+                    candidate=recovery_candidate,
+                ),
+            ),
         )
 
     def _validate(self, candidate: Any) -> StructuredModel:
@@ -415,7 +447,7 @@ class StructuredOutputRunner(Generic[StructuredModel]):
         except OutputValidationError as exc:
             raise _InvalidOutput(
                 "semantic_validation",
-                (f"semantic.{exc.issue_code}",),
+                tuple(f"semantic.{code}" for code in exc.issue_codes),
             ) from exc
         except Exception as exc:
             raise _InvalidOutput("semantic_validation") from exc
@@ -653,10 +685,10 @@ ALLOWED MEMORY REFS:
 
 
 def _validation_issues(error: Any) -> tuple[str, ...]:
-    """Return bounded field/type diagnostics without model values or messages."""
+    """Return safe field/type diagnostics without model values or messages."""
 
     if isinstance(error, OutputValidationError):
-        return (f"semantic.{error.issue_code}",)
+        return tuple(f"semantic.{code}" for code in error.issue_codes)
     if not isinstance(error, ValidationError):
         return ()
     issues = []
@@ -672,8 +704,6 @@ def _validation_issues(error: Any) -> tuple[str, ...]:
         issues.append(
             f"schema.{location or 'root'}.{error_type}"
         )
-        if len(issues) == 8:
-            break
     return tuple(dict.fromkeys(issues))
 
 

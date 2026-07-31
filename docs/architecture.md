@@ -83,6 +83,13 @@ risk_review_adjustments
 numeric_audit_status
 ```
 
+Failed optional numeric candidates never enter `ResearchDecision`. A separate
+`DecisionNumericAuditAppendix` may retain up to two sanitized, parsed JSON
+snapshots (initial and repair), their safe validation issue codes, and the
+components omitted from the canonical decision. It is persisted atomically
+with the decision for user inspection and export, but memory retrieval,
+outcome settlement, ratings, and thesis generation ignore it.
+
 Non-personalized ratings, conditional investment views, auditable valuation
 ranges, scenarios, and market reference levels are allowed. Position
 percentage, account configuration, order quantity/type, broker instructions,
@@ -338,7 +345,9 @@ decision-critical valuation, scenario, or market-reference arithmetic uses
 observations. A numeric appendix gets one bounded repair. If it still cannot be
 fully audited, independently valid components are retained and the remaining
 numeric fields are omitted with an explicit warning instead of discarding the
-strict qualitative conclusion.
+strict qualitative conclusion. Failed initial and repair candidates are kept
+only as a size-bounded, recursively redacted numeric audit appendix; raw
+provider messages, prompts, and hidden reasoning are never persisted.
 
 Every artifact records its prompt version and structured generation method. No
 artifact stores hidden reasoning traces or raw provider conversations.

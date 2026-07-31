@@ -25,8 +25,14 @@ _STRUCTURED_SENTINELS = {
 class OutputValidationError(ValueError):
     """A safe, stable semantic issue that may be shown to a recovery model."""
 
-    def __init__(self, issue_code: str):
+    def __init__(
+        self,
+        issue_code: str,
+        *,
+        issue_codes: tuple[str, ...] = (),
+    ):
         self.issue_code = issue_code
+        self.issue_codes = tuple(dict.fromkeys(issue_codes or (issue_code,)))
         super().__init__(issue_code)
 
 

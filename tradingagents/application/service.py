@@ -468,6 +468,7 @@ class AnalysisService:
             instrument_name=instrument_name,
             reports=execution.reports,
             decision=execution.decision,
+            numeric_audit=execution.numeric_audit,
             evidence=execution.evidence,
             metrics=metrics.snapshot(),
             warnings=warnings,

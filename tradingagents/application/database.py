@@ -191,6 +191,10 @@ class DecisionRecord(Base):
     rating: Mapped[str] = mapped_column(String(20), nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     decision_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    numeric_audit_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON,
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
