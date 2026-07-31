@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import json
 import math
+import re
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -12,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from tradingagents.application.contracts import (
     AnalystReport,
+    ArtifactGenerationMethod,
     DebateAgenda,
     DebateImportance,
     DebateIssue,
@@ -49,13 +51,6 @@ from tradingagents.graph.structured_output import (
 EventWriter = Callable[[dict[str, Any]], None]
 
 
-class ResearchCaseAudit(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    focus_claim_ids: tuple[str, ...] = ()
-    report_section_refs: tuple[str, ...] = ()
-
-
 class RebuttalAudit(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -69,13 +64,6 @@ class JudgeAudit(BaseModel):
     preliminary_rating: ResearchRating
     confidence: float = Field(ge=0.0, le=1.0)
     issue_dispositions: tuple[IssueDisposition, ...] = Field(min_length=1)
-
-
-class RiskAudit(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    challenged_issue_ids: tuple[str, ...] = ()
-    unresolved_issue_ids: tuple[str, ...] = ()
 
 
 def write_research_markdown(
@@ -195,42 +183,18 @@ def invoke_research_case(
     node: str,
     event_writer: EventWriter | None = None,
 ) -> StructuredOutputResult[ResearchCase]:
+    del llm, event_writer
     valid_claims = _claim_ids(state)
     valid_sections = _section_ids(state)
-
-    def validate(result: ResearchCaseAudit) -> ResearchCaseAudit:
-        if not set(result.focus_claim_ids).issubset(valid_claims):
-            raise OutputValidationError("navigation.claim.unknown")
-        if not set(result.report_section_refs).issubset(valid_sections):
-            raise OutputValidationError("navigation.section.unknown")
-        return result
-
-    audited = _runner(
-        llm,
-        ResearchCaseAudit,
-        validate,
-        node,
-        event_writer,
-    ).invoke(
-        (
-            "Extract only shallow navigation metadata from this completed "
-            f"{role} research case. Do not rewrite the Markdown.\n\n"
-            f"MARKDOWN:\n{markdown}"
-        ),
-        example=ResearchCaseAudit(
-            focus_claim_ids=tuple(sorted(valid_claims)[:1]),
-            report_section_refs=tuple(sorted(valid_sections)[:1]),
-        ).model_dump(mode="json"),
-        allowed_evidence_refs=_evidence_refs(state),
-    )
+    del node
     return StructuredOutputResult(
         value=ResearchCase(
             role=role,
             markdown=markdown,
-            focus_claim_ids=audited.value.focus_claim_ids,
-            report_section_refs=audited.value.report_section_refs,
+            focus_claim_ids=_mentioned_ids(markdown, valid_claims),
+            report_section_refs=_mentioned_ids(markdown, valid_sections),
         ),
-        generation_method=audited.generation_method,
+        generation_method=ArtifactGenerationMethod.MARKDOWN_AUDITED,
     )
 
 
@@ -248,28 +212,51 @@ def invoke_debate_agenda(
             require_text(issue.question)
         return result
 
-    return _runner(
-        llm,
-        DebateAgenda,
-        validate,
-        node,
-        event_writer,
-    ).invoke(
-        prompt
-        + "\n\nReturn only a concise agenda summary and distinct material "
-        "questions. The full bull and bear reasoning remains in their Markdown.",
-        example=DebateAgenda(
-            summary="The cases disagree on one material mechanism.",
-            issues=(
-                DebateIssue(
-                    id="debate.issue_1",
-                    question="Will the disputed operating mechanism persist?",
-                    importance=DebateImportance.MATERIAL,
+    try:
+        return _runner(
+            llm,
+            DebateAgenda,
+            validate,
+            node,
+            event_writer,
+        ).invoke(
+            prompt
+            + "\n\nReturn only a concise agenda summary and distinct material "
+            "questions. The full bull and bear reasoning remains in their Markdown.",
+            example=DebateAgenda(
+                summary="The cases disagree on one material mechanism.",
+                issues=(
+                    DebateIssue(
+                        id="debate.issue_1",
+                        question="Will the disputed operating mechanism persist?",
+                        importance=DebateImportance.MATERIAL,
+                    ),
+                ),
+            ).model_dump(mode="json"),
+            allowed_evidence_refs=_evidence_refs(state),
+        )
+    except StructuredOutputError:
+        return StructuredOutputResult(
+            value=DebateAgenda(
+                summary=(
+                    "The completed bull and bear cases contain a material "
+                    "disagreement whose navigation audit is incomplete."
+                ),
+                issues=(
+                    DebateIssue(
+                        id="debate.issue_audit_fallback",
+                        question=(
+                            "Which material disagreement between the completed "
+                            "bull and bear cases remains unresolved?"
+                        ),
+                        importance=DebateImportance.MATERIAL,
+                    ),
                 ),
             ),
-        ).model_dump(mode="json"),
-        allowed_evidence_refs=_evidence_refs(state),
-    )
+            generation_method=(
+                ArtifactGenerationMethod.MARKDOWN_AUDIT_INCOMPLETE
+            ),
+        )
 
 
 def invoke_rebuttal(
@@ -280,6 +267,7 @@ def invoke_rebuttal(
     markdown: str,
     state: Mapping[str, Any],
     node: str,
+    conservative_open: bool = False,
     event_writer: EventWriter | None = None,
 ) -> StructuredOutputResult[RebuttalReview]:
     agenda = DebateAgenda.model_validate(state["debate_agenda"])
@@ -297,24 +285,42 @@ def invoke_rebuttal(
         return result
 
     first_issue = agenda.issues[0].id
-    audited = _runner(
-        llm,
-        RebuttalAudit,
-        validate,
-        node,
-        event_writer,
-    ).invoke(
-        (
-            "Extract only addressed and still-open DebateAgenda issue IDs "
-            "from this completed rebuttal. Do not rewrite the Markdown.\n\n"
-            f"MARKDOWN:\n{markdown}"
-        ),
-        example=RebuttalAudit(
-            addressed_issue_ids=(first_issue,),
-            open_issue_ids=(first_issue,),
-        ).model_dump(mode="json"),
-        allowed_evidence_refs=_evidence_refs(state),
-    )
+    valid_issue_list = tuple(issue.id for issue in agenda.issues)
+    try:
+        audited = _runner(
+            llm,
+            RebuttalAudit,
+            validate,
+            node,
+            event_writer,
+        ).invoke(
+            (
+                "Extract only addressed and still-open DebateAgenda issue IDs "
+                "from this completed rebuttal. Do not rewrite the Markdown.\n\n"
+                f"VALID ISSUE IDS:\n{json.dumps(valid_issue_list)}\n\n"
+                f"MARKDOWN:\n{markdown}"
+            ),
+            example=RebuttalAudit(
+                addressed_issue_ids=(first_issue,),
+                open_issue_ids=(first_issue,),
+            ).model_dump(mode="json"),
+            allowed_evidence_refs=_evidence_refs(state),
+        )
+    except StructuredOutputError:
+        mentioned = _mentioned_ids(markdown, valid_issues)
+        addressed = mentioned or valid_issue_list
+        return StructuredOutputResult(
+            value=RebuttalReview(
+                role=role,
+                round=round_number,
+                markdown=markdown,
+                addressed_issue_ids=addressed,
+                open_issue_ids=valid_issue_list if conservative_open else (),
+            ),
+            generation_method=(
+                ArtifactGenerationMethod.MARKDOWN_AUDIT_INCOMPLETE
+            ),
+        )
     return StructuredOutputResult(
         value=RebuttalReview(
             role=role,
@@ -352,26 +358,41 @@ def invoke_judge_draft(
         IssueDisposition(issue_id=issue.id, status="unresolved")
         for issue in agenda.issues
     )
-    audited = _runner(
-        llm,
-        JudgeAudit,
-        validate,
-        node,
-        event_writer,
-    ).invoke(
-        (
-            "Extract the preliminary rating, calibrated confidence, and one "
-            "routing disposition for every agenda issue from this completed "
-            "judge Markdown. Do not rewrite the Markdown.\n\n"
-            f"MARKDOWN:\n{markdown}"
-        ),
-        example=JudgeAudit(
-            preliminary_rating=ResearchRating.HOLD,
-            confidence=0.55,
-            issue_dispositions=example_dispositions,
-        ).model_dump(mode="json"),
-        allowed_evidence_refs=_evidence_refs(state),
-    )
+    valid_issue_list = tuple(issue.id for issue in agenda.issues)
+    try:
+        audited = _runner(
+            llm,
+            JudgeAudit,
+            validate,
+            node,
+            event_writer,
+        ).invoke(
+            (
+                "Extract the preliminary rating, calibrated confidence, and one "
+                "routing disposition for every agenda issue from this completed "
+                "judge Markdown. Do not rewrite the Markdown.\n\n"
+                f"VALID ISSUE IDS:\n{json.dumps(valid_issue_list)}\n\n"
+                f"MARKDOWN:\n{markdown}"
+            ),
+            example=JudgeAudit(
+                preliminary_rating=ResearchRating.HOLD,
+                confidence=0.55,
+                issue_dispositions=example_dispositions,
+            ).model_dump(mode="json"),
+            allowed_evidence_refs=_evidence_refs(state),
+        )
+    except StructuredOutputError:
+        return StructuredOutputResult(
+            value=JudgeDraft(
+                markdown=markdown,
+                preliminary_rating=None,
+                confidence=None,
+                issue_dispositions=example_dispositions,
+            ),
+            generation_method=(
+                ArtifactGenerationMethod.MARKDOWN_AUDIT_INCOMPLETE
+            ),
+        )
     return StructuredOutputResult(
         value=JudgeDraft(
             markdown=markdown,
@@ -392,43 +413,30 @@ def invoke_risk_review(
     node: str,
     event_writer: EventWriter | None = None,
 ) -> StructuredOutputResult[RiskReview]:
+    del llm, node, event_writer
     agenda = DebateAgenda.model_validate(state["debate_agenda"])
     valid_issues = {issue.id for issue in agenda.issues}
-
-    def validate(result: RiskAudit) -> RiskAudit:
-        if not set(result.challenged_issue_ids).issubset(valid_issues):
-            raise OutputValidationError("navigation.issue.unknown_challenged")
-        if not set(result.unresolved_issue_ids).issubset(valid_issues):
-            raise OutputValidationError("navigation.issue.unknown_unresolved")
-        return result
-
-    first_issue = agenda.issues[0].id
-    audited = _runner(
-        llm,
-        RiskAudit,
-        validate,
-        node,
-        event_writer,
-    ).invoke(
-        (
-            "Extract only challenged and unresolved DebateAgenda issue IDs "
-            "from this completed risk review. Do not rewrite the Markdown.\n\n"
-            f"MARKDOWN:\n{markdown}"
+    challenged = _mentioned_ids(markdown, valid_issues)
+    unresolved = _mentioned_ids(
+        "\n".join(
+            line
+            for line in markdown.splitlines()
+            if re.search(
+                r"\b(?:unresolved|open|uncertain)\b|未解决|尚未|不确定",
+                line,
+                flags=re.IGNORECASE,
+            )
         ),
-        example=RiskAudit(
-            challenged_issue_ids=(first_issue,),
-            unresolved_issue_ids=(first_issue,),
-        ).model_dump(mode="json"),
-        allowed_evidence_refs=_evidence_refs(state),
+        valid_issues,
     )
     return StructuredOutputResult(
         value=RiskReview(
             role=role,
             markdown=markdown,
-            challenged_issue_ids=audited.value.challenged_issue_ids,
-            unresolved_issue_ids=audited.value.unresolved_issue_ids,
+            challenged_issue_ids=challenged,
+            unresolved_issue_ids=unresolved,
         ),
-        generation_method=audited.generation_method,
+        generation_method=ArtifactGenerationMethod.MARKDOWN_AUDITED,
     )
 
 
@@ -702,6 +710,21 @@ def _section_ids(state: Mapping[str, Any]) -> set[str]:
         for raw in state["analyst_reports"].values()
         for section in AnalystReport.model_validate(raw).report_sections
     }
+
+
+def _mentioned_ids(markdown: str, valid_ids: set[str]) -> tuple[str, ...]:
+    """Return exact valid IDs in first-appearance order."""
+
+    matches: list[tuple[int, str]] = []
+    for candidate in valid_ids:
+        match = re.search(
+            rf"(?<![A-Za-z0-9_-]){re.escape(candidate)}"
+            r"(?![A-Za-z0-9_-])",
+            markdown,
+        )
+        if match is not None:
+            matches.append((match.start(), candidate))
+    return tuple(candidate for _, candidate in sorted(matches))
 
 
 def _message_text(response: Any) -> str:

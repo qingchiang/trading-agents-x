@@ -146,10 +146,12 @@ export default function DeliberationView({
           <StageHeading title={t("judgeDraft")} />
           <ArtifactFrame artifact={artifact}>
             <div className="artifact-rating">
-              <strong>{artifact.content.preliminary_rating}</strong>
+              <strong>{artifact.content.preliminary_rating ?? "—"}</strong>
               <span>
                 {t("confidence")}{" "}
-                {Math.round(artifact.content.confidence * 100)}%
+                {artifact.content.confidence == null
+                  ? "—"
+                  : `${Math.round(artifact.content.confidence * 100)}%`}
               </span>
             </div>
             {markdown(artifact.content.markdown)}

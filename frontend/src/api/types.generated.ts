@@ -174,10 +174,10 @@ export interface components {
       status: "upheld" | "rejected" | "unresolved";
     };
     JudgeDraft: {
-      confidence: number;
+      confidence?: number | null;
       issue_dispositions: components["schemas"]["IssueDisposition"][];
       markdown: string;
-      preliminary_rating: components["schemas"]["ResearchRating"];
+      preliminary_rating?: components["schemas"]["ResearchRating"] | null;
     };
     KeyClaim: {
       confidence: number;

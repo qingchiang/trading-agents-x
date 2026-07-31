@@ -677,8 +677,8 @@ class JudgeDraft(FrozenModel):
     """Readable preliminary judgment with shallow issue dispositions."""
 
     markdown: str = Field(min_length=1)
-    preliminary_rating: ResearchRating
-    confidence: float = Field(ge=0.0, le=1.0)
+    preliminary_rating: ResearchRating | None = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     issue_dispositions: tuple[IssueDisposition, ...] = Field(min_length=1)
 
     @model_validator(mode="after")

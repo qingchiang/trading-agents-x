@@ -7,6 +7,7 @@ import pytest
 
 from tests.factories import analyst_report, research_decision
 from tradingagents.application.contracts import (
+    ArtifactGenerationMethod,
     CalculationPurpose,
     CalculationRecord,
     DebateAgenda,
@@ -14,15 +15,20 @@ from tradingagents.application.contracts import (
     DebateIssue,
     EvidenceBundle,
     EvidenceItem,
+    JudgeDraft,
     RebuttalReview,
+    RiskReview,
     ValuationAssessment,
     ValuationRange,
 )
 from tradingagents.graph.deliberation import (
-    ResearchCaseAudit,
     debate_round_has_material_progress,
+    invoke_debate_agenda,
+    invoke_judge_draft,
+    invoke_rebuttal,
     invoke_research_case,
     invoke_research_decision,
+    invoke_risk_review,
     research_prompt,
 )
 from tradingagents.graph.structured_output import StructuredOutputError
@@ -96,28 +102,32 @@ def test_research_prompt_keeps_complete_reports_but_catalogs_long_evidence() -> 
     assert "EVIDENCE WORKSET" in prompt
 
 
-def test_research_case_rejects_unknown_claim_after_bounded_recovery() -> None:
+def test_research_case_uses_deterministic_valid_id_intersection() -> None:
     state = _state()
-    invalid = ResearchCaseAudit(
-        focus_claim_ids=("market.claim_invented",),
-        report_section_refs=("market.section.overview",),
+    llm = _StaticLLM(
+        {
+            "focus_claim_ids": ["market.claim_invented"],
+            "report_section_refs": [],
+        }
     )
-    llm = _StaticLLM(invalid)
-
-    with pytest.raises(StructuredOutputError) as error:
-        invoke_research_case(
-            llm,
-            role="bull",
-            markdown="## Bull case\n\nFixture argument.",
-            state=state,
-            node="case.bull",
-        )
-
-    assert error.value.reason_code == "semantic_validation"
-    assert error.value.validation_issues == (
-        "semantic.navigation.claim.unknown",
+    result = invoke_research_case(
+        llm,
+        role="bull",
+        markdown=(
+            "## Bull case\n\n"
+            "market.claim_1 supports market.section.overview. "
+            "market.claim_1_invented does not."
+        ),
+        state=state,
+        node="case.bull",
     )
-    assert len(llm.prompts) == 2
+
+    assert result.value.focus_claim_ids == ("market.claim_1",)
+    assert result.value.report_section_refs == (
+        "market.section.overview",
+    )
+    assert result.generation_method is ArtifactGenerationMethod.MARKDOWN_AUDITED
+    assert llm.prompts == []
 
 
 def test_research_case_audit_preserves_completed_markdown() -> None:
@@ -126,21 +136,166 @@ def test_research_case_audit_preserves_completed_markdown() -> None:
         "## Constructive case\n\n"
         "| Measure | Reading |\n|---|---:|\n| Growth | 12.3% |\n"
     )
-    audit = ResearchCaseAudit(
-        focus_claim_ids=("market.claim_1",),
-        report_section_refs=("market.section.overview",),
-    )
-
     result = invoke_research_case(
-        _StaticLLM(audit),
+        _StaticLLM(None),
         role="bull",
-        markdown=markdown,
+        markdown=(
+            markdown
+            + "\nmarket.claim_1 supports market.section.overview."
+        ),
         state=state,
         node="case.bull.audit",
     )
 
-    assert result.value.markdown == markdown
+    assert result.value.markdown.startswith(markdown)
     assert result.value.focus_claim_ids == ("market.claim_1",)
+
+
+def _state_with_agenda() -> dict[str, Any]:
+    state = _state()
+    state["debate_agenda"] = DebateAgenda(
+        summary="Two material issues.",
+        issues=(
+            DebateIssue(
+                id="debate.issue_1",
+                question="Will growth persist?",
+                importance=DebateImportance.MATERIAL,
+            ),
+            DebateIssue(
+                id="debate.issue_2",
+                question="Is valuation support durable?",
+                importance=DebateImportance.MATERIAL,
+            ),
+        ),
+    ).model_dump(mode="json")
+    return state
+
+
+def test_agenda_audit_failure_uses_explicit_navigation_fallback() -> None:
+    state = _state()
+    result = invoke_debate_agenda(
+        _StaticLLM({"summary": "", "issues": []}),
+        prompt="Completed moderator brief.",
+        state=state,
+        node="debate.agenda.audit",
+    )
+
+    assert result.value.issues[0].id == "debate.issue_audit_fallback"
+    assert (
+        result.generation_method
+        is ArtifactGenerationMethod.MARKDOWN_AUDIT_INCOMPLETE
+    )
+
+
+@pytest.mark.parametrize(
+    ("conservative_open", "expected_open"),
+    [
+        (False, ()),
+        (True, ("debate.issue_1", "debate.issue_2")),
+    ],
+)
+def test_rebuttal_audit_failure_preserves_markdown_with_profile_fallback(
+    conservative_open: bool,
+    expected_open: tuple[str, ...],
+) -> None:
+    state = _state_with_agenda()
+    invalid = {
+        "addressed_issue_ids": ["debate.issue_invented"],
+        "open_issue_ids": ["debate.issue_invented"],
+    }
+    markdown = "debate.issue_1 is addressed; the other issue is discussed."
+
+    llm = _StaticLLM(invalid)
+    result = invoke_rebuttal(
+        llm,
+        role="bear",
+        round_number=1,
+        markdown=markdown,
+        state=state,
+        node="rebuttal.bear.audit",
+        conservative_open=conservative_open,
+    )
+
+    assert result.value.markdown == markdown
+    assert result.value.addressed_issue_ids == ("debate.issue_1",)
+    assert result.value.open_issue_ids == expected_open
+    assert (
+        result.generation_method
+        is ArtifactGenerationMethod.MARKDOWN_AUDIT_INCOMPLETE
+    )
+    assert all(
+        "debate.issue_1" in prompt and "debate.issue_2" in prompt
+        for prompt in llm.prompts
+    )
+
+
+def test_judge_audit_failure_preserves_markdown_without_fabricated_rating() -> None:
+    state = _state_with_agenda()
+    invalid = {
+        "preliminary_rating": "Hold",
+        "confidence": 0.5,
+        "issue_dispositions": [
+            {"issue_id": "debate.issue_invented", "status": "upheld"}
+        ],
+    }
+
+    llm = _StaticLLM(invalid)
+    result = invoke_judge_draft(
+        llm,
+        markdown="## Judgment\n\nBoth material questions remain unresolved.",
+        state=state,
+        node="judge.research.audit",
+    )
+
+    assert isinstance(result.value, JudgeDraft)
+    assert result.value.preliminary_rating is None
+    assert result.value.confidence is None
+    assert {
+        item.issue_id: item.status
+        for item in result.value.issue_dispositions
+    } == {
+        "debate.issue_1": "unresolved",
+        "debate.issue_2": "unresolved",
+    }
+    assert (
+        result.generation_method
+        is ArtifactGenerationMethod.MARKDOWN_AUDIT_INCOMPLETE
+    )
+    assert all(
+        "debate.issue_1" in prompt and "debate.issue_2" in prompt
+        for prompt in llm.prompts
+    )
+
+
+def test_risk_navigation_ignores_unknown_issue_ids_without_llm_audit() -> None:
+    state = _state_with_agenda()
+    llm = _StaticLLM(
+        {
+            "challenged_issue_ids": ["debate.issue_invented"],
+            "unresolved_issue_ids": ["debate.issue_invented"],
+        }
+    )
+    markdown = (
+        "debate.issue_1 is challenged.\n"
+        "Unresolved: debate.issue_2.\n"
+        "Ignore debate.issue_invented."
+    )
+
+    result = invoke_risk_review(
+        llm,
+        role="integrated",
+        markdown=markdown,
+        state=state,
+        node="risk.review.audit",
+    )
+
+    assert isinstance(result.value, RiskReview)
+    assert result.value.challenged_issue_ids == (
+        "debate.issue_1",
+        "debate.issue_2",
+    )
+    assert result.value.unresolved_issue_ids == ("debate.issue_2",)
+    assert llm.prompts == []
 
 
 def test_debate_progress_requires_a_changed_open_issue_set() -> None:

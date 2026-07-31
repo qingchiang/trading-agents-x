@@ -39,8 +39,6 @@ from tradingagents.graph.analyst_synthesis import AnalystAuditDraft
 from tradingagents.graph.deliberation import (
     JudgeAudit,
     RebuttalAudit,
-    ResearchCaseAudit,
-    RiskAudit,
 )
 from tradingagents.graph.evidence_context import EvidenceWorksetPlan
 from tradingagents.graph.research_graph import (
@@ -95,28 +93,6 @@ class _StructuredInvoker:
                 memo="The catalog is sufficient for the fixture.",
                 lookups=(),
             )
-        elif self.schema is ResearchCaseAudit:
-            claim_ids = tuple(
-                dict.fromkeys(
-                    re.findall(
-                        r"(?:market|social|news|fundamentals)\.claim_[a-z0-9_.-]+",
-                        prompt,
-                    )
-                )
-            )
-            section_ids = tuple(
-                dict.fromkeys(
-                    re.findall(
-                        r"(?:market|social|news|fundamentals)\."
-                        r"(?:section(?:_[0-9]+|\.[a-z0-9_.-]+)|root)",
-                        prompt,
-                    )
-                )
-            )
-            parsed = ResearchCaseAudit(
-                focus_claim_ids=claim_ids[:1],
-                report_section_refs=section_ids[:1],
-            )
         elif self.schema is DebateAgenda:
             parsed = DebateAgenda(
                 summary="One material dispute requires resolution.",
@@ -143,11 +119,6 @@ class _StructuredInvoker:
                         status="unresolved",
                     ),
                 ),
-            )
-        elif self.schema is RiskAudit:
-            parsed = RiskAudit(
-                challenged_issue_ids=("debate.issue_1",),
-                unresolved_issue_ids=("debate.issue_1",),
             )
         elif self.schema is ResearchDecision:
             risk_roles = tuple(
@@ -429,10 +400,8 @@ def test_profiles_share_contract_but_use_distinct_topologies(
             {
                 "MarkdownReport",
                 "AnalystAuditDraft",
-                "ResearchCaseAudit",
                 "DebateAgenda",
                 "RebuttalAudit",
-                "RiskAudit",
                 "ResearchMarkdown",
                 "EvidenceBlueprint",
                 "EvidenceWorksetPlan",
@@ -454,11 +423,9 @@ def test_profiles_share_contract_but_use_distinct_topologies(
                 "EvidenceWorksetPlan",
             },
             {
-                "ResearchCaseAudit",
                 "DebateAgenda",
                 "RebuttalAudit",
                 "JudgeAudit",
-                "RiskAudit",
                 "ResearchDecision",
                 "ResearchMarkdown",
                 "EvidenceBlueprint",
@@ -727,7 +694,7 @@ def test_graph_emits_only_typed_visible_research_artifacts(
     assert all("messages" not in artifact.content.model_fields for artifact in artifacts)
     assert {
         artifact.generation_method.value for artifact in artifacts if artifact.stage != "analyst"
-    } == {"tool_call"}
+    } == {"tool_call", "markdown_audited"}
     assert {
         (artifact.role, artifact.prompt_version)
         for artifact in artifacts

@@ -1235,10 +1235,17 @@
         "description": "Readable preliminary judgment with shallow issue dispositions.",
         "properties": {
           "confidence": {
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Confidence",
-            "type": "number"
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
           },
           "issue_dispositions": {
             "items": {
@@ -1254,13 +1261,18 @@
             "type": "string"
           },
           "preliminary_rating": {
-            "$ref": "#/components/schemas/ResearchRating"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchRating"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "markdown",
-          "preliminary_rating",
-          "confidence",
           "issue_dispositions"
         ],
         "title": "JudgeDraft",

@@ -300,12 +300,18 @@ RiskReview         role Markdown plus challenged and unresolved issue IDs
 ResearchDecision   strict final opinion, scenarios, calculations, and evidence
 ```
 
-Cases, agenda, rebuttals, judge, and risk reviews use a reasoning-model Markdown
-write followed by a non-thinking shallow audit. Graph routing depends on stable
-claim/issue IDs and dispositions, not on parsing prose. The Final Committee
-uses a reasoning pass to form the synthesis brief and a separate strict
-serializer for `ResearchDecision`. Only decision-critical valuation, scenario,
-or market-reference arithmetic uses `CalculationRecord`.
+Cases and risk reviews use a reasoning-model Markdown write followed by a
+deterministic intersection with the valid claim, section, and issue IDs already
+present in graph state. Rebuttals and the judge use a small non-thinking audit
+against an explicit valid-ID list. If that shallow audit cannot be validated,
+the readable Markdown is preserved with `markdown_audit_incomplete`: Standard
+continues with no open rebuttal issues, Deep conservatively keeps agenda issues
+open, and a judge fallback leaves rating/confidence unknown while marking every
+issue unresolved. Graph routing depends on stable issue IDs and dispositions,
+not on parsing prose. The Final Committee uses a reasoning pass to form the
+synthesis brief and a separate strict serializer for `ResearchDecision`. Only
+decision-critical valuation, scenario, or market-reference arithmetic uses
+`CalculationRecord`.
 
 Every artifact records its prompt version and structured generation method. No
 artifact stores hidden reasoning traces or raw provider conversations.

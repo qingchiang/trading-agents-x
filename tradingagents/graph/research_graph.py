@@ -968,6 +968,7 @@ class ResearchGraph:
                     markdown=markdown,
                     state=state,
                     node=f"{node}.audit",
+                    conservative_open=self.profile is RunProfile.DEEP,
                     event_writer=runtime.stream_writer,
                 )
             rebuttal = output.value
@@ -1108,7 +1109,11 @@ class ResearchGraph:
             runtime,
             node,
             {
-                "rating": draft.preliminary_rating.value,
+                "rating": (
+                    draft.preliminary_rating.value
+                    if draft.preliminary_rating is not None
+                    else None
+                ),
                 "confidence": draft.confidence,
             },
             measure=False,
@@ -1851,9 +1856,25 @@ def _structured_recovery_warnings(
     node: str,
     output: StructuredOutputResult[Any],
 ) -> list[dict[str, Any]]:
+    if (
+        output.generation_method
+        is ArtifactGenerationMethod.MARKDOWN_AUDIT_INCOMPLETE
+    ):
+        if node.startswith("analyst."):
+            return []
+        warning = ResearchWarning(
+            code="deliberation.audit_incomplete",
+            message=(
+                "The readable Markdown was preserved, but shallow navigation "
+                "metadata could not be fully validated."
+            ),
+            source=node,
+        )
+        return [warning.model_dump(mode="json")]
     if output.generation_method in {
         ArtifactGenerationMethod.TOOL_CALL,
         ArtifactGenerationMethod.JSON_MODE,
+        ArtifactGenerationMethod.MARKDOWN_AUDITED,
     }:
         return []
     warning = ResearchWarning(
