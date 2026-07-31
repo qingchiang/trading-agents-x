@@ -28,6 +28,7 @@ from .contracts import (
     MemoryContext,
     MemoryOutcome,
     MemoryRecord,
+    NumericAuditStatus,
     RebuttalReview,
     RecentInstrument,
     ResearchArtifact,
@@ -1280,6 +1281,30 @@ class RunRepository:
                             ArtifactGenerationMethod.JSON_MODE_RECOVERED,
                             ArtifactGenerationMethod.SECTIONED_RECOVERY,
                         }
+                    ),
+                    *(
+                        (
+                            ResearchWarning(
+                                code=(
+                                    "decision.numeric_audit_"
+                                    f"{decision.numeric_audit_status.value}"
+                                ),
+                                message=(
+                                    "Optional valuation and market-reference "
+                                    "figures were omitted because their "
+                                    "calculations could not be fully validated. "
+                                    "The qualitative decision remains audited."
+                                ),
+                                source="committee.final.serialize.numeric",
+                            ),
+                        )
+                        if decision is not None
+                        and decision.numeric_audit_status
+                        in {
+                            NumericAuditStatus.PARTIAL,
+                            NumericAuditStatus.INCOMPLETE,
+                        }
+                        else ()
                     ),
                 )
             )

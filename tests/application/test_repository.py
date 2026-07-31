@@ -29,6 +29,7 @@ from tradingagents.application.contracts import (
     IssueDisposition,
     JudgeDraft,
     KeyClaim,
+    NumericAuditStatus,
     RebuttalReview,
     ReportAuditStatus,
     ReportSection,
@@ -598,6 +599,32 @@ def test_recovered_artifact_surfaces_a_top_level_result_warning(
 
     assert result.warnings[0].code == "structured_output.recovered"
     assert "raw_json_recovered" in result.warnings[0].message
+
+
+def test_partial_numeric_audit_surfaces_after_result_reload(
+    repository: RunRepository,
+    app_settings: AppSettings,
+) -> None:
+    run, _ = _create(repository, app_settings)
+    repository.claim_run(run.id, "worker", 30)
+    repository.append_artifact(
+        run.id,
+        ResearchArtifactDraft(
+            node="committee.final",
+            stage="decision",
+            role="final_committee",
+            generation_method=ArtifactGenerationMethod.TOOL_CALL,
+            content=research_decision().model_copy(
+                update={"numeric_audit_status": NumericAuditStatus.PARTIAL}
+            ),
+        ),
+    )
+
+    result = repository.get_result(run.id)
+
+    assert [warning.code for warning in result.warnings] == [
+        "decision.numeric_audit_partial"
+    ]
 
 
 def test_complete_persists_result_and_resolved_memory(
