@@ -296,6 +296,33 @@ const en = {
     formula: "Formula",
     inputs: "Inputs",
     decisionCalculations: "Audited decision calculations",
+    unverifiedNumericDrafts: "Unverified numeric drafts",
+    unverifiedNumericBoundary:
+      "These model-proposed values did not pass numeric audit and were not used in the rating, thesis, memory, outcomes, or canonical numeric conclusions.",
+    omittedNumericComponents: "Omitted canonical components",
+    generationMethod: "Generation method",
+    failureReason: "Failure reason",
+    schemaValid: "Schema valid",
+    validationIssues: "Validation issues",
+    numericCandidateOversize:
+      "The candidate exceeded the retention limit. Only digest {{digest}} was retained.",
+    numericCandidateUnparseable:
+      "The provider output could not be parsed as a JSON object.",
+    numericAppendixStatus: {
+      recovered: "Recovered",
+      partial: "Partially retained",
+      incomplete: "Not retained",
+    },
+    numericSnapshotPhase: {
+      initial: "Initial candidate",
+      repair: "Repair candidate",
+    },
+    numericCandidateGroup: {
+      valuation: "Valuation proposal",
+      scenarios: "Scenario ranges",
+      references: "Market reference proposals",
+      calculations: "Calculation proposals",
+    },
     numericAuditPartial:
       "Some optional numeric conclusions were omitted because their calculations could not be fully audited.",
     numericAuditIncomplete:
@@ -670,6 +697,32 @@ const zhCN = {
     formula: "公式",
     inputs: "输入值",
     decisionCalculations: "决策关键计算审计",
+    unverifiedNumericDrafts: "未验证数值草案",
+    unverifiedNumericBoundary:
+      "这些模型建议值未通过数值审计，未用于研究评级、核心论点、Memory、Outcome 或正式数值结论。",
+    omittedNumericComponents: "正式结论中省略的组件",
+    generationMethod: "生成方式",
+    failureReason: "失败原因",
+    schemaValid: "Schema 有效",
+    validationIssues: "校验问题",
+    numericCandidateOversize:
+      "候选内容超过保留上限，仅保存摘要 {{digest}}。",
+    numericCandidateUnparseable: "供应商输出无法解析为 JSON 对象。",
+    numericAppendixStatus: {
+      recovered: "已恢复",
+      partial: "部分保留",
+      incomplete: "未保留",
+    },
+    numericSnapshotPhase: {
+      initial: "初次候选",
+      repair: "修复候选",
+    },
+    numericCandidateGroup: {
+      valuation: "估值建议",
+      scenarios: "情景区间",
+      references: "市场参考位建议",
+      calculations: "计算建议",
+    },
     numericAuditPartial:
       "部分可选数值结论因计算审计未完全通过而被省略。",
     numericAuditIncomplete:
@@ -1051,6 +1104,33 @@ const ja = {
     formula: "式",
     inputs: "入力値",
     decisionCalculations: "意思決定に関する計算監査",
+    unverifiedNumericDrafts: "未検証の数値ドラフト",
+    unverifiedNumericBoundary:
+      "これらのモデル提案値は数値監査を通過しておらず、評価、投資仮説、Memory、Outcome、正式な数値結論には使用されていません。",
+    omittedNumericComponents: "正式判断から除外した項目",
+    generationMethod: "生成方法",
+    failureReason: "失敗理由",
+    schemaValid: "Schema 有効",
+    validationIssues: "検証上の問題",
+    numericCandidateOversize:
+      "候補が保存上限を超えたため、ダイジェスト {{digest}} のみ保存しました。",
+    numericCandidateUnparseable:
+      "プロバイダー出力を JSON オブジェクトとして解析できませんでした。",
+    numericAppendixStatus: {
+      recovered: "復旧済み",
+      partial: "一部保持",
+      incomplete: "未保持",
+    },
+    numericSnapshotPhase: {
+      initial: "初回候補",
+      repair: "修復候補",
+    },
+    numericCandidateGroup: {
+      valuation: "評価提案",
+      scenarios: "シナリオ範囲",
+      references: "市場参考値の提案",
+      calculations: "計算提案",
+    },
     numericAuditPartial:
       "計算監査を完全に通過しなかった一部の任意数値を省略しました。",
     numericAuditIncomplete:

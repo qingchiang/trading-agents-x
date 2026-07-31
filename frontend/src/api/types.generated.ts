@@ -24,6 +24,7 @@ export interface components {
       instrument: string;
       instrument_name?: string | null;
       metrics?: components["schemas"]["RunMetrics"];
+      numeric_audit?: components["schemas"]["DecisionNumericAuditAppendix"] | null;
       reports: Record<string, components["schemas"]["AnalystReport"] | string>;
       run_id: string;
       status: components["schemas"]["RunStatus"];
@@ -82,6 +83,11 @@ export interface components {
       id: string;
       importance: components["schemas"]["DebateImportance"];
       question: string;
+    };
+    DecisionNumericAuditAppendix: {
+      omitted_components?: components["schemas"]["NumericAuditOmission"][];
+      snapshots: components["schemas"]["NumericAuditSnapshot"][];
+      status: components["schemas"]["NumericAuditAppendixStatus"];
     };
     DiscoveredModelView: {
       compatibility: "supported" | "unknown";
@@ -237,6 +243,23 @@ export interface components {
       reasoning_output_tokens?: number;
       tool_calls?: number;
       wall_time_seconds?: number;
+    };
+    NumericAuditAppendixStatus: "recovered" | "partial" | "incomplete";
+    NumericAuditOmission: {
+      component_path: string;
+      issue_codes: string[];
+      label: string;
+    };
+    NumericAuditPhase: "initial" | "repair";
+    NumericAuditSnapshot: {
+      candidate?: Record<string, unknown> | null;
+      candidate_digest?: string | null;
+      candidate_omitted?: string | null;
+      method: components["schemas"]["ArtifactGenerationMethod"];
+      phase: components["schemas"]["NumericAuditPhase"];
+      reason_code: string;
+      schema_valid: boolean;
+      validation_issues?: string[];
     };
     NumericAuditStatus: "complete" | "partial" | "incomplete" | "not_applicable";
     ProviderCapabilities: {

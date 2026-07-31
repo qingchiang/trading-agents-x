@@ -1,18 +1,24 @@
 import { useTranslation } from "react-i18next";
 
-import type { ResearchDecision } from "../api/client";
+import type {
+  DecisionNumericAuditAppendix,
+  ResearchDecision,
+} from "../api/client";
 import type { EvidenceReferenceIndex } from "../evidence";
 import EvidenceLinks from "./EvidenceLinks";
 import { MarkdownList } from "./AnalystReportView";
 import Markdown from "./Markdown";
+import NumericAuditAppendixView from "./NumericAuditAppendixView";
 
 export default function ResearchDecisionView({
   decision,
+  numericAudit,
   evidenceIndex,
   onEvidence,
   onOpenWarnings,
 }: {
   decision: ResearchDecision | null;
+  numericAudit?: DecisionNumericAuditAppendix | null;
   evidenceIndex: EvidenceReferenceIndex;
   onEvidence: (ref: string) => void;
   onOpenWarnings?: () => void;
@@ -37,6 +43,7 @@ export default function ResearchDecisionView({
     >
       <ResearchDecisionContent
         decision={decision}
+        numericAudit={numericAudit}
         evidenceIndex={evidenceIndex}
         onEvidence={onEvidence}
         onOpenWarnings={onOpenWarnings}
@@ -47,12 +54,14 @@ export default function ResearchDecisionView({
 
 export function ResearchDecisionContent({
   decision,
+  numericAudit,
   evidenceIndex,
   onEvidence,
   onOpenWarnings,
   embedded = false,
 }: {
   decision: ResearchDecision;
+  numericAudit?: DecisionNumericAuditAppendix | null;
   evidenceIndex: EvidenceReferenceIndex;
   onEvidence: (ref: string) => void;
   onOpenWarnings?: () => void;
@@ -351,6 +360,12 @@ export function ResearchDecisionContent({
               ))}
             </div>
           </details>
+        </section>
+      )}
+
+      {!embedded && numericAudit && (
+        <section className="decision-section numeric-audit-section">
+          <NumericAuditAppendixView appendix={numericAudit} />
         </section>
       )}
 

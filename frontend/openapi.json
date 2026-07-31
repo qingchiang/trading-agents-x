@@ -166,6 +166,16 @@
           "metrics": {
             "$ref": "#/components/schemas/RunMetrics"
           },
+          "numeric_audit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DecisionNumericAuditAppendix"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "reports": {
             "additionalProperties": {
               "anyOf": [
@@ -589,6 +599,38 @@
           "importance"
         ],
         "title": "DebateIssue",
+        "type": "object"
+      },
+      "DecisionNumericAuditAppendix": {
+        "additionalProperties": false,
+        "description": "Unverified numeric proposals kept outside the canonical decision.",
+        "properties": {
+          "omitted_components": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/NumericAuditOmission"
+            },
+            "title": "Omitted Components",
+            "type": "array"
+          },
+          "snapshots": {
+            "items": {
+              "$ref": "#/components/schemas/NumericAuditSnapshot"
+            },
+            "maxItems": 2,
+            "minItems": 1,
+            "title": "Snapshots",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/NumericAuditAppendixStatus"
+          }
+        },
+        "required": [
+          "status",
+          "snapshots"
+        ],
+        "title": "DecisionNumericAuditAppendix",
         "type": "object"
       },
       "DiscoveredModelView": {
@@ -1647,6 +1689,127 @@
           }
         },
         "title": "NodeMetrics",
+        "type": "object"
+      },
+      "NumericAuditAppendixStatus": {
+        "enum": [
+          "recovered",
+          "partial",
+          "incomplete"
+        ],
+        "title": "NumericAuditAppendixStatus",
+        "type": "string"
+      },
+      "NumericAuditOmission": {
+        "additionalProperties": false,
+        "properties": {
+          "component_path": {
+            "pattern": "^[a-z0-9_.-]+$",
+            "title": "Component Path",
+            "type": "string"
+          },
+          "issue_codes": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Issue Codes",
+            "type": "array"
+          },
+          "label": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "component_path",
+          "label",
+          "issue_codes"
+        ],
+        "title": "NumericAuditOmission",
+        "type": "object"
+      },
+      "NumericAuditPhase": {
+        "enum": [
+          "initial",
+          "repair"
+        ],
+        "title": "NumericAuditPhase",
+        "type": "string"
+      },
+      "NumericAuditSnapshot": {
+        "additionalProperties": false,
+        "description": "One sanitized failed numeric serializer candidate.",
+        "properties": {
+          "candidate": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate"
+          },
+          "candidate_digest": {
+            "anyOf": [
+              {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Digest"
+          },
+          "candidate_omitted": {
+            "anyOf": [
+              {
+                "const": "oversize",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Omitted"
+          },
+          "method": {
+            "$ref": "#/components/schemas/ArtifactGenerationMethod"
+          },
+          "phase": {
+            "$ref": "#/components/schemas/NumericAuditPhase"
+          },
+          "reason_code": {
+            "pattern": "^[a-z0-9_.-]+$",
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "schema_valid": {
+            "title": "Schema Valid",
+            "type": "boolean"
+          },
+          "validation_issues": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Validation Issues",
+            "type": "array"
+          }
+        },
+        "required": [
+          "phase",
+          "method",
+          "reason_code",
+          "schema_valid"
+        ],
+        "title": "NumericAuditSnapshot",
         "type": "object"
       },
       "NumericAuditStatus": {

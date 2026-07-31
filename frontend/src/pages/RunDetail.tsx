@@ -3,6 +3,7 @@ import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import {
   api,
+  type AnalysisResult,
   type AnalystReport,
   type Capabilities,
   type EvidenceBundle,
@@ -502,6 +503,7 @@ export default function RunDetail() {
       {activeView === "decision" && (
         <DecisionPanel
           decision={decision}
+          numericAudit={detail.result?.numeric_audit}
           onEvidence={openSourceDrawer}
           evidenceIndex={evidenceIndex}
           onOpenWarnings={() => setWarningOpenRequest((value) => value + 1)}
@@ -1012,11 +1014,13 @@ function ReportsPanel({
 
 function DecisionPanel({
   decision,
+  numericAudit,
   onEvidence,
   evidenceIndex,
   onOpenWarnings,
 }: {
   decision: ResearchDecision | null;
+  numericAudit: AnalysisResult["numeric_audit"];
   onEvidence: (ref: string) => void;
   evidenceIndex: EvidenceReferenceIndex;
   onOpenWarnings: () => void;
@@ -1024,6 +1028,7 @@ function DecisionPanel({
   return (
     <ResearchDecisionView
       decision={decision}
+      numericAudit={numericAudit}
       onEvidence={onEvidence}
       evidenceIndex={evidenceIndex}
       onOpenWarnings={onOpenWarnings}

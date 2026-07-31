@@ -536,6 +536,38 @@ test("restores deliberation and resolves evidence references across run views", 
 test("keeps a degraded numeric audit compact and opens run warnings on demand", async () => {
   const degraded = structuredClone(detail);
   degraded.result!.decision!.numeric_audit_status = "incomplete";
+  degraded.result!.numeric_audit = {
+    status: "incomplete",
+    omitted_components: [
+      {
+        component_path: "numeric.valuation",
+        label: "Valuation assessment",
+        issue_codes: ["numeric.valuation.unknown_calculation"],
+      },
+    ],
+    snapshots: [
+      {
+        phase: "initial",
+        method: "tool_call",
+        reason_code: "semantic_validation",
+        validation_issues: ["semantic.numeric.valuation.invalid"],
+        schema_valid: false,
+        candidate: { marker: "initial-value" },
+        candidate_digest: "a".repeat(64),
+      },
+      {
+        phase: "repair",
+        method: "tool_call_recovered",
+        reason_code: "semantic_validation",
+        validation_issues: ["semantic.numeric.valuation.unknown_calculation"],
+        schema_valid: true,
+        candidate: {
+          valuation_assessment: { method: "repair-value" },
+        },
+        candidate_digest: "b".repeat(64),
+      },
+    ],
+  };
   degraded.result!.warnings = [
     {
       code: "decision.numeric_audit_incomplete",
@@ -558,6 +590,16 @@ test("keeps a degraded numeric audit compact and opens run warnings on demand", 
     ),
   ).toBeVisible();
   expect(screen.getByText("Optional numeric conclusions were omitted.")).not.toBeVisible();
+
+  const appendixSummary = screen.getByText("Unverified numeric drafts");
+  const appendix = appendixSummary.closest("details");
+  expect(appendix).not.toHaveAttribute("open");
+  fireEvent.click(appendixSummary);
+  expect(screen.getByText("Valuation assessment")).toBeVisible();
+  expect(screen.getByText(/repair-value/)).toBeVisible();
+  expect(screen.queryByText(/initial-value/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("tab", { name: "Initial candidate" }));
+  expect(screen.getByText(/initial-value/)).toBeVisible();
 
   fireEvent.click(screen.getByRole("button", { name: "Review warnings" }));
 
