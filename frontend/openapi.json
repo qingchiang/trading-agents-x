@@ -1372,11 +1372,10 @@
             "title": "Interpretation",
             "type": "string"
           },
-          "level_type": {
-            "maxLength": 80,
+          "label": {
+            "maxLength": 120,
             "minLength": 1,
-            "pattern": "^[a-z][a-z0-9_.-]*$",
-            "title": "Level Type",
+            "title": "Label",
             "type": "string"
           },
           "unit": {
@@ -1391,7 +1390,7 @@
           }
         },
         "required": [
-          "level_type",
+          "label",
           "value",
           "unit",
           "as_of_date",

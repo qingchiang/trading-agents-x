@@ -123,7 +123,7 @@ class _StructuredInvoker:
                     "neutral",
                     "conservative",
                 )
-                if f'"role":"{role}"' in prompt
+                if f'"{role}"' in prompt
             )
             adjustments = (
                 tuple(
@@ -136,7 +136,7 @@ class _StructuredInvoker:
                     )
                     for role in risk_roles
                 )
-                if '"risk_reviews":' in prompt
+                if "REQUIRED RISK REVIEW ROLES:" in prompt
                 else ()
             )
             parsed = research_decision(
@@ -380,6 +380,14 @@ def test_profiles_share_contract_but_use_distinct_topologies(
         } <= set(node_metrics)
         assert not any(node.endswith(".prepare") for node in node_metrics)
         assert "case.bull" not in node_metrics
+        final_prompt = next(
+            prompt
+            for schema, prompt in deep.calls
+            if schema == "ResearchDecision"
+        )
+        assert "DECISION SYNTHESIS BRIEF:" in final_prompt
+        assert "RESEARCH CONTEXT:" not in final_prompt
+        assert "REQUIRED RISK REVIEW ROLES:" in final_prompt
 
 
 @pytest.mark.parametrize(

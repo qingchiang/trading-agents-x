@@ -56,7 +56,7 @@ def test_research_decision_accepts_audited_nonpersonalized_opinions() -> None:
             },
             "market_reference_levels": [
                 {
-                    "level_type": "observed_support",
+                    "label": "Observed support",
                     "value": 95.0,
                     "unit": "USD",
                     "as_of_date": "2026-07-24",
@@ -73,7 +73,32 @@ def test_research_decision_accepts_audited_nonpersonalized_opinions() -> None:
 
     assert decision.rating.value == "Overweight"
     assert decision.valuation_assessment is not None
-    assert decision.market_reference_levels[0].level_type == "observed_support"
+    assert decision.market_reference_levels[0].label == "Observed support"
+
+
+def test_research_decision_merges_nested_evidence_refs_deterministically() -> None:
+    payload = research_decision().model_dump(mode="json")
+    nested_ref = "ev_ffffffffffff"
+    payload["scenarios"][0]["evidence_refs"] = [nested_ref]
+    payload["evidence_refs"] = ["ev_0123456789ab"]
+
+    decision = ResearchDecision.model_validate(payload)
+
+    assert decision.evidence_refs == (
+        "ev_0123456789ab",
+        nested_ref,
+    )
+
+
+def test_research_decision_rejects_duplicate_scenario_kinds() -> None:
+    payload = research_decision().model_dump(mode="json")
+    payload["scenarios"][1]["kind"] = "base"
+
+    with pytest.raises(
+        ValidationError,
+        match="decision_scenarios_duplicate_kind",
+    ):
+        ResearchDecision.model_validate(payload)
 
 
 def test_legacy_warning_strings_become_plain_structured_records() -> None:

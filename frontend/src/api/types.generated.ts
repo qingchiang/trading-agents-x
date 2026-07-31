@@ -196,7 +196,7 @@ export interface components {
       as_of_date: string;
       evidence_refs: string[];
       interpretation: string;
-      level_type: string;
+      label: string;
       unit: string;
       value: number;
     };

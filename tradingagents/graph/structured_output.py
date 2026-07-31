@@ -80,6 +80,7 @@ class StructuredOutputRunner(Generic[StructuredModel]):
         invoke_config: dict[str, Any] | None = None,
         repair_mode: Literal["json_mode", "preferred"] = "json_mode",
         include_candidate_in_repair: bool = False,
+        candidate_only_repair: bool = False,
         repair_instructions: str | None = None,
         truncation_recovery: (
             Callable[[], StructuredOutputResult[StructuredModel]] | None
@@ -93,6 +94,7 @@ class StructuredOutputRunner(Generic[StructuredModel]):
         self.invoke_config = invoke_config
         self.repair_mode = repair_mode
         self.include_candidate_in_repair = include_candidate_in_repair
+        self.candidate_only_repair = candidate_only_repair
         self.repair_instructions = repair_instructions
         self.truncation_recovery = truncation_recovery
 
@@ -258,6 +260,7 @@ class StructuredOutputRunner(Generic[StructuredModel]):
                 else None
             ),
             repair_instructions=self.repair_instructions,
+            candidate_only=self.candidate_only_repair,
         )
         try:
             if self.repair_mode == "preferred":
@@ -535,6 +538,7 @@ def _recovery_prompt(
     validation_issues: tuple[str, ...],
     candidate: dict[str, Any] | None,
     repair_instructions: str | None,
+    candidate_only: bool,
 ) -> str:
     return _json_contract_prompt(
         original_prompt,
@@ -546,6 +550,7 @@ def _recovery_prompt(
         candidate=candidate,
         repair_instructions=repair_instructions,
         retry=True,
+        include_original_prompt=not (candidate_only and candidate is not None),
     )
 
 
@@ -567,6 +572,7 @@ def _primary_json_prompt(
         candidate=None,
         repair_instructions=None,
         retry=False,
+        include_original_prompt=True,
     )
 
 
@@ -581,6 +587,7 @@ def _json_contract_prompt(
     candidate: dict[str, Any] | None,
     repair_instructions: str | None,
     retry: bool,
+    include_original_prompt: bool,
 ) -> str:
     introduction = (
         "The previous response did not satisfy the required output contract."
@@ -609,6 +616,11 @@ def _json_contract_prompt(
         if repair_instructions
         else ""
     )
+    original_task = (
+        f"\nORIGINAL TASK:\n{original_prompt}\n"
+        if include_original_prompt
+        else ""
+    )
     return f"""{introduction}
 Return exactly one JSON object and no Markdown, prose, or code fence.
 The object must satisfy the JSON Schema and all semantic requirements in the
@@ -628,9 +640,7 @@ ALLOWED EVIDENCE REFS:
 
 ALLOWED MEMORY REFS:
 {json.dumps(allowed_memory_refs, ensure_ascii=False)}
-
-ORIGINAL TASK:
-{original_prompt}
+{original_task}
 """
 
 

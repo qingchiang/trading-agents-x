@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import operator
 import re
 from collections.abc import Callable, Iterable, Mapping
@@ -1307,9 +1308,15 @@ class ResearchGraph:
                     prompt=(
                         "Map the completed decision synthesis brief to the "
                         "strict final decision contract. Preserve its research "
-                        "judgment; do not add unsupported facts.\n\n"
+                        "judgment; do not add unsupported facts. Use localized "
+                        "reader-facing labels for market reference levels.\n\n"
                         f"DECISION SYNTHESIS BRIEF:\n{written.markdown}\n\n"
-                        f"RESEARCH CONTEXT:\n{context.prompt}"
+                        "ALLOWED EVIDENCE REFS:\n"
+                        f"{json.dumps(_state_evidence_refs(state))}\n\n"
+                        "ALLOWED MEMORY REFS:\n"
+                        f"{json.dumps(tuple(runtime.context.memory.refs))}\n\n"
+                        "REQUIRED RISK REVIEW ROLES:\n"
+                        f"{json.dumps(tuple(state.get('risk_reviews', {})))}"
                     ),
                     state=state,
                     node=f"{node}.serialize",
@@ -1325,7 +1332,7 @@ class ResearchGraph:
                 role="final_committee",
                 content=decision,
                 generation_method=output.generation_method,
-                prompt_version="final-committee-v5-compact",
+                prompt_version="final-committee-v6-stable",
             )
             self._finish_node(
                 runtime,

@@ -16,6 +16,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from pydantic_core import PydanticCustomError
 
 from tradingagents.application.reporting import order_reports
 from tradingagents.dataflows.symbol_utils import (
@@ -496,7 +497,6 @@ class ReportSection(FrozenModel):
     def validate_source_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return _unique_evidence_refs(value)
 
-
 class KeyClaim(FrozenModel):
     """A decision-relevant assertion extracted from a readable report."""
 
@@ -741,11 +741,7 @@ class ValuationAssessment(FrozenModel):
 
 
 class MarketReferenceLevel(FrozenModel):
-    level_type: str = Field(
-        min_length=1,
-        max_length=80,
-        pattern=r"^[a-z][a-z0-9_.-]*$",
-    )
+    label: str = Field(min_length=1, max_length=120)
     value: float
     unit: str = Field(min_length=1, max_length=32)
     as_of_date: date
@@ -845,6 +841,28 @@ class ResearchDecision(FrozenModel):
     calculation_records: tuple[CalculationRecord, ...] = ()
     risk_review_adjustments: tuple[RiskReviewAdjustment, ...] = ()
 
+    @model_validator(mode="before")
+    @classmethod
+    def merge_nested_evidence_refs(cls, value: Any) -> Any:
+        """Make the top-level evidence index a deterministic nested-ref union."""
+        if not isinstance(value, dict):
+            return value
+        merged = list(value.get("evidence_refs") or ())
+        for scenario in value.get("scenarios") or ():
+            merged.extend(_field_value(scenario, "evidence_refs") or ())
+        valuation = value.get("valuation_assessment")
+        if valuation is not None:
+            merged.extend(_field_value(valuation, "input_evidence_refs") or ())
+        for level in value.get("market_reference_levels") or ():
+            merged.extend(_field_value(level, "evidence_refs") or ())
+        for calculation in value.get("calculation_records") or ():
+            merged.extend(
+                _field_value(calculation, "input_evidence_refs") or ()
+            )
+        for adjustment in value.get("risk_review_adjustments") or ():
+            merged.extend(_field_value(adjustment, "evidence_refs") or ())
+        return {**value, "evidence_refs": tuple(dict.fromkeys(merged))}
+
     @field_validator("memory_refs")
     @classmethod
     def validate_memory_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
@@ -862,31 +880,27 @@ class ResearchDecision(FrozenModel):
         return _unique_evidence_refs(value)
 
     @model_validator(mode="after")
-    def validate_decision(self) -> ResearchDecision:
-        scenario_kinds = tuple(scenario.kind for scenario in self.scenarios)
+    def validate_scenario_set(self) -> ResearchDecision:
+        scenario_kinds = tuple(item.kind for item in self.scenarios)
+        if len(set(scenario_kinds)) != len(scenario_kinds):
+            raise PydanticCustomError(
+                "decision_scenarios_duplicate_kind",
+                "research scenario kinds must be unique",
+            )
         if set(scenario_kinds) != set(ResearchScenarioKind):
-            raise ValueError("research decision requires one base, bull, and bear scenario")
-        if len(scenario_kinds) != len(set(scenario_kinds)):
-            raise ValueError("research scenario kinds must be unique")
-        nested_refs = {ref for scenario in self.scenarios for ref in scenario.evidence_refs}
-        if self.valuation_assessment is not None:
-            nested_refs.update(self.valuation_assessment.input_evidence_refs)
-        nested_refs.update(
-            ref for level in self.market_reference_levels for ref in level.evidence_refs
-        )
-        nested_refs.update(
-            ref
-            for calculation in self.calculation_records
-            for ref in calculation.input_evidence_refs
-        )
-        nested_refs.update(
-            ref for adjustment in self.risk_review_adjustments for ref in adjustment.evidence_refs
-        )
-        if not nested_refs.issubset(self.evidence_refs):
-            raise ValueError(
-                "decision refs must include scenario, valuation, and market-reference evidence"
+            raise PydanticCustomError(
+                "decision_scenarios_incomplete_set",
+                "research decision requires base, bull, and bear scenarios",
             )
         return self
+
+
+def _field_value(value: Any, field: str) -> Any:
+    if isinstance(value, BaseModel):
+        return getattr(value, field, None)
+    if isinstance(value, dict):
+        return value.get(field)
+    return None
 
 
 class MemoryOutcome(FrozenModel):

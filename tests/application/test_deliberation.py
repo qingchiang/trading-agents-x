@@ -412,3 +412,31 @@ def test_final_decision_rejects_unreproducible_critical_calculation() -> None:
     assert error.value.validation_issues == (
         "semantic.decision.calculation.result_mismatch",
     )
+
+
+def test_final_decision_reports_stable_duplicate_scenario_issue() -> None:
+    state = _state()
+    ref = state["evidence_bundle"]["items"][0]["ref"]
+    decision = research_decision(evidence_refs=(ref,))
+    duplicate = decision.model_copy(
+        update={
+            "scenarios": (
+                decision.scenarios[0],
+                decision.scenarios[0],
+                decision.scenarios[2],
+            )
+        }
+    )
+
+    with pytest.raises(StructuredOutputError) as error:
+        invoke_research_decision(
+            _StaticLLM(duplicate),
+            prompt="Form the final decision.",
+            state=state,
+            node="committee.final",
+            require_risk_adjustments=False,
+        )
+
+    assert error.value.validation_issues == (
+        "schema.root.decision_scenarios_duplicate_kind",
+    )

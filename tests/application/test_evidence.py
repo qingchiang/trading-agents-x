@@ -822,7 +822,7 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
             ),
             "market_reference_levels": (
                 MarketReferenceLevel(
-                    level_type="recent_support",
+                    label="Recent support",
                     value=98,
                     unit="USD",
                     as_of_date=date(2026, 7, 24),

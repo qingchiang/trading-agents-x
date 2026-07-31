@@ -593,7 +593,7 @@ def _render_research_decision(content: ResearchDecision) -> str:
             lines.extend(
                 [
                     "",
-                    f"#### {level.level_type.replace('_', ' ').title()}",
+                    f"#### {level.label}",
                     "",
                     f"- Value: `{level.value}` {level.unit}",
                     f"- As of: `{level.as_of_date.isoformat()}`",

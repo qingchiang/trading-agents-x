@@ -201,9 +201,9 @@ export function ResearchDecisionContent({
               <div className="market-reference-list">
                 {(decision.market_reference_levels ?? []).map(
                   (level, index) => (
-                    <section key={`${level.level_type}:${index}`}>
+                    <section key={`${level.label}:${index}`}>
                       <header>
-                        <strong>{humanize(level.level_type)}</strong>
+                        <strong>{level.label}</strong>
                         <span>
                           {level.value.toLocaleString()} {level.unit}
                         </span>

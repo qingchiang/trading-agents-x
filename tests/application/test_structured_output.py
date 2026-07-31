@@ -188,6 +188,41 @@ def test_json_mode_recovery_succeeds_with_two_calls() -> None:
     ]
 
 
+def test_candidate_only_repair_omits_the_original_task() -> None:
+    original_task = "FULL RESEARCH CONTEXT MUST NOT BE REPEATED"
+    llm = _FakeLLM(
+        primary={
+            "raw": AIMessage(content=""),
+            "parsed": _review(risks=()),
+            "parsing_error": None,
+        },
+        recovery={
+            "raw": AIMessage(content=""),
+            "parsed": _review(),
+            "parsing_error": None,
+        },
+    )
+    runner = StructuredOutputRunner(
+        llm=llm,
+        schema=_Review,
+        validator=_validate,
+        node="case.bear",
+        include_candidate_in_repair=True,
+        candidate_only_repair=True,
+    )
+
+    result = runner.invoke(
+        original_task,
+        example=_review().model_dump(mode="json"),
+        allowed_evidence_refs=(_REF,),
+    )
+
+    assert result.value == _review()
+    recovery_prompt = llm.calls[1][1]
+    assert "INVALID CANDIDATE JSON" in recovery_prompt
+    assert original_task not in recovery_prompt
+
+
 def test_two_invalid_outputs_fail_without_leaking_provider_content() -> None:
     secret = "token=private-value"
     response = {

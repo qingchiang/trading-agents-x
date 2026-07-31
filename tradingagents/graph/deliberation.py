@@ -416,6 +416,11 @@ def invoke_research_decision(
     )
 
     def validate(result: ResearchDecision) -> ResearchDecision:
+        scenario_kinds = tuple(item.kind for item in result.scenarios)
+        if len(set(scenario_kinds)) != len(scenario_kinds):
+            raise OutputValidationError("decision.scenarios.duplicate_kind")
+        if set(scenario_kinds) != set(ResearchScenarioKind):
+            raise OutputValidationError("decision.scenarios.incomplete_set")
         require_text(result.executive_summary)
         require_text(result.thesis)
         require_nonempty_texts(result.risks)
@@ -523,11 +528,15 @@ def invoke_research_decision(
         event_writer=event_writer,
         repair_mode="preferred",
         include_candidate_in_repair=True,
+        candidate_only_repair=True,
         invoke_config={"metadata": {"research_node": node}},
         repair_instructions=(
             "Keep valid research content. Use only allowed evidence and memory "
             "refs. Every decision-critical calculation must be reproducible "
-            "from its named numeric inputs."
+            "from its named numeric inputs. The scenarios must contain exactly "
+            "one base, one bull, and one bear case. Market-reference labels are "
+            "reader-facing localized text, not machine identifiers. Required "
+            f"risk-review roles: {json.dumps(risk_roles)}."
         ),
     ).invoke(
         prompt
