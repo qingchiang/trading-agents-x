@@ -127,6 +127,14 @@ export interface components {
       timing?: string;
     };
     EvidenceQuality: "high" | "medium" | "low" | "unavailable";
+    EvidenceSealView: {
+      digest?: string | null;
+      item_count?: number;
+      sealed_at?: string | null;
+      sealed_attempt?: number | null;
+      status: "pending" | "sealed";
+      table_count?: number;
+    };
     EvidenceTable: {
       columns: components["schemas"]["EvidenceTableColumn"][];
       evidence_refs: string[];
@@ -367,6 +375,7 @@ export interface components {
     };
     RunDetail: {
       attempts?: components["schemas"]["RunAttemptView"][];
+      evidence_status: components["schemas"]["EvidenceSealView"];
       result?: components["schemas"]["AnalysisResult"] | null;
       run: components["schemas"]["RunView"];
     };

@@ -907,6 +907,72 @@
         "title": "EvidenceQuality",
         "type": "string"
       },
+      "EvidenceSealView": {
+        "additionalProperties": false,
+        "description": "Durable status of the immutable evidence boundary for one run.",
+        "properties": {
+          "digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Digest"
+          },
+          "item_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Item Count",
+            "type": "integer"
+          },
+          "sealed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sealed At"
+          },
+          "sealed_attempt": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sealed Attempt"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "sealed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "table_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Table Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "EvidenceSealView",
+        "type": "object"
+      },
       "EvidenceTable": {
         "additionalProperties": false,
         "description": "A complete fact table deterministically extracted from source evidence.",
@@ -2558,6 +2624,9 @@
             "title": "Attempts",
             "type": "array"
           },
+          "evidence_status": {
+            "$ref": "#/components/schemas/EvidenceSealView"
+          },
           "result": {
             "anyOf": [
               {
@@ -2573,7 +2642,8 @@
           }
         },
         "required": [
-          "run"
+          "run",
+          "evidence_status"
         ],
         "title": "RunDetail",
         "type": "object"
@@ -3749,6 +3819,45 @@
           }
         },
         "summary": "Stream Events"
+      }
+    },
+    "/api/v1/runs/{run_id}/evidence": {
+      "get": {
+        "operationId": "get_evidence_api_v1_runs__run_id__evidence_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceBundle"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Evidence"
       }
     },
     "/api/v1/runs/{run_id}/export": {

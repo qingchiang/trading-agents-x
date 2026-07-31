@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
+    EvidenceSealView,
     ResearchDecision,
     RunAttemptView,
     RunView,
@@ -28,6 +29,7 @@ class RunDetail(ApiModel):
     run: RunView
     result: AnalysisResult | None = None
     attempts: tuple[RunAttemptView, ...] = ()
+    evidence_status: EvidenceSealView
 
 
 class RunCreateRequest(AnalysisRequest):

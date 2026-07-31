@@ -45,6 +45,10 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
             tuple(constraint["column_names"])
             for constraint in inspector.get_unique_constraints("run_artifacts")
         }
+        evidence_columns = {
+            column["name"] for column in inspector.get_columns("run_evidence")
+        }
+        table_names = set(inspector.get_table_names())
     finally:
         engine.dispose()
 
@@ -70,8 +74,17 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
         "role",
         "round",
         "prompt_version",
-        "content_hash",
     ) in artifact_uniques
+    assert evidence_columns == {
+        "run_id",
+        "sealed_attempt",
+        "bundle_json",
+        "digest",
+        "item_count",
+        "table_count",
+        "sealed_at",
+    }
+    assert "reports" not in table_names
     assert "trashed_at" in run_columns
     assert "ix_runs_trash" in run_indexes
     assert "next_check_at" in outcome_columns

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -24,6 +23,7 @@ from .contracts import (
     ArtifactGenerationMethod,
     DebateAgenda,
     EvidenceBundle,
+    EvidenceSealView,
     JudgeDraft,
     MemoryContext,
     MemoryOutcome,
@@ -50,10 +50,10 @@ from .database import (
     LegacyImportRecord,
     OutcomeRecord,
     ReflectionRecord,
-    ReportRecord,
     RunArtifactRecord,
     RunAttemptRecord,
     RunEventRecord,
+    RunEvidenceRecord,
     RunRecord,
     create_sqlite_engine,
 )
@@ -126,6 +126,18 @@ class InvalidRunTransitionError(RuntimeError):
 
 
 class IdempotencyConflictError(RuntimeError):
+    pass
+
+
+class ArtifactConflictError(RuntimeError):
+    pass
+
+
+class EvidenceConflictError(RuntimeError):
+    pass
+
+
+class EvidenceNotSealedError(RuntimeError):
     pass
 
 
@@ -851,13 +863,17 @@ class RunRepository:
                         table.c.role == draft.role,
                         table.c.round == draft.round,
                         table.c.prompt_version == draft.prompt_version,
-                        table.c.content_hash == draft.content_hash,
                     )
                 )
                 .mappings()
                 .first()
             )
             if existing is not None:
+                if existing["content_hash"] != draft.content_hash:
+                    connection.rollback()
+                    raise ArtifactConflictError(
+                        "artifact identity replayed with different content"
+                    )
                 connection.commit()
                 return self._artifact(existing), None
 
@@ -949,6 +965,135 @@ class RunRepository:
             raise RunNotFoundError(run_id)
         return [self._artifact(record) for record in records]
 
+    def seal_evidence(
+        self,
+        run_id: str,
+        bundle: EvidenceBundle,
+    ) -> tuple[EvidenceSealView, RunEvent | None]:
+        """Persist the immutable evidence ledger and its event atomically."""
+        now = _utc_naive()
+        digest = bundle.digest
+        if digest is None:  # pragma: no cover - enforced by EvidenceBundle
+            raise ValueError("evidence bundle must have a digest")
+        table = RunEvidenceRecord.__table__
+        with self.engine.connect() as connection:
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+            run_row = connection.execute(
+                select(
+                    RunRecord.current_attempt,
+                    RunRecord.status,
+                ).where(RunRecord.id == run_id)
+            ).first()
+            if run_row is None:
+                connection.rollback()
+                raise RunNotFoundError(run_id)
+            if run_row.status != RunStatus.RUNNING.value:
+                connection.rollback()
+                raise InvalidRunTransitionError(run_row.status)
+            existing = (
+                connection.execute(
+                    select(table).where(table.c.run_id == run_id)
+                )
+                .mappings()
+                .first()
+            )
+            if existing is not None:
+                if existing["digest"] != digest:
+                    connection.rollback()
+                    raise EvidenceConflictError(
+                        "evidence seal replayed with a different digest"
+                    )
+                connection.commit()
+                return self._evidence_view(existing), None
+
+            attempt = run_row.current_attempt
+            connection.execute(
+                table.insert().values(
+                    run_id=run_id,
+                    sealed_attempt=attempt,
+                    bundle_json=bundle.model_dump(mode="json"),
+                    digest=digest,
+                    item_count=len(bundle.items),
+                    table_count=len(bundle.tables),
+                    sealed_at=now,
+                )
+            )
+            sequence = connection.execute(
+                select(func.coalesce(func.max(RunEventRecord.sequence), 0) + 1)
+                .where(RunEventRecord.run_id == run_id)
+            ).scalar_one()
+            payload = {
+                "attempt": attempt,
+                "digest": digest,
+                "item_count": len(bundle.items),
+                "table_count": len(bundle.tables),
+            }
+            connection.execute(
+                RunEventRecord.__table__.insert().values(
+                    run_id=run_id,
+                    sequence=sequence,
+                    attempt=attempt,
+                    event_type="evidence.sealed",
+                    node="evidence.seal",
+                    payload_json=payload,
+                    created_at=now,
+                )
+            )
+            connection.commit()
+        view = EvidenceSealView(
+            status="sealed",
+            digest=digest,
+            item_count=len(bundle.items),
+            table_count=len(bundle.tables),
+            sealed_attempt=attempt,
+            sealed_at=_aware(now),
+        )
+        return (
+            view,
+            RunEvent(
+                run_id=run_id,
+                sequence=sequence,
+                attempt=attempt,
+                event_type="evidence.sealed",
+                node="evidence.seal",
+                payload=payload,
+                created_at=_aware(now),
+            ),
+        )
+
+    def evidence_status(self, run_id: str) -> EvidenceSealView:
+        with self.engine.connect() as connection:
+            run_exists = connection.scalar(
+                select(func.count())
+                .select_from(RunRecord)
+                .where(RunRecord.id == run_id)
+            )
+            if not run_exists:
+                raise RunNotFoundError(run_id)
+            record = (
+                connection.execute(
+                    select(RunEvidenceRecord.__table__).where(
+                        RunEvidenceRecord.run_id == run_id
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        return (
+            self._evidence_view(record)
+            if record is not None
+            else EvidenceSealView(status="pending")
+        )
+
+    def get_evidence(self, run_id: str) -> EvidenceBundle:
+        with self.sessions() as session:
+            record = session.get(RunEvidenceRecord, run_id)
+            if record is None:
+                if session.get(RunRecord, run_id) is None:
+                    raise RunNotFoundError(run_id)
+                raise EvidenceNotSealedError(run_id)
+            return EvidenceBundle.model_validate(record.bundle_json)
+
     def complete(
         self,
         run_id: str,
@@ -964,21 +1109,12 @@ class RunRepository:
                 raise RunNotFoundError(run_id)
             if record.status != RunStatus.RUNNING.value:
                 raise InvalidRunTransitionError(record.status)
-            for name, report in order_reports(result.reports).items():
-                if hasattr(report, "model_dump"):
-                    structured = report.model_dump(mode="json")
-                    markdown = getattr(report, "narrative", json.dumps(structured))
-                else:
-                    structured = None
-                    markdown = str(report)
-                session.add(
-                    ReportRecord(
-                        run_id=run_id,
-                        name=name,
-                        markdown=markdown,
-                        structured_json=structured,
-                        created_at=now,
-                    )
+            sealed = session.get(RunEvidenceRecord, run_id)
+            if sealed is None:
+                raise EvidenceNotSealedError(run_id)
+            if sealed.digest != evidence.digest:
+                raise EvidenceConflictError(
+                    "completed result does not match the sealed evidence"
                 )
             if result.decision is not None:
                 request = AnalysisRequest.model_validate(record.request_json)
@@ -994,7 +1130,6 @@ class RunRepository:
                     rating=result.decision.rating.value,
                     confidence=result.decision.confidence,
                     decision_json=result.decision.model_dump(mode="json"),
-                    evidence_bundle_json=evidence.model_dump(mode="json"),
                     created_at=now,
                 )
                 session.add(decision)
@@ -1086,41 +1221,28 @@ class RunRepository:
 
     def get_result(self, run_id: str) -> AnalysisResult:
         view = self.get_run(run_id)
+        artifacts = self.list_artifacts(run_id)
         with self.sessions() as session:
-            report_records = list(
-                session.scalars(
-                    select(ReportRecord)
-                    .where(ReportRecord.run_id == run_id)
-                    .order_by(ReportRecord.id)
-                )
-            )
             decision_record = session.scalar(
                 select(DecisionRecord).where(DecisionRecord.run_id == run_id)
             )
-        reports: dict[str, Any] = {}
-        for report in report_records:
-            if report.structured_json and report.name in {
-                "market",
-                "social",
-                "news",
-                "fundamentals",
-            }:
-                reports[report.name] = AnalystReport.model_validate(
-                    report.structured_json
-                )
-            else:
-                reports[report.name] = report.markdown
-        reports = order_reports(reports)
+            evidence_record = session.get(RunEvidenceRecord, run_id)
+        reports = order_reports(
+            {
+                artifact.role: artifact.content
+                for artifact in artifacts
+                if artifact.stage == "analyst"
+                and isinstance(artifact.content, AnalystReport)
+            }
+        )
         decision = (
             ResearchDecision.model_validate(decision_record.decision_json)
             if decision_record
             else None
         )
         evidence = (
-            EvidenceBundle.model_validate(
-                decision_record.evidence_bundle_json
-            )
-            if decision_record
+            EvidenceBundle.model_validate(evidence_record.bundle_json)
+            if evidence_record
             else None
         )
         warnings = tuple(
@@ -1142,7 +1264,7 @@ class RunRepository:
                             ),
                             source=f"{artifact.stage}.{artifact.role}",
                         )
-                        for artifact in self.list_artifacts(run_id)
+                        for artifact in artifacts
                         if artifact.generation_method
                         in {
                             ArtifactGenerationMethod.RAW_JSON_RECOVERED,
@@ -1231,6 +1353,17 @@ class RunRepository:
             generation_method=generation_method,
             content=content,
             created_at=_aware(record["created_at"]),
+        )
+
+    @staticmethod
+    def _evidence_view(record: Any) -> EvidenceSealView:
+        return EvidenceSealView(
+            status="sealed",
+            digest=record["digest"],
+            item_count=record["item_count"],
+            table_count=record["table_count"],
+            sealed_attempt=record["sealed_attempt"],
+            sealed_at=_aware(record["sealed_at"]),
         )
 
     def pending_outcomes(
@@ -1659,6 +1792,22 @@ class RunRepository:
                 )
             )
             session.flush()
+            evidence = EvidenceBundle(
+                instrument=request.ticker,
+                analysis_date=request.analysis_date,
+                items=(),
+            )
+            session.add(
+                RunEvidenceRecord(
+                    run_id=run_id,
+                    sealed_attempt=1,
+                    bundle_json=evidence.model_dump(mode="json"),
+                    digest=evidence.digest,
+                    item_count=0,
+                    table_count=0,
+                    sealed_at=now,
+                )
+            )
             decision_record = DecisionRecord(
                 run_id=run_id,
                 ticker=request.ticker,
@@ -1670,11 +1819,6 @@ class RunRepository:
                 rating=decision.rating.value,
                 confidence=decision.confidence,
                 decision_json=decision.model_dump(mode="json"),
-                evidence_bundle_json=EvidenceBundle(
-                    instrument=request.ticker,
-                    analysis_date=request.analysis_date,
-                    items=(),
-                ).model_dump(mode="json"),
                 created_at=now,
             )
             session.add(decision_record)

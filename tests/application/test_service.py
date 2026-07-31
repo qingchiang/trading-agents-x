@@ -317,7 +317,12 @@ def test_service_persists_events_before_callback_and_result(
 
     assert result.status is RunStatus.SUCCEEDED
     assert result.evidence is not None
-    assert seen == ["run.started", "node.completed", "run.succeeded"]
+    assert seen == [
+        "run.started",
+        "node.completed",
+        "evidence.sealed",
+        "run.succeeded",
+    ]
     events = repository.list_events(result.run_id)
     assert events[0].event_type == "run.queued"
     assert events[-1].event_type == "run.succeeded"

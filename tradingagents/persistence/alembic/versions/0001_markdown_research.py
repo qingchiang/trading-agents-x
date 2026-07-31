@@ -128,7 +128,6 @@ def upgrade() -> None:
             "role",
             "round",
             "prompt_version",
-            "content_hash",
             name="uq_run_artifact_identity",
         ),
     )
@@ -145,18 +144,17 @@ def upgrade() -> None:
         unique=False,
     )
     op.create_table(
-        "reports",
-        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
+        "run_evidence",
         sa.Column("run_id", sa.String(length=36), nullable=False),
-        sa.Column("name", sa.String(length=100), nullable=False),
-        sa.Column("markdown", sa.Text(), nullable=False),
-        sa.Column("structured_json", sa.JSON(), nullable=True),
-        sa.Column("created_at", sa.DateTime(), nullable=False),
+        sa.Column("sealed_attempt", sa.Integer(), nullable=False),
+        sa.Column("bundle_json", sa.JSON(), nullable=False),
+        sa.Column("digest", sa.String(length=64), nullable=False),
+        sa.Column("item_count", sa.Integer(), nullable=False),
+        sa.Column("table_count", sa.Integer(), nullable=False),
+        sa.Column("sealed_at", sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(["run_id"], ["runs.id"], ondelete="CASCADE"),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("run_id", "name"),
+        sa.PrimaryKeyConstraint("run_id"),
     )
-    op.create_index("ix_reports_run_id", "reports", ["run_id"], unique=False)
     op.create_table(
         "decisions",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
@@ -168,7 +166,6 @@ def upgrade() -> None:
         sa.Column("rating", sa.String(length=20), nullable=False),
         sa.Column("confidence", sa.Float(), nullable=False),
         sa.Column("decision_json", sa.JSON(), nullable=False),
-        sa.Column("evidence_bundle_json", sa.JSON(), nullable=False),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(["run_id"], ["runs.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
@@ -261,8 +258,7 @@ def downgrade() -> None:
     op.drop_index("ix_decisions_ticker", table_name="decisions")
     op.drop_index("ix_decisions_run_id", table_name="decisions")
     op.drop_table("decisions")
-    op.drop_index("ix_reports_run_id", table_name="reports")
-    op.drop_table("reports")
+    op.drop_table("run_evidence")
     op.drop_index("ix_run_artifacts_order", table_name="run_artifacts")
     op.drop_index("ix_run_artifacts_run_id", table_name="run_artifacts")
     op.drop_table("run_artifacts")

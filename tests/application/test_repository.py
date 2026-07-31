@@ -42,6 +42,8 @@ from tradingagents.application.contracts import (
 from tradingagents.application.database import RunAttemptRecord, RunRecord
 from tradingagents.application.maintenance import TrashMaintenance
 from tradingagents.application.repository import (
+    ArtifactConflictError,
+    EvidenceConflictError,
     IdempotencyConflictError,
     InvalidRunTransitionError,
     RunNotFoundError,
@@ -401,33 +403,30 @@ def test_artifacts_are_typed_retained_and_idempotent_across_retries(
     repository.retry(run.id)
     repository.claim_run(run.id, "worker-2", 30)
     retried, retried_event = repository.append_artifact(run.id, draft)
-    changed, changed_event = repository.append_artifact(
-        run.id,
-        draft.model_copy(
-            update={
+    with pytest.raises(ArtifactConflictError):
+        repository.append_artifact(
+            run.id,
+            draft.model_copy(
+                update={
                     "content": report.model_copy(
                         update={
                             "markdown": "# Overview\n\nRecomputed summary."
                         }
                     )
-            }
-        ),
-    )
+                }
+            ),
+        )
 
     assert first == duplicate == retried
     assert first.attempt == 1
     assert duplicate_event is None
     assert retried_event is None
-    assert changed.attempt == 2
     assert first_event is not None
-    assert changed_event is not None
     assert [artifact.id for artifact in repository.list_artifacts(run.id)] == [
         first.id,
-        changed.id,
     ]
     events = repository.list_events(run.id)
     assert [event.event_type for event in events] == [
-        "artifact.created",
         "artifact.created",
     ]
     assert events[0].payload == {
@@ -666,6 +665,41 @@ def test_complete_persists_result_and_resolved_memory(
         decision=decision,
     )
 
+    repository.append_artifact(
+        run.id,
+        ResearchArtifactDraft(
+            node="analyst.market",
+            stage="analyst",
+            role="market",
+            generation_method=ArtifactGenerationMethod.TOOL_CALL,
+            content=report,
+        ),
+    )
+    sealed, event = repository.seal_evidence(run.id, evidence)
+    duplicate, duplicate_event = repository.seal_evidence(run.id, evidence)
+    assert sealed == duplicate
+    assert event is not None
+    assert duplicate_event is None
+    assert repository.evidence_status(run.id) == sealed
+    assert repository.get_evidence(run.id) == evidence
+    conflicting_item = EvidenceItem.create(
+        source="fixture",
+        evidence_type="price",
+        requested_date=date(2026, 7, 24),
+        effective_date=date(2026, 7, 24),
+        value=101.0,
+        unit="USD",
+    )
+    with pytest.raises(EvidenceConflictError):
+        repository.seal_evidence(
+            run.id,
+            EvidenceBundle(
+                instrument="NVDA",
+                analysis_date=date(2026, 7, 24),
+                items=(conflicting_item,),
+            ),
+        )
+
     repository.complete(run.id, result, evidence=evidence, benchmark="SPY")
     restored = repository.get_result(run.id)
     due_at = datetime(2026, 8, 10, tzinfo=timezone.utc)
@@ -700,6 +734,47 @@ def test_complete_persists_result_and_resolved_memory(
     assert repository.memory_entries() == []
     repository.restore_runs((run.id,))
     assert repository.memory_context("NVDA", "stock").items[0].run_id == run.id
+
+
+def test_failed_run_retains_sealed_evidence_and_analyst_reports(
+    repository: RunRepository,
+    app_settings: AppSettings,
+) -> None:
+    run, _ = _create(repository, app_settings)
+    repository.claim_run(run.id, "worker", 30)
+    item = EvidenceItem.create(
+        source="fixture",
+        evidence_type="price",
+        requested_date=date(2026, 7, 24),
+        effective_date=date(2026, 7, 24),
+        value=100.0,
+        unit="USD",
+    )
+    evidence = EvidenceBundle(
+        instrument="NVDA",
+        analysis_date=date(2026, 7, 24),
+        items=(item,),
+    )
+    report = analyst_report(evidence_ref=item.ref)
+    repository.append_artifact(
+        run.id,
+        ResearchArtifactDraft(
+            node="analyst.market",
+            stage="analyst",
+            role="market",
+            generation_method=ArtifactGenerationMethod.TOOL_CALL,
+            content=report,
+        ),
+    )
+    repository.seal_evidence(run.id, evidence)
+
+    repository.fail(run.id, RuntimeError("final decision validation failed"))
+
+    restored = repository.get_result(run.id)
+    assert restored.status is RunStatus.FAILED
+    assert restored.evidence == evidence
+    assert restored.reports == {"market": report}
+    assert restored.decision is None
 
 
 def test_research_template_requires_terminal_source_and_backup_is_consistent(
@@ -823,17 +898,29 @@ def test_reports_use_canonical_order_across_result_and_repository(
         analysis_date=date(2026, 7, 24),
         items=(),
     )
+    reports = {
+        name: analyst_report(
+            analyst=name,
+            narrative=f"# Overview\n\n{name.title()} report.",
+        )
+        for name in ("social", "news", "market", "fundamentals")
+    }
+    for name, report in reports.items():
+        repository.append_artifact(
+            run.id,
+            ResearchArtifactDraft(
+                node=f"analyst.{name}",
+                stage="analyst",
+                role=name,
+                generation_method=ArtifactGenerationMethod.TOOL_CALL,
+                content=report,
+            ),
+        )
     result = AnalysisResult(
         run_id=run.id,
         status=RunStatus.SUCCEEDED,
         instrument="NVDA",
-        reports={
-            "social": "Social report.",
-            "news": "News report.",
-            "market": "Market report.",
-            "fundamentals": "Fundamentals report.",
-            "legacy": "Legacy report.",
-        },
+        reports=reports,
         decision=None,
     )
 
@@ -842,9 +929,9 @@ def test_reports_use_canonical_order_across_result_and_repository(
         "market",
         "news",
         "social",
-        "legacy",
     ]
 
+    repository.seal_evidence(run.id, evidence)
     repository.complete(run.id, result, evidence=evidence, benchmark="SPY")
     restored = repository.get_result(run.id)
 
@@ -853,5 +940,4 @@ def test_reports_use_canonical_order_across_result_and_repository(
         "market",
         "news",
         "social",
-        "legacy",
     ]

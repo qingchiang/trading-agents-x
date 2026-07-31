@@ -71,6 +71,9 @@ async def test_run_lifecycle_routes_and_filters(
     run_id = created["id"]
 
     detail = await web_client.get(f"/api/v1/runs/{run_id}")
+    pending_evidence = await web_client.get(
+        f"/api/v1/runs/{run_id}/evidence"
+    )
     queued = await web_client.get("/api/v1/runs?status=queued")
     cancelled = await web_client.post(f"/api/v1/runs/{run_id}/cancel")
     trashed = await web_client.post(
@@ -128,6 +131,9 @@ async def test_run_lifecycle_routes_and_filters(
     assert restored.json()["changed"] == 1
     assert restored.json()["runs"][0]["trashed_at"] is None
     assert templated.status_code == 202
+    assert detail.json()["evidence_status"]["status"] == "pending"
+    assert pending_evidence.status_code == 409
+    assert pending_evidence.json()["error"]["code"] == "evidence_not_sealed"
     assert templated.json()["source_run_id"] == run_id
 
 
@@ -246,6 +252,7 @@ async def test_openapi_contains_versioned_run_center_contract(
         "/api/v1/runs",
         "/api/v1/runs/{run_id}",
         "/api/v1/runs/{run_id}/artifacts",
+        "/api/v1/runs/{run_id}/evidence",
         "/api/v1/runs/{run_id}/events",
         "/api/v1/runs/{run_id}/cancel",
         "/api/v1/runs/{run_id}/retry",
@@ -368,26 +375,30 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
         analysis_date=date(2026, 7, 24),
         items=(evidence_item,),
     )
-    report = analyst_report(
-        executive_summary="Fixture summary.",
-        confidence=0.8,
-        evidence_ref=evidence_item.ref,
-        narrative="Fixture report.",
-    )
     reports = {
-        name: report.model_copy(update={"analyst": name})
+        name: analyst_report(
+            analyst=name,
+            executive_summary="Fixture summary.",
+            confidence=0.8,
+            evidence_ref=evidence_item.ref,
+            narrative="Fixture report.",
+        )
         for name in ("social", "news", "market", "fundamentals")
     }
-    artifact, _ = web_repository.append_artifact(
-        queued.id,
-        ResearchArtifactDraft(
-            node="analyst.market",
-            stage="analyst",
-            role="market",
-            generation_method=ArtifactGenerationMethod.TOOL_CALL,
-            content=report,
-        ),
-    )
+    artifacts_created = []
+    for name, analyst_output in reports.items():
+        stored, _ = web_repository.append_artifact(
+            queued.id,
+            ResearchArtifactDraft(
+                node=f"analyst.{name}",
+                stage="analyst",
+                role=name,
+                generation_method=ArtifactGenerationMethod.TOOL_CALL,
+                content=analyst_output,
+            ),
+        )
+        artifacts_created.append(stored)
+    artifact = next(item for item in artifacts_created if item.role == "market")
     review, _ = web_repository.append_artifact(
         queued.id,
         ResearchArtifactDraft(
@@ -406,6 +417,7 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
         thesis="Fixture thesis.",
         evidence_refs=(evidence_item.ref,),
     )
+    web_repository.seal_evidence(queued.id, evidence)
     web_repository.complete(
         queued.id,
         AnalysisResult(
@@ -430,6 +442,9 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
     package = await web_client.get(
         f"/api/v1/runs/{queued.id}/export?format=package"
     )
+    evidence_response = await web_client.get(
+        f"/api/v1/runs/{queued.id}/evidence"
+    )
 
     assert detail.status_code == 200
     assert list(detail.json()["result"]["reports"]) == [
@@ -442,12 +457,15 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
     assert detail.json()["result"]["evidence"]["items"][0]["ref"] == (
         evidence_item.ref
     )
+    assert detail.json()["evidence_status"]["status"] == "sealed"
+    assert evidence_response.status_code == 200
+    assert evidence_response.json()["digest"] == evidence.digest
     assert detail.json()["attempts"][0]["status"] == "succeeded"
     assert detail.json()["attempts"][0]["metrics"] == (
         detail.json()["run"]["metrics"]
     )
     assert artifacts.status_code == 200
-    assert artifacts.json()[0]["id"] == artifact.id
+    assert artifact.id in {item["id"] for item in artifacts.json()}
     assert "Fixture report." in artifacts.json()[0]["content"]["markdown"]
     review_payload = next(
         item for item in artifacts.json() if item["id"] == review.id

@@ -149,7 +149,6 @@ class RunArtifactRecord(Base):
             "role",
             "round",
             "prompt_version",
-            "content_hash",
             name="uq_run_artifact_identity",
         ),
         Index(
@@ -161,19 +160,18 @@ class RunArtifactRecord(Base):
     )
 
 
-class ReportRecord(Base):
-    __tablename__ = "reports"
+class RunEvidenceRecord(Base):
+    __tablename__ = "run_evidence"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     run_id: Mapped[str] = mapped_column(
-        ForeignKey("runs.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("runs.id", ondelete="CASCADE"), primary_key=True
     )
-    name: Mapped[str] = mapped_column(String(100), nullable=False)
-    markdown: Mapped[str] = mapped_column(Text, nullable=False)
-    structured_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-
-    __table_args__ = (UniqueConstraint("run_id", "name"),)
+    sealed_attempt: Mapped[int] = mapped_column(Integer, nullable=False)
+    bundle_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    item_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    table_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    sealed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
 class DecisionRecord(Base):
@@ -193,7 +191,6 @@ class DecisionRecord(Base):
     rating: Mapped[str] = mapped_column(String(20), nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     decision_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
-    evidence_bundle_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 

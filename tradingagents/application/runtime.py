@@ -6,11 +6,20 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from .contracts import AnalysisRequest, MemoryContext, ResearchArtifactDraft
+from .contracts import (
+    AnalysisRequest,
+    EvidenceBundle,
+    MemoryContext,
+    ResearchArtifactDraft,
+)
 from .settings import RunSettings
 
 
 def _discard_artifact(_artifact: ResearchArtifactDraft) -> None:
+    """Default sink used by direct graph callers without persistence."""
+
+
+def _discard_evidence(_evidence: EvidenceBundle) -> None:
     """Default sink used by direct graph callers without persistence."""
 
 
@@ -25,6 +34,7 @@ class RunContext:
     cancel_requested: Callable[[], bool]
     shutdown_requested: Callable[[], bool] = lambda: False
     artifact_writer: Callable[[ResearchArtifactDraft], None] = _discard_artifact
+    evidence_writer: Callable[[EvidenceBundle], None] = _discard_evidence
 
 
 class RunCancelled(RuntimeError):

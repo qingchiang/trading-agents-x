@@ -729,6 +729,7 @@ class ResearchGraph:
                 required=False,
             )
             reports[key] = report.model_dump(mode="json")
+        runtime.context.evidence_writer(bundle)
         self._finish_node(
             runtime,
             node,

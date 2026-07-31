@@ -28,6 +28,7 @@ from tradingagents.persistence import upgrade_database
 from .contracts import (
     AnalysisRequest,
     AnalysisResult,
+    EvidenceBundle,
     ResearchArtifactDraft,
     RunEvent,
     RunExport,
@@ -229,6 +230,11 @@ class AnalysisService:
                         artifact,
                         on_event,
                     ),
+                    evidence_writer=lambda evidence: self._persist_evidence(
+                        run.id,
+                        evidence,
+                        on_event,
+                    ),
                 )
                 with SqliteSaver.from_conn_string(
                     str(self.settings.database_path)
@@ -259,6 +265,15 @@ class AnalysisService:
                                 run.id, raw, on_event
                             ),
                         )
+                    # Production graphs seal before deliberation. This
+                    # idempotent application boundary also protects custom
+                    # graph implementations from completing without durable
+                    # evidence.
+                    self._persist_evidence(
+                        run.id,
+                        execution.evidence,
+                        on_event,
+                    )
                     result = self._result(
                         run.id,
                         execution,
@@ -479,6 +494,16 @@ class AnalysisService:
         on_event: EventHandler | None,
     ) -> None:
         _, event = self.repository.append_artifact(run_id, draft)
+        if event is not None and on_event is not None:
+            on_event(event)
+
+    def _persist_evidence(
+        self,
+        run_id: str,
+        evidence: EvidenceBundle,
+        on_event: EventHandler | None,
+    ) -> None:
+        _, event = self.repository.seal_evidence(run_id, evidence)
         if event is not None and on_event is not None:
             on_event(event)
 

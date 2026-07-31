@@ -1248,6 +1248,17 @@ class AnalysisResult(FrozenModel):
         return _coerce_warnings(value)
 
 
+class EvidenceSealView(FrozenModel):
+    """Durable status of the immutable evidence boundary for one run."""
+
+    status: Literal["pending", "sealed"]
+    digest: str | None = None
+    item_count: int = Field(default=0, ge=0)
+    table_count: int = Field(default=0, ge=0)
+    sealed_attempt: int | None = Field(default=None, ge=1)
+    sealed_at: datetime | None = None
+
+
 class RunView(FrozenModel):
     id: str
     source_run_id: str | None = None

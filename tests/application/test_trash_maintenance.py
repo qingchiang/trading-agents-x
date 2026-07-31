@@ -22,10 +22,10 @@ from tradingagents.application.database import (
     LegacyImportRecord,
     OutcomeRecord,
     ReflectionRecord,
-    ReportRecord,
     RunArtifactRecord,
     RunAttemptRecord,
     RunEventRecord,
+    RunEvidenceRecord,
     RunRecord,
 )
 from tradingagents.application.maintenance import TrashMaintenance
@@ -109,6 +109,7 @@ def _complete_trashed_run(repository, app_settings):
             content=report,
         ),
     )
+    repository.seal_evidence(run.id, evidence)
     decision = research_decision(
         confidence=0.6,
         thesis="Fixture thesis.",
@@ -191,7 +192,7 @@ def test_trash_maintenance_purges_owned_data_and_preserves_audit_links(
             RunAttemptRecord,
             RunEventRecord,
             RunArtifactRecord,
-            ReportRecord,
+            RunEvidenceRecord,
             DecisionRecord,
         ):
             assert (

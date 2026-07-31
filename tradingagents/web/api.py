@@ -24,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select
 
 from tradingagents.application.contracts import (
+    EvidenceBundle,
     RecentInstrument,
     ResearchArtifact,
     RunEvent,
@@ -40,6 +41,9 @@ from tradingagents.application.database import (
 )
 from tradingagents.application.maintenance import TrashMaintenance
 from tradingagents.application.repository import (
+    ArtifactConflictError,
+    EvidenceConflictError,
+    EvidenceNotSealedError,
     IdempotencyConflictError,
     InvalidRunTransitionError,
     RunNotFoundError,
@@ -127,6 +131,39 @@ def create_app(
         exc: IdempotencyConflictError,
     ):
         return _error(409, "idempotency_conflict", str(exc))
+
+    @app.exception_handler(EvidenceNotSealedError)
+    async def evidence_not_sealed(
+        _request: Request,
+        _exc: EvidenceNotSealedError,
+    ):
+        return _error(
+            409,
+            "evidence_not_sealed",
+            "Evidence has not been sealed for this run.",
+        )
+
+    @app.exception_handler(EvidenceConflictError)
+    async def evidence_conflict(
+        _request: Request,
+        _exc: EvidenceConflictError,
+    ):
+        return _error(
+            409,
+            "evidence_conflict",
+            "The sealed evidence does not match this execution.",
+        )
+
+    @app.exception_handler(ArtifactConflictError)
+    async def artifact_conflict(
+        _request: Request,
+        _exc: ArtifactConflictError,
+    ):
+        return _error(
+            409,
+            "artifact_conflict",
+            "A research stage replayed with different content.",
+        )
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(
@@ -256,7 +293,15 @@ def create_app(
             run=view,
             result=result,
             attempts=repository.list_attempts(run_id),
+            evidence_status=repository.evidence_status(run_id),
         )
+
+    @app.get(
+        f"{API_PREFIX}/runs/{{run_id}}/evidence",
+        response_model=EvidenceBundle,
+    )
+    def get_evidence(run_id: str):
+        return repository.get_evidence(run_id)
 
     @app.get(
         f"{API_PREFIX}/runs/{{run_id}}/artifacts",
