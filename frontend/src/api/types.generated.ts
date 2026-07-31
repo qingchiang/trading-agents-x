@@ -291,9 +291,7 @@ export interface components {
       stage: string;
     };
     ResearchCase: {
-      focus_claim_ids?: string[];
       markdown: string;
-      report_section_refs?: string[];
       role: "bull" | "bear";
     };
     ResearchDecision: {

@@ -116,30 +116,19 @@ def test_research_markdown_uses_inline_ledger_refs_without_definitions() -> None
     assert result.warnings == ()
 
 
-def test_research_case_uses_deterministic_valid_id_intersection() -> None:
+def test_research_case_preserves_readable_markdown_without_navigation_ids() -> None:
     state = _state()
-    llm = _StaticLLM(
-        {
-            "focus_claim_ids": ["market.claim_invented"],
-            "report_section_refs": [],
-        }
-    )
+    llm = _StaticLLM(None)
+    markdown = "## Bull case\n\nEvidence supports the constructive view."
     result = invoke_research_case(
         llm,
         role="bull",
-        markdown=(
-            "## Bull case\n\n"
-            "market.claim_1 supports market.section.overview. "
-            "market.claim_1_invented does not."
-        ),
+        markdown=markdown,
         state=state,
         node="case.bull",
     )
 
-    assert result.value.focus_claim_ids == ("market.claim_1",)
-    assert result.value.report_section_refs == (
-        "market.section.overview",
-    )
+    assert result.value.model_dump() == {"role": "bull", "markdown": markdown}
     assert result.generation_method is ArtifactGenerationMethod.MARKDOWN_AUDITED
     assert llm.prompts == []
 
@@ -153,16 +142,12 @@ def test_research_case_audit_preserves_completed_markdown() -> None:
     result = invoke_research_case(
         _StaticLLM(None),
         role="bull",
-        markdown=(
-            markdown
-            + "\nmarket.claim_1 supports market.section.overview."
-        ),
+        markdown=markdown,
         state=state,
         node="case.bull.audit",
     )
 
-    assert result.value.markdown.startswith(markdown)
-    assert result.value.focus_claim_ids == ("market.claim_1",)
+    assert result.value.markdown == markdown
 
 
 def _state_with_agenda() -> dict[str, Any]:

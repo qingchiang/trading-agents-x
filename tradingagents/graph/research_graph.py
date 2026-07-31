@@ -804,9 +804,10 @@ class ResearchGraph:
                 ).primary_evidence_refs(),
                 instructions=(
                     "Build an independent complete case before seeing the "
-                    "opposing case. Every argument must identify the analyst "
-                    "claim IDs it relies on and the causal mechanism connecting "
-                    "the evidence to its implication."
+                    "opposing case. For every material argument, identify the "
+                    "analyst conclusion it relies on, cite the relevant evidence, "
+                    "and explain the causal mechanism connecting the evidence to "
+                    "its implication. Do not expose internal claim or section IDs."
                 ),
             )
             with self.metrics.phase(
@@ -843,15 +844,12 @@ class ResearchGraph:
                 role=spec.key,
                 content=case,
                 generation_method=output.generation_method,
-                prompt_version=f"research-case-{spec.key}-v5-compact",
+                prompt_version=f"research-case-{spec.key}-v6-readable",
             )
             self._finish_node(
                 runtime,
                 node,
-                {
-                    "focus_claims": len(case.focus_claim_ids),
-                    "report_sections": len(case.report_section_refs),
-                },
+                {"role": case.role},
                 measure=False,
             )
             return {
@@ -885,8 +883,9 @@ class ResearchGraph:
                 artifacts={"cases": state.get("cases", {})},
                 instructions=(
                     "Create one issue per distinct material question. "
-                    "Attach the exact analyst claim IDs at stake. Do not turn "
-                    "mere missing data into a bearish assertion."
+                    "Describe the analyst conclusions at stake in natural "
+                    "language. Do not expose internal claim or section IDs. Do "
+                    "not turn mere missing data into a bearish assertion."
                 ),
             )
             with self.metrics.phase(
@@ -908,7 +907,7 @@ class ResearchGraph:
                 role="moderator",
                 content=agenda,
                 generation_method=output.generation_method,
-                prompt_version="debate-agenda-v5-direct",
+                prompt_version="debate-agenda-v6-readable",
             )
             self._finish_node(
                 runtime,
@@ -1069,7 +1068,7 @@ class ResearchGraph:
             node=node,
             title="Research Judge",
             objective=(
-                "Rule on every DebateAgenda issue, explain why specific claims "
+                "Rule on every DebateAgenda issue, explain why specific findings "
                 "are accepted or rejected, preserve unresolved questions, and "
                 "form a preliminary research conclusion."
             ),
@@ -1083,7 +1082,9 @@ class ResearchGraph:
             include_memory=True,
             instructions=(
                 "Rule on every agenda issue even when the correct ruling "
-                "is unresolved. Cite exact claim IDs and evidence refs."
+                "is unresolved. Refer to analyst findings in natural language, "
+                "cite relevant evidence refs, and do not expose internal claim "
+                "or section IDs."
             ),
         )
         with self.metrics.phase(
@@ -1120,7 +1121,7 @@ class ResearchGraph:
             role="research_judge",
             content=draft,
             generation_method=output.generation_method,
-            prompt_version="research-judge-v5-compact",
+            prompt_version="research-judge-v6-readable",
         )
         self._finish_node(
             runtime,
@@ -1166,9 +1167,10 @@ class ResearchGraph:
                 report_mode="risk",
                 instructions=(
                     "Identify explicit findings, their mechanisms and "
-                    "severity, the analyst claims they challenge, concrete "
+                    "severity, the analyst conclusions they challenge, concrete "
                     "invalidation paths, and changes the final committee should "
-                    "make. Unknowns are not automatically downside."
+                    "make. Do not expose internal claim or section IDs. Unknowns "
+                    "are not automatically downside."
                 ),
             )
             with self.metrics.phase(
@@ -1205,7 +1207,7 @@ class ResearchGraph:
                 role=spec.key,
                 content=review,
                 generation_method=output.generation_method,
-                prompt_version=f"risk-review-{spec.key}-v5-compact",
+                prompt_version=f"risk-review-{spec.key}-v6-readable",
             )
             self._finish_node(
                 runtime,

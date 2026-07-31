@@ -2001,28 +2001,12 @@
       },
       "ResearchCase": {
         "additionalProperties": false,
-        "description": "A readable constructive or skeptical case with routing metadata.",
+        "description": "A readable constructive or skeptical research case.",
         "properties": {
-          "focus_claim_ids": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Focus Claim Ids",
-            "type": "array"
-          },
           "markdown": {
             "minLength": 1,
             "title": "Markdown",
             "type": "string"
-          },
-          "report_section_refs": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Report Section Refs",
-            "type": "array"
           },
           "role": {
             "enum": [

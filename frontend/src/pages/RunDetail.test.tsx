@@ -328,8 +328,6 @@ const artifacts = [
     content: {
       role: "bull",
       markdown: "**Demand** remains constructive.[^ev_0123456789ab]",
-      focus_claim_ids: ["market.claim_1"],
-      report_section_refs: ["overview"],
     },
   },
   {

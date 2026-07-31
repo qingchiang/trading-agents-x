@@ -616,17 +616,10 @@ class AnalystReport(FrozenModel):
 
 
 class ResearchCase(FrozenModel):
-    """A readable constructive or skeptical case with routing metadata."""
+    """A readable constructive or skeptical research case."""
 
     role: Literal["bull", "bear"]
     markdown: str = Field(min_length=1)
-    focus_claim_ids: tuple[str, ...] = ()
-    report_section_refs: tuple[str, ...] = ()
-
-    @field_validator("focus_claim_ids", "report_section_refs")
-    @classmethod
-    def validate_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        return _unique_research_ids(value)
 
 
 class DebateIssue(FrozenModel):

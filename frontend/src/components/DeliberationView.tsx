@@ -82,15 +82,6 @@ export default function DeliberationView({
                   )}
                 </span>
                 {markdown(artifact.content.markdown)}
-                <NavigationFields
-                  labels={[
-                    [t("focusClaims"), artifact.content.focus_claim_ids],
-                    [
-                      t("reportSections"),
-                      artifact.content.report_section_refs,
-                    ],
-                  ]}
-                />
               </ArtifactFrame>
             ))}
           </div>
@@ -265,7 +256,11 @@ function typedArtifacts<T extends ResearchArtifact["content"]>(
 }
 
 function isResearchCase(value: ResearchArtifact["content"]): value is ResearchCase {
-  return "role" in value && "markdown" in value && "focus_claim_ids" in value;
+  return (
+    "role" in value &&
+    "markdown" in value &&
+    (value.role === "bull" || value.role === "bear")
+  );
 }
 
 function isDebateAgenda(value: ResearchArtifact["content"]): value is DebateAgenda {

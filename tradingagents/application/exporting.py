@@ -419,8 +419,8 @@ def _render_analyst_report(
             lines.extend(
                 [
                     "",
-                    f"- `{claim.id}` · {claim.importance.value} · "
-                    f"{claim.kind.value}: {claim.statement}",
+                    f"- {claim.importance.value} · {claim.kind.value}: "
+                    f"{claim.statement}",
                     f"  - Implication: {claim.implication}",
                     f"  - Evidence: {_render_refs(claim.evidence_refs)}",
                 ]

@@ -166,8 +166,6 @@ test("organizes shallow Markdown deliberation by role and issue", () => {
       content: {
         role: "bull",
         markdown: `Bull thesis.[^${evidenceRef}]`,
-        focus_claim_ids: ["market.claim.1"],
-        report_section_refs: ["market-view"],
       },
     },
     {
@@ -179,8 +177,6 @@ test("organizes shallow Markdown deliberation by role and issue", () => {
       content: {
         role: "bear",
         markdown: "Bear thesis.",
-        focus_claim_ids: ["market.claim.1"],
-        report_section_refs: ["market-view"],
       },
     },
     {

@@ -13,7 +13,6 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from tradingagents.application.contracts import (
-    AnalystReport,
     ArtifactGenerationMethod,
     DebateAgenda,
     DebateImportance,
@@ -135,16 +134,11 @@ def invoke_research_case(
     node: str,
     event_writer: EventWriter | None = None,
 ) -> StructuredOutputResult[ResearchCase]:
-    del llm, event_writer
-    valid_claims = _claim_ids(state)
-    valid_sections = _section_ids(state)
-    del node
+    del llm, state, node, event_writer
     return StructuredOutputResult(
         value=ResearchCase(
             role=role,
             markdown=markdown,
-            focus_claim_ids=_mentioned_ids(markdown, valid_claims),
-            report_section_refs=_mentioned_ids(markdown, valid_sections),
         ),
         generation_method=ArtifactGenerationMethod.MARKDOWN_AUDITED,
     )
@@ -636,9 +630,9 @@ def _runner(
         repair_mode="preferred",
         include_candidate_in_repair=True,
         repair_instructions=(
-            "Repair only invalid shallow routing metadata such as claim IDs, "
-            "section IDs, issue IDs, confidence, or dispositions. The readable "
-            "Markdown is already complete and must not be regenerated."
+            "Repair only invalid shallow routing metadata such as issue IDs, "
+            "confidence, or dispositions. The readable Markdown is already "
+            "complete and must not be regenerated."
         ),
     )
 
@@ -646,22 +640,6 @@ def _runner(
 def _evidence_refs(state: Mapping[str, Any]) -> tuple[str, ...]:
     bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
     return tuple(item.ref for item in bundle.items)
-
-
-def _claim_ids(state: Mapping[str, Any]) -> set[str]:
-    return {
-        claim.id
-        for raw in state["analyst_reports"].values()
-        for claim in AnalystReport.model_validate(raw).key_claims
-    }
-
-
-def _section_ids(state: Mapping[str, Any]) -> set[str]:
-    return {
-        section.id
-        for raw in state["analyst_reports"].values()
-        for section in AnalystReport.model_validate(raw).report_sections
-    }
 
 
 def _mentioned_ids(markdown: str, valid_ids: set[str]) -> tuple[str, ...]:

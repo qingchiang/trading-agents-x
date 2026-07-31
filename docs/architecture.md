@@ -313,7 +313,7 @@ allows the same provider/model to reuse its automatic context cache.
 Visible research-process artifacts have separate contracts:
 
 ```text
-ResearchCase       role Markdown plus focused claim and report-section IDs
+ResearchCase       role plus readable Markdown
 DebateAgenda       short summary plus prioritized issue IDs and questions
 RebuttalReview     role Markdown plus addressed and open issue IDs
 JudgeDraft         judge Markdown, preliminary rating, and issue dispositions

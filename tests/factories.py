@@ -121,7 +121,6 @@ def research_case(
     *,
     role: Literal["bull", "bear"] = "bear",
     evidence_ref: str = _DEFAULT_REF,
-    claim_id: str = "market.claim_1",
 ) -> ResearchCase:
     """Return a shallow Markdown research-case fixture."""
 
@@ -131,6 +130,4 @@ def research_case(
             f"# {role.title()} case\n\n"
             f"Fixture case statement grounded in [^{evidence_ref}]."
         ),
-        focus_claim_ids=(claim_id,),
-        report_section_refs=("market.section.overview",),
     )

@@ -814,7 +814,6 @@ def test_service_export_reads_the_durable_result(
         content = payload["artifacts"][0]["content"]
         assert "Fixture report." in content["markdown"]
     else:
-        evidence_ref = result.evidence.items[0].ref
         assert "## Research Process" in body
         assert "### analyst · market · round 0" not in body
         assert "## Reports" in body
@@ -824,7 +823,7 @@ def test_service_export_reads_the_durable_result(
         assert "## Sources" in body
         assert "### Attempts" in body
         assert "| 1 | succeeded |" in body
-        assert f"### `{evidence_ref}`" in body
+        assert "### E01" in body
         assert '"source": "fixture"' in body
 
 
