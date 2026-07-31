@@ -641,14 +641,22 @@ test("runs, templates, trash, and restores local research", async ({
   purged.delete("run-report");
   restored.trashed_at = null;
   await page.goto("/runs/run-report?view=reports&report=market");
+  await expect(
+    page.getByRole("navigation", { name: "Report section navigation" }),
+  ).toBeVisible();
   const reportMaxHeight = await page
-    .locator(".report-panel > .analyst-report")
+    .locator(".report-panel .analyst-report")
     .evaluate((element) =>
       Number.parseFloat(getComputedStyle(element).maxHeight),
     );
   expect(reportMaxHeight).toBeGreaterThan(660);
 
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/runs/run-report?view=reports&report=market");
+  await expect(page.getByLabel("Jump to section")).toBeVisible();
+  await expect(
+    page.getByRole("navigation", { name: "Report section navigation" }),
+  ).toBeHidden();
   await page.goto("/runs");
   const shell = page.locator(".app-shell");
   await page.getByRole("button", { name: "Open navigation" }).click();
