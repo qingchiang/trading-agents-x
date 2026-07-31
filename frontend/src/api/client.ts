@@ -94,6 +94,8 @@ export const api = {
       `/api/v1/instruments/recent?limit=${encodeURIComponent(limit)}`,
     ),
   run: (id: string) => request<RunDetail>(`/api/v1/runs/${id}`),
+  evidence: (id: string) =>
+    request<EvidenceBundle>(`/api/v1/runs/${id}/evidence`),
   artifacts: (id: string, attempt?: number) =>
     request<ResearchArtifact[]>(
       `/api/v1/runs/${id}/artifacts${

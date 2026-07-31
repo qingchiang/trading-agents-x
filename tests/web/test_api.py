@@ -98,6 +98,9 @@ async def test_run_lifecycle_routes_and_filters(
 
     assert detail.status_code == 200
     assert detail.json()["run"]["id"] == run_id
+    assert detail.json()["result"]["status"] == "queued"
+    assert detail.json()["result"]["reports"] == {}
+    assert detail.json()["result"]["evidence"] is None
     assert detail.json()["attempts"] == [
         {
             "attempt": 1,
@@ -418,6 +421,42 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
         evidence_refs=(evidence_item.ref,),
     )
     web_repository.seal_evidence(queued.id, evidence)
+    web_repository.append_artifact(
+        queued.id,
+        ResearchArtifactDraft(
+            node="committee.final",
+            stage="decision",
+            role="final_committee",
+            generation_method=ArtifactGenerationMethod.TOOL_CALL,
+            content=decision,
+        ),
+    )
+    partial_detail = await web_client.get(f"/api/v1/runs/{queued.id}")
+    partial_export = await web_client.get(
+        f"/api/v1/runs/{queued.id}/export?format=json"
+    )
+
+    assert partial_detail.status_code == 200
+    assert partial_export.status_code == 200
+    assert partial_detail.json()["run"]["status"] == "running"
+    assert partial_detail.json()["result"]["status"] == "running"
+    assert partial_detail.json()["result"]["decision"]["thesis"] == (
+        "Fixture thesis."
+    )
+    assert partial_detail.json()["result"]["evidence"]["digest"] == (
+        evidence.digest
+    )
+    assert list(partial_detail.json()["result"]["reports"]) == [
+        "fundamentals",
+        "market",
+        "news",
+        "social",
+    ]
+    assert partial_export.json()["result"]["decision"]["thesis"] == (
+        "Fixture thesis."
+    )
+    assert partial_export.json()["evidence"]["digest"] == evidence.digest
+
     web_repository.complete(
         queued.id,
         AnalysisResult(

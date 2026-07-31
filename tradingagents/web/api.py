@@ -284,14 +284,9 @@ def create_app(
     @app.get(f"{API_PREFIX}/runs/{{run_id}}", response_model=RunDetail)
     def get_run(run_id: str):
         view = repository.get_run(run_id)
-        result = (
-            repository.get_result(run_id)
-            if view.status in _TERMINAL
-            else None
-        )
         return RunDetail(
             run=view,
-            result=result,
+            result=repository.get_result(run_id),
             attempts=repository.list_attempts(run_id),
             evidence_status=repository.evidence_status(run_id),
         )

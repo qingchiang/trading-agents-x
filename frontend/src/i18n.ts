@@ -182,6 +182,27 @@ const en = {
     detailedUsageCoverage: "Usage detail coverage",
     wallTime: "Wall time",
     nodeMetrics: "Per-node metrics",
+    nodeMetricsTimelineOrder:
+      "Phases are ordered by their first persisted timeline event.",
+    phase: "Phase",
+    phaseCollect: "Collect",
+    phaseCollectDescription:
+      "Deterministic data-source and tool collection; normally no LLM call.",
+    phasePrepare: "Prepare",
+    phasePrepareDescription:
+      "A reasoning model prepares an evidence workset, then a serializer validates the lookup plan.",
+    phaseWrite: "Write / reason",
+    phaseWriteDescription:
+      "A reasoning model writes the report, deliberation narrative, or decision synthesis brief.",
+    phaseAudit: "Audit",
+    phaseAuditDescription:
+      "A non-thinking serializer extracts and validates the small report or deliberation audit envelope.",
+    phaseSerialize: "Serialize",
+    phaseSerializeDescription:
+      "A non-thinking serializer maps the final synthesis brief to the strict decision contract.",
+    phaseOther: "Other",
+    phaseOtherDescription:
+      "A graph phase that does not use one of the standard research phase suffixes.",
     attemptMetrics: "Attempt metrics",
     noAttemptMetrics: "No attempt metrics were recorded.",
     resumeCount: "Resumes",
@@ -203,6 +224,10 @@ const en = {
       "No typed research artifacts were recorded for this run.",
     noDeliberation: "This profile did not produce deliberation artifacts.",
     noEvidenceRecorded: "No sealed evidence bundle was recorded for this run.",
+    evidencePending:
+      "Evidence collection is still in progress. The ledger will appear here as soon as it is sealed, before analyst reports are generated.",
+    partialResearchAvailable:
+      "Partial research is available. Completed evidence, reports, deliberation, and decision artifacts are preserved even though this run is not successful.",
     noDecision: "No final research decision was recorded.",
     round: "round",
     claimRebuttals: "Claim rebuttals",
@@ -520,6 +545,25 @@ const zhCN = {
     detailedUsageCoverage: "用量明细覆盖",
     wallTime: "耗时",
     nodeMetrics: "节点指标",
+    nodeMetricsTimelineOrder: "各阶段按首次持久化到时间线的事件顺序显示。",
+    phase: "阶段",
+    phaseCollect: "数据收集",
+    phaseCollectDescription:
+      "确定性调用数据源和工具；正常情况下不调用 LLM。",
+    phasePrepare: "证据准备",
+    phasePrepareDescription:
+      "推理模型准备证据工作集，随后由序列化模型校验查询计划。",
+    phaseWrite: "写作 / 推理",
+    phaseWriteDescription:
+      "推理模型撰写分析报告、研究过程正文或最终结论合成稿。",
+    phaseAudit: "审计提取",
+    phaseAuditDescription:
+      "关闭 thinking 的序列化模型提取并校验轻量的报告或研究过程审计字段。",
+    phaseSerialize: "严格序列化",
+    phaseSerializeDescription:
+      "关闭 thinking 的序列化模型将最终合成稿映射为严格的研究结论契约。",
+    phaseOther: "其他",
+    phaseOtherDescription: "未使用标准研究阶段后缀的 Graph 阶段。",
     attemptMetrics: "分次尝试指标",
     noAttemptMetrics: "尚未记录分次尝试指标。",
     resumeCount: "恢复次数",
@@ -540,6 +584,10 @@ const zhCN = {
     noArtifactsRecorded: "该运行未记录结构化研究过程。",
     noDeliberation: "当前研究模式未生成辩论或复核产物。",
     noEvidenceRecorded: "该运行未记录已封存的证据包。",
+    evidencePending:
+      "证据仍在收集中；在 Analyst 开始生成报告前完成封存后，会立即显示在这里。",
+    partialResearchAvailable:
+      "当前运行尚未成功结束，但已完成的证据、报告、研究过程和结论产物均已保留，可继续查看或导出。",
     noDecision: "该运行未形成最终研究结论。",
     round: "轮次",
     claimRebuttals: "观点反驳",
@@ -853,6 +901,27 @@ const ja = {
     detailedUsageCoverage: "使用量詳細カバレッジ",
     wallTime: "所要時間",
     nodeMetrics: "ノード別指標",
+    nodeMetricsTimelineOrder:
+      "各フェーズは、最初に永続化されたタイムラインイベントの順に表示されます。",
+    phase: "フェーズ",
+    phaseCollect: "データ収集",
+    phaseCollectDescription:
+      "データソースとツールを決定論的に呼び出します。通常 LLM は使用しません。",
+    phasePrepare: "エビデンス準備",
+    phasePrepareDescription:
+      "推論モデルがエビデンス作業セットを準備し、シリアライザーが検索計画を検証します。",
+    phaseWrite: "執筆 / 推論",
+    phaseWriteDescription:
+      "推論モデルがレポート、検討本文、または最終判断の統合草稿を作成します。",
+    phaseAudit: "監査抽出",
+    phaseAuditDescription:
+      "thinking を無効にしたシリアライザーが、レポートや検討過程の小さな監査情報を抽出・検証します。",
+    phaseSerialize: "厳格な直列化",
+    phaseSerializeDescription:
+      "thinking を無効にしたシリアライザーが最終草稿を厳格な判断契約へ変換します。",
+    phaseOther: "その他",
+    phaseOtherDescription:
+      "標準のリサーチフェーズ接尾辞を使用しない Graph フェーズです。",
     attemptMetrics: "試行別指標",
     noAttemptMetrics: "試行別指標は記録されていません。",
     resumeCount: "再開回数",
@@ -873,6 +942,10 @@ const ja = {
     noArtifactsRecorded:
       "この実行には構造化されたリサーチ過程が記録されていません。",
     noDeliberation: "このモードでは検討成果物が生成されませんでした。",
+    evidencePending:
+      "エビデンスを収集中です。アナリストがレポートを生成する前に封印されると、ここに表示されます。",
+    partialResearchAvailable:
+      "この実行はまだ成功していませんが、完了済みのエビデンス、レポート、検討過程、判断成果物は保存され、閲覧・エクスポートできます。",
     noEvidenceRecorded:
       "この実行には封印済みエビデンスバンドルがありません。",
     noDecision: "最終リサーチ判断は記録されていません。",

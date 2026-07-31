@@ -1238,7 +1238,15 @@ class RunRepository:
         decision = (
             ResearchDecision.model_validate(decision_record.decision_json)
             if decision_record
-            else None
+            else next(
+                (
+                    artifact.content
+                    for artifact in reversed(artifacts)
+                    if artifact.stage == "decision"
+                    and isinstance(artifact.content, ResearchDecision)
+                ),
+                None,
+            )
         )
         evidence = (
             EvidenceBundle.model_validate(evidence_record.bundle_json)

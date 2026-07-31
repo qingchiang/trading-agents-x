@@ -45,6 +45,7 @@ const eventNames = [
   "node.completed",
   "phase.started",
   "phase.completed",
+  "evidence.sealed",
   "node.output_retry",
   "node.output_recovered",
   "node.output_failed",
@@ -78,6 +79,7 @@ export default function RunDetail() {
   const { runId = "" } = useParams();
   const [detail, setDetail] = useState<RunDetailType | null>(null);
   const [artifacts, setArtifacts] = useState<ResearchArtifact[]>([]);
+  const [evidence, setEvidence] = useState<EvidenceBundle | null>(null);
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   const [error, setError] = useState("");
@@ -99,9 +101,19 @@ export default function RunDetail() {
         api.run(runId),
         api.artifacts(runId),
       ]);
+      let nextEvidence = nextDetail.result?.evidence ?? null;
+      let evidenceError = "";
+      if (nextDetail.evidence_status.status === "sealed") {
+        try {
+          nextEvidence = await api.evidence(runId);
+        } catch (cause) {
+          evidenceError = cause instanceof Error ? cause.message : t("error");
+        }
+      }
       setDetail(nextDetail);
       setArtifacts(nextArtifacts);
-      setError("");
+      setEvidence(nextEvidence);
+      setError(evidenceError);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t("error"));
     }
@@ -125,6 +137,7 @@ export default function RunDetail() {
       });
       if (
         event.event_type === "node.completed" ||
+        event.event_type === "evidence.sealed" ||
         event.event_type === "artifact.created" ||
         event.event_type.startsWith("run.")
       ) {
@@ -186,11 +199,21 @@ export default function RunDetail() {
     ? requestedReport
     : (reportNames[0] ?? "");
   const evidenceIndex = useMemo(
+    () => buildEvidenceReferenceIndex(evidence),
+    [evidence],
+  );
+  const decision = useMemo(
     () =>
-      buildEvidenceReferenceIndex(
-        detail?.result?.evidence ?? null,
-      ),
-    [detail?.result?.evidence],
+      detail?.result?.decision ??
+      [...artifacts]
+        .reverse()
+        .find(
+          (artifact) =>
+            artifact.stage === "decision" &&
+            isResearchDecision(artifact.content),
+        )?.content ??
+      null,
+    [artifacts, detail?.result?.decision],
   );
   const runWarnings = useMemo(() => {
     const reportWarningKeys = new Set(
@@ -229,8 +252,8 @@ export default function RunDetail() {
     target?.scrollIntoView?.({ behavior: "smooth", block: "center" });
   }, [
     activeView,
-    detail?.result?.evidence?.digest,
-    detail?.result?.evidence?.items.length,
+    evidence?.digest,
+    evidence?.items.length,
     evidenceIndex.primaryRefs,
     focusedEvidence,
   ]);
@@ -326,6 +349,12 @@ export default function RunDetail() {
     return <div className="loading">{error || t("loading")}</div>;
   }
   const { run, result } = detail;
+  const hasPartialResearch =
+    run.status !== "succeeded" &&
+    (evidence !== null ||
+      artifacts.length > 0 ||
+      Object.keys(reports).length > 0 ||
+      decision !== null);
 
   return (
     <section>
@@ -413,6 +442,11 @@ export default function RunDetail() {
         </div>
       )}
       {run.error_message && <div className="alert">{run.error_message}</div>}
+      {hasPartialResearch && (
+        <div className="notice partial-research-notice" role="status">
+          {t("partialResearchAvailable")}
+        </div>
+      )}
       <RunWarnings warnings={runWarnings} />
 
       <nav
@@ -447,7 +481,9 @@ export default function RunDetail() {
       )}
       {activeView === "evidence" && (
         <EvidencePanel
-          evidence={result?.evidence ?? null}
+          evidence={evidence}
+          evidenceStatus={detail.evidence_status.status}
+          runStatus={run.status}
           focusedRef={focusedEvidence}
           onReturn={returnFromEvidence}
           returnLabel={returnViewLabel(t, returnView)}
@@ -467,7 +503,7 @@ export default function RunDetail() {
       )}
       {activeView === "decision" && (
         <DecisionPanel
-          decision={result?.decision ?? null}
+          decision={decision}
           onEvidence={openSourceDrawer}
           evidenceIndex={evidenceIndex}
         />
@@ -602,6 +638,8 @@ function DeliberationPanel({
 
 function EvidencePanel({
   evidence,
+  evidenceStatus,
+  runStatus,
   focusedRef,
   onReturn,
   returnLabel,
@@ -609,6 +647,8 @@ function EvidencePanel({
   onEvidence,
 }: {
   evidence: EvidenceBundle | null;
+  evidenceStatus: RunDetailType["evidence_status"]["status"];
+  runStatus: RunDetailType["run"]["status"];
   focusedRef: string;
   onReturn: () => void;
   returnLabel: string;
@@ -639,7 +679,12 @@ function EvidencePanel({
         </div>
       </div>
       {!evidence ? (
-        <div className="empty-state">{t("noEvidenceRecorded")}</div>
+        <div className="empty-state">
+          {evidenceStatus === "pending" &&
+          (runStatus === "queued" || runStatus === "running")
+            ? t("evidencePending")
+            : t("noEvidenceRecorded")}
+        </div>
       ) : (
         <>
           <dl className="bundle-summary">
@@ -1215,11 +1260,15 @@ function MetricsPanel({
           <summary>
             {t("nodeMetrics")} <span>{rows.length}</span>
           </summary>
+          <p className="metrics-observation-note">
+            {t("nodeMetricsTimelineOrder")}
+          </p>
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
                   <th>{t("node")}</th>
+                  <th>{t("phase")}</th>
                   <th>{t("llmCalls")}</th>
                   <th>{t("toolCalls")}</th>
                   <th>{t("inputTokens")}</th>
@@ -1236,6 +1285,9 @@ function MetricsPanel({
                   <tr key={row.node}>
                     <td>
                       <code>{row.node}</code>
+                    </td>
+                    <td title={t(phaseDescriptionKey(row.phase))}>
+                      {t(phaseLabelKey(row.phase))}
                     </td>
                     <td>{metricCell(row.llmCalls)}</td>
                     <td>{metricCell(row.toolCalls)}</td>
@@ -1304,6 +1356,7 @@ function runStatusKey(status: RunAttemptView["status"]): string {
 
 type NodeMetricRow = {
   node: string;
+  phase: MetricPhase;
   llmCalls: number | null;
   toolCalls: number | null;
   inputTokens: number | null;
@@ -1314,6 +1367,14 @@ type NodeMetricRow = {
   detailedUsageCalls: number | null;
   wallTime: number;
 };
+
+type MetricPhase =
+  | "collect"
+  | "prepare"
+  | "write"
+  | "audit"
+  | "serialize"
+  | "other";
 
 function nodeMetricRows(
   metrics: RunMetrics | undefined,
@@ -1336,6 +1397,7 @@ function nodeMetricRows(
       const usage = nodeMetrics[node];
       return {
         node,
+        phase: metricPhase(node),
         llmCalls: usage.llm_calls ?? 0,
         toolCalls: usage.tool_calls ?? 0,
         inputTokens: usage.input_tokens ?? 0,
@@ -1355,6 +1417,34 @@ function nodeMetricRows(
     );
 }
 
+function metricPhase(node: string): MetricPhase {
+  if (node.endsWith(".prepare")) return "prepare";
+  if (
+    node.endsWith(".report") ||
+    node.endsWith(".write") ||
+    node.endsWith(".reason")
+  ) {
+    return "write";
+  }
+  if (node.endsWith(".audit")) return "audit";
+  if (node.endsWith(".serialize")) return "serialize";
+  if (
+    node.endsWith(".collect") ||
+    /^analyst\.[^.]+$/.test(node)
+  ) {
+    return "collect";
+  }
+  return "other";
+}
+
+function phaseLabelKey(phase: MetricPhase): string {
+  return `phase${phase[0].toUpperCase()}${phase.slice(1)}`;
+}
+
+function phaseDescriptionKey(phase: MetricPhase): string {
+  return `${phaseLabelKey(phase)}Description`;
+}
+
 function metricCell(value: number | null): string {
   return value === null ? "—" : value.toLocaleString();
 }
@@ -1365,6 +1455,16 @@ function isAnalystReport(content: ArtifactContent): content is AnalystReport {
     "markdown" in content &&
     "report_sections" in content &&
     "audit_status" in content
+  );
+}
+
+function isResearchDecision(
+  content: ArtifactContent,
+): content is ResearchDecision {
+  return (
+    "rating" in content &&
+    "thesis" in content &&
+    "scenarios" in content
   );
 }
 

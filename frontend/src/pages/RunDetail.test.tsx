@@ -22,6 +22,7 @@ import RunDetail from "./RunDetail";
 vi.mock("../api/client", () => ({
   api: {
     run: vi.fn(),
+    evidence: vi.fn(),
     artifacts: vi.fn(),
     action: vi.fn(),
     capabilities: vi.fn(),
@@ -285,6 +286,14 @@ const detail = {
       error_code: null,
     },
   ],
+  evidence_status: {
+    status: "sealed",
+    digest: "fixture-digest",
+    item_count: 2,
+    table_count: 0,
+    sealed_attempt: 1,
+    sealed_at: "2026-07-24T00:00:30Z",
+  },
 } as unknown as RunDetailType;
 
 const artifacts = [
@@ -339,6 +348,7 @@ beforeEach(async () => {
   localStorage.removeItem("tradingagents-audit-details-open");
   await i18n.changeLanguage("en");
   vi.mocked(api.run).mockResolvedValue(detail);
+  vi.mocked(api.evidence).mockResolvedValue(detail.result!.evidence!);
   vi.mocked(api.artifacts).mockResolvedValue(artifacts);
   vi.mocked(api.capabilities).mockResolvedValue({
     defaults: { trash_retention_days: 30 },
@@ -688,6 +698,111 @@ test("shows persisted run metrics when a failed run has no result", async () => 
   expect(screen.getAllByText("1,200")[0]).toBeVisible();
   fireEvent.click(screen.getByText("Attempt metrics", { exact: false }));
   expect(screen.getByText("StructuredOutputError")).toBeVisible();
+});
+
+test("loads sealed evidence immediately when the SSE seal event arrives", async () => {
+  const runningPending = {
+    ...detail,
+    run: { ...detail.run, status: "running" },
+    result: {
+      ...detail.result,
+      status: "running",
+      reports: {},
+      decision: null,
+      evidence: null,
+    },
+    evidence_status: {
+      status: "pending",
+      digest: null,
+      item_count: 0,
+      table_count: 0,
+      sealed_attempt: null,
+      sealed_at: null,
+    },
+  } as RunDetailType;
+  const runningSealed = {
+    ...runningPending,
+    evidence_status: detail.evidence_status,
+  } as RunDetailType;
+  vi.mocked(api.run)
+    .mockResolvedValueOnce(runningPending)
+    .mockResolvedValue(runningSealed);
+  vi.mocked(api.artifacts).mockResolvedValue([]);
+
+  render(
+    <Router initialPath="/runs/run-1?view=evidence">
+      <RunDetail />
+    </Router>,
+  );
+
+  expect(await screen.findByText(/Evidence collection is still/)).toBeVisible();
+  expect(api.evidence).not.toHaveBeenCalled();
+
+  act(() => {
+    FakeEventSource.instance.emit("evidence.sealed", {
+      run_id: "run-1",
+      sequence: 5,
+      attempt: 1,
+      event_type: "evidence.sealed",
+      node: "evidence.seal",
+      payload: {
+        digest: "fixture-digest",
+        item_count: 2,
+        table_count: 0,
+      },
+      created_at: "2026-07-24T00:00:30Z",
+    });
+  });
+
+  expect(
+    await screen.findByRole("heading", {
+      name: "Price snapshot · Composite snapshot",
+    }),
+  ).toBeVisible();
+  expect(api.evidence).toHaveBeenCalledWith("run-1");
+});
+
+test("shows preserved decision artifacts for an unsuccessful run", async () => {
+  const decisionArtifact = {
+    id: "artifact-decision",
+    run_id: "run-1",
+    attempt: 1,
+    stage: "decision",
+    role: "final_committee",
+    round: 0,
+    schema_version: "2",
+    prompt_version: "final-committee-v4-split",
+    generation_method: "tool_call",
+    created_at: "2026-07-24T00:00:55Z",
+    content: detail.result!.decision!,
+  } as ResearchArtifact;
+  vi.mocked(api.run).mockResolvedValue({
+    ...detail,
+    run: {
+      ...detail.run,
+      status: "failed",
+      error_code: "PersistenceError",
+      error_message: "Completion failed after the decision was saved.",
+    },
+    result: {
+      ...detail.result,
+      status: "failed",
+      decision: null,
+    },
+  } as RunDetailType);
+  vi.mocked(api.artifacts).mockResolvedValue([
+    ...artifacts,
+    decisionArtifact,
+  ]);
+
+  render(
+    <Router initialPath="/runs/run-1?view=decision">
+      <RunDetail />
+    </Router>,
+  );
+
+  expect(await screen.findByText("Evidence is balanced.")).toBeVisible();
+  expect(screen.getByText(/Partial research is available/)).toBeVisible();
 });
 
 test("keeps report footnote navigation in an in-page source drawer", async () => {
