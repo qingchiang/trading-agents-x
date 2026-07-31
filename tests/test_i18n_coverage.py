@@ -6,11 +6,15 @@ languages. The bug originally happened because several agents silently omitted
 the instruction (fixed in 6b384f7); this test codifies the invariant so a future
 refactor can't quietly drop it again.
 """
+from datetime import date
 from pathlib import Path
 
 import pytest
 
+from tests.factories import analyst_report
 from tradingagents.agents.utils.agent_utils import get_language_instruction
+from tradingagents.application.contracts import EvidenceBundle, EvidenceItem
+from tradingagents.graph.role_context import RoleContextBuilder
 
 _AGENTS_DIR = Path(__file__).resolve().parents[1] / "tradingagents" / "agents"
 
@@ -59,13 +63,41 @@ def test_report_agent_applies_language_instruction(rel):
 
 @pytest.mark.unit
 def test_research_graph_applies_run_language_to_generic_roles():
-    graph_dir = _AGENTS_DIR.parent / "graph"
-    graph_src = (graph_dir / "research_graph.py").read_text(
-        encoding="utf-8"
+    item = EvidenceItem.create(
+        source="fixture",
+        evidence_type="language fixture",
+        requested_date=date(2026, 7, 31),
+        effective_date=date(2026, 7, 31),
+        content="Language routing evidence.",
     )
-    prompt_src = (graph_dir / "deliberation.py").read_text(
-        encoding="utf-8"
+    bundle = EvidenceBundle(
+        instrument="4568.T",
+        analysis_date=date(2026, 7, 31),
+        items=(item,),
+    )
+    report = analyst_report(
+        analyst="market",
+        evidence_ref=item.ref,
+        narrative="Language routing report.",
+    )
+    custom_language = (
+        "Use concise Simplified Chinese headings and preserve Japanese names."
+    )
+    context = RoleContextBuilder(
+        {
+            "evidence_bundle": bundle.model_dump(mode="json"),
+            "analyst_reports": {
+                "market": report.model_dump(mode="json"),
+            },
+            "output_language": custom_language,
+            "profile": "standard",
+        }
+    ).build(
+        title="Bull Researcher",
+        objective="Build the constructive case.",
+        stage="opening_case",
+        report_mode="full",
     )
 
-    assert "report_language_prompt_label(" in graph_src
-    assert 'state.get("output_language", "English")' in prompt_src
+    assert custom_language in context.shared_prefix
+    assert custom_language in context.prompt
