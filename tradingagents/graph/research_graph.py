@@ -1198,12 +1198,18 @@ class ResearchGraph:
         runtime: Runtime[RunContext],
         memo_instruction: str | None = None,
     ) -> PreparedEvidence:
+        serializer_llm = (
+            self.deep_serializer_llm
+            if llm is self.deep_llm
+            else self.quick_serializer_llm
+        )
         with self.metrics.phase(
             node,
             event_writer=runtime.stream_writer,
         ):
             prepared = prepare_evidence(
                 llm,
+                serializer_llm=serializer_llm,
                 bundle=bundle,
                 role_prompt=role_prompt,
                 node=node,
@@ -1213,6 +1219,7 @@ class ResearchGraph:
                     "metadata": {"research_node": node},
                 },
             )
+            self.metrics.record_tool_calls(node, len(prepared.lookups))
         for lookup in prepared.lookups:
             runtime.stream_writer(
                 {

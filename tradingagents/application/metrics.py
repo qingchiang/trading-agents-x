@@ -250,6 +250,18 @@ class MetricsCallback(BaseCallbackHandler):
                 self._legacy_spans.pop(node, None)
         return self.finish_span(token) if token is not None else 0.0
 
+    def record_tool_calls(self, node: str, count: int = 1) -> None:
+        """Record deterministic local tool executions outside callback plumbing."""
+
+        if count <= 0:
+            return
+        with self._lock:
+            self.tool_calls += count
+            self._node_usage.setdefault(
+                node,
+                _NodeAccumulator(),
+            ).tool_calls += count
+
     @contextmanager
     def phase(
         self,

@@ -163,6 +163,16 @@ def test_missing_metadata_and_provider_usage_are_explicit() -> None:
     assert snapshot.node_metrics["unattributed"].input_tokens == 0
 
 
+def test_deterministic_local_tool_calls_are_attributed_explicitly() -> None:
+    metrics = MetricsCallback()
+
+    metrics.record_tool_calls("case.bull.prepare", 3)
+
+    snapshot = metrics.snapshot()
+    assert snapshot.tool_calls == 3
+    assert snapshot.node_metrics["case.bull.prepare"].tool_calls == 3
+
+
 def test_phase_records_parallel_safe_wall_time_and_timeline_events(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

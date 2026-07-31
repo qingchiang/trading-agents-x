@@ -8,9 +8,10 @@ from langchain_core.messages import AIMessage
 from tests.factories import analyst_report
 from tradingagents.application.contracts import EvidenceBundle, EvidenceItem
 from tradingagents.application.evidence import extract_evidence_tables
-from tradingagents.application.metrics import MetricsCallback
 from tradingagents.graph.deliberation import research_prompt
 from tradingagents.graph.evidence_context import (
+    EvidenceLookupRequest,
+    EvidenceWorksetPlan,
     build_evidence_catalog,
     prepare_evidence,
     query_evidence_table_payload,
@@ -130,47 +131,66 @@ def test_table_query_rejects_future_cutoff() -> None:
 
 
 class _PreparationLLM:
-    def __init__(self, table_id: str):
-        self.table_id = table_id
+    def __init__(self):
         self.calls = 0
         self.configs: list[dict[str, Any] | None] = []
-
-    def bind_tools(self, _tools):
-        return self
 
     def invoke(self, _messages, *, config=None):
         self.calls += 1
         self.configs.append(config)
-        if self.calls == 1:
-            return AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "id": "lookup-1",
-                        "name": "query_evidence_table",
-                        "args": {
-                            "table_id": self.table_id,
-                            "operation": "summary",
-                            "columns": ["close"],
-                        },
-                    }
-                ],
+        return AIMessage(
+            content=(
+                "Check the close range with a summary query, then use it in "
+                "the formal research output."
             )
-        return AIMessage(content="Verified the close range from the source table.")
+        )
 
 
-def test_role_preparation_records_actual_read_only_queries() -> None:
+class _PlanInvoker:
+    def __init__(self, owner: _PlanSerializer):
+        self.owner = owner
+
+    def invoke(self, _prompt, *, config=None):
+        self.owner.calls += 1
+        self.owner.configs.append(config)
+        return {"raw": None, "parsed": self.owner.plan}
+
+
+class _PlanSerializer:
+    preferred_structured_output_method = "function_calling"
+
+    def __init__(self, plan: EvidenceWorksetPlan):
+        self.plan = plan
+        self.calls = 0
+        self.configs: list[dict[str, Any] | None] = []
+
+    def with_structured_output(self, _schema, **_kwargs):
+        return _PlanInvoker(self)
+
+
+def test_role_preparation_executes_one_deduplicated_lookup_batch() -> None:
     bundle = _bundle()
-    llm = _PreparationLLM(bundle.tables[0].id)
-    metrics = MetricsCallback()
+    llm = _PreparationLLM()
+    lookup = EvidenceLookupRequest(
+        tool="query_evidence_table",
+        table_id=bundle.tables[0].id,
+        operation="summary",
+        columns=("close",),
+    )
+    serializer = _PlanSerializer(
+        EvidenceWorksetPlan(
+            memo="Verified the close range from the source table.",
+            lookups=(lookup, lookup),
+        )
+    )
 
     prepared = prepare_evidence(
         llm,
+        serializer_llm=serializer,
         bundle=bundle,
         role_prompt="Check the price range.",
         node="case.bull",
         invoke_config={
-            "callbacks": [metrics],
             "metadata": {"research_node": "case.bull"},
         },
     )
@@ -180,7 +200,9 @@ def test_role_preparation_records_actual_read_only_queries() -> None:
     assert prepared.lookups[0].returned_rows == 0
     assert prepared.query_results[0]["summary"]["close"]["max"] == 119
     assert llm.configs[0]["metadata"]["research_node"] == "case.bull"
-    assert metrics.snapshot().node_metrics["case.bull"].tool_calls == 1
+    assert llm.calls == 1
+    assert serializer.calls == 1
+    assert serializer.configs[0]["metadata"]["research_node"] == "case.bull"
 
 
 def test_post_analyst_prompt_size_does_not_scale_with_raw_rows() -> None:

@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any, Literal
 
-from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
-from langchain_core.tools import tool
+from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from tradingagents.application.contracts import (
     EvidenceBundle,
@@ -17,9 +17,12 @@ from tradingagents.application.contracts import (
     EvidenceTable,
     EvidenceTableCell,
 )
+from tradingagents.graph.structured_output import (
+    StructuredOutputError,
+    StructuredOutputRunner,
+)
 
 _MAX_ROWS = 120
-_MAX_PREPARATION_STEPS = 12
 _LARGE_TABULAR_CONTENT = 20_000
 
 
@@ -76,6 +79,45 @@ class PreparedEvidence:
                 ensure_ascii=False,
             )
         )
+
+
+class EvidenceLookupRequest(BaseModel):
+    """One batchable read-only lookup selected during evidence preparation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tool: Literal["get_evidence_item", "query_evidence_table"]
+    evidence_ref: str | None = None
+    table_id: str | None = None
+    operation: Literal["rows", "resample", "summary", "extrema"] | None = None
+    columns: tuple[str, ...] = ()
+    start_date: str | None = None
+    end_date: str | None = None
+    frequency: str | None = None
+    row_ids: tuple[str, ...] = ()
+    cursor: str | None = None
+
+    @model_validator(mode="after")
+    def validate_shape(self) -> EvidenceLookupRequest:
+        if self.tool == "get_evidence_item":
+            if not self.evidence_ref or self.table_id is not None:
+                raise ValueError(
+                    "item lookup requires evidence_ref and forbids table_id"
+                )
+        elif not self.table_id or self.evidence_ref is not None:
+            raise ValueError(
+                "table lookup requires table_id and forbids evidence_ref"
+            )
+        return self
+
+
+class EvidenceWorksetPlan(BaseModel):
+    """Small typed plan produced after the thinking model's blueprint."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    memo: str = Field(min_length=1)
+    lookups: tuple[EvidenceLookupRequest, ...] = ()
 
 
 def build_evidence_catalog(bundle: EvidenceBundle) -> dict[str, Any]:
@@ -179,150 +221,224 @@ def query_evidence_table_payload(
 def prepare_evidence(
     llm: Any,
     *,
+    serializer_llm: Any | None = None,
     bundle: EvidenceBundle,
     role_prompt: str,
     node: str,
     invoke_config: dict[str, Any] | None = None,
     memo_instruction: str | None = None,
 ) -> PreparedEvidence:
-    """Let one role inspect catalogued evidence before formal synthesis."""
+    """Plan once, serialize one batch, then execute immutable local lookups."""
 
     catalog = build_evidence_catalog(bundle)
     fallback_memo = (
         "Use the complete typed research context and the evidence catalog. "
         "No additional evidence slice was requested."
     )
-    if not hasattr(llm, "bind_tools"):
+    try:
+        response = llm.invoke(
+            [
+                SystemMessage(
+                    content=(
+                        memo_instruction
+                        or (
+                            "Create a detailed evidence-preparation blueprint "
+                            "for the formal research output that follows. "
+                            "Identify the exact source passages, values, table "
+                            "operations, columns, ranges, comparisons, "
+                            "counter-evidence, and uncertainty worth checking. "
+                            "Do not write the formal artifact and do not invent "
+                            "IDs outside the supplied catalog."
+                        )
+                    )
+                ),
+                HumanMessage(
+                    content=(
+                        f"NODE: {node}\n\nROLE CONTEXT:\n{role_prompt}\n\n"
+                        "EVIDENCE CATALOG:\n"
+                        + json.dumps(catalog, ensure_ascii=False)
+                    )
+                ),
+            ],
+            config=invoke_config,
+        )
+    except Exception:
         return PreparedEvidence(catalog=catalog, memo=fallback_memo)
+    blueprint = _message_text(response).strip() or fallback_memo
+    serializer = serializer_llm or llm
+    try:
+        plan = StructuredOutputRunner(
+            llm=serializer,
+            schema=EvidenceWorksetPlan,
+            validator=lambda candidate: _validate_workset_plan(
+                candidate,
+                bundle,
+            ),
+            node=node,
+            invoke_config=invoke_config,
+            repair_mode="preferred",
+        ).invoke(
+            (
+                "Convert this evidence-preparation blueprint into one batch of "
+                "read-only lookups. Preserve the useful research memo. Use "
+                "get_evidence_item for exact source text/value and "
+                "query_evidence_table for rows, summary, extrema, or resample. "
+                "Do not request data merely because it exists.\n\n"
+                f"BLUEPRINT:\n{blueprint}\n\n"
+                "EVIDENCE CATALOG:\n"
+                + json.dumps(catalog, ensure_ascii=False)
+            ),
+            example={
+                "memo": "Verify the latest price range and the relevant passage.",
+                "lookups": [
+                    {
+                        "tool": "get_evidence_item",
+                        "evidence_ref": (
+                            bundle.items[0].ref if bundle.items else None
+                        ),
+                    }
+                ]
+                if bundle.items
+                else [],
+            },
+            allowed_evidence_refs=tuple(item.ref for item in bundle.items),
+        ).value
+    except StructuredOutputError:
+        return PreparedEvidence(catalog=catalog, memo=blueprint)
 
     lookup_records: list[EvidenceLookup] = []
     query_results: list[dict[str, Any]] = []
-
-    @tool("get_evidence_item")
-    def get_evidence_item(ref: str) -> str:
-        """Read one sealed evidence item by its exact ev_ reference."""
-
-        payload = get_evidence_item_payload(bundle, ref)
-        lookup_records.append(EvidenceLookup(tool="get_evidence_item", evidence_ref=ref))
+    for request in _dedupe_lookup_requests(plan.lookups):
+        payload, lookup = _execute_lookup(bundle, request)
         query_results.append(payload)
-        return json.dumps(payload, ensure_ascii=False)
-
-    @tool("query_evidence_table")
-    def query_evidence_table(
-        table_id: str,
-        operation: Literal["rows", "resample", "summary", "extrema"] = "rows",
-        columns: list[str] | None = None,
-        start_date: str | None = None,
-        end_date: str | None = None,
-        frequency: str | None = None,
-        row_ids: list[str] | None = None,
-        cursor: str | None = None,
-    ) -> str:
-        """Read, aggregate, or page a sealed evidence table without live I/O."""
-
-        payload = query_evidence_table_payload(
-            bundle,
-            table_id=table_id,
-            operation=operation,
-            columns=columns,
-            start_date=start_date,
-            end_date=end_date,
-            frequency=frequency,
-            row_ids=row_ids,
-            cursor=cursor,
-        )
-        lookup_records.append(
-            EvidenceLookup(
-                tool="query_evidence_table",
-                table_id=table_id,
-                operation=operation,
-                columns=tuple(columns or ()),
-                start_date=start_date,
-                end_date=end_date,
-                frequency=frequency,
-                row_ids=tuple(row_ids or ()),
-                cursor=cursor,
-                returned_rows=int(payload.get("returned_rows", 0)),
-            )
-        )
-        query_results.append(payload)
-        return json.dumps(payload, ensure_ascii=False)
-
-    tools = (get_evidence_item, query_evidence_table)
-    try:
-        prepared_llm = llm.bind_tools(list(tools))
-    except (AttributeError, NotImplementedError, TypeError, ValueError):
-        return PreparedEvidence(catalog=catalog, memo=fallback_memo)
-
-    messages: list[Any] = [
-        SystemMessage(
-            content=(
-                memo_instruction
-                or (
-                    "Prepare an evidence memo for the formal research output "
-                    "that follows. Inspect the typed context and compact "
-                    "EvidenceCatalog. Use the read-only tools whenever an "
-                    "exact value, original text, table slice, resampling, "
-                    "summary, or extrema check would improve the result. Do "
-                    "not draft the formal JSON artifact. Finish with a concise "
-                    "memo listing verified facts, relevant claim/table/ref "
-                    "IDs, important uncertainty, and any requested slices. "
-                    "Never treat historical memory as current evidence."
-                )
-            )
-        ),
-        HumanMessage(
-            content=(
-                f"NODE: {node}\n\nROLE CONTEXT:\n{role_prompt}\n\n"
-                "EVIDENCE CATALOG:\n" + json.dumps(catalog, ensure_ascii=False)
-            )
-        ),
-    ]
-    tool_by_name = {item.name: item for item in tools}
-    memo = fallback_memo
-    for _ in range(_MAX_PREPARATION_STEPS):
-        response = prepared_llm.invoke(messages, config=invoke_config)
-        messages.append(response)
-        calls = getattr(response, "tool_calls", None) or ()
-        if not calls:
-            content = getattr(response, "content", "")
-            if isinstance(content, str) and content.strip():
-                memo = content.strip()
-            break
-        for call in calls:
-            name = str(call.get("name", ""))
-            selected_tool = tool_by_name.get(name)
-            if selected_tool is None:
-                result = json.dumps(
-                    {"error": "unknown_tool", "tool": name},
-                    ensure_ascii=False,
-                )
-            else:
-                try:
-                    result = selected_tool.invoke(
-                        call.get("args", {}),
-                        config=invoke_config,
-                    )
-                except (TypeError, ValueError) as exc:
-                    result = json.dumps(
-                        {
-                            "error": "invalid_query",
-                            "reason": type(exc).__name__,
-                        },
-                        ensure_ascii=False,
-                    )
-            messages.append(
-                ToolMessage(
-                    content=result,
-                    tool_call_id=str(call.get("id") or f"{name}-call"),
-                    name=name or "unknown",
-                )
-            )
+        lookup_records.append(lookup)
     return PreparedEvidence(
         catalog=catalog,
-        memo=memo,
+        memo=plan.memo,
         query_results=tuple(query_results),
         lookups=tuple(lookup_records),
+    )
+
+
+def _message_text(response: Any) -> str:
+    content = getattr(response, "content", response)
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts: list[str] = []
+    for block in content:
+        if isinstance(block, str):
+            parts.append(block)
+        elif isinstance(block, dict):
+            text = block.get("text")
+            if isinstance(text, str):
+                parts.append(text)
+    return "\n".join(parts)
+
+
+def _validate_workset_plan(
+    plan: EvidenceWorksetPlan,
+    bundle: EvidenceBundle,
+) -> EvidenceWorksetPlan:
+    item_refs = {item.ref for item in bundle.items}
+    tables = {table.id: table for table in bundle.tables}
+    for request in plan.lookups:
+        if request.tool == "get_evidence_item":
+            if request.evidence_ref not in item_refs:
+                raise ValueError("workset plan references unknown evidence")
+            continue
+        table = tables.get(request.table_id or "")
+        if table is None:
+            raise ValueError("workset plan references unknown evidence table")
+        valid_columns = {column.key for column in table.columns}
+        if not set(request.columns).issubset(valid_columns):
+            raise ValueError("workset plan references unknown table columns")
+        valid_rows = {row.id for row in table.rows}
+        if not set(request.row_ids).issubset(valid_rows):
+            raise ValueError("workset plan references unknown table rows")
+        if request.operation == "resample" and request.frequency not in {
+            "day",
+            "week",
+            "month",
+            "quarter",
+            "year",
+        }:
+            raise ValueError("resample lookup requires a supported frequency")
+        for raw_date in (request.start_date, request.end_date):
+            if raw_date is None:
+                continue
+            try:
+                parsed = date.fromisoformat(raw_date)
+            except ValueError as exc:
+                raise ValueError("workset plan contains an invalid date") from exc
+            if parsed > bundle.analysis_date:
+                raise ValueError("workset plan requests evidence after the cutoff")
+        if request.cursor is not None:
+            try:
+                if int(request.cursor) < 0:
+                    raise ValueError
+            except ValueError as exc:
+                raise ValueError("workset plan contains an invalid cursor") from exc
+    return plan
+
+
+def _dedupe_lookup_requests(
+    requests: tuple[EvidenceLookupRequest, ...],
+) -> tuple[EvidenceLookupRequest, ...]:
+    deduped: dict[str, EvidenceLookupRequest] = {}
+    for request in requests:
+        identity = json.dumps(
+            request.model_dump(mode="json"),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        deduped.setdefault(identity, request)
+    return tuple(deduped.values())
+
+
+def _execute_lookup(
+    bundle: EvidenceBundle,
+    request: EvidenceLookupRequest,
+) -> tuple[dict[str, Any], EvidenceLookup]:
+    if request.tool == "get_evidence_item":
+        payload = get_evidence_item_payload(
+            bundle,
+            request.evidence_ref or "",
+        )
+        return (
+            payload,
+            EvidenceLookup(
+                tool=request.tool,
+                evidence_ref=request.evidence_ref,
+            ),
+        )
+    payload = query_evidence_table_payload(
+        bundle,
+        table_id=request.table_id or "",
+        operation=request.operation or "rows",
+        columns=request.columns,
+        start_date=request.start_date,
+        end_date=request.end_date,
+        frequency=request.frequency,
+        row_ids=request.row_ids,
+        cursor=request.cursor,
+    )
+    return (
+        payload,
+        EvidenceLookup(
+            tool=request.tool,
+            table_id=request.table_id,
+            operation=request.operation or "rows",
+            columns=request.columns,
+            start_date=request.start_date,
+            end_date=request.end_date,
+            frequency=request.frequency,
+            row_ids=request.row_ids,
+            cursor=request.cursor,
+            returned_rows=int(payload.get("returned_rows", 0)),
+        ),
     )
 
 

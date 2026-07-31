@@ -40,6 +40,7 @@ from tradingagents.application.contracts import (
 from tradingagents.application.metrics import MetricsCallback
 from tradingagents.application.runtime import RunContext
 from tradingagents.graph.analyst_synthesis import AnalystAuditDraft
+from tradingagents.graph.evidence_context import EvidenceWorksetPlan
 from tradingagents.graph.research_graph import (
     ResearchGraph,
     _evidence_from_record,
@@ -86,6 +87,11 @@ class _StructuredInvoker:
                     ),
                 ),
                 section_source_refs={section_id: refs[-1:]},
+            )
+        elif self.schema is EvidenceWorksetPlan:
+            parsed = EvidenceWorksetPlan(
+                memo="The catalog is sufficient for the fixture.",
+                lookups=(),
             )
         elif self.schema is ResearchCase:
             role = "bull" if "Bull Researcher" in prompt else "bear"
@@ -217,6 +223,14 @@ class _FakeLLM:
 
     def invoke(self, prompt, config=None):
         assert config is None or "metadata" in config
+        if isinstance(prompt, list):
+            self.calls.append(("EvidenceBlueprint", prompt))
+            return AIMessage(
+                content=(
+                    "Use the catalog and request only evidence needed for "
+                    "material claims."
+                )
+            )
         self.calls.append(("MarkdownReport", prompt))
         refs = tuple(dict.fromkeys(re.findall(r"ev_[a-f0-9]{12}", prompt)))
         analyst_match = re.search(
@@ -403,8 +417,17 @@ def test_profiles_share_contract_but_use_distinct_topologies(
     (
         (
             RunProfile.FAST,
-            {"MarkdownReport", "AnalystAuditDraft"},
-            {"ResearchDecision"},
+            {
+                "MarkdownReport",
+                "AnalystAuditDraft",
+                "EvidenceBlueprint",
+                "EvidenceWorksetPlan",
+            },
+            {
+                "ResearchDecision",
+                "EvidenceBlueprint",
+                "EvidenceWorksetPlan",
+            },
         ),
         (
             RunProfile.STANDARD,
@@ -415,12 +438,24 @@ def test_profiles_share_contract_but_use_distinct_topologies(
                 "DebateAgenda",
                 "RebuttalReview",
                 "RiskReview",
+                "EvidenceBlueprint",
+                "EvidenceWorksetPlan",
             },
-            {"JudgeDraft", "ResearchDecision"},
+            {
+                "JudgeDraft",
+                "ResearchDecision",
+                "EvidenceBlueprint",
+                "EvidenceWorksetPlan",
+            },
         ),
         (
             RunProfile.DEEP,
-            {"MarkdownReport", "AnalystAuditDraft"},
+            {
+                "MarkdownReport",
+                "AnalystAuditDraft",
+                "EvidenceBlueprint",
+                "EvidenceWorksetPlan",
+            },
             {
                 "ResearchCase",
                 "DebateAgenda",
@@ -428,6 +463,8 @@ def test_profiles_share_contract_but_use_distinct_topologies(
                 "JudgeDraft",
                 "RiskReview",
                 "ResearchDecision",
+                "EvidenceBlueprint",
+                "EvidenceWorksetPlan",
             },
         ),
     ),
@@ -500,9 +537,10 @@ def test_analyst_core_uses_the_dedicated_serializer_client(
     )
     assert {
         schema for schema, _prompt in serializer.calls
-    } == {"AnalystAuditDraft"}
+    } == {"AnalystAuditDraft", "EvidenceWorksetPlan"}
     assert {schema for schema, _prompt in reasoning.calls} == {
-        "MarkdownReport"
+        "MarkdownReport",
+        "EvidenceBlueprint",
     }
 
 
