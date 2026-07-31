@@ -205,14 +205,7 @@ export default function RunDetail() {
   const decision = useMemo(
     () =>
       detail?.result?.decision ??
-      [...artifacts]
-        .reverse()
-        .find(
-          (artifact) =>
-            artifact.stage === "decision" &&
-            isResearchDecision(artifact.content),
-        )?.content ??
-      null,
+      latestResearchDecision(artifacts),
     [artifacts, detail?.result?.decision],
   );
   const runWarnings = useMemo(() => {
@@ -1466,6 +1459,20 @@ function isResearchDecision(
     "thesis" in content &&
     "scenarios" in content
   );
+}
+
+function latestResearchDecision(
+  artifacts: ResearchArtifact[],
+): ResearchDecision | null {
+  for (const artifact of [...artifacts].reverse()) {
+    if (
+      artifact.stage === "decision" &&
+      isResearchDecision(artifact.content)
+    ) {
+      return artifact.content;
+    }
+  }
+  return null;
 }
 
 function uniqueStrings(values: string[]): string[] {
