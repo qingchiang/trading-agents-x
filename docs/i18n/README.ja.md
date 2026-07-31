@@ -118,12 +118,15 @@ SQLite と WAL ファイルは、Web/worker と同一ホストのローカルフ
 | Profile | フロー |
 | --- | --- |
 | Fast | 並列 analysts → 最終リサーチ委員会 |
-| Standard | 並列 analysts → bull/bear 並列レビュー → Research Judge → 単一 Risk Reviewer → Final Committee |
-| Deep | 並列 analysts → bull/bear と最大 2 ラウンドの targeted rebuttal → Research Judge → aggressive/neutral/conservative の risk lenses → Final Committee |
+| Standard | 並列 analysts → bull/bear case → Debate Agenda → 1 回の targeted cross-rebuttal → Research Judge → 単一 Risk Reviewer → Final Committee |
+| Deep | 並列 analysts → bull/bear case → Debate Agenda → 必須 1 回と最大 2 回の追加 targeted rebuttal → Research Judge → aggressive/neutral/conservative の risk lenses → Final Committee |
 
-Deep は新しい evidence ref も claim rebuttal も追加されなければ早期終了
-します。各 analyst は独立した state channel を使用し、provenance を prose
-経由で受け渡しません。Trader node はありません。
+Deep の追加ラウンドは、重要な未解決 issue が残り、新しい evidence、因果
+mechanism、または具体的な claim の有効な棄却がある場合だけ実行します。
+各 analyst は独立した state channel を使用します。生データと provenance は
+封印済み Evidence Ledger に保存し、人が読む report と deliberation は
+Markdown と軽量な検証済み audit navigation を使用します。Trader node は
+ありません。
 
 ## アーキテクチャと lifecycle
 

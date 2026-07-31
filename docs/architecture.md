@@ -224,29 +224,27 @@ run mutations use ordinary HTTP endpoints.
 
 Market, Social/Sentiment, News, and Fundamentals analysts begin in the same
 LangGraph superstep but use independent local message state and tools. Tool
-collection is followed by a validated report-synthesis step. Its typed handoff
-is `AnalystReport`:
+collection is followed by evidence preparation, Markdown report writing, and a
+small audit-extraction step. The durable `AnalystReport` handoff is:
 
 ```text
 analyst
-executive_summary
+markdown
+report_sections[{id, title, anchor, source_refs}]
 confidence
-claims[{id, kind, statement, implication, confidence, evidence_refs}]
-sections[{id, title, narrative, table_ids}]
-tables[ResearchTable]
-catalysts
-risks
-invalidation_conditions
-evidence_refs
+key_claims[{id, section_id, kind, importance, statement, implication,
+            confidence, evidence_refs}]
+source_refs
+audit_status: complete | incomplete
 warnings
 ```
 
-The main graph merges complete typed reports and evidence items, not a shared
-`MessagesState`. It does not derive formal claims from Markdown with regular
-expressions. Schema or semantic failures receive one bounded JSON recovery;
-provider truncation can recover through a validated manifest and independent
-section synthesis. A report that still fails validation fails the attempt
-instead of producing a fabricated typed artifact.
+Markdown is the formal human-readable report. It may contain headings, lists,
+and GFM tables, and is not reconstructed from typed rows or cells. A
+non-thinking serializer extracts only the small navigation and claim audit
+envelope. If that extraction still fails after one bounded repair, the Markdown
+report is preserved with `audit_status=incomplete` and the graph continues. A
+missing or truncated report body still fails the analyst node.
 
 ### Evidence sealing
 
@@ -266,43 +264,51 @@ fallback
 provenance
 ```
 
-`EvidenceBundle(version="3")` deduplicates items, validates unique references,
+`EvidenceBundle(version="5")` deduplicates items, validates unique references,
 rejects effective dates after the analysis cutoff, interprets `available_at`
 in the instrument's market timezone, and seals both evidence items and
-deterministic `EvidenceTable` objects with a digest. Every later role receives
-the same sealed bundle.
+deterministic raw `EvidenceTable` objects with a digest.
 
-`EvidenceTable` preserves complete fact tables extracted or generated
-deterministically from source results. `ResearchTable` holds cited comparisons,
-interpretations, scenarios, or derived values created during report synthesis.
-Observation cells cite Evidence; derived cells retain the formula, inputs,
-input refs, unit, and result. The contracts impose no product-level table,
-row, column, or cell-length limits. A report may present a declared view of an
-EvidenceTable, but it must retain the source table and source row identities so
-the complete data remains available.
+The sealed bundle is written to `run_evidence` independently of the run's final
+status. Evidence sealing and its `evidence.sealed` event commit atomically, so a
+running or failed run can still expose the immutable ledger. Analyst artifacts,
+deliberation artifacts, and the final decision are also durable as soon as each
+stage completes; Run Detail and exports therefore show partial research rather
+than treating an unsuccessful attempt as empty.
 
-### Claim-driven deliberation
+`EvidenceTable` is an audit fact table containing canonical raw values and
+source mappings. It is available on the Evidence page and as CSV in the
+research package, but is never copied wholesale into a model prompt or forced
+into a user report. Analysts receive a compact catalog, deterministic
+analytical views, and a bounded role-specific workset. Read-only local lookups
+operate on the sealed artifacts without recontacting the provider.
 
-Post-analyst roles consume every complete `AnalystReport`, including sections
-and tables, plus the complete sealed Evidence payload. Evidence bodies are not
-silently cropped to a fixed character budget. If provider context limits
-eventually require lookup, omitted bodies must remain available through a
-read-only lookup by canonical ref.
+### Markdown-first deliberation
+
+Post-analyst roles consume the complete Analyst Markdown, available key claims,
+the Evidence catalog, and a deduplicated role-specific lookup workset. The full
+raw EvidenceBundle is not broadcast to every role.
 
 Visible research-process artifacts have separate contracts:
 
 ```text
-ResearchCase       bull/bear case, mechanisms, counterarguments, assumptions
-DebateAgenda       prioritized disputes linked to analyst claim IDs
-RebuttalReview     issue-specific response, mechanism, outcome, remaining issue
-JudgeDraft         ruling for every agenda issue and preliminary conclusion
-RiskReview         findings, invalidation paths, recommended changes
-ResearchDecision   final opinion and risk-review dispositions
+ResearchCase       role Markdown plus focused claim and report-section IDs
+DebateAgenda       short summary plus prioritized issue IDs and questions
+RebuttalReview     role Markdown plus addressed and open issue IDs
+JudgeDraft         judge Markdown, preliminary rating, and issue dispositions
+RiskReview         role Markdown plus challenged and unresolved issue IDs
+ResearchDecision   strict final opinion, scenarios, calculations, and evidence
 ```
 
-Every artifact records its prompt version and structured generation method.
-Roles cite analyst claim IDs and Evidence refs; no artifact stores hidden
-reasoning traces or raw provider conversations.
+Cases, agenda, rebuttals, judge, and risk reviews use a reasoning-model Markdown
+write followed by a non-thinking shallow audit. Graph routing depends on stable
+claim/issue IDs and dispositions, not on parsing prose. The Final Committee
+uses a reasoning pass to form the synthesis brief and a separate strict
+serializer for `ResearchDecision`. Only decision-critical valuation, scenario,
+or market-reference arithmetic uses `CalculationRecord`.
+
+Every artifact records its prompt version and structured generation method. No
+artifact stores hidden reasoning traces or raw provider conversations.
 
 Adapters may still encode transport provenance in versioned markers. Analyst
 nodes extract those markers from tool messages into typed evidence and remove
@@ -345,6 +351,23 @@ materially open agenda issue plus new evidence, a new causal mechanism, or a
 specific claim rejection; repeated thesis prose does not keep the loop alive.
 Role nodes are produced from `RoleSpec`; separate persona modules do not
 duplicate state copying and prompt assembly. There is no Trader node.
+
+### Observable execution phases
+
+Metrics and events use stable phase suffixes. They describe execution
+responsibility rather than separate public graph nodes:
+
+| Phase | Meaning |
+| --- | --- |
+| `collect` (or the base `analyst.<role>` node) | Deterministic data/tool collection; normally no LLM call |
+| `prepare` | Reasoning-model evidence blueprint plus a validated, batched local lookup plan |
+| `report`, `write`, `reason` | Reasoning-model report, deliberation Markdown, or final synthesis brief |
+| `audit` | Non-thinking extraction of a small report/deliberation audit envelope |
+| `serialize` | Non-thinking mapping of the final synthesis to the strict decision contract |
+
+Per-phase wall time surrounds the actual operation, so LLM calls, tool calls,
+tokens, and elapsed time belong to the same phase. Run Detail orders these rows
+by their first persisted timeline event, not by duration.
 
 ## Decision memory and outcomes
 

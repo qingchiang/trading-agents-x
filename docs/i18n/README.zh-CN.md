@@ -107,12 +107,13 @@ NFS、SMB 等网络文件系统。
 | Profile | 流程 |
 | --- | --- |
 | Fast | 并行 analysts → 最终研究委员会 |
-| Standard | 并行 analysts → bull/bear 并行评审 → Research Judge → 单一 Risk Reviewer → Final Committee |
-| Deep | 并行 analysts → bull/bear 与最多两轮定向 rebuttal → Research Judge → aggressive/neutral/conservative 三个 risk lenses 并行 → Final Committee |
+| Standard | 并行 analysts → bull/bear 案例 → Debate Agenda → 一轮定向交叉反驳 → Research Judge → 单一 Risk Reviewer → Final Committee |
+| Deep | 并行 analysts → bull/bear 案例 → Debate Agenda → 一轮必选及最多两轮附加定向反驳 → Research Judge → aggressive/neutral/conservative 三个 risk lenses 并行 → Final Committee |
 
-Deep 在没有新增 evidence ref 或 claim rebuttal 时提前停止。各 analyst 使用
-独立 state channel；provenance 不再依赖 prose 传递。系统中没有 Trader
-节点。
+Deep 只有在仍存在重要开放争议，并且新增证据、因果机制或有效推翻具体 claim
+时才进入附加轮次。各 analyst 使用独立 state channel；原始数据和 provenance
+保存在封存 Evidence Ledger 中，人类可读报告与研究过程使用 Markdown，并只保留
+轻量、经校验的审计导航。系统中没有 Trader 节点。
 
 ## 架构与运行生命周期
 

@@ -22,9 +22,9 @@ The audits cover:
 
 - sealed Evidence refs, actual sources, fallback provenance, and market-local
   visibility dates;
-- exact figures in prose and tables;
-- reproducible `DerivedValue` formulas and inputs;
-- complete `EvidenceTable` and placed `ResearchTable` references;
+- raw `EvidenceTable` integrity and exclusion from model/report contexts;
+- valid report footnotes and report-level/claim-level source references;
+- reproducible decision-critical `CalculationRecord` formulas and inputs;
 - nested JSON, fallback sentinels, and malformed artifacts;
 - current-evidence versus `memory:*` reference separation;
 - rating consistency, seeded-risk recall, and the research-only boundary.
@@ -80,7 +80,8 @@ paid matrix, printing the plan is not authorization to execute it.
 The recorded matrix has five variants:
 
 1. `main_analyst`: the old Analyst prompt for each matching frozen role input;
-2. `v2_analyst`: the V2 strict Analyst synthesis over the same input;
+2. `v2_analyst`: the Markdown-first Analyst report and audit extraction over
+   the same input;
 3. `main_medium`: the exact old Medium debate/risk topology;
 4. `v2_standard`: the production V2 Standard deliberation topology;
 5. `v2_deep`: the production V2 Deep deliberation topology.

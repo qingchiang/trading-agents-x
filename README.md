@@ -134,12 +134,14 @@ Every profile uses one sealed, versioned `EvidenceBundle` and the same typed
 | Profile | Workflow |
 | --- | --- |
 | Fast | Parallel analysts → final research committee |
-| Standard | Parallel analysts → parallel bull/bear reviews → research judge → one risk reviewer → final committee |
-| Deep | Parallel analysts → bull/bear reviews and up to two evidence-aware rebuttal rounds → research judge → parallel aggressive/neutral/conservative risk lenses → final committee |
+| Standard | Parallel analysts → bull/bear cases → debate agenda → one targeted cross-rebuttal → research judge → one risk reviewer → final committee |
+| Deep | Parallel analysts → bull/bear cases → debate agenda → one required and up to two additional targeted rebuttals → research judge → parallel aggressive/neutral/conservative risk lenses → final committee |
 
-Deep rebuttal stops when it adds neither a claim rebuttal nor a new evidence
-reference. Analysts run on separate state channels; prose is not used as the
-transport for provenance.
+An additional Deep rebuttal requires a material open issue plus new evidence, a
+new causal mechanism, or a specific claim rejection. Analysts run on separate
+state channels. Raw source data and provenance live in the sealed Evidence
+Ledger; human reports and deliberation are readable Markdown with lightweight,
+validated audit navigation.
 
 ## Architecture
 
@@ -149,7 +151,7 @@ flowchart LR
     PY["Python API"] --> SVC["AnalysisService"]
     CLI["Non-interactive CLI"] --> SVC
     API --> SVC
-    SVC --> DB[("SQLite<br/>runs · events · reports · memory")]
+    SVC --> DB[("SQLite<br/>runs · evidence · artifacts · decisions · memory")]
     WORKER["Single worker"] --> DB
     WORKER --> GRAPH["Evidence-first LangGraph"]
     GRAPH --> DATA["US · JP · CN · crypto dataflows"]
