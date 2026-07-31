@@ -163,6 +163,32 @@ def test_missing_metadata_and_provider_usage_are_explicit() -> None:
     assert snapshot.node_metrics["unattributed"].input_tokens == 0
 
 
+def test_phase_records_parallel_safe_wall_time_and_timeline_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    moments = iter((0.0, 10.0, 12.5, 13.0))
+    monkeypatch.setattr(
+        "tradingagents.application.metrics.monotonic",
+        lambda: next(moments),
+    )
+    metrics = MetricsCallback()
+    events: list[dict[str, object]] = []
+
+    with metrics.phase("analyst.market.report", event_writer=events.append):
+        pass
+
+    snapshot = metrics.snapshot()
+
+    assert snapshot.node_metrics[
+        "analyst.market.report"
+    ].wall_time_seconds == pytest.approx(2.5)
+    assert [event["event_type"] for event in events] == [
+        "phase.started",
+        "phase.completed",
+    ]
+    assert events[-1]["payload"] == {"wall_time_seconds": 2.5}
+
+
 def test_deepseek_cache_and_reasoning_usage_are_attributed_with_coverage() -> None:
     metrics = MetricsCallback()
     detailed_run = uuid4()

@@ -619,8 +619,28 @@ test("shows a collapsed per-node metrics table", async () => {
   fireEvent.click(summary);
 
   expect(details).toHaveAttribute("open");
-  const committee = screen.getByText("committee.final").closest("tr");
-  const analyst = screen.getByText("analyst.market").closest("tr");
+  act(() => {
+    FakeEventSource.instance.emit("phase.started", {
+      run_id: "run-1",
+      sequence: 10,
+      attempt: 1,
+      event_type: "phase.started",
+      node: "committee.final",
+      payload: {},
+      created_at: "2026-07-24T00:00:10Z",
+    });
+    FakeEventSource.instance.emit("phase.started", {
+      run_id: "run-1",
+      sequence: 20,
+      attempt: 1,
+      event_type: "phase.started",
+      node: "analyst.market",
+      payload: {},
+      created_at: "2026-07-24T00:00:20Z",
+    });
+  });
+  const committee = within(details!).getByText("committee.final").closest("tr");
+  const analyst = within(details!).getByText("analyst.market").closest("tr");
   expect(committee).toHaveTextContent("400");
   expect(committee).toHaveTextContent("4.5s");
   expect(analyst).toHaveTextContent("800");

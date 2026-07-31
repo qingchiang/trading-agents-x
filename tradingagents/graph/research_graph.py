@@ -614,7 +614,7 @@ class ResearchGraph:
         ) -> dict[str, Any]:
             context = runtime.context
             node_name = f"analyst.{analyst}"
-            self._start_node(runtime, node_name)
+            self._start_node(runtime, node_name, measure=False)
             check_cancelled(context)
             narrative = state["analyst_drafts"][analyst]
             evidence = tuple(
@@ -669,6 +669,7 @@ class ResearchGraph:
                 node=node_name,
                 prepared_evidence=prepared_evidence,
                 event_writer=runtime.stream_writer,
+                metrics=self.metrics,
             )
             typed = output.value
             check_cancelled(context)
@@ -689,6 +690,7 @@ class ResearchGraph:
                     "confidence": typed.confidence,
                     "warnings": len(typed.warnings),
                 },
+                measure=False,
             )
             return {
                 "analyst_reports": {analyst: typed.model_dump(mode="json")},
@@ -1195,17 +1197,21 @@ class ResearchGraph:
         runtime: Runtime[RunContext],
         memo_instruction: str | None = None,
     ) -> PreparedEvidence:
-        prepared = prepare_evidence(
-            llm,
-            bundle=bundle,
-            role_prompt=role_prompt,
-            node=node,
-            memo_instruction=memo_instruction,
-            invoke_config={
-                "callbacks": [self.metrics],
-                "metadata": {"research_node": node},
-            },
-        )
+        with self.metrics.phase(
+            node,
+            event_writer=runtime.stream_writer,
+        ):
+            prepared = prepare_evidence(
+                llm,
+                bundle=bundle,
+                role_prompt=role_prompt,
+                node=node,
+                memo_instruction=memo_instruction,
+                invoke_config={
+                    "callbacks": [self.metrics],
+                    "metadata": {"research_node": node},
+                },
+            )
         for lookup in prepared.lookups:
             runtime.stream_writer(
                 {
@@ -1293,8 +1299,18 @@ class ResearchGraph:
         self,
         runtime: Runtime[RunContext],
         node: str,
+        *,
+        measure: bool = True,
     ) -> None:
-        self.metrics.node_started(node)
+        if measure:
+            self.metrics.node_started(node)
+            runtime.stream_writer(
+                {
+                    "event_type": "phase.started",
+                    "node": node,
+                    "payload": {},
+                }
+            )
         runtime.stream_writer(
             {
                 "event_type": "node.started",
@@ -1308,8 +1324,18 @@ class ResearchGraph:
         runtime: Runtime[RunContext],
         node: str,
         payload: dict[str, Any],
+        *,
+        measure: bool = True,
     ) -> None:
-        self.metrics.node_finished(node)
+        if measure:
+            elapsed = self.metrics.node_finished(node)
+            runtime.stream_writer(
+                {
+                    "event_type": "phase.completed",
+                    "node": node,
+                    "payload": {"wall_time_seconds": elapsed},
+                }
+            )
         runtime.stream_writer(
             {
                 "event_type": "node.completed",

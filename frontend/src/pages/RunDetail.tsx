@@ -43,6 +43,8 @@ const eventNames = [
   "run.resumed",
   "node.started",
   "node.completed",
+  "phase.started",
+  "phase.completed",
   "node.output_retry",
   "node.output_recovered",
   "node.output_failed",
@@ -471,7 +473,11 @@ export default function RunDetail() {
         />
       )}
 
-      <MetricsPanel metrics={run.metrics} attempts={detail.attempts ?? []} />
+      <MetricsPanel
+        metrics={run.metrics}
+        attempts={detail.attempts ?? []}
+        events={events}
+      />
       <EvidenceSourceDrawer
         evidenceRef={sourceDrawerRef}
         evidenceIndex={evidenceIndex}
@@ -1164,12 +1170,17 @@ function Metric({ label, value }: { label: string; value: number | string }) {
 function MetricsPanel({
   metrics,
   attempts,
+  events,
 }: {
   metrics: RunMetrics | undefined;
   attempts: RunAttemptView[];
+  events: RunEvent[];
 }) {
   const { t } = useTranslation();
-  const rows = useMemo(() => nodeMetricRows(metrics), [metrics]);
+  const rows = useMemo(
+    () => nodeMetricRows(metrics, events),
+    [events, metrics],
+  );
   return (
     <article className="panel run-metrics">
       <p className="metrics-observation-note">{t("observedUsageNote")}</p>
@@ -1304,8 +1315,22 @@ type NodeMetricRow = {
   wallTime: number;
 };
 
-function nodeMetricRows(metrics: RunMetrics | undefined): NodeMetricRow[] {
+function nodeMetricRows(
+  metrics: RunMetrics | undefined,
+  events: RunEvent[],
+): NodeMetricRow[] {
   const nodeMetrics = metrics?.node_metrics ?? {};
+  const firstSequence = new Map<string, number>();
+  for (const event of events) {
+    if (
+      event.node &&
+      (event.event_type === "phase.started" ||
+        event.event_type === "node.started") &&
+      !firstSequence.has(event.node)
+    ) {
+      firstSequence.set(event.node, event.sequence);
+    }
+  }
   return Object.keys(nodeMetrics)
     .map((node) => {
       const usage = nodeMetrics[node];
@@ -1324,7 +1349,8 @@ function nodeMetricRows(metrics: RunMetrics | undefined): NodeMetricRow[] {
     })
     .sort(
       (left, right) =>
-        right.wallTime - left.wallTime ||
+        (firstSequence.get(left.node) ?? Number.MAX_SAFE_INTEGER) -
+          (firstSequence.get(right.node) ?? Number.MAX_SAFE_INTEGER) ||
         left.node.localeCompare(right.node),
     );
 }

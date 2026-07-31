@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from time import monotonic
 from typing import Any
+from uuid import UUID, uuid4
 
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import AIMessage
@@ -101,7 +104,8 @@ class MetricsCallback(BaseCallbackHandler):
         super().__init__()
         self._lock = threading.Lock()
         self._started_at = monotonic()
-        self._node_started: dict[str, float] = {}
+        self._active_spans: dict[UUID, tuple[str, float]] = {}
+        self._legacy_spans: dict[str, list[UUID]] = {}
         self._node_times: dict[str, float] = {}
         self._node_usage: dict[str, _NodeAccumulator] = {}
         self._llm_runs: dict[Any, str] = {}
@@ -207,23 +211,81 @@ class MetricsCallback(BaseCallbackHandler):
             node = active.pop(run_id, None) if run_id is not None else None
         return node or _callback_node(kwargs)
 
-    def node_started(self, node: str) -> None:
-        with self._lock:
-            self._node_started.setdefault(node, monotonic())
+    def start_span(self, node: str) -> UUID:
+        """Start one independently tracked phase, including parallel repeats."""
 
-    def node_finished(self, node: str) -> None:
+        token = uuid4()
         with self._lock:
-            started = self._node_started.pop(node, None)
-            if started is not None:
-                self._node_times[node] = self._node_times.get(node, 0.0) + (
-                    monotonic() - started
+            self._active_spans[token] = (node, monotonic())
+        return token
+
+    def finish_span(self, token: UUID) -> float:
+        """Finish a phase span and return its measured elapsed seconds."""
+
+        with self._lock:
+            active = self._active_spans.pop(token, None)
+            if active is None:
+                return 0.0
+            node, started = active
+            elapsed = max(0.0, monotonic() - started)
+            self._node_times[node] = (
+                self._node_times.get(node, 0.0) + elapsed
+            )
+            return elapsed
+
+    def node_started(self, node: str) -> None:
+        """Compatibility wrapper for graph nodes not yet split into phases."""
+
+        token = self.start_span(node)
+        with self._lock:
+            self._legacy_spans.setdefault(node, []).append(token)
+
+    def node_finished(self, node: str) -> float:
+        """Finish the most recent compatibility span for one graph node."""
+
+        with self._lock:
+            tokens = self._legacy_spans.get(node)
+            token = tokens.pop() if tokens else None
+            if tokens == []:
+                self._legacy_spans.pop(node, None)
+        return self.finish_span(token) if token is not None else 0.0
+
+    @contextmanager
+    def phase(
+        self,
+        node: str,
+        *,
+        event_writer: Callable[[dict[str, Any]], None] | None = None,
+    ) -> Iterator[None]:
+        """Measure one phase and optionally expose its durable timeline events."""
+
+        token = self.start_span(node)
+        if event_writer is not None:
+            event_writer(
+                {
+                    "event_type": "phase.started",
+                    "node": node,
+                    "payload": {},
+                }
+            )
+        try:
+            yield
+        finally:
+            elapsed = self.finish_span(token)
+            if event_writer is not None:
+                event_writer(
+                    {
+                        "event_type": "phase.completed",
+                        "node": node,
+                        "payload": {"wall_time_seconds": elapsed},
+                    }
                 )
 
     def snapshot(self) -> RunMetrics:
         now = monotonic()
         with self._lock:
             node_times = dict(self._node_times)
-            for node, started in self._node_started.items():
+            for node, started in self._active_spans.values():
                 node_times[node] = node_times.get(node, 0.0) + max(
                     0.0,
                     now - started,

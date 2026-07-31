@@ -8,6 +8,7 @@ from langchain_core.messages import AIMessage
 from tests.factories import analyst_report
 from tradingagents.application.contracts import EvidenceBundle, EvidenceItem
 from tradingagents.application.evidence import extract_evidence_tables
+from tradingagents.application.metrics import MetricsCallback
 from tradingagents.graph.deliberation import research_prompt
 from tradingagents.graph.evidence_context import (
     build_evidence_catalog,
@@ -161,13 +162,17 @@ class _PreparationLLM:
 def test_role_preparation_records_actual_read_only_queries() -> None:
     bundle = _bundle()
     llm = _PreparationLLM(bundle.tables[0].id)
+    metrics = MetricsCallback()
 
     prepared = prepare_evidence(
         llm,
         bundle=bundle,
         role_prompt="Check the price range.",
         node="case.bull",
-        invoke_config={"metadata": {"research_node": "case.bull"}},
+        invoke_config={
+            "callbacks": [metrics],
+            "metadata": {"research_node": "case.bull"},
+        },
     )
 
     assert prepared.memo.startswith("Verified")
@@ -175,6 +180,7 @@ def test_role_preparation_records_actual_read_only_queries() -> None:
     assert prepared.lookups[0].returned_rows == 0
     assert prepared.query_results[0]["summary"]["close"]["max"] == 119
     assert llm.configs[0]["metadata"]["research_node"] == "case.bull"
+    assert metrics.snapshot().node_metrics["case.bull"].tool_calls == 1
 
 
 def test_post_analyst_prompt_size_does_not_scale_with_raw_rows() -> None:

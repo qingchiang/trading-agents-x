@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
 from typing import Any
 
 from pydantic import Field
@@ -23,6 +24,7 @@ from tradingagents.application.contracts import (
     ReportSection,
     ResearchWarning,
 )
+from tradingagents.application.metrics import MetricsCallback
 from tradingagents.graph.evidence_context import (
     PreparedEvidence,
     build_evidence_catalog,
@@ -202,6 +204,7 @@ def invoke_analyst_report(
     node: str,
     prepared_evidence: PreparedEvidence | None = None,
     event_writer: Callable[[dict[str, Any]], None] | None = None,
+    metrics: MetricsCallback | None = None,
 ) -> StructuredOutputResult[AnalystReport]:
     """Generate readable Markdown, then extract non-fatal key-claim audit data."""
 
@@ -213,29 +216,40 @@ def invoke_analyst_report(
         confidence_override=confidence_override,
         prepared_evidence=prepared_evidence,
     )
-    response = writer_llm.invoke(
-        prompt,
-        config={"metadata": {"research_node": f"{node}.report"}},
+    report_phase = (
+        metrics.phase(f"{node}.report", event_writer=event_writer)
+        if metrics is not None
+        else _null_phase()
     )
-    markdown = _message_text(response)
-    if not markdown.strip():
-        raise StructuredOutputError(
-            node=f"{node}.report",
-            schema="MarkdownReport",
-            reason_code="empty_output",
+    with report_phase:
+        response = writer_llm.invoke(
+            prompt,
+            config={"metadata": {"research_node": f"{node}.report"}},
         )
-    if _is_truncated(response):
-        continuation = writer_llm.invoke(
-            _continuation_prompt(markdown, output_language),
-            config={"metadata": {"research_node": f"{node}.report.continue"}},
-        )
-        if _is_truncated(continuation):
+        markdown = _message_text(response)
+        if not markdown.strip():
             raise StructuredOutputError(
                 node=f"{node}.report",
                 schema="MarkdownReport",
-                reason_code="truncated_output",
+                reason_code="empty_output",
             )
-        markdown = _join_markdown(markdown, _message_text(continuation))
+        if _is_truncated(response):
+            continuation = writer_llm.invoke(
+                _continuation_prompt(markdown, output_language),
+                config={
+                    "metadata": {"research_node": f"{node}.report"}
+                },
+            )
+            if _is_truncated(continuation):
+                raise StructuredOutputError(
+                    node=f"{node}.report",
+                    schema="MarkdownReport",
+                    reason_code="truncated_output",
+                )
+            markdown = _join_markdown(
+                markdown,
+                _message_text(continuation),
+            )
 
     markdown, sections, cited_refs, citation_warnings = (
         normalize_report_citations(markdown, bundle=bundle, analyst=analyst)
@@ -246,17 +260,23 @@ def invoke_analyst_report(
         dict.fromkeys((*warnings, *citation_warnings))
     )
 
+    audit_phase = (
+        metrics.phase(f"{node}.audit", event_writer=event_writer)
+        if metrics is not None
+        else _null_phase()
+    )
     try:
-        audit_result = _extract_report_audit(
-            audit_llm,
-            analyst=analyst,
-            markdown=markdown,
-            sections=sections,
-            bundle=bundle,
-            confidence_override=confidence_override,
-            node=f"{node}.audit",
-            event_writer=event_writer,
-        )
+        with audit_phase:
+            audit_result = _extract_report_audit(
+                audit_llm,
+                analyst=analyst,
+                markdown=markdown,
+                sections=sections,
+                bundle=bundle,
+                confidence_override=confidence_override,
+                node=f"{node}.audit",
+                event_writer=event_writer,
+            )
     except StructuredOutputError:
         incomplete_warning = ResearchWarning(
             code="report.audit_incomplete",
@@ -335,6 +355,11 @@ def invoke_analyst_report(
         ),
         generation_method=ArtifactGenerationMethod.MARKDOWN_AUDITED,
     )
+
+
+@contextmanager
+def _null_phase() -> Iterator[None]:
+    yield
 
 
 def normalize_report_citations(

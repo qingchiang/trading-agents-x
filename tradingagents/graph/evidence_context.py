@@ -299,7 +299,10 @@ def prepare_evidence(
                 )
             else:
                 try:
-                    result = selected_tool.invoke(call.get("args", {}))
+                    result = selected_tool.invoke(
+                        call.get("args", {}),
+                        config=invoke_config,
+                    )
                 except (TypeError, ValueError) as exc:
                     result = json.dumps(
                         {
