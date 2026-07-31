@@ -22,6 +22,9 @@ from tradingagents.application.contracts import (
     ValuationRange,
 )
 from tradingagents.graph.deliberation import (
+    CalculationInputDraft,
+    CalculationRecordDraft,
+    _evaluate_formula,
     debate_round_has_material_progress,
     invoke_debate_agenda,
     invoke_judge_draft,
@@ -31,6 +34,7 @@ from tradingagents.graph.deliberation import (
     invoke_risk_review,
     write_research_markdown,
 )
+from tradingagents.graph.output_validation import OutputValidationError
 from tradingagents.graph.structured_output import StructuredOutputError
 
 
@@ -375,6 +379,65 @@ def test_final_decision_accepts_reproducible_critical_calculation() -> None:
     )
 
     assert result.value.calculation_records[0].result == 100
+
+
+def test_calculation_draft_exposes_identifier_inputs_in_json_schema() -> None:
+    schema = CalculationRecordDraft.model_json_schema()
+    input_schema = schema["$defs"]["CalculationInputDraft"]["properties"]
+
+    assert input_schema["name"]["pattern"] == r"^[A-Za-z][A-Za-z0-9_]*$"
+    assert schema["properties"]["inputs"]["items"] == {
+        "$ref": "#/$defs/CalculationInputDraft"
+    }
+
+
+def test_calculation_draft_converts_typed_inputs_to_public_mapping() -> None:
+    draft = CalculationRecordDraft(
+        id="calc_valuation",
+        purpose=CalculationPurpose.VALUATION,
+        formula="earnings * multiple",
+        inputs=(
+            CalculationInputDraft(name="earnings", value=10),
+            CalculationInputDraft(name="multiple", value=10),
+        ),
+        input_evidence_refs=("ev_0123456789ab",),
+        result=100,
+        unit="USD",
+        as_of_date=date(2026, 7, 24),
+        limitations=("The multiple is scenario-dependent.",),
+    )
+
+    assert draft.input_mapping() == {"earnings": 10, "multiple": 10}
+
+
+@pytest.mark.parametrize(
+    ("formula", "inputs", "issue"),
+    (
+        (
+            "base * growth",
+            {"base": 100},
+            "numeric.calculation.calc_base.formula.missing_input",
+        ),
+        (
+            "base",
+            {"base": 100, "growth": 1.1},
+            "numeric.calculation.calc_base.formula.unused_input",
+        ),
+    ),
+)
+def test_formula_validation_reports_component_scoped_input_issues(
+    formula: str,
+    inputs: dict[str, float],
+    issue: str,
+) -> None:
+    with pytest.raises(OutputValidationError) as error:
+        _evaluate_formula(
+            formula,
+            inputs,
+            issue_prefix="numeric.calculation.calc_base",
+        )
+
+    assert error.value.issue_code == issue
 
 
 def test_final_decision_rejects_unreproducible_critical_calculation() -> None:

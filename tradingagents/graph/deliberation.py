@@ -8,12 +8,14 @@ import math
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from tradingagents.application.contracts import (
     ArtifactGenerationMethod,
+    CalculationPurpose,
     DebateAgenda,
     DebateImportance,
     DebateIssue,
@@ -69,6 +71,45 @@ class JudgeAudit(BaseModel):
     preliminary_rating: ResearchRating
     confidence: float = Field(ge=0.0, le=1.0)
     issue_dispositions: tuple[IssueDisposition, ...] = Field(min_length=1)
+
+
+class CalculationInputDraft(BaseModel):
+    """Serializer-facing numeric input with a schema-visible identifier."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_]*$")
+    value: int | float
+
+
+class CalculationRecordDraft(BaseModel):
+    """Serializer-facing calculation without dynamic JSON object keys."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: str = Field(pattern=r"^calc_[a-z0-9][a-z0-9_.-]*$")
+    purpose: CalculationPurpose
+    formula: str = Field(min_length=1)
+    inputs: tuple[CalculationInputDraft, ...] = Field(min_length=1)
+    input_evidence_refs: tuple[str, ...] = Field(min_length=1)
+    result: int | float
+    unit: str = Field(min_length=1, max_length=32)
+    as_of_date: date
+    limitations: tuple[str, ...] = Field(min_length=1)
+
+    @field_validator("inputs")
+    @classmethod
+    def validate_unique_inputs(
+        cls,
+        value: tuple[CalculationInputDraft, ...],
+    ) -> tuple[CalculationInputDraft, ...]:
+        names = tuple(item.name for item in value)
+        if len(names) != len(set(names)):
+            raise ValueError("calculation input names must be unique")
+        return value
+
+    def input_mapping(self) -> dict[str, int | float]:
+        return {item.name: item.value for item in self.inputs}
 
 
 def write_research_markdown(
@@ -699,13 +740,29 @@ def _is_truncated(response: Any) -> bool:
 def _evaluate_formula(
     formula: str,
     inputs: Mapping[str, int | float],
+    *,
+    issue_prefix: str = "calculation",
 ) -> float:
     try:
         tree = ast.parse(formula, mode="eval")
     except SyntaxError as exc:
         raise OutputValidationError(
-            "calculation.formula.invalid_syntax"
+            f"{issue_prefix}.formula.invalid_syntax"
         ) from exc
+
+    referenced_names = {
+        node.id for node in ast.walk(tree) if isinstance(node, ast.Name)
+    }
+    missing_names = referenced_names.difference(inputs)
+    if missing_names:
+        raise OutputValidationError(
+            f"{issue_prefix}.formula.missing_input"
+        )
+    unused_names = set(inputs).difference(referenced_names)
+    if unused_names:
+        raise OutputValidationError(
+            f"{issue_prefix}.formula.unused_input"
+        )
 
     def evaluate(node: ast.AST) -> float:
         if isinstance(node, ast.Expression):
@@ -716,13 +773,13 @@ def _evaluate_formula(
                 (int, float),
             ):
                 raise OutputValidationError(
-                    "calculation.formula.non_numeric_constant"
+                    f"{issue_prefix}.formula.non_numeric_constant"
                 )
             return float(node.value)
         if isinstance(node, ast.Name):
             if node.id not in inputs:
                 raise OutputValidationError(
-                    "calculation.formula.unknown_input"
+                    f"{issue_prefix}.formula.missing_input"
                 )
             return float(inputs[node.id])
         if isinstance(node, ast.UnaryOp) and isinstance(
@@ -743,7 +800,7 @@ def _evaluate_formula(
             if isinstance(node.op, ast.Div):
                 if right == 0:
                     raise OutputValidationError(
-                        "calculation.formula.division_by_zero"
+                        f"{issue_prefix}.formula.division_by_zero"
                     )
                 return left / right
             if isinstance(node.op, ast.Pow) and abs(right) <= 12:
@@ -751,13 +808,15 @@ def _evaluate_formula(
                     return left**right
                 except OverflowError as exc:
                     raise OutputValidationError(
-                        "calculation.formula.overflow"
+                        f"{issue_prefix}.formula.overflow"
                     ) from exc
         raise OutputValidationError(
-            "calculation.formula.unsupported_operation"
+            f"{issue_prefix}.formula.unsupported_operation"
         )
 
     result = evaluate(tree)
     if not math.isfinite(result):
-        raise OutputValidationError("calculation.formula.non_finite_result")
+        raise OutputValidationError(
+            f"{issue_prefix}.formula.non_finite_result"
+        )
     return result
