@@ -192,8 +192,11 @@ export interface components {
     LoginRequest: {
       token: string;
     };
+    MarketReferenceBasis: "observed" | "derived";
     MarketReferenceLevel: {
       as_of_date: string;
+      basis?: components["schemas"]["MarketReferenceBasis"];
+      calculation_ids?: string[];
       evidence_refs: string[];
       interpretation: string;
       label: string;
@@ -235,6 +238,7 @@ export interface components {
       tool_calls?: number;
       wall_time_seconds?: number;
     };
+    NumericAuditStatus: "complete" | "partial" | "incomplete" | "not_applicable";
     ProviderCapabilities: {
       api_key_configured: boolean | null;
       api_key_required: boolean;
@@ -303,6 +307,7 @@ export interface components {
       invalidation_conditions: string[];
       market_reference_levels?: components["schemas"]["MarketReferenceLevel"][];
       memory_refs?: string[];
+      numeric_audit_status?: components["schemas"]["NumericAuditStatus"] | null;
       rating: components["schemas"]["ResearchRating"];
       risk_review_adjustments?: components["schemas"]["RiskReviewAdjustment"][];
       risks: string[];
@@ -318,6 +323,7 @@ export interface components {
       evidence_refs?: string[];
       kind: components["schemas"]["ResearchScenarioKind"];
       outcome: string;
+      valuation_calculation_ids?: string[];
       valuation_range?: components["schemas"]["ValuationRange"] | null;
     };
     ResearchScenarioKind: "base" | "bull" | "bear";
@@ -436,6 +442,7 @@ export interface components {
     };
     ValuationAssessment: {
       as_of_date: string;
+      calculation_ids: string[];
       currency: string;
       input_evidence_refs: string[];
       limitations: string[];

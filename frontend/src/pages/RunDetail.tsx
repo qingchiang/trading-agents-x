@@ -84,6 +84,7 @@ export default function RunDetail() {
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   const [error, setError] = useState("");
   const [sourceDrawerRef, setSourceDrawerRef] = useState<string | null>(null);
+  const [warningOpenRequest, setWarningOpenRequest] = useState(0);
   const searchParams = useMemo(
     () => new URLSearchParams(location.search),
     [location.search],
@@ -440,7 +441,11 @@ export default function RunDetail() {
           {t("partialResearchAvailable")}
         </div>
       )}
-      <RunWarnings warnings={runWarnings} key={runId} />
+      <RunWarnings
+        warnings={runWarnings}
+        openRequest={warningOpenRequest}
+        key={runId}
+      />
 
       <nav
         className="panel view-tabs"
@@ -499,6 +504,7 @@ export default function RunDetail() {
           decision={decision}
           onEvidence={openSourceDrawer}
           evidenceIndex={evidenceIndex}
+          onOpenWarnings={() => setWarningOpenRequest((value) => value + 1)}
         />
       )}
 
@@ -1008,16 +1014,19 @@ function DecisionPanel({
   decision,
   onEvidence,
   evidenceIndex,
+  onOpenWarnings,
 }: {
   decision: ResearchDecision | null;
   onEvidence: (ref: string) => void;
   evidenceIndex: EvidenceReferenceIndex;
+  onOpenWarnings: () => void;
 }) {
   return (
     <ResearchDecisionView
       decision={decision}
       onEvidence={onEvidence}
       evidenceIndex={evidenceIndex}
+      onOpenWarnings={onOpenWarnings}
     />
   );
 }
@@ -1115,12 +1124,29 @@ function ReportMetadata({
   );
 }
 
-function RunWarnings({ warnings }: { warnings: VisibleWarning[] }) {
+function RunWarnings({
+  warnings,
+  openRequest,
+}: {
+  warnings: VisibleWarning[];
+  openRequest: number;
+}) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (openRequest === 0) return;
+    setOpen(true);
+    requestAnimationFrame(() => {
+      document.getElementById("run-warnings")?.scrollIntoView?.({
+        behavior: "smooth",
+        block: "nearest",
+      });
+    });
+  }, [openRequest]);
   if (!warnings.length) return null;
   return (
     <details
+      id="run-warnings"
       className="run-warning-details audit-details"
       open={open}
     >

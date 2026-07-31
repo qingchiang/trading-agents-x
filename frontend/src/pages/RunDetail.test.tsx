@@ -533,6 +533,37 @@ test("restores deliberation and resolves evidence references across run views", 
   await vi.waitFor(() => expect(api.artifacts).toHaveBeenCalledTimes(3));
 });
 
+test("keeps a degraded numeric audit compact and opens run warnings on demand", async () => {
+  const degraded = structuredClone(detail);
+  degraded.result!.decision!.numeric_audit_status = "incomplete";
+  degraded.result!.warnings = [
+    {
+      code: "decision.numeric_audit_incomplete",
+      message: "Optional numeric conclusions were omitted.",
+      evidence_ref: null,
+      source: "committee.final.serialize.numeric",
+    },
+  ];
+  vi.mocked(api.run).mockResolvedValue(degraded);
+
+  render(
+    <Router initialPath="/runs/run-1?view=decision">
+      <RunDetail />
+    </Router>,
+  );
+
+  expect(
+    await screen.findByText(
+      "Optional valuation and market-reference figures were omitted; the qualitative decision remains audited.",
+    ),
+  ).toBeVisible();
+  expect(screen.getByText("Optional numeric conclusions were omitted.")).not.toBeVisible();
+
+  fireEvent.click(screen.getByRole("button", { name: "Review warnings" }));
+
+  expect(screen.getByText("Optional numeric conclusions were omitted.")).toBeVisible();
+});
+
 test("opens an editable new-run template instead of rerunning immediately", async () => {
   render(
     <Router initialPath="/runs/run-1">

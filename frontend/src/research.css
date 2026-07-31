@@ -899,6 +899,30 @@
   text-transform: uppercase;
 }
 
+.numeric-audit-notice {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 30px;
+  color: #72520f;
+  font-size: 13px;
+  background: #fff8df;
+  border-top: 1px solid #f0df9e;
+}
+
+.numeric-audit-notice button {
+  flex: 0 0 auto;
+  padding: 3px 0;
+  color: #72520f;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
 .decision-section {
   padding: 26px 30px;
   border-top: 1px solid var(--line-soft);

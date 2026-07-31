@@ -522,6 +522,15 @@ def _render_research_decision(content: ResearchDecision) -> str:
         f"- Rating: **{content.rating.value}**",
         f"- Confidence: `{content.confidence:.0%}`",
         f"- Time horizon: {content.time_horizon}",
+        (
+            "- Numeric audit: `"
+            + (
+                content.numeric_audit_status.value
+                if content.numeric_audit_status is not None
+                else "not_recorded"
+            )
+            + "`"
+        ),
         f"- Evidence: {_render_refs(content.evidence_refs)}",
         f"- Memory: {_render_ids(content.memory_refs)}",
         "",
@@ -562,6 +571,11 @@ def _render_research_decision(content: ResearchDecision) -> str:
                     ),
                 ]
             )
+            if scenario.valuation_calculation_ids:
+                lines.append(
+                    "**Calculation IDs:** "
+                    + _render_ids(scenario.valuation_calculation_ids)
+                )
         lines.extend(
             [
                 "",
@@ -584,6 +598,7 @@ def _render_research_decision(content: ResearchDecision) -> str:
                 ),
                 f"- As of: `{assessment.as_of_date.isoformat()}`",
                 ("- Input evidence: " + _render_refs(assessment.input_evidence_refs)),
+                ("- Calculations: " + _render_ids(assessment.calculation_ids)),
             ]
         )
         lines.extend(_render_list("Limitations", assessment.limitations))
@@ -598,6 +613,11 @@ def _render_research_decision(content: ResearchDecision) -> str:
                     f"- Value: `{level.value}` {level.unit}",
                     f"- As of: `{level.as_of_date.isoformat()}`",
                     f"- Evidence: {_render_refs(level.evidence_refs)}",
+                    f"- Basis: `{level.basis.value}`",
+                    (
+                        "- Calculations: "
+                        + _render_ids(level.calculation_ids)
+                    ),
                     "",
                     level.interpretation,
                 ]

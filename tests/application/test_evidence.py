@@ -27,6 +27,7 @@ from tradingagents.application.contracts import (
     EvidenceTemporalScope,
     MarketReferenceLevel,
     NodeMetrics,
+    NumericAuditStatus,
     ResearchArtifact,
     ResearchWarning,
     RiskReviewAdjustment,
@@ -840,6 +841,7 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
                     evidence_refs=("ev_0123456789ab",),
                 ),
             ),
+            "numeric_audit_status": NumericAuditStatus.COMPLETE,
         }
     )
     artifacts = (
@@ -917,6 +919,7 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
     assert "Non-personalized research opinion" in markdown
     assert "### Scenarios" in markdown
     assert "### Valuation Assessment" in markdown
+    assert "- Numeric audit: `complete`" in markdown
     assert "Scenario-weighted multiple" in markdown
     assert "### Market Reference Levels" in markdown
     assert "Observation only, not an entry order." in markdown

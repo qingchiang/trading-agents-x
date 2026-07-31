@@ -1351,6 +1351,14 @@
         "title": "LoginRequest",
         "type": "object"
       },
+      "MarketReferenceBasis": {
+        "enum": [
+          "observed",
+          "derived"
+        ],
+        "title": "MarketReferenceBasis",
+        "type": "string"
+      },
       "MarketReferenceLevel": {
         "additionalProperties": false,
         "properties": {
@@ -1358,6 +1366,18 @@
             "format": "date",
             "title": "As Of Date",
             "type": "string"
+          },
+          "basis": {
+            "$ref": "#/components/schemas/MarketReferenceBasis",
+            "default": "observed"
+          },
+          "calculation_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Calculation Ids",
+            "type": "array"
           },
           "evidence_refs": {
             "items": {
@@ -1628,6 +1648,16 @@
         },
         "title": "NodeMetrics",
         "type": "object"
+      },
+      "NumericAuditStatus": {
+        "enum": [
+          "complete",
+          "partial",
+          "incomplete",
+          "not_applicable"
+        ],
+        "title": "NumericAuditStatus",
+        "type": "string"
       },
       "ProviderCapabilities": {
         "additionalProperties": false,
@@ -2086,6 +2116,16 @@
             "title": "Memory Refs",
             "type": "array"
           },
+          "numeric_audit_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NumericAuditStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "rating": {
             "$ref": "#/components/schemas/ResearchRating"
           },
@@ -2193,6 +2233,14 @@
             "minLength": 1,
             "title": "Outcome",
             "type": "string"
+          },
+          "valuation_calculation_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Valuation Calculation Ids",
+            "type": "array"
           },
           "valuation_range": {
             "anyOf": [
@@ -3025,6 +3073,14 @@
             "title": "As Of Date",
             "type": "string"
           },
+          "calculation_ids": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Calculation Ids",
+            "type": "array"
+          },
           "currency": {
             "maxLength": 16,
             "minLength": 1,
@@ -3062,7 +3118,8 @@
           "currency",
           "as_of_date",
           "input_evidence_refs",
-          "limitations"
+          "limitations",
+          "calculation_ids"
         ],
         "title": "ValuationAssessment",
         "type": "object"

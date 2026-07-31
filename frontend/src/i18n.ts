@@ -296,6 +296,11 @@ const en = {
     formula: "Formula",
     inputs: "Inputs",
     decisionCalculations: "Audited decision calculations",
+    numericAuditPartial:
+      "Some optional numeric conclusions were omitted because their calculations could not be fully audited.",
+    numericAuditIncomplete:
+      "Optional valuation and market-reference figures were omitted; the qualitative decision remains audited.",
+    openRunWarnings: "Review warnings",
     independentCases: "Independent cases",
     bullBearCases: "Bull and bear cases",
     debateAgenda: "Debate agenda",
@@ -665,6 +670,11 @@ const zhCN = {
     formula: "公式",
     inputs: "输入值",
     decisionCalculations: "决策关键计算审计",
+    numericAuditPartial:
+      "部分可选数值结论因计算审计未完全通过而被省略。",
+    numericAuditIncomplete:
+      "可选估值和市场参考数值已省略；定性研究结论仍已完成审计。",
+    openRunWarnings: "查看警告",
     independentCases: "独立立论",
     bullBearCases: "多方与空方完整案例",
     debateAgenda: "辩论议程",
@@ -1041,6 +1051,11 @@ const ja = {
     formula: "式",
     inputs: "入力値",
     decisionCalculations: "意思決定に関する計算監査",
+    numericAuditPartial:
+      "計算監査を完全に通過しなかった一部の任意数値を省略しました。",
+    numericAuditIncomplete:
+      "任意の評価・市場参考値を省略しましたが、定性的な判断は監査済みです。",
+    openRunWarnings: "警告を確認",
     independentCases: "独立した論証",
     bullBearCases: "強気・弱気ケース",
     debateAgenda: "討論アジェンダ",

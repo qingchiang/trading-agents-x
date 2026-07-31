@@ -10,10 +10,12 @@ export default function ResearchDecisionView({
   decision,
   evidenceIndex,
   onEvidence,
+  onOpenWarnings,
 }: {
   decision: ResearchDecision | null;
   evidenceIndex: EvidenceReferenceIndex;
   onEvidence: (ref: string) => void;
+  onOpenWarnings?: () => void;
 }) {
   const { t } = useTranslation();
   if (!decision) {
@@ -37,6 +39,7 @@ export default function ResearchDecisionView({
         decision={decision}
         evidenceIndex={evidenceIndex}
         onEvidence={onEvidence}
+        onOpenWarnings={onOpenWarnings}
       />
     </article>
   );
@@ -46,11 +49,13 @@ export function ResearchDecisionContent({
   decision,
   evidenceIndex,
   onEvidence,
+  onOpenWarnings,
   embedded = false,
 }: {
   decision: ResearchDecision;
   evidenceIndex: EvidenceReferenceIndex;
   onEvidence: (ref: string) => void;
+  onOpenWarnings?: () => void;
   embedded?: boolean;
 }) {
   const { t } = useTranslation();
@@ -96,6 +101,24 @@ export function ResearchDecisionContent({
           <MemoryLinks refs={decision.memory_refs ?? []} />
         </div>
       </header>
+
+      {(decision.numeric_audit_status === "partial" ||
+        decision.numeric_audit_status === "incomplete") && (
+        <div className="numeric-audit-notice" role="status">
+          <span>
+            {t(
+              decision.numeric_audit_status === "partial"
+                ? "numericAuditPartial"
+                : "numericAuditIncomplete",
+            )}
+          </span>
+          {onOpenWarnings && (
+            <button type="button" onClick={onOpenWarnings}>
+              {t("openRunWarnings")}
+            </button>
+          )}
+        </div>
+      )}
 
       <section className="decision-section">
         <div className="decision-section-heading">
