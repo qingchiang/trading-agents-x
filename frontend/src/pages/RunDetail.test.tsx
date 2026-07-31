@@ -112,23 +112,41 @@ const runMetrics = {
   detailed_usage_calls: 1,
   wall_time_seconds: 12.4,
   node_metrics: {
-    "analyst.market": {
-      llm_calls: 2,
+    "analyst.market.collect": {
+      llm_calls: 1,
       tool_calls: 3,
-      input_tokens: 800,
-      output_tokens: 220,
-      cache_hit_input_tokens: 300,
-      cache_miss_input_tokens: 500,
-      reasoning_output_tokens: 100,
+      input_tokens: 300,
+      output_tokens: 100,
+      cache_hit_input_tokens: 100,
+      cache_miss_input_tokens: 200,
+      reasoning_output_tokens: 40,
       detailed_usage_calls: 1,
       wall_time_seconds: 2.1,
     },
-    "committee.final": {
-      llm_calls: 2,
+    "analyst.market.report": {
+      llm_calls: 1,
       tool_calls: 0,
-      input_tokens: 400,
+      input_tokens: 500,
+      output_tokens: 120,
+      cache_hit_input_tokens: 200,
+      cache_miss_input_tokens: 300,
+      reasoning_output_tokens: 60,
+      detailed_usage_calls: 0,
+      wall_time_seconds: 2.9,
+    },
+    "committee.final.reason": {
+      llm_calls: 1,
+      tool_calls: 0,
+      input_tokens: 200,
+      output_tokens: 100,
+      wall_time_seconds: 2.5,
+    },
+    "committee.final.serialize": {
+      llm_calls: 1,
+      tool_calls: 0,
+      input_tokens: 200,
       output_tokens: 180,
-      wall_time_seconds: 4.5,
+      wall_time_seconds: 2,
     },
   },
 };
@@ -635,7 +653,7 @@ test("shows a collapsed per-node metrics table", async () => {
       sequence: 10,
       attempt: 1,
       event_type: "phase.started",
-      node: "committee.final",
+      node: "committee.final.reason",
       payload: {},
       created_at: "2026-07-24T00:00:10Z",
     });
@@ -644,20 +662,59 @@ test("shows a collapsed per-node metrics table", async () => {
       sequence: 20,
       attempt: 1,
       event_type: "phase.started",
-      node: "analyst.market",
+      node: "analyst.market.collect",
       payload: {},
       created_at: "2026-07-24T00:00:20Z",
     });
   });
-  const committee = within(details!).getByText("committee.final").closest("tr");
-  const analyst = within(details!).getByText("analyst.market").closest("tr");
-  expect(committee).toHaveTextContent("400");
-  expect(committee).toHaveTextContent("4.5s");
-  expect(analyst).toHaveTextContent("800");
+  const committee = within(details!)
+    .getByText("committee.final.reason")
+    .closest("tr");
+  const analyst = within(details!)
+    .getByText("analyst.market.collect")
+    .closest("tr");
+  expect(committee).toHaveTextContent("200");
+  expect(committee).toHaveTextContent("2.5s");
+  expect(analyst).toHaveTextContent("300");
   expect(
     committee!.compareDocumentPosition(analyst!) &
       Node.DOCUMENT_POSITION_FOLLOWING,
   ).not.toBe(0);
+
+  act(() => {
+    FakeEventSource.instance.emit("node.context_prepared", {
+      run_id: "run-1",
+      sequence: 30,
+      attempt: 1,
+      event_type: "node.context_prepared",
+      node: "committee.final.context",
+      payload: {
+        inline_characters: 12345,
+        reference_count: 7,
+        table_summary_count: 2,
+        catalog_items: 43,
+      },
+      created_at: "2026-07-24T00:00:30Z",
+    });
+    FakeEventSource.instance.emit("node.output_recovered", {
+      run_id: "run-1",
+      sequence: 31,
+      attempt: 1,
+      event_type: "node.output_recovered",
+      node: "committee.final.reason",
+      payload: { method: "json_mode_recovered" },
+      created_at: "2026-07-24T00:00:31Z",
+    });
+  });
+  expect(committee).toHaveTextContent("Recovered");
+  const contextSummary = screen.getByText("Prepared contexts", {
+    exact: false,
+  });
+  fireEvent.click(contextSummary);
+  const contextDetails = contextSummary.closest("details");
+  expect(contextDetails).toHaveTextContent("committee.final.context");
+  expect(contextDetails).toHaveTextContent("12,345");
+  expect(contextDetails).toHaveTextContent("43");
 
   const attemptSummary = screen.getByText("Attempt metrics", { exact: false });
   fireEvent.click(attemptSummary);

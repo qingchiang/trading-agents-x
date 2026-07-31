@@ -45,6 +45,7 @@ const eventNames = [
   "node.completed",
   "phase.started",
   "phase.completed",
+  "node.context_prepared",
   "evidence.sealed",
   "node.output_retry",
   "node.output_recovered",
@@ -1219,6 +1220,7 @@ function MetricsPanel({
     () => nodeMetricRows(metrics, events),
     [events, metrics],
   );
+  const contexts = useMemo(() => contextMetricRows(events), [events]);
   return (
     <article className="panel run-metrics">
       <p className="metrics-observation-note">{t("observedUsageNote")}</p>
@@ -1270,6 +1272,7 @@ function MetricsPanel({
                   <th>{t("outputTokens")}</th>
                   <th>{t("reasoningOutputTokens")}</th>
                   <th>{t("detailedUsageCalls")}</th>
+                  <th>{t("outputStatus")}</th>
                   <th>{t("wallTime")}</th>
                 </tr>
               </thead>
@@ -1290,7 +1293,44 @@ function MetricsPanel({
                     <td>{metricCell(row.outputTokens)}</td>
                     <td>{metricCell(row.reasoningOutputTokens)}</td>
                     <td>{metricCell(row.detailedUsageCalls)}</td>
+                    <td>{t(outputStatusKey(row.outputStatus))}</td>
                     <td>{row.wallTime.toFixed(1)}s</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
+      {contexts.length > 0 && (
+        <details className="node-metrics context-metrics">
+          <summary>
+            {t("contextMetrics")} <span>{contexts.length}</span>
+          </summary>
+          <p className="metrics-observation-note">
+            {t("contextMetricsDescription")}
+          </p>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>{t("node")}</th>
+                  <th>{t("contextCharacters")}</th>
+                  <th>{t("evidenceReferences")}</th>
+                  <th>{t("tableSummaries")}</th>
+                  <th>{t("catalogItems")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {contexts.map((row) => (
+                  <tr key={`${row.sequence}:${row.node}`}>
+                    <td>
+                      <code>{row.node}</code>
+                    </td>
+                    <td>{row.inlineCharacters.toLocaleString()}</td>
+                    <td>{row.referenceCount.toLocaleString()}</td>
+                    <td>{row.tableSummaryCount.toLocaleString()}</td>
+                    <td>{row.catalogItems.toLocaleString()}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1358,16 +1398,33 @@ type NodeMetricRow = {
   outputTokens: number | null;
   reasoningOutputTokens: number | null;
   detailedUsageCalls: number | null;
+  outputStatus: OutputStatus;
   wallTime: number;
 };
 
 type MetricPhase =
   | "collect"
-  | "prepare"
+  | "context"
   | "write"
   | "audit"
   | "serialize"
   | "other";
+
+type OutputStatus =
+  | "normal"
+  | "retry"
+  | "recovered"
+  | "auditIncomplete"
+  | "failed";
+
+type ContextMetricRow = {
+  sequence: number;
+  node: string;
+  inlineCharacters: number;
+  referenceCount: number;
+  tableSummaryCount: number;
+  catalogItems: number;
+};
 
 function nodeMetricRows(
   metrics: RunMetrics | undefined,
@@ -1399,6 +1456,7 @@ function nodeMetricRows(
         outputTokens: usage.output_tokens ?? 0,
         reasoningOutputTokens: usage.reasoning_output_tokens ?? 0,
         detailedUsageCalls: usage.detailed_usage_calls ?? 0,
+        outputStatus: nodeOutputStatus(node, events),
         wallTime: usage.wall_time_seconds ?? 0,
       };
     })
@@ -1411,7 +1469,7 @@ function nodeMetricRows(
 }
 
 function metricPhase(node: string): MetricPhase {
-  if (node.endsWith(".prepare")) return "prepare";
+  if (node.endsWith(".context")) return "context";
   if (
     node.endsWith(".report") ||
     node.endsWith(".write") ||
@@ -1428,6 +1486,52 @@ function metricPhase(node: string): MetricPhase {
     return "collect";
   }
   return "other";
+}
+
+function nodeOutputStatus(node: string, events: RunEvent[]): OutputStatus {
+  const outputEvents = events.filter((event) => event.node === node);
+  if (
+    outputEvents.some((event) => event.event_type === "node.output_recovered")
+  ) {
+    return "recovered";
+  }
+  if (outputEvents.some((event) => event.event_type === "node.output_failed")) {
+    return node.endsWith(".audit") ? "auditIncomplete" : "failed";
+  }
+  if (outputEvents.some((event) => event.event_type === "node.output_retry")) {
+    return "retry";
+  }
+  return "normal";
+}
+
+function outputStatusKey(status: OutputStatus): string {
+  return `outputStatus${status[0].toUpperCase()}${status.slice(1)}`;
+}
+
+function contextMetricRows(events: RunEvent[]): ContextMetricRow[] {
+  return events
+    .filter(
+      (event) =>
+        event.event_type === "node.context_prepared" &&
+        typeof event.node === "string",
+    )
+    .map((event) => ({
+      sequence: event.sequence,
+      node: event.node ?? "context",
+      inlineCharacters: numericPayload(event.payload, "inline_characters"),
+      referenceCount: numericPayload(event.payload, "reference_count"),
+      tableSummaryCount: numericPayload(event.payload, "table_summary_count"),
+      catalogItems: numericPayload(event.payload, "catalog_items"),
+    }))
+    .sort((left, right) => left.sequence - right.sequence);
+}
+
+function numericPayload(
+  payload: Record<string, unknown> | undefined,
+  key: string,
+): number {
+  const value = payload?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
 function phaseLabelKey(phase: MetricPhase): string {

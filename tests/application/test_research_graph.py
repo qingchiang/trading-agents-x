@@ -457,6 +457,43 @@ def test_profiles_route_quality_roles_to_the_configured_model_tier(
     assert {schema for schema, _prompt in deep.calls} == deep_schemas
 
 
+@pytest.mark.parametrize(
+    ("profile", "role", "expected_tier"),
+    (
+        (RunProfile.FAST, "bull", "quick"),
+        (RunProfile.STANDARD, "bull", "quick"),
+        (RunProfile.STANDARD, "risk", "quick"),
+        (RunProfile.DEEP, "bull", "deep"),
+        (RunProfile.DEEP, "risk", "deep"),
+    ),
+)
+def test_profile_keeps_reasoning_and_serializer_on_the_same_model_tier(
+    profile: RunProfile,
+    role: str,
+    expected_tier: str,
+) -> None:
+    quick = _FakeLLM()
+    deep = _FakeLLM()
+    quick_serializer = _FakeLLM()
+    deep_serializer = _FakeLLM()
+    graph = ResearchGraph(
+        quick_llm=quick,
+        deep_llm=deep,
+        quick_serializer_llm=quick_serializer,
+        deep_serializer_llm=deep_serializer,
+        profile=profile,
+        selected_analysts=("market",),
+    )
+    spec = research_graph_module._PERSPECTIVE_SPECS[role]
+
+    if expected_tier == "deep":
+        assert graph._deliberation_llm(spec) is deep
+        assert graph._deliberation_serializer_llm(spec) is deep_serializer
+    else:
+        assert graph._deliberation_llm(spec) is quick
+        assert graph._deliberation_serializer_llm(spec) is quick_serializer
+
+
 def test_analyst_core_uses_the_dedicated_serializer_client(
     app_settings,
     monkeypatch,

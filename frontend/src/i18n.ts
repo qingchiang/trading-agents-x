@@ -184,13 +184,26 @@ const en = {
     nodeMetrics: "Per-node metrics",
     nodeMetricsTimelineOrder:
       "Phases are ordered by their first persisted timeline event.",
+    contextMetrics: "Prepared contexts",
+    contextMetricsDescription:
+      "Deterministic role contexts in timeline order; preparing them does not call a model.",
+    contextCharacters: "Context characters",
+    evidenceReferences: "Evidence refs",
+    tableSummaries: "Table summaries",
+    catalogItems: "Catalog items",
+    outputStatus: "Output status",
+    outputStatusNormal: "Normal",
+    outputStatusRetry: "Retry requested",
+    outputStatusRecovered: "Recovered",
+    outputStatusAuditIncomplete: "Audit incomplete",
+    outputStatusFailed: "Failed",
     phase: "Phase",
     phaseCollect: "Collect",
     phaseCollectDescription:
-      "Deterministic data-source and tool collection; normally no LLM call.",
-    phasePrepare: "Prepare",
-    phasePrepareDescription:
-      "A reasoning model prepares an evidence workset, then a serializer validates the lookup plan.",
+      "Adaptive data collection. It may use an LLM to choose tools and invokes data-source tools.",
+    phaseContext: "Context",
+    phaseContextDescription:
+      "Deterministically assembles the compact role context without a provider call.",
     phaseWrite: "Write / reason",
     phaseWriteDescription:
       "A reasoning model writes the report, deliberation narrative, or decision synthesis brief.",
@@ -546,13 +559,26 @@ const zhCN = {
     wallTime: "耗时",
     nodeMetrics: "节点指标",
     nodeMetricsTimelineOrder: "各阶段按首次持久化到时间线的事件顺序显示。",
+    contextMetrics: "上下文规模",
+    contextMetricsDescription:
+      "按时间线展示确定性组装的角色上下文；该阶段不调用模型。",
+    contextCharacters: "上下文字符数",
+    evidenceReferences: "证据引用数",
+    tableSummaries: "表格摘要数",
+    catalogItems: "目录条目数",
+    outputStatus: "输出状态",
+    outputStatusNormal: "正常",
+    outputStatusRetry: "已触发修复",
+    outputStatusRecovered: "修复成功",
+    outputStatusAuditIncomplete: "审计不完整",
+    outputStatusFailed: "失败",
     phase: "阶段",
     phaseCollect: "数据收集",
     phaseCollectDescription:
-      "确定性调用数据源和工具；正常情况下不调用 LLM。",
-    phasePrepare: "证据准备",
-    phasePrepareDescription:
-      "推理模型准备证据工作集，随后由序列化模型校验查询计划。",
+      "自适应收集数据；可以由 LLM 选择工具，并调用数据源工具。",
+    phaseContext: "上下文组装",
+    phaseContextDescription:
+      "确定性组装紧凑的角色上下文，不产生供应商模型调用。",
     phaseWrite: "写作 / 推理",
     phaseWriteDescription:
       "推理模型撰写分析报告、研究过程正文或最终结论合成稿。",
@@ -903,13 +929,26 @@ const ja = {
     nodeMetrics: "ノード別指標",
     nodeMetricsTimelineOrder:
       "各フェーズは、最初に永続化されたタイムラインイベントの順に表示されます。",
+    contextMetrics: "コンテキスト規模",
+    contextMetricsDescription:
+      "決定論的に組み立てたロール別コンテキストを時系列で表示します。この段階ではモデルを呼び出しません。",
+    contextCharacters: "コンテキスト文字数",
+    evidenceReferences: "エビデンス参照数",
+    tableSummaries: "表サマリー数",
+    catalogItems: "カタログ項目数",
+    outputStatus: "出力状態",
+    outputStatusNormal: "正常",
+    outputStatusRetry: "修復を開始",
+    outputStatusRecovered: "修復済み",
+    outputStatusAuditIncomplete: "監査不完全",
+    outputStatusFailed: "失敗",
     phase: "フェーズ",
     phaseCollect: "データ収集",
     phaseCollectDescription:
-      "データソースとツールを決定論的に呼び出します。通常 LLM は使用しません。",
-    phasePrepare: "エビデンス準備",
-    phasePrepareDescription:
-      "推論モデルがエビデンス作業セットを準備し、シリアライザーが検索計画を検証します。",
+      "適応的にデータを収集します。LLM がツールを選択し、データソースのツールを呼び出す場合があります。",
+    phaseContext: "コンテキスト構築",
+    phaseContextDescription:
+      "コンパクトなロール別コンテキストを決定論的に構築し、プロバイダーを呼び出しません。",
     phaseWrite: "執筆 / 推論",
     phaseWriteDescription:
       "推論モデルがレポート、検討本文、または最終判断の統合草稿を作成します。",

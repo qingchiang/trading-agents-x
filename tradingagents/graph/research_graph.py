@@ -1327,21 +1327,31 @@ class ResearchGraph:
     def _deliberation_llm(self, spec: RoleSpec | None = None) -> Any:
         """Resolve role models according to the quality-first profile contract."""
 
-        if self.profile is RunProfile.DEEP:
-            return self.deep_llm
-        if spec is not None and spec.model == "deep":
-            return self.deep_llm
-        return self.quick_llm
+        return (
+            self.deep_llm
+            if self._deliberation_model_tier(spec) == "deep"
+            else self.quick_llm
+        )
 
     def _deliberation_serializer_llm(
         self,
         spec: RoleSpec | None = None,
     ) -> Any:
+        return (
+            self.deep_serializer_llm
+            if self._deliberation_model_tier(spec) == "deep"
+            else self.quick_serializer_llm
+        )
+
+    def _deliberation_model_tier(
+        self,
+        spec: RoleSpec | None = None,
+    ) -> Literal["quick", "deep"]:
+        """Keep reasoning and serializer clients on the same profile tier."""
+
         if self.profile is RunProfile.DEEP:
-            return self.deep_serializer_llm
-        if spec is not None and spec.model == "deep":
-            return self.deep_serializer_llm
-        return self.quick_serializer_llm
+            return "deep"
+        return spec.model if spec is not None else "quick"
 
     def _role_context(
         self,
