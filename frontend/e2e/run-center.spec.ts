@@ -445,6 +445,23 @@ test("runs, templates, trash, and restores local research", async ({
           : [],
       });
     }
+    const evidenceMatch = path.match(
+      /^\/api\/v1\/runs\/([^/]+)\/evidence$/,
+    );
+    if (evidenceMatch) {
+      if (evidenceMatch[1] !== "run-report") {
+        return route.fulfill({
+          status: 409,
+          json: {
+            error: {
+              code: "evidence_not_sealed",
+              message: "Evidence is not sealed yet.",
+            },
+          },
+        });
+      }
+      return route.fulfill({ json: result(evidenceMatch[1]).evidence });
+    }
     const eventMatch = path.match(/^\/api\/v1\/runs\/([^/]+)\/events$/);
     if (eventMatch) {
       const run = runs.get(eventMatch[1]);
@@ -480,10 +497,51 @@ test("runs, templates, trash, and restores local research", async ({
         return route.fulfill({ status: 404, json: { detail: "Run not found" } });
       }
       const run = runs.get(id)!;
+      const completedResult = result(id);
+      const partialResult =
+        id === "run-report"
+          ? completedResult
+          : {
+              ...completedResult,
+              status: run.status,
+              reports: {},
+              decision: null,
+              evidence: null,
+              warnings: [],
+            };
       return route.fulfill({
         json: {
           run,
-          result: id === "run-report" ? result(id) : null,
+          result: partialResult,
+          attempts: [
+            {
+              attempt: 1,
+              status: run.status,
+              resume_count: 0,
+              metrics: run.metrics,
+              started_at: null,
+              finished_at: null,
+              error_code: null,
+            },
+          ],
+          evidence_status:
+            id === "run-report"
+              ? {
+                  status: "sealed",
+                  digest: completedResult.evidence?.digest ?? null,
+                  item_count: completedResult.evidence?.items.length ?? 0,
+                  table_count: completedResult.evidence?.tables.length ?? 0,
+                  sealed_attempt: 1,
+                  sealed_at: timestamp,
+                }
+              : {
+                  status: "pending",
+                  digest: null,
+                  item_count: 0,
+                  table_count: 0,
+                  sealed_attempt: null,
+                  sealed_at: null,
+                },
         },
       });
     }
@@ -503,7 +561,9 @@ test("runs, templates, trash, and restores local research", async ({
   await page.getByRole("button", { name: /Queue research/ }).click();
   await expect(page).toHaveURL(/\/runs\/run-created$/);
   await page.getByRole("button", { name: "Cancel" }).click();
-  await expect(page.getByText("Cancelled")).toBeVisible();
+  await expect(
+    page.locator("header").getByText("Cancelled", { exact: true }),
+  ).toBeVisible();
 
   await page.getByRole("link", { name: "New from this run" }).click();
   await expect(ticker).toHaveValue("7203.T");
