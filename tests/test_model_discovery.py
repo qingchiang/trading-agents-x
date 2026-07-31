@@ -162,6 +162,41 @@ def test_openai_compatible_discovery_paginates_filters_and_caches(
     assert session.calls[1]["params"] == {"after": "audio-only"}
 
 
+def test_deepseek_catalog_exposes_only_effective_reasoning_levels(
+    tmp_path: Path,
+) -> None:
+    service = ModelDiscoveryService(
+        _settings(
+            tmp_path,
+            TRADINGAGENTS_LLM_PROVIDER="deepseek",
+            TRADINGAGENTS_QUICK_THINK_LLM="deepseek-v4-flash",
+            TRADINGAGENTS_DEEP_THINK_LLM="deepseek-v4-flash",
+        ),
+        environ={"DEEPSEEK_API_KEY": "private-key"},
+        session=FakeSession([]),
+    )
+
+    models = service._normalize_models(
+        "deepseek",
+        [
+            ("deepseek-v4-flash", "supported"),
+            ("deepseek-v4-pro", "supported"),
+        ],
+    )
+
+    assert {
+        model.id: model.reasoning_efforts for model in models
+    } == {
+        "deepseek-v4-flash": (
+            "provider_default",
+            "low",
+            "high",
+            "max",
+        ),
+        "deepseek-v4-pro": ("provider_default", "high", "max"),
+    }
+
+
 def test_refresh_bypasses_five_minute_cache(tmp_path: Path) -> None:
     session = FakeSession(
         [

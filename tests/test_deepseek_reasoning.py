@@ -127,6 +127,16 @@ class TestDeepSeekReasoningContent:
         assert payload["reasoning_effort"] == "max"
         assert "thinking" not in payload.get("extra_body", {})
 
+    def test_flash_low_effort_is_sent_as_top_level_parameter(self):
+        client = DeepSeekChatOpenAI(
+            model="deepseek-v4-flash",
+            api_key="placeholder",
+            base_url="https://api.deepseek.com",
+            reasoning_effort="low",
+        )
+        payload = client._get_request_payload([HumanMessage(content="Analyze.")])
+        assert payload["reasoning_effort"] == "low"
+
 
 # ---------------------------------------------------------------------------
 # Capability-driven structured output

@@ -45,7 +45,7 @@ _PROVIDER_LEVELS = {
         "max",
     ),
     "azure": ("none", "minimal", "low", "medium", "high", "xhigh", "max"),
-    "deepseek": ("high", "max"),
+    "deepseek": ("low", "high", "max"),
     "google": ("minimal", "low", "medium", "high"),
     "anthropic": ("low", "medium", "high", "xhigh", "max"),
 }
@@ -64,7 +64,7 @@ _OPENAI_MODEL_LEVELS = {
 }
 
 _DEEPSEEK_MODEL_LEVELS = {
-    "deepseek-v4-flash": ("high", "max"),
+    "deepseek-v4-flash": ("low", "high", "max"),
     "deepseek-v4-pro": ("high", "max"),
     "deepseek-reasoner": ("high", "max"),
 }
