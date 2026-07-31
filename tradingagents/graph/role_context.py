@@ -117,10 +117,6 @@ class RoleContextBuilder:
         role_objective = {
             "title": title,
             "objective": objective,
-            "output_language": self.state.get(
-                "output_language",
-                "English",
-            ),
             "instructions": instructions,
         }
         prompt = (
@@ -183,20 +179,6 @@ class RoleContextBuilder:
                 "English",
             ),
             "profile": self.state.get("profile"),
-            "report_index": [
-                {
-                    "analyst": analyst,
-                    "audit_status": report.audit_status.value,
-                    "section_titles": [
-                        section.title for section in report.report_sections
-                    ],
-                    "primary_claims": _claim_summaries(
-                        report,
-                        primary_only=True,
-                    ),
-                }
-                for analyst, report in self.reports.items()
-            ],
             "evidence_catalog": self.catalog,
         }
         return _SYSTEM_RULES + "\n\nRESEARCH DOSSIER:\n" + _stable_json(
@@ -286,6 +268,7 @@ def _claim_summaries(
         if not primary_only or claim.importance is ClaimImportance.PRIMARY
         if not exclude_observations or claim.kind.value != "observation"
     ]
+
 
 def _risk_sections(markdown: str) -> list[str]:
     sections: list[tuple[str, list[str]]] = []

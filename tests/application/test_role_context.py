@@ -82,6 +82,24 @@ def test_roles_share_a_byte_identical_stable_prefix() -> None:
     assert risk.prompt.index("Integrated Risk Reviewer") > len(
         risk.shared_prefix
     )
+    assert "Complete localized report" not in bull.shared_prefix
+    assert "report_index" not in bull.shared_prefix
+
+
+def test_full_report_context_does_not_duplicate_primary_claims() -> None:
+    builder = RoleContextBuilder(_state())
+
+    context = builder.build(
+        title="Bull Researcher",
+        objective="Build the constructive case.",
+        stage="opening_case",
+        report_mode="full",
+        evidence_refs=builder.primary_evidence_refs(),
+    )
+
+    assert context.prompt.count(
+        "The committee should preserve this condition."
+    ) == 1
 
 
 def test_final_context_does_not_rebroadcast_case_or_rebuttal_markdown() -> None:
