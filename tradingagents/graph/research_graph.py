@@ -74,7 +74,6 @@ from tradingagents.application.reporting import order_reports
 from tradingagents.application.runtime import RunContext, check_cancelled
 from tradingagents.dataflows.config import use_config
 from tradingagents.graph.analyst_synthesis import (
-    analyst_report_prompt,
     evidence_warnings as _evidence_warnings,
     invoke_analyst_report as _invoke_analyst_report,
 )
@@ -91,6 +90,7 @@ from tradingagents.graph.deliberation import (
 )
 from tradingagents.graph.evidence_context import (
     PreparedEvidence,
+    build_analyst_evidence_context,
     prepare_evidence,
 )
 from tradingagents.graph.output_validation import (
@@ -125,12 +125,12 @@ class ResearchState(TypedDict, total=False):
     profile: str
     output_language: str
     analysts: list[str]
-    analyst_drafts: Annotated[dict[str, str], _merge_dicts]
+    analyst_collection_memos: Annotated[dict[str, str], _merge_dicts]
     analyst_evidence_items: Annotated[
         dict[str, list[dict[str, Any]]],
         _merge_dicts,
     ]
-    analyst_synthesis_metadata: Annotated[
+    analyst_collection_metadata: Annotated[
         dict[str, dict[str, Any]],
         _merge_dicts,
     ]
@@ -368,9 +368,9 @@ class ResearchGraph:
             "profile": request.profile.value,
             "output_language": report_language_prompt_label(context.settings.output_language),
             "analysts": list(request.analysts),
-            "analyst_drafts": {},
+            "analyst_collection_memos": {},
             "analyst_evidence_items": {},
-            "analyst_synthesis_metadata": {},
+            "analyst_collection_metadata": {},
             "analyst_reports": {},
             "cases": {},
             "rebuttals": [],
@@ -456,10 +456,14 @@ class ResearchGraph:
                 self._create_analyst_synthesis_node(analyst),
             )
             workflow.add_edge(START, collect_name)
-            workflow.add_edge(collect_name, node_name)
-            workflow.add_edge(node_name, "evidence.seal")
+            workflow.add_edge(collect_name, "evidence.seal")
         workflow.add_node("evidence.seal", self._seal_evidence)
-        self._attach_research_workflow(workflow, "evidence.seal")
+        workflow.add_node("reports.ready", self._reports_ready)
+        for analyst in self.selected_analysts:
+            node_name = f"analyst.{analyst}"
+            workflow.add_edge("evidence.seal", node_name)
+            workflow.add_edge(node_name, "reports.ready")
+        self._attach_research_workflow(workflow, "reports.ready")
         return workflow
 
     def _attach_research_workflow(
@@ -599,11 +603,13 @@ class ResearchGraph:
                 },
             )
             return {
-                "analyst_drafts": {analyst: narrative},
+                "analyst_collection_memos": {analyst: narrative},
                 "analyst_evidence_items": {
                     analyst: [item.model_dump(mode="json") for item in evidence]
                 },
-                "analyst_synthesis_metadata": {analyst: synthesis_metadata},
+                "analyst_collection_metadata": {
+                    analyst: synthesis_metadata
+                },
             }
 
         return collect_node
@@ -617,46 +623,62 @@ class ResearchGraph:
             node_name = f"analyst.{analyst}"
             self._start_node(runtime, node_name, measure=False)
             check_cancelled(context)
-            narrative = state["analyst_drafts"][analyst]
-            evidence = tuple(
-                EvidenceItem.model_validate(item)
+            narrative = state["analyst_collection_memos"][analyst]
+            evidence_refs = tuple(
+                EvidenceItem.model_validate(item).ref
                 for item in state["analyst_evidence_items"][analyst]
             )
-            synthesis_metadata = state["analyst_synthesis_metadata"][analyst]
+            synthesis_metadata = state["analyst_collection_metadata"][analyst]
             confidence_override = synthesis_metadata.get("confidence_override")
             warnings = tuple(
                 ResearchWarning.model_validate(warning)
                 for warning in synthesis_metadata.get("warnings", [])
             )
+            sealed_bundle = EvidenceBundle.model_validate(
+                state["evidence_bundle"]
+            )
+            evidence_ref_set = set(evidence_refs)
+            analyst_items = tuple(
+                item
+                for item in sealed_bundle.items
+                if item.ref in evidence_ref_set
+            )
             analyst_bundle = EvidenceBundle(
-                instrument=context.request.ticker,
-                analysis_date=context.request.analysis_date,
-                items=evidence,
-                tables=extract_evidence_tables(evidence),
+                instrument=sealed_bundle.instrument,
+                analysis_date=sealed_bundle.analysis_date,
+                items=analyst_items,
+                tables=tuple(
+                    table
+                    for table in sealed_bundle.tables
+                    if evidence_ref_set.intersection(table.evidence_refs)
+                ),
             )
             output_language = report_language_prompt_label(context.settings.output_language)
-            preparation_prompt = analyst_report_prompt(
-                analyst=analyst,
-                draft_narrative=narrative,
+            prepared_evidence = build_analyst_evidence_context(
                 bundle=analyst_bundle,
-                output_language=output_language,
-                confidence_override=confidence_override,
+                evidence_refs=evidence_refs,
             )
-            prepared_evidence = self._prepare_node_evidence(
-                llm=self.quick_llm,
-                bundle=analyst_bundle,
-                role_prompt=preparation_prompt,
-                node=f"{node_name}.prepare",
-                runtime=runtime,
-                memo_instruction=(
-                    "Prepare the evidence workset for a complete human-readable "
-                    "analyst report. Verify exact values and original passages "
-                    "through the read-only tools. Identify useful comparisons, "
-                    "counter-evidence, uncertainty, catalysts, risks, and "
-                    "invalidation conditions. Recommend reader-friendly tables "
-                    "but never reproduce a complete raw source table. Do not "
-                    "emit a formal JSON artifact."
-                ),
+            runtime.stream_writer(
+                {
+                    "event_type": "node.context_prepared",
+                    "node": f"{node_name}.context",
+                    "payload": {
+                        "inline_characters": (
+                            prepared_evidence.inline_characters
+                        ),
+                        "catalog_items": len(
+                            prepared_evidence.catalog.get("items", [])
+                        ),
+                        "catalog_tables": len(
+                            prepared_evidence.catalog.get("tables", [])
+                        ),
+                        "lookup_count": len(prepared_evidence.lookups),
+                        "returned_rows": sum(
+                            lookup.returned_rows
+                            for lookup in prepared_evidence.lookups
+                        ),
+                    },
+                }
             )
             output = _invoke_analyst_report(
                 self.quick_llm,
@@ -681,13 +703,13 @@ class ResearchGraph:
                 role=analyst,
                 content=typed,
                 generation_method=output.generation_method,
-                prompt_version=f"analyst-{analyst}-v5-markdown",
+                prompt_version=f"analyst-{analyst}-v6-sealed-context",
             )
             self._finish_node(
                 runtime,
                 node_name,
                 {
-                    "evidence_count": len(evidence),
+                    "evidence_count": len(analyst_items),
                     "confidence": typed.confidence,
                     "warnings": len(typed.warnings),
                 },
@@ -720,16 +742,6 @@ class ResearchGraph:
             items=tuple(deduped.values()),
             tables=extract_evidence_tables(tuple(deduped.values())),
         )
-        reports: dict[str, dict[str, Any]] = {}
-        valid_refs = set(deduped)
-        for key, raw in state["analyst_reports"].items():
-            report = AnalystReport.model_validate(raw)
-            _require_valid_refs(
-                report.source_refs,
-                valid_refs,
-                required=False,
-            )
-            reports[key] = report.model_dump(mode="json")
         runtime.context.evidence_writer(bundle)
         self._finish_node(
             runtime,
@@ -742,8 +754,35 @@ class ResearchGraph:
         )
         return {
             "evidence_bundle": bundle.model_dump(mode="json"),
-            "analyst_reports": reports,
         }
+
+    def _reports_ready(
+        self,
+        state: ResearchState,
+        runtime: Runtime[RunContext],
+    ) -> dict[str, Any]:
+        node = "reports.ready"
+        self._start_node(runtime, node)
+        check_cancelled(runtime.context)
+        bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
+        valid_refs = {item.ref for item in bundle.items}
+        reports: dict[str, dict[str, Any]] = {}
+        for analyst in state["analysts"]:
+            report = AnalystReport.model_validate(
+                state["analyst_reports"][analyst]
+            )
+            _require_valid_refs(
+                report.source_refs,
+                valid_refs,
+                required=False,
+            )
+            reports[analyst] = report.model_dump(mode="json")
+        self._finish_node(
+            runtime,
+            node,
+            {"reports": len(reports)},
+        )
+        return {"analyst_reports": reports}
 
     def _create_case_node(self, spec: RoleSpec):
         llm = self._deliberation_llm(spec)

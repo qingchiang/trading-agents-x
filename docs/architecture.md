@@ -222,10 +222,15 @@ run mutations use ordinary HTTP endpoints.
 
 ### Independent analyst channels
 
-Market, Social/Sentiment, News, and Fundamentals analysts begin in the same
-LangGraph superstep but use independent local message state and tools. Tool
-collection is followed by evidence preparation, Markdown report writing, and a
-small audit-extraction step. The durable `AnalystReport` handoff is:
+Market, Social/Sentiment, News, and Fundamentals collection agents begin in the
+same LangGraph superstep but use independent local message state and tools.
+After every collection channel completes, the graph seals and persists one
+immutable EvidenceBundle before any formal report is written. The four report
+writers then run in parallel with deterministic analyst-specific contexts
+containing the collection memo, compact source passages, analytical views, and
+table summaries/resampling; there is no LLM evidence-planning pass. A small
+non-thinking audit-extraction step follows each Markdown report. The durable
+`AnalystReport` handoff is:
 
 ```text
 analyst
@@ -280,8 +285,9 @@ than treating an unsuccessful attempt as empty.
 source mappings. It is available on the Evidence page and as CSV in the
 research package, but is never copied wholesale into a model prompt or forced
 into a user report. Analysts receive a compact catalog, deterministic
-analytical views, and a bounded role-specific workset. Read-only local lookups
-operate on the sealed artifacts without recontacting the provider.
+analytical views, table summaries/resampling, and source passages that do not
+duplicate a large fact table. Read-only local lookups operate on the sealed
+artifacts without recontacting the provider.
 
 ### Markdown-first deliberation
 

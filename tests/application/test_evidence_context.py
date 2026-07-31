@@ -12,6 +12,7 @@ from tradingagents.graph.deliberation import research_prompt
 from tradingagents.graph.evidence_context import (
     EvidenceLookupRequest,
     EvidenceWorksetPlan,
+    build_analyst_evidence_context,
     build_evidence_catalog,
     prepare_evidence,
     query_evidence_table_payload,
@@ -70,6 +71,34 @@ def test_catalog_excludes_source_bodies_and_table_rows() -> None:
     assert "content" not in catalog["items"][0]
     assert catalog["tables"][0]["row_count"] == 488
     assert "rows" not in catalog["tables"][0]
+
+
+def test_deterministic_analyst_context_keeps_raw_rows_out_of_prompt() -> None:
+    short_bundle = _bundle(20)
+    long_bundle = _bundle(488)
+
+    short = build_analyst_evidence_context(
+        short_bundle,
+        evidence_refs=(short_bundle.items[0].ref,),
+    )
+    long = build_analyst_evidence_context(
+        long_bundle,
+        evidence_refs=(long_bundle.items[0].ref,),
+    )
+
+    assert "2025-01-02,99,102,98,100,1000000" in short.query_results[0]["content"]
+    assert long.query_results[0]["content"] is None
+    assert long.query_results[0]["content_omitted"] is True
+    assert long.catalog["tables"][0]["row_count"] == 488
+    assert any(
+        result.get("operation") == "summary"
+        for result in long.query_results
+    )
+    assert any(
+        result.get("operation") == "resample"
+        for result in long.query_results
+    )
+    assert long.inline_characters < len(long_bundle.items[0].content or "")
 
 
 def test_table_query_supports_paging_filters_summary_extrema_and_resample() -> None:

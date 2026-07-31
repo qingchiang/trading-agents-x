@@ -139,6 +139,89 @@ def build_evidence_catalog(bundle: EvidenceBundle) -> dict[str, Any]:
     }
 
 
+def build_analyst_evidence_context(
+    bundle: EvidenceBundle,
+    *,
+    evidence_refs: tuple[str, ...],
+) -> PreparedEvidence:
+    """Build a deterministic analyst context without an LLM planning pass."""
+
+    selected_refs = set(evidence_refs)
+    selected_items = tuple(
+        item for item in bundle.items if item.ref in selected_refs
+    )
+    selected_tables = tuple(
+        table
+        for table in bundle.tables
+        if selected_refs.intersection(table.evidence_refs)
+    )
+    analyst_bundle = EvidenceBundle(
+        instrument=bundle.instrument,
+        analysis_date=bundle.analysis_date,
+        items=selected_items,
+        tables=selected_tables,
+    )
+    query_results: list[dict[str, Any]] = [
+        get_evidence_item_payload(analyst_bundle, item.ref)
+        for item in selected_items
+    ]
+    lookups: list[EvidenceLookup] = [
+        EvidenceLookup(
+            tool="get_evidence_item",
+            evidence_ref=item.ref,
+        )
+        for item in selected_items
+    ]
+    for table in selected_tables:
+        columns = tuple(column.key for column in table.columns)
+        summary = query_evidence_table_payload(
+            analyst_bundle,
+            table_id=table.id,
+            operation="summary",
+            columns=columns,
+        )
+        query_results.append(summary)
+        lookups.append(
+            EvidenceLookup(
+                tool="query_evidence_table",
+                table_id=table.id,
+                operation="summary",
+                columns=columns,
+                returned_rows=int(summary.get("row_count", 0)),
+            )
+        )
+        resampled = query_evidence_table_payload(
+            analyst_bundle,
+            table_id=table.id,
+            operation="resample",
+            columns=columns,
+            frequency="month",
+        )
+        if "error" not in resampled:
+            query_results.append(resampled)
+            lookups.append(
+                EvidenceLookup(
+                    tool="query_evidence_table",
+                    table_id=table.id,
+                    operation="resample",
+                    columns=columns,
+                    frequency="month",
+                    returned_rows=len(resampled.get("rows", [])),
+                )
+            )
+    return PreparedEvidence(
+        catalog=build_evidence_catalog(analyst_bundle),
+        memo=(
+            "This deterministic context contains the collection memo, compact "
+            "source passages, analytical table summaries, and monthly "
+            "resampling where available. Raw fact-table rows remain in the "
+            "sealed Evidence ledger."
+        ),
+        query_results=tuple(query_results),
+        lookups=tuple(lookups),
+    )
+
+
 def get_evidence_item_payload(
     bundle: EvidenceBundle,
     ref: str,
@@ -148,12 +231,19 @@ def get_evidence_item_payload(
     item = next((candidate for candidate in bundle.items if candidate.ref == ref), None)
     if item is None:
         return {"error": "unknown_evidence_ref", "ref": ref}
-    source_tables = [table.id for table in bundle.tables if ref in table.evidence_refs]
+    source_tables = [
+        table for table in bundle.tables if ref in table.evidence_refs
+    ]
     include_content = not (
-        source_tables and item.content is not None and len(item.content) > _LARGE_TABULAR_CONTENT
+        source_tables
+        and item.content is not None
+        and (
+            len(item.content) > _LARGE_TABULAR_CONTENT
+            or any(len(table.rows) > _MAX_ROWS for table in source_tables)
+        )
     )
     return {
-        **_catalog_item(item, source_tables),
+        **_catalog_item(item, [table.id for table in source_tables]),
         "content": item.content if include_content else None,
         "content_omitted": not include_content,
         "instruction": (

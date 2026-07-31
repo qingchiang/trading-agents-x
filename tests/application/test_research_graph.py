@@ -364,6 +364,23 @@ def test_profiles_share_contract_but_use_distinct_topologies(
     assert execution.decision.rating is ResearchRating.HOLD
     valid_refs = {item.ref for item in execution.evidence.items}
     assert set(execution.decision.evidence_refs) <= valid_refs
+    event_positions = {
+        (event["event_type"], event["node"]): index
+        for index, event in enumerate(events)
+        if event["event_type"] in {"node.started", "node.completed"}
+    }
+    assert event_positions[("node.completed", "evidence.seal")] < min(
+        event_positions[("node.started", f"analyst.{analyst}")]
+        for analyst in ("market", "news")
+    )
+    assert max(
+        event_positions[("node.completed", f"analyst.{analyst}")]
+        for analyst in ("market", "news")
+    ) < event_positions[("node.completed", "reports.ready")]
+    assert not any(
+        node.startswith("analyst.") and node.endswith(".prepare")
+        for node in graph.metrics.snapshot().node_metrics
+    )
     if profile is RunProfile.STANDARD:
         node_metrics = graph.metrics.snapshot().node_metrics
         assert {
@@ -385,8 +402,6 @@ def test_profiles_share_contract_but_use_distinct_topologies(
             {
                 "MarkdownReport",
                 "AnalystAuditDraft",
-                "EvidenceBlueprint",
-                "EvidenceWorksetPlan",
             },
             {
                 "ResearchDecision",
@@ -419,8 +434,6 @@ def test_profiles_share_contract_but_use_distinct_topologies(
             {
                 "MarkdownReport",
                 "AnalystAuditDraft",
-                "EvidenceBlueprint",
-                "EvidenceWorksetPlan",
             },
             {
                 "DebateAgenda",
@@ -502,10 +515,9 @@ def test_analyst_core_uses_the_dedicated_serializer_client(
     )
     assert {
         schema for schema, _prompt in serializer.calls
-    } == {"AnalystAuditDraft", "EvidenceWorksetPlan"}
+    } == {"AnalystAuditDraft"}
     assert {schema for schema, _prompt in reasoning.calls} == {
         "MarkdownReport",
-        "EvidenceBlueprint",
     }
 
 
@@ -700,8 +712,8 @@ def test_graph_emits_only_typed_visible_research_artifacts(
         for artifact in artifacts
         if artifact.stage == "analyst"
     } == {
-        ("market", "analyst-market-v5-markdown"),
-        ("news", "analyst-news-v5-markdown"),
+        ("market", "analyst-market-v6-sealed-context"),
+        ("news", "analyst-news-v6-sealed-context"),
     }
     assert all(artifact.prompt_version != "research-v1" for artifact in artifacts)
 
