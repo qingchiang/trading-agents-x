@@ -9,6 +9,9 @@ type MarkdownNode = {
   identifier?: string;
   label?: string;
   children?: MarkdownNode[];
+  data?: {
+    hProperties?: Record<string, unknown>;
+  };
 };
 
 type EvidenceReferenceOptions = {
@@ -19,10 +22,12 @@ export default function Markdown({
   children,
   evidenceAliases = {},
   onEvidence,
+  headingAnchors = [],
 }: {
   children: string;
   evidenceAliases?: Record<string, string>;
   onEvidence?: (ref: string) => void;
+  headingAnchors?: string[];
 }) {
   return (
     <div className="markdown">
@@ -33,6 +38,7 @@ export default function Markdown({
             remarkEvidenceReferences,
             { aliases: evidenceAliases },
           ],
+          [remarkHeadingAnchors, { anchors: headingAnchors }],
         ]}
         rehypePlugins={[rehypeSanitize]}
         skipHtml
@@ -54,12 +60,51 @@ export default function Markdown({
             }
             return <a href={href}>{linkChildren}</a>;
           },
+          h1: ({ children: headingChildren, node: _node, ...props }) => (
+            <h1 {...props} tabIndex={-1}>{headingChildren}</h1>
+          ),
+          h2: ({ children: headingChildren, node: _node, ...props }) => (
+            <h2 {...props} tabIndex={-1}>{headingChildren}</h2>
+          ),
+          h3: ({ children: headingChildren, node: _node, ...props }) => (
+            <h3 {...props} tabIndex={-1}>{headingChildren}</h3>
+          ),
+          h4: ({ children: headingChildren, node: _node, ...props }) => (
+            <h4 {...props} tabIndex={-1}>{headingChildren}</h4>
+          ),
+          h5: ({ children: headingChildren, node: _node, ...props }) => (
+            <h5 {...props} tabIndex={-1}>{headingChildren}</h5>
+          ),
+          h6: ({ children: headingChildren, node: _node, ...props }) => (
+            <h6 {...props} tabIndex={-1}>{headingChildren}</h6>
+          ),
         }}
       >
         {children}
       </ReactMarkdown>
     </div>
   );
+}
+
+function remarkHeadingAnchors({ anchors }: { anchors: string[] }) {
+  return (tree: MarkdownNode) => {
+    let index = 0;
+    const visit = (node: MarkdownNode) => {
+      if (node.type === "heading" && index < anchors.length) {
+        const anchor = anchors[index];
+        node.data = {
+          ...node.data,
+          hProperties: {
+            ...node.data?.hProperties,
+            id: anchor,
+          },
+        };
+        index += 1;
+      }
+      node.children?.forEach(visit);
+    };
+    visit(tree);
+  };
 }
 
 function remarkEvidenceReferences(options: EvidenceReferenceOptions) {

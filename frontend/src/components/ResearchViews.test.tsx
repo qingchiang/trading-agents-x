@@ -99,12 +99,21 @@ test("renders natural Markdown tables and unobtrusive evidence footnotes", () =>
   render(
     <AnalystReportView
       report={report}
+      runId="run-1"
+      reportKey="market"
       evidenceIndex={evidenceIndex}
       onEvidence={onEvidence}
     />,
   );
 
   expect(screen.getByRole("table")).toHaveTextContent("收盘价100 美元");
+  expect(
+    screen.getByRole("navigation", { name: "Report section navigation" }),
+  ).toBeVisible();
+  expect(screen.getByRole("heading", { name: "Market view" })).toHaveAttribute(
+    "id",
+    "user-content-market-view",
+  );
   expect(screen.queryByText(evidenceRef)).not.toBeInTheDocument();
   const footnote = screen.getByRole("button", {
     name: `Open evidence ${evidenceRef}`,
@@ -122,12 +131,14 @@ test("keeps a readable report when automated audit extraction is incomplete", ()
         audit_status: "incomplete",
         key_claims: [],
       }}
+      runId="run-1"
+      reportKey="market"
       evidenceIndex={evidenceIndex}
       onEvidence={vi.fn()}
     />,
   );
 
-  expect(screen.getByText("Market view")).toBeVisible();
+  expect(screen.getByRole("heading", { name: "Market view" })).toBeVisible();
   expect(
     screen.getByText(
       "The report is available, but automated claim extraction is incomplete.",

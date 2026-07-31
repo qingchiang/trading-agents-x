@@ -470,7 +470,22 @@ test("restores deliberation and resolves evidence references across run views", 
   expect(
     await screen.findByRole("heading", { name: "Fundamentals report" }),
   ).toBeVisible();
+  const reportScroller = document.querySelector<HTMLElement>(".analyst-report");
+  expect(reportScroller).not.toBeNull();
+  if (!reportScroller) throw new Error("report scroller not rendered");
+  reportScroller.scrollTop = 137;
+  fireEvent.scroll(reportScroller);
+  expect(
+    sessionStorage.getItem("tradingagents-report-scroll:run-1:fundamentals"),
+  ).toBe("137");
   fireEvent.click(marketTab);
+  expect(reportScroller.scrollTop).toBe(0);
+  reportScroller.scrollTop = 42;
+  fireEvent.scroll(reportScroller);
+  fireEvent.click(fundamentalsTab);
+  expect(reportScroller.scrollTop).toBe(137);
+  fireEvent.click(marketTab);
+  expect(reportScroller.scrollTop).toBe(42);
   expect(
     screen.queryByRole("heading", { name: "Data Provenance" }),
   ).not.toBeInTheDocument();

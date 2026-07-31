@@ -492,6 +492,7 @@ export default function RunDetail() {
       )}
       {activeView === "reports" && (
         <ReportsPanel
+          runId={run.id}
           reports={reports}
           reportNames={reportNames}
           activeReport={activeReport}
@@ -953,6 +954,7 @@ function EvidenceSourceDrawer({
 }
 
 function ReportsPanel({
+  runId,
   reports,
   reportNames,
   activeReport,
@@ -960,6 +962,7 @@ function ReportsPanel({
   onEvidence,
   evidenceIndex,
 }: {
+  runId: string;
   reports: Record<string, AnalystReport | string>;
   reportNames: string[];
   activeReport: string;
@@ -997,6 +1000,8 @@ function ReportsPanel({
           </div>
           <AnalystReportView
             report={reports[activeReport]}
+            runId={runId}
+            reportKey={activeReport}
             evidenceIndex={evidenceIndex}
             onEvidence={onEvidence}
           />
