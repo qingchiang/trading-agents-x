@@ -7,6 +7,7 @@ import json
 import math
 import re
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -27,10 +28,12 @@ from tradingagents.application.contracts import (
     ResearchRating,
     ResearchScenario,
     ResearchScenarioKind,
+    ResearchWarning,
     RiskReview,
     RiskReviewAdjustment,
     RiskReviewDisposition,
 )
+from tradingagents.application.markdown_evidence import normalize_evidence_markdown
 from tradingagents.graph.output_validation import (
     OutputValidationError,
     require_nonempty_texts,
@@ -44,6 +47,14 @@ from tradingagents.graph.structured_output import (
 )
 
 EventWriter = Callable[[dict[str, Any]], None]
+
+
+@dataclass(frozen=True)
+class ResearchMarkdown:
+    """One readable artifact body and non-fatal citation warnings."""
+
+    markdown: str
+    warnings: tuple[ResearchWarning, ...]
 
 
 class RebuttalAudit(BaseModel):
@@ -66,15 +77,18 @@ def write_research_markdown(
     *,
     prompt: str,
     node: str,
+    allowed_evidence_refs: tuple[str, ...],
     invoke_config: dict[str, Any] | None = None,
-) -> str:
+) -> ResearchMarkdown:
     """Generate one readable deliberation document without a JSON contract."""
 
     response = llm.invoke(
         prompt
         + "\n\nWrite the complete research reasoning as readable Markdown. "
         "Use headings, concise tables, and evidence footnotes where they help "
-        "the reader. Do not emit JSON, schema fields, or hidden chain-of-thought.",
+        "the reader. Use only inline `[^ev_xxxxxxxxxxxx]` references and never "
+        "write footnote definitions; Evidence Ledger supplies source details. "
+        "Do not emit JSON, schema fields, or hidden chain-of-thought.",
         config=invoke_config,
     )
     markdown = _message_text(response).strip()
@@ -101,7 +115,15 @@ def write_research_markdown(
         continued = _message_text(continuation).strip()
         if continued:
             markdown = f"{markdown.rstrip()}\n\n{continued}"
-    return markdown
+    normalized = normalize_evidence_markdown(
+        markdown,
+        allowed_refs=set(allowed_evidence_refs),
+        source=node,
+    )
+    return ResearchMarkdown(
+        markdown=normalized.markdown,
+        warnings=normalized.warnings,
+    )
 
 
 def invoke_research_case(

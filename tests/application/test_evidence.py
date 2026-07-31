@@ -547,6 +547,59 @@ def test_markdown_export_renders_an_exact_body_once_with_all_refs() -> None:
     assert "source-a, source-b" in markdown
 
 
+def test_markdown_export_uses_stable_evidence_markers_without_definitions() -> None:
+    item = EvidenceItem.create(
+        source="fixture",
+        evidence_type="filing",
+        requested_date=date(2026, 7, 24),
+        content="Canonical ledger content.",
+    )
+    evidence = EvidenceBundle(
+        instrument="7203.T",
+        analysis_date=date(2026, 7, 24),
+        items=(item,),
+    )
+    now = datetime(2026, 7, 24, 12, tzinfo=timezone.utc)
+    report = analyst_report(
+        evidence_ref=item.ref,
+        narrative=(
+            f"# Report\n\nSupported finding.[^{item.ref}]\n\n"
+            f"[^{item.ref}]: Model-authored source text."
+        ),
+    )
+    run_export = RunExport(
+        run=RunView(
+            id="fixture-run",
+            status=RunStatus.SUCCEEDED,
+            request=AnalysisRequest(
+                ticker="7203.T",
+                analysis_date="2026-07-24",
+            ),
+            config_snapshot={},
+            attempt=1,
+            cancel_requested=False,
+            created_at=now,
+            updated_at=now,
+        ),
+        result=AnalysisResult(
+            run_id="fixture-run",
+            status=RunStatus.SUCCEEDED,
+            instrument="7203.T",
+            reports={"market": report},
+            decision=None,
+            evidence=evidence,
+        ),
+        evidence=evidence,
+    )
+
+    markdown = render_run_export_markdown(run_export)
+
+    assert "Supported finding.`E01`" in markdown
+    assert "Model-authored source text" not in markdown
+    assert "### E01" in markdown
+    assert f"- Refs: `{item.ref}`" in markdown
+
+
 def test_markdown_export_links_raw_evidence_table_without_inlining_rows() -> None:
     item = EvidenceItem.create(
         source="verified fixture",

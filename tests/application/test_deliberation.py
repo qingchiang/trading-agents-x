@@ -29,6 +29,7 @@ from tradingagents.graph.deliberation import (
     invoke_research_case,
     invoke_research_decision,
     invoke_risk_review,
+    write_research_markdown,
 )
 from tradingagents.graph.structured_output import StructuredOutputError
 
@@ -52,6 +53,22 @@ class _StaticLLM:
 
     def with_structured_output(self, _schema: Any, **_kwargs: Any) -> _StaticInvoker:
         return _StaticInvoker(self)
+
+
+class _MarkdownLLM:
+    def __init__(self, content: str):
+        self.content = content
+
+    def invoke(self, prompt: str, config: Any = None) -> Any:
+        del prompt, config
+        return type(
+            "Message",
+            (),
+            {
+                "content": self.content,
+                "response_metadata": {"finish_reason": "stop"},
+            },
+        )()
 
 
 def _state(*, content: str = "Fixture evidence.") -> dict[str, Any]:
@@ -81,6 +98,22 @@ def _state(*, content: str = "Fixture evidence.") -> dict[str, Any]:
         "rebuttals": [],
         "risk_reviews": {},
     }
+
+
+def test_research_markdown_uses_inline_ledger_refs_without_definitions() -> None:
+    state = _state()
+    ref = state["evidence_bundle"]["items"][0]["ref"]
+    result = write_research_markdown(
+        _MarkdownLLM(
+            f"# Case\n\nSupported.[^{ref}]\n\n[^{ref}]: Model source text."
+        ),
+        prompt="Write the case.",
+        node="case.bull.write",
+        allowed_evidence_refs=(ref,),
+    )
+
+    assert result.markdown == f"# Case\n\nSupported.[^{ref}]"
+    assert result.warnings == ()
 
 
 def test_research_case_uses_deterministic_valid_id_intersection() -> None:

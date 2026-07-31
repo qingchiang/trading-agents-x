@@ -24,6 +24,7 @@ from tradingagents.application.contracts import (
     ReportSection,
     ResearchWarning,
 )
+from tradingagents.application.markdown_evidence import normalize_evidence_markdown
 from tradingagents.application.metrics import MetricsCallback
 from tradingagents.graph.evidence_context import (
     PreparedEvidence,
@@ -47,8 +48,6 @@ from tradingagents.provenance import (
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
 _CITATION_RE = re.compile(r"\[\^(ev_[a-f0-9]{12})\]")
-_ANY_EVIDENCE_CITATION_RE = re.compile(r"\[\^(ev_[A-Za-z0-9_-]+)\]")
-
 _ANALYST_QUALITY_RULES = {
     "market": (
         "Distinguish trend, momentum, volatility, and noise. Compare price and "
@@ -173,6 +172,8 @@ Report requirements:
 - Cite decision-relevant assertions, paragraphs, or whole tables with
   `[^ev_xxxxxxxxxxxx]`. Do not cite every cell. Use only refs in the supplied
   catalog and place a table citation immediately before or after the table.
+  Do not add footnote definitions such as `[^ev_xxxxxxxxxxxx]: source text`;
+  the application renders authoritative source details from Evidence Ledger.
 - Separate observation, inference, and forecast in prose. Treat missing
   coverage as uncertainty, never as neutral or negative evidence.
 - Non-personalized ratings, valuation comparisons, scenarios, and market
@@ -375,31 +376,22 @@ def normalize_report_citations(
 ]:
     """Validate lightweight footnotes and derive stable report sections."""
 
-    valid_refs = {item.ref for item in bundle.items}
-    warnings: list[ResearchWarning] = []
-
-    def replace(match: re.Match[str]) -> str:
-        ref = match.group(1)
-        if ref in valid_refs:
-            return match.group(0)
-        warnings.append(
-            ResearchWarning(
-                code="report.unknown_evidence_ref",
-                message="An unknown report evidence reference was ignored.",
-                source=f"{analyst} analyst",
-            )
-        )
-        return ""
-
-    normalized = _ANY_EVIDENCE_CITATION_RE.sub(replace, markdown).strip()
-    cited_refs = tuple(
-        dict.fromkeys(_CITATION_RE.findall(normalized))
+    normalized = normalize_evidence_markdown(
+        markdown,
+        allowed_refs={item.ref for item in bundle.items},
+        source=f"{analyst} analyst",
+        warning_code="report.unknown_evidence_ref",
     )
     sections = _parse_report_sections(
-        normalized,
+        normalized.markdown,
         analyst=analyst,
     )
-    return normalized, sections, cited_refs, tuple(dict.fromkeys(warnings))
+    return (
+        normalized.markdown,
+        sections,
+        normalized.evidence_refs,
+        normalized.warnings,
+    )
 
 
 def _extract_report_audit(

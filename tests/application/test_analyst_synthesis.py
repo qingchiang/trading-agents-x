@@ -140,6 +140,23 @@ def test_unknown_citation_is_removed_without_discarding_report() -> None:
     }
 
 
+def test_report_citation_normalization_drops_model_source_definitions() -> None:
+    bundle = _bundle()
+    ref = bundle.items[0].ref
+    normalized, _sections, refs, warnings = normalize_report_citations(
+        (
+            f"# Overview\n\nSupported.[^{ref}]\n\n"
+            f"[^{ref}]: A model-authored source description.\n"
+        ),
+        bundle=bundle,
+        analyst="market",
+    )
+
+    assert normalized == f"# Overview\n\nSupported.[^{ref}]"
+    assert refs == (ref,)
+    assert warnings == ()
+
+
 def test_failed_audit_keeps_markdown_and_marks_incomplete() -> None:
     bundle = _bundle()
     ref = bundle.items[0].ref

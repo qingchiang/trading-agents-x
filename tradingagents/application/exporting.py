@@ -6,8 +6,11 @@ import csv
 import hashlib
 import io
 import json
+import re
 import zipfile
 from typing import Any
+
+from tradingagents.application.markdown_evidence import normalize_evidence_markdown
 
 from .contracts import (
     AnalystReport,
@@ -28,6 +31,7 @@ from .evidence import group_evidence_by_content
 def render_run_export_markdown(run_export: RunExport) -> str:
     """Render a human-readable audit document without hidden model messages."""
     result = run_export.result
+    evidence_aliases = _evidence_aliases(run_export.evidence)
     process_artifacts = tuple(
         artifact
         for artifact in run_export.artifacts
@@ -47,7 +51,9 @@ def render_run_export_markdown(run_export: RunExport) -> str:
         sections.extend(["", "_No final reports were recorded._"])
     for name, report in result.reports.items():
         narrative = (
-            _render_analyst_report(report) if isinstance(report, AnalystReport) else str(report)
+            _render_export_markdown(_render_analyst_report(report), evidence_aliases)
+            if isinstance(report, AnalystReport)
+            else _render_export_markdown(str(report), evidence_aliases)
         )
         sections.extend(
             [
@@ -80,7 +86,10 @@ def render_run_export_markdown(run_export: RunExport) -> str:
                 f"- Created: `{artifact.created_at.isoformat()}`",
             ]
         )
-        human_text = _artifact_human_text(artifact.content)
+        human_text = _render_export_markdown(
+            _artifact_human_text(artifact.content),
+            evidence_aliases,
+        )
         if human_text:
             sections.extend(["", human_text])
 
@@ -88,7 +97,15 @@ def render_run_export_markdown(run_export: RunExport) -> str:
     if result.decision is None:
         sections.extend(["", "_No final decision was recorded._"])
     else:
-        sections.extend(["", _render_research_decision(result.decision)])
+        sections.extend(
+            [
+                "",
+                _render_export_markdown(
+                    _render_research_decision(result.decision),
+                    evidence_aliases,
+                ),
+            ]
+        )
 
     warnings = _export_warnings(run_export)
     sections.extend(["", "## Warnings"])
@@ -217,6 +234,7 @@ def render_run_export_markdown(run_export: RunExport) -> str:
             sections.extend(["", "### Evidence Items"])
         for group in group_evidence_by_content(run_export.evidence.items):
             item = group.canonical
+            alias = evidence_aliases[item.ref]
             sources = tuple(
                 dict.fromkeys(
                     origin.source for grouped_item in group.items for origin in grouped_item.origins
@@ -225,7 +243,7 @@ def render_run_export_markdown(run_export: RunExport) -> str:
             sections.extend(
                 [
                     "",
-                    f"### `{item.ref}`",
+                    f"### {alias}",
                     "",
                     "- Refs: " + ", ".join(f"`{ref}`" for ref in group.refs),
                     f"- Sources: {', '.join(sources)}",
@@ -408,6 +426,35 @@ def _render_analyst_report(
                 ]
             )
     return "\n".join(lines)
+
+
+def _evidence_aliases(evidence: Any) -> dict[str, str]:
+    if evidence is None:
+        return {}
+    aliases: dict[str, str] = {}
+    for index, group in enumerate(group_evidence_by_content(evidence.items), 1):
+        alias = f"E{index:02d}"
+        for ref in group.refs:
+            aliases[ref] = alias
+    return aliases
+
+
+def _render_export_markdown(
+    markdown: str,
+    aliases: dict[str, str],
+) -> str:
+    if not markdown or not aliases:
+        return markdown
+    normalized = normalize_evidence_markdown(
+        markdown,
+        allowed_refs=set(aliases),
+        source="markdown export",
+    )
+    return re.sub(
+        r"\[\^(ev_[a-f0-9]{12})\]",
+        lambda match: f"`{aliases[match.group(1)]}`",
+        normalized.markdown,
+    )
 
 
 def _artifact_human_text(

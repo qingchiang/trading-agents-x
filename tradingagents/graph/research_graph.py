@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import operator
 import re
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date
 from typing import Annotated, Any, Literal
@@ -813,10 +813,11 @@ class ResearchGraph:
                 f"{node}.write",
                 event_writer=runtime.stream_writer,
             ):
-                markdown = write_research_markdown(
+                written = write_research_markdown(
                     llm,
                     prompt=context.prompt,
                     node=f"{node}.write",
+                    allowed_evidence_refs=_state_evidence_refs(state),
                     invoke_config={
                         "callbacks": [self.metrics],
                         "metadata": {"research_node": f"{node}.write"},
@@ -829,7 +830,7 @@ class ResearchGraph:
                 output = invoke_research_case(
                     self._deliberation_serializer_llm(spec),
                     role=spec.key,
-                    markdown=markdown,
+                    markdown=written.markdown,
                     state=state,
                     node=f"{node}.audit",
                     event_writer=runtime.stream_writer,
@@ -855,7 +856,10 @@ class ResearchGraph:
             )
             return {
                 "cases": {spec.key: case.model_dump(mode="json")},
-                "warnings": _structured_recovery_warnings(node, output),
+                "warnings": [
+                    *_structured_recovery_warnings(node, output),
+                    *_research_markdown_warnings(written),
+                ],
             }
 
         return case_node
@@ -962,10 +966,11 @@ class ResearchGraph:
                 f"{node}.write",
                 event_writer=runtime.stream_writer,
             ):
-                markdown = write_research_markdown(
+                written = write_research_markdown(
                     llm,
                     prompt=context.prompt,
                     node=f"{node}.write",
+                    allowed_evidence_refs=_state_evidence_refs(state),
                     invoke_config={
                         "callbacks": [self.metrics],
                         "metadata": {"research_node": f"{node}.write"},
@@ -979,7 +984,7 @@ class ResearchGraph:
                     self._deliberation_serializer_llm(spec),
                     role=spec.key,
                     round_number=round_number,
-                    markdown=markdown,
+                    markdown=written.markdown,
                     state=state,
                     node=f"{node}.audit",
                     conservative_open=self.profile is RunProfile.DEEP,
@@ -1008,7 +1013,10 @@ class ResearchGraph:
             )
             return {
                 "rebuttals": [rebuttal.model_dump(mode="json")],
-                "warnings": _structured_recovery_warnings(node, output),
+                "warnings": [
+                    *_structured_recovery_warnings(node, output),
+                    *_research_markdown_warnings(written),
+                ],
             }
 
         return rebuttal_node
@@ -1082,10 +1090,11 @@ class ResearchGraph:
             f"{node}.write",
             event_writer=runtime.stream_writer,
         ):
-            markdown = write_research_markdown(
+            written = write_research_markdown(
                 self.deep_llm,
                 prompt=context.prompt,
                 node=f"{node}.write",
+                allowed_evidence_refs=_state_evidence_refs(state),
                 invoke_config={
                     "callbacks": [self.metrics],
                     "metadata": {"research_node": f"{node}.write"},
@@ -1097,7 +1106,7 @@ class ResearchGraph:
         ):
             output = invoke_judge_draft(
                 self.deep_serializer_llm,
-                markdown=markdown,
+                markdown=written.markdown,
                 state=state,
                 node=f"{node}.audit",
                 event_writer=runtime.stream_writer,
@@ -1128,7 +1137,10 @@ class ResearchGraph:
         )
         return {
             "judge_draft": draft.model_dump(mode="json"),
-            "warnings": _structured_recovery_warnings(node, output),
+            "warnings": [
+                *_structured_recovery_warnings(node, output),
+                *_research_markdown_warnings(written),
+            ],
         }
 
     def _create_risk_node(self, spec: RoleSpec):
@@ -1163,10 +1175,11 @@ class ResearchGraph:
                 f"{node}.write",
                 event_writer=runtime.stream_writer,
             ):
-                markdown = write_research_markdown(
+                written = write_research_markdown(
                     llm,
                     prompt=context.prompt,
                     node=f"{node}.write",
+                    allowed_evidence_refs=_state_evidence_refs(state),
                     invoke_config={
                         "callbacks": [self.metrics],
                         "metadata": {"research_node": f"{node}.write"},
@@ -1179,7 +1192,7 @@ class ResearchGraph:
                 output = invoke_risk_review(
                     self._deliberation_serializer_llm(spec),
                     role=spec.key,
-                    markdown=markdown,
+                    markdown=written.markdown,
                     state=state,
                     node=f"{node}.audit",
                     event_writer=runtime.stream_writer,
@@ -1202,7 +1215,10 @@ class ResearchGraph:
             )
             return {
                 "risk_reviews": {spec.key: review.model_dump(mode="json")},
-                "warnings": _structured_recovery_warnings(node, output),
+                "warnings": [
+                    *_structured_recovery_warnings(node, output),
+                    *_research_markdown_warnings(written),
+                ],
             }
 
         return risk_node
@@ -1263,7 +1279,7 @@ class ResearchGraph:
                 f"{node}.reason",
                 event_writer=runtime.stream_writer,
             ):
-                decision_brief = write_research_markdown(
+                written = write_research_markdown(
                     self.deep_llm,
                     prompt=(
                         context.prompt
@@ -1274,6 +1290,7 @@ class ResearchGraph:
                         "calculations, and risk-review dispositions."
                     ),
                     node=f"{node}.reason",
+                    allowed_evidence_refs=_state_evidence_refs(state),
                     invoke_config={
                         "callbacks": [self.metrics],
                         "metadata": {"research_node": f"{node}.reason"},
@@ -1289,7 +1306,7 @@ class ResearchGraph:
                         "Map the completed decision synthesis brief to the "
                         "strict final decision contract. Preserve its research "
                         "judgment; do not add unsupported facts.\n\n"
-                        f"DECISION SYNTHESIS BRIEF:\n{decision_brief}\n\n"
+                        f"DECISION SYNTHESIS BRIEF:\n{written.markdown}\n\n"
                         f"RESEARCH CONTEXT:\n{context.prompt}"
                     ),
                     state=state,
@@ -1319,7 +1336,10 @@ class ResearchGraph:
             )
             return {
                 "final_decision": decision.model_dump(mode="json"),
-                "warnings": _structured_recovery_warnings(node, output),
+                "warnings": [
+                    *_structured_recovery_warnings(node, output),
+                    *_research_markdown_warnings(written),
+                ],
             }
 
         return final_node
@@ -1863,3 +1883,12 @@ def _structured_recovery_warnings(
         source=node,
     )
     return [warning.model_dump(mode="json")]
+
+
+def _state_evidence_refs(state: Mapping[str, Any]) -> tuple[str, ...]:
+    bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
+    return tuple(item.ref for item in bundle.items)
+
+
+def _research_markdown_warnings(output: Any) -> list[dict[str, Any]]:
+    return [warning.model_dump(mode="json") for warning in output.warnings]
