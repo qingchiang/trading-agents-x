@@ -629,6 +629,54 @@ def test_numeric_serializer_repairs_seven_invalid_input_names() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("output_language", "localized_example"),
+    (
+        ("Simplified Chinese (简体中文, zh-CN)", "现有证据支持一项平衡的研究结论"),
+        ("使用正式、克制的繁体中文", "The evidence supports a balanced conclusion"),
+    ),
+)
+def test_final_serializers_preserve_output_language_in_primary_and_repair(
+    output_language: str,
+    localized_example: str,
+) -> None:
+    state = _state()
+    state["output_language"] = output_language
+    ref = state["evidence_bundle"]["items"][0]["ref"]
+    core = _core_draft_from_decision(
+        research_decision(evidence_refs=(ref,)).model_dump(mode="json")
+    )
+    invalid_core = core.model_dump(mode="json")
+    invalid_core["thesis"] = ""
+    invalid_numeric = {
+        "requested": True,
+        "scenario_valuations": [],
+        "valuation_assessment": None,
+        "market_reference_levels": [],
+        "calculation_records": [],
+    }
+    llm = _SequenceLLM(
+        {
+            "ResearchDecisionCoreDraft": [invalid_core, core],
+            "DecisionNumericDraft": [invalid_numeric, DecisionNumericDraft(requested=False)],
+        }
+    )
+
+    invoke_research_decision(
+        llm,
+        prompt="Form the final decision.",
+        state=state,
+        node="committee.final",
+        require_risk_adjustments=False,
+        output_language=output_language,
+    )
+
+    assert len(llm.prompts) == 4
+    assert all(output_language in prompt for _schema, prompt in llm.prompts)
+    assert localized_example in llm.prompts[0][1]
+    assert localized_example in llm.prompts[1][1]
+
+
 def test_calculation_draft_exposes_identifier_inputs_in_json_schema() -> None:
     schema = CalculationRecordDraft.model_json_schema()
     input_schema = schema["$defs"]["CalculationInputDraft"]["properties"]

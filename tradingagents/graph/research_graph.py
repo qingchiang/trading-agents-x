@@ -1338,6 +1338,7 @@ class ResearchGraph:
                     event_writer=runtime.stream_writer,
                     memory=runtime.context.memory,
                     require_risk_adjustments=not fast,
+                    output_language=state["output_language"],
                 )
             decision = output.value
             self._write_artifact(
@@ -1347,7 +1348,7 @@ class ResearchGraph:
                 role="final_committee",
                 content=decision,
                 generation_method=output.generation_method,
-                prompt_version="final-committee-v7-numeric-isolation",
+                prompt_version="final-committee-v8-language-contract",
             )
             self._finish_node(
                 runtime,

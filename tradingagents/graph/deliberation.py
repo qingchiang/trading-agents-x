@@ -33,6 +33,7 @@ from tradingagents.application.contracts import (
     NumericAuditSnapshot,
     NumericAuditStatus,
     RebuttalReview,
+    ReportLanguage,
     ResearchCase,
     ResearchDecision,
     ResearchRating,
@@ -519,6 +520,82 @@ def invoke_risk_review(
     )
 
 
+def _decision_language_rules(output_language: str) -> str:
+    return (
+        "Write every human-readable field in the requested report language: "
+        f"{output_language}. Keep rating values, schema enums, IDs, formula "
+        "variable names, Evidence refs, Memory refs, and unit wire values in "
+        "their required schema format."
+    )
+
+
+def _decision_example_text(output_language: str) -> dict[str, str]:
+    if output_language == ReportLanguage.SIMPLIFIED_CHINESE.prompt_label:
+        return {
+            "adjustment_subject": "置信度校准",
+            "adjustment_explanation": "最终结论已纳入风险审查意见。",
+            "executive_summary": "现有证据支持一项平衡的研究结论。",
+            "thesis": "该观点取决于一个可验证的经营机制。",
+            "risk": "证据支持的下行风险可能会兑现。",
+            "invalidation": "新证据直接否定核心论点。",
+            "question": "哪一种情景将占据主导？",
+            "horizon": "6至12个月",
+            "base_assumption": "当前证据仍具有代表性。",
+            "base_outcome": "核心论点大体按预期演进。",
+            "bull_assumption": "建设性机制进一步增强。",
+            "bull_outcome": "结果优于基准情景。",
+            "bear_assumption": "主要风险开始兑现。",
+            "bear_outcome": "结果弱于基准情景。",
+            "valuation_method": "基于证据的盈利倍数法",
+            "valuation_limitation": "估值倍数取决于情景假设。",
+            "reference_label": "近期观察收盘价",
+            "reference_interpretation": "这是直接观察的参考值，并非执行指令。",
+        }
+    if output_language == ReportLanguage.JAPANESE.prompt_label:
+        return {
+            "adjustment_subject": "確信度の調整",
+            "adjustment_explanation": "最終判断にはリスクレビューを反映した。",
+            "executive_summary": "現時点の証拠は均衡の取れた判断を支持する。",
+            "thesis": "この見解は検証可能な事業メカニズムに依存する。",
+            "risk": "証拠に裏付けられた下振れリスクが顕在化し得る。",
+            "invalidation": "新たな証拠が中核仮説を直接否定する。",
+            "question": "どのシナリオが優勢になるか。",
+            "horizon": "6〜12か月",
+            "base_assumption": "現在の証拠が引き続き代表性を持つ。",
+            "base_outcome": "仮説は概ね想定どおりに進展する。",
+            "bull_assumption": "上振れメカニズムが強まる。",
+            "bull_outcome": "結果は基本シナリオを上回る。",
+            "bear_assumption": "主要リスクが顕在化する。",
+            "bear_outcome": "結果は基本シナリオを下回る。",
+            "valuation_method": "証拠に基づく利益倍率法",
+            "valuation_limitation": "倍率はシナリオ前提に左右される。",
+            "reference_label": "直近の観測終値",
+            "reference_interpretation": "直接観測した参考値であり、執行指示ではない。",
+        }
+    return {
+        "adjustment_subject": "Confidence calibration",
+        "adjustment_explanation": "The final decision incorporates the risk review.",
+        "executive_summary": "The evidence supports a balanced conclusion.",
+        "thesis": "The view depends on a testable operating mechanism.",
+        "risk": "The evidence-backed downside may materialize.",
+        "invalidation": "New evidence directly contradicts the thesis.",
+        "question": "Which scenario will dominate?",
+        "horizon": "6-12 months",
+        "base_assumption": "Current evidence remains representative.",
+        "base_outcome": "The thesis develops broadly as expected.",
+        "bull_assumption": "The constructive mechanism strengthens.",
+        "bull_outcome": "The result exceeds the base case.",
+        "bear_assumption": "The principal risk materializes.",
+        "bear_outcome": "The result falls below the base case.",
+        "valuation_method": "Evidence-backed earnings multiple",
+        "valuation_limitation": "The multiple is scenario-dependent.",
+        "reference_label": "Observed recent close",
+        "reference_interpretation": (
+            "A directly observed reference, not an execution order."
+        ),
+    }
+
+
 def invoke_research_decision(
     llm: Any,
     *,
@@ -528,19 +605,25 @@ def invoke_research_decision(
     memory: MemoryContext | None = None,
     require_risk_adjustments: bool,
     event_writer: EventWriter | None = None,
+    output_language: str | None = None,
 ) -> ResearchDecisionOutput:
     bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
     valid_refs = tuple(item.ref for item in bundle.items)
     valid_memory_refs = tuple(memory.refs if memory is not None else ())
     first_ref = valid_refs[0]
     risk_roles = tuple(state.get("risk_reviews", {}))
+    resolved_language = output_language or str(
+        state.get("output_language") or ReportLanguage.ENGLISH.prompt_label
+    )
+    example_text = _decision_example_text(resolved_language)
+    language_rules = _decision_language_rules(resolved_language)
     example_adjustments = (
         (
             RiskReviewAdjustment(
                 source_role=risk_roles[0],
                 disposition=RiskReviewDisposition.MODIFIED,
-                subject="Confidence calibration",
-                explanation="The final decision incorporates the risk review.",
+                subject=example_text["adjustment_subject"],
+                explanation=example_text["adjustment_explanation"],
                 evidence_refs=(first_ref,),
             ),
         )
@@ -592,6 +675,38 @@ def invoke_research_decision(
             )
         return result
 
+    core_example = ResearchDecisionCoreDraft(
+        rating=ResearchRating.HOLD,
+        confidence=0.5,
+        executive_summary=example_text["executive_summary"],
+        thesis=example_text["thesis"],
+        evidence_refs=(first_ref,),
+        risks=(example_text["risk"],),
+        invalidation_conditions=(example_text["invalidation"],),
+        unresolved_questions=(example_text["question"],),
+        time_horizon=example_text["horizon"],
+        scenarios=(
+            ResearchScenarioCoreDraft(
+                kind=ResearchScenarioKind.BASE,
+                core_assumptions=(example_text["base_assumption"],),
+                outcome=example_text["base_outcome"],
+                evidence_refs=(first_ref,),
+            ),
+            ResearchScenarioCoreDraft(
+                kind=ResearchScenarioKind.BULL,
+                core_assumptions=(example_text["bull_assumption"],),
+                outcome=example_text["bull_outcome"],
+                evidence_refs=(first_ref,),
+            ),
+            ResearchScenarioCoreDraft(
+                kind=ResearchScenarioKind.BEAR,
+                core_assumptions=(example_text["bear_assumption"],),
+                outcome=example_text["bear_outcome"],
+                evidence_refs=(first_ref,),
+            ),
+        ),
+        risk_review_adjustments=example_adjustments,
+    )
     core = StructuredOutputRunner(
         llm=llm,
         schema=ResearchDecisionCoreDraft,
@@ -607,51 +722,17 @@ def invoke_research_decision(
             "refs. Do not include valuation ranges, market-reference levels, "
             "or calculations in this core object. The scenarios must contain "
             "exactly one base, one bull, and one bear case. Required "
-            f"risk-review roles: {json.dumps(risk_roles)}."
+            f"risk-review roles: {json.dumps(risk_roles)}. {language_rules}"
         ),
     ).invoke(
         prompt
         + "\n\nSerialize only the strict qualitative decision core. Numeric "
         "valuation, scenario ranges, market reference levels, and calculations "
-        "are handled by a separate audit step.",
-        example=ResearchDecisionCoreDraft(
-            rating=ResearchRating.HOLD,
-            confidence=0.5,
-            executive_summary="The evidence supports a balanced conclusion.",
-            thesis="The view depends on a testable operating mechanism.",
-            evidence_refs=(first_ref,),
-            risks=("The evidence-backed downside may materialize.",),
-            invalidation_conditions=(
-                "New evidence directly contradicts the thesis.",
-            ),
-            unresolved_questions=("Which scenario will dominate?",),
-            time_horizon="6-12 months",
-            scenarios=(
-                    ResearchScenarioCoreDraft(
-                    kind=ResearchScenarioKind.BASE,
-                    core_assumptions=(
-                        "Current evidence remains representative.",
-                    ),
-                    outcome="The thesis develops broadly as expected.",
-                    evidence_refs=(first_ref,),
-                ),
-                    ResearchScenarioCoreDraft(
-                    kind=ResearchScenarioKind.BULL,
-                    core_assumptions=(
-                        "The constructive mechanism strengthens.",
-                    ),
-                    outcome="The result exceeds the base case.",
-                    evidence_refs=(first_ref,),
-                ),
-                    ResearchScenarioCoreDraft(
-                    kind=ResearchScenarioKind.BEAR,
-                    core_assumptions=("The principal risk materializes.",),
-                    outcome="The result falls below the base case.",
-                    evidence_refs=(first_ref,),
-                ),
-            ),
-            risk_review_adjustments=example_adjustments,
-        ).model_dump(mode="json"),
+        "are handled by a separate audit step. "
+        + language_rules
+        + "\n\nLOCALIZED VALID EXAMPLE:\n"
+        + json.dumps(core_example.model_dump(mode="json"), ensure_ascii=False),
+        example=core_example.model_dump(mode="json"),
         allowed_evidence_refs=valid_refs,
         allowed_memory_refs=valid_memory_refs,
     )
@@ -663,6 +744,7 @@ def invoke_research_decision(
         bundle=bundle,
         allowed_evidence_refs=valid_refs,
         event_writer=event_writer,
+        output_language=resolved_language,
     )
     core_value = core.value
     scenario_values = []
@@ -734,8 +816,11 @@ def _invoke_decision_numeric(
     bundle: EvidenceBundle,
     allowed_evidence_refs: tuple[str, ...],
     event_writer: EventWriter | None,
+    output_language: str,
 ) -> _NumericDecisionAssembly:
     allowed = set(allowed_evidence_refs)
+    example_text = _decision_example_text(output_language)
+    language_rules = _decision_language_rules(output_language)
 
     def validate(draft: DecisionNumericDraft) -> DecisionNumericDraft:
         _assemble_numeric_draft(
@@ -760,20 +845,20 @@ def _invoke_decision_numeric(
     example = DecisionNumericDraft(
         requested=True,
         valuation_assessment=ValuationAssessmentDraft(
-            method="Evidence-backed earnings multiple",
+            method=example_text["valuation_method"],
             valuation_range=ValuationRange(low=90, high=110),
             currency="USD",
             input_evidence_refs=(allowed_evidence_refs[0],),
-            limitations=("The multiple is scenario-dependent.",),
+            limitations=(example_text["valuation_limitation"],),
             calculation_ids=("calc_valuation",),
         ),
         market_reference_levels=(
             MarketReferenceLevelDraft(
-                label="Observed recent close",
+                label=example_text["reference_label"],
                 value=100,
                 unit="USD",
                 interpretation=(
-                    "A directly observed reference, not an execution order."
+                    example_text["reference_interpretation"]
                 ),
                 evidence_refs=(allowed_evidence_refs[0],),
                 basis=MarketReferenceBasis.OBSERVED,
@@ -789,7 +874,7 @@ def _invoke_decision_numeric(
                 ),
                 input_evidence_refs=(allowed_evidence_refs[0],),
                 unit="USD",
-                limitations=("The multiple is scenario-dependent.",),
+                limitations=(example_text["valuation_limitation"],),
             ),
         ),
     )
@@ -811,7 +896,7 @@ def _invoke_decision_numeric(
             "scenario valuation ranges must name valid calculation IDs. Do not "
             "supply calculation results or dates; the application derives both "
             "from the formula and Evidence Ledger. Do not change the qualitative "
-            "decision core."
+            f"decision core. {language_rules}"
         ),
     )
     try:
@@ -820,7 +905,10 @@ def _invoke_decision_numeric(
             + "\n\nExtract only optional decision-critical numeric content. "
             "Set requested=false and return empty collections when the brief "
             "does not support a numeric appendix. Do not copy ordinary report "
-            "table arithmetic.",
+            "table arithmetic. "
+            + language_rules
+            + "\n\nLOCALIZED VALID EXAMPLE:\n"
+            + json.dumps(example.model_dump(mode="json"), ensure_ascii=False),
             example=example.model_dump(mode="json"),
             allowed_evidence_refs=allowed_evidence_refs,
         )
