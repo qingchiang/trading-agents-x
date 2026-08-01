@@ -69,6 +69,7 @@ def test_public_api_exposes_typed_application_contract():
         "KeyClaim",
         "MarketReferenceBasis",
         "MarketReferenceLevel",
+        "MeasurementKind",
         "NumericAuditStatus",
         "NumericAuditAppendixStatus",
         "NumericAuditComponentType",

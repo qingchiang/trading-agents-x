@@ -30,6 +30,7 @@ from tradingagents.application.contracts import (
     NumericAuditStatus,
     NumericTemporalBasis,
     RebuttalReview,
+    ReportLanguage,
     ResearchScenarioKind,
     RiskReview,
     ScenarioReferenceCategory,
@@ -52,6 +53,7 @@ from tradingagents.graph.deliberation import (
     _evaluate_formula,
     _numeric_audit_snapshot,
     debate_round_has_material_progress,
+    decision_scenario_assumption_guidance,
     invoke_debate_agenda,
     invoke_judge_draft,
     invoke_rebuttal,
@@ -1273,14 +1275,18 @@ def test_exact_duplicate_scenario_range_is_removed_without_degrading_audit() -> 
 
 
 def test_observed_singleton_range_is_promoted_and_deduplicated_by_locator() -> None:
+    regression = _numeric_regression_payload()["presentation_regressions"]
+    rsi_case = regression["rsi"]
+    singleton_case = regression["singleton_reference"]
     item = EvidenceItem(
         ref="ev_0123456789ab",
         source="fixture.market",
         evidence_type="verified RSI",
         requested_date=date(2026, 8, 1),
         effective_date=date(2026, 7, 31),
-        value=67.24,
-        measurement_kind=MeasurementKind.INDEX,
+        value=rsi_case["value"],
+        measurement_kind=MeasurementKind(rsi_case["expected_measurement_kind"]),
+        unit=rsi_case["expected_unit"],
     )
     bundle = EvidenceBundle(
         instrument="6501.T",
@@ -1295,7 +1301,7 @@ def test_observed_singleton_range_is_promoted_and_deduplicated_by_locator() -> N
             base=(
                 ScenarioReferenceRangeDraft(
                     category=ScenarioReferenceCategory.TECHNICAL,
-                    label="RSI reference",
+                    label=singleton_case["label"],
                     low=endpoint,
                     high=endpoint,
                     interpretation="Observed momentum reference.",
@@ -1327,6 +1333,8 @@ def test_observed_singleton_range_is_promoted_and_deduplicated_by_locator() -> N
     ]
     assert result.market_reference_levels[0].measurement_kind is MeasurementKind.INDEX
     assert result.promoted_singletons == 1
+    assert singleton_case["same_locator"] is True
+    assert singleton_case["expected_destination"] == "market_reference_levels"
     assert result.status is NumericAuditStatus.COMPLETE
     events: list[dict[str, Any]] = []
     _emit_numeric_normalization_event(
@@ -1341,6 +1349,19 @@ def test_observed_singleton_range_is_promoted_and_deduplicated_by_locator() -> N
             "payload": {"count": 1},
         }
     ]
+
+
+def test_6501_scenario_assumption_regression_is_covered_by_prompt_guidance() -> None:
+    regression = _numeric_regression_payload()["presentation_regressions"][
+        "scenario_assumption"
+    ]
+    guidance = decision_scenario_assumption_guidance(
+        ReportLanguage.SIMPLIFIED_CHINESE.prompt_label
+    )
+
+    assert regression["expected"] in guidance
+    assert regression["metric_subject"] in guidance
+    assert f"不要只写‘{regression['ambiguous']}’" in guidance
 
 
 def test_equal_observed_values_with_different_locators_are_not_promoted() -> None:

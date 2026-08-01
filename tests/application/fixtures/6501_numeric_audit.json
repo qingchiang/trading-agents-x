@@ -235,5 +235,23 @@
     "background_date": "2026-08-01",
     "expected_interpreted_date": "2026-07-31",
     "live_consensus_date": "2026-08-01"
+  },
+  "presentation_regressions": {
+    "rsi": {
+      "value": 67.24,
+      "incorrect_unit": "JPY",
+      "expected_measurement_kind": "index",
+      "expected_unit": null
+    },
+    "singleton_reference": {
+      "label": "RSI reference",
+      "same_locator": true,
+      "expected_destination": "market_reference_levels"
+    },
+    "scenario_assumption": {
+      "ambiguous": "共识上修至 185–195 日元",
+      "expected": "分析师 EPS 共识上修至每股 185–195 日元",
+      "metric_subject": "EPS"
+    }
   }
 }
