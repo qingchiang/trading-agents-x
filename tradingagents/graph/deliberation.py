@@ -182,7 +182,16 @@ class InterpretedRangeEndpointDraft(BaseModel):
         MarketReferenceBasis.INTERPRETED
     )
     value: float
-    evidence_refs: tuple[str, ...] = Field(min_length=1)
+    anchor_value_refs: tuple[str, ...] = Field(min_length=1)
+    context_evidence_refs: tuple[str, ...] = ()
+
+    @field_validator("anchor_value_refs")
+    @classmethod
+    def validate_anchor_value_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        refs = tuple(dict.fromkeys(value))
+        if any(not re.fullmatch(r"nv_[a-f0-9]{12}", item) for item in refs):
+            raise ValueError("invalid numeric anchor reference")
+        return refs
 
 
 class DerivedRangeEndpointDraft(BaseModel):
@@ -263,10 +272,19 @@ class InterpretedMarketReferenceLevelDraft(BaseModel):
     value: float
     unit: str = Field(min_length=1, max_length=32)
     interpretation: str = Field(min_length=1)
-    evidence_refs: tuple[str, ...] = Field(min_length=1)
+    anchor_value_refs: tuple[str, ...] = Field(min_length=1)
+    context_evidence_refs: tuple[str, ...] = ()
     basis: Literal[MarketReferenceBasis.INTERPRETED] = (
         MarketReferenceBasis.INTERPRETED
     )
+
+    @field_validator("anchor_value_refs")
+    @classmethod
+    def validate_anchor_value_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        refs = tuple(dict.fromkeys(value))
+        if any(not re.fullmatch(r"nv_[a-f0-9]{12}", item) for item in refs):
+            raise ValueError("invalid numeric anchor reference")
+        return refs
 
 
 class DerivedMarketReferenceLevelDraft(BaseModel):
@@ -659,6 +677,19 @@ _SCENARIO_LABEL_PATTERNS: dict[
         ResearchScenarioKind.BEAR: (r"(?:弱気|下振れ|悪化)(?:シナリオ|ケース)",),
     },
 }
+_FIAT_UNITS = {
+    "AUD",
+    "CAD",
+    "CHF",
+    "CNY",
+    "EUR",
+    "GBP",
+    "HKD",
+    "JPY",
+    "KRW",
+    "USD",
+}
+_VALUATION_LABEL_TOKENS = ("valuation", "估值", "バリュエーション", "企業価値")
 
 
 def _label_declares_other_scenario(
@@ -683,6 +714,19 @@ def _label_declares_other_scenario(
         if any(re.search(pattern, label, flags=re.IGNORECASE) for pattern in patterns):
             return True
     return False
+
+
+def _currency_valuation_requires_calculation(
+    scenario: ScenarioReferenceRangeDraft,
+) -> bool:
+    if scenario.unit.upper() not in _FIAT_UNITS:
+        return False
+    if not any(token in scenario.label.casefold() for token in _VALUATION_LABEL_TOKENS):
+        return False
+    return any(
+        not isinstance(endpoint, DerivedRangeEndpointDraft)
+        for endpoint in (scenario.low, scenario.high)
+    )
 
 
 def _decision_example_text(output_language: str) -> dict[str, str]:
@@ -1034,36 +1078,53 @@ def _invoke_decision_numeric(
             interpretation=example_text["reference_interpretation"],
         )
     else:
-        example_low = InterpretedRangeEndpointDraft(
-            value=95,
-            evidence_refs=(allowed_evidence_refs[0],),
+        example_low = DerivedRangeEndpointDraft(
+            calculation_id="calc_valuation_low",
         )
-        example_high = InterpretedRangeEndpointDraft(
-            value=105,
-            evidence_refs=(allowed_evidence_refs[0],),
+        example_high = DerivedRangeEndpointDraft(
+            calculation_id="calc_valuation_high",
         )
-        example_reference = InterpretedMarketReferenceLevelDraft(
+        example_reference = DerivedMarketReferenceLevelDraft(
             label=example_text["reference_label"],
-            value=100,
             unit="USD",
             interpretation=example_text["reference_interpretation"],
-            evidence_refs=(allowed_evidence_refs[0],),
+            calculation_id="calc_valuation_low",
+        )
+
+    example_ranges = [
+        ScenarioReferenceRangeDraft(
+            category=ScenarioReferenceCategory.TECHNICAL,
+            label=example_text["scenario_range_label"],
+            low=example_low,
+            high=example_high,
+            unit="USD",
+            interpretation=example_text["scenario_range_interpretation"],
+            limitations=(example_text["valuation_limitation"],),
+        )
+    ]
+    if value_catalog:
+        example_ranges.append(
+            ScenarioReferenceRangeDraft(
+                category=ScenarioReferenceCategory.OTHER,
+                label=example_text["reference_label"],
+                low=InterpretedRangeEndpointDraft(
+                    value=value_catalog[0].value,
+                    anchor_value_refs=(value_catalog[0].id,),
+                ),
+                high=InterpretedRangeEndpointDraft(
+                    value=value_catalog[0].value,
+                    anchor_value_refs=(value_catalog[0].id,),
+                ),
+                unit=value_catalog[0].unit or "USD",
+                interpretation=example_text["reference_interpretation"],
+                limitations=(example_text["valuation_limitation"],),
+            )
         )
 
     example = DecisionNumericDraft(
         requested=True,
         scenario_reference_ranges=ScenarioReferenceRangesDraft(
-            base=(
-                ScenarioReferenceRangeDraft(
-                    category=ScenarioReferenceCategory.TECHNICAL,
-                    label=example_text["scenario_range_label"],
-                    low=example_low,
-                    high=example_high,
-                    unit="USD",
-                    interpretation=example_text["scenario_range_interpretation"],
-                    limitations=(example_text["valuation_limitation"],),
-                ),
-            ),
+            base=tuple(example_ranges),
         ),
         valuation_assessment=ValuationAssessmentDraft(
             method=example_text["valuation_method"],
@@ -1120,9 +1181,11 @@ def _invoke_decision_numeric(
             "input exactly. Technical levels, historical highs/lows, and analyst "
             "target prices are observed only when selected by value_ref from the "
             "Numeric Value Catalog. Rounded, selected, combined, or model-interpreted "
-            "levels must use basis=interpreted with supporting Evidence refs. They "
-            "require no calculation and must not be disguised as observed values or "
-            "descriptive formulas. Derived endpoints must name a valid calculation. "
+            "levels must use basis=interpreted with anchor_value_refs from the Numeric "
+            "Value Catalog; context_evidence_refs are explanatory only and never set "
+            "the value date. Interpreted values require no calculation, but EPS times "
+            "a multiple, DCF, and other arithmetic must use basis=derived with a valid "
+            "calculation rather than being disguised as interpreted values. "
             "Each base, bull, and bear scenario range field is an array. Preserve "
             "every already-valid, non-duplicate range while repairing only the "
             "invalid range identified by the issue path. A scenario may contain "
@@ -1476,6 +1539,9 @@ def _assemble_numeric_draft(
             ):
                 issues.append(f"{prefix}.scenario_mismatch")
                 continue
+            if _currency_valuation_requires_calculation(scenario):
+                issues.append(f"{prefix}.derived_calculation_required")
+                continue
             try:
                 require_text(scenario.label)
                 require_text(scenario.interpretation)
@@ -1597,13 +1663,18 @@ def _assemble_numeric_draft(
                 source_locator: EvidenceValueLocator | None = catalog_entry.locator
                 calculation_ids: tuple[str, ...] = ()
             elif isinstance(item, InterpretedMarketReferenceLevelDraft):
-                require_valid_refs(
-                    item.evidence_refs,
-                    allowed_evidence_refs,
-                    required=True,
+                anchor_entries = _numeric_anchor_entries(
+                    item.anchor_value_refs,
+                    value_catalog=value_catalog,
+                    issue_prefix=prefix,
                 )
-                resolved_date = _latest_evidence_date(
-                    item.evidence_refs,
+                require_valid_refs(
+                    item.context_evidence_refs,
+                    allowed_evidence_refs,
+                    required=False,
+                )
+                resolved_date = _latest_catalog_date(
+                    anchor_entries,
                     evidence_items=evidence_items,
                     bundle=bundle,
                     issue_prefix=prefix,
@@ -1611,7 +1682,10 @@ def _assemble_numeric_draft(
                 as_of_date = resolved_date.value
                 temporal_basis = resolved_date.temporal_basis
                 value = item.value
-                evidence_refs = item.evidence_refs
+                date_evidence_refs = _catalog_evidence_refs(anchor_entries)
+                evidence_refs = tuple(
+                    dict.fromkeys((*date_evidence_refs, *item.context_evidence_refs))
+                )
                 source_locator = None
                 calculation_ids: tuple[str, ...] = ()
             else:
@@ -1621,9 +1695,12 @@ def _assemble_numeric_draft(
                 as_of_date = calculation.as_of_date
                 value = float(calculation.result)
                 evidence_refs = calculation.input_evidence_refs
+                date_evidence_refs = calculation.input_evidence_refs
                 source_locator = None
                 calculation_ids = (item.calculation_id,)
                 temporal_basis = calculation.temporal_basis
+            if isinstance(item, ObservedMarketReferenceLevelDraft):
+                date_evidence_refs = catalog_entry.evidence_refs
         except OutputValidationError as exc:
             issues.append(exc.issue_code)
         else:
@@ -1635,6 +1712,7 @@ def _assemble_numeric_draft(
                     as_of_date=as_of_date,
                     interpretation=item.interpretation,
                     evidence_refs=evidence_refs,
+                    date_evidence_refs=date_evidence_refs,
                     basis=item.basis,
                     source_locator=source_locator,
                     calculation_ids=calculation_ids,
@@ -1796,30 +1874,40 @@ def _assemble_range_endpoint(
             value=catalog_entry.value,
             basis=MarketReferenceBasis.OBSERVED,
             evidence_refs=catalog_entry.evidence_refs,
+            date_evidence_refs=catalog_entry.evidence_refs,
             source_locator=catalog_entry.locator,
             as_of_date=resolved_date.value,
             temporal_basis=resolved_date.temporal_basis,
         )
     if isinstance(draft, InterpretedRangeEndpointDraft):
+        anchor_entries = _numeric_anchor_entries(
+            draft.anchor_value_refs,
+            value_catalog=value_catalog,
+            issue_prefix=issue_prefix,
+        )
         try:
             require_valid_refs(
-                draft.evidence_refs,
+                draft.context_evidence_refs,
                 allowed_evidence_refs,
-                required=True,
+                required=False,
             )
         except OutputValidationError as exc:
-            suffix = "missing_evidence" if exc.issue_code == "refs.required" else "invalid_evidence"
-            raise OutputValidationError(f"{issue_prefix}.{suffix}") from exc
-        resolved_date = _latest_evidence_date(
-            draft.evidence_refs,
+            raise OutputValidationError(f"{issue_prefix}.invalid_evidence") from exc
+        resolved_date = _latest_catalog_date(
+            anchor_entries,
             evidence_items=evidence_items,
             bundle=bundle,
             issue_prefix=issue_prefix,
         )
+        date_evidence_refs = _catalog_evidence_refs(anchor_entries)
+        evidence_refs = tuple(
+            dict.fromkeys((*date_evidence_refs, *draft.context_evidence_refs))
+        )
         return AuditedRangeEndpoint(
             value=draft.value,
             basis=MarketReferenceBasis.INTERPRETED,
-            evidence_refs=draft.evidence_refs,
+            evidence_refs=evidence_refs,
+            date_evidence_refs=date_evidence_refs,
             as_of_date=resolved_date.value,
             temporal_basis=resolved_date.temporal_basis,
         )
@@ -1830,6 +1918,7 @@ def _assemble_range_endpoint(
         value=float(calculation.result),
         basis=MarketReferenceBasis.DERIVED,
         evidence_refs=calculation.input_evidence_refs,
+        date_evidence_refs=calculation.input_evidence_refs,
         calculation_id=calculation.id,
         as_of_date=calculation.as_of_date,
         temporal_basis=calculation.temporal_basis,
@@ -1855,6 +1944,57 @@ def _catalog_entry_date(
         evidence_items=evidence_items,
         bundle=bundle,
         issue_prefix=issue_prefix,
+    )
+
+
+def _numeric_anchor_entries(
+    anchor_value_refs: tuple[str, ...],
+    *,
+    value_catalog: Mapping[str, NumericValueCatalogEntry],
+    issue_prefix: str,
+) -> tuple[NumericValueCatalogEntry, ...]:
+    entries = tuple(value_catalog.get(item) for item in anchor_value_refs)
+    if not entries or any(item is None for item in entries):
+        raise OutputValidationError(f"{issue_prefix}.anchor_unavailable")
+    return tuple(item for item in entries if item is not None)
+
+
+def _catalog_evidence_refs(
+    entries: tuple[NumericValueCatalogEntry, ...],
+) -> tuple[str, ...]:
+    return tuple(
+        dict.fromkeys(ref for entry in entries for ref in entry.evidence_refs)
+    )
+
+
+def _latest_catalog_date(
+    entries: tuple[NumericValueCatalogEntry, ...],
+    *,
+    evidence_items: Mapping[str, EvidenceItem],
+    bundle: EvidenceBundle,
+    issue_prefix: str,
+) -> _ResolvedEvidenceDate:
+    resolved = tuple(
+        _catalog_entry_date(
+            entry,
+            evidence_items=evidence_items,
+            bundle=bundle,
+            issue_prefix=issue_prefix,
+        )
+        for entry in entries
+    )
+    if not resolved:
+        raise OutputValidationError(f"{issue_prefix}.anchor_unavailable")
+    return _ResolvedEvidenceDate(
+        value=max(item.value for item in resolved),
+        temporal_basis=(
+            NumericTemporalBasis.LIVE_SNAPSHOT
+            if any(
+                item.temporal_basis is NumericTemporalBasis.LIVE_SNAPSHOT
+                for item in resolved
+            )
+            else NumericTemporalBasis.POINT_IN_TIME
+        ),
     )
 
 

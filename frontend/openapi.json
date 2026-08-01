@@ -356,6 +356,14 @@
             ],
             "title": "Calculation Id"
           },
+          "date_evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Date Evidence Refs",
+            "type": "array"
+          },
           "evidence_refs": {
             "items": {
               "type": "string"
@@ -387,6 +395,7 @@
           "value",
           "basis",
           "evidence_refs",
+          "date_evidence_refs",
           "as_of_date"
         ],
         "title": "AuditedRangeEndpoint",
@@ -1532,6 +1541,14 @@
             "title": "Calculation Ids",
             "type": "array"
           },
+          "date_evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Date Evidence Refs",
+            "type": "array"
+          },
           "evidence_refs": {
             "items": {
               "type": "string"
@@ -1582,7 +1599,8 @@
           "unit",
           "as_of_date",
           "interpretation",
-          "evidence_refs"
+          "evidence_refs",
+          "date_evidence_refs"
         ],
         "title": "MarketReferenceLevel",
         "type": "object"

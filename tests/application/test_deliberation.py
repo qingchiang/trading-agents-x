@@ -40,8 +40,11 @@ from tradingagents.graph.deliberation import (
     CalculationInputDraft,
     CalculationRecordDraft,
     DecisionNumericDraft,
+    InterpretedRangeEndpointDraft,
     ObservedMarketReferenceLevelDraft,
     ResearchDecisionCoreDraft,
+    ScenarioReferenceRangeDraft,
+    ScenarioReferenceRangesDraft,
     _assemble_numeric_draft,
     _evaluate_formula,
     _numeric_audit_snapshot,
@@ -159,7 +162,8 @@ def _endpoint_draft(endpoint: dict[str, Any]) -> dict[str, Any]:
         return {
             "basis": "interpreted",
             "value": endpoint["value"],
-            "evidence_refs": endpoint["evidence_refs"],
+            "anchor_value_refs": (_interpreted_value_ref(endpoint),),
+            "context_evidence_refs": (),
         }
     return {"basis": "derived", "calculation_id": endpoint["calculation_id"]}
 
@@ -187,15 +191,13 @@ def _reference_draft(item: dict[str, Any]) -> dict[str, Any]:
         }
     if item["basis"] == "interpreted":
         return {
-            key: value
-            for key, value in item.items()
-            if key
-            not in {
-                "as_of_date",
-                "calculation_ids",
-                "temporal_basis",
-                "source_locator",
-            }
+            "label": item["label"],
+            "value": item["value"],
+            "unit": item["unit"],
+            "interpretation": item["interpretation"],
+            "anchor_value_refs": (_interpreted_value_ref(item),),
+            "context_evidence_refs": (),
+            "basis": "interpreted",
         }
     return {
         "label": item["label"],
@@ -212,6 +214,25 @@ def _value_ref(item: dict[str, Any]) -> str:
         ref=locator.evidence_ref,
         source="fixture",
         evidence_type="fixture scalar",
+        requested_date=date(2026, 7, 24),
+        effective_date=item.get("as_of_date"),
+        value=item["value"],
+        unit=item.get("unit"),
+    )
+    bundle = EvidenceBundle(
+        instrument="NVDA",
+        analysis_date=date(2026, 7, 24),
+        items=(evidence_item,),
+    )
+    return build_numeric_value_catalog(bundle)[0].id
+
+
+def _interpreted_value_ref(item: dict[str, Any]) -> str:
+    evidence_ref = (item.get("date_evidence_refs") or item["evidence_refs"])[0]
+    evidence_item = EvidenceItem(
+        ref=evidence_ref,
+        source="fixture",
+        evidence_type="fixture interpreted anchor",
         requested_date=date(2026, 7, 24),
         effective_date=item.get("as_of_date"),
         value=item["value"],
@@ -645,6 +666,7 @@ def test_final_decision_accepts_reproducible_critical_calculation() -> None:
                     value=100,
                     basis=MarketReferenceBasis.DERIVED,
                     evidence_refs=(ref,),
+                    date_evidence_refs=(ref,),
                     calculation_id="calc_valuation",
                     as_of_date=date(2026, 7, 24),
                 ),
@@ -652,6 +674,7 @@ def test_final_decision_accepts_reproducible_critical_calculation() -> None:
                     value=100,
                     basis=MarketReferenceBasis.DERIVED,
                     evidence_refs=(ref,),
+                    date_evidence_refs=(ref,),
                     calculation_id="calc_valuation",
                     as_of_date=date(2026, 7, 24),
                 ),
@@ -698,6 +721,7 @@ def test_final_decision_accepts_observed_reference_without_calculation() -> None
                     as_of_date=date(2026, 7, 24),
                     interpretation="Observed reference only.",
                     evidence_refs=(ref,),
+                    date_evidence_refs=(ref,),
                     basis=MarketReferenceBasis.OBSERVED,
                     source_locator=EvidenceValueLocator(evidence_ref=ref),
                 ),
@@ -750,6 +774,7 @@ def test_public_decision_rejects_derived_reference_without_calculation() -> None
             as_of_date=date(2026, 7, 24),
             interpretation="A derived reference only.",
             evidence_refs=(ref,),
+            date_evidence_refs=(ref,),
             basis=MarketReferenceBasis.DERIVED,
         )
 
@@ -1031,6 +1056,90 @@ def test_6501_numeric_regression_canonicalizes_results_dates_and_shared_usage() 
     }
     assert "calc_current_pe" in result.market_reference_levels[1].calculation_ids
     assert result.status is NumericAuditStatus.COMPLETE
+    base_ranges = result.scenario_reference_ranges[ResearchScenarioKind.BASE]
+    assert base_ranges[0].low.as_of_date == date(2026, 7, 31)
+    assert base_ranges[0].low.date_evidence_refs == ("ev_6501a0000001",)
+    assert base_ranges[1].low.as_of_date == date(2026, 8, 1)
+    assert base_ranges[1].low.temporal_basis is NumericTemporalBasis.LIVE_SNAPSHOT
+
+
+def test_interpreted_range_date_uses_anchor_not_context_evidence() -> None:
+    bundle, _draft = _numeric_regression()
+    market_item = bundle.items[0]
+    context_item = EvidenceItem(
+        ref="ev_6501a0000004",
+        source="fixture.fundamentals",
+        evidence_type="context only",
+        requested_date=bundle.analysis_date,
+        effective_date=date(2026, 8, 1),
+        content="Context that explains the scenario but does not set its price date.",
+    )
+    bundle = bundle.model_copy(update={"items": (*bundle.items, context_item)})
+    anchor_ref = build_numeric_value_catalog(bundle)[0].id
+    endpoint = InterpretedRangeEndpointDraft(
+        value=5000,
+        anchor_value_refs=(anchor_ref,),
+        context_evidence_refs=(context_item.ref,),
+    )
+    draft = DecisionNumericDraft(
+        requested=True,
+        scenario_reference_ranges=ScenarioReferenceRangesDraft(
+            base=(
+                ScenarioReferenceRangeDraft(
+                    category=ScenarioReferenceCategory.TECHNICAL,
+                    label="Technical support band",
+                    low=endpoint,
+                    high=endpoint.model_copy(update={"value": 5300}),
+                    unit="JPY",
+                    interpretation="A rounded technical reference range.",
+                    limitations=("The range is not a forecast.",),
+                ),
+            )
+        ),
+    )
+
+    result = _assemble_numeric_draft(
+        draft,
+        bundle=bundle,
+        allowed_evidence_refs={item.ref for item in bundle.items},
+        value_catalog=_value_catalog(bundle),
+        salvage=False,
+        node="committee.final.serialize.numeric",
+    )
+
+    low = result.scenario_reference_ranges[ResearchScenarioKind.BASE][0].low
+    assert low.as_of_date == date(2026, 7, 31)
+    assert low.date_evidence_refs == (market_item.ref,)
+    assert low.evidence_refs == (market_item.ref, context_item.ref)
+
+
+def test_currency_valuation_label_requires_derived_calculation() -> None:
+    bundle, draft = _numeric_regression()
+    interpreted = draft.scenario_reference_ranges.base[0].model_copy(
+        update={"label": "估值回归价格区间"}
+    )
+    draft = draft.model_copy(
+        update={
+            "scenario_reference_ranges": ScenarioReferenceRangesDraft(
+                base=(interpreted,)
+            )
+        }
+    )
+
+    result = _assemble_numeric_draft(
+        draft,
+        bundle=bundle,
+        allowed_evidence_refs={item.ref for item in bundle.items},
+        value_catalog=_value_catalog(bundle),
+        salvage=True,
+        node="committee.final.serialize.numeric",
+    )
+
+    assert result.scenario_reference_ranges == {}
+    assert result.issues == (
+        "numeric.scenario.base.ranges.0.derived_calculation_required",
+    )
+    assert result.status is NumericAuditStatus.PARTIAL
 
 
 def test_scenario_ranges_preserve_distinct_ranges_in_the_same_category() -> None:
@@ -1102,7 +1211,7 @@ def test_invalid_scenario_range_only_omits_that_range() -> None:
         update={
             "label": "Invalid unsupported range",
             "low": valid_range.low.model_copy(
-                update={"evidence_refs": ("ev_ffffffffffff",)}
+                update={"anchor_value_refs": ("nv_ffffffffffff",)}
             ),
         }
     )
@@ -1487,6 +1596,7 @@ def test_final_decision_recomputes_optional_calculation_result() -> None:
                                     value=999,
                                     basis=MarketReferenceBasis.DERIVED,
                                     evidence_refs=(ref,),
+                                    date_evidence_refs=(ref,),
                                     calculation_id="calc_scenario",
                                     as_of_date=date(2026, 7, 24),
                                 ),
@@ -1494,6 +1604,7 @@ def test_final_decision_recomputes_optional_calculation_result() -> None:
                                     value=999,
                                     basis=MarketReferenceBasis.DERIVED,
                                     evidence_refs=(ref,),
+                                    date_evidence_refs=(ref,),
                                     calculation_id="calc_scenario",
                                     as_of_date=date(2026, 7, 24),
                                 ),
@@ -1549,6 +1660,7 @@ def test_final_decision_preserves_valid_numeric_components_after_repair_failure(
                     value=100,
                     basis=MarketReferenceBasis.DERIVED,
                     evidence_refs=(ref,),
+                    date_evidence_refs=(ref,),
                     calculation_id="calc_valuation",
                     as_of_date=date(2026, 7, 24),
                 ),
@@ -1556,6 +1668,7 @@ def test_final_decision_preserves_valid_numeric_components_after_repair_failure(
                     value=100,
                     basis=MarketReferenceBasis.DERIVED,
                     evidence_refs=(ref,),
+                    date_evidence_refs=(ref,),
                     calculation_id="calc_valuation",
                     as_of_date=date(2026, 7, 24),
                 ),
@@ -1570,6 +1683,7 @@ def test_final_decision_preserves_valid_numeric_components_after_repair_failure(
                     as_of_date=date(2026, 7, 24),
                     interpretation="Observed reference only.",
                     evidence_refs=(ref,),
+                    date_evidence_refs=(ref,),
                     basis=MarketReferenceBasis.OBSERVED,
                     source_locator=EvidenceValueLocator(evidence_ref=ref),
                 ),

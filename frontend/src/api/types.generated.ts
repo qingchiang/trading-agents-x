@@ -48,6 +48,7 @@ export interface components {
       as_of_date: string;
       basis: components["schemas"]["MarketReferenceBasis"];
       calculation_id?: string | null;
+      date_evidence_refs: string[];
       evidence_refs: string[];
       source_locator?: components["schemas"]["EvidenceValueLocator"] | null;
       temporal_basis?: components["schemas"]["NumericTemporalBasis"];
@@ -218,6 +219,7 @@ export interface components {
       as_of_date: string;
       basis?: components["schemas"]["MarketReferenceBasis"];
       calculation_ids?: string[];
+      date_evidence_refs: string[];
       evidence_refs: string[];
       interpretation: string;
       label: string;

@@ -836,6 +836,7 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
                     value=100,
                     basis=MarketReferenceBasis.DERIVED,
                     evidence_refs=("ev_0123456789ab",),
+                    date_evidence_refs=("ev_0123456789ab",),
                     calculation_id="calc_valuation_low",
                     as_of_date=date(2026, 7, 24),
                 ),
@@ -843,6 +844,7 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
                     value=125,
                     basis=MarketReferenceBasis.DERIVED,
                     evidence_refs=("ev_0123456789ab",),
+                    date_evidence_refs=("ev_0123456789ab",),
                     calculation_id="calc_valuation_high",
                     as_of_date=date(2026, 7, 24),
                 ),
@@ -857,6 +859,7 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
                     as_of_date=date(2026, 7, 24),
                     interpretation="Observation only, not an entry order.",
                     evidence_refs=("ev_0123456789ab",),
+                    date_evidence_refs=("ev_0123456789ab",),
                     source_locator=EvidenceValueLocator(
                         evidence_ref="ev_0123456789ab"
                     ),
@@ -1060,6 +1063,7 @@ def test_export_localizes_scenario_range_categories_and_omissions(
         value=100,
         basis=MarketReferenceBasis.INTERPRETED,
         evidence_refs=(ref,),
+        date_evidence_refs=(ref,),
         as_of_date=date(2026, 7, 24),
     )
     decision = research_decision(evidence_refs=(ref,))
@@ -1137,6 +1141,17 @@ def test_export_localizes_scenario_range_categories_and_omissions(
     assert category_label in markdown
     assert omission_label in markdown
     assert "Secondary target range" in markdown
+
+
+def test_numeric_date_evidence_must_be_part_of_endpoint_evidence() -> None:
+    with pytest.raises(ValueError, match="date evidence refs"):
+        AuditedRangeEndpoint(
+            value=100,
+            basis=MarketReferenceBasis.INTERPRETED,
+            evidence_refs=("ev_0123456789ab",),
+            date_evidence_refs=("ev_ffffffffffff",),
+            as_of_date=date(2026, 7, 24),
+        )
 
 
 def test_zh_export_localizes_framework_and_keeps_canonical_refs_in_sources() -> None:

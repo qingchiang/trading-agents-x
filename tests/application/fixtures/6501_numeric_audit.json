@@ -49,8 +49,8 @@
         {
         "category": "technical",
         "label": "Base technical range",
-        "low": {"basis": "interpreted", "value": 5000, "evidence_refs": ["ev_6501a0000001"]},
-        "high": {"basis": "interpreted", "value": 5500, "evidence_refs": ["ev_6501a0000001"]},
+        "low": {"basis": "interpreted", "value": 5000, "anchor_value_refs": ["nv_b031f094f3c7"]},
+        "high": {"basis": "interpreted", "value": 5500, "anchor_value_refs": ["nv_b031f094f3c7"]},
         "unit": "JPY",
         "interpretation": "Observed technical reference band.",
         "limitations": ["Historical levels are not forecasts."]
@@ -58,8 +58,8 @@
         {
         "category": "analyst_consensus",
         "label": "Analyst target range",
-        "low": {"basis": "interpreted", "value": 4600, "evidence_refs": ["ev_6501a0000003"]},
-        "high": {"basis": "interpreted", "value": 7100, "evidence_refs": ["ev_6501a0000003"]},
+        "low": {"basis": "interpreted", "value": 4600, "anchor_value_refs": ["nv_b07c4c829290"]},
+        "high": {"basis": "interpreted", "value": 7100, "anchor_value_refs": ["nv_b07c4c829290"]},
         "unit": "JPY",
         "interpretation": "Selected analyst target range from a live-only consensus snapshot.",
         "limitations": ["Coverage and targets may change after retrieval."]
@@ -69,8 +69,8 @@
         {
         "category": "technical",
         "label": "Bull reference range",
-        "low": {"basis": "interpreted", "value": 5700, "evidence_refs": ["ev_6501a0000001"]},
-        "high": {"basis": "interpreted", "value": 6200, "evidence_refs": ["ev_6501a0000001"]},
+        "low": {"basis": "interpreted", "value": 5700, "anchor_value_refs": ["nv_b031f094f3c7"]},
+        "high": {"basis": "interpreted", "value": 6200, "anchor_value_refs": ["nv_b031f094f3c7"]},
         "unit": "JPY",
         "interpretation": "Observed market reference band.",
         "limitations": ["Historical levels are not forecasts."]
@@ -80,8 +80,8 @@
         {
         "category": "historical",
         "label": "Bear reference range",
-        "low": {"basis": "interpreted", "value": 4200, "evidence_refs": ["ev_6501a0000001"]},
-        "high": {"basis": "interpreted", "value": 4700, "evidence_refs": ["ev_6501a0000001"]},
+        "low": {"basis": "interpreted", "value": 4200, "anchor_value_refs": ["nv_b031f094f3c7"]},
+        "high": {"basis": "interpreted", "value": 4700, "anchor_value_refs": ["nv_b031f094f3c7"]},
         "unit": "JPY",
         "interpretation": "Observed downside reference band.",
         "limitations": ["Historical levels are not forecasts."]
@@ -179,8 +179,8 @@
         {
           "category": "technical",
           "label": "Unsupported duplicate repair fixture",
-          "low": {"basis": "interpreted", "value": 5000, "evidence_refs": ["ev_ffffffffffff"]},
-          "high": {"basis": "interpreted", "value": 5500, "evidence_refs": ["ev_6501a0000001"]},
+          "low": {"basis": "interpreted", "value": 5000, "anchor_value_refs": ["nv_ffffffffffff"]},
+          "high": {"basis": "interpreted", "value": 5500, "anchor_value_refs": ["nv_b031f094f3c7"]},
           "unit": "JPY",
           "interpretation": "A deliberately invalid frozen repair candidate.",
           "limitations": ["Regression fixture only."]

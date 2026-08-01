@@ -821,12 +821,13 @@ class AuditedRangeEndpoint(FrozenModel):
     value: float
     basis: MarketReferenceBasis
     evidence_refs: tuple[str, ...] = Field(min_length=1)
+    date_evidence_refs: tuple[str, ...] = Field(min_length=1)
     source_locator: EvidenceValueLocator | None = None
     calculation_id: str | None = None
     as_of_date: date
     temporal_basis: NumericTemporalBasis = NumericTemporalBasis.POINT_IN_TIME
 
-    @field_validator("evidence_refs")
+    @field_validator("evidence_refs", "date_evidence_refs")
     @classmethod
     def validate_evidence_refs(
         cls,
@@ -843,6 +844,8 @@ class AuditedRangeEndpoint(FrozenModel):
 
     @model_validator(mode="after")
     def validate_basis(self) -> AuditedRangeEndpoint:
+        if not set(self.date_evidence_refs).issubset(self.evidence_refs):
+            raise ValueError("date evidence refs must be included in endpoint refs")
         if self.basis is MarketReferenceBasis.OBSERVED:
             if self.source_locator is None:
                 raise ValueError("observed endpoint requires an Evidence locator")
@@ -939,12 +942,13 @@ class MarketReferenceLevel(FrozenModel):
     as_of_date: date
     interpretation: str = Field(min_length=1)
     evidence_refs: tuple[str, ...] = Field(min_length=1)
+    date_evidence_refs: tuple[str, ...] = Field(min_length=1)
     basis: MarketReferenceBasis = MarketReferenceBasis.OBSERVED
     source_locator: EvidenceValueLocator | None = None
     calculation_ids: tuple[str, ...] = ()
     temporal_basis: NumericTemporalBasis = NumericTemporalBasis.POINT_IN_TIME
 
-    @field_validator("evidence_refs")
+    @field_validator("evidence_refs", "date_evidence_refs")
     @classmethod
     def validate_evidence_refs(
         cls,
@@ -959,6 +963,10 @@ class MarketReferenceLevel(FrozenModel):
 
     @model_validator(mode="after")
     def validate_basis(self) -> MarketReferenceLevel:
+        if not set(self.date_evidence_refs).issubset(self.evidence_refs):
+            raise ValueError(
+                "date evidence refs must be included in market reference refs"
+            )
         if self.basis is MarketReferenceBasis.OBSERVED:
             if self.source_locator is None:
                 raise ValueError("observed market reference requires an Evidence locator")

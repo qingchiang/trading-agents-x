@@ -50,17 +50,19 @@ def test_research_decision_accepts_audited_nonpersonalized_opinions() -> None:
                 "method": "Comparable multiples",
                 "low": {
                     "value": 90.0,
-                    "basis": "derived",
-                    "evidence_refs": ["ev_0123456789ab"],
-                    "calculation_id": "calc_valuation_low",
+                        "basis": "derived",
+                        "evidence_refs": ["ev_0123456789ab"],
+                        "date_evidence_refs": ["ev_0123456789ab"],
+                        "calculation_id": "calc_valuation_low",
                     "as_of_date": "2026-07-24",
                     "temporal_basis": "point_in_time",
                 },
                 "high": {
                     "value": 110.0,
-                    "basis": "derived",
-                    "evidence_refs": ["ev_0123456789ab"],
-                    "calculation_id": "calc_valuation_high",
+                        "basis": "derived",
+                        "evidence_refs": ["ev_0123456789ab"],
+                        "date_evidence_refs": ["ev_0123456789ab"],
+                        "calculation_id": "calc_valuation_high",
                     "as_of_date": "2026-07-24",
                     "temporal_basis": "point_in_time",
                 },
@@ -76,8 +78,9 @@ def test_research_decision_accepts_audited_nonpersonalized_opinions() -> None:
                     "interpretation": (
                         "An observed reference level, not an execution order."
                     ),
-                "evidence_refs": ["ev_0123456789ab"],
-                "source_locator": {"evidence_ref": "ev_0123456789ab"},
+                    "evidence_refs": ["ev_0123456789ab"],
+                    "date_evidence_refs": ["ev_0123456789ab"],
+                    "source_locator": {"evidence_ref": "ev_0123456789ab"},
             }
             ],
         }
