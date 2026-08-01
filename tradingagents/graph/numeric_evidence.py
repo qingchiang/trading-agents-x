@@ -13,6 +13,7 @@ from tradingagents.application.contracts import (
     EvidenceTable,
     EvidenceTableRow,
     EvidenceValueLocator,
+    MeasurementKind,
 )
 
 
@@ -23,6 +24,7 @@ class NumericValueCatalogEntry:
     id: str
     label: str
     value: float
+    measurement_kind: MeasurementKind
     unit: str | None
     evidence_refs: tuple[str, ...]
     locator: EvidenceValueLocator
@@ -33,6 +35,7 @@ class NumericValueCatalogEntry:
             "value_ref": self.id,
             "label": self.label,
             "value": self.value,
+            "measurement_kind": self.measurement_kind.value,
             "unit": self.unit,
             "evidence_refs": list(self.evidence_refs),
             "observed_date": (
@@ -66,6 +69,7 @@ def build_numeric_value_catalog(
             _entry(
                 label=f"{item.evidence_type} ({item.source})",
                 value=float(item.value),
+                measurement_kind=item.measurement_kind,
                 unit=item.unit,
                 evidence_refs=(item.ref,),
                 locator=EvidenceValueLocator(evidence_ref=item.ref),
@@ -93,7 +97,10 @@ def build_numeric_value_catalog(
                     _entry(
                         label=f"{table.title} · {row_label} · {column.label}",
                         value=float(cell.raw_value),
-                        unit=column.unit,
+                        measurement_kind=(
+                            cell.measurement_kind or column.measurement_kind
+                        ),
+                        unit=cell.unit or column.unit,
                         evidence_refs=refs,
                         locator=EvidenceValueLocator(
                             evidence_ref=refs[0],
@@ -115,6 +122,7 @@ def _entry(
     *,
     label: str,
     value: float,
+    measurement_kind: MeasurementKind,
     unit: str | None,
     evidence_refs: tuple[str, ...],
     locator: EvidenceValueLocator,
@@ -131,6 +139,7 @@ def _entry(
         id=f"nv_{digest}",
         label=label,
         value=value,
+        measurement_kind=measurement_kind,
         unit=unit,
         evidence_refs=tuple(dict.fromkeys(evidence_refs)),
         locator=locator,

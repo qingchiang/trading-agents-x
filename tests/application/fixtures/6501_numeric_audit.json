@@ -9,6 +9,7 @@
       "requested_date": "2026-08-01",
       "effective_date": "2026-07-31",
       "value": 5267,
+      "measurement_kind": "currency",
       "unit": "JPY"
     },
     {
@@ -26,6 +27,7 @@
       "requested_date": "2026-08-01",
       "effective_date": null,
       "value": 5600,
+      "measurement_kind": "currency",
       "unit": "JPY",
       "quality": "low",
       "origins": [
@@ -99,7 +101,6 @@
       {
         "label": "Observed close",
         "value_ref": "nv_b031f094f3c7",
-        "unit": "JPY",
         "interpretation": "Directly observed close.",
         "basis": "observed"
       },
@@ -120,7 +121,6 @@
       {
         "label": "Analyst consensus target",
         "value_ref": "nv_b07c4c829290",
-        "unit": "JPY",
         "interpretation": "A low-quality retrieval-time analyst target snapshot.",
         "basis": "observed"
       }

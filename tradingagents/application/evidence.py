@@ -15,6 +15,7 @@ from .contracts import (
     EvidenceTableCell,
     EvidenceTableColumn,
     EvidenceTableRow,
+    MeasurementKind,
     TableDataType,
 )
 
@@ -300,10 +301,19 @@ def _columns(
                 key=key,
                 label=label,
                 data_type=data_type,
+                measurement_kind=_column_measurement_kind(data_type),
                 unit=unit,
             )
         )
     return tuple(columns)
+
+
+def _column_measurement_kind(data_type: TableDataType) -> MeasurementKind:
+    if data_type is TableDataType.CURRENCY:
+        return MeasurementKind.CURRENCY
+    if data_type is TableDataType.PERCENT:
+        return MeasurementKind.PERCENT
+    return MeasurementKind.UNKNOWN
 
 
 def _rows(
@@ -311,11 +321,41 @@ def _rows(
     rows: list[list[str]],
 ) -> tuple[EvidenceTableRow, ...]:
     output = []
+    column_by_key = {column.key: column for column in columns}
+    measurement_column = column_by_key.get("measurement")
+    unit_column = column_by_key.get("unit")
     for row_index, values in enumerate(rows, start=1):
         cells = {}
+        displayed_by_key = {
+            column.key: displayed
+            for column, displayed in zip(columns, values, strict=True)
+        }
+        measurement_kind = _measurement_kind(
+            displayed_by_key.get(measurement_column.key, "")
+            if measurement_column is not None
+            else ""
+        )
+        raw_unit = (
+            displayed_by_key.get(unit_column.key, "").strip()
+            if unit_column is not None
+            else ""
+        )
+        unit = None if raw_unit.casefold() in _UNAVAILABLE_VALUES else raw_unit
         for column, displayed in zip(columns, values, strict=True):
+            is_measured_value = (
+                column.key not in {"measurement", "unit"}
+                and column.data_type
+                in {
+                    TableDataType.INTEGER,
+                    TableDataType.NUMBER,
+                    TableDataType.PERCENT,
+                    TableDataType.CURRENCY,
+                }
+            )
             cells[column.key] = EvidenceTableCell(
                 raw_value=_typed_value(displayed, column.data_type),
+                measurement_kind=(measurement_kind if is_measured_value else None),
+                unit=(unit if is_measured_value else None),
             )
         output.append(
             EvidenceTableRow(
@@ -324,6 +364,13 @@ def _rows(
             )
         )
     return tuple(output)
+
+
+def _measurement_kind(value: str) -> MeasurementKind:
+    try:
+        return MeasurementKind(value.strip().casefold())
+    except ValueError:
+        return MeasurementKind.UNKNOWN
 
 
 def _infer_column_type(

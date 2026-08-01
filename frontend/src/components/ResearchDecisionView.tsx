@@ -163,14 +163,15 @@ export function ResearchDecisionContent({
                           </span>
                           <span>{referenceRange.label}</span>
                           <strong
-                            title={`${referenceRange.low.value}–${referenceRange.high.value} ${referenceRange.unit}`}
+                            title={`${referenceRange.low.value}–${referenceRange.high.value} ${referenceRange.unit ?? t("unitUnspecified")}`}
                           >
                             {formatRange(
                               referenceRange.low.value,
                               referenceRange.high.value,
-                              referenceRange.unit,
+                              referenceRange.unit ?? undefined,
                               numberLanguage,
                             )}
+                            {!referenceRange.unit && ` ${t("unitUnspecified")}`}
                           </strong>
                         </div>
                         <small className="numeric-date-line">
@@ -336,10 +337,10 @@ export function ResearchDecisionContent({
                       >
                         {formatDecisionNumber(
                           level.value,
-                          level.unit,
+                          level.unit ?? undefined,
                           numberLanguage,
                         )}{" "}
-                        {level.unit}
+                        {level.unit ?? t("unitUnspecified")}
                       </td>
                       <td className="market-reference-date" data-label={t("asOfDate")}>
                         {level.as_of_date}

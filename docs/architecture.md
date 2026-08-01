@@ -286,7 +286,7 @@ fallback
 provenance
 ```
 
-`EvidenceBundle(version="5")` deduplicates items, validates unique references,
+`EvidenceBundle(version="6")` deduplicates items, validates unique references,
 rejects effective dates after the analysis cutoff, interprets `available_at`
 in the instrument's market timezone, and seals both evidence items and
 deterministic raw `EvidenceTable` objects with a digest.

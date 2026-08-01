@@ -793,8 +793,8 @@
             "type": "array"
           },
           "version": {
-            "const": "5",
-            "default": "5",
+            "const": "6",
+            "default": "6",
             "title": "Version",
             "type": "string"
           }
@@ -856,6 +856,10 @@
             "default": false,
             "title": "Fallback",
             "type": "boolean"
+          },
+          "measurement_kind": {
+            "$ref": "#/components/schemas/MeasurementKind",
+            "default": "unknown"
           },
           "origins": {
             "default": [],
@@ -1151,6 +1155,16 @@
         "additionalProperties": false,
         "description": "One raw value in a deterministic source table.",
         "properties": {
+          "measurement_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MeasurementKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "raw_value": {
             "anyOf": [
               {
@@ -1178,6 +1192,18 @@
             },
             "title": "Source Refs",
             "type": "array"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
           }
         },
         "title": "EvidenceTableCell",
@@ -1200,6 +1226,10 @@
             "minLength": 1,
             "title": "Label",
             "type": "string"
+          },
+          "measurement_kind": {
+            "$ref": "#/components/schemas/MeasurementKind",
+            "default": "unknown"
           },
           "unit": {
             "anyOf": [
@@ -1568,6 +1598,10 @@
             "title": "Label",
             "type": "string"
           },
+          "measurement_kind": {
+            "$ref": "#/components/schemas/MeasurementKind",
+            "default": "unknown"
+          },
           "source_locator": {
             "anyOf": [
               {
@@ -1583,10 +1617,17 @@
             "default": "point_in_time"
           },
           "unit": {
-            "maxLength": 32,
-            "minLength": 1,
-            "title": "Unit",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
           },
           "value": {
             "title": "Value",
@@ -1596,7 +1637,6 @@
         "required": [
           "label",
           "value",
-          "unit",
           "as_of_date",
           "interpretation",
           "evidence_refs",
@@ -1604,6 +1644,22 @@
         ],
         "title": "MarketReferenceLevel",
         "type": "object"
+      },
+      "MeasurementKind": {
+        "description": "Semantic measurement family owned by deterministic data producers.",
+        "enum": [
+          "currency",
+          "percent",
+          "ratio",
+          "index",
+          "quantity",
+          "count",
+          "basis_points",
+          "unitless",
+          "unknown"
+        ],
+        "title": "MeasurementKind",
+        "type": "string"
       },
       "MemoryEntry": {
         "additionalProperties": false,
@@ -3391,11 +3447,22 @@
           "low": {
             "$ref": "#/components/schemas/AuditedRangeEndpoint"
           },
+          "measurement_kind": {
+            "$ref": "#/components/schemas/MeasurementKind",
+            "default": "unknown"
+          },
           "unit": {
-            "maxLength": 32,
-            "minLength": 1,
-            "title": "Unit",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
           }
         },
         "required": [
@@ -3403,7 +3470,6 @@
           "label",
           "low",
           "high",
-          "unit",
           "interpretation",
           "limitations"
         ],

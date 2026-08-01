@@ -121,6 +121,7 @@ export interface components {
       effective_date?: string | null;
       evidence_type: string;
       fallback?: boolean;
+      measurement_kind?: components["schemas"]["MeasurementKind"];
       origins?: components["schemas"]["EvidenceOrigin"][];
       provenance?: Record<string, unknown>;
       quality?: components["schemas"]["EvidenceQuality"];
@@ -161,13 +162,16 @@ export interface components {
       title: string;
     };
     EvidenceTableCell: {
+      measurement_kind?: components["schemas"]["MeasurementKind"] | null;
       raw_value?: string | number | boolean | null;
       source_refs?: string[];
+      unit?: string | null;
     };
     EvidenceTableColumn: {
       data_type?: components["schemas"]["TableDataType"];
       key: string;
       label: string;
+      measurement_kind?: components["schemas"]["MeasurementKind"];
       unit?: string | null;
     };
     EvidenceTableRow: {
@@ -223,11 +227,13 @@ export interface components {
       evidence_refs: string[];
       interpretation: string;
       label: string;
+      measurement_kind?: components["schemas"]["MeasurementKind"];
       source_locator?: components["schemas"]["EvidenceValueLocator"] | null;
       temporal_basis?: components["schemas"]["NumericTemporalBasis"];
-      unit: string;
+      unit?: string | null;
       value: number;
     };
+    MeasurementKind: "currency" | "percent" | "ratio" | "index" | "quantity" | "count" | "basis_points" | "unitless" | "unknown";
     MemoryEntry: {
       analysis_date: string;
       asset_type: string;
@@ -484,7 +490,8 @@ export interface components {
       label: string;
       limitations: string[];
       low: components["schemas"]["AuditedRangeEndpoint"];
-      unit: string;
+      measurement_kind?: components["schemas"]["MeasurementKind"];
+      unit?: string | null;
     };
     StructuredRecoveryNotice: {
       attempt: number;

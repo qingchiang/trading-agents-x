@@ -29,6 +29,47 @@ DEFAULT_SNAPSHOT_INDICATORS: tuple[str, ...] = (
 )
 
 
+def _instrument_currency(symbol: str) -> str:
+    normalized = symbol.upper()
+    for suffix, currency in (
+        (".T", "JPY"),
+        (".SS", "CNY"),
+        (".SZ", "CNY"),
+        (".HK", "HKD"),
+        (".L", "GBP"),
+        (".TO", "CAD"),
+        (".AX", "AUD"),
+        (".NS", "INR"),
+        (".BO", "INR"),
+    ):
+        if normalized.endswith(suffix):
+            return currency
+    index_currency = {
+        "^N225": "JPY",
+        "^HSI": "HKD",
+        "^FTSE": "GBP",
+        "^GSPTSE": "CAD",
+        "^AXJO": "AUD",
+        "^NSEI": "INR",
+        "^BSESN": "INR",
+    }
+    if normalized in index_currency:
+        return index_currency[normalized]
+    if normalized.endswith("=X") and len(normalized) >= 8:
+        return normalized[3:6]
+    if "-" in normalized:
+        quote = normalized.rsplit("-", 1)[-1]
+        if len(quote) == 3 and quote.isalpha():
+            return quote
+    return "USD"
+
+
+def _indicator_measurement(name: str, currency: str) -> tuple[str, str | None]:
+    if name == "rsi" or name.startswith("rsi_"):
+        return "index", None
+    return "currency", currency
+
+
 def _verified_rows(data: pd.DataFrame, symbol: str, curr_date: str) -> pd.DataFrame:
     """OHLCV on or before curr_date, date-sorted. Raises if nothing usable.
 
@@ -102,6 +143,7 @@ def render_verified_market_snapshot(
     stock_df = wrap(df.copy())
 
     selected = tuple(indicators or DEFAULT_SNAPSHOT_INDICATORS)
+    currency = _instrument_currency(symbol)
     indicator_values: dict[str, str] = {}
     for name in selected:
         try:
@@ -126,21 +168,33 @@ def render_verified_market_snapshot(
         "",
         "### Latest verified OHLCV row",
         "",
-        "| Field | Value |",
-        "|---|---:|",
+        "| Field | Value | Measurement | Unit |",
+        "|---|---:|---|---|",
     ]
     for field in ("Open", "High", "Low", "Close", "Volume"):
-        lines.append(f"| {field} | {_fmt(latest.get(field))} |")
+        measurement, unit = (
+            ("quantity", "shares")
+            if field == "Volume"
+            else ("currency", currency)
+        )
+        lines.append(
+            f"| {field} | {_fmt(latest.get(field))} | {measurement} | {unit} |"
+        )
 
     lines += ["", "### Verified technical indicators (latest row)", "",
-              "| Indicator | Value |", "|---|---:|"]
+              "| Indicator | Value | Measurement | Unit |", "|---|---:|---|---|"]
     for name, value in indicator_values.items():
-        lines.append(f"| {name} | {value} |")
+        measurement, unit = _indicator_measurement(name, currency)
+        lines.append(
+            f"| {name} | {value} | {measurement} | {unit or '—'} |"
+        )
 
     lines += ["", f"### Recent verified closes (last {len(recent)} rows)", "",
-              "| Date | Close |", "|---|---:|"]
+              "| Date | Close | Measurement | Unit |", "|---|---:|---|---|"]
     for _, row in recent.iterrows():
-        lines.append(f"| {_fmt(row['Date'])} | {_fmt(row.get('Close'))} |")
+        lines.append(
+            f"| {_fmt(row['Date'])} | {_fmt(row.get('Close'))} | currency | {currency} |"
+        )
 
     lines += [
         "",

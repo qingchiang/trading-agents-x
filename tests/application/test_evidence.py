@@ -429,9 +429,9 @@ def test_bundle_digest_covers_items_and_tables_without_legacy_versions() -> None
         digest=digest,
     )
 
-    assert bundle.version == "5"
+    assert bundle.version == "6"
     assert bundle.digest == digest
-    with pytest.raises(ValidationError, match="Input should be '5'"):
+    with pytest.raises(ValidationError, match="Input should be '6'"):
         EvidenceBundle.model_validate(
             {
                 **bundle.model_dump(mode="json"),

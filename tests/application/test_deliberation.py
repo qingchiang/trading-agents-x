@@ -185,7 +185,6 @@ def _reference_draft(item: dict[str, Any]) -> dict[str, Any]:
         return {
             "label": item["label"],
             "value_ref": _value_ref(item),
-            "unit": item["unit"],
             "interpretation": item["interpretation"],
             "basis": "observed",
         }
@@ -217,6 +216,7 @@ def _value_ref(item: dict[str, Any]) -> str:
         requested_date=date(2026, 7, 24),
         effective_date=item.get("as_of_date"),
         value=item["value"],
+        measurement_kind=item.get("measurement_kind", "unknown"),
         unit=item.get("unit"),
     )
     bundle = EvidenceBundle(
@@ -404,7 +404,6 @@ def _live_numeric_fixture(
             ObservedMarketReferenceLevelDraft(
                 label="Analyst target",
                 value_ref=build_numeric_value_catalog(bundle)[0].id,
-                unit="JPY",
                 interpretation="Retrieval-time analyst consensus.",
             ),
         ),

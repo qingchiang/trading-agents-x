@@ -11,8 +11,10 @@ from tradingagents.application.contracts import (
     EvidenceTableCell,
     EvidenceTableColumn,
     EvidenceTableRow,
+    MeasurementKind,
     TableDataType,
 )
+from tradingagents.application.evidence import extract_evidence_tables
 from tradingagents.graph.numeric_evidence import build_numeric_value_catalog
 
 
@@ -24,6 +26,7 @@ def test_numeric_catalog_indexes_exact_item_scalar_with_locator() -> None:
         requested_date=date(2026, 8, 1),
         effective_date=date(2026, 7, 31),
         value=6129,
+        measurement_kind=MeasurementKind.CURRENCY,
         unit="JPY",
     )
     bundle = EvidenceBundle(
@@ -36,6 +39,8 @@ def test_numeric_catalog_indexes_exact_item_scalar_with_locator() -> None:
 
     assert len(catalog) == 1
     assert catalog[0].value == 6129
+    assert catalog[0].measurement_kind is MeasurementKind.CURRENCY
+    assert catalog[0].unit == "JPY"
     assert catalog[0].evidence_refs == (item.ref,)
     assert catalog[0].locator.model_dump() == {
         "evidence_ref": item.ref,
@@ -96,3 +101,37 @@ def test_numeric_catalog_limits_large_series_to_latest_and_extrema_rows() -> Non
     assert {entry.locator.column for entry in catalog} == {"high", "low", "close"}
     assert all(entry.locator.table_id == table.id for entry in catalog)
     assert all(entry.locator.evidence_ref == ref for entry in catalog)
+
+
+def test_numeric_catalog_uses_row_measurement_metadata_for_mixed_value_column() -> None:
+    item = EvidenceItem(
+        ref="ev_0123456789ab",
+        source="fixture",
+        evidence_type="verified market snapshot",
+        requested_date=date(2026, 8, 1),
+        effective_date=date(2026, 7, 31),
+        content=(
+            "## Verified technical indicators (latest row)\n\n"
+            "| Indicator | Value | Measurement | Unit |\n"
+            "|---|---:|---|---|\n"
+            "| rsi | 67.24 | index | — |\n"
+            "| close_50_sma | 4854.86 | currency | JPY |"
+        ),
+    )
+    table = extract_evidence_tables((item,))[0]
+    bundle = EvidenceBundle(
+        instrument="6501.T",
+        analysis_date=date(2026, 8, 1),
+        items=(item,),
+        tables=(table,),
+    )
+
+    catalog = build_numeric_value_catalog(bundle)
+    by_label = {entry.label: entry for entry in catalog}
+    rsi = next(entry for label, entry in by_label.items() if "rsi" in label)
+    sma = next(entry for label, entry in by_label.items() if "close_50_sma" in label)
+
+    assert rsi.measurement_kind is MeasurementKind.INDEX
+    assert rsi.unit is None
+    assert sma.measurement_kind is MeasurementKind.CURRENCY
+    assert sma.unit == "JPY"

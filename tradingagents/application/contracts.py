@@ -290,6 +290,20 @@ class TableDataType(str, Enum):
     BOOLEAN = "boolean"
 
 
+class MeasurementKind(str, Enum):
+    """Semantic measurement family owned by deterministic data producers."""
+
+    CURRENCY = "currency"
+    PERCENT = "percent"
+    RATIO = "ratio"
+    INDEX = "index"
+    QUANTITY = "quantity"
+    COUNT = "count"
+    BASIS_POINTS = "basis_points"
+    UNITLESS = "unitless"
+    UNKNOWN = "unknown"
+
+
 class EvidenceOrigin(FrozenModel):
     """One source record contributing to an evidence payload."""
 
@@ -316,6 +330,7 @@ class EvidenceItem(FrozenModel):
     available_at: datetime | None = None
     content: str | None = None
     value: float | int | str | None = None
+    measurement_kind: MeasurementKind = MeasurementKind.UNKNOWN
     unit: str | None = None
     quality: EvidenceQuality = EvidenceQuality.MEDIUM
     fallback: bool = False
@@ -333,6 +348,7 @@ class EvidenceItem(FrozenModel):
         available_at: datetime | None = None,
         content: str | None = None,
         value: float | int | str | None = None,
+        measurement_kind: MeasurementKind = MeasurementKind.UNKNOWN,
         unit: str | None = None,
         quality: EvidenceQuality = EvidenceQuality.MEDIUM,
         fallback: bool = False,
@@ -347,6 +363,7 @@ class EvidenceItem(FrozenModel):
             "available_at": available_at.isoformat() if available_at else None,
             "content": content,
             "value": value,
+            "measurement_kind": measurement_kind.value,
             "unit": unit,
             "provenance": provenance or {},
         }
@@ -364,6 +381,7 @@ class EvidenceItem(FrozenModel):
             available_at=available_at,
             content=content,
             value=value,
+            measurement_kind=measurement_kind,
             unit=unit,
             quality=quality,
             fallback=fallback,
@@ -381,6 +399,7 @@ class EvidenceTableColumn(FrozenModel):
     key: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
     label: str = Field(min_length=1)
     data_type: TableDataType = TableDataType.TEXT
+    measurement_kind: MeasurementKind = MeasurementKind.UNKNOWN
     unit: str | None = Field(default=None, min_length=1)
 
 
@@ -388,6 +407,8 @@ class EvidenceTableCell(FrozenModel):
     """One raw value in a deterministic source table."""
 
     raw_value: TableScalar = None
+    measurement_kind: MeasurementKind | None = None
+    unit: str | None = Field(default=None, min_length=1)
     source_refs: tuple[str, ...] = ()
 
     @field_validator("source_refs")
@@ -489,6 +510,12 @@ class EvidenceTable(FrozenModel):
                     "cells": {
                         key: {
                             "raw_value": cell.raw_value,
+                            "measurement_kind": (
+                                cell.measurement_kind.value
+                                if cell.measurement_kind is not None
+                                else None
+                            ),
+                            "unit": cell.unit,
                         }
                         for key, cell in row.cells.items()
                     },
@@ -511,7 +538,7 @@ class EvidenceTable(FrozenModel):
 class EvidenceBundle(FrozenModel):
     """Versioned evidence snapshot shared by every agent in one run."""
 
-    version: Literal["5"] = "5"
+    version: Literal["6"] = "6"
     instrument: str
     analysis_date: date
     items: tuple[EvidenceItem, ...]
@@ -873,7 +900,8 @@ class ScenarioReferenceRange(FrozenModel):
     label: str = Field(min_length=1, max_length=120)
     low: AuditedRangeEndpoint
     high: AuditedRangeEndpoint
-    unit: str = Field(min_length=1, max_length=32)
+    measurement_kind: MeasurementKind = MeasurementKind.UNKNOWN
+    unit: str | None = Field(default=None, min_length=1, max_length=32)
     interpretation: str = Field(min_length=1)
     limitations: tuple[str, ...] = Field(min_length=1)
 
@@ -938,7 +966,8 @@ class ValuationAssessment(FrozenModel):
 class MarketReferenceLevel(FrozenModel):
     label: str = Field(min_length=1, max_length=120)
     value: float
-    unit: str = Field(min_length=1, max_length=32)
+    measurement_kind: MeasurementKind = MeasurementKind.UNKNOWN
+    unit: str | None = Field(default=None, min_length=1, max_length=32)
     as_of_date: date
     interpretation: str = Field(min_length=1)
     evidence_refs: tuple[str, ...] = Field(min_length=1)
