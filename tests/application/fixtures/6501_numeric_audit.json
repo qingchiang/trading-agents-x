@@ -192,5 +192,48 @@
     "valuation_assessment": null,
     "market_reference_levels": [],
     "calculation_records": []
+  },
+  "scenario_alignment_cases": [
+    {
+      "ticker": "6501.T",
+      "owner": "base",
+      "output_language": "Simplified Chinese (简体中文, zh-CN)",
+      "label": "悲观情景估值回归区间",
+      "expected_issue": "numeric.scenario.base.ranges.1.scenario_mismatch"
+    },
+    {
+      "ticker": "4568.T",
+      "owner": "base",
+      "output_language": "Simplified Chinese (简体中文, zh-CN)",
+      "label": "修复情景：一次性因素被确认（技术参考区间）",
+      "expected_issue": "numeric.scenario.base.ranges.1.scenario_mismatch"
+    },
+    {
+      "ticker": "4568.T",
+      "owner": "base",
+      "output_language": "Simplified Chinese (简体中文, zh-CN)",
+      "label": "恶化情景：利润走弱趋势化（技术参考区间）",
+      "expected_issue": "numeric.scenario.base.ranges.1.scenario_mismatch"
+    },
+    {
+      "ticker": "fixture-US",
+      "owner": "base",
+      "output_language": "English (en)",
+      "label": "Bear scenario valuation range",
+      "expected_issue": "numeric.scenario.base.ranges.1.scenario_mismatch"
+    },
+    {
+      "ticker": "fixture-JP",
+      "owner": "base",
+      "output_language": "Japanese (日本語, ja)",
+      "label": "弱気シナリオ評価レンジ",
+      "expected_issue": "numeric.scenario.base.ranges.1.scenario_mismatch"
+    }
+  ],
+  "date_anchor_case": {
+    "technical_anchor_date": "2026-07-31",
+    "background_date": "2026-08-01",
+    "expected_interpreted_date": "2026-07-31",
+    "live_consensus_date": "2026-08-01"
   }
 }

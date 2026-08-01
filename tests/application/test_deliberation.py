@@ -311,8 +311,12 @@ _NUMERIC_REGRESSION_FIXTURE = (
 )
 
 
+def _numeric_regression_payload() -> dict[str, Any]:
+    return json.loads(_NUMERIC_REGRESSION_FIXTURE.read_text(encoding="utf-8"))
+
+
 def _numeric_regression() -> tuple[EvidenceBundle, DecisionNumericDraft]:
-    payload = json.loads(_NUMERIC_REGRESSION_FIXTURE.read_text(encoding="utf-8"))
+    payload = _numeric_regression_payload()
     bundle = EvidenceBundle(
         instrument="6501.T",
         analysis_date=payload["analysis_date"],
@@ -323,7 +327,7 @@ def _numeric_regression() -> tuple[EvidenceBundle, DecisionNumericDraft]:
 
 
 def _numeric_noop_repair_candidate() -> DecisionNumericDraft:
-    payload = json.loads(_NUMERIC_REGRESSION_FIXTURE.read_text(encoding="utf-8"))
+    payload = _numeric_regression_payload()
     return DecisionNumericDraft.model_validate(payload["no_op_repair_candidate"])
 
 
@@ -943,20 +947,16 @@ def test_numeric_serializer_receives_validated_core_scenario_catalog() -> None:
 
 
 @pytest.mark.parametrize(
-    ("output_language", "label"),
-    (
-        ("Simplified Chinese (简体中文, zh-CN)", "悲观情景估值回归区间"),
-        ("English (en)", "Bear scenario valuation range"),
-        ("Japanese (日本語, ja)", "弱気シナリオ評価レンジ"),
-    ),
+    "case",
+    _numeric_regression_payload()["scenario_alignment_cases"],
+    ids=lambda case: f"{case['ticker']}-{case['label']}",
 )
 def test_explicit_cross_scenario_label_only_omits_that_range(
-    output_language: str,
-    label: str,
+    case: dict[str, str],
 ) -> None:
     bundle, draft = _numeric_regression()
     valid_range = draft.scenario_reference_ranges.base[0]
-    mismatched_range = valid_range.model_copy(update={"label": label})
+    mismatched_range = valid_range.model_copy(update={"label": case["label"]})
     draft = draft.model_copy(
         update={
             "scenario_reference_ranges": draft.scenario_reference_ranges.model_copy(
@@ -972,17 +972,72 @@ def test_explicit_cross_scenario_label_only_omits_that_range(
         value_catalog=_value_catalog(bundle),
         salvage=True,
         node="committee.final.serialize.numeric",
-        output_language=output_language,
+        output_language=case["output_language"],
     )
 
     assert [item.label for item in result.scenario_reference_ranges[ResearchScenarioKind.BASE]] == [
         valid_range.label
     ]
     assert result.status is NumericAuditStatus.PARTIAL
-    assert result.issues == ("numeric.scenario.base.ranges.1.scenario_mismatch",)
+    assert result.issues == (case["expected_issue"],)
     assert {item.component_path for item in result.omissions} == {
         "numeric.scenario.base.ranges.1"
     }
+
+
+def test_repeated_cross_scenario_repair_preserves_other_numeric_components() -> None:
+    payload = _numeric_regression_payload()
+    case = payload["scenario_alignment_cases"][0]
+    bundle, draft = _numeric_regression()
+    valid_range = draft.scenario_reference_ranges.base[0]
+    mismatched_range = valid_range.model_copy(update={"label": case["label"]})
+    invalid_numeric = draft.model_copy(
+        update={
+            "scenario_reference_ranges": draft.scenario_reference_ranges.model_copy(
+                update={"base": (valid_range, mismatched_range)}
+            )
+        }
+    )
+    state = _state()
+    state["evidence_bundle"] = bundle.model_dump(mode="json")
+    core = _core_draft_from_decision(
+        research_decision(evidence_refs=(bundle.items[0].ref,)).model_dump(mode="json")
+    )
+    llm = _SequenceLLM(
+        {
+            "ResearchDecisionCoreDraft": [core],
+            "DecisionNumericDraft": [invalid_numeric, invalid_numeric],
+        }
+    )
+    events: list[dict[str, Any]] = []
+
+    result = invoke_research_decision(
+        llm,
+        prompt="Form the final decision.",
+        state=state,
+        node="committee.final.serialize",
+        require_risk_adjustments=False,
+        output_language=case["output_language"],
+        event_writer=events.append,
+    )
+
+    base = next(
+        scenario
+        for scenario in result.value.scenarios
+        if scenario.kind is ResearchScenarioKind.BASE
+    )
+    assert [item.label for item in base.reference_ranges] == [valid_range.label]
+    assert result.value.numeric_audit_status is NumericAuditStatus.PARTIAL
+    assert result.value.market_reference_levels
+    assert result.value.calculation_records
+    assert result.numeric_audit is not None
+    assert {item.component_path for item in result.numeric_audit.omitted_components} == {
+        "numeric.scenario.base.ranges.1"
+    }
+    assert [event["event_type"] for event in events] == [
+        "node.numeric_audit_retry",
+        "node.numeric_audit_degraded",
+    ]
 
 
 def test_non_scenario_purpose_label_is_not_treated_as_misaligned() -> None:
@@ -1064,6 +1119,7 @@ def test_6501_numeric_regression_canonicalizes_results_dates_and_shared_usage() 
 
 
 def test_interpreted_range_date_uses_anchor_not_context_evidence() -> None:
+    date_case = _numeric_regression_payload()["date_anchor_case"]
     bundle, _draft = _numeric_regression()
     market_item = bundle.items[0]
     context_item = EvidenceItem(
@@ -1071,7 +1127,7 @@ def test_interpreted_range_date_uses_anchor_not_context_evidence() -> None:
         source="fixture.fundamentals",
         evidence_type="context only",
         requested_date=bundle.analysis_date,
-        effective_date=date(2026, 8, 1),
+        effective_date=date.fromisoformat(date_case["background_date"]),
         content="Context that explains the scenario but does not set its price date.",
     )
     bundle = bundle.model_copy(update={"items": (*bundle.items, context_item)})
@@ -1108,7 +1164,7 @@ def test_interpreted_range_date_uses_anchor_not_context_evidence() -> None:
     )
 
     low = result.scenario_reference_ranges[ResearchScenarioKind.BASE][0].low
-    assert low.as_of_date == date(2026, 7, 31)
+    assert low.as_of_date == date.fromisoformat(date_case["expected_interpreted_date"])
     assert low.date_evidence_refs == (market_item.ref,)
     assert low.evidence_refs == (market_item.ref, context_item.ref)
 
