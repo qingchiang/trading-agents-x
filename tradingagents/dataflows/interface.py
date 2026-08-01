@@ -410,11 +410,17 @@ def _provenance_for_route(
         timing = "market-date filtered"
     elif method == "get_indicators" and len(args) >= 3:
         requested = str(args[2])
-        effective = f"latest trading data <= {args[2]}"
+        effective = (
+            _latest_market_observation_date(result, indicator=True)
+            or f"latest trading data <= {args[2]}"
+        )
         timing = "market-date filtered"
     elif method == "get_verified_market_snapshot" and len(args) >= 2:
         requested = str(args[1])
-        effective = f"latest trading data <= {args[1]}"
+        effective = (
+            _latest_market_observation_date(result, indicator=False)
+            or f"latest trading data <= {args[1]}"
+        )
         timing = "market-date filtered"
     elif method == "get_news" and len(args) >= 3:
         requested = f"{args[1]} to {args[2]}"
@@ -500,6 +506,30 @@ def _provenance_for_route(
         timing=timing,
         retrieved_at=retrieved_at,
     )
+
+
+def _latest_market_observation_date(result: str, *, indicator: bool) -> str | None:
+    """Extract an explicit successful observation date without guessing cutoff."""
+
+    labels = (
+        ("Latest valid indicator observation", "Effective trading date")
+        if indicator
+        else ("Latest trading row used", "Effective trading date")
+    )
+    for label in labels:
+        match = re.search(
+            rf"(?mi)^[#\- ]*{re.escape(label)}:\s*(\d{{4}}-\d{{2}}-\d{{2}})\s*$",
+            result,
+        )
+        if match:
+            return match.group(1)
+    if not indicator:
+        return None
+    dated_values = re.findall(
+        r"(?m)^(\d{4}-\d{2}-\d{2}):\s*(?!N/A(?:\b|:))\S.*$",
+        result,
+    )
+    return max(dated_values) if dated_values else None
 
 
 def _attach_unavailable_provenance(

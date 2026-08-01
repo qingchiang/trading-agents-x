@@ -407,6 +407,53 @@ def test_stock_route_uses_actual_returned_trading_dates():
 
 
 @pytest.mark.unit
+def test_indicator_route_uses_latest_valid_indicator_observation() -> None:
+    result = (
+        "## atr values from 2026-07-27 to 2026-08-01:\n\n"
+        "Latest valid indicator observation: 2026-07-31\n\n"
+        "2026-08-01: N/A: Not a trading day (weekend or holiday)\n"
+        "2026-07-31: 160.18145\n"
+    )
+    with mock.patch.dict(
+        interface.VENDOR_METHODS,
+        {"get_indicators": {"yfinance": mock.Mock(return_value=result)}},
+    ), mock.patch.object(interface, "get_vendor", return_value="yfinance"):
+        marked = interface.route_to_vendor(
+            "get_indicators",
+            "6501.T",
+            "atr",
+            "2026-08-01",
+            5,
+            _provenance=True,
+        )
+
+    record = extract_provenance(marked)[0]
+    assert record.requested == "2026-08-01"
+    assert record.effective == "2026-07-31"
+
+
+@pytest.mark.unit
+def test_snapshot_route_uses_latest_verified_trading_row() -> None:
+    result = (
+        "## Verified market data snapshot for 6501.T\n\n"
+        "- Requested analysis date: 2026-08-01\n"
+        "- Latest trading row used: 2026-07-31\n"
+    )
+    with mock.patch.dict(
+        interface.VENDOR_METHODS,
+        {"get_verified_market_snapshot": {"fixture": mock.Mock(return_value=result)}},
+    ), mock.patch.object(interface, "get_vendor", return_value="fixture"):
+        marked = interface.route_to_vendor(
+            "get_verified_market_snapshot",
+            "6501.T",
+            "2026-08-01",
+            _provenance=True,
+        )
+
+    assert extract_provenance(marked)[0].effective == "2026-07-31"
+
+
+@pytest.mark.unit
 def test_historical_live_only_sentinel_keeps_not_queried_semantics():
     result = (
         "LIVE_DATA_UNAVAILABLE: yfinance .info is a current snapshot and was "

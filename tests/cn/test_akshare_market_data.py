@@ -511,6 +511,7 @@ def test_indicator_and_snapshot_reuse_same_qfq_fetch(monkeypatch):
     em.assert_not_called()
     assert "# Actual data source: AkShare / Tencent" in indicator
     assert "Effective trading date: 2026-07-17" in indicator
+    assert "Latest valid indicator observation: 2026-07-17" in indicator
     assert "Data source: AkShare / Tencent" in snapshot
     assert "Price adjustment: qfq (forward-adjusted)" in snapshot
     assert "Latest trading row used: 2026-07-17" in snapshot

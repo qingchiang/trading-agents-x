@@ -451,6 +451,14 @@ def render_indicator_window(
             f"{list(INDICATOR_DESCRIPTIONS.keys())}"
         )
     indicator_data = compute_indicators_over_frame(data, indicator)
+    valid_observation_dates = tuple(
+        date_str
+        for date_str, value in indicator_data.items()
+        if value != "N/A"
+    )
+    latest_observation = (
+        max(valid_observation_dates) if valid_observation_dates else "unavailable"
+    )
 
     end_date = curr_date
     curr_date_dt = datetime.strptime(curr_date, "%Y-%m-%d")
@@ -466,6 +474,7 @@ def render_indicator_window(
 
     return (
         f"## {indicator} values from {before.strftime('%Y-%m-%d')} to {end_date}:\n\n"
+        f"Latest valid indicator observation: {latest_observation}\n\n"
         + ind_string
         + "\n\n"
         + INDICATOR_DESCRIPTIONS.get(indicator, "No description available.")

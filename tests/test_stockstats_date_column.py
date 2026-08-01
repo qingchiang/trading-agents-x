@@ -68,3 +68,18 @@ class TestCleanDataframeAcrossVersions:
         df["close_5_sma"]  # triggers calculation
         assert "close_5_sma" in df.columns
         assert df["close_5_sma"].notna().any()
+
+
+@pytest.mark.unit
+def test_indicator_window_records_latest_valid_observation_before_weekend() -> None:
+    frame = _ohlcv("Date")
+
+    report = su.render_indicator_window(
+        frame,
+        "atr",
+        "2026-04-14",
+        5,
+    )
+
+    assert "Latest valid indicator observation: 2026-04-14" in report
+    assert "2026-04-12: N/A: Not a trading day" in report
