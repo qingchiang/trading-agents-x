@@ -385,11 +385,12 @@ def test_profiles_share_contract_but_use_distinct_topologies(
     if profile is RunProfile.STANDARD:
         node_metrics = graph.metrics.snapshot().node_metrics
         assert {
-            "case.bull.write",
-            "case.bull.audit",
-            "committee.final.reason",
-            "committee.final.serialize",
-        } <= set(node_metrics)
+                "case.bull.write",
+                "case.bull.audit",
+                "committee.final.reason",
+                "committee.final.serialize.core",
+                "committee.final.serialize.numeric",
+            } <= set(node_metrics)
         assert not any(node.endswith(".prepare") for node in node_metrics)
         assert "case.bull" not in node_metrics
         final_prompt = next(

@@ -8,6 +8,7 @@ import json
 import math
 import re
 from collections.abc import Callable, Mapping
+from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from datetime import date
 from typing import Any
@@ -216,8 +217,7 @@ def write_research_markdown(
     """Generate one readable deliberation document without a JSON contract."""
 
     response = llm.invoke(
-        prompt
-        + "\n\nWrite the complete research reasoning as readable Markdown. "
+        prompt + "\n\nWrite the complete research reasoning as readable Markdown. "
         "Use headings, concise tables, and evidence footnotes where they help "
         "the reader. Use only inline `[^ev_xxxxxxxxxxxx]` references and never "
         "write footnote definitions; Evidence Ledger supplies source details. "
@@ -300,8 +300,7 @@ def invoke_debate_agenda(
             node,
             event_writer,
         ).invoke(
-            prompt
-            + "\n\nReturn only a concise agenda summary and distinct material "
+            prompt + "\n\nReturn only a concise agenda summary and distinct material "
             "questions. The full bull and bear reasoning remains in their Markdown.",
             example=DebateAgenda(
                 summary="The cases disagree on one material mechanism.",
@@ -333,9 +332,7 @@ def invoke_debate_agenda(
                     ),
                 ),
             ),
-            generation_method=(
-                ArtifactGenerationMethod.MARKDOWN_AUDIT_INCOMPLETE
-            ),
+            generation_method=(ArtifactGenerationMethod.MARKDOWN_AUDIT_INCOMPLETE),
         )
 
 
@@ -356,9 +353,7 @@ def invoke_rebuttal(
     def validate(result: RebuttalAudit) -> RebuttalAudit:
         addressed = set(result.addressed_issue_ids)
         opened = set(result.open_issue_ids)
-        if not addressed.issubset(valid_issues) or not opened.issubset(
-            valid_issues
-        ):
+        if not addressed.issubset(valid_issues) or not opened.issubset(valid_issues):
             raise OutputValidationError("navigation.issue.unknown")
         if not addressed:
             raise OutputValidationError("navigation.issue.missing_addressed")
@@ -397,9 +392,7 @@ def invoke_rebuttal(
                 addressed_issue_ids=addressed,
                 open_issue_ids=valid_issue_list if conservative_open else (),
             ),
-            generation_method=(
-                ArtifactGenerationMethod.MARKDOWN_AUDIT_INCOMPLETE
-            ),
+            generation_method=(ArtifactGenerationMethod.MARKDOWN_AUDIT_INCOMPLETE),
         )
     return StructuredOutputResult(
         value=RebuttalReview(
@@ -429,14 +422,11 @@ def invoke_judge_draft(
     def validate(result: JudgeAudit) -> JudgeAudit:
         actual = {item.issue_id for item in result.issue_dispositions}
         if actual != issue_ids:
-            raise OutputValidationError(
-                "navigation.issue.disposition_incomplete"
-            )
+            raise OutputValidationError("navigation.issue.disposition_incomplete")
         return result
 
     example_dispositions = tuple(
-        IssueDisposition(issue_id=issue.id, status="unresolved")
-        for issue in agenda.issues
+        IssueDisposition(issue_id=issue.id, status="unresolved") for issue in agenda.issues
     )
     valid_issue_list = tuple(issue.id for issue in agenda.issues)
     try:
@@ -469,9 +459,7 @@ def invoke_judge_draft(
                 confidence=None,
                 issue_dispositions=example_dispositions,
             ),
-            generation_method=(
-                ArtifactGenerationMethod.MARKDOWN_AUDIT_INCOMPLETE
-            ),
+            generation_method=(ArtifactGenerationMethod.MARKDOWN_AUDIT_INCOMPLETE),
         )
     return StructuredOutputResult(
         value=JudgeDraft(
@@ -590,9 +578,7 @@ def _decision_example_text(output_language: str) -> dict[str, str]:
         "valuation_method": "Evidence-backed earnings multiple",
         "valuation_limitation": "The multiple is scenario-dependent.",
         "reference_label": "Observed recent close",
-        "reference_interpretation": (
-            "A directly observed reference, not an execution order."
-        ),
+        "reference_interpretation": ("A directly observed reference, not an execution order."),
     }
 
 
@@ -606,6 +592,7 @@ def invoke_research_decision(
     require_risk_adjustments: bool,
     event_writer: EventWriter | None = None,
     output_language: str | None = None,
+    metrics: Any | None = None,
 ) -> ResearchDecisionOutput:
     bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
     valid_refs = tuple(item.ref for item in bundle.items)
@@ -659,20 +646,11 @@ def invoke_research_decision(
                 required=True,
             )
         if require_risk_adjustments:
-            adjusted_roles = {
-                item.source_role for item in result.risk_review_adjustments
-            }
+            adjusted_roles = {item.source_role for item in result.risk_review_adjustments}
             if not set(risk_roles).issubset(adjusted_roles):
-                raise OutputValidationError(
-                    "decision.risk_review.missing_role"
-                )
-        if any(
-            item.source_role not in risk_roles
-            for item in result.risk_review_adjustments
-        ):
-            raise OutputValidationError(
-                "decision.risk_review.unknown_role"
-            )
+                raise OutputValidationError("decision.risk_review.missing_role")
+        if any(item.source_role not in risk_roles for item in result.risk_review_adjustments):
+            raise OutputValidationError("decision.risk_review.unknown_role")
         return result
 
     core_example = ResearchDecisionCoreDraft(
@@ -707,45 +685,58 @@ def invoke_research_decision(
         ),
         risk_review_adjustments=example_adjustments,
     )
-    core = StructuredOutputRunner(
-        llm=llm,
-        schema=ResearchDecisionCoreDraft,
-        validator=validate_core,
-        node=f"{node}.core",
-        event_writer=event_writer,
-        repair_mode="preferred",
-        include_candidate_in_repair=True,
-        candidate_only_repair=True,
-        invoke_config={"metadata": {"research_node": f"{node}.core"}},
-        repair_instructions=(
-            "Keep valid research content. Use only allowed evidence and memory "
-            "refs. Do not include valuation ranges, market-reference levels, "
-            "or calculations in this core object. The scenarios must contain "
-            "exactly one base, one bull, and one bear case. Required "
-            f"risk-review roles: {json.dumps(risk_roles)}. {language_rules}"
-        ),
-    ).invoke(
-        prompt
-        + "\n\nSerialize only the strict qualitative decision core. Numeric "
-        "valuation, scenario ranges, market reference levels, and calculations "
-        "are handled by a separate audit step. "
-        + language_rules
-        + "\n\nLOCALIZED VALID EXAMPLE:\n"
-        + json.dumps(core_example.model_dump(mode="json"), ensure_ascii=False),
-        example=core_example.model_dump(mode="json"),
-        allowed_evidence_refs=valid_refs,
-        allowed_memory_refs=valid_memory_refs,
+    core_node = f"{node}.core"
+    core_phase = (
+        metrics.phase(core_node, event_writer=event_writer)
+        if metrics is not None
+        else nullcontext()
     )
+    with core_phase:
+        core = StructuredOutputRunner(
+            llm=llm,
+            schema=ResearchDecisionCoreDraft,
+            validator=validate_core,
+            node=core_node,
+            event_writer=event_writer,
+            repair_mode="preferred",
+            include_candidate_in_repair=True,
+            candidate_only_repair=True,
+            invoke_config={"metadata": {"research_node": core_node}},
+            repair_instructions=(
+                "Keep valid research content. Use only allowed evidence and memory "
+                "refs. Do not include valuation ranges, market-reference levels, "
+                "or calculations in this core object. The scenarios must contain "
+                "exactly one base, one bull, and one bear case. Required "
+                f"risk-review roles: {json.dumps(risk_roles)}. {language_rules}"
+            ),
+        ).invoke(
+            prompt + "\n\nSerialize only the strict qualitative decision core. Numeric "
+            "valuation, scenario ranges, market reference levels, and calculations "
+            "are handled by a separate audit step. "
+            + language_rules
+            + "\n\nLOCALIZED VALID EXAMPLE:\n"
+            + json.dumps(core_example.model_dump(mode="json"), ensure_ascii=False),
+            example=core_example.model_dump(mode="json"),
+            allowed_evidence_refs=valid_refs,
+            allowed_memory_refs=valid_memory_refs,
+        )
 
-    numeric = _invoke_decision_numeric(
-        llm,
-        prompt=prompt,
-        node=f"{node}.numeric",
-        bundle=bundle,
-        allowed_evidence_refs=valid_refs,
-        event_writer=event_writer,
-        output_language=resolved_language,
+    numeric_node = f"{node}.numeric"
+    numeric_phase = (
+        metrics.phase(numeric_node, event_writer=event_writer)
+        if metrics is not None
+        else nullcontext()
     )
+    with numeric_phase:
+        numeric = _invoke_decision_numeric(
+            llm,
+            prompt=prompt,
+            node=numeric_node,
+            bundle=bundle,
+            allowed_evidence_refs=valid_refs,
+            event_writer=event_writer,
+            output_language=resolved_language,
+        )
     core_value = core.value
     scenario_values = []
     for scenario in core_value.scenarios:
@@ -757,14 +748,10 @@ def invoke_research_decision(
                 outcome=scenario.outcome,
                 evidence_refs=scenario.evidence_refs,
                 valuation_range=(
-                    numeric_scenario.valuation_range
-                    if numeric_scenario is not None
-                    else None
+                    numeric_scenario.valuation_range if numeric_scenario is not None else None
                 ),
                 valuation_calculation_ids=(
-                    numeric_scenario.calculation_ids
-                    if numeric_scenario is not None
-                    else ()
+                    numeric_scenario.calculation_ids if numeric_scenario is not None else ()
                 ),
             )
         )
@@ -857,9 +844,7 @@ def _invoke_decision_numeric(
                 label=example_text["reference_label"],
                 value=100,
                 unit="USD",
-                interpretation=(
-                    example_text["reference_interpretation"]
-                ),
+                interpretation=(example_text["reference_interpretation"]),
                 evidence_refs=(allowed_evidence_refs[0],),
                 basis=MarketReferenceBasis.OBSERVED,
             ),
@@ -901,8 +886,7 @@ def _invoke_decision_numeric(
     )
     try:
         output = runner.invoke(
-            prompt
-            + "\n\nExtract only optional decision-critical numeric content. "
+            prompt + "\n\nExtract only optional decision-critical numeric content. "
             "Set requested=false and return empty collections when the brief "
             "does not support a numeric appendix. Do not copy ordinary report "
             "table arithmetic. "
@@ -988,9 +972,7 @@ def _numeric_candidate(candidate: dict[str, Any] | None) -> DecisionNumericDraft
 
 
 _NUMERIC_CANDIDATE_MAX_BYTES = 256 * 1024
-_SENSITIVE_CANDIDATE_KEY = re.compile(
-    r"(?i)(api.?key|authorization|bearer|password|secret|token)"
-)
+_SENSITIVE_CANDIDATE_KEY = re.compile(r"(?i)(api.?key|authorization|bearer|password|secret|token)")
 _SENSITIVE_CANDIDATE_VALUE = re.compile(
     r"(?i)(api[-_ ]?key|authorization|bearer|password|secret|token)"
     r"(\s*[:=]\s*)(\S+)"
@@ -1286,9 +1268,7 @@ def _assemble_numeric_draft(
     orphaned = set(calculations).difference(linked_ids)
     for calculation_id in sorted(orphaned):
         issues.append(f"numeric.calculation.{calculation_id}.orphaned")
-    if draft.requested and not (
-        scenario_values or valuation is not None or reference_levels
-    ):
+    if draft.requested and not (scenario_values or valuation is not None or reference_levels):
         issues.append("numeric.requested.empty")
     if not draft.requested and (
         draft.scenario_valuations
@@ -1309,16 +1289,10 @@ def _assemble_numeric_draft(
         for calculation_id, calculation in calculations.items()
         if calculation_id in linked_ids
     )
-    has_content = bool(
-        scenario_values or valuation is not None or reference_levels
-    )
+    has_content = bool(scenario_values or valuation is not None or reference_levels)
     omissions = _numeric_omissions(draft, tuple(issues))
     if issues:
-        status = (
-            NumericAuditStatus.PARTIAL
-            if has_content
-            else NumericAuditStatus.INCOMPLETE
-        )
+        status = NumericAuditStatus.PARTIAL if has_content else NumericAuditStatus.INCOMPLETE
         omitted = ", ".join(item.label for item in omissions)
         warnings = (
             ResearchWarning(
@@ -1333,11 +1307,7 @@ def _assemble_numeric_draft(
             ),
         )
     else:
-        status = (
-            NumericAuditStatus.COMPLETE
-            if has_content
-            else NumericAuditStatus.NOT_APPLICABLE
-        )
+        status = NumericAuditStatus.COMPLETE if has_content else NumericAuditStatus.NOT_APPLICABLE
         warnings = ()
     return _NumericDecisionAssembly(
         scenario_valuations=scenario_values,
@@ -1357,8 +1327,7 @@ def _numeric_omissions(
 ) -> tuple[NumericAuditOmission, ...]:
     grouped: dict[tuple[str, str], list[str]] = {}
     reference_labels = {
-        str(index): item.label
-        for index, item in enumerate(draft.market_reference_levels)
+        str(index): item.label for index, item in enumerate(draft.market_reference_levels)
     }
     for issue in issues:
         parts = issue.split(".")
@@ -1457,32 +1426,17 @@ def debate_round_has_material_progress(
 ) -> bool:
     """Continue only when the set of material open issues actually changes."""
 
-    rebuttals = [
-        RebuttalReview.model_validate(raw)
-        for raw in state.get("rebuttals", [])
-    ]
-    current = [
-        item for item in rebuttals if item.round == round_number
-    ]
+    rebuttals = [RebuttalReview.model_validate(raw) for raw in state.get("rebuttals", [])]
+    current = [item for item in rebuttals if item.round == round_number]
     if not current:
         return False
-    current_open = {
-        issue_id
-        for item in current
-        for issue_id in item.open_issue_ids
-    }
+    current_open = {issue_id for item in current for issue_id in item.open_issue_ids}
     if not current_open:
         return False
-    prior = [
-        item for item in rebuttals if item.round < round_number
-    ]
+    prior = [item for item in rebuttals if item.round < round_number]
     if not prior:
         return True
-    prior_open = {
-        issue_id
-        for item in prior
-        for issue_id in item.open_issue_ids
-    }
+    prior_open = {issue_id for item in prior for issue_id in item.open_issue_ids}
     return current_open != prior_open
 
 
@@ -1569,23 +1523,15 @@ def _evaluate_formula(
     try:
         tree = ast.parse(formula, mode="eval")
     except SyntaxError as exc:
-        raise OutputValidationError(
-            f"{issue_prefix}.formula.invalid_syntax"
-        ) from exc
+        raise OutputValidationError(f"{issue_prefix}.formula.invalid_syntax") from exc
 
-    referenced_names = {
-        node.id for node in ast.walk(tree) if isinstance(node, ast.Name)
-    }
+    referenced_names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
     missing_names = referenced_names.difference(inputs)
     if missing_names:
-        raise OutputValidationError(
-            f"{issue_prefix}.formula.missing_input"
-        )
+        raise OutputValidationError(f"{issue_prefix}.formula.missing_input")
     unused_names = set(inputs).difference(referenced_names)
     if unused_names:
-        raise OutputValidationError(
-            f"{issue_prefix}.formula.unused_input"
-        )
+        raise OutputValidationError(f"{issue_prefix}.formula.unused_input")
 
     def evaluate(node: ast.AST) -> float:
         if isinstance(node, ast.Expression):
@@ -1595,15 +1541,11 @@ def _evaluate_formula(
                 node.value,
                 (int, float),
             ):
-                raise OutputValidationError(
-                    f"{issue_prefix}.formula.non_numeric_constant"
-                )
+                raise OutputValidationError(f"{issue_prefix}.formula.non_numeric_constant")
             return float(node.value)
         if isinstance(node, ast.Name):
             if node.id not in inputs:
-                raise OutputValidationError(
-                    f"{issue_prefix}.formula.missing_input"
-                )
+                raise OutputValidationError(f"{issue_prefix}.formula.missing_input")
             return float(inputs[node.id])
         if isinstance(node, ast.UnaryOp) and isinstance(
             node.op,
@@ -1622,24 +1564,16 @@ def _evaluate_formula(
                 return left * right
             if isinstance(node.op, ast.Div):
                 if right == 0:
-                    raise OutputValidationError(
-                        f"{issue_prefix}.formula.division_by_zero"
-                    )
+                    raise OutputValidationError(f"{issue_prefix}.formula.division_by_zero")
                 return left / right
             if isinstance(node.op, ast.Pow) and abs(right) <= 12:
                 try:
                     return left**right
                 except OverflowError as exc:
-                    raise OutputValidationError(
-                        f"{issue_prefix}.formula.overflow"
-                    ) from exc
-        raise OutputValidationError(
-            f"{issue_prefix}.formula.unsupported_operation"
-        )
+                    raise OutputValidationError(f"{issue_prefix}.formula.overflow") from exc
+        raise OutputValidationError(f"{issue_prefix}.formula.unsupported_operation")
 
     result = evaluate(tree)
     if not math.isfinite(result):
-        raise OutputValidationError(
-            f"{issue_prefix}.formula.non_finite_result"
-        )
+        raise OutputValidationError(f"{issue_prefix}.formula.non_finite_result")
     return result

@@ -602,10 +602,7 @@ class ResearchGraph:
                 "confidence_override": (
                     result.get("sentiment_confidence") if analyst == "social" else None
                 ),
-                "warnings": [
-                    warning.model_dump(mode="json")
-                    for warning in evidence_warnings
-                ],
+                "warnings": [warning.model_dump(mode="json") for warning in evidence_warnings],
             }
             self._finish_node(
                 runtime,
@@ -620,9 +617,7 @@ class ResearchGraph:
                 "analyst_evidence_items": {
                     analyst: [item.model_dump(mode="json") for item in evidence]
                 },
-                "analyst_collection_metadata": {
-                    analyst: synthesis_metadata
-                },
+                "analyst_collection_metadata": {analyst: synthesis_metadata},
             }
 
         return collect_node
@@ -647,14 +642,10 @@ class ResearchGraph:
                 ResearchWarning.model_validate(warning)
                 for warning in synthesis_metadata.get("warnings", [])
             )
-            sealed_bundle = EvidenceBundle.model_validate(
-                state["evidence_bundle"]
-            )
+            sealed_bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
             evidence_ref_set = set(evidence_refs)
             analyst_items = tuple(
-                item
-                for item in sealed_bundle.items
-                if item.ref in evidence_ref_set
+                item for item in sealed_bundle.items if item.ref in evidence_ref_set
             )
             analyst_bundle = EvidenceBundle(
                 instrument=sealed_bundle.instrument,
@@ -676,19 +667,12 @@ class ResearchGraph:
                     "event_type": "node.context_prepared",
                     "node": f"{node_name}.context",
                     "payload": {
-                        "inline_characters": (
-                            prepared_evidence.inline_characters
-                        ),
-                        "catalog_items": len(
-                            prepared_evidence.catalog.get("items", [])
-                        ),
-                        "catalog_tables": len(
-                            prepared_evidence.catalog.get("tables", [])
-                        ),
+                        "inline_characters": (prepared_evidence.inline_characters),
+                        "catalog_items": len(prepared_evidence.catalog.get("items", [])),
+                        "catalog_tables": len(prepared_evidence.catalog.get("tables", [])),
                         "lookup_count": len(prepared_evidence.lookups),
                         "returned_rows": sum(
-                            lookup.returned_rows
-                            for lookup in prepared_evidence.lookups
+                            lookup.returned_rows for lookup in prepared_evidence.lookups
                         ),
                     },
                 }
@@ -781,9 +765,7 @@ class ResearchGraph:
         valid_refs = {item.ref for item in bundle.items}
         reports: dict[str, dict[str, Any]] = {}
         for analyst in state["analysts"]:
-            report = AnalystReport.model_validate(
-                state["analyst_reports"][analyst]
-            )
+            report = AnalystReport.model_validate(state["analyst_reports"][analyst])
             _require_valid_refs(
                 report.source_refs,
                 valid_refs,
@@ -815,9 +797,7 @@ class ResearchGraph:
                 objective=spec.objective,
                 stage="opening_case",
                 report_mode="full",
-                evidence_refs=RoleContextBuilder(
-                    state
-                ).primary_evidence_refs(),
+                evidence_refs=RoleContextBuilder(state).primary_evidence_refs(),
                 instructions=(
                     "Build an independent complete case before seeing the "
                     "opposing case. For every material argument, identify the "
@@ -1144,9 +1124,7 @@ class ResearchGraph:
             node,
             {
                 "rating": (
-                    draft.preliminary_rating.value
-                    if draft.preliminary_rating is not None
-                    else None
+                    draft.preliminary_rating.value if draft.preliminary_rating is not None else None
                 ),
                 "confidence": draft.confidence,
             },
@@ -1265,9 +1243,7 @@ class ResearchGraph:
                 artifacts = {
                     "judge_draft": state.get("judge_draft", {}),
                     "risk_reviews": state.get("risk_reviews", {}),
-                    "unresolved_issue_ids": RoleContextBuilder(
-                        state
-                    ).unresolved_issue_ids(),
+                    "unresolved_issue_ids": RoleContextBuilder(state).unresolved_issue_ids(),
                 }
             context = self._role_context(
                 state=state,
@@ -1278,9 +1254,7 @@ class ResearchGraph:
                 stage="final_committee",
                 artifacts=artifacts,
                 report_mode="full",
-                evidence_refs=RoleContextBuilder(
-                    state
-                ).primary_evidence_refs(),
+                evidence_refs=RoleContextBuilder(state).primary_evidence_refs(),
                 include_memory=True,
                 instructions=(
                     "For every risk-review role, add at least one structured "
@@ -1300,8 +1274,7 @@ class ResearchGraph:
                 written = write_research_markdown(
                     self.deep_llm,
                     prompt=(
-                        context.prompt
-                        + "\n\nForm a complete decision synthesis brief. "
+                        context.prompt + "\n\nForm a complete decision synthesis brief. "
                         "Cover the rating rationale, thesis, three scenarios, "
                         "catalysts, risks, invalidation, unresolved questions, "
                         "time horizon, any valuation or market-reference "
@@ -1314,32 +1287,29 @@ class ResearchGraph:
                         "metadata": {"research_node": f"{node}.reason"},
                     },
                 )
-            with self.metrics.phase(
-                f"{node}.serialize",
+            output = invoke_research_decision(
+                self.deep_serializer_llm,
+                prompt=(
+                    "Map the completed decision synthesis brief to the "
+                    "strict final decision contract. Preserve its research "
+                    "judgment; do not add unsupported facts. Use localized "
+                    "reader-facing labels for market reference levels.\n\n"
+                    f"DECISION SYNTHESIS BRIEF:\n{written.markdown}\n\n"
+                    "ALLOWED EVIDENCE REFS:\n"
+                    f"{json.dumps(_state_evidence_refs(state))}\n\n"
+                    "ALLOWED MEMORY REFS:\n"
+                    f"{json.dumps(tuple(runtime.context.memory.refs))}\n\n"
+                    "REQUIRED RISK REVIEW ROLES:\n"
+                    f"{json.dumps(tuple(state.get('risk_reviews', {})))}"
+                ),
+                state=state,
+                node=f"{node}.serialize",
                 event_writer=runtime.stream_writer,
-            ):
-                output = invoke_research_decision(
-                    self.deep_serializer_llm,
-                    prompt=(
-                        "Map the completed decision synthesis brief to the "
-                        "strict final decision contract. Preserve its research "
-                        "judgment; do not add unsupported facts. Use localized "
-                        "reader-facing labels for market reference levels.\n\n"
-                        f"DECISION SYNTHESIS BRIEF:\n{written.markdown}\n\n"
-                        "ALLOWED EVIDENCE REFS:\n"
-                        f"{json.dumps(_state_evidence_refs(state))}\n\n"
-                        "ALLOWED MEMORY REFS:\n"
-                        f"{json.dumps(tuple(runtime.context.memory.refs))}\n\n"
-                        "REQUIRED RISK REVIEW ROLES:\n"
-                        f"{json.dumps(tuple(state.get('risk_reviews', {})))}"
-                    ),
-                    state=state,
-                    node=f"{node}.serialize",
-                    event_writer=runtime.stream_writer,
-                    memory=runtime.context.memory,
-                    require_risk_adjustments=not fast,
-                    output_language=state["output_language"],
-                )
+                memory=runtime.context.memory,
+                require_risk_adjustments=not fast,
+                output_language=state["output_language"],
+                metrics=self.metrics,
+            )
             decision = output.value
             self._write_artifact(
                 runtime,
@@ -1378,11 +1348,7 @@ class ResearchGraph:
     def _deliberation_llm(self, spec: RoleSpec | None = None) -> Any:
         """Resolve role models according to the quality-first profile contract."""
 
-        return (
-            self.deep_llm
-            if self._deliberation_model_tier(spec) == "deep"
-            else self.quick_llm
-        )
+        return self.deep_llm if self._deliberation_model_tier(spec) == "deep" else self.quick_llm
 
     def _deliberation_serializer_llm(
         self,
@@ -1884,10 +1850,7 @@ def _structured_recovery_warnings(
     node: str,
     output: StructuredOutputResult[Any],
 ) -> list[dict[str, Any]]:
-    if (
-        output.generation_method
-        is ArtifactGenerationMethod.MARKDOWN_AUDIT_INCOMPLETE
-    ):
+    if output.generation_method is ArtifactGenerationMethod.MARKDOWN_AUDIT_INCOMPLETE:
         if node.startswith("analyst."):
             return []
         warning = ResearchWarning(

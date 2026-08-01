@@ -24,6 +24,7 @@ from tradingagents.application.contracts import (
     ValuationAssessment,
     ValuationRange,
 )
+from tradingagents.application.metrics import MetricsCallback
 from tradingagents.graph.deliberation import (
     CalculationInputDraft,
     CalculationRecordDraft,
@@ -104,26 +105,18 @@ def _numeric_draft_from_decision(payload: dict[str, Any]) -> DecisionNumericDraf
             }
             | {
                 "inputs": [
-                    {"name": name, "value": value}
-                    for name, value in calculation["inputs"].items()
+                    {"name": name, "value": value} for name, value in calculation["inputs"].items()
                 ],
             }
         )
     valuation = payload.get("valuation_assessment")
     if valuation is not None:
-        valuation = {
-            key: value for key, value in valuation.items() if key != "as_of_date"
-        }
+        valuation = {key: value for key, value in valuation.items() if key != "as_of_date"}
     references = [
         {key: value for key, value in item.items() if key != "as_of_date"}
         for item in payload.get("market_reference_levels") or ()
     ]
-    has_content = bool(
-        scenario_valuations
-        or valuation
-        or references
-        or calculations
-    )
+    has_content = bool(scenario_valuations or valuation or references or calculations)
     return DecisionNumericDraft.model_validate(
         {
             "requested": has_content,
@@ -224,9 +217,7 @@ def test_research_markdown_uses_inline_ledger_refs_without_definitions() -> None
     state = _state()
     ref = state["evidence_bundle"]["items"][0]["ref"]
     result = write_research_markdown(
-        _MarkdownLLM(
-            f"# Case\n\nSupported.[^{ref}]\n\n[^{ref}]: Model source text."
-        ),
+        _MarkdownLLM(f"# Case\n\nSupported.[^{ref}]\n\n[^{ref}]: Model source text."),
         prompt="Write the case.",
         node="case.bull.write",
         allowed_evidence_refs=(ref,),
@@ -255,10 +246,7 @@ def test_research_case_preserves_readable_markdown_without_navigation_ids() -> N
 
 def test_research_case_audit_preserves_completed_markdown() -> None:
     state = _state()
-    markdown = (
-        "## Constructive case\n\n"
-        "| Measure | Reading |\n|---|---:|\n| Growth | 12.3% |\n"
-    )
+    markdown = "## Constructive case\n\n| Measure | Reading |\n|---|---:|\n| Growth | 12.3% |\n"
     result = invoke_research_case(
         _StaticLLM(None),
         role="bull",
@@ -300,10 +288,7 @@ def test_agenda_audit_failure_uses_explicit_navigation_fallback() -> None:
     )
 
     assert result.value.issues[0].id == "debate.issue_audit_fallback"
-    assert (
-        result.generation_method
-        is ArtifactGenerationMethod.MARKDOWN_AUDIT_INCOMPLETE
-    )
+    assert result.generation_method is ArtifactGenerationMethod.MARKDOWN_AUDIT_INCOMPLETE
 
 
 @pytest.mark.parametrize(
@@ -338,14 +323,8 @@ def test_rebuttal_audit_failure_preserves_markdown_with_profile_fallback(
     assert result.value.markdown == markdown
     assert result.value.addressed_issue_ids == ("debate.issue_1",)
     assert result.value.open_issue_ids == expected_open
-    assert (
-        result.generation_method
-        is ArtifactGenerationMethod.MARKDOWN_AUDIT_INCOMPLETE
-    )
-    assert all(
-        "debate.issue_1" in prompt and "debate.issue_2" in prompt
-        for prompt in llm.prompts
-    )
+    assert result.generation_method is ArtifactGenerationMethod.MARKDOWN_AUDIT_INCOMPLETE
+    assert all("debate.issue_1" in prompt and "debate.issue_2" in prompt for prompt in llm.prompts)
 
 
 def test_judge_audit_failure_preserves_markdown_without_fabricated_rating() -> None:
@@ -353,9 +332,7 @@ def test_judge_audit_failure_preserves_markdown_without_fabricated_rating() -> N
     invalid = {
         "preliminary_rating": "Hold",
         "confidence": 0.5,
-        "issue_dispositions": [
-            {"issue_id": "debate.issue_invented", "status": "upheld"}
-        ],
+        "issue_dispositions": [{"issue_id": "debate.issue_invented", "status": "upheld"}],
     }
 
     llm = _StaticLLM(invalid)
@@ -369,21 +346,12 @@ def test_judge_audit_failure_preserves_markdown_without_fabricated_rating() -> N
     assert isinstance(result.value, JudgeDraft)
     assert result.value.preliminary_rating is None
     assert result.value.confidence is None
-    assert {
-        item.issue_id: item.status
-        for item in result.value.issue_dispositions
-    } == {
+    assert {item.issue_id: item.status for item in result.value.issue_dispositions} == {
         "debate.issue_1": "unresolved",
         "debate.issue_2": "unresolved",
     }
-    assert (
-        result.generation_method
-        is ArtifactGenerationMethod.MARKDOWN_AUDIT_INCOMPLETE
-    )
-    assert all(
-        "debate.issue_1" in prompt and "debate.issue_2" in prompt
-        for prompt in llm.prompts
-    )
+    assert result.generation_method is ArtifactGenerationMethod.MARKDOWN_AUDIT_INCOMPLETE
+    assert all("debate.issue_1" in prompt and "debate.issue_2" in prompt for prompt in llm.prompts)
 
 
 def test_risk_navigation_ignores_unknown_issue_ids_without_llm_audit() -> None:
@@ -395,9 +363,7 @@ def test_risk_navigation_ignores_unknown_issue_ids_without_llm_audit() -> None:
         }
     )
     markdown = (
-        "debate.issue_1 is challenged.\n"
-        "Unresolved: debate.issue_2.\n"
-        "Ignore debate.issue_invented."
+        "debate.issue_1 is challenged.\nUnresolved: debate.issue_2.\nIgnore debate.issue_invented."
     )
 
     result = invoke_risk_review(
@@ -443,9 +409,7 @@ def test_debate_progress_requires_a_changed_open_issue_set() -> None:
         open_issue_ids=("debate.issue_1",),
     )
     repeated = first.model_copy(update={"round": 2})
-    changed = repeated.model_copy(
-        update={"open_issue_ids": ("debate.issue_2",)}
-    )
+    changed = repeated.model_copy(update={"open_issue_ids": ("debate.issue_2",)})
 
     state["rebuttals"] = [first.model_dump(mode="json")]
     assert debate_round_has_material_progress(state, round_number=1) is True
@@ -467,10 +431,10 @@ def test_final_decision_accepts_reproducible_critical_calculation() -> None:
                 valuation_range=ValuationRange(low=90, high=110),
                 currency="USD",
                 as_of_date=date(2026, 7, 24),
-                    input_evidence_refs=(ref,),
-                    limitations=("The multiple is scenario-dependent.",),
-                    calculation_ids=("calc_valuation",),
-                ),
+                input_evidence_refs=(ref,),
+                limitations=("The multiple is scenario-dependent.",),
+                calculation_ids=("calc_valuation",),
+            ),
             "calculation_records": (
                 CalculationRecord(
                     id="calc_valuation",
@@ -612,9 +576,7 @@ def test_numeric_serializer_repairs_seven_invalid_input_names() -> None:
     assert result.value.numeric_audit_status is NumericAuditStatus.NOT_APPLICABLE
     assert result.numeric_audit is not None
     assert result.numeric_audit.status is NumericAuditAppendixStatus.RECOVERED
-    assert [item.phase.value for item in result.numeric_audit.snapshots] == [
-        "initial"
-    ]
+    assert [item.phase.value for item in result.numeric_audit.snapshots] == ["initial"]
     assert result.numeric_audit.snapshots[0].candidate == invalid_numeric
     assert [event["event_type"] for event in events] == [
         "node.numeric_audit_retry",
@@ -623,10 +585,7 @@ def test_numeric_serializer_repairs_seven_invalid_input_names() -> None:
     issues = events[0]["payload"]["validation_issues"]
     assert len(issues) > 8
     assert issues[0].startswith("schema.calculation_records.0.inputs")
-    assert any(
-        issue.startswith("schema.calculation_records.6.inputs")
-        for issue in issues
-    )
+    assert any(issue.startswith("schema.calculation_records.6.inputs") for issue in issues)
 
 
 @pytest.mark.parametrize(
@@ -677,14 +636,44 @@ def test_final_serializers_preserve_output_language_in_primary_and_repair(
     assert localized_example in llm.prompts[1][1]
 
 
+def test_final_serializer_phases_record_child_wall_time_without_parent_span() -> None:
+    state = _state()
+    ref = state["evidence_bundle"]["items"][0]["ref"]
+    metrics = MetricsCallback()
+    events: list[dict[str, Any]] = []
+
+    invoke_research_decision(
+        _StaticLLM(research_decision(evidence_refs=(ref,))),
+        prompt="Form the final decision.",
+        state=state,
+        node="committee.final.serialize",
+        require_risk_adjustments=False,
+        event_writer=events.append,
+        metrics=metrics,
+    )
+
+    snapshot = metrics.snapshot()
+    assert "committee.final.serialize" not in snapshot.node_metrics
+    assert snapshot.node_metrics["committee.final.serialize.core"].wall_time_seconds >= 0
+    assert snapshot.node_metrics["committee.final.serialize.numeric"].wall_time_seconds >= 0
+    assert [
+        (event["event_type"], event["node"])
+        for event in events
+        if event["event_type"].startswith("phase.")
+    ] == [
+        ("phase.started", "committee.final.serialize.core"),
+        ("phase.completed", "committee.final.serialize.core"),
+        ("phase.started", "committee.final.serialize.numeric"),
+        ("phase.completed", "committee.final.serialize.numeric"),
+    ]
+
+
 def test_calculation_draft_exposes_identifier_inputs_in_json_schema() -> None:
     schema = CalculationRecordDraft.model_json_schema()
     input_schema = schema["$defs"]["CalculationInputDraft"]["properties"]
 
     assert input_schema["name"]["pattern"] == r"^[A-Za-z][A-Za-z0-9_]*$"
-    assert schema["properties"]["inputs"]["items"] == {
-        "$ref": "#/$defs/CalculationInputDraft"
-    }
+    assert schema["properties"]["inputs"]["items"] == {"$ref": "#/$defs/CalculationInputDraft"}
 
 
 def test_calculation_draft_converts_typed_inputs_to_public_mapping() -> None:
@@ -834,9 +823,7 @@ def test_final_decision_preserves_valid_numeric_components_after_repair_failure(
     assert result.warnings[0].code == "decision.numeric_audit_partial"
     assert result.numeric_audit is not None
     assert result.numeric_audit.status is NumericAuditAppendixStatus.PARTIAL
-    assert {
-        item.component_path for item in result.numeric_audit.omitted_components
-    } == {
+    assert {item.component_path for item in result.numeric_audit.omitted_components} == {
         "numeric.calculation.calc_valuation",
         "numeric.valuation",
     }
@@ -909,6 +896,4 @@ def test_final_decision_reports_stable_duplicate_scenario_issue() -> None:
             require_risk_adjustments=False,
         )
 
-    assert error.value.validation_issues == (
-        "semantic.decision.scenarios.duplicate_kind",
-    )
+    assert error.value.validation_issues == ("semantic.decision.scenarios.duplicate_kind",)
