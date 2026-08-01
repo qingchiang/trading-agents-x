@@ -16,7 +16,8 @@ def get_macro_indicators(
         str,
         "Macro indicator. US (FRED): 'cpi', 'core_pce', 'unemployment', "
         "'fed_funds_rate', '10y_treasury', 'yield_curve', 'real_gdp', 'vix', or a "
-        "raw FRED series ID such as 'CPIAUCSL'. Japan (official sources): 'jp_cpi', "
+        "1-25 character alphanumeric raw FRED series ID such as 'CPIAUCSL' "
+        "(no spaces, punctuation, or underscores). Japan (official sources): 'jp_cpi', "
         "'jp_core_cpi' (e-Stat), 'jp_policy_rate', 'jp_tankan' (BOJ).",
     ],
     curr_date: Annotated[str, "Current date in yyyy-mm-dd format; the end of the window"],
@@ -47,7 +48,7 @@ def get_macro_indicators(
 def get_macro_indicators_for_analysis(
     indicator: Annotated[
         str,
-        "Macro indicator alias or raw FRED series ID.",
+        "Macro indicator alias, or a 1-25 character alphanumeric raw FRED series ID.",
     ],
     curr_date: Annotated[str, InjectedState("trade_date")],
     runtime: AnalysisToolRuntime,

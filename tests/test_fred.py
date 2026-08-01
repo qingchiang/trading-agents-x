@@ -63,9 +63,22 @@ class FredResolutionTests(unittest.TestCase):
     def test_descriptive_phrase_is_rejected(self):
         # An LLM phrase (spaces / too long) is not a series ID — reject up front
         # with guidance rather than 400ing the API.
-        for bad in ("bank of japan rate", "the unemployment number", "X" * 31):
+        for bad in (
+            "bank of japan rate",
+            "the unemployment number",
+            "INVALID_SERIES",
+            "SERIES-ID",
+            "X" * 26,
+        ):
             with self.assertRaises(ValueError):
                 fred._resolve_series_id(bad)
+
+    def test_invalid_raw_id_never_reaches_http(self):
+        with mock.patch.object(fred, "_request") as request:
+            out = fred.get_macro_data("INVALID_SERIES", "2026-01-01")
+
+        request.assert_not_called()
+        self.assertIn("not a known macro alias", out)
 
     def test_get_macro_data_returns_guidance_on_bad_indicator(self):
         # Invalid indicator -> actionable message, not a crash (no API call).
@@ -124,7 +137,7 @@ class FredFormattingTests(unittest.TestCase):
         # the run is not aborted over an optional macro lookup.
         no_series = {"seriess": []}
         with mock.patch.object(fred, "_request", side_effect=_request_stub(meta=no_series)):
-            out = fred.get_macro_data("totally_unknown_xyz", "2025-09-30", 30)
+            out = fred.get_macro_data("totallyunknownxyz", "2025-09-30", 30)
         self.assertIn("not found", out)
 
     def test_long_series_is_truncated_but_change_uses_full_range(self):
@@ -202,8 +215,8 @@ class FredCacheTests(unittest.TestCase):
             return {"seriess": []}
 
         with mock.patch.object(fred, "_request", side_effect=_req):
-            self.assertIsNone(fred.fetch_series("totally_unknown_xyz", "2025-09-30", 30))
-            self.assertIsNone(fred.fetch_series("totally_unknown_xyz", "2025-09-30", 30))
+            self.assertIsNone(fred.fetch_series("totallyunknownxyz", "2025-09-30", 30))
+            self.assertIsNone(fred.fetch_series("totallyunknownxyz", "2025-09-30", 30))
         # A miss is NOT memoized (could be a transient outage), so it is retried.
         self.assertEqual(calls, ["series", "series"])
 
