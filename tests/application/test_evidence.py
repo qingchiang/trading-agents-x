@@ -983,3 +983,51 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
     assert exported["result"]["numeric_audit"]["status"] == "partial"
     assert markdown.index("## Reports") < markdown.index("## Research Process")
     assert markdown.index("## Research Process") < markdown.index("## Research Decision")
+
+
+@pytest.mark.parametrize(
+    ("output_language", "expected"),
+    (
+        ("en", ("## Reports", "## Research Decision", "## Warnings", "## Sources")),
+        ("zh-CN", ("## 研究报告", "## 最终结论", "## 警告", "## 来源")),
+        ("ja", ("## リサーチレポート", "## 最終結論", "## 警告", "## 情報源")),
+        (
+            "使用正式、克制的繁体中文",
+            ("## Reports", "## Research Decision", "## Warnings", "## Sources"),
+        ),
+    ),
+)
+def test_export_framework_uses_standard_locales_and_custom_language_fallback(
+    output_language: str,
+    expected: tuple[str, str, str, str],
+) -> None:
+    now = datetime(2026, 8, 1, 12, tzinfo=timezone.utc)
+    run_export = RunExport(
+        run=RunView(
+            id="fixture-run",
+            status=RunStatus.FAILED,
+            request=AnalysisRequest(
+                ticker="6501.T",
+                analysis_date="2026-08-01",
+                output_language=output_language,
+            ),
+            config_snapshot={},
+            attempt=1,
+            cancel_requested=False,
+            created_at=now,
+            updated_at=now,
+        ),
+        result=AnalysisResult(
+            run_id="fixture-run",
+            status=RunStatus.FAILED,
+            instrument="6501.T",
+            reports={},
+            decision=None,
+        ),
+    )
+
+    markdown = render_run_export_markdown(run_export)
+
+    assert all(heading in markdown for heading in expected)
+    with zipfile.ZipFile(io.BytesIO(render_run_export_package(run_export))) as archive:
+        assert archive.read("report.md").decode() == markdown
