@@ -323,6 +323,7 @@ class AnalysisService:
                     reports={},
                     decision=None,
                     metrics=aggregate_metrics,
+                    recoveries=self.repository.list_recoveries(run.id),
                     warnings=("Run cancelled at a graph node boundary.",),
                 )
             except WorkerShutdown:
@@ -471,6 +472,7 @@ class AnalysisService:
             numeric_audit=execution.numeric_audit,
             evidence=execution.evidence,
             metrics=metrics.snapshot(),
+            recoveries=self.repository.list_recoveries(run_id),
             warnings=warnings,
         )
 

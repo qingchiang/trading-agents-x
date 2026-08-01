@@ -227,6 +227,10 @@ const en = {
     runWarnings: "Run warnings",
     warningCount: "{{count}} warnings",
     auditDetails: "Audit details",
+    structuredRecoveries: "Structured recoveries",
+    recoveryCount: "{{count}} nodes required validated recovery",
+    recoveryNoticeSummary:
+      "Initial reason: {{reason}} · method: {{method}} · {{calls}} extra call(s)",
     auditSummary: "{{warnings}} warnings · {{evidence}} evidence groups",
     evidenceRefs: "Evidence references",
     memoryRefs: "Memory references",
@@ -652,6 +656,10 @@ const zhCN = {
     runWarnings: "运行级警告",
     warningCount: "{{count}} 条警告",
     auditDetails: "审计详情",
+    structuredRecoveries: "结构化恢复",
+    recoveryCount: "{{count}} 个节点发生结构化恢复",
+    recoveryNoticeSummary:
+      "初始原因：{{reason}} · 恢复方式：{{method}} · 额外调用 {{calls}} 次",
     auditSummary: "{{warnings}} 条警告 · {{evidence}} 组证据",
     evidenceRefs: "证据引用",
     memoryRefs: "记忆引用",
@@ -1073,6 +1081,10 @@ const ja = {
     runWarnings: "実行レベルの警告",
     warningCount: "警告 {{count}} 件",
     auditDetails: "監査詳細",
+    structuredRecoveries: "構造化出力の復旧",
+    recoveryCount: "{{count}} ノードで構造化出力を復旧",
+    recoveryNoticeSummary:
+      "初期原因: {{reason}} · 方法: {{method}} · 追加呼び出し {{calls}} 回",
     auditSummary: "警告 {{warnings}} 件 · エビデンス {{evidence}} 組",
     evidenceRefs: "エビデンス参照",
     memoryRefs: "メモリー参照",

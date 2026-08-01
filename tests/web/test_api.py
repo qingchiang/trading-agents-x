@@ -431,6 +431,21 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
             content=decision,
         ),
     )
+    web_repository.append_event(
+        queued.id,
+        "node.output_retry",
+        node="debate.agenda.serialize",
+        payload={
+            "method": "tool_call_recovered",
+            "reason_code": "non_json_response",
+        },
+    )
+    web_repository.append_event(
+        queued.id,
+        "node.output_recovered",
+        node="debate.agenda.serialize",
+        payload={"method": "tool_call_recovered"},
+    )
     partial_detail = await web_client.get(f"/api/v1/runs/{queued.id}")
     partial_export = await web_client.get(
         f"/api/v1/runs/{queued.id}/export?format=json"
@@ -452,6 +467,10 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
         "news",
         "social",
     ]
+    assert partial_detail.json()["result"]["recoveries"][0]["node"] == (
+        "debate.agenda.serialize"
+    )
+    assert partial_export.json()["result"]["recoveries"][0]["retry_count"] == 1
     assert partial_export.json()["result"]["decision"]["thesis"] == (
         "Fixture thesis."
     )

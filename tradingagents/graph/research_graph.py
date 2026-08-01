@@ -1868,21 +1868,7 @@ def _structured_recovery_warnings(
             source=node,
         )
         return [warning.model_dump(mode="json")]
-    if output.generation_method in {
-        ArtifactGenerationMethod.TOOL_CALL,
-        ArtifactGenerationMethod.JSON_MODE,
-        ArtifactGenerationMethod.MARKDOWN_AUDITED,
-    }:
-        return []
-    warning = ResearchWarning(
-        code="structured_output.recovered",
-        message=(
-            "The model output required validated structured recovery "
-            f"({output.generation_method.value})."
-        ),
-        source=node,
-    )
-    return [warning.model_dump(mode="json")]
+    return []
 
 
 def _state_evidence_refs(state: Mapping[str, Any]) -> tuple[str, ...]:

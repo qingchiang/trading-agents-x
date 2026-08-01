@@ -1396,6 +1396,25 @@
   background: #e6f4fb;
 }
 
+.recovery-notice-list {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.75rem 1rem 1rem;
+}
+
+.recovery-notice-list article {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.6fr) minmax(260px, 1.4fr);
+  gap: 0.35rem 0.75rem;
+  align-items: baseline;
+}
+
+.recovery-notice-list code {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
 .scenario-endpoint-bases {
   display: flex;
   flex-wrap: wrap;

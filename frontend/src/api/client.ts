@@ -35,6 +35,8 @@ export type Health = components["schemas"]["HealthResponse"];
 export type MemoryEntry = components["schemas"]["MemoryEntry"];
 export type RunMetrics = components["schemas"]["RunMetrics"];
 export type RunAttemptView = components["schemas"]["RunAttemptView"];
+export type StructuredRecoveryNotice =
+  components["schemas"]["StructuredRecoveryNotice"];
 export type RecentInstrument = components["schemas"]["RecentInstrument"];
 
 export class ApiError extends Error {

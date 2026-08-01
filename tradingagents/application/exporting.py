@@ -68,6 +68,13 @@ _EN_LABELS = {
     "evidence_items": "Evidence Items",
     "content": "Content",
     "audit_records": "Audit records",
+    "structured_recoveries": "Structured Recoveries",
+    "no_recoveries": "No successful structured recoveries were recorded.",
+    "initial_reason": "Initial reason",
+    "recovery_method": "Recovery method",
+    "validation_issues": "Validation issues",
+    "retry_count": "Extra calls",
+    "recovered_at": "Recovered at",
     "unverified_numeric": "Unverified Numeric Drafts",
     "numeric_warning": (
         "The following model-proposed numeric content did not pass audit and "
@@ -196,6 +203,13 @@ _ZH_LABELS = {
     "evidence_items": "证据条目",
     "content": "正文",
     "audit_records": "审计记录",
+    "structured_recoveries": "结构化恢复",
+    "no_recoveries": "未记录成功的结构化恢复。",
+    "initial_reason": "初始原因",
+    "recovery_method": "恢复方式",
+    "validation_issues": "校验问题",
+    "retry_count": "额外调用",
+    "recovered_at": "恢复时间",
     "unverified_numeric": "未验证数值草案",
     "numeric_warning": "以下模型提出的数值内容未通过审计，未用于正式研究结论。",
     "omitted_components": "已省略组件",
@@ -315,6 +329,13 @@ _JA_LABELS = {
     "evidence_items": "証拠項目",
     "content": "本文",
     "audit_records": "監査記録",
+    "structured_recoveries": "構造化出力の復旧",
+    "no_recoveries": "成功した構造化出力の復旧は記録されていません。",
+    "initial_reason": "初期原因",
+    "recovery_method": "復旧方法",
+    "validation_issues": "検証上の問題",
+    "retry_count": "追加呼び出し",
+    "recovered_at": "復旧日時",
     "unverified_numeric": "未検証の数値ドラフト",
     "numeric_warning": "以下の数値案は監査を通過せず、正式結論には使用されていません。",
     "omitted_components": "省略された項目",
@@ -511,6 +532,25 @@ def render_run_export_markdown(run_export: RunExport) -> str:
         )
 
     warnings = _export_warnings(run_export)
+    sections.extend(["", f"## {labels['structured_recoveries']}"])
+    if not result.recoveries:
+        sections.extend(["", f"_{labels['no_recoveries']}_"])
+    else:
+        for recovery in result.recoveries:
+            issues = ", ".join(recovery.validation_issue_codes) or "—"
+            sections.extend(
+                [
+                    "",
+                    f"### `{recovery.node}`",
+                    "",
+                    f"- {labels['attempt']}: `{recovery.attempt}`",
+                    f"- {labels['initial_reason']}: `{recovery.initial_reason_code}`",
+                    f"- {labels['recovery_method']}: `{recovery.recovery_method.value}`",
+                    f"- {labels['validation_issues']}: `{issues}`",
+                    f"- {labels['retry_count']}: `{recovery.retry_count}`",
+                    f"- {labels['recovered_at']}: `{recovery.recovered_at.isoformat()}`",
+                ]
+            )
     sections.extend(["", f"## {labels['warnings']}"])
     if not warnings:
         sections.extend(["", f"_{labels['no_warnings']}_"])

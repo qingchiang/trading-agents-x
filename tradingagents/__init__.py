@@ -45,6 +45,7 @@ from .application.contracts import (
     RiskReviewDisposition,
     RunProfile,
     ScenarioReferenceRange,
+    StructuredRecoveryNotice,
     TableDataType,
     ValuationAssessment,
 )
@@ -98,6 +99,7 @@ __all__ = [
     "AuditedRangeEndpoint",
     "NumericTemporalBasis",
     "ScenarioReferenceRange",
+    "StructuredRecoveryNotice",
     "__version__",
 ]
 

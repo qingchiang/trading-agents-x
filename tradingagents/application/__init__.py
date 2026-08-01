@@ -51,6 +51,7 @@ from .contracts import (
     RunProfile,
     RunStatus,
     ScenarioReferenceRange,
+    StructuredRecoveryNotice,
     TableDataType,
     ValuationAssessment,
 )
@@ -111,4 +112,5 @@ __all__ = [
     "AuditedRangeEndpoint",
     "NumericTemporalBasis",
     "ScenarioReferenceRange",
+    "StructuredRecoveryNotice",
 ]

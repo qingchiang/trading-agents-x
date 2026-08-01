@@ -176,6 +176,14 @@
               }
             ]
           },
+          "recoveries": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/StructuredRecoveryNotice"
+            },
+            "title": "Recoveries",
+            "type": "array"
+          },
           "reports": {
             "additionalProperties": {
               "anyOf": [
@@ -3336,6 +3344,59 @@
           "limitations"
         ],
         "title": "ScenarioReferenceRange",
+        "type": "object"
+      },
+      "StructuredRecoveryNotice": {
+        "additionalProperties": false,
+        "description": "One successful bounded structured-output recovery rebuilt from events.",
+        "properties": {
+          "attempt": {
+            "minimum": 1.0,
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "initial_reason_code": {
+            "pattern": "^[a-z0-9_.-]+$",
+            "title": "Initial Reason Code",
+            "type": "string"
+          },
+          "node": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Node",
+            "type": "string"
+          },
+          "recovered_at": {
+            "format": "date-time",
+            "title": "Recovered At",
+            "type": "string"
+          },
+          "recovery_method": {
+            "$ref": "#/components/schemas/ArtifactGenerationMethod"
+          },
+          "retry_count": {
+            "minimum": 1.0,
+            "title": "Retry Count",
+            "type": "integer"
+          },
+          "validation_issue_codes": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Validation Issue Codes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "attempt",
+          "node",
+          "initial_reason_code",
+          "recovery_method",
+          "retry_count",
+          "recovered_at"
+        ],
+        "title": "StructuredRecoveryNotice",
         "type": "object"
       },
       "TableDataType": {

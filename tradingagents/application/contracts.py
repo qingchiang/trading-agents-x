@@ -1431,6 +1431,26 @@ class RunEvent(FrozenModel):
     created_at: datetime
 
 
+class StructuredRecoveryNotice(FrozenModel):
+    """One successful bounded structured-output recovery rebuilt from events."""
+
+    attempt: int = Field(ge=1)
+    node: str = Field(min_length=1, max_length=160)
+    initial_reason_code: str = Field(pattern=r"^[a-z0-9_.-]+$")
+    recovery_method: ArtifactGenerationMethod
+    validation_issue_codes: tuple[str, ...] = ()
+    retry_count: int = Field(ge=1)
+    recovered_at: datetime
+
+    @field_validator("validation_issue_codes")
+    @classmethod
+    def validate_issue_codes(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        issues = tuple(dict.fromkeys(value))
+        if any(not re.fullmatch(r"[a-z0-9_.-]+", item) for item in issues):
+            raise ValueError("recovery issues must use stable codes")
+        return issues
+
+
 class AnalysisResult(FrozenModel):
     run_id: str
     status: RunStatus
@@ -1441,6 +1461,7 @@ class AnalysisResult(FrozenModel):
     numeric_audit: DecisionNumericAuditAppendix | None = None
     evidence: EvidenceBundle | None = None
     metrics: RunMetrics = Field(default_factory=RunMetrics)
+    recoveries: tuple[StructuredRecoveryNotice, ...] = ()
     warnings: tuple[ResearchWarning, ...] = ()
 
     @field_validator("reports")

@@ -13,6 +13,7 @@ import {
   type RunEvent,
   type RunAttemptView,
   type RunMetrics,
+  type StructuredRecoveryNotice,
 } from "../api/client";
 import AnalystReportView from "../components/AnalystReportView";
 import DeliberationView from "../components/DeliberationView";
@@ -50,6 +51,9 @@ const eventNames = [
   "node.output_retry",
   "node.output_recovered",
   "node.output_failed",
+  "node.numeric_audit_retry",
+  "node.numeric_audit_recovered",
+  "node.numeric_audit_degraded",
   "artifact.created",
   "run.succeeded",
   "run.failed",
@@ -442,6 +446,7 @@ export default function RunDetail() {
           {t("partialResearchAvailable")}
         </div>
       )}
+      <RecoveryNotices notices={result?.recoveries ?? []} key={`recovery-${runId}`} />
       <RunWarnings
         warnings={runWarnings}
         openRequest={warningOpenRequest}
@@ -1181,6 +1186,46 @@ function RunWarnings({
   );
 }
 
+function RecoveryNotices({
+  notices,
+}: {
+  notices: StructuredRecoveryNotice[];
+}) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  if (notices.length === 0) return null;
+  return (
+    <details className="run-recovery-details audit-details" open={open}>
+      <summary
+        onClick={(event) => {
+          event.preventDefault();
+          setOpen(!open);
+        }}
+      >
+        <strong>{t("structuredRecoveries")}</strong>
+        <span>{t("recoveryCount", { count: notices.length })}</span>
+      </summary>
+      <div className="recovery-notice-list">
+        {notices.map((notice, index) => (
+          <article key={`${notice.attempt}:${notice.node}:${index}`}>
+            <strong>{notice.node}</strong>
+            <span>
+              {t("recoveryNoticeSummary", {
+                reason: notice.initial_reason_code,
+                method: notice.recovery_method,
+                calls: notice.retry_count,
+              })}
+            </span>
+            {(notice.validation_issue_codes ?? []).length > 0 && (
+              <code>{(notice.validation_issue_codes ?? []).join(", ")}</code>
+            )}
+          </article>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 function reportWarnings(report: AnalystReport | string): VisibleWarning[] {
   return typeof report === "string"
     ? []
@@ -1520,14 +1565,30 @@ function metricPhase(node: string): MetricPhase {
 function nodeOutputStatus(node: string, events: RunEvent[]): OutputStatus {
   const outputEvents = events.filter((event) => event.node === node);
   if (
-    outputEvents.some((event) => event.event_type === "node.output_recovered")
+    outputEvents.some(
+      (event) =>
+        event.event_type === "node.output_recovered" ||
+        event.event_type === "node.numeric_audit_recovered",
+    )
   ) {
     return "recovered";
   }
-  if (outputEvents.some((event) => event.event_type === "node.output_failed")) {
+  if (
+    outputEvents.some(
+      (event) =>
+        event.event_type === "node.output_failed" ||
+        event.event_type === "node.numeric_audit_degraded",
+    )
+  ) {
     return node.endsWith(".audit") ? "auditIncomplete" : "failed";
   }
-  if (outputEvents.some((event) => event.event_type === "node.output_retry")) {
+  if (
+    outputEvents.some(
+      (event) =>
+        event.event_type === "node.output_retry" ||
+        event.event_type === "node.numeric_audit_retry",
+    )
+  ) {
     return "retry";
   }
   return "normal";

@@ -781,6 +781,22 @@ def test_service_export_reads_the_durable_result(
             analysts=("market",),
         )
     )
+    repository.append_event(
+        result.run_id,
+        "node.output_retry",
+        node="debate.agenda.serialize",
+        payload={
+            "method": "tool_call_recovered",
+            "reason_code": "non_json_response",
+            "validation_issues": ["schema.issues"],
+        },
+    )
+    repository.append_event(
+        result.run_id,
+        "node.output_recovered",
+        node="debate.agenda.serialize",
+        payload={"method": "tool_call_recovered"},
+    )
 
     media_type, body = service.export(result.run_id, format=format)
 
@@ -798,17 +814,24 @@ def test_service_export_reads_the_durable_result(
             assert "Fixture thesis" in report
             run_payload = json.loads(archive.read("run.json"))
             assert run_payload["attempts"][0]["status"] == "succeeded"
+            assert run_payload["result"]["recoveries"][0]["node"] == (
+                "debate.agenda.serialize"
+            )
+            assert "## Structured Recoveries" in report
         return
     assert isinstance(body, str)
     assert result.run_id in body
     assert "Fixture thesis" in body
     if format == "json":
         payload = json.loads(body)
-        assert payload["schema_version"] == "2"
+        assert payload["schema_version"] == "3"
         assert payload["run"]["id"] == result.run_id
         assert payload["attempts"][0]["status"] == "succeeded"
         assert payload["attempts"][0]["metrics"] == payload["run"]["metrics"]
         assert payload["result"]["evidence"] == payload["evidence"]
+        assert payload["result"]["recoveries"][0]["initial_reason_code"] == (
+            "non_json_response"
+        )
         assert payload["evidence"]["items"][0]["source"] == "fixture"
         assert payload["artifacts"][0]["stage"] == "analyst"
         content = payload["artifacts"][0]["content"]
@@ -820,6 +843,8 @@ def test_service_export_reads_the_durable_result(
         assert "Fixture report." in body
         assert "_No deliberation artifacts were recorded for this run._" in body
         assert "## Warnings" in body
+        assert "## Structured Recoveries" in body
+        assert "`debate.agenda.serialize`" in body
         assert "## Sources" in body
         assert "### Attempts" in body
         assert "| 1 | succeeded |" in body

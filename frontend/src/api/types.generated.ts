@@ -25,6 +25,7 @@ export interface components {
       instrument_name?: string | null;
       metrics?: components["schemas"]["RunMetrics"];
       numeric_audit?: components["schemas"]["DecisionNumericAuditAppendix"] | null;
+      recoveries?: components["schemas"]["StructuredRecoveryNotice"][];
       reports: Record<string, components["schemas"]["AnalystReport"] | string>;
       run_id: string;
       status: components["schemas"]["RunStatus"];
@@ -477,6 +478,15 @@ export interface components {
       limitations: string[];
       low: components["schemas"]["AuditedRangeEndpoint"];
       unit: string;
+    };
+    StructuredRecoveryNotice: {
+      attempt: number;
+      initial_reason_code: string;
+      node: string;
+      recovered_at: string;
+      recovery_method: components["schemas"]["ArtifactGenerationMethod"];
+      retry_count: number;
+      validation_issue_codes?: string[];
     };
     TableDataType: "text" | "integer" | "number" | "percent" | "currency" | "date" | "datetime" | "boolean";
     ValidationError: {

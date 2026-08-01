@@ -576,7 +576,7 @@ def test_deliberation_artifact_types_round_trip(
     assert restored == [stored]
 
 
-def test_recovered_artifact_surfaces_a_top_level_result_warning(
+def test_recovery_events_surface_as_audit_notices_not_top_level_warnings(
     repository: RunRepository,
     app_settings: AppSettings,
 ) -> None:
@@ -599,11 +599,32 @@ def test_recovered_artifact_surfaces_a_top_level_result_warning(
             ),
         ),
     )
+    repository.append_event(
+        run.id,
+        "node.output_retry",
+        node="committee.final.serialize.core",
+        payload={
+            "method": "raw_json_recovered",
+            "reason_code": "schema_validation",
+            "validation_issues": ["schema.thesis"],
+        },
+    )
+    repository.append_event(
+        run.id,
+        "node.output_recovered",
+        node="committee.final.serialize.core",
+        payload={
+            "method": "raw_json_recovered",
+            "reason_code": "schema_validation",
+        },
+    )
 
     result = repository.get_result(run.id)
 
-    assert result.warnings[0].code == "structured_output.recovered"
-    assert "raw_json_recovered" in result.warnings[0].message
+    assert result.warnings == ()
+    assert len(result.recoveries) == 1
+    assert result.recoveries[0].node == "committee.final.serialize.core"
+    assert result.recoveries[0].validation_issue_codes == ("schema.thesis",)
 
 
 def test_partial_numeric_audit_surfaces_after_result_reload(

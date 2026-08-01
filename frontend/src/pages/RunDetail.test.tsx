@@ -297,10 +297,21 @@ const detail = {
       ],
     },
     metrics: runMetrics,
+    recoveries: [
+      {
+        attempt: 1,
+        node: "debate.agenda.serialize",
+        initial_reason_code: "non_json_response",
+        recovery_method: "tool_call_recovered",
+        validation_issue_codes: [],
+        retry_count: 1,
+        recovered_at: "2026-07-24T00:00:45Z",
+      },
+    ],
     warnings: [
       {
-        code: "structured_output.recovered",
-        message: "One structured output required recovery.",
+        code: "run.fixture_warning",
+        message: "One run-level fixture warning.",
         evidence_ref: null,
         source: "committee.final",
       },
@@ -395,8 +406,12 @@ test("restores deliberation and resolves evidence references across run views", 
   expect(await screen.findByRole("heading", { name: "NVDA" })).toBeVisible();
   expect(screen.getByText("Run warnings")).toBeVisible();
   expect(
-    screen.getByText("One structured output required recovery."),
+    screen.getByText("One run-level fixture warning."),
   ).not.toBeVisible();
+  expect(screen.getByText("Structured recoveries")).toBeVisible();
+  expect(screen.getByText("debate.agenda.serialize")).not.toBeVisible();
+  fireEvent.click(screen.getByText("Structured recoveries"));
+  expect(screen.getByText("debate.agenda.serialize")).toBeVisible();
   expect(screen.getByRole("tab", { name: "Agent timeline" })).toHaveAttribute(
     "aria-selected",
     "true",
@@ -468,9 +483,11 @@ test("restores deliberation and resolves evidence references across run views", 
     newsTab.compareDocumentPosition(socialTab) &
       Node.DOCUMENT_POSITION_FOLLOWING,
   ).not.toBe(0);
-  expect(
-    await screen.findByRole("heading", { name: "Fundamentals report" }),
-  ).toBeVisible();
+  await waitFor(() => {
+    expect(
+      screen.getByRole("heading", { name: "Fundamentals report" }),
+    ).toBeVisible();
+  });
   const reportScroller = document.querySelector<HTMLElement>(".analyst-report");
   expect(reportScroller).not.toBeNull();
   if (!reportScroller) throw new Error("report scroller not rendered");
@@ -1022,16 +1039,18 @@ test("keeps report footnote navigation in an in-page source drawer", async () =>
 });
 
 test("localizes canonical report labels for zh-CN", async () => {
-  await i18n.changeLanguage("zh-CN");
+  await act(() => i18n.changeLanguage("zh-CN"));
   render(
     <Router initialPath="/runs/run-1?view=reports">
       <RunDetail />
     </Router>,
   );
 
-  expect(
-    await screen.findByRole("heading", { name: "Fundamentals report" }),
-  ).toBeVisible();
+  await waitFor(() => {
+    expect(
+      screen.getByRole("heading", { name: "Fundamentals report" }),
+    ).toBeVisible();
+  });
   const labels = ["基本面", "市场", "新闻", "舆情"].map((name) =>
     screen.getByRole("button", { name }),
   );

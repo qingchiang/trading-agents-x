@@ -45,6 +45,7 @@ from .contracts import (
     RunStatus,
     RunTrashState,
     RunView,
+    StructuredRecoveryNotice,
 )
 from .database import (
     Base,
@@ -61,6 +62,7 @@ from .database import (
 )
 from .metrics import merge_run_metrics
 from .outcome_schedule import earliest_outcome_check_at
+from .recoveries import rebuild_structured_recoveries
 from .reporting import order_reports
 from .settings import AppSettings
 
@@ -843,6 +845,44 @@ class RunRepository:
             for record in records
         ]
 
+    def list_recoveries(self, run_id: str) -> tuple[StructuredRecoveryNotice, ...]:
+        """Return all successful structured recoveries without event-page limits."""
+
+        event_types = tuple(
+            {
+                "node.output_retry",
+                "node.output_recovered",
+                "node.output_failed",
+                "node.numeric_audit_retry",
+                "node.numeric_audit_recovered",
+                "node.numeric_audit_degraded",
+            }
+        )
+        with self.sessions() as session:
+            records = tuple(
+                session.scalars(
+                    select(RunEventRecord)
+                    .where(
+                        RunEventRecord.run_id == run_id,
+                        RunEventRecord.event_type.in_(event_types),
+                    )
+                    .order_by(RunEventRecord.sequence)
+                )
+            )
+        events = tuple(
+            RunEvent(
+                run_id=record.run_id,
+                sequence=record.sequence,
+                attempt=record.attempt,
+                event_type=record.event_type,
+                node=record.node,
+                payload=record.payload_json,
+                created_at=_aware(record.created_at),
+            )
+            for record in records
+        )
+        return rebuild_structured_recoveries(events)
+
     def append_artifact(
         self,
         run_id: str,
@@ -1290,25 +1330,6 @@ class RunRepository:
                         for warning in report.warnings
                     ),
                     *(
-                        ResearchWarning(
-                            code="structured_output.recovered",
-                            message=(
-                                "The model output required validated "
-                                "structured recovery "
-                                f"({artifact.generation_method.value})."
-                            ),
-                            source=f"{artifact.stage}.{artifact.role}",
-                        )
-                        for artifact in artifacts
-                        if artifact.generation_method
-                        in {
-                            ArtifactGenerationMethod.RAW_JSON_RECOVERED,
-                            ArtifactGenerationMethod.TOOL_CALL_RECOVERED,
-                            ArtifactGenerationMethod.JSON_MODE_RECOVERED,
-                            ArtifactGenerationMethod.SECTIONED_RECOVERY,
-                        }
-                    ),
-                    *(
                         (
                             ResearchWarning(
                                 code=(
@@ -1342,6 +1363,7 @@ class RunRepository:
             numeric_audit=numeric_audit,
             evidence=evidence,
             metrics=view.metrics,
+            recoveries=self.list_recoveries(run_id),
             warnings=warnings,
         )
 
