@@ -852,11 +852,11 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
                     unit="USD",
                     as_of_date=date(2026, 7, 24),
                     interpretation="Observation only, not an entry order.",
-                        evidence_refs=("ev_0123456789ab",),
-                        source_locator=EvidenceValueLocator(
-                            evidence_ref="ev_0123456789ab"
-                        ),
+                    evidence_refs=("ev_0123456789ab",),
+                    source_locator=EvidenceValueLocator(
+                        evidence_ref="ev_0123456789ab"
                     ),
+                ),
             ),
             "risk_review_adjustments": (
                 RiskReviewAdjustment(
@@ -1035,3 +1035,86 @@ def test_export_framework_uses_standard_locales_and_custom_language_fallback(
     assert all(heading in markdown for heading in expected)
     with zipfile.ZipFile(io.BytesIO(render_run_export_package(run_export))) as archive:
         assert archive.read("report.md").decode() == markdown
+
+
+def test_zh_export_localizes_framework_and_keeps_canonical_refs_in_sources() -> None:
+    item = EvidenceItem.create(
+        source="fixture",
+        evidence_type="market snapshot",
+        requested_date=date(2026, 8, 1),
+        content="Sanitized market snapshot.",
+    )
+    evidence = EvidenceBundle(
+        instrument="6501.T",
+        analysis_date=date(2026, 8, 1),
+        items=(item,),
+    )
+    now = datetime(2026, 8, 1, 12, tzinfo=timezone.utc)
+    decision = research_decision(evidence_refs=(item.ref,)).model_copy(
+        update={"numeric_audit_status": NumericAuditStatus.INCOMPLETE}
+    )
+    warning = ResearchWarning(
+        code="report.audit_incomplete",
+        message="The readable report was preserved, but its audit is incomplete.",
+        source="fundamentals analyst",
+    )
+    run_export = RunExport(
+        run=RunView(
+            id="fixture-run",
+            status=RunStatus.SUCCEEDED,
+            request=AnalysisRequest(
+                ticker="6501.T",
+                analysis_date="2026-08-01",
+                output_language="zh-CN",
+            ),
+            config_snapshot={},
+            attempt=1,
+            cancel_requested=False,
+            created_at=now,
+            updated_at=now,
+        ),
+        result=AnalysisResult(
+            run_id="fixture-run",
+            status=RunStatus.SUCCEEDED,
+            instrument="6501.T",
+            reports={
+                "fundamentals": analyst_report(
+                    evidence_ref=item.ref,
+                    narrative=f"# 基本面\n\n已验证结论。[^{item.ref}]",
+                )
+            },
+            decision=decision,
+            evidence=evidence,
+            numeric_audit=DecisionNumericAuditAppendix(
+                status=NumericAuditAppendixStatus.INCOMPLETE,
+                snapshots=(
+                    NumericAuditSnapshot(
+                        phase=NumericAuditPhase.INITIAL,
+                        method=ArtifactGenerationMethod.TOOL_CALL,
+                        reason_code="schema_validation",
+                        validation_issues=(),
+                        schema_valid=False,
+                        candidate=None,
+                        candidate_digest="c" * 64,
+                    ),
+                ),
+            ),
+            warnings=(warning,),
+        ),
+        evidence=evidence,
+    )
+
+    markdown = render_run_export_markdown(run_export)
+    readable, sources = markdown.split("## 来源", maxsplit=1)
+
+    assert "[E01]" in readable
+    assert item.ref not in readable
+    assert f"`{item.ref}`" in sources
+    assert "### 初次候选" in readable
+    assert "未记录校验问题" in readable
+    assert "可读报告已保留，但关键观点审计不完整。" in readable
+    assert "Evidence:" not in readable
+    assert "Calculations:" not in readable
+    assert "Candidate" not in readable
+    assert "none recorded" not in readable
+    assert markdown.count("## 来源") == 1

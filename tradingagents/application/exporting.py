@@ -44,6 +44,9 @@ class ExportLabels:
     def report_name(self, key: str) -> str:
         return self.values.get(f"report.{key}", key.title())
 
+    def enum_name(self, namespace: str, value: str) -> str:
+        return self.values.get(f"{namespace}.{value}", value)
+
 
 _EN_LABELS = {
     "title": "TradingAgentsX Research",
@@ -112,6 +115,7 @@ _EN_LABELS = {
     "prompt": "Prompt",
     "generation": "Generation",
     "created": "Created",
+    "round": "Round",
     "source": "source",
     "evidence": "Evidence",
     "memory": "Memory",
@@ -172,7 +176,49 @@ _EN_LABELS = {
     ),
     "no_market_references": "None identified.",
     "candidate_unparseable": "Candidate was not parseable as a JSON object.",
+    "candidate_omitted": "Candidate omitted",
+    "candidate_digest": "Digest",
+    "no_validation_issues": "No validation issues recorded.",
+    "raw_table_available": (
+        "Raw tabular content is available in `evidence.json` and the linked `tables/*.csv` files."
+    ),
+    "not_audited": "not audited",
+    "not_recorded": "not recorded",
+    "warning.report.audit_incomplete": (
+        "The readable report was preserved, but its key-claim audit is incomplete."
+    ),
+    "warning.report.unknown_evidence_ref": (
+        "An unknown evidence reference was ignored in the readable report."
+    ),
+    "warning.research.unknown_evidence_ref": (
+        "An unknown research evidence reference was ignored."
+    ),
+    "warning.deliberation.audit_incomplete": (
+        "The readable deliberation was preserved, but its navigation audit is incomplete."
+    ),
+    "warning.decision.numeric_audit_partial": (
+        "Some optional numeric components were omitted after audit; the qualitative decision remains audited."
+    ),
+    "warning.decision.numeric_audit_incomplete": (
+        "Optional numeric components were omitted after audit; the qualitative decision remains audited."
+    ),
     "none": "None identified.",
+    "calculation_use.scenario": "{scenario} scenario reference range",
+    "calculation_use.valuation": "Valuation assessment",
+    "calculation_use.market": "Market reference: {label}",
+    "numeric_status.complete": "complete",
+    "numeric_status.partial": "partial",
+    "numeric_status.incomplete": "incomplete",
+    "numeric_status.not_applicable": "not applicable",
+    "numeric_phase.initial": "Initial candidate",
+    "numeric_phase.repair": "Repair candidate",
+    "temporal.point_in_time": "point in time",
+    "temporal.live_snapshot": "live snapshot",
+    "claim_importance.primary": "Primary",
+    "claim_importance.supporting": "Supporting",
+    "claim_kind.observation": "observation",
+    "claim_kind.inference": "inference",
+    "claim_kind.forecast": "forecast",
     "report.fundamentals": "Fundamentals",
     "report.market": "Market",
     "report.news": "News",
@@ -244,6 +290,7 @@ _ZH_LABELS = {
     "prompt": "提示词版本",
     "generation": "生成方式",
     "created": "创建时间",
+    "round": "轮次",
     "source": "来源",
     "evidence": "证据",
     "memory": "研究记忆",
@@ -298,7 +345,35 @@ _ZH_LABELS = {
     "opinion_notice": "非个性化研究意见；不构成账户级指令、仓位建议或订单。",
     "no_market_references": "未识别到市场参考位置。",
     "candidate_unparseable": "候选内容无法解析为 JSON 对象。",
+    "candidate_omitted": "候选内容已省略",
+    "candidate_digest": "摘要哈希",
+    "no_validation_issues": "未记录校验问题。",
+    "raw_table_available": "原始表格内容位于 `evidence.json` 及对应的 `tables/*.csv` 文件中。",
+    "not_audited": "未完成审计",
+    "not_recorded": "未记录",
+    "warning.report.audit_incomplete": "可读报告已保留，但关键观点审计不完整。",
+    "warning.report.unknown_evidence_ref": "可读报告中的未知证据引用已忽略。",
+    "warning.research.unknown_evidence_ref": "未知的研究证据引用已忽略。",
+    "warning.deliberation.audit_incomplete": "可读研究过程已保留，但导航审计不完整。",
+    "warning.decision.numeric_audit_partial": "部分可选数值组件经审计后被省略；定性结论仍已完成审计。",
+    "warning.decision.numeric_audit_incomplete": "可选数值组件经审计后被省略；定性结论仍已完成审计。",
     "none": "未识别到相关内容。",
+    "calculation_use.scenario": "{scenario}情景参考区间",
+    "calculation_use.valuation": "估值评估",
+    "calculation_use.market": "市场参考：{label}",
+    "numeric_status.complete": "完整",
+    "numeric_status.partial": "部分完成",
+    "numeric_status.incomplete": "未完成",
+    "numeric_status.not_applicable": "不适用",
+    "numeric_phase.initial": "初次候选",
+    "numeric_phase.repair": "修复候选",
+    "temporal.point_in_time": "时点数据",
+    "temporal.live_snapshot": "实时快照",
+    "claim_importance.primary": "主要",
+    "claim_importance.supporting": "辅助",
+    "claim_kind.observation": "观察",
+    "claim_kind.inference": "推论",
+    "claim_kind.forecast": "预测",
     "report.fundamentals": "基本面",
     "report.market": "市场",
     "report.news": "新闻",
@@ -370,6 +445,7 @@ _JA_LABELS = {
     "prompt": "プロンプト版",
     "generation": "生成方式",
     "created": "作成日時",
+    "round": "ラウンド",
     "source": "情報源",
     "evidence": "証拠",
     "memory": "リサーチメモリ",
@@ -424,7 +500,35 @@ _JA_LABELS = {
     "opinion_notice": "非個人向けのリサーチ見解であり、口座単位の指示、ポジション量、注文ではありません。",
     "no_market_references": "市場参考水準は特定されていません。",
     "candidate_unparseable": "候補を JSON オブジェクトとして解析できませんでした。",
+    "candidate_omitted": "候補を省略",
+    "candidate_digest": "ダイジェスト",
+    "no_validation_issues": "検証上の問題は記録されていません。",
+    "raw_table_available": "生の表データは `evidence.json` と対応する `tables/*.csv` に収録されています。",
+    "not_audited": "未監査",
+    "not_recorded": "未記録",
+    "warning.report.audit_incomplete": "可読レポートは保持されましたが、主要主張の監査は不完全です。",
+    "warning.report.unknown_evidence_ref": "可読レポート内の不明な証拠参照を無視しました。",
+    "warning.research.unknown_evidence_ref": "不明なリサーチ証拠参照を無視しました。",
+    "warning.deliberation.audit_incomplete": "可読の審議内容は保持されましたが、ナビゲーション監査は不完全です。",
+    "warning.decision.numeric_audit_partial": "一部の任意数値項目は監査後に省略されました。定性的結論の監査は完了しています。",
+    "warning.decision.numeric_audit_incomplete": "任意数値項目は監査後に省略されました。定性的結論の監査は完了しています。",
     "none": "該当項目なし。",
+    "calculation_use.scenario": "{scenario}シナリオ参考レンジ",
+    "calculation_use.valuation": "バリュエーション評価",
+    "calculation_use.market": "市場参考：{label}",
+    "numeric_status.complete": "完了",
+    "numeric_status.partial": "一部完了",
+    "numeric_status.incomplete": "未完了",
+    "numeric_status.not_applicable": "該当なし",
+    "numeric_phase.initial": "初回候補",
+    "numeric_phase.repair": "修復候補",
+    "temporal.point_in_time": "時点データ",
+    "temporal.live_snapshot": "ライブスナップショット",
+    "claim_importance.primary": "主要",
+    "claim_importance.supporting": "補助",
+    "claim_kind.observation": "観測",
+    "claim_kind.inference": "推論",
+    "claim_kind.forecast": "予測",
     "report.fundamentals": "ファンダメンタルズ",
     "report.market": "市場",
     "report.news": "ニュース",
@@ -452,7 +556,7 @@ def render_run_export_markdown(run_export: RunExport) -> str:
         if artifact.stage not in {"analyst", "decision"}
     )
     sections = [
-        f"# {labels['title']}：{result.instrument}",
+        f"# {labels['title']}: {result.instrument}",
         "",
         f"- {labels['export_schema']}: `{run_export.schema_version}`",
         f"- {labels['run']}: `{result.run_id}`",
@@ -465,9 +569,7 @@ def render_run_export_markdown(run_export: RunExport) -> str:
         sections.extend(["", f"_{labels['no_reports']}_"])
     for name, report in result.reports.items():
         narrative = (
-            _render_export_markdown(
-                _render_analyst_report(report, labels), evidence_aliases
-            )
+            _render_export_markdown(_render_analyst_report(report, labels), evidence_aliases)
             if isinstance(report, AnalystReport)
             else _render_export_markdown(str(report), evidence_aliases)
         )
@@ -492,7 +594,7 @@ def render_run_export_markdown(run_export: RunExport) -> str:
         sections.extend(
             [
                 "",
-                (f"### {artifact.stage} · {artifact.role} · round {artifact.round}"),
+                (f"### {artifact.stage} · {artifact.role} · {labels['round']} {artifact.round}"),
                 "",
                 f"- {labels['artifact']}: `{artifact.id}`",
                 f"- {labels['attempt']}: `{artifact.attempt}`",
@@ -560,9 +662,13 @@ def render_run_export_markdown(run_export: RunExport) -> str:
             if warning.source:
                 details.append(f"{labels['source']}: {warning.source}")
             if warning.evidence_ref:
-                details.append(f"{labels['evidence']}: `{warning.evidence_ref}`")
+                details.append(
+                    f"{labels['evidence']}: "
+                    + _render_alias_refs((warning.evidence_ref,), evidence_aliases, labels)
+                )
             suffix = f" ({'; '.join(details)})" if details else ""
-            sections.append(f"- **{warning.code}**: {warning.message}{suffix}")
+            message = labels.values.get(f"warning.{warning.code}", warning.message)
+            sections.append(f"- **{warning.code}**: {message}{suffix}")
 
     metrics = result.metrics
     sections.extend(
@@ -579,10 +685,7 @@ def render_run_export_markdown(run_export: RunExport) -> str:
             f"- {labels['cache_hit']}: `{metrics.cache_hit_input_tokens}`",
             f"- {labels['cache_miss']}: `{metrics.cache_miss_input_tokens}`",
             f"- {labels['reasoning']}: `{metrics.reasoning_output_tokens}`",
-            (
-                f"- {labels['detailed_calls']}: "
-                f"`{metrics.detailed_usage_calls}/{metrics.llm_calls}` calls"
-            ),
+            (f"- {labels['detailed_calls']}: `{metrics.detailed_usage_calls}/{metrics.llm_calls}`"),
             f"- {labels['wall_time']}: `{metrics.wall_time_seconds:.3f}s`",
         ]
     )
@@ -647,11 +750,7 @@ def render_run_export_markdown(run_export: RunExport) -> str:
     if run_export.evidence is None:
         sections.extend(["", f"_{labels['no_evidence']}_"])
     else:
-        table_refs = {
-            ref
-            for table in run_export.evidence.tables
-            for ref in table.evidence_refs
-        }
+        table_refs = {ref for table in run_export.evidence.tables for ref in table.evidence_refs}
         sections.extend(
             [
                 "",
@@ -672,7 +771,8 @@ def render_run_export_markdown(run_export: RunExport) -> str:
                         f"- {labels['purpose']}: {table.purpose}",
                         f"- {labels['rows']}: `{len(table.rows)}`",
                         f"- {labels['raw_data']}: `tables/{table.id}.csv`",
-                        f"- {labels['evidence']}: " + _render_refs(table.evidence_refs),
+                        f"- {labels['evidence']}: "
+                        + _render_canonical_refs(table.evidence_refs, labels),
                     ]
                 )
             sections.extend(["", f"### {labels['evidence_items']}"])
@@ -689,8 +789,7 @@ def render_run_export_markdown(run_export: RunExport) -> str:
                     "",
                     f"### {alias}",
                     "",
-                    f"- {labels['refs']}: "
-                    + ", ".join(f"`{ref}`" for ref in group.refs),
+                    f"- {labels['refs']}: " + ", ".join(f"`{ref}`" for ref in group.refs),
                     f"- {labels['source_list']}: {', '.join(sources)}",
                     f"- {labels['type']}: {item.evidence_type}",
                     f"- {labels['quality']}: `{item.quality.value}`",
@@ -710,8 +809,7 @@ def render_run_export_markdown(run_export: RunExport) -> str:
                 sections.extend(
                     [
                         "",
-                        "_Raw tabular content is available in `evidence.json` "
-                        "and the linked `tables/*.csv` files._",
+                        f"_{labels['raw_table_available']}_",
                     ]
                 )
             sections.extend(
@@ -747,22 +845,14 @@ def render_run_export_package(run_export: RunExport) -> bytes:
                 "schema_version": run_export.schema_version,
                 "run": run_export.run.model_dump(mode="json"),
                 "result": run_export.result.model_dump(mode="json"),
-                "attempts": [
-                    attempt.model_dump(mode="json")
-                    for attempt in run_export.attempts
-                ],
+                "attempts": [attempt.model_dump(mode="json") for attempt in run_export.attempts],
             }
         ),
         "artifacts.json": _json_bytes(
-            [
-                artifact.model_dump(mode="json")
-                for artifact in run_export.artifacts
-            ]
+            [artifact.model_dump(mode="json") for artifact in run_export.artifacts]
         ),
         "evidence.json": _json_bytes(
-            run_export.evidence.model_dump(mode="json")
-            if run_export.evidence is not None
-            else None
+            run_export.evidence.model_dump(mode="json") if run_export.evidence is not None else None
         ),
     }
     if run_export.evidence is not None:
@@ -803,10 +893,7 @@ def _evidence_table_csv(table: EvidenceTable) -> bytes:
         writer.writerow(
             [
                 row.id,
-                *(
-                    _csv_raw_value(row.cells[column.key].raw_value)
-                    for column in table.columns
-                ),
+                *(_csv_raw_value(row.cells[column.key].raw_value) for column in table.columns),
             ]
         )
     return output.getvalue().encode()
@@ -848,9 +935,7 @@ def _render_analyst_report(
     labels: ExportLabels,
 ) -> str:
     confidence = (
-        f"{report.confidence:.0%}"
-        if report.confidence is not None
-        else "not audited"
+        f"{report.confidence:.0%}" if report.confidence is not None else labels["not_audited"]
     )
     lines = [
         f"- {labels['analyst']}: `{report.analyst}`",
@@ -865,10 +950,13 @@ def _render_analyst_report(
             lines.extend(
                 [
                     "",
-                    f"- {claim.importance.value} · {claim.kind.value}: "
+                    "- "
+                    f"{labels.enum_name('claim_importance', claim.importance.value)}"
+                    " · "
+                    f"{labels.enum_name('claim_kind', claim.kind.value)}: "
                     f"{claim.statement}",
                     f"  - {labels['implication']}: {claim.implication}",
-                    f"  - {labels['evidence']}: {_render_refs(claim.evidence_refs)}",
+                    f"  - {labels['evidence']}: {_render_refs(claim.evidence_refs, labels)}",
                 ]
             )
     return "\n".join(lines)
@@ -889,7 +977,7 @@ def _render_export_markdown(
     markdown: str,
     aliases: dict[str, str],
 ) -> str:
-    if not markdown or not aliases:
+    if not markdown:
         return markdown
     normalized = normalize_evidence_markdown(
         markdown,
@@ -966,7 +1054,7 @@ def _render_research_decision(
     content: ResearchDecision,
     labels: ExportLabels,
 ) -> str:
-    calculation_uses = _calculation_uses(content)
+    calculation_uses = _calculation_uses(content, labels)
     lines = [
         f"> {labels['opinion_notice']}",
         "",
@@ -976,14 +1064,14 @@ def _render_research_decision(
         (
             f"- {labels['numeric_audit']}: `"
             + (
-                content.numeric_audit_status.value
+                labels.enum_name("numeric_status", content.numeric_audit_status.value)
                 if content.numeric_audit_status is not None
-                else "not_recorded"
+                else labels["not_recorded"]
             )
             + "`"
         ),
-        f"- {labels['evidence']}: {_render_refs(content.evidence_refs)}",
-        f"- {labels['memory']}: {_render_ids(content.memory_refs)}",
+        f"- {labels['evidence']}: {_render_refs(content.evidence_refs, labels)}",
+        f"- {labels['memory']}: {_render_ids(content.memory_refs, labels)}",
         "",
         f"### {labels['executive_summary']}",
         "",
@@ -1031,9 +1119,9 @@ def _render_research_decision(
                     (
                         f"**{labels['endpoint_dates']}:** "
                         f"`{reference_range.low.as_of_date.isoformat()}` "
-                        f"(`{reference_range.low.temporal_basis.value}`) / "
+                        f"({labels.enum_name('temporal', reference_range.low.temporal_basis.value)}) / "
                         f"`{reference_range.high.as_of_date.isoformat()}` "
-                        f"(`{reference_range.high.temporal_basis.value}`)"
+                        f"({labels.enum_name('temporal', reference_range.high.temporal_basis.value)})"
                     ),
                     reference_range.interpretation,
                 ]
@@ -1048,7 +1136,7 @@ def _render_research_decision(
         lines.extend(
             [
                 "",
-                f"**Evidence:** {_render_refs(scenario.evidence_refs)}",
+                f"**{labels['evidence']}:** {_render_refs(scenario.evidence_refs, labels)}",
             ]
         )
     if content.valuation_assessment is not None:
@@ -1068,18 +1156,15 @@ def _render_research_decision(
                 f"- {labels['as_of']}: `{assessment.as_of_date.isoformat()}`",
                 (
                     f"- {labels['temporal_basis']}: "
-                    f"`{assessment.low.temporal_basis.value}` / "
-                    f"`{assessment.high.temporal_basis.value}`"
+                    f"{labels.enum_name('temporal', assessment.low.temporal_basis.value)} / "
+                    f"{labels.enum_name('temporal', assessment.high.temporal_basis.value)}"
                 ),
                 f"- {labels['input_evidence']}: "
-                + _render_refs(assessment.input_evidence_refs),
-                f"- {labels['calculations']}: "
-                + _render_ids(assessment.calculation_ids),
+                + _render_refs(assessment.input_evidence_refs, labels),
+                f"- {labels['calculations']}: " + _render_ids(assessment.calculation_ids, labels),
             ]
         )
-        lines.extend(
-            _render_list(labels["limitations"], assessment.limitations, labels=labels)
-        )
+        lines.extend(_render_list(labels["limitations"], assessment.limitations, labels=labels))
     lines.extend(["", f"### {labels['market_references']}"])
     if content.market_reference_levels:
         for level in content.market_reference_levels:
@@ -1090,13 +1175,11 @@ def _render_research_decision(
                     "",
                     f"- {labels['value']}: `{level.value}` {level.unit}",
                     f"- {labels['as_of']}: `{level.as_of_date.isoformat()}`",
-                    f"- {labels['evidence']}: {_render_refs(level.evidence_refs)}",
+                    f"- {labels['evidence']}: {_render_refs(level.evidence_refs, labels)}",
                     f"- {labels['basis']}: {labels[f'basis.{level.basis.value}']}",
-                    f"- {labels['temporal_basis']}: `{level.temporal_basis.value}`",
-                    (
-                        "- Calculations: "
-                        + _render_ids(level.calculation_ids)
-                    ),
+                    f"- {labels['temporal_basis']}: "
+                    f"{labels.enum_name('temporal', level.temporal_basis.value)}",
+                    (f"- {labels['calculations']}: " + _render_ids(level.calculation_ids, labels)),
                     "",
                     level.interpretation,
                 ]
@@ -1106,10 +1189,7 @@ def _render_research_decision(
     lines.extend(["", f"### {labels['calculations']}"])
     if content.calculation_records:
         for calculation in content.calculation_records:
-            inputs = ", ".join(
-                f"{name}={value}"
-                for name, value in calculation.inputs.items()
-            )
+            inputs = ", ".join(f"{name}={value}" for name, value in calculation.inputs.items())
             lines.extend(
                 [
                     "",
@@ -1121,15 +1201,14 @@ def _render_research_decision(
                     f"- {labels['inputs']}: `{inputs}`",
                     f"- {labels['result']}: `{calculation.result}` {calculation.unit}",
                     f"- {labels['as_of']}: `{calculation.as_of_date.isoformat()}`",
-                    f"- {labels['temporal_basis']}: `{calculation.temporal_basis.value}`",
+                    f"- {labels['temporal_basis']}: "
+                    f"{labels.enum_name('temporal', calculation.temporal_basis.value)}",
                     f"- {labels['evidence']}: "
-                    + _render_refs(calculation.input_evidence_refs),
+                    + _render_refs(calculation.input_evidence_refs, labels),
                 ]
             )
             lines.extend(
-                _render_list(
-                    labels["limitations"], calculation.limitations, labels=labels
-                )
+                _render_list(labels["limitations"], calculation.limitations, labels=labels)
             )
     else:
         lines.extend(["", f"_{labels['no_calculations']}_"])
@@ -1155,7 +1234,7 @@ def _render_research_decision(
                     "",
                     adjustment.explanation,
                     "",
-                    f"**{labels['evidence']}:** {_render_refs(adjustment.evidence_refs)}",
+                    f"**{labels['evidence']}:** {_render_refs(adjustment.evidence_refs, labels)}",
                 ]
             )
     else:
@@ -1163,7 +1242,10 @@ def _render_research_decision(
     return "\n".join(lines)
 
 
-def _calculation_uses(content: ResearchDecision) -> dict[str, tuple[str, ...]]:
+def _calculation_uses(
+    content: ResearchDecision,
+    labels: ExportLabels,
+) -> dict[str, tuple[str, ...]]:
     uses: dict[str, list[str]] = {}
 
     def add(calculation_ids: tuple[str, ...], label: str) -> None:
@@ -1181,16 +1263,19 @@ def _calculation_uses(content: ResearchDecision) -> dict[str, tuple[str, ...]]:
                     )
                     if item is not None
                 ),
-                f"{scenario.kind.value.title()} scenario reference range",
+                labels["calculation_use.scenario"].format(scenario=labels[scenario.kind.value]),
             )
     if content.valuation_assessment is not None:
-        add(content.valuation_assessment.calculation_ids, "Valuation assessment")
+        add(
+            content.valuation_assessment.calculation_ids,
+            labels["calculation_use.valuation"],
+        )
     for level in content.market_reference_levels:
-        add(level.calculation_ids, f"Market reference: {level.label}")
-    return {
-        calculation_id: tuple(dict.fromkeys(labels))
-        for calculation_id, labels in uses.items()
-    }
+        add(
+            level.calculation_ids,
+            labels["calculation_use.market"].format(label=level.label),
+        )
+    return {calculation_id: tuple(dict.fromkeys(labels)) for calculation_id, labels in uses.items()}
 
 
 def _render_numeric_audit_appendix(
@@ -1212,10 +1297,11 @@ def _render_numeric_audit_appendix(
                 + ", ".join(f"`{code}`" for code in item.issue_codes)
             )
     for snapshot in appendix.snapshots:
+        phase_label = labels.enum_name("numeric_phase", snapshot.phase.value)
         lines.extend(
             [
                 "",
-                f"### {snapshot.phase.value.title()} Candidate",
+                f"### {phase_label}",
                 "",
                 f"- {labels['method']}: `{snapshot.method.value}`",
                 f"- {labels['reason']}: `{snapshot.reason_code}`",
@@ -1223,10 +1309,8 @@ def _render_numeric_audit_appendix(
                 (
                     f"- {labels['issues']}: "
                     + (
-                        ", ".join(
-                            f"`{code}`" for code in snapshot.validation_issues
-                        )
-                        or "_none recorded_"
+                        ", ".join(f"`{code}`" for code in snapshot.validation_issues)
+                        or f"_{labels['no_validation_issues']}_"
                     )
                 ),
             ]
@@ -1242,8 +1326,9 @@ def _render_numeric_audit_appendix(
             )
         elif snapshot.candidate_omitted:
             lines.append(
-                f"- Candidate omitted: `{snapshot.candidate_omitted}` "
-                f"(digest `{snapshot.candidate_digest}`)"
+                f"- {labels['candidate_omitted']}: "
+                f"`{snapshot.candidate_omitted}` "
+                f"({labels['candidate_digest']} `{snapshot.candidate_digest}`)"
             )
         else:
             lines.append(f"- {labels['candidate_unparseable']}")
@@ -1266,12 +1351,28 @@ def _render_list(
     ]
 
 
-def _render_refs(refs: tuple[str, ...]) -> str:
-    return ", ".join(f"`{ref}`" for ref in refs) or "none"
+def _render_refs(refs: tuple[str, ...], labels: ExportLabels) -> str:
+    return " ".join(f"[^{ref}]" for ref in refs) or labels["none"]
 
 
-def _render_ids(refs: tuple[str, ...]) -> str:
-    return ", ".join(f"`{ref}`" for ref in refs) or "none"
+def _render_ids(refs: tuple[str, ...], labels: ExportLabels) -> str:
+    return ", ".join(f"`{ref}`" for ref in refs) or labels["none"]
+
+
+def _render_canonical_refs(
+    refs: tuple[str, ...],
+    labels: ExportLabels,
+) -> str:
+    return ", ".join(f"`{ref}`" for ref in refs) or labels["none"]
+
+
+def _render_alias_refs(
+    refs: tuple[str, ...],
+    aliases: Mapping[str, str],
+    labels: ExportLabels,
+) -> str:
+    rendered = tuple(f"[{aliases[ref]}]" for ref in refs if ref in aliases)
+    return " ".join(rendered) or labels["none"]
 
 
 def _export_warnings(run_export: RunExport) -> tuple[ResearchWarning, ...]:
