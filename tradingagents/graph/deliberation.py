@@ -179,9 +179,7 @@ class ObservedRangeEndpointDraft(BaseModel):
 class InterpretedRangeEndpointDraft(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    basis: Literal[MarketReferenceBasis.INTERPRETED] = (
-        MarketReferenceBasis.INTERPRETED
-    )
+    basis: Literal[MarketReferenceBasis.INTERPRETED] = MarketReferenceBasis.INTERPRETED
     value: float
     anchor_value_refs: tuple[str, ...] = Field(min_length=1)
     context_evidence_refs: tuple[str, ...] = ()
@@ -203,9 +201,7 @@ class DerivedRangeEndpointDraft(BaseModel):
 
 
 RangeEndpointDraft: TypeAlias = Annotated[
-    ObservedRangeEndpointDraft
-    | InterpretedRangeEndpointDraft
-    | DerivedRangeEndpointDraft,
+    ObservedRangeEndpointDraft | InterpretedRangeEndpointDraft | DerivedRangeEndpointDraft,
     Field(discriminator="basis"),
 ]
 
@@ -233,9 +229,7 @@ class ScenarioReferenceRangesDraft(BaseModel):
 
     def items(
         self,
-    ) -> tuple[
-        tuple[ResearchScenarioKind, tuple[ScenarioReferenceRangeDraft, ...]], ...
-    ]:
+    ) -> tuple[tuple[ResearchScenarioKind, tuple[ScenarioReferenceRangeDraft, ...]], ...]:
         return (
             (ResearchScenarioKind.BASE, self.base),
             (ResearchScenarioKind.BULL, self.bull),
@@ -274,9 +268,7 @@ class InterpretedMarketReferenceLevelDraft(BaseModel):
     interpretation: str = Field(min_length=1)
     anchor_value_refs: tuple[str, ...] = Field(min_length=1)
     context_evidence_refs: tuple[str, ...] = ()
-    basis: Literal[MarketReferenceBasis.INTERPRETED] = (
-        MarketReferenceBasis.INTERPRETED
-    )
+    basis: Literal[MarketReferenceBasis.INTERPRETED] = MarketReferenceBasis.INTERPRETED
 
     @field_validator("anchor_value_refs")
     @classmethod
@@ -659,9 +651,7 @@ _SCENARIO_LABEL_PATTERNS: dict[
 ] = {
     ReportLanguage.ENGLISH: {
         ResearchScenarioKind.BASE: (r"\b(?:base|neutral)\s+(?:scenario|case)\b",),
-        ResearchScenarioKind.BULL: (
-            r"\b(?:bull|bullish|upside|recovery)\s+(?:scenario|case)\b",
-        ),
+        ResearchScenarioKind.BULL: (r"\b(?:bull|bullish|upside|recovery)\s+(?:scenario|case)\b",),
         ResearchScenarioKind.BEAR: (
             r"\b(?:bear|bearish|downside|deterioration)\s+(?:scenario|case)\b",
         ),
@@ -699,11 +689,7 @@ def _label_declares_other_scenario(
     output_language: str,
 ) -> bool:
     language = next(
-        (
-            candidate
-            for candidate in ReportLanguage
-            if output_language == candidate.prompt_label
-        ),
+        (candidate for candidate in ReportLanguage if output_language == candidate.prompt_label),
         None,
     )
     if language is None:
@@ -1039,9 +1025,7 @@ def invoke_research_decision(
 
 @dataclass(frozen=True)
 class _NumericDecisionAssembly:
-    scenario_reference_ranges: dict[
-        ResearchScenarioKind, tuple[ScenarioReferenceRange, ...]
-    ]
+    scenario_reference_ranges: dict[ResearchScenarioKind, tuple[ScenarioReferenceRange, ...]]
     valuation_assessment: ValuationAssessment | None
     market_reference_levels: tuple[MarketReferenceLevel, ...]
     calculation_records: tuple[CalculationRecord, ...]
@@ -1050,6 +1034,24 @@ class _NumericDecisionAssembly:
     issues: tuple[str, ...] = ()
     omissions: tuple[NumericAuditOmission, ...] = ()
     audit: DecisionNumericAuditAppendix | None = None
+    promoted_singletons: int = 0
+
+
+def _emit_numeric_normalization_event(
+    assembly: _NumericDecisionAssembly,
+    *,
+    event_writer: EventWriter | None,
+    node: str,
+) -> _NumericDecisionAssembly:
+    if event_writer is not None and assembly.promoted_singletons:
+        event_writer(
+            {
+                "event_type": "decision.numeric_singleton_promoted",
+                "node": node,
+                "payload": {"count": assembly.promoted_singletons},
+            }
+        )
+    return assembly
 
 
 def _invoke_decision_numeric(
@@ -1175,9 +1177,7 @@ def _invoke_decision_numeric(
             currency="USD",
             limitations=(example_text["valuation_limitation"],),
         ),
-        market_reference_levels=(
-            example_reference,
-        ),
+        market_reference_levels=(example_reference,),
         calculation_records=(
             CalculationRecordDraft(
                 id="calc_valuation_low",
@@ -1274,26 +1274,30 @@ def _invoke_decision_numeric(
                 node=node,
                 status=NumericAuditStatus.INCOMPLETE,
             )
-            return replace(
-                empty,
-                audit=_numeric_audit_appendix(
-                    status=NumericAuditAppendixStatus.INCOMPLETE,
-                    failures=exc.failures,
-                    omissions=(
-                        NumericAuditOmission(
-                            component_path="numeric.appendix",
-                            component_type=NumericAuditComponentType.APPENDIX,
-                            issue_codes=tuple(
-                                dict.fromkeys(
-                                    issue
-                                    for failure in exc.failures
-                                    for issue in failure.validation_issues
+            return _emit_numeric_normalization_event(
+                replace(
+                    empty,
+                    audit=_numeric_audit_appendix(
+                        status=NumericAuditAppendixStatus.INCOMPLETE,
+                        failures=exc.failures,
+                        omissions=(
+                            NumericAuditOmission(
+                                component_path="numeric.appendix",
+                                component_type=NumericAuditComponentType.APPENDIX,
+                                issue_codes=tuple(
+                                    dict.fromkeys(
+                                        issue
+                                        for failure in exc.failures
+                                        for issue in failure.validation_issues
+                                    )
                                 )
-                            )
-                            or ("numeric.appendix.invalid",),
+                                or ("numeric.appendix.invalid",),
+                            ),
                         ),
                     ),
                 ),
+                event_writer=event_writer,
+                node=node,
             )
         assembly = _assemble_numeric_draft(
             draft,
@@ -1318,17 +1322,21 @@ def _invoke_decision_numeric(
                     ),
                 ),
             )
-        return replace(
-            assembly,
-            audit=_numeric_audit_appendix(
-                status=(
-                    NumericAuditAppendixStatus.PARTIAL
-                    if assembly.status is NumericAuditStatus.PARTIAL
-                    else NumericAuditAppendixStatus.INCOMPLETE
+        return _emit_numeric_normalization_event(
+            replace(
+                assembly,
+                audit=_numeric_audit_appendix(
+                    status=(
+                        NumericAuditAppendixStatus.PARTIAL
+                        if assembly.status is NumericAuditStatus.PARTIAL
+                        else NumericAuditAppendixStatus.INCOMPLETE
+                    ),
+                    failures=exc.failures,
+                    omissions=assembly.omissions,
                 ),
-                failures=exc.failures,
-                omissions=assembly.omissions,
             ),
+            event_writer=event_writer,
+            node=node,
         )
     assembly = _assemble_numeric_draft(
         output.value,
@@ -1339,15 +1347,23 @@ def _invoke_decision_numeric(
         node=node,
     )
     if output.failed_attempts:
-        return replace(
-            assembly,
-            audit=_numeric_audit_appendix(
-                status=NumericAuditAppendixStatus.RECOVERED,
-                failures=output.failed_attempts,
-                omissions=(),
+        return _emit_numeric_normalization_event(
+            replace(
+                assembly,
+                audit=_numeric_audit_appendix(
+                    status=NumericAuditAppendixStatus.RECOVERED,
+                    failures=output.failed_attempts,
+                    omissions=(),
+                ),
             ),
+            event_writer=event_writer,
+            node=node,
         )
-    return assembly
+    return _emit_numeric_normalization_event(
+        assembly,
+        event_writer=event_writer,
+        node=node,
+    )
 
 
 def _numeric_candidate(candidate: dict[str, Any] | None) -> DecisionNumericDraft | None:
@@ -1549,11 +1565,10 @@ def _assemble_numeric_draft(
         except OutputValidationError as exc:
             issues.append(exc.issue_code)
 
-    scenario_values: dict[
-        ResearchScenarioKind, tuple[ScenarioReferenceRange, ...]
-    ] = {}
+    scenario_values: dict[ResearchScenarioKind, tuple[ScenarioReferenceRange, ...]] = {}
     duplicate_warnings: list[ResearchWarning] = []
     unknown_unit_present = False
+    promoted_references: list[MarketReferenceLevel] = []
     linked_ids: set[str] = set()
     for scenario_kind, scenario_ranges in draft.scenario_reference_ranges.items():
         assembled_ranges: list[ScenarioReferenceRange] = []
@@ -1618,6 +1633,34 @@ def _assemble_numeric_draft(
                 )
             except OutputValidationError as exc:
                 issues.append(exc.issue_code)
+                continue
+            if endpoints["high"].value == endpoints["low"].value:
+                if (
+                    isinstance(scenario.low, ObservedRangeEndpointDraft)
+                    and isinstance(scenario.high, ObservedRangeEndpointDraft)
+                    and scenario.low.value_ref == scenario.high.value_ref
+                    and endpoints["low"].source_locator is not None
+                ):
+                    endpoint = endpoints["low"]
+                    promoted_references.append(
+                        MarketReferenceLevel(
+                            label=scenario.label,
+                            value=endpoint.value,
+                            measurement_kind=measurement_kind,
+                            unit=unit,
+                            as_of_date=endpoint.as_of_date,
+                            interpretation=scenario.interpretation,
+                            evidence_refs=endpoint.evidence_refs,
+                            date_evidence_refs=endpoint.date_evidence_refs,
+                            basis=MarketReferenceBasis.OBSERVED,
+                            source_locator=endpoint.source_locator,
+                            temporal_basis=endpoint.temporal_basis,
+                        )
+                    )
+                    if measurement_kind is MeasurementKind.UNKNOWN:
+                        unknown_unit_present = True
+                    continue
+                issues.append(f"{prefix}.invalid_range")
                 continue
             assembled_ranges.append(
                 ScenarioReferenceRange(
@@ -1781,6 +1824,18 @@ def _assemble_numeric_draft(
                 unknown_unit_present = True
             linked_ids.update(calculation_ids)
 
+    explicit_locators = {
+        level.source_locator.model_dump_json()
+        for level in reference_levels
+        if level.source_locator is not None
+    }
+    for promoted in promoted_references:
+        locator = promoted.source_locator
+        if locator is None or locator.model_dump_json() in explicit_locators:
+            continue
+        reference_levels.append(promoted)
+        explicit_locators.add(locator.model_dump_json())
+
     if unknown_unit_present:
         duplicate_warnings.append(
             ResearchWarning(
@@ -1818,9 +1873,7 @@ def _assemble_numeric_draft(
     omissions = _numeric_omissions(draft, tuple(issues))
     if issues:
         status = NumericAuditStatus.PARTIAL if has_content else NumericAuditStatus.INCOMPLETE
-        omitted = ", ".join(
-            item.reference_label or item.component_path for item in omissions
-        )
+        omitted = ", ".join(item.reference_label or item.component_path for item in omissions)
         warnings = (
             ResearchWarning(
                 code=f"decision.numeric_audit_{status.value}",
@@ -1846,6 +1899,7 @@ def _assemble_numeric_draft(
         warnings=warnings,
         issues=tuple(issues),
         omissions=omissions,
+        promoted_singletons=len(promoted_references),
     )
 
 
@@ -1880,11 +1934,7 @@ def _numeric_omissions(
             path = ".".join(parts[:3])
             component_type = NumericAuditComponentType.CALCULATION
             reference_label = parts[2]
-        elif (
-            len(parts) >= 6
-            and parts[:2] == ["numeric", "scenario"]
-            and parts[3] == "ranges"
-        ):
+        elif len(parts) >= 6 and parts[:2] == ["numeric", "scenario"] and parts[3] == "ranges":
             path = ".".join(parts[:5])
             component_type = NumericAuditComponentType.SCENARIO_RANGE
             try:
@@ -1899,9 +1949,7 @@ def _numeric_omissions(
             path = ".".join(parts[:3])
             component_type = NumericAuditComponentType.MARKET_REFERENCE
             reference_label = reference_labels.get(parts[2])
-        grouped.setdefault(
-            (path, component_type, scenario_kind, reference_label), []
-        ).append(issue)
+        grouped.setdefault((path, component_type, scenario_kind, reference_label), []).append(issue)
     return tuple(
         NumericAuditOmission(
             component_path=path,
@@ -1969,9 +2017,7 @@ def _assemble_range_endpoint(
             issue_prefix=issue_prefix,
         )
         date_evidence_refs = _catalog_evidence_refs(anchor_entries)
-        evidence_refs = tuple(
-            dict.fromkeys((*date_evidence_refs, *draft.context_evidence_refs))
-        )
+        evidence_refs = tuple(dict.fromkeys((*date_evidence_refs, *draft.context_evidence_refs)))
         return AuditedRangeEndpoint(
             value=draft.value,
             basis=MarketReferenceBasis.INTERPRETED,
@@ -2031,9 +2077,7 @@ def _numeric_anchor_entries(
 def _catalog_evidence_refs(
     entries: tuple[NumericValueCatalogEntry, ...],
 ) -> tuple[str, ...]:
-    return tuple(
-        dict.fromkeys(ref for entry in entries for ref in entry.evidence_refs)
-    )
+    return tuple(dict.fromkeys(ref for entry in entries for ref in entry.evidence_refs))
 
 
 def _latest_catalog_date(
@@ -2058,10 +2102,7 @@ def _latest_catalog_date(
         value=max(item.value for item in resolved),
         temporal_basis=(
             NumericTemporalBasis.LIVE_SNAPSHOT
-            if any(
-                item.temporal_basis is NumericTemporalBasis.LIVE_SNAPSHOT
-                for item in resolved
-            )
+            if any(item.temporal_basis is NumericTemporalBasis.LIVE_SNAPSHOT for item in resolved)
             else NumericTemporalBasis.POINT_IN_TIME
         ),
     )
@@ -2112,8 +2153,7 @@ def _latest_evidence_date(
 
 def _live_snapshot_date(item: EvidenceItem, *, bundle: EvidenceBundle) -> date | None:
     if not item.origins or any(
-        origin.temporal_scope is not EvidenceTemporalScope.LIVE_ONLY
-        or not origin.retrieved_at
+        origin.temporal_scope is not EvidenceTemporalScope.LIVE_ONLY or not origin.retrieved_at
         for origin in item.origins
     ):
         return None

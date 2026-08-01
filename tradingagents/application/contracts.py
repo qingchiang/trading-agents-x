@@ -907,8 +907,8 @@ class ScenarioReferenceRange(FrozenModel):
 
     @model_validator(mode="after")
     def validate_range(self) -> ScenarioReferenceRange:
-        if self.high.value < self.low.value:
-            raise ValueError("reference range high must be >= low")
+        if self.high.value <= self.low.value:
+            raise ValueError("reference range high must be greater than low")
         return self
 
 

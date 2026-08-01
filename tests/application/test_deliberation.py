@@ -25,6 +25,7 @@ from tradingagents.application.contracts import (
     JudgeDraft,
     MarketReferenceBasis,
     MarketReferenceLevel,
+    MeasurementKind,
     NumericAuditAppendixStatus,
     NumericAuditStatus,
     NumericTemporalBasis,
@@ -42,10 +43,12 @@ from tradingagents.graph.deliberation import (
     DecisionNumericDraft,
     InterpretedRangeEndpointDraft,
     ObservedMarketReferenceLevelDraft,
+    ObservedRangeEndpointDraft,
     ResearchDecisionCoreDraft,
     ScenarioReferenceRangeDraft,
     ScenarioReferenceRangesDraft,
     _assemble_numeric_draft,
+    _emit_numeric_normalization_event,
     _evaluate_formula,
     _numeric_audit_snapshot,
     debate_round_has_material_progress,
@@ -1259,6 +1262,133 @@ def test_exact_duplicate_scenario_range_is_removed_without_degrading_audit() -> 
     ]
 
 
+def test_observed_singleton_range_is_promoted_and_deduplicated_by_locator() -> None:
+    item = EvidenceItem(
+        ref="ev_0123456789ab",
+        source="fixture.market",
+        evidence_type="verified RSI",
+        requested_date=date(2026, 8, 1),
+        effective_date=date(2026, 7, 31),
+        value=67.24,
+        measurement_kind=MeasurementKind.INDEX,
+    )
+    bundle = EvidenceBundle(
+        instrument="6501.T",
+        analysis_date=date(2026, 8, 1),
+        items=(item,),
+    )
+    value_ref = build_numeric_value_catalog(bundle)[0].id
+    endpoint = ObservedRangeEndpointDraft(value_ref=value_ref)
+    draft = DecisionNumericDraft(
+        requested=True,
+        scenario_reference_ranges=ScenarioReferenceRangesDraft(
+            base=(
+                ScenarioReferenceRangeDraft(
+                    category=ScenarioReferenceCategory.TECHNICAL,
+                    label="RSI reference",
+                    low=endpoint,
+                    high=endpoint,
+                    interpretation="Observed momentum reference.",
+                    limitations=("A point is not a scenario range.",),
+                ),
+            )
+        ),
+        market_reference_levels=(
+            ObservedMarketReferenceLevelDraft(
+                label="Explicit RSI reference",
+                value_ref=value_ref,
+                interpretation="Explicit market reference wins deduplication.",
+            ),
+        ),
+    )
+
+    result = _assemble_numeric_draft(
+        draft,
+        bundle=bundle,
+        allowed_evidence_refs={item.ref},
+        value_catalog=_value_catalog(bundle),
+        salvage=False,
+        node="committee.final.serialize.numeric",
+    )
+
+    assert result.scenario_reference_ranges == {}
+    assert [level.label for level in result.market_reference_levels] == [
+        "Explicit RSI reference"
+    ]
+    assert result.market_reference_levels[0].measurement_kind is MeasurementKind.INDEX
+    assert result.promoted_singletons == 1
+    assert result.status is NumericAuditStatus.COMPLETE
+    events: list[dict[str, Any]] = []
+    _emit_numeric_normalization_event(
+        result,
+        event_writer=events.append,
+        node="committee.final.serialize.numeric",
+    )
+    assert events == [
+        {
+            "event_type": "decision.numeric_singleton_promoted",
+            "node": "committee.final.serialize.numeric",
+            "payload": {"count": 1},
+        }
+    ]
+
+
+def test_equal_observed_values_with_different_locators_are_not_promoted() -> None:
+    items = tuple(
+        EvidenceItem(
+            ref=ref,
+            source="fixture.market",
+            evidence_type=label,
+            requested_date=date(2026, 8, 1),
+            effective_date=date(2026, 7, 31),
+            value=100,
+            measurement_kind=MeasurementKind.CURRENCY,
+            unit="JPY",
+        )
+        for ref, label in (
+            ("ev_0123456789ab", "first source"),
+            ("ev_abcdef012345", "second source"),
+        )
+    )
+    bundle = EvidenceBundle(
+        instrument="6501.T",
+        analysis_date=date(2026, 8, 1),
+        items=items,
+    )
+    catalog = build_numeric_value_catalog(bundle)
+    draft = DecisionNumericDraft(
+        requested=True,
+        scenario_reference_ranges=ScenarioReferenceRangesDraft(
+            base=(
+                ScenarioReferenceRangeDraft(
+                    category=ScenarioReferenceCategory.TECHNICAL,
+                    label="Conflicting singleton",
+                    low=ObservedRangeEndpointDraft(value_ref=catalog[0].id),
+                    high=ObservedRangeEndpointDraft(value_ref=catalog[1].id),
+                    interpretation="Equal values from different locators.",
+                    limitations=("The locators differ.",),
+                ),
+            )
+        ),
+    )
+
+    result = _assemble_numeric_draft(
+        draft,
+        bundle=bundle,
+        allowed_evidence_refs={item.ref for item in items},
+        value_catalog={entry.id: entry for entry in catalog},
+        salvage=True,
+        node="committee.final.serialize.numeric",
+    )
+
+    assert result.market_reference_levels == ()
+    assert result.scenario_reference_ranges == {}
+    assert result.issues == (
+        "numeric.scenario.base.ranges.0.invalid_range",
+        "numeric.requested.empty",
+    )
+
+
 def test_invalid_scenario_range_only_omits_that_range() -> None:
     bundle, draft = _numeric_regression()
     valid_range = draft.scenario_reference_ranges.base[0]
@@ -1648,11 +1778,11 @@ def test_final_decision_recomputes_optional_calculation_result() -> None:
                                 category=ScenarioReferenceCategory.FUNDAMENTAL,
                                 label="Derived scenario reference",
                                 low=AuditedRangeEndpoint(
-                                    value=999,
+                                    value=100,
                                     basis=MarketReferenceBasis.DERIVED,
                                     evidence_refs=(ref,),
                                     date_evidence_refs=(ref,),
-                                    calculation_id="calc_scenario",
+                                    calculation_id="calc_scenario_low",
                                     as_of_date=date(2026, 7, 24),
                                 ),
                                 high=AuditedRangeEndpoint(
@@ -1660,7 +1790,7 @@ def test_final_decision_recomputes_optional_calculation_result() -> None:
                                     basis=MarketReferenceBasis.DERIVED,
                                     evidence_refs=(ref,),
                                     date_evidence_refs=(ref,),
-                                    calculation_id="calc_scenario",
+                                    calculation_id="calc_scenario_high",
                                     as_of_date=date(2026, 7, 24),
                                 ),
                                 unit="USD",
@@ -1676,7 +1806,17 @@ def test_final_decision_recomputes_optional_calculation_result() -> None:
             ),
             "calculation_records": (
                 CalculationRecord(
-                    id="calc_scenario",
+                    id="calc_scenario_low",
+                    formula="base * floor_multiple",
+                    inputs={"base": 100, "floor_multiple": 1},
+                    input_evidence_refs=(ref,),
+                    result=999,
+                    unit="USD",
+                    as_of_date=date(2026, 7, 24),
+                    limitations=("Illustrative scenario only.",),
+                ),
+                CalculationRecord(
+                    id="calc_scenario_high",
                     formula="base * growth",
                     inputs={"base": 100, "growth": 1.1},
                     input_evidence_refs=(ref,),
@@ -1699,7 +1839,9 @@ def test_final_decision_recomputes_optional_calculation_result() -> None:
     )
 
     assert len(llm.prompts) == 2
-    assert result.value.calculation_records[0].result == pytest.approx(110.0)
+    assert [item.result for item in result.value.calculation_records] == pytest.approx(
+        [100.0, 110.0]
+    )
     assert result.value.numeric_audit_status is NumericAuditStatus.COMPLETE
     assert result.numeric_audit is None
 
