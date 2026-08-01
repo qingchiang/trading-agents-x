@@ -635,6 +635,56 @@ def _decision_language_rules(output_language: str) -> str:
     )
 
 
+_SCENARIO_LABEL_PATTERNS: dict[
+    ReportLanguage,
+    dict[ResearchScenarioKind, tuple[str, ...]],
+] = {
+    ReportLanguage.ENGLISH: {
+        ResearchScenarioKind.BASE: (r"\b(?:base|neutral)\s+(?:scenario|case)\b",),
+        ResearchScenarioKind.BULL: (
+            r"\b(?:bull|bullish|upside|recovery)\s+(?:scenario|case)\b",
+        ),
+        ResearchScenarioKind.BEAR: (
+            r"\b(?:bear|bearish|downside|deterioration)\s+(?:scenario|case)\b",
+        ),
+    },
+    ReportLanguage.SIMPLIFIED_CHINESE: {
+        ResearchScenarioKind.BASE: (r"(?:基准|中性)情景",),
+        ResearchScenarioKind.BULL: (r"(?:乐观|上行|修复)情景",),
+        ResearchScenarioKind.BEAR: (r"(?:悲观|下行|恶化)情景",),
+    },
+    ReportLanguage.JAPANESE: {
+        ResearchScenarioKind.BASE: (r"(?:基準|中立)(?:シナリオ|ケース)",),
+        ResearchScenarioKind.BULL: (r"(?:強気|上振れ|回復)(?:シナリオ|ケース)",),
+        ResearchScenarioKind.BEAR: (r"(?:弱気|下振れ|悪化)(?:シナリオ|ケース)",),
+    },
+}
+
+
+def _label_declares_other_scenario(
+    label: str,
+    *,
+    owner: ResearchScenarioKind,
+    output_language: str,
+) -> bool:
+    language = next(
+        (
+            candidate
+            for candidate in ReportLanguage
+            if output_language == candidate.prompt_label
+        ),
+        None,
+    )
+    if language is None:
+        return False
+    for scenario_kind, patterns in _SCENARIO_LABEL_PATTERNS[language].items():
+        if scenario_kind is owner:
+            continue
+        if any(re.search(pattern, label, flags=re.IGNORECASE) for pattern in patterns):
+            return True
+    return False
+
+
 def _decision_example_text(output_language: str) -> dict[str, str]:
     if output_language == ReportLanguage.SIMPLIFIED_CHINESE.prompt_label:
         return {
@@ -847,6 +897,7 @@ def invoke_research_decision(
             allowed_memory_refs=valid_memory_refs,
         )
 
+    core_value = core.value
     numeric_node = f"{node}.numeric"
     numeric_phase = (
         metrics.phase(numeric_node, event_writer=event_writer)
@@ -862,8 +913,8 @@ def invoke_research_decision(
             allowed_evidence_refs=valid_refs,
             event_writer=event_writer,
             output_language=resolved_language,
+            core_scenarios=core_value.scenarios,
         )
-    core_value = core.value
     scenario_values = []
     for scenario in core_value.scenarios:
         numeric_scenarios = numeric.scenario_reference_ranges.get(scenario.kind, ())
@@ -927,6 +978,7 @@ def _invoke_decision_numeric(
     allowed_evidence_refs: tuple[str, ...],
     event_writer: EventWriter | None,
     output_language: str,
+    core_scenarios: tuple[ResearchScenarioCoreDraft, ...],
 ) -> _NumericDecisionAssembly:
     allowed = set(allowed_evidence_refs)
     value_catalog = build_numeric_value_catalog(
@@ -936,6 +988,16 @@ def _invoke_decision_numeric(
     value_catalog_by_id = {item.id: item for item in value_catalog}
     example_text = _decision_example_text(output_language)
     language_rules = _decision_language_rules(output_language)
+    scenario_catalog = tuple(
+        {
+            "kind": scenario.kind.value,
+            "outcome": scenario.outcome,
+            "core_assumptions": list(scenario.core_assumptions),
+            "evidence_refs": list(scenario.evidence_refs),
+        }
+        for scenario in core_scenarios
+    )
+    scenario_catalog_json = json.dumps(scenario_catalog, ensure_ascii=False)
 
     def validate(draft: DecisionNumericDraft) -> DecisionNumericDraft:
         _assemble_numeric_draft(
@@ -945,6 +1007,7 @@ def _invoke_decision_numeric(
             value_catalog=value_catalog_by_id,
             salvage=False,
             node=node,
+            output_language=output_language,
         )
         return draft
 
@@ -1065,6 +1128,9 @@ def _invoke_decision_numeric(
             "invalid range identified by the issue path. A scenario may contain "
             "multiple ranges with the same category when their labels or endpoints "
             "describe distinct research uses. Do not emit exact duplicates. "
+            "Every range must belong to the matching validated scenario in the "
+            "SCENARIO CATALOG. Labels describe only the range purpose and must not "
+            "claim to belong to a different base, bull, or bear scenario. "
             "A valuation assessment is allowed only when both endpoints are derived "
             "from real valuation calculations such as EPS times a multiple or DCF. Do not "
             "supply calculation results or dates; the application derives both "
@@ -1075,6 +1141,8 @@ def _invoke_decision_numeric(
                 [item.prompt_payload() for item in value_catalog],
                 ensure_ascii=False,
             )
+            + "\nSCENARIO CATALOG:\n"
+            + scenario_catalog_json
         ),
     )
     try:
@@ -1091,6 +1159,8 @@ def _invoke_decision_numeric(
                 [item.prompt_payload() for item in value_catalog],
                 ensure_ascii=False,
             )
+            + "\n\nSCENARIO CATALOG:\n"
+            + scenario_catalog_json
             + "\n\nLOCALIZED VALID EXAMPLE:\n"
             + json.dumps(example.model_dump(mode="json"), ensure_ascii=False),
             example=example.model_dump(mode="json"),
@@ -1330,6 +1400,7 @@ def _assemble_numeric_draft(
     value_catalog: Mapping[str, NumericValueCatalogEntry],
     salvage: bool,
     node: str,
+    output_language: str = ReportLanguage.ENGLISH.prompt_label,
 ) -> _NumericDecisionAssembly:
     issues: list[str] = []
     calculations: dict[str, CalculationRecord] = {}
@@ -1398,6 +1469,13 @@ def _assemble_numeric_draft(
                 continue
             seen_range_keys.add(range_key)
             prefix = f"numeric.scenario.{scenario_kind.value}.ranges.{index}"
+            if _label_declares_other_scenario(
+                scenario.label,
+                owner=scenario_kind,
+                output_language=output_language,
+            ):
+                issues.append(f"{prefix}.scenario_mismatch")
+                continue
             try:
                 require_text(scenario.label)
                 require_text(scenario.interpretation)

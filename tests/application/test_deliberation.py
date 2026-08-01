@@ -896,6 +896,99 @@ def test_final_serializer_phases_record_child_wall_time_without_parent_span() ->
     ]
 
 
+def test_numeric_serializer_receives_validated_core_scenario_catalog() -> None:
+    state = _state()
+    ref = state["evidence_bundle"]["items"][0]["ref"]
+    decision = research_decision(evidence_refs=(ref,))
+    llm = _StaticLLM(decision)
+
+    invoke_research_decision(
+        llm,
+        prompt="Form the final decision.",
+        state=state,
+        node="committee.final",
+        require_risk_adjustments=False,
+    )
+
+    numeric_prompt = llm.prompts[1]
+    assert "SCENARIO CATALOG" in numeric_prompt
+    for scenario in decision.scenarios:
+        assert scenario.outcome in numeric_prompt
+        assert scenario.core_assumptions[0] in numeric_prompt
+
+
+@pytest.mark.parametrize(
+    ("output_language", "label"),
+    (
+        ("Simplified Chinese (简体中文, zh-CN)", "悲观情景估值回归区间"),
+        ("English (en)", "Bear scenario valuation range"),
+        ("Japanese (日本語, ja)", "弱気シナリオ評価レンジ"),
+    ),
+)
+def test_explicit_cross_scenario_label_only_omits_that_range(
+    output_language: str,
+    label: str,
+) -> None:
+    bundle, draft = _numeric_regression()
+    valid_range = draft.scenario_reference_ranges.base[0]
+    mismatched_range = valid_range.model_copy(update={"label": label})
+    draft = draft.model_copy(
+        update={
+            "scenario_reference_ranges": draft.scenario_reference_ranges.model_copy(
+                update={"base": (valid_range, mismatched_range)}
+            )
+        }
+    )
+
+    result = _assemble_numeric_draft(
+        draft,
+        bundle=bundle,
+        allowed_evidence_refs={item.ref for item in bundle.items},
+        value_catalog=_value_catalog(bundle),
+        salvage=True,
+        node="committee.final.serialize.numeric",
+        output_language=output_language,
+    )
+
+    assert [item.label for item in result.scenario_reference_ranges[ResearchScenarioKind.BASE]] == [
+        valid_range.label
+    ]
+    assert result.status is NumericAuditStatus.PARTIAL
+    assert result.issues == ("numeric.scenario.base.ranges.1.scenario_mismatch",)
+    assert {item.component_path for item in result.omissions} == {
+        "numeric.scenario.base.ranges.1"
+    }
+
+
+def test_non_scenario_purpose_label_is_not_treated_as_misaligned() -> None:
+    bundle, draft = _numeric_regression()
+    base_range = draft.scenario_reference_ranges.base[0].model_copy(
+        update={"label": "下行风险参考区间"}
+    )
+    draft = draft.model_copy(
+        update={
+            "scenario_reference_ranges": draft.scenario_reference_ranges.model_copy(
+                update={"base": (base_range,)}
+            )
+        }
+    )
+
+    result = _assemble_numeric_draft(
+        draft,
+        bundle=bundle,
+        allowed_evidence_refs={item.ref for item in bundle.items},
+        value_catalog=_value_catalog(bundle),
+        salvage=False,
+        node="committee.final.serialize.numeric",
+        output_language="Simplified Chinese (简体中文, zh-CN)",
+    )
+
+    assert result.scenario_reference_ranges[ResearchScenarioKind.BASE][0].label == (
+        "下行风险参考区间"
+    )
+    assert result.status is NumericAuditStatus.COMPLETE
+
+
 def test_6501_numeric_regression_canonicalizes_results_dates_and_shared_usage() -> None:
     bundle, draft = _numeric_regression()
 
