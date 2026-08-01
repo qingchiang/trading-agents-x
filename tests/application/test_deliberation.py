@@ -52,6 +52,7 @@ from tradingagents.graph.deliberation import (
     _emit_numeric_normalization_event,
     _evaluate_formula,
     _numeric_audit_snapshot,
+    _numeric_example_pair,
     debate_round_has_material_progress,
     decision_scenario_assumption_guidance,
     invoke_debate_agenda,
@@ -769,6 +770,42 @@ def test_numeric_prompt_distinguishes_observed_ranges_from_valuations() -> None:
     assert "not valuations" in numeric_prompt
     assert '"basis": "observed"' in numeric_prompt
     assert '"basis": "derived"' in numeric_prompt
+    assert "low strictly less than high" in numeric_prompt
+    assert "single numeric level in market_reference_levels" in numeric_prompt
+    assert "must omit dates, values, units, basis names" in numeric_prompt
+    example = json.loads(numeric_prompt.rsplit("LOCALIZED VALID EXAMPLE:\n", 1)[1])
+    assert example["scenario_reference_ranges"] == {
+        "base": [],
+        "bull": [],
+        "bear": [],
+    }
+
+
+def test_numeric_prompt_example_pair_is_compatible_and_strictly_ordered() -> None:
+    bundle = EvidenceBundle(
+        instrument="NVDA",
+        analysis_date=date(2026, 7, 24),
+        items=tuple(
+            EvidenceItem.create(
+                source="fixture",
+                evidence_type=label,
+                requested_date=date(2026, 7, 24),
+                effective_date=date(2026, 7, 24),
+                value=value,
+                measurement_kind=MeasurementKind.CURRENCY,
+                unit="USD",
+            )
+            for label, value in (("upper", 120), ("lower", 80))
+        ),
+    )
+
+    pair = _numeric_example_pair(build_numeric_value_catalog(bundle))
+
+    assert pair is not None
+    assert pair[0].value == 80
+    assert pair[1].value == 120
+    assert pair[0].measurement_kind is pair[1].measurement_kind
+    assert pair[0].unit == pair[1].unit == "USD"
 
 
 def test_public_decision_rejects_derived_reference_without_calculation() -> None:

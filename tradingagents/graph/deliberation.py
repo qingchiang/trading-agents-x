@@ -858,6 +858,23 @@ def _decision_example_text(output_language: str) -> dict[str, str]:
     }
 
 
+def _numeric_example_pair(
+    value_catalog: tuple[NumericValueCatalogEntry, ...],
+) -> tuple[NumericValueCatalogEntry, NumericValueCatalogEntry] | None:
+    """Return one compatible, strictly ordered pair for the prompt example."""
+
+    for index, first in enumerate(value_catalog):
+        for second in value_catalog[index + 1 :]:
+            if (
+                first.measurement_kind is not second.measurement_kind
+                or first.unit != second.unit
+                or first.value == second.value
+            ):
+                continue
+            return tuple(sorted((first, second), key=lambda item: item.value))
+    return None
+
+
 def invoke_research_decision(
     llm: Any,
     *,
@@ -1137,24 +1154,14 @@ def _invoke_decision_numeric(
         }.get(raw.get("event_type"), raw.get("event_type"))
         event_writer({**raw, "event_type": mapped})
 
-    example_low: RangeEndpointDraft
-    example_high: RangeEndpointDraft
     example_reference: MarketReferenceLevelDraft
     if value_catalog:
-        example_low = ObservedRangeEndpointDraft(value_ref=value_catalog[0].id)
-        example_high = ObservedRangeEndpointDraft(value_ref=value_catalog[0].id)
         example_reference = ObservedMarketReferenceLevelDraft(
             label=example_text["reference_label"],
             value_ref=value_catalog[0].id,
             interpretation=example_text["reference_interpretation"],
         )
     else:
-        example_low = DerivedRangeEndpointDraft(
-            calculation_id="calc_valuation_low",
-        )
-        example_high = DerivedRangeEndpointDraft(
-            calculation_id="calc_valuation_high",
-        )
         example_reference = DerivedMarketReferenceLevelDraft(
             label=example_text["reference_label"],
             unit="USD",
@@ -1162,32 +1169,18 @@ def _invoke_decision_numeric(
             calculation_id="calc_valuation_low",
         )
 
-    example_ranges = [
-        ScenarioReferenceRangeDraft(
-            category=ScenarioReferenceCategory.TECHNICAL,
-            label=example_text["scenario_range_label"],
-            low=example_low,
-            high=example_high,
-            unit="USD",
-            interpretation=example_text["scenario_range_interpretation"],
-            limitations=(example_text["valuation_limitation"],),
-        )
-    ]
-    if value_catalog:
+    example_ranges: list[ScenarioReferenceRangeDraft] = []
+    example_pair = _numeric_example_pair(value_catalog)
+    if example_pair is not None:
+        example_low, example_high = example_pair
         example_ranges.append(
             ScenarioReferenceRangeDraft(
-                category=ScenarioReferenceCategory.OTHER,
-                label=example_text["reference_label"],
-                low=InterpretedRangeEndpointDraft(
-                    value=value_catalog[0].value,
-                    anchor_value_refs=(value_catalog[0].id,),
-                ),
-                high=InterpretedRangeEndpointDraft(
-                    value=value_catalog[0].value,
-                    anchor_value_refs=(value_catalog[0].id,),
-                ),
-                unit=value_catalog[0].unit or "USD",
-                interpretation=example_text["reference_interpretation"],
+                category=ScenarioReferenceCategory.TECHNICAL,
+                label=example_text["scenario_range_label"],
+                low=ObservedRangeEndpointDraft(value_ref=example_low.id),
+                high=ObservedRangeEndpointDraft(value_ref=example_high.id),
+                unit=example_low.unit,
+                interpretation=example_text["scenario_range_interpretation"],
                 limitations=(example_text["valuation_limitation"],),
             )
         )
@@ -1259,10 +1252,15 @@ def _invoke_decision_numeric(
             "every already-valid, non-duplicate range while repairing only the "
             "invalid range identified by the issue path. A scenario may contain "
             "multiple ranges with the same category when their labels or endpoints "
-            "describe distinct research uses. Do not emit exact duplicates. "
+            "describe distinct research uses. A true range must contain two distinct "
+            "endpoints with low strictly less than high; never reverse low and high. "
+            "Represent a single numeric level in market_reference_levels, never as a "
+            "zero-width range. Do not emit exact duplicates. "
             "Every range must belong to the matching validated scenario in the "
             "SCENARIO CATALOG. Labels describe only the range purpose and must not "
-            "claim to belong to a different base, bull, or bear scenario. "
+            "claim to belong to a different base, bull, or bear scenario. Labels must "
+            "not repeat dates, values, units, basis names, or scenario ownership; the "
+            "application renders those fields separately. "
             "A valuation assessment is allowed only when both endpoints are derived "
             "from real valuation calculations such as EPS times a multiple or DCF. Do not "
             "supply calculation results or dates; the application derives both "
@@ -1284,6 +1282,10 @@ def _invoke_decision_numeric(
             "does not support a numeric appendix. Do not copy ordinary report "
             "table arithmetic. Use scenario_reference_ranges for technical bands, "
             "52-week levels, or analyst target ranges; these are not valuations. "
+            "A true range requires two distinct endpoints with low strictly less than "
+            "high. Put a single numeric level in market_reference_levels instead of "
+            "repeating it as low and high. Labels name only the metric or research use "
+            "and must omit dates, values, units, basis names, and scenario ownership. "
             "Use valuation_assessment only for genuinely derived valuation work. "
             + language_rules
             + "\n\nNUMERIC VALUE CATALOG:\n"
