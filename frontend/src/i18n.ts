@@ -306,8 +306,9 @@ const en = {
     referenceBasis: "Basis",
     interpretation: "Interpretation",
     marketReferenceBasis: {
-      observed: "Observed",
-      derived: "Derived",
+      observed: "Direct observation",
+      interpreted: "Research interpretation",
+      derived: "Formula-derived",
     },
     unverifiedNumericDrafts: "Unverified numeric drafts",
     unverifiedNumericBoundary:
@@ -725,8 +726,9 @@ const zhCN = {
     referenceBasis: "类型",
     interpretation: "解释",
     marketReferenceBasis: {
-      observed: "观察值",
-      derived: "推导值",
+      observed: "直接观察",
+      interpreted: "研究解读",
+      derived: "公式推导",
     },
     unverifiedNumericDrafts: "未验证数值草案",
     unverifiedNumericBoundary:
@@ -1150,8 +1152,9 @@ const ja = {
     referenceBasis: "種別",
     interpretation: "説明",
     marketReferenceBasis: {
-      observed: "観測値",
-      derived: "導出値",
+      observed: "直接観測",
+      interpreted: "リサーチ解釈",
+      derived: "数式による導出",
     },
     unverifiedNumericDrafts: "未検証の数値ドラフト",
     unverifiedNumericBoundary:

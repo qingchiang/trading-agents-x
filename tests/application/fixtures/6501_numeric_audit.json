@@ -48,8 +48,8 @@
       {
         "kind": "base",
         "label": "Base technical range",
-        "low": {"basis": "observed", "value": 5000, "evidence_refs": ["ev_6501a0000001"]},
-        "high": {"basis": "observed", "value": 5500, "evidence_refs": ["ev_6501a0000001"]},
+        "low": {"basis": "interpreted", "value": 5000, "evidence_refs": ["ev_6501a0000001"]},
+        "high": {"basis": "interpreted", "value": 5500, "evidence_refs": ["ev_6501a0000001"]},
         "unit": "JPY",
         "interpretation": "Observed technical reference band.",
         "limitations": ["Historical levels are not forecasts."]
@@ -57,8 +57,8 @@
       {
         "kind": "bull",
         "label": "Bull reference range",
-        "low": {"basis": "observed", "value": 5700, "evidence_refs": ["ev_6501a0000001"]},
-        "high": {"basis": "observed", "value": 6200, "evidence_refs": ["ev_6501a0000001"]},
+        "low": {"basis": "interpreted", "value": 5700, "evidence_refs": ["ev_6501a0000001"]},
+        "high": {"basis": "interpreted", "value": 6200, "evidence_refs": ["ev_6501a0000001"]},
         "unit": "JPY",
         "interpretation": "Observed market reference band.",
         "limitations": ["Historical levels are not forecasts."]
@@ -66,8 +66,8 @@
       {
         "kind": "bear",
         "label": "Bear reference range",
-        "low": {"basis": "observed", "value": 4200, "evidence_refs": ["ev_6501a0000001"]},
-        "high": {"basis": "observed", "value": 4700, "evidence_refs": ["ev_6501a0000001"]},
+        "low": {"basis": "interpreted", "value": 4200, "evidence_refs": ["ev_6501a0000001"]},
+        "high": {"basis": "interpreted", "value": 4700, "evidence_refs": ["ev_6501a0000001"]},
         "unit": "JPY",
         "interpretation": "Observed downside reference band.",
         "limitations": ["Historical levels are not forecasts."]
@@ -83,10 +83,9 @@
     "market_reference_levels": [
       {
         "label": "Observed close",
-        "value": 5267,
+        "value_ref": "nv_b031f094f3c7",
         "unit": "JPY",
         "interpretation": "Directly observed close.",
-        "evidence_refs": ["ev_6501a0000001"],
         "basis": "observed"
       },
       {
@@ -105,10 +104,9 @@
       },
       {
         "label": "Analyst consensus target",
-        "value": 5600,
+        "value_ref": "nv_b07c4c829290",
         "unit": "JPY",
         "interpretation": "A low-quality retrieval-time analyst target snapshot.",
-        "evidence_refs": ["ev_6501a0000003"],
         "basis": "observed"
       }
     ],

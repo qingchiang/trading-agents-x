@@ -26,6 +26,7 @@ from tradingagents.application.contracts import (
     EvidenceBundle,
     EvidenceItem,
     EvidenceTemporalScope,
+    EvidenceValueLocator,
     IssueDisposition,
     JudgeDraft,
     MarketReferenceBasis,
@@ -54,6 +55,10 @@ from tradingagents.application.contracts import (
 from tradingagents.application.markdown_evidence import normalize_evidence_markdown
 from tradingagents.dataflows.lookahead import is_near_live
 from tradingagents.dataflows.symbol_utils import market_timezone
+from tradingagents.graph.numeric_evidence import (
+    NumericValueCatalogEntry,
+    build_numeric_value_catalog,
+)
 from tradingagents.graph.output_validation import (
     OutputValidationError,
     require_nonempty_texts,
@@ -165,6 +170,15 @@ class ObservedRangeEndpointDraft(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     basis: Literal[MarketReferenceBasis.OBSERVED] = MarketReferenceBasis.OBSERVED
+    value_ref: str = Field(pattern=r"^nv_[a-f0-9]{12}$")
+
+
+class InterpretedRangeEndpointDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    basis: Literal[MarketReferenceBasis.INTERPRETED] = (
+        MarketReferenceBasis.INTERPRETED
+    )
     value: float
     evidence_refs: tuple[str, ...] = Field(min_length=1)
 
@@ -177,7 +191,9 @@ class DerivedRangeEndpointDraft(BaseModel):
 
 
 RangeEndpointDraft: TypeAlias = Annotated[
-    ObservedRangeEndpointDraft | DerivedRangeEndpointDraft,
+    ObservedRangeEndpointDraft
+    | InterpretedRangeEndpointDraft
+    | DerivedRangeEndpointDraft,
     Field(discriminator="basis"),
 ]
 
@@ -208,11 +224,23 @@ class ObservedMarketReferenceLevelDraft(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     label: str = Field(min_length=1, max_length=120)
+    value_ref: str = Field(pattern=r"^nv_[a-f0-9]{12}$")
+    unit: str = Field(min_length=1, max_length=32)
+    interpretation: str = Field(min_length=1)
+    basis: Literal[MarketReferenceBasis.OBSERVED] = MarketReferenceBasis.OBSERVED
+
+
+class InterpretedMarketReferenceLevelDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    label: str = Field(min_length=1, max_length=120)
     value: float
     unit: str = Field(min_length=1, max_length=32)
     interpretation: str = Field(min_length=1)
     evidence_refs: tuple[str, ...] = Field(min_length=1)
-    basis: Literal[MarketReferenceBasis.OBSERVED] = MarketReferenceBasis.OBSERVED
+    basis: Literal[MarketReferenceBasis.INTERPRETED] = (
+        MarketReferenceBasis.INTERPRETED
+    )
 
 
 class DerivedMarketReferenceLevelDraft(BaseModel):
@@ -226,7 +254,9 @@ class DerivedMarketReferenceLevelDraft(BaseModel):
 
 
 MarketReferenceLevelDraft: TypeAlias = Annotated[
-    ObservedMarketReferenceLevelDraft | DerivedMarketReferenceLevelDraft,
+    ObservedMarketReferenceLevelDraft
+    | InterpretedMarketReferenceLevelDraft
+    | DerivedMarketReferenceLevelDraft,
     Field(discriminator="basis"),
 ]
 
@@ -854,6 +884,11 @@ def _invoke_decision_numeric(
     output_language: str,
 ) -> _NumericDecisionAssembly:
     allowed = set(allowed_evidence_refs)
+    value_catalog = build_numeric_value_catalog(
+        bundle,
+        allowed_evidence_refs=allowed,
+    )
+    value_catalog_by_id = {item.id: item for item in value_catalog}
     example_text = _decision_example_text(output_language)
     language_rules = _decision_language_rules(output_language)
 
@@ -862,6 +897,7 @@ def _invoke_decision_numeric(
             draft,
             bundle=bundle,
             allowed_evidence_refs=allowed,
+            value_catalog=value_catalog_by_id,
             salvage=False,
             node=node,
         )
@@ -877,20 +913,43 @@ def _invoke_decision_numeric(
         }.get(raw.get("event_type"), raw.get("event_type"))
         event_writer({**raw, "event_type": mapped})
 
+    example_low: RangeEndpointDraft
+    example_high: RangeEndpointDraft
+    example_reference: MarketReferenceLevelDraft
+    if value_catalog:
+        example_low = ObservedRangeEndpointDraft(value_ref=value_catalog[0].id)
+        example_high = ObservedRangeEndpointDraft(value_ref=value_catalog[0].id)
+        example_reference = ObservedMarketReferenceLevelDraft(
+            label=example_text["reference_label"],
+            value_ref=value_catalog[0].id,
+            unit=value_catalog[0].unit or "USD",
+            interpretation=example_text["reference_interpretation"],
+        )
+    else:
+        example_low = InterpretedRangeEndpointDraft(
+            value=95,
+            evidence_refs=(allowed_evidence_refs[0],),
+        )
+        example_high = InterpretedRangeEndpointDraft(
+            value=105,
+            evidence_refs=(allowed_evidence_refs[0],),
+        )
+        example_reference = InterpretedMarketReferenceLevelDraft(
+            label=example_text["reference_label"],
+            value=100,
+            unit="USD",
+            interpretation=example_text["reference_interpretation"],
+            evidence_refs=(allowed_evidence_refs[0],),
+        )
+
     example = DecisionNumericDraft(
         requested=True,
         scenario_reference_ranges=(
             ScenarioReferenceRangeDraft(
                 kind=ResearchScenarioKind.BASE,
                 label=example_text["scenario_range_label"],
-                low=ObservedRangeEndpointDraft(
-                    value=95,
-                    evidence_refs=(allowed_evidence_refs[0],),
-                ),
-                high=ObservedRangeEndpointDraft(
-                    value=105,
-                    evidence_refs=(allowed_evidence_refs[0],),
-                ),
+                low=example_low,
+                high=example_high,
                 unit="USD",
                 interpretation=example_text["scenario_range_interpretation"],
                 limitations=(example_text["valuation_limitation"],),
@@ -908,14 +967,7 @@ def _invoke_decision_numeric(
             limitations=(example_text["valuation_limitation"],),
         ),
         market_reference_levels=(
-            ObservedMarketReferenceLevelDraft(
-                label=example_text["reference_label"],
-                value=100,
-                unit="USD",
-                interpretation=(example_text["reference_interpretation"]),
-                evidence_refs=(allowed_evidence_refs[0],),
-                basis=MarketReferenceBasis.OBSERVED,
-            ),
+            example_reference,
         ),
         calculation_records=(
             CalculationRecordDraft(
@@ -956,14 +1008,21 @@ def _invoke_decision_numeric(
             "Repair only the optional numeric appendix. Calculation input "
             "names must be ASCII identifiers and the formula must use every "
             "input exactly. Technical levels, historical highs/lows, and analyst "
-            "target prices are observed references when supported directly by "
-            "Evidence; they require no calculation and must not be disguised as "
+            "target prices are observed only when selected by value_ref from the "
+            "Numeric Value Catalog. Rounded, selected, combined, or model-interpreted "
+            "levels must use basis=interpreted with supporting Evidence refs. They "
+            "require no calculation and must not be disguised as observed values or "
             "descriptive formulas. Derived endpoints must name a valid calculation. "
             "A valuation assessment is allowed only when both endpoints are derived "
             "from real valuation calculations such as EPS times a multiple or DCF. Do not "
             "supply calculation results or dates; the application derives both "
             "from the formula and Evidence Ledger. Do not change the qualitative "
-            f"decision core. {language_rules}"
+            f"decision core. {language_rules}\n"
+            "VALID OBSERVED VALUE REFS:\n"
+            + json.dumps(
+                [item.prompt_payload() for item in value_catalog],
+                ensure_ascii=False,
+            )
         ),
     )
     try:
@@ -975,6 +1034,11 @@ def _invoke_decision_numeric(
             "52-week levels, or analyst target ranges; these are not valuations. "
             "Use valuation_assessment only for genuinely derived valuation work. "
             + language_rules
+            + "\n\nNUMERIC VALUE CATALOG:\n"
+            + json.dumps(
+                [item.prompt_payload() for item in value_catalog],
+                ensure_ascii=False,
+            )
             + "\n\nLOCALIZED VALID EXAMPLE:\n"
             + json.dumps(example.model_dump(mode="json"), ensure_ascii=False),
             example=example.model_dump(mode="json"),
@@ -1012,6 +1076,7 @@ def _invoke_decision_numeric(
             draft,
             bundle=bundle,
             allowed_evidence_refs=allowed,
+            value_catalog=value_catalog_by_id,
             salvage=True,
             node=node,
         )
@@ -1031,6 +1096,7 @@ def _invoke_decision_numeric(
         output.value,
         bundle=bundle,
         allowed_evidence_refs=allowed,
+        value_catalog=value_catalog_by_id,
         salvage=False,
         node=node,
     )
@@ -1179,6 +1245,7 @@ def _assemble_numeric_draft(
     *,
     bundle: EvidenceBundle,
     allowed_evidence_refs: set[str],
+    value_catalog: Mapping[str, NumericValueCatalogEntry],
     salvage: bool,
     node: str,
 ) -> _NumericDecisionAssembly:
@@ -1256,6 +1323,7 @@ def _assemble_numeric_draft(
                     evidence_items=evidence_items,
                     bundle=bundle,
                     allowed_evidence_refs=allowed_evidence_refs,
+                    value_catalog=value_catalog,
                     issue_prefix=f"{prefix}.{endpoint_name}",
                 )
             except OutputValidationError as exc:
@@ -1292,6 +1360,7 @@ def _assemble_numeric_draft(
                 evidence_items=evidence_items,
                 bundle=bundle,
                 allowed_evidence_refs=allowed_evidence_refs,
+                value_catalog=value_catalog,
                 issue_prefix=f"{prefix}.low",
             )
             high = _assemble_range_endpoint(
@@ -1300,6 +1369,7 @@ def _assemble_numeric_draft(
                 evidence_items=evidence_items,
                 bundle=bundle,
                 allowed_evidence_refs=allowed_evidence_refs,
+                value_catalog=value_catalog,
                 issue_prefix=f"{prefix}.high",
             )
         except OutputValidationError as exc:
@@ -1323,6 +1393,22 @@ def _assemble_numeric_draft(
         try:
             require_text(item.interpretation)
             if isinstance(item, ObservedMarketReferenceLevelDraft):
+                catalog_entry = value_catalog.get(item.value_ref)
+                if catalog_entry is None:
+                    raise OutputValidationError(f"{prefix}.unknown_observed_value")
+                resolved_date = _catalog_entry_date(
+                    catalog_entry,
+                    evidence_items=evidence_items,
+                    bundle=bundle,
+                    issue_prefix=prefix,
+                )
+                as_of_date = resolved_date.value
+                temporal_basis = resolved_date.temporal_basis
+                value = catalog_entry.value
+                evidence_refs = catalog_entry.evidence_refs
+                source_locator: EvidenceValueLocator | None = catalog_entry.locator
+                calculation_ids: tuple[str, ...] = ()
+            elif isinstance(item, InterpretedMarketReferenceLevelDraft):
                 require_valid_refs(
                     item.evidence_refs,
                     allowed_evidence_refs,
@@ -1338,6 +1424,7 @@ def _assemble_numeric_draft(
                 temporal_basis = resolved_date.temporal_basis
                 value = item.value
                 evidence_refs = item.evidence_refs
+                source_locator = None
                 calculation_ids: tuple[str, ...] = ()
             else:
                 calculation = calculations.get(item.calculation_id)
@@ -1346,6 +1433,7 @@ def _assemble_numeric_draft(
                 as_of_date = calculation.as_of_date
                 value = float(calculation.result)
                 evidence_refs = calculation.input_evidence_refs
+                source_locator = None
                 calculation_ids = (item.calculation_id,)
                 temporal_basis = calculation.temporal_basis
         except OutputValidationError as exc:
@@ -1360,6 +1448,7 @@ def _assemble_numeric_draft(
                     interpretation=item.interpretation,
                     evidence_refs=evidence_refs,
                     basis=item.basis,
+                    source_locator=source_locator,
                     calculation_ids=calculation_ids,
                     temporal_basis=temporal_basis,
                 )
@@ -1464,9 +1553,28 @@ def _assemble_range_endpoint(
     evidence_items: Mapping[str, EvidenceItem],
     bundle: EvidenceBundle,
     allowed_evidence_refs: set[str],
+    value_catalog: Mapping[str, NumericValueCatalogEntry],
     issue_prefix: str,
 ) -> AuditedRangeEndpoint:
     if isinstance(draft, ObservedRangeEndpointDraft):
+        catalog_entry = value_catalog.get(draft.value_ref)
+        if catalog_entry is None:
+            raise OutputValidationError(f"{issue_prefix}.unknown_observed_value")
+        resolved_date = _catalog_entry_date(
+            catalog_entry,
+            evidence_items=evidence_items,
+            bundle=bundle,
+            issue_prefix=issue_prefix,
+        )
+        return AuditedRangeEndpoint(
+            value=catalog_entry.value,
+            basis=MarketReferenceBasis.OBSERVED,
+            evidence_refs=catalog_entry.evidence_refs,
+            source_locator=catalog_entry.locator,
+            as_of_date=resolved_date.value,
+            temporal_basis=resolved_date.temporal_basis,
+        )
+    if isinstance(draft, InterpretedRangeEndpointDraft):
         try:
             require_valid_refs(
                 draft.evidence_refs,
@@ -1484,7 +1592,7 @@ def _assemble_range_endpoint(
         )
         return AuditedRangeEndpoint(
             value=draft.value,
-            basis=MarketReferenceBasis.OBSERVED,
+            basis=MarketReferenceBasis.INTERPRETED,
             evidence_refs=draft.evidence_refs,
             as_of_date=resolved_date.value,
             temporal_basis=resolved_date.temporal_basis,
@@ -1499,6 +1607,28 @@ def _assemble_range_endpoint(
         calculation_id=calculation.id,
         as_of_date=calculation.as_of_date,
         temporal_basis=calculation.temporal_basis,
+    )
+
+
+def _catalog_entry_date(
+    entry: NumericValueCatalogEntry,
+    *,
+    evidence_items: Mapping[str, EvidenceItem],
+    bundle: EvidenceBundle,
+    issue_prefix: str,
+) -> _ResolvedEvidenceDate:
+    if entry.observed_date is not None:
+        if entry.observed_date > bundle.analysis_date:
+            raise OutputValidationError(f"{issue_prefix}.future_date")
+        return _ResolvedEvidenceDate(
+            value=entry.observed_date,
+            temporal_basis=NumericTemporalBasis.POINT_IN_TIME,
+        )
+    return _latest_evidence_date(
+        entry.evidence_refs,
+        evidence_items=evidence_items,
+        bundle=bundle,
+        issue_prefix=issue_prefix,
     )
 
 

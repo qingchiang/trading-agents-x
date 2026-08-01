@@ -171,6 +171,21 @@ export function ResearchDecisionContent({
                       )}
                     />
                   </small>
+                  <div className="scenario-endpoint-bases">
+                    <span
+                      className={`reference-basis basis-${scenario.reference_range.low.basis}`}
+                    >
+                      {t(`marketReferenceBasis.${scenario.reference_range.low.basis}`)}
+                    </span>
+                    {scenario.reference_range.high.basis !==
+                      scenario.reference_range.low.basis && (
+                      <span
+                        className={`reference-basis basis-${scenario.reference_range.high.basis}`}
+                      >
+                        {t(`marketReferenceBasis.${scenario.reference_range.high.basis}`)}
+                      </span>
+                    )}
+                  </div>
                   <Markdown
                     evidenceAliases={evidenceIndex.aliases}
                     onEvidence={onEvidence}

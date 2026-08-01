@@ -356,6 +356,16 @@
             "title": "Evidence Refs",
             "type": "array"
           },
+          "source_locator": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvidenceValueLocator"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "temporal_basis": {
             "$ref": "#/components/schemas/NumericTemporalBasis",
             "default": "point_in_time"
@@ -1237,6 +1247,58 @@
         "title": "EvidenceTemporalScope",
         "type": "string"
       },
+      "EvidenceValueLocator": {
+        "additionalProperties": false,
+        "description": "Exact Evidence Ledger location for a directly observed scalar.",
+        "properties": {
+          "column": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z][a-z0-9_]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Column"
+          },
+          "evidence_ref": {
+            "pattern": "^ev_[a-f0-9]{12}$",
+            "title": "Evidence Ref",
+            "type": "string"
+          },
+          "row_id": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z][a-z0-9_.-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Row Id"
+          },
+          "table_id": {
+            "anyOf": [
+              {
+                "pattern": "^et_[a-f0-9]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Id"
+          }
+        },
+        "required": [
+          "evidence_ref"
+        ],
+        "title": "EvidenceValueLocator",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1436,6 +1498,7 @@
       "MarketReferenceBasis": {
         "enum": [
           "observed",
+          "interpreted",
           "derived"
         ],
         "title": "MarketReferenceBasis",
@@ -1479,6 +1542,16 @@
             "minLength": 1,
             "title": "Label",
             "type": "string"
+          },
+          "source_locator": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvidenceValueLocator"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "temporal_basis": {
             "$ref": "#/components/schemas/NumericTemporalBasis",

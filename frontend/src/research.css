@@ -1391,6 +1391,17 @@
   background: #fff3c4;
 }
 
+.reference-basis.basis-interpreted {
+  color: #245b78;
+  background: #e6f4fb;
+}
+
+.scenario-endpoint-bases {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
 .numeric-date-line {
   display: flex;
   align-items: center;

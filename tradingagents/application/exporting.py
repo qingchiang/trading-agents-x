@@ -84,6 +84,9 @@ _EN_LABELS = {
     "scenario_reference_range": "Scenario reference range",
     "endpoint_basis": "Endpoint basis",
     "endpoint_dates": "Endpoint dates",
+    "basis.observed": "direct observation",
+    "basis.interpreted": "research interpretation",
+    "basis.derived": "formula-derived",
     "valuation_assessment": "Valuation Assessment",
     "market_references": "Market Reference Levels",
     "calculations": "Decision-Critical Calculations",
@@ -206,6 +209,9 @@ _ZH_LABELS = {
     "scenario_reference_range": "情景参考区间",
     "endpoint_basis": "端点依据",
     "endpoint_dates": "端点日期",
+    "basis.observed": "直接观察",
+    "basis.interpreted": "研究解读",
+    "basis.derived": "公式推导",
     "valuation_assessment": "估值评估",
     "market_references": "市场参考位置",
     "calculations": "决策关键计算",
@@ -322,6 +328,9 @@ _JA_LABELS = {
     "scenario_reference_range": "シナリオ参考レンジ",
     "endpoint_basis": "端点の根拠",
     "endpoint_dates": "端点の日付",
+    "basis.observed": "直接観測",
+    "basis.interpreted": "リサーチ解釈",
+    "basis.derived": "数式による導出",
     "valuation_assessment": "バリュエーション評価",
     "market_references": "市場参考水準",
     "calculations": "意思決定上の重要計算",
@@ -976,8 +985,8 @@ def _render_research_decision(
                     ),
                     (
                         f"**{labels['endpoint_basis']}:** "
-                        f"`{reference_range.low.basis.value}` / "
-                        f"`{reference_range.high.basis.value}`"
+                        f"{labels[f'basis.{reference_range.low.basis.value}']} / "
+                        f"{labels[f'basis.{reference_range.high.basis.value}']}"
                     ),
                     (
                         f"**{labels['endpoint_dates']}:** "
@@ -1042,7 +1051,7 @@ def _render_research_decision(
                     f"- {labels['value']}: `{level.value}` {level.unit}",
                     f"- {labels['as_of']}: `{level.as_of_date.isoformat()}`",
                     f"- {labels['evidence']}: {_render_refs(level.evidence_refs)}",
-                    f"- {labels['basis']}: `{level.basis.value}`",
+                    f"- {labels['basis']}: {labels[f'basis.{level.basis.value}']}",
                     f"- {labels['temporal_basis']}: `{level.temporal_basis.value}`",
                     (
                         "- Calculations: "

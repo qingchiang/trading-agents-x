@@ -21,6 +21,7 @@ from tradingagents.application.contracts import (
     EvidenceOrigin,
     EvidenceQuality,
     EvidenceTemporalScope,
+    EvidenceValueLocator,
     JudgeDraft,
     MarketReferenceBasis,
     MarketReferenceLevel,
@@ -52,6 +53,7 @@ from tradingagents.graph.deliberation import (
     invoke_risk_review,
     write_research_markdown,
 )
+from tradingagents.graph.numeric_evidence import build_numeric_value_catalog
 from tradingagents.graph.output_validation import OutputValidationError
 from tradingagents.graph.structured_output import (
     StructuredOutputError,
@@ -144,6 +146,11 @@ def _endpoint_draft(endpoint: dict[str, Any]) -> dict[str, Any]:
     if endpoint["basis"] == "observed":
         return {
             "basis": "observed",
+            "value_ref": _value_ref(endpoint),
+        }
+    if endpoint["basis"] == "interpreted":
+        return {
+            "basis": "interpreted",
             "value": endpoint["value"],
             "evidence_refs": endpoint["evidence_refs"],
         }
@@ -164,9 +171,23 @@ def _range_draft(reference_range: dict[str, Any]) -> dict[str, Any]:
 def _reference_draft(item: dict[str, Any]) -> dict[str, Any]:
     if item["basis"] == "observed":
         return {
+            "label": item["label"],
+            "value_ref": _value_ref(item),
+            "unit": item["unit"],
+            "interpretation": item["interpretation"],
+            "basis": "observed",
+        }
+    if item["basis"] == "interpreted":
+        return {
             key: value
             for key, value in item.items()
-            if key not in {"as_of_date", "calculation_ids", "temporal_basis"}
+            if key
+            not in {
+                "as_of_date",
+                "calculation_ids",
+                "temporal_basis",
+                "source_locator",
+            }
         }
     return {
         "label": item["label"],
@@ -175,6 +196,25 @@ def _reference_draft(item: dict[str, Any]) -> dict[str, Any]:
         "basis": "derived",
         "calculation_id": item["calculation_ids"][0],
     }
+
+
+def _value_ref(item: dict[str, Any]) -> str:
+    locator = EvidenceValueLocator.model_validate(item["source_locator"])
+    evidence_item = EvidenceItem(
+        ref=locator.evidence_ref,
+        source="fixture",
+        evidence_type="fixture scalar",
+        requested_date=date(2026, 7, 24),
+        effective_date=item.get("as_of_date"),
+        value=item["value"],
+        unit=item.get("unit"),
+    )
+    bundle = EvidenceBundle(
+        instrument="NVDA",
+        analysis_date=date(2026, 7, 24),
+        items=(evidence_item,),
+    )
+    return build_numeric_value_catalog(bundle)[0].id
 
 
 def _core_draft_from_decision(payload: dict[str, Any]) -> ResearchDecisionCoreDraft:
@@ -253,6 +293,10 @@ def _numeric_regression() -> tuple[EvidenceBundle, DecisionNumericDraft]:
     return bundle, DecisionNumericDraft.model_validate(payload["numeric_candidate"])
 
 
+def _value_catalog(bundle: EvidenceBundle) -> dict[str, Any]:
+    return {item.id: item for item in build_numeric_value_catalog(bundle)}
+
+
 def _state(*, content: str = "Fixture evidence.") -> dict[str, Any]:
     item = EvidenceItem.create(
         source="fixture",
@@ -260,6 +304,8 @@ def _state(*, content: str = "Fixture evidence.") -> dict[str, Any]:
         requested_date=date(2026, 7, 24),
         effective_date=date(2026, 7, 24),
         content=content,
+        value=100,
+        unit="USD",
     )
     bundle = EvidenceBundle(
         instrument="NVDA",
@@ -319,10 +365,9 @@ def _live_numeric_fixture(
         market_reference_levels=(
             ObservedMarketReferenceLevelDraft(
                 label="Analyst target",
-                value=5500,
+                value_ref=build_numeric_value_catalog(bundle)[0].id,
                 unit="JPY",
                 interpretation="Retrieval-time analyst consensus.",
-                evidence_refs=(item.ref,),
             ),
         ),
     )
@@ -602,6 +647,7 @@ def test_final_decision_accepts_observed_reference_without_calculation() -> None
                     interpretation="Observed reference only.",
                     evidence_refs=(ref,),
                     basis=MarketReferenceBasis.OBSERVED,
+                    source_locator=EvidenceValueLocator(evidence_ref=ref),
                 ),
             ),
         }
@@ -641,36 +687,19 @@ def test_numeric_prompt_distinguishes_observed_ranges_from_valuations() -> None:
     assert '"basis": "derived"' in numeric_prompt
 
 
-def test_final_decision_drops_derived_reference_without_calculation() -> None:
-    state = _state()
-    ref = state["evidence_bundle"]["items"][0]["ref"]
-    decision = research_decision(evidence_refs=(ref,)).model_copy(
-        update={
-            "market_reference_levels": (
-                MarketReferenceLevel(
-                    label="Derived fair value",
-                    value=100,
-                    unit="USD",
-                    as_of_date=date(2026, 7, 24),
-                    interpretation="A derived reference only.",
-                    evidence_refs=(ref,),
-                    basis=MarketReferenceBasis.DERIVED,
-                ),
-            ),
-        }
-    )
+def test_public_decision_rejects_derived_reference_without_calculation() -> None:
+    ref = _state()["evidence_bundle"]["items"][0]["ref"]
 
-    result = invoke_research_decision(
-        _StaticLLM(decision),
-        prompt="Form the final decision.",
-        state=state,
-        node="committee.final",
-        require_risk_adjustments=False,
-    )
-
-    assert result.value.market_reference_levels == ()
-    assert result.value.numeric_audit_status is NumericAuditStatus.INCOMPLETE
-    assert result.warnings[0].code == "decision.numeric_audit_incomplete"
+    with pytest.raises(ValueError, match="requires a calculation"):
+        MarketReferenceLevel(
+            label="Derived fair value",
+            value=100,
+            unit="USD",
+            as_of_date=date(2026, 7, 24),
+            interpretation="A derived reference only.",
+            evidence_refs=(ref,),
+            basis=MarketReferenceBasis.DERIVED,
+        )
 
 
 def test_numeric_serializer_repairs_seven_invalid_input_names() -> None:
@@ -822,6 +851,7 @@ def test_6501_numeric_regression_canonicalizes_results_dates_and_shared_usage() 
         draft,
         bundle=bundle,
         allowed_evidence_refs={item.ref for item in bundle.items},
+        value_catalog=_value_catalog(bundle),
         salvage=False,
         node="committee.final.serialize.numeric",
     )
@@ -874,6 +904,7 @@ def test_descriptive_pseudo_formula_does_not_remove_observed_scenario_ranges() -
         draft,
         bundle=bundle,
         allowed_evidence_refs={item.ref for item in bundle.items},
+        value_catalog=_value_catalog(bundle),
         salvage=True,
         node="committee.final.serialize.numeric",
     )
@@ -915,6 +946,7 @@ def test_live_numeric_evidence_uses_market_local_snapshot_date(
         draft,
         bundle=bundle,
         allowed_evidence_refs={bundle.items[0].ref},
+        value_catalog=_value_catalog(bundle),
         salvage=False,
         node="committee.final.serialize.numeric",
     )
@@ -943,6 +975,7 @@ def test_live_numeric_evidence_enforces_near_live_window(
         draft,
         bundle=bundle,
         allowed_evidence_refs={bundle.items[0].ref},
+        value_catalog=_value_catalog(bundle),
         salvage=True,
         node="committee.final.serialize.numeric",
     )
@@ -965,6 +998,7 @@ def test_live_numeric_evidence_rejects_retrieval_after_seal() -> None:
         draft,
         bundle=bundle,
         allowed_evidence_refs={bundle.items[0].ref},
+        value_catalog=_value_catalog(bundle),
         salvage=True,
         node="committee.final.serialize.numeric",
     )
@@ -1078,6 +1112,7 @@ def test_6501_numeric_regression_keeps_strict_failure_boundaries(
             draft,
             bundle=bundle,
             allowed_evidence_refs={item.ref for item in bundle.items},
+            value_catalog=_value_catalog(bundle),
             salvage=False,
             node="committee.final.serialize.numeric",
         )
@@ -1236,6 +1271,7 @@ def test_final_decision_preserves_valid_numeric_components_after_repair_failure(
                     interpretation="Observed reference only.",
                     evidence_refs=(ref,),
                     basis=MarketReferenceBasis.OBSERVED,
+                    source_locator=EvidenceValueLocator(evidence_ref=ref),
                 ),
             ),
             "calculation_records": (

@@ -236,6 +236,7 @@ class DecisionNumericAuditAppendix(FrozenModel):
 
 class MarketReferenceBasis(str, Enum):
     OBSERVED = "observed"
+    INTERPRETED = "interpreted"
     DERIVED = "derived"
 
 
@@ -772,12 +773,33 @@ class NumericTemporalBasis(str, Enum):
     LIVE_SNAPSHOT = "live_snapshot"
 
 
+class EvidenceValueLocator(FrozenModel):
+    """Exact Evidence Ledger location for a directly observed scalar."""
+
+    evidence_ref: str = Field(pattern=r"^ev_[a-f0-9]{12}$")
+    table_id: str | None = Field(default=None, pattern=r"^et_[a-f0-9]{12}$")
+    row_id: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_.-]*$")
+    column: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]*$")
+
+    @model_validator(mode="after")
+    def validate_table_location(self) -> EvidenceValueLocator:
+        table_parts = (self.table_id, self.row_id, self.column)
+        if any(part is not None for part in table_parts) and not all(
+            part is not None for part in table_parts
+        ):
+            raise ValueError(
+                "table-backed evidence values require table_id, row_id, and column"
+            )
+        return self
+
+
 class AuditedRangeEndpoint(FrozenModel):
     """One evidence-backed endpoint of a scenario or valuation range."""
 
     value: float
     basis: MarketReferenceBasis
     evidence_refs: tuple[str, ...] = Field(min_length=1)
+    source_locator: EvidenceValueLocator | None = None
     calculation_id: str | None = None
     as_of_date: date
     temporal_basis: NumericTemporalBasis = NumericTemporalBasis.POINT_IN_TIME
@@ -799,10 +821,23 @@ class AuditedRangeEndpoint(FrozenModel):
 
     @model_validator(mode="after")
     def validate_basis(self) -> AuditedRangeEndpoint:
-        if self.basis is MarketReferenceBasis.OBSERVED and self.calculation_id:
-            raise ValueError("observed endpoint must not reference a calculation")
-        if self.basis is MarketReferenceBasis.DERIVED and not self.calculation_id:
-            raise ValueError("derived endpoint requires a calculation")
+        if self.basis is MarketReferenceBasis.OBSERVED:
+            if self.source_locator is None:
+                raise ValueError("observed endpoint requires an Evidence locator")
+            if self.calculation_id:
+                raise ValueError("observed endpoint must not reference a calculation")
+            if self.source_locator.evidence_ref not in self.evidence_refs:
+                raise ValueError("observed endpoint refs must include its locator ref")
+        elif self.basis is MarketReferenceBasis.INTERPRETED:
+            if self.source_locator is not None or self.calculation_id:
+                raise ValueError(
+                    "interpreted endpoint must not claim a locator or calculation"
+                )
+        elif self.basis is MarketReferenceBasis.DERIVED:
+            if not self.calculation_id:
+                raise ValueError("derived endpoint requires a calculation")
+            if self.source_locator is not None:
+                raise ValueError("derived endpoint must not claim an observed locator")
         return self
 
 
@@ -882,6 +917,7 @@ class MarketReferenceLevel(FrozenModel):
     interpretation: str = Field(min_length=1)
     evidence_refs: tuple[str, ...] = Field(min_length=1)
     basis: MarketReferenceBasis = MarketReferenceBasis.OBSERVED
+    source_locator: EvidenceValueLocator | None = None
     calculation_ids: tuple[str, ...] = ()
     temporal_basis: NumericTemporalBasis = NumericTemporalBasis.POINT_IN_TIME
 
@@ -897,6 +933,27 @@ class MarketReferenceLevel(FrozenModel):
     @classmethod
     def validate_calculation_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return _unique_research_ids(value)
+
+    @model_validator(mode="after")
+    def validate_basis(self) -> MarketReferenceLevel:
+        if self.basis is MarketReferenceBasis.OBSERVED:
+            if self.source_locator is None:
+                raise ValueError("observed market reference requires an Evidence locator")
+            if self.calculation_ids:
+                raise ValueError("observed market reference cannot use calculations")
+            if self.source_locator.evidence_ref not in self.evidence_refs:
+                raise ValueError("market reference refs must include its locator ref")
+        elif self.basis is MarketReferenceBasis.INTERPRETED:
+            if self.source_locator is not None or self.calculation_ids:
+                raise ValueError(
+                    "interpreted market reference cannot claim direct or derived audit"
+                )
+        elif self.basis is MarketReferenceBasis.DERIVED:
+            if not self.calculation_ids:
+                raise ValueError("derived market reference requires a calculation")
+            if self.source_locator is not None:
+                raise ValueError("derived market reference cannot claim a locator")
+        return self
 
 
 class RiskReviewAdjustment(FrozenModel):
@@ -1458,7 +1515,7 @@ class RecentInstrument(FrozenModel):
 class RunExport(FrozenModel):
     """Versioned, self-contained durable run export."""
 
-    schema_version: Literal["2"] = "2"
+    schema_version: Literal["3"] = "3"
     run: RunView
     result: AnalysisResult
     evidence: EvidenceBundle | None = None

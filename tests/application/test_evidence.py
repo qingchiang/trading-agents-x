@@ -27,6 +27,7 @@ from tradingagents.application.contracts import (
     EvidenceItem,
     EvidenceQuality,
     EvidenceTemporalScope,
+    EvidenceValueLocator,
     MarketReferenceBasis,
     MarketReferenceLevel,
     NodeMetrics,
@@ -851,8 +852,11 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
                     unit="USD",
                     as_of_date=date(2026, 7, 24),
                     interpretation="Observation only, not an entry order.",
-                    evidence_refs=("ev_0123456789ab",),
-                ),
+                        evidence_refs=("ev_0123456789ab",),
+                        source_locator=EvidenceValueLocator(
+                            evidence_ref="ev_0123456789ab"
+                        ),
+                    ),
             ),
             "risk_review_adjustments": (
                 RiskReviewAdjustment(

@@ -54,6 +54,7 @@ def get_analyst_ratings_block(ticker: str, curr_date: str) -> str:
     tgt_mean = _num(ratings.get("targetMeanPrice"))
 
     lines = []
+    numeric_rows: list[tuple[str, float]] = []
     # Rating line whenever there is a real rating, independent of the analyst
     # count — yfinance can report a rating with numberOfAnalystOpinions None/0, so
     # the count is an optional trailing clause, not a gate on the whole block.
@@ -61,6 +62,10 @@ def get_analyst_ratings_block(ticker: str, curr_date: str) -> str:
         mean_note = f" (mean {mean:.2f} on {_MEAN_SCALE})" if mean is not None else ""
         count = f"; {int(n_analysts)} analysts" if n_analysts else ""
         lines.append(f"- Rating: {str(key).replace('_', ' ')}{mean_note}{count}")
+        if mean is not None:
+            numeric_rows.append(("recommendation_mean", mean))
+        if n_analysts is not None:
+            numeric_rows.append(("analyst_count", n_analysts))
 
     if tgt_mean is not None:
         hi = _num(ratings.get("targetHighPrice"))
@@ -77,16 +82,30 @@ def get_analyst_ratings_block(ticker: str, curr_date: str) -> str:
                 f"retrieval-time current price {current:,.0f}"
             )
         lines.append(f"- 12-month price target (mean): {tgt_mean:,.0f}{band}{upside}")
+        numeric_rows.append(("target_mean_price", tgt_mean))
+        if lo is not None:
+            numeric_rows.append(("target_low_price", lo))
+        if hi is not None:
+            numeric_rows.append(("target_high_price", hi))
+        if current is not None:
+            numeric_rows.append(("retrieval_time_price", current))
 
     if not lines:
         return ""
     # Data + legend only; the prompt wrapper owns the section framing and the
     # sentiment rules own how to weight it (kept out of here so they don't drift).
     retrieved_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    numeric_table = ""
+    if numeric_rows:
+        numeric_table = (
+            "\n\n| Metric | Value |\n|---|---:|\n"
+            + "\n".join(f"| {name} | {value} |" for name, value in numeric_rows)
+        )
     return (
         "yfinance analyst consensus (sell-side; LIVE snapshot)\n"
         f"Requested analysis date: {curr_date}\n"
         f"Retrieved at: {retrieved_at}\n"
         "Not point-in-time historical data; price comparisons use the retrieval-time price.\n\n"
         + "\n".join(lines)
+        + numeric_table
     )

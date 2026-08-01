@@ -76,8 +76,9 @@ def test_research_decision_accepts_audited_nonpersonalized_opinions() -> None:
                     "interpretation": (
                         "An observed reference level, not an execution order."
                     ),
-                    "evidence_refs": ["ev_0123456789ab"],
-                }
+                "evidence_refs": ["ev_0123456789ab"],
+                "source_locator": {"evidence_ref": "ev_0123456789ab"},
+            }
             ],
         }
     )

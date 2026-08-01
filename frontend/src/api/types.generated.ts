@@ -48,6 +48,7 @@ export interface components {
       basis: components["schemas"]["MarketReferenceBasis"];
       calculation_id?: string | null;
       evidence_refs: string[];
+      source_locator?: components["schemas"]["EvidenceValueLocator"] | null;
       temporal_basis?: components["schemas"]["NumericTemporalBasis"];
       value: number;
     };
@@ -173,6 +174,12 @@ export interface components {
       source_refs?: string[];
     };
     EvidenceTemporalScope: "point_in_time" | "live_only" | "unknown";
+    EvidenceValueLocator: {
+      column?: string | null;
+      evidence_ref: string;
+      row_id?: string | null;
+      table_id?: string | null;
+    };
     HTTPValidationError: {
       detail?: components["schemas"]["ValidationError"][];
     };
@@ -205,7 +212,7 @@ export interface components {
     LoginRequest: {
       token: string;
     };
-    MarketReferenceBasis: "observed" | "derived";
+    MarketReferenceBasis: "observed" | "interpreted" | "derived";
     MarketReferenceLevel: {
       as_of_date: string;
       basis?: components["schemas"]["MarketReferenceBasis"];
@@ -213,6 +220,7 @@ export interface components {
       evidence_refs: string[];
       interpretation: string;
       label: string;
+      source_locator?: components["schemas"]["EvidenceValueLocator"] | null;
       temporal_basis?: components["schemas"]["NumericTemporalBasis"];
       unit: string;
       value: number;
