@@ -1060,6 +1060,11 @@ def _invoke_decision_numeric(
             "levels must use basis=interpreted with supporting Evidence refs. They "
             "require no calculation and must not be disguised as observed values or "
             "descriptive formulas. Derived endpoints must name a valid calculation. "
+            "Each base, bull, and bear scenario range field is an array. Preserve "
+            "every already-valid, non-duplicate range while repairing only the "
+            "invalid range identified by the issue path. A scenario may contain "
+            "multiple ranges with the same category when their labels or endpoints "
+            "describe distinct research uses. Do not emit exact duplicates. "
             "A valuation assessment is allowed only when both endpoints are derived "
             "from real valuation calculations such as EPS times a multiple or DCF. Do not "
             "supply calculation results or dates; the application derives both "
@@ -1127,6 +1132,21 @@ def _invoke_decision_numeric(
             salvage=True,
             node=node,
         )
+        if _numeric_repair_is_noop(exc.failures):
+            assembly = replace(
+                assembly,
+                warnings=(
+                    *assembly.warnings,
+                    ResearchWarning(
+                        code="decision.numeric_repair_noop",
+                        message=(
+                            "The numeric repair returned the same invalid appendix; "
+                            "independently valid components were retained."
+                        ),
+                        source=node,
+                    ),
+                ),
+            )
         return replace(
             assembly,
             audit=_numeric_audit_appendix(
@@ -1230,6 +1250,21 @@ def _numeric_audit_snapshot(
         schema_valid=schema_valid,
         candidate=candidate,
         candidate_digest=digest,
+    )
+
+
+def _numeric_repair_is_noop(
+    failures: tuple[StructuredOutputFailure, ...],
+) -> bool:
+    if len(failures) < 2:
+        return False
+    initial, repair = failures[-2:]
+    initial_snapshot = _numeric_audit_snapshot(initial)
+    repair_snapshot = _numeric_audit_snapshot(repair)
+    return bool(
+        initial_snapshot.candidate_digest
+        and initial_snapshot.candidate_digest == repair_snapshot.candidate_digest
+        and initial_snapshot.validation_issues == repair_snapshot.validation_issues
     )
 
 
@@ -1345,10 +1380,23 @@ def _assemble_numeric_draft(
     scenario_values: dict[
         ResearchScenarioKind, tuple[ScenarioReferenceRange, ...]
     ] = {}
+    duplicate_warnings: list[ResearchWarning] = []
     linked_ids: set[str] = set()
     for scenario_kind, scenario_ranges in draft.scenario_reference_ranges.items():
         assembled_ranges: list[ScenarioReferenceRange] = []
+        seen_range_keys: set[str] = set()
+        duplicate_ranges_removed = 0
         for index, scenario in enumerate(scenario_ranges):
+            range_key = json.dumps(
+                scenario.model_dump(mode="json"),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            if range_key in seen_range_keys:
+                duplicate_ranges_removed += 1
+                continue
+            seen_range_keys.add(range_key)
             prefix = f"numeric.scenario.{scenario_kind.value}.ranges.{index}"
             try:
                 require_text(scenario.label)
@@ -1397,6 +1445,17 @@ def _assemble_numeric_draft(
             )
         if assembled_ranges:
             scenario_values[scenario_kind] = tuple(assembled_ranges)
+        if duplicate_ranges_removed:
+            duplicate_warnings.append(
+                ResearchWarning(
+                    code="decision.numeric_duplicate_removed",
+                    message=(
+                        f"Removed {duplicate_ranges_removed} exact duplicate "
+                        f"reference range(s) from the {scenario_kind.value} scenario."
+                    ),
+                    source=node,
+                )
+            )
 
     valuation: ValuationAssessment | None = None
     if draft.valuation_assessment is not None:
@@ -1548,10 +1607,11 @@ def _assemble_numeric_draft(
                 ),
                 source=node,
             ),
+            *duplicate_warnings,
         )
     else:
         status = NumericAuditStatus.COMPLETE if has_content else NumericAuditStatus.NOT_APPLICABLE
-        warnings = ()
+        warnings = tuple(duplicate_warnings)
     return _NumericDecisionAssembly(
         scenario_reference_ranges=scenario_values,
         valuation_assessment=valuation,

@@ -930,6 +930,110 @@ def test_6501_numeric_regression_canonicalizes_results_dates_and_shared_usage() 
     assert result.status is NumericAuditStatus.COMPLETE
 
 
+def test_scenario_ranges_preserve_distinct_ranges_in_the_same_category() -> None:
+    bundle, draft = _numeric_regression()
+    base_range = draft.scenario_reference_ranges.base[0]
+    second_range = base_range.model_copy(
+        update={
+            "label": "Secondary technical range",
+            "low": base_range.low.model_copy(update={"value": 4600}),
+            "high": base_range.high.model_copy(update={"value": 7100}),
+        }
+    )
+    draft = draft.model_copy(
+        update={
+            "scenario_reference_ranges": draft.scenario_reference_ranges.model_copy(
+                update={"base": (base_range, second_range)}
+            )
+        }
+    )
+
+    result = _assemble_numeric_draft(
+        draft,
+        bundle=bundle,
+        allowed_evidence_refs={item.ref for item in bundle.items},
+        value_catalog=_value_catalog(bundle),
+        salvage=False,
+        node="committee.final.serialize.numeric",
+    )
+
+    assert [item.label for item in result.scenario_reference_ranges[ResearchScenarioKind.BASE]] == [
+        "Base technical range",
+        "Secondary technical range",
+    ]
+    assert result.status is NumericAuditStatus.COMPLETE
+
+
+def test_exact_duplicate_scenario_range_is_removed_without_degrading_audit() -> None:
+    bundle, draft = _numeric_regression()
+    base_range = draft.scenario_reference_ranges.base[0]
+    draft = draft.model_copy(
+        update={
+            "scenario_reference_ranges": draft.scenario_reference_ranges.model_copy(
+                update={"base": (base_range, base_range)}
+            )
+        }
+    )
+
+    result = _assemble_numeric_draft(
+        draft,
+        bundle=bundle,
+        allowed_evidence_refs={item.ref for item in bundle.items},
+        value_catalog=_value_catalog(bundle),
+        salvage=False,
+        node="committee.final.serialize.numeric",
+    )
+
+    assert len(result.scenario_reference_ranges[ResearchScenarioKind.BASE]) == 1
+    assert result.status is NumericAuditStatus.COMPLETE
+    assert result.issues == ()
+    assert [warning.code for warning in result.warnings] == [
+        "decision.numeric_duplicate_removed"
+    ]
+
+
+def test_invalid_scenario_range_only_omits_that_range() -> None:
+    bundle, draft = _numeric_regression()
+    valid_range = draft.scenario_reference_ranges.base[0]
+    invalid_range = valid_range.model_copy(
+        update={
+            "label": "Invalid unsupported range",
+            "low": valid_range.low.model_copy(
+                update={"evidence_refs": ("ev_ffffffffffff",)}
+            ),
+        }
+    )
+    draft = draft.model_copy(
+        update={
+            "scenario_reference_ranges": draft.scenario_reference_ranges.model_copy(
+                update={"base": (valid_range, invalid_range)}
+            )
+        }
+    )
+
+    result = _assemble_numeric_draft(
+        draft,
+        bundle=bundle,
+        allowed_evidence_refs={item.ref for item in bundle.items},
+        value_catalog=_value_catalog(bundle),
+        salvage=True,
+        node="committee.final.serialize.numeric",
+    )
+
+    assert [item.label for item in result.scenario_reference_ranges[ResearchScenarioKind.BASE]] == [
+        "Base technical range"
+    ]
+    assert result.status is NumericAuditStatus.PARTIAL
+    assert {item.component_path for item in result.omissions} == {
+        "numeric.scenario.base.ranges.1"
+    }
+    assert set(result.scenario_reference_ranges) == {
+        ResearchScenarioKind.BASE,
+        ResearchScenarioKind.BULL,
+        ResearchScenarioKind.BEAR,
+    }
+
+
 def test_descriptive_pseudo_formula_does_not_remove_observed_scenario_ranges() -> None:
     bundle, draft = _numeric_regression()
     invalid = CalculationRecordDraft(
@@ -1106,6 +1210,68 @@ def test_6501_invalid_numeric_tool_candidate_is_repaired_and_retained() -> None:
     assert result.numeric_audit.status is NumericAuditAppendixStatus.RECOVERED
     assert result.numeric_audit.snapshots[0].candidate == invalid_candidate
     assert result.numeric_audit.snapshots[0].candidate_digest
+
+
+def test_identical_failed_numeric_repair_is_degraded_not_recovered() -> None:
+    bundle, valid_numeric = _numeric_regression()
+    state = _state()
+    state["evidence_bundle"] = bundle.model_dump(mode="json")
+    core = _core_draft_from_decision(
+        research_decision(evidence_refs=(bundle.items[0].ref,)).model_dump(mode="json")
+    )
+    invalid_range = valid_numeric.scenario_reference_ranges.base[0]
+    invalid_range = invalid_range.model_copy(
+        update={
+            "low": invalid_range.low.model_copy(
+                update={"evidence_refs": ("ev_ffffffffffff",)}
+            )
+        }
+    )
+    invalid_numeric = valid_numeric.model_copy(
+        update={
+            "scenario_reference_ranges": valid_numeric.scenario_reference_ranges.model_copy(
+                update={"base": (invalid_range,)}
+            )
+        }
+    )
+    llm = _SequenceLLM(
+        {
+            "ResearchDecisionCoreDraft": [core],
+            "DecisionNumericDraft": [invalid_numeric, invalid_numeric],
+        }
+    )
+    events: list[dict[str, Any]] = []
+
+    result = invoke_research_decision(
+        llm,
+        prompt="Form the final decision.",
+        state=state,
+        node="committee.final.serialize",
+        require_risk_adjustments=False,
+        event_writer=events.append,
+    )
+
+    assert result.value.numeric_audit_status is NumericAuditStatus.PARTIAL
+    assert result.numeric_audit is not None
+    assert result.numeric_audit.status is NumericAuditAppendixStatus.PARTIAL
+    assert len(result.numeric_audit.snapshots) == 2
+    assert (
+        result.numeric_audit.snapshots[0].candidate_digest
+        == result.numeric_audit.snapshots[1].candidate_digest
+    )
+    assert [event["event_type"] for event in events] == [
+        "node.numeric_audit_retry",
+        "node.numeric_audit_degraded",
+    ]
+    assert any(
+        warning.code == "decision.numeric_repair_noop"
+        for warning in result.warnings
+    )
+    assert ResearchScenarioKind.BULL in {
+        scenario.kind
+        for scenario in result.value.scenarios
+        if scenario.reference_ranges
+    }
 
 
 @pytest.mark.parametrize(
