@@ -242,6 +242,7 @@ const detail = {
           evidence_refs: ["ev_0123456789ab"],
           basis: "observed",
           calculation_ids: [],
+          temporal_basis: "live_snapshot",
         },
       ],
       calculation_records: [
@@ -515,6 +516,7 @@ test("restores deliberation and resolves evidence references across run views", 
   expect(referenceTable).toHaveTextContent("As-of date");
   expect(referenceTable).toHaveTextContent("Basis");
   expect(referenceTable).toHaveTextContent("Observed");
+  expect(referenceTable).toHaveTextContent("Live snapshot");
   expect(
     screen.getByRole("link", {
       name: "Open memory memory:legacy-run",

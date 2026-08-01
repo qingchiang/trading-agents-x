@@ -10,7 +10,7 @@ import re
 from collections.abc import Callable, Mapping
 from contextlib import nullcontext
 from dataclasses import dataclass, replace
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated, Any, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -24,6 +24,8 @@ from tradingagents.application.contracts import (
     DebateIssue,
     DecisionNumericAuditAppendix,
     EvidenceBundle,
+    EvidenceItem,
+    EvidenceTemporalScope,
     IssueDisposition,
     JudgeDraft,
     MarketReferenceBasis,
@@ -50,6 +52,8 @@ from tradingagents.application.contracts import (
     ValuationAssessment,
 )
 from tradingagents.application.markdown_evidence import normalize_evidence_markdown
+from tradingagents.dataflows.lookahead import is_near_live
+from tradingagents.dataflows.symbol_utils import market_timezone
 from tradingagents.graph.output_validation import (
     OutputValidationError,
     require_nonempty_texts,
@@ -1180,7 +1184,7 @@ def _assemble_numeric_draft(
 ) -> _NumericDecisionAssembly:
     issues: list[str] = []
     calculations: dict[str, CalculationRecord] = {}
-    evidence_dates = {item.ref: item.effective_date for item in bundle.items}
+    evidence_items = {item.ref: item for item in bundle.items}
     duplicate_ids = {
         item.id
         for item in draft.calculation_records
@@ -1204,10 +1208,10 @@ def _assemble_numeric_draft(
                 inputs,
                 issue_prefix=prefix,
             )
-            as_of_date = _latest_evidence_date(
+            resolved_date = _latest_evidence_date(
                 item.input_evidence_refs,
-                evidence_dates=evidence_dates,
-                analysis_date=bundle.analysis_date,
+                evidence_items=evidence_items,
+                bundle=bundle,
                 issue_prefix=prefix,
             )
             calculations[item.id] = CalculationRecord(
@@ -1217,8 +1221,8 @@ def _assemble_numeric_draft(
                 input_evidence_refs=item.input_evidence_refs,
                 result=calculated,
                 unit=item.unit,
-                as_of_date=as_of_date,
-                temporal_basis=NumericTemporalBasis.POINT_IN_TIME,
+                as_of_date=resolved_date.value,
+                temporal_basis=resolved_date.temporal_basis,
                 limitations=item.limitations,
             )
         except OutputValidationError as exc:
@@ -1249,9 +1253,9 @@ def _assemble_numeric_draft(
                 endpoints[endpoint_name] = _assemble_range_endpoint(
                     endpoint_draft,
                     calculations=calculations,
-                    evidence_dates=evidence_dates,
+                    evidence_items=evidence_items,
+                    bundle=bundle,
                     allowed_evidence_refs=allowed_evidence_refs,
-                    analysis_date=bundle.analysis_date,
                     issue_prefix=f"{prefix}.{endpoint_name}",
                 )
             except OutputValidationError as exc:
@@ -1285,17 +1289,17 @@ def _assemble_numeric_draft(
             low = _assemble_range_endpoint(
                 item.low,
                 calculations=calculations,
-                evidence_dates=evidence_dates,
+                evidence_items=evidence_items,
+                bundle=bundle,
                 allowed_evidence_refs=allowed_evidence_refs,
-                analysis_date=bundle.analysis_date,
                 issue_prefix=f"{prefix}.low",
             )
             high = _assemble_range_endpoint(
                 item.high,
                 calculations=calculations,
-                evidence_dates=evidence_dates,
+                evidence_items=evidence_items,
+                bundle=bundle,
                 allowed_evidence_refs=allowed_evidence_refs,
-                analysis_date=bundle.analysis_date,
                 issue_prefix=f"{prefix}.high",
             )
         except OutputValidationError as exc:
@@ -1324,12 +1328,14 @@ def _assemble_numeric_draft(
                     allowed_evidence_refs,
                     required=True,
                 )
-                as_of_date = _latest_evidence_date(
+                resolved_date = _latest_evidence_date(
                     item.evidence_refs,
-                    evidence_dates=evidence_dates,
-                    analysis_date=bundle.analysis_date,
+                    evidence_items=evidence_items,
+                    bundle=bundle,
                     issue_prefix=prefix,
                 )
+                as_of_date = resolved_date.value
+                temporal_basis = resolved_date.temporal_basis
                 value = item.value
                 evidence_refs = item.evidence_refs
                 calculation_ids: tuple[str, ...] = ()
@@ -1341,6 +1347,7 @@ def _assemble_numeric_draft(
                 value = float(calculation.result)
                 evidence_refs = calculation.input_evidence_refs
                 calculation_ids = (item.calculation_id,)
+                temporal_basis = calculation.temporal_basis
         except OutputValidationError as exc:
             issues.append(exc.issue_code)
         else:
@@ -1354,7 +1361,7 @@ def _assemble_numeric_draft(
                     evidence_refs=evidence_refs,
                     basis=item.basis,
                     calculation_ids=calculation_ids,
-                    temporal_basis=NumericTemporalBasis.POINT_IN_TIME,
+                    temporal_basis=temporal_basis,
                 )
             )
             linked_ids.update(calculation_ids)
@@ -1454,9 +1461,9 @@ def _assemble_range_endpoint(
     draft: RangeEndpointDraft,
     *,
     calculations: Mapping[str, CalculationRecord],
-    evidence_dates: Mapping[str, date | None],
+    evidence_items: Mapping[str, EvidenceItem],
+    bundle: EvidenceBundle,
     allowed_evidence_refs: set[str],
-    analysis_date: date,
     issue_prefix: str,
 ) -> AuditedRangeEndpoint:
     if isinstance(draft, ObservedRangeEndpointDraft):
@@ -1469,18 +1476,18 @@ def _assemble_range_endpoint(
         except OutputValidationError as exc:
             suffix = "missing_evidence" if exc.issue_code == "refs.required" else "invalid_evidence"
             raise OutputValidationError(f"{issue_prefix}.{suffix}") from exc
-        as_of_date = _latest_evidence_date(
+        resolved_date = _latest_evidence_date(
             draft.evidence_refs,
-            evidence_dates=evidence_dates,
-            analysis_date=analysis_date,
+            evidence_items=evidence_items,
+            bundle=bundle,
             issue_prefix=issue_prefix,
         )
         return AuditedRangeEndpoint(
             value=draft.value,
             basis=MarketReferenceBasis.OBSERVED,
             evidence_refs=draft.evidence_refs,
-            as_of_date=as_of_date,
-            temporal_basis=NumericTemporalBasis.POINT_IN_TIME,
+            as_of_date=resolved_date.value,
+            temporal_basis=resolved_date.temporal_basis,
         )
     calculation = calculations.get(draft.calculation_id)
     if calculation is None:
@@ -1495,24 +1502,73 @@ def _assemble_range_endpoint(
     )
 
 
+@dataclass(frozen=True)
+class _ResolvedEvidenceDate:
+    value: date
+    temporal_basis: NumericTemporalBasis
+
+
 def _latest_evidence_date(
     evidence_refs: tuple[str, ...],
     *,
-    evidence_dates: Mapping[str, date | None],
-    analysis_date: date,
+    evidence_items: Mapping[str, EvidenceItem],
+    bundle: EvidenceBundle,
     issue_prefix: str,
-) -> date:
+) -> _ResolvedEvidenceDate:
     dates: list[date] = []
+    has_live_snapshot = False
     for evidence_ref in evidence_refs:
-        effective_date = evidence_dates.get(evidence_ref)
-        if effective_date is None:
+        item = evidence_items.get(evidence_ref)
+        if item is None:
             raise OutputValidationError(f"{issue_prefix}.date_unavailable")
-        if effective_date > analysis_date:
+        if item.effective_date is not None:
+            if item.effective_date > bundle.analysis_date:
+                raise OutputValidationError(f"{issue_prefix}.future_date")
+            dates.append(item.effective_date)
+            continue
+        live_date = _live_snapshot_date(item, bundle=bundle)
+        if live_date is None:
+            raise OutputValidationError(f"{issue_prefix}.date_unavailable")
+        if live_date > bundle.sealed_at.astimezone(market_timezone(bundle.instrument)).date():
             raise OutputValidationError(f"{issue_prefix}.future_date")
-        dates.append(effective_date)
+        dates.append(live_date)
+        has_live_snapshot = True
     if not dates:
         raise OutputValidationError(f"{issue_prefix}.date_unavailable")
-    return max(dates)
+    return _ResolvedEvidenceDate(
+        value=max(dates),
+        temporal_basis=(
+            NumericTemporalBasis.LIVE_SNAPSHOT
+            if has_live_snapshot
+            else NumericTemporalBasis.POINT_IN_TIME
+        ),
+    )
+
+
+def _live_snapshot_date(item: EvidenceItem, *, bundle: EvidenceBundle) -> date | None:
+    if not item.origins or any(
+        origin.temporal_scope is not EvidenceTemporalScope.LIVE_ONLY
+        or not origin.retrieved_at
+        for origin in item.origins
+    ):
+        return None
+    retrieved: list[datetime] = []
+    for origin in item.origins:
+        try:
+            value = datetime.fromisoformat(str(origin.retrieved_at).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if value.utcoffset() is None or value > bundle.sealed_at:
+            return None
+        if not is_near_live(
+            bundle.analysis_date.isoformat(),
+            bundle.instrument,
+            now=value,
+        ):
+            return None
+        retrieved.append(value)
+    timezone = market_timezone(bundle.instrument)
+    return max(value.astimezone(timezone).date() for value in retrieved)
 
 
 def debate_round_has_material_progress(

@@ -159,6 +159,18 @@ export function ResearchDecisionContent({
                 <div className="scenario-reference-range">
                   <strong>{t("scenarioReferenceRange")}</strong>
                   <span>{scenario.reference_range.label}</span>
+                  <small className="numeric-date-line">
+                    {latestEndpointDate(
+                      scenario.reference_range.low.as_of_date,
+                      scenario.reference_range.high.as_of_date,
+                    )}
+                    <TemporalBasisBadge
+                      basis={latestTemporalBasis(
+                        scenario.reference_range.low.temporal_basis,
+                        scenario.reference_range.high.temporal_basis,
+                      )}
+                    />
+                  </small>
                   <Markdown
                     evidenceAliases={evidenceIndex.aliases}
                     onEvidence={onEvidence}
@@ -216,6 +228,12 @@ export function ResearchDecisionContent({
                       decision.valuation_assessment.low.as_of_date,
                       decision.valuation_assessment.high.as_of_date,
                     )}
+                    <TemporalBasisBadge
+                      basis={latestTemporalBasis(
+                        decision.valuation_assessment.low.temporal_basis,
+                        decision.valuation_assessment.high.temporal_basis,
+                      )}
+                    />
                   </dd>
                 </div>
               </dl>
@@ -271,6 +289,7 @@ export function ResearchDecisionContent({
                       </td>
                       <td className="market-reference-date" data-label={t("asOfDate")}>
                         {level.as_of_date}
+                        <TemporalBasisBadge basis={level.temporal_basis} />
                       </td>
                       <td data-label={t("referenceBasis")}>
                         <span
@@ -525,6 +544,25 @@ function buildCalculationUses(
 
 function latestEndpointDate(left: string, right: string): string {
   return left >= right ? left : right;
+}
+
+function latestTemporalBasis(
+  left: "point_in_time" | "live_snapshot" | undefined,
+  right: "point_in_time" | "live_snapshot" | undefined,
+): "point_in_time" | "live_snapshot" {
+  return left === "live_snapshot" || right === "live_snapshot"
+    ? "live_snapshot"
+    : "point_in_time";
+}
+
+function TemporalBasisBadge({
+  basis,
+}: {
+  basis: "point_in_time" | "live_snapshot" | undefined;
+}) {
+  const { t } = useTranslation();
+  if (basis !== "live_snapshot") return null;
+  return <span className="live-snapshot-badge">{t("liveSnapshot")}</span>;
 }
 
 function humanize(value: string): string {

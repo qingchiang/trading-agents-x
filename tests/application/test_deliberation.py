@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -18,11 +18,15 @@ from tradingagents.application.contracts import (
     DebateIssue,
     EvidenceBundle,
     EvidenceItem,
+    EvidenceOrigin,
+    EvidenceQuality,
+    EvidenceTemporalScope,
     JudgeDraft,
     MarketReferenceBasis,
     MarketReferenceLevel,
     NumericAuditAppendixStatus,
     NumericAuditStatus,
+    NumericTemporalBasis,
     RebuttalReview,
     ResearchScenarioKind,
     RiskReview,
@@ -34,6 +38,7 @@ from tradingagents.graph.deliberation import (
     CalculationInputDraft,
     CalculationRecordDraft,
     DecisionNumericDraft,
+    ObservedMarketReferenceLevelDraft,
     ResearchDecisionCoreDraft,
     _assemble_numeric_draft,
     _evaluate_formula,
@@ -243,6 +248,7 @@ def _numeric_regression() -> tuple[EvidenceBundle, DecisionNumericDraft]:
         instrument="6501.T",
         analysis_date=payload["analysis_date"],
         items=tuple(EvidenceItem.model_validate(item) for item in payload["evidence"]),
+        sealed_at=payload["sealed_at"],
     )
     return bundle, DecisionNumericDraft.model_validate(payload["numeric_candidate"])
 
@@ -274,6 +280,53 @@ def _state(*, content: str = "Fixture evidence.") -> dict[str, Any]:
         "rebuttals": [],
         "risk_reviews": {},
     }
+
+
+def _live_numeric_fixture(
+    *,
+    ticker: str,
+    analysis_date: date,
+    retrieved_at: datetime,
+    sealed_at: datetime | None = None,
+) -> tuple[EvidenceBundle, DecisionNumericDraft]:
+    origin = EvidenceOrigin(
+        source="fixture.live",
+        evidence_type="analyst consensus",
+        requested=analysis_date.isoformat(),
+        effective="live snapshot",
+        timing="live-only retrieval",
+        retrieved_at=retrieved_at.isoformat(),
+        quality=EvidenceQuality.LOW,
+        temporal_scope=EvidenceTemporalScope.LIVE_ONLY,
+    )
+    item = EvidenceItem.create(
+        source="fixture.live",
+        evidence_type="analyst consensus",
+        requested_date=analysis_date,
+        value=5500,
+        unit="JPY",
+        quality=EvidenceQuality.LOW,
+        origins=(origin,),
+    )
+    bundle = EvidenceBundle(
+        instrument=ticker,
+        analysis_date=analysis_date,
+        items=(item,),
+        sealed_at=sealed_at or retrieved_at + timedelta(minutes=1),
+    )
+    draft = DecisionNumericDraft(
+        requested=True,
+        market_reference_levels=(
+            ObservedMarketReferenceLevelDraft(
+                label="Analyst target",
+                value=5500,
+                unit="JPY",
+                interpretation="Retrieval-time analyst consensus.",
+                evidence_refs=(item.ref,),
+            ),
+        ),
+    )
+    return bundle, draft
 
 
 def test_research_markdown_uses_inline_ledger_refs_without_definitions() -> None:
@@ -786,10 +839,12 @@ def test_6501_numeric_regression_canonicalizes_results_dates_and_shared_usage() 
     }
     assert result.valuation_assessment is not None
     assert result.valuation_assessment.as_of_date == date(2026, 7, 31)
-    assert len(result.market_reference_levels) == 3
+    assert len(result.market_reference_levels) == 4
     assert {item.as_of_date for item in result.market_reference_levels} == {
-        date(2026, 7, 31)
+        date(2026, 7, 31),
+        date(2026, 8, 1),
     }
+    assert result.market_reference_levels[-1].temporal_basis is NumericTemporalBasis.LIVE_SNAPSHOT
     assert set(result.valuation_assessment.calculation_ids) == {
         "calc_bear_price",
         "calc_bull_price",
@@ -833,6 +888,89 @@ def test_descriptive_pseudo_formula_does_not_remove_observed_scenario_ranges() -
         "numeric.calculation.calc_descriptive_band.formula.missing_input"
         in result.issues
     )
+
+
+@pytest.mark.parametrize(
+    ("ticker", "analysis_date", "retrieved_at", "expected_date"),
+    (
+        ("6501.T", date(2026, 8, 1), "2026-08-01T01:00:00+00:00", date(2026, 8, 1)),
+        ("600519.SS", date(2026, 8, 1), "2026-08-01T01:00:00+00:00", date(2026, 8, 1)),
+        ("NVDA", date(2026, 7, 31), "2026-08-01T01:00:00+00:00", date(2026, 7, 31)),
+        ("BTC-USD", date(2026, 8, 1), "2026-08-01T01:00:00+00:00", date(2026, 8, 1)),
+    ),
+)
+def test_live_numeric_evidence_uses_market_local_snapshot_date(
+    ticker: str,
+    analysis_date: date,
+    retrieved_at: str,
+    expected_date: date,
+) -> None:
+    bundle, draft = _live_numeric_fixture(
+        ticker=ticker,
+        analysis_date=analysis_date,
+        retrieved_at=datetime.fromisoformat(retrieved_at),
+    )
+
+    result = _assemble_numeric_draft(
+        draft,
+        bundle=bundle,
+        allowed_evidence_refs={bundle.items[0].ref},
+        salvage=False,
+        node="committee.final.serialize.numeric",
+    )
+
+    reference = result.market_reference_levels[0]
+    assert reference.as_of_date == expected_date
+    assert reference.temporal_basis is NumericTemporalBasis.LIVE_SNAPSHOT
+
+
+@pytest.mark.parametrize(
+    ("age_days", "accepted"),
+    ((0, True), (5, True), (6, False), (-1, False)),
+)
+def test_live_numeric_evidence_enforces_near_live_window(
+    age_days: int,
+    accepted: bool,
+) -> None:
+    retrieved_at = datetime(2026, 8, 6, 12, tzinfo=timezone.utc)
+    bundle, draft = _live_numeric_fixture(
+        ticker="6501.T",
+        analysis_date=date(2026, 8, 6) - timedelta(days=age_days),
+        retrieved_at=retrieved_at,
+    )
+
+    result = _assemble_numeric_draft(
+        draft,
+        bundle=bundle,
+        allowed_evidence_refs={bundle.items[0].ref},
+        salvage=True,
+        node="committee.final.serialize.numeric",
+    )
+
+    assert bool(result.market_reference_levels) is accepted
+    if not accepted:
+        assert "numeric.market_reference.0.date_unavailable" in result.issues
+
+
+def test_live_numeric_evidence_rejects_retrieval_after_seal() -> None:
+    retrieved_at = datetime(2026, 8, 1, 1, tzinfo=timezone.utc)
+    bundle, draft = _live_numeric_fixture(
+        ticker="6501.T",
+        analysis_date=date(2026, 8, 1),
+        retrieved_at=retrieved_at,
+        sealed_at=retrieved_at - timedelta(seconds=1),
+    )
+
+    result = _assemble_numeric_draft(
+        draft,
+        bundle=bundle,
+        allowed_evidence_refs={bundle.items[0].ref},
+        salvage=True,
+        node="committee.final.serialize.numeric",
+    )
+
+    assert result.market_reference_levels == ()
+    assert "numeric.market_reference.0.date_unavailable" in result.issues
 
 
 def test_6501_invalid_numeric_tool_candidate_is_repaired_and_retained() -> None:

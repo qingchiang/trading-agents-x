@@ -586,6 +586,13 @@ def _render_research_decision(content: ResearchDecision) -> str:
                         f"`{reference_range.low.basis.value}` / "
                         f"`{reference_range.high.basis.value}`"
                     ),
+                    (
+                        "**Endpoint dates:** "
+                        f"`{reference_range.low.as_of_date.isoformat()}` "
+                        f"(`{reference_range.low.temporal_basis.value}`) / "
+                        f"`{reference_range.high.as_of_date.isoformat()}` "
+                        f"(`{reference_range.high.temporal_basis.value}`)"
+                    ),
                     reference_range.interpretation,
                 ]
             )
@@ -611,6 +618,11 @@ def _render_research_decision(content: ResearchDecision) -> str:
                     f"{assessment.currency}"
                 ),
                 f"- As of: `{assessment.as_of_date.isoformat()}`",
+                (
+                    "- Temporal basis: "
+                    f"`{assessment.low.temporal_basis.value}` / "
+                    f"`{assessment.high.temporal_basis.value}`"
+                ),
                 ("- Input evidence: " + _render_refs(assessment.input_evidence_refs)),
                 ("- Calculations: " + _render_ids(assessment.calculation_ids)),
             ]
@@ -628,6 +640,7 @@ def _render_research_decision(content: ResearchDecision) -> str:
                     f"- As of: `{level.as_of_date.isoformat()}`",
                     f"- Evidence: {_render_refs(level.evidence_refs)}",
                     f"- Basis: `{level.basis.value}`",
+                    f"- Temporal basis: `{level.temporal_basis.value}`",
                     (
                         "- Calculations: "
                         + _render_ids(level.calculation_ids)
@@ -656,6 +669,7 @@ def _render_research_decision(content: ResearchDecision) -> str:
                     f"- Inputs: `{inputs}`",
                     f"- Result: `{calculation.result}` {calculation.unit}",
                     f"- As of: `{calculation.as_of_date.isoformat()}`",
+                    f"- Temporal basis: `{calculation.temporal_basis.value}`",
                     "- Evidence: "
                     + _render_refs(calculation.input_evidence_refs),
                 ]
