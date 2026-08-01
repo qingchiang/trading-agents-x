@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from tradingagents.application.markdown_evidence import normalize_evidence_markdown
+from tradingagents.application.numeric_display import format_decision_number
 
 from .contracts import (
     AnalystReport,
@@ -37,6 +38,7 @@ class ExportLabels:
     """Deterministic application-owned labels for a readable export."""
 
     values: Mapping[str, str]
+    language: str = "en"
 
     def __getitem__(self, key: str) -> str:
         return self.values[key]
@@ -569,10 +571,10 @@ _JA_LABELS = {
 def _export_labels(run_export: RunExport) -> ExportLabels:
     language = run_export.run.request.output_language
     if language == ReportLanguage.SIMPLIFIED_CHINESE:
-        return ExportLabels(_ZH_LABELS)
+        return ExportLabels(_ZH_LABELS, language="zh-CN")
     if language == ReportLanguage.JAPANESE:
-        return ExportLabels(_JA_LABELS)
-    return ExportLabels(_EN_LABELS)
+        return ExportLabels(_JA_LABELS, language="ja")
+    return ExportLabels(_EN_LABELS, language="en")
 
 
 def render_run_export_markdown(run_export: RunExport) -> str:
@@ -1138,8 +1140,9 @@ def _render_research_decision(
                         f"**{labels['scenario_reference_range']} "
                         f"({labels.enum_name('category', reference_range.category.value)} · "
                         f"{reference_range.label}):** "
-                        f"`{reference_range.low.value}`–"
-                        f"`{reference_range.high.value}` {reference_range.unit}"
+                        f"`{format_decision_number(reference_range.low.value, reference_range.unit, output_language=labels.language)}`–"
+                        f"`{format_decision_number(reference_range.high.value, reference_range.unit, output_language=labels.language)}` "
+                        f"{reference_range.unit}"
                     ),
                     (
                         f"**{labels['endpoint_basis']}:** "
@@ -1179,8 +1182,8 @@ def _render_research_decision(
                 f"- {labels['method']}: {assessment.method}",
                 (
                     f"- {labels['range']}: "
-                    f"`{assessment.low.value}`–"
-                    f"`{assessment.high.value}` "
+                    f"`{format_decision_number(assessment.low.value, assessment.currency, output_language=labels.language)}`–"
+                    f"`{format_decision_number(assessment.high.value, assessment.currency, output_language=labels.language)}` "
                     f"{assessment.currency}"
                 ),
                 f"- {labels['as_of']}: `{assessment.as_of_date.isoformat()}`",
@@ -1203,7 +1206,9 @@ def _render_research_decision(
                     "",
                     f"#### {level.label}",
                     "",
-                    f"- {labels['value']}: `{level.value}` {level.unit}",
+                    f"- {labels['value']}: "
+                    f"`{format_decision_number(level.value, level.unit, output_language=labels.language)}` "
+                    f"{level.unit}",
                     f"- {labels['as_of']}: `{level.as_of_date.isoformat()}`",
                     f"- {labels['evidence']}: {_render_refs(level.evidence_refs, labels)}",
                     f"- {labels['basis']}: {labels[f'basis.{level.basis.value}']}",
@@ -1219,7 +1224,10 @@ def _render_research_decision(
     lines.extend(["", f"### {labels['calculations']}"])
     if content.calculation_records:
         for calculation in content.calculation_records:
-            inputs = ", ".join(f"{name}={value}" for name, value in calculation.inputs.items())
+            inputs = ", ".join(
+                f"{name}={format_decision_number(value, output_language=labels.language)}"
+                for name, value in calculation.inputs.items()
+            )
             lines.extend(
                 [
                     "",
@@ -1229,7 +1237,9 @@ def _render_research_decision(
                     + ", ".join(calculation_uses.get(calculation.id, ())),
                     f"- {labels['formula']}: `{calculation.formula}`",
                     f"- {labels['inputs']}: `{inputs}`",
-                    f"- {labels['result']}: `{calculation.result}` {calculation.unit}",
+                    f"- {labels['result']}: "
+                    f"`{format_decision_number(calculation.result, calculation.unit, output_language=labels.language)}` "
+                    f"{calculation.unit}",
                     f"- {labels['as_of']}: `{calculation.as_of_date.isoformat()}`",
                     f"- {labels['temporal_basis']}: "
                     f"{labels.enum_name('temporal', calculation.temporal_basis.value)}",

@@ -5,6 +5,7 @@ import type {
   ResearchDecision,
 } from "../api/client";
 import type { EvidenceReferenceIndex } from "../evidence";
+import { formatDecisionNumber } from "../numericDisplay";
 import EvidenceLinks from "./EvidenceLinks";
 import { MarkdownList } from "./AnalystReportView";
 import Markdown from "./Markdown";
@@ -67,7 +68,8 @@ export function ResearchDecisionContent({
   onOpenWarnings?: () => void;
   embedded?: boolean;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const numberLanguage = i18n.resolvedLanguage ?? i18n.language;
   const visibleRefs = (refs: string[]) => (embedded ? [] : refs);
   const scenarios = [...decision.scenarios].sort(
     (left, right) =>
@@ -160,11 +162,14 @@ export function ResearchDecisionContent({
                             {t(`scenarioRangeCategory.${referenceRange.category}`)}
                           </span>
                           <span>{referenceRange.label}</span>
-                          <strong>
+                          <strong
+                            title={`${referenceRange.low.value}–${referenceRange.high.value} ${referenceRange.unit}`}
+                          >
                             {formatRange(
                               referenceRange.low.value,
                               referenceRange.high.value,
                               referenceRange.unit,
+                              numberLanguage,
                             )}
                           </strong>
                         </div>
@@ -246,11 +251,14 @@ export function ResearchDecisionContent({
               <span className="decision-section-label">
                 {t("valuationAssessment")}
               </span>
-              <h2>
+              <h2
+                title={`${decision.valuation_assessment.low.value}–${decision.valuation_assessment.high.value} ${decision.valuation_assessment.currency}`}
+              >
                 {formatRange(
                   decision.valuation_assessment.low.value,
                   decision.valuation_assessment.high.value,
                   decision.valuation_assessment.currency,
+                  numberLanguage,
                 )}
               </h2>
               <dl>
@@ -321,8 +329,17 @@ export function ResearchDecisionContent({
                   (level, index) => (
                     <tr key={`${level.label}:${index}`}>
                       <th data-label={t("referenceItem")}>{level.label}</th>
-                      <td className="market-reference-value" data-label={t("value")}>
-                        {level.value.toLocaleString()} {level.unit}
+                      <td
+                        className="market-reference-value"
+                        data-label={t("value")}
+                        title={String(level.value)}
+                      >
+                        {formatDecisionNumber(
+                          level.value,
+                          level.unit,
+                          numberLanguage,
+                        )}{" "}
+                        {level.unit}
                       </td>
                       <td className="market-reference-date" data-label={t("asOfDate")}>
                         {level.as_of_date}
@@ -441,7 +458,12 @@ export function ResearchDecisionContent({
                       <small>{calculation.id}</small>
                     </div>
                     <span title={String(calculation.result)}>
-                      {formatCalculationValue(calculation.result)} {calculation.unit}
+                      {formatDecisionNumber(
+                        calculation.result,
+                        calculation.unit,
+                        numberLanguage,
+                      )}{" "}
+                      {calculation.unit}
                     </span>
                   </header>
                   <code>{calculation.formula}</code>
@@ -450,7 +472,9 @@ export function ResearchDecisionContent({
                     {Object.entries(calculation.inputs).map(([name, value]) => (
                       <div key={name}>
                         <dt>{name}</dt>
-                        <dd>{value.toLocaleString()}</dd>
+                        <dd title={String(value)}>
+                          {formatDecisionNumber(value, undefined, numberLanguage)}
+                        </dd>
                       </div>
                     ))}
                   </dl>
@@ -528,14 +552,19 @@ function dispositionKey(
   }[disposition];
 }
 
-function formatRange(low: number, high: number, currency?: string): string {
-  return `${low.toLocaleString()}–${high.toLocaleString()}${
+function formatRange(
+  low: number,
+  high: number,
+  currency?: string,
+  language?: string,
+): string {
+  return `${formatDecisionNumber(low, currency, language)}–${formatDecisionNumber(
+    high,
+    currency,
+    language,
+  )}${
     currency ? ` ${currency}` : ""
   }`;
-}
-
-function formatCalculationValue(value: number): string {
-  return value.toLocaleString(undefined, { maximumFractionDigits: 6 });
 }
 
 function buildCalculationUses(

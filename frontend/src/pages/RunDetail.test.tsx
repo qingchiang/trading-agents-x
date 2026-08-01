@@ -241,12 +241,14 @@ const detail = {
                     value: 90,
                     basis: "interpreted" as const,
                     evidence_refs: ["ev_0123456789ab"],
+                    date_evidence_refs: ["ev_0123456789ab"],
                     as_of_date: "2026-07-24",
                   },
                   high: {
                     value: 105,
                     basis: "interpreted" as const,
                     evidence_refs: ["ev_0123456789ab"],
+                    date_evidence_refs: ["ev_0123456789ab"],
                     as_of_date: "2026-07-24",
                   },
                   unit: "USD",
@@ -260,12 +262,14 @@ const detail = {
                     value: 95,
                     basis: "interpreted" as const,
                     evidence_refs: ["ev_0123456789ab"],
+                    date_evidence_refs: ["ev_0123456789ab"],
                     as_of_date: "2026-07-24",
                   },
                   high: {
                     value: 125,
                     basis: "interpreted" as const,
                     evidence_refs: ["ev_0123456789ab"],
+                    date_evidence_refs: ["ev_0123456789ab"],
                     as_of_date: "2026-07-24",
                   },
                   unit: "USD",
@@ -278,11 +282,12 @@ const detail = {
       market_reference_levels: [
         {
           label: "Recent close",
-          value: 100,
-          unit: "USD",
+          value: 4199.4116,
+          unit: "JPY",
           as_of_date: "2026-07-24",
           interpretation: "Observed reference, not an execution instruction.",
           evidence_refs: ["ev_0123456789ab"],
+          date_evidence_refs: ["ev_0123456789ab"],
           basis: "observed",
           calculation_ids: [],
           temporal_basis: "live_snapshot",
@@ -573,6 +578,7 @@ test("restores deliberation and resolves evidence references across run views", 
   const referenceTable = screen.getByRole("table", {
     name: "Market reference levels",
   });
+  expect(within(referenceTable).getByText("4,199.41 JPY")).toBeVisible();
   expect(referenceTable).toHaveTextContent("Reference");
   expect(referenceTable).toHaveTextContent("Value");
   expect(referenceTable).toHaveTextContent("As-of date");

@@ -1077,7 +1077,7 @@ def test_export_localizes_scenario_range_categories_and_omissions(
                                 category=ScenarioReferenceCategory.ANALYST_CONSENSUS,
                                 label="Target range",
                                 low=endpoint,
-                                high=endpoint.model_copy(update={"value": 120}),
+                                high=endpoint.model_copy(update={"value": 4199.4116}),
                                 unit="JPY",
                                 interpretation="Consensus reference.",
                                 limitations=("Coverage may change.",),
@@ -1141,6 +1141,8 @@ def test_export_localizes_scenario_range_categories_and_omissions(
     assert category_label in markdown
     assert omission_label in markdown
     assert "Secondary target range" in markdown
+    assert "`100`–`4,199.41` JPY" in markdown
+    assert '"value":4199.4116' in run_export.model_dump_json()
 
 
 def test_numeric_date_evidence_must_be_part_of_endpoint_evidence() -> None:
