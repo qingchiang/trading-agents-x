@@ -400,6 +400,19 @@ def test_profiles_share_contract_but_use_distinct_topologies(
         assert "DECISION SYNTHESIS BRIEF:" in final_prompt
         assert "RESEARCH CONTEXT:" not in final_prompt
         assert "REQUIRED RISK REVIEW ROLES:" in final_prompt
+        agenda_prompt = next(
+            prompt for schema, prompt in quick.calls if schema == "DebateAgenda"
+        )
+        assert '"evidence_catalog"' not in agenda_prompt
+        assert '"analyst_reports"' not in agenda_prompt
+        agenda_context_event = next(
+            event
+            for event in events
+            if event["event_type"] == "node.context_prepared"
+            and event["node"] == "debate.agenda.context"
+        )
+        assert agenda_context_event["payload"]["catalog_items"] == 0
+        assert agenda_context_event["payload"]["catalog_tables"] == 0
 
 
 @pytest.mark.parametrize(

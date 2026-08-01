@@ -398,6 +398,7 @@ def invoke_debate_agenda(
                 "Repair only the concise agenda object. Use distinct material "
                 f"issues and preserve valid wire IDs. {language_rule}"
             ),
+            candidate_only_repair=True,
         ).invoke(
             prompt + "\n\nReturn only a concise agenda summary and distinct material "
             "questions. The full bull and bear reasoning remains in their Markdown. "
@@ -1743,6 +1744,8 @@ def _runner(
     node: str,
     event_writer: EventWriter | None,
     repair_instructions: str | None = None,
+    *,
+    candidate_only_repair: bool = False,
 ) -> StructuredOutputRunner[Any]:
     return StructuredOutputRunner(
         llm=llm,
@@ -1753,6 +1756,7 @@ def _runner(
         invoke_config={"metadata": {"research_node": node}},
         repair_mode="preferred",
         include_candidate_in_repair=True,
+        candidate_only_repair=candidate_only_repair,
         repair_instructions=repair_instructions
         or (
             "Repair only invalid shallow routing metadata such as issue IDs, "

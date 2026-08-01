@@ -867,17 +867,12 @@ class ResearchGraph:
             node = "debate.agenda"
             self._start_node(runtime, node, measure=False)
             check_cancelled(runtime.context)
-            context = self._role_context(
-                state=state,
-                runtime=runtime,
-                node=node,
+            context = RoleContextBuilder(state).build_agenda(
                 title="Research Debate Moderator",
                 objective=(
                     "Compare the independent bull and bear cases and produce a "
                     "prioritized agenda of genuine material disagreements."
                 ),
-                stage="debate_agenda",
-                artifacts={"cases": state.get("cases", {})},
                 instructions=(
                     "Create one issue per distinct material question. "
                     "Describe the analyst conclusions at stake in natural "
@@ -885,6 +880,7 @@ class ResearchGraph:
                     "not turn mere missing data into a bearish assertion."
                 ),
             )
+            self._record_role_context(runtime, node=node, context=context)
             with self.metrics.phase(
                 f"{node}.serialize",
                 event_writer=runtime.stream_writer,
@@ -905,7 +901,7 @@ class ResearchGraph:
                 role="moderator",
                 content=agenda,
                 generation_method=output.generation_method,
-                prompt_version="debate-agenda-v7-language-contract",
+                prompt_version="debate-agenda-v8-compact-context",
             )
             self._finish_node(
                 runtime,
@@ -1404,6 +1400,16 @@ class ResearchGraph:
             include_memory=include_memory,
             instructions=instructions,
         )
+        self._record_role_context(runtime, node=node, context=context)
+        return context
+
+    @staticmethod
+    def _record_role_context(
+        runtime: Runtime[RunContext],
+        *,
+        node: str,
+        context: RoleContext,
+    ) -> None:
         runtime.stream_writer(
             {
                 "event_type": "node.context_prepared",
@@ -1419,7 +1425,6 @@ class ResearchGraph:
                 },
             }
         )
-        return context
 
     @staticmethod
     def _write_artifact(

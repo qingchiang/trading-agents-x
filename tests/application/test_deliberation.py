@@ -442,9 +442,11 @@ def _state_with_agenda() -> dict[str, Any]:
 
 def test_agenda_audit_failure_uses_explicit_navigation_fallback() -> None:
     state = _state()
+    llm = _StaticLLM({"summary": "", "issues": []})
+    original_context = "FULL AGENDA CONTEXT MUST NOT BE REPEATED"
     result = invoke_debate_agenda(
-        _StaticLLM({"summary": "", "issues": []}),
-        prompt="Completed moderator brief.",
+        llm,
+        prompt=original_context,
         state=state,
         node="debate.agenda.audit",
         output_language="English (en)",
@@ -452,6 +454,8 @@ def test_agenda_audit_failure_uses_explicit_navigation_fallback() -> None:
 
     assert result.value.issues[0].id == "debate.issue_audit_fallback"
     assert result.generation_method is ArtifactGenerationMethod.MARKDOWN_AUDIT_INCOMPLETE
+    assert "INVALID CANDIDATE JSON" in llm.prompts[1]
+    assert original_context not in llm.prompts[1]
 
 
 def test_agenda_prompt_and_fallback_follow_standard_output_language() -> None:

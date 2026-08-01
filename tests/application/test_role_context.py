@@ -106,6 +106,72 @@ def test_full_report_context_does_not_duplicate_primary_claims() -> None:
     ) == 1
 
 
+def test_agenda_context_contains_cases_without_the_evidence_catalog() -> None:
+    state = _state()
+    bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
+    ref = bundle.items[0].ref
+    state["cases"] = {
+        "bull": {"role": "bull", "markdown": f"Bull case.[^{ref}]"},
+        "bear": {"role": "bear", "markdown": f"Bear case.[^{ref}]"},
+    }
+
+    context = RoleContextBuilder(state).build_agenda(
+        title="Research Debate Moderator",
+        objective="Prioritize material disagreements.",
+    )
+
+    assert "Bull case." in context.prompt
+    assert "Bear case." in context.prompt
+    assert '"evidence_ref_whitelist"' in context.prompt
+    assert ref in context.prompt
+    assert "Fixture evidence supports the stated observation." in context.prompt
+    assert "market.claim_1" not in context.prompt
+    assert '"evidence_catalog"' not in context.prompt
+    assert '"analyst_reports"' not in context.prompt
+    assert context.catalog_items == 0
+    assert context.catalog_tables == 0
+
+
+def test_agenda_context_size_does_not_scale_with_unreferenced_evidence() -> None:
+    state = _state()
+    bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
+    ref = bundle.items[0].ref
+    cases = {
+        "bull": {"role": "bull", "markdown": f"Bull case.[^{ref}]"},
+        "bear": {"role": "bear", "markdown": f"Bear case.[^{ref}]"},
+    }
+    state["cases"] = cases
+    expanded_items = bundle.items + tuple(
+        EvidenceItem.create(
+            source=f"unused-{index}",
+            evidence_type="unused fixture",
+            requested_date=bundle.analysis_date,
+            effective_date=bundle.analysis_date,
+            content=f"Unreferenced evidence body {index}." * 20,
+        )
+        for index in range(60)
+    )
+    expanded = EvidenceBundle(
+        instrument=bundle.instrument,
+        analysis_date=bundle.analysis_date,
+        items=expanded_items,
+        tables=bundle.tables,
+    )
+    expanded_state = dict(state)
+    expanded_state["evidence_bundle"] = expanded.model_dump(mode="json")
+
+    compact = RoleContextBuilder(state).build_agenda(
+        title="Research Debate Moderator",
+        objective="Prioritize material disagreements.",
+    )
+    expanded_context = RoleContextBuilder(expanded_state).build_agenda(
+        title="Research Debate Moderator",
+        objective="Prioritize material disagreements.",
+    )
+
+    assert expanded_context.prompt == compact.prompt
+
+
 def test_final_context_does_not_rebroadcast_case_or_rebuttal_markdown() -> None:
     state = _state()
     state["cases"] = {

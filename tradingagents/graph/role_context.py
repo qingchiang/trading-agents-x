@@ -117,17 +117,11 @@ class RoleContextBuilder:
                 if self.memory is not None and self.memory.items
                 else None
             )
-        role_objective = {
-            "title": title,
-            "objective": objective,
-            "instructions": instructions,
-            "output_language": self.output_language,
-            "language_requirement": (
-                "Write every human-readable field in this complete output-language "
-                f"instruction: {self.output_language}. Keep IDs, enums, Evidence "
-                "refs, and other wire values unchanged."
-            ),
-        }
+        role_objective = self._role_objective(
+            title=title,
+            objective=objective,
+            instructions=instructions,
+        )
         prompt = (
             self.shared_prefix
             + "\n\nROLE CONTEXT:\n"
@@ -145,6 +139,48 @@ class RoleContextBuilder:
                 bool(item.get("analytical_views"))
                 for item in self.catalog["items"]
             ),
+        )
+
+    def build_agenda(
+        self,
+        *,
+        title: str,
+        objective: str,
+        instructions: str = "",
+    ) -> RoleContext:
+        """Build the moderator input without rebroadcasting the EvidenceCatalog."""
+
+        cases = self.state.get("cases", {})
+        routed_refs = self.artifact_evidence_refs(cases)
+        shared_prefix = self._agenda_shared_prefix()
+        stage_context = {
+            "stage": "debate_agenda",
+            "cases": cases,
+            "evidence_ref_whitelist": list(routed_refs),
+            "primary_claim_summaries": {
+                key: _claim_summaries(report, primary_only=True)
+                for key, report in self.reports.items()
+            },
+        }
+        role_objective = self._role_objective(
+            title=title,
+            objective=objective,
+            instructions=instructions,
+        )
+        prompt = (
+            shared_prefix
+            + "\n\nROLE CONTEXT:\n"
+            + _stable_json(stage_context)
+            + "\n\nROLE OBJECTIVE:\n"
+            + _stable_json(role_objective)
+        )
+        return RoleContext(
+            prompt=prompt,
+            shared_prefix=shared_prefix,
+            evidence_refs=routed_refs,
+            catalog_items=0,
+            catalog_tables=0,
+            table_summary_count=0,
         )
 
     def primary_evidence_refs(self) -> tuple[str, ...]:
@@ -198,6 +234,41 @@ class RoleContextBuilder:
         return _SYSTEM_RULES + language_rule + "\n\nRESEARCH DOSSIER:\n" + _stable_json(
             dossier
         )
+
+    def _agenda_shared_prefix(self) -> str:
+        dossier = {
+            "instrument": self.bundle.instrument,
+            "analysis_date": self.bundle.analysis_date.isoformat(),
+            "output_language": self.output_language,
+            "profile": self.state.get("profile"),
+        }
+        return (
+            _SYSTEM_RULES
+            + "\n- Write every human-readable field in this complete output-language "
+            f"instruction: {self.output_language}. Keep IDs, enums, Evidence refs, "
+            "and other wire values unchanged."
+            + "\n\nRESEARCH DOSSIER:\n"
+            + _stable_json(dossier)
+        )
+
+    def _role_objective(
+        self,
+        *,
+        title: str,
+        objective: str,
+        instructions: str,
+    ) -> dict[str, str]:
+        return {
+            "title": title,
+            "objective": objective,
+            "instructions": instructions,
+            "output_language": self.output_language,
+            "language_requirement": (
+                "Write every human-readable field in this complete output-language "
+                f"instruction: {self.output_language}. Keep IDs, enums, Evidence "
+                "refs, and other wire values unchanged."
+            ),
+        }
 
     def _report_payload(
         self,
