@@ -228,7 +228,7 @@ MarketReferenceLevelDraft: TypeAlias = Annotated[
 
 
 class DecisionNumericDraft(BaseModel):
-    """Optional valuation and market-reference payload for a decision."""
+    """Optional scenario references, valuation, and market-reference payload."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -579,6 +579,8 @@ def _decision_example_text(output_language: str) -> dict[str, str]:
             "valuation_limitation": "估值倍数取决于情景假设。",
             "reference_label": "近期观察收盘价",
             "reference_interpretation": "这是直接观察的参考值，并非执行指令。",
+            "scenario_range_label": "技术参考区间",
+            "scenario_range_interpretation": "该区间来自已观察的市场位置，并非估值结论。",
         }
     if output_language == ReportLanguage.JAPANESE.prompt_label:
         return {
@@ -600,6 +602,8 @@ def _decision_example_text(output_language: str) -> dict[str, str]:
             "valuation_limitation": "倍率はシナリオ前提に左右される。",
             "reference_label": "直近の観測終値",
             "reference_interpretation": "直接観測した参考値であり、執行指示ではない。",
+            "scenario_range_label": "テクニカル参考レンジ",
+            "scenario_range_interpretation": "観測済みの市場水準であり、企業価値評価ではない。",
         }
     return {
         "adjustment_subject": "Confidence calibration",
@@ -620,6 +624,10 @@ def _decision_example_text(output_language: str) -> dict[str, str]:
         "valuation_limitation": "The multiple is scenario-dependent.",
         "reference_label": "Observed recent close",
         "reference_interpretation": ("A directly observed reference, not an execution order."),
+        "scenario_range_label": "Technical reference range",
+        "scenario_range_interpretation": (
+            "The range uses observed market levels and is not a valuation conclusion."
+        ),
     }
 
 
@@ -867,6 +875,23 @@ def _invoke_decision_numeric(
 
     example = DecisionNumericDraft(
         requested=True,
+        scenario_reference_ranges=(
+            ScenarioReferenceRangeDraft(
+                kind=ResearchScenarioKind.BASE,
+                label=example_text["scenario_range_label"],
+                low=ObservedRangeEndpointDraft(
+                    value=95,
+                    evidence_refs=(allowed_evidence_refs[0],),
+                ),
+                high=ObservedRangeEndpointDraft(
+                    value=105,
+                    evidence_refs=(allowed_evidence_refs[0],),
+                ),
+                unit="USD",
+                interpretation=example_text["scenario_range_interpretation"],
+                limitations=(example_text["valuation_limitation"],),
+            ),
+        ),
         valuation_assessment=ValuationAssessmentDraft(
             method=example_text["valuation_method"],
             low=DerivedRangeEndpointDraft(
@@ -926,9 +951,12 @@ def _invoke_decision_numeric(
         repair_instructions=(
             "Repair only the optional numeric appendix. Calculation input "
             "names must be ASCII identifiers and the formula must use every "
-            "input exactly. Observed market references require evidence but "
-            "no calculation. Derived references, valuation assessments, and "
-            "scenario valuation ranges must name valid calculation IDs. Do not "
+            "input exactly. Technical levels, historical highs/lows, and analyst "
+            "target prices are observed references when supported directly by "
+            "Evidence; they require no calculation and must not be disguised as "
+            "descriptive formulas. Derived endpoints must name a valid calculation. "
+            "A valuation assessment is allowed only when both endpoints are derived "
+            "from real valuation calculations such as EPS times a multiple or DCF. Do not "
             "supply calculation results or dates; the application derives both "
             "from the formula and Evidence Ledger. Do not change the qualitative "
             f"decision core. {language_rules}"
@@ -939,7 +967,9 @@ def _invoke_decision_numeric(
             prompt + "\n\nExtract only optional decision-critical numeric content. "
             "Set requested=false and return empty collections when the brief "
             "does not support a numeric appendix. Do not copy ordinary report "
-            "table arithmetic. "
+            "table arithmetic. Use scenario_reference_ranges for technical bands, "
+            "52-week levels, or analyst target ranges; these are not valuations. "
+            "Use valuation_assessment only for genuinely derived valuation work. "
             + language_rules
             + "\n\nLOCALIZED VALID EXAMPLE:\n"
             + json.dumps(example.model_dump(mode="json"), ensure_ascii=False),
@@ -1430,11 +1460,15 @@ def _assemble_range_endpoint(
     issue_prefix: str,
 ) -> AuditedRangeEndpoint:
     if isinstance(draft, ObservedRangeEndpointDraft):
-        require_valid_refs(
-            draft.evidence_refs,
-            allowed_evidence_refs,
-            required=True,
-        )
+        try:
+            require_valid_refs(
+                draft.evidence_refs,
+                allowed_evidence_refs,
+                required=True,
+            )
+        except OutputValidationError as exc:
+            suffix = "missing_evidence" if exc.issue_code == "refs.required" else "invalid_evidence"
+            raise OutputValidationError(f"{issue_prefix}.{suffix}") from exc
         as_of_date = _latest_evidence_date(
             draft.evidence_refs,
             evidence_dates=evidence_dates,

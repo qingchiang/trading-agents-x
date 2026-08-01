@@ -567,6 +567,27 @@ def test_final_decision_accepts_observed_reference_without_calculation() -> None
     assert result.value.numeric_audit_status is NumericAuditStatus.COMPLETE
 
 
+def test_numeric_prompt_distinguishes_observed_ranges_from_valuations() -> None:
+    state = _state()
+    ref = state["evidence_bundle"]["items"][0]["ref"]
+    llm = _StaticLLM(research_decision(evidence_refs=(ref,)))
+
+    invoke_research_decision(
+        llm,
+        prompt="Form the final decision.",
+        state=state,
+        node="committee.final",
+        require_risk_adjustments=False,
+    )
+
+    numeric_prompt = llm.prompts[1]
+    assert "scenario_reference_ranges" in numeric_prompt
+    assert "technical bands" in numeric_prompt
+    assert "not valuations" in numeric_prompt
+    assert '"basis": "observed"' in numeric_prompt
+    assert '"basis": "derived"' in numeric_prompt
+
+
 def test_final_decision_drops_derived_reference_without_calculation() -> None:
     state = _state()
     ref = state["evidence_bundle"]["items"][0]["ref"]
@@ -775,6 +796,43 @@ def test_6501_numeric_regression_canonicalizes_results_dates_and_shared_usage() 
     }
     assert "calc_current_pe" in result.market_reference_levels[1].calculation_ids
     assert result.status is NumericAuditStatus.COMPLETE
+
+
+def test_descriptive_pseudo_formula_does_not_remove_observed_scenario_ranges() -> None:
+    bundle, draft = _numeric_regression()
+    invalid = CalculationRecordDraft(
+        id="calc_descriptive_band",
+        formula="ema_to_bollinger",
+        inputs=(
+            CalculationInputDraft(name="ema", value=5000),
+            CalculationInputDraft(name="bollinger", value=5500),
+        ),
+        input_evidence_refs=(bundle.items[0].ref,),
+        unit="JPY",
+        limitations=("Descriptive fixture.",),
+    )
+    draft = draft.model_copy(
+        update={"calculation_records": (*draft.calculation_records, invalid)}
+    )
+
+    result = _assemble_numeric_draft(
+        draft,
+        bundle=bundle,
+        allowed_evidence_refs={item.ref for item in bundle.items},
+        salvage=True,
+        node="committee.final.serialize.numeric",
+    )
+
+    assert set(result.scenario_reference_ranges) == {
+        ResearchScenarioKind.BASE,
+        ResearchScenarioKind.BULL,
+        ResearchScenarioKind.BEAR,
+    }
+    assert all(item.id != "calc_descriptive_band" for item in result.calculation_records)
+    assert (
+        "numeric.calculation.calc_descriptive_band.formula.missing_input"
+        in result.issues
+    )
 
 
 def test_6501_invalid_numeric_tool_candidate_is_repaired_and_retained() -> None:
