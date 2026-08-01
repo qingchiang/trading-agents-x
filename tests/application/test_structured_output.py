@@ -160,6 +160,133 @@ def test_raw_json_is_recovered_without_second_call() -> None:
     assert len(llm.calls) == 1
 
 
+def test_normalized_schema_tool_args_are_recovered_without_second_call() -> None:
+    candidate = _review().model_dump(mode="json")
+    llm = _FakeLLM(
+        primary={
+            "raw": AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "_Review",
+                        "args": candidate,
+                        "id": "call_review",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            "parsed": None,
+            "parsing_error": ValueError("schema parser rejected output"),
+        },
+        recovery=AssertionError("recovery must not run"),
+    )
+
+    result = _invoke(_runner(llm, []))
+
+    assert result.value == _review()
+    assert result.generation_method is ArtifactGenerationMethod.TOOL_CALL_RECOVERED
+    assert len(llm.calls) == 1
+
+
+def test_invalid_tool_call_json_candidate_is_passed_to_targeted_repair() -> None:
+    candidate = _review(risks=()).model_dump(mode="json")
+    llm = _FakeLLM(
+        primary={
+            "raw": AIMessage(
+                content="",
+                invalid_tool_calls=[
+                    {
+                        "name": "_Review",
+                        "args": json.dumps(candidate),
+                        "id": "call_review",
+                        "error": "schema validation failed",
+                        "type": "invalid_tool_call",
+                    }
+                ],
+            ),
+            "parsed": None,
+            "parsing_error": ValueError("schema parser rejected output"),
+        },
+        recovery={
+            "raw": AIMessage(content=""),
+            "parsed": _review(),
+            "parsing_error": None,
+        },
+    )
+    runner = StructuredOutputRunner(
+        llm=llm,
+        schema=_Review,
+        validator=_validate,
+        node="case.bear",
+        include_candidate_in_repair=True,
+        candidate_only_repair=True,
+    )
+
+    result = _invoke(runner)
+
+    assert result.value == _review()
+    assert "INVALID CANDIDATE JSON" in llm.calls[1][1]
+    assert '"risks": []' in llm.calls[1][1]
+
+
+def test_provider_additional_kwargs_tool_candidate_is_recovered() -> None:
+    candidate = _review().model_dump(mode="json")
+    raw = type(
+        "RawProviderMessage",
+        (),
+        {
+            "content": "",
+            "tool_calls": [],
+            "invalid_tool_calls": [],
+            "additional_kwargs": {
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "_Review",
+                            "arguments": json.dumps(candidate),
+                        }
+                    }
+                ]
+            },
+        },
+    )()
+    llm = _FakeLLM(
+        primary={"raw": raw, "parsed": None, "parsing_error": None},
+        recovery=AssertionError("recovery must not run"),
+    )
+
+    result = _invoke(_runner(llm, []))
+
+    assert result.value == _review()
+    assert result.generation_method is ArtifactGenerationMethod.TOOL_CALL_RECOVERED
+
+
+def test_multiple_matching_tool_calls_are_not_guessed() -> None:
+    candidate = _review().model_dump(mode="json")
+    raw = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "_Review",
+                "args": candidate,
+                "id": f"call_{index}",
+                "type": "tool_call",
+            }
+            for index in range(2)
+        ],
+    )
+    llm = _FakeLLM(
+        primary={"raw": raw, "parsed": None, "parsing_error": None},
+        recovery={"raw": raw, "parsed": None, "parsing_error": None},
+    )
+
+    with pytest.raises(StructuredOutputError) as error:
+        _invoke(_runner(llm, []))
+
+    assert error.value.reason_code == "ambiguous_tool_calls"
+    assert error.value.candidate is None
+
+
 def test_json_mode_recovery_succeeds_with_two_calls() -> None:
     events: list[dict[str, Any]] = []
     llm = _FakeLLM(

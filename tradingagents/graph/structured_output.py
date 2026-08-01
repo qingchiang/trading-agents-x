@@ -175,7 +175,10 @@ class StructuredOutputRunner(Generic[StructuredModel]):
                         )
                 else:
                     try:
-                        primary_candidate = _strict_json_object(raw)
+                        (
+                            primary_candidate,
+                            recovered_method,
+                        ) = _recover_structured_candidate(raw, self.schema)
                         value = self._validate(primary_candidate)
                     except _InvalidOutput as exc:
                         parser_issues = _validation_issues(parsing_error)
@@ -190,16 +193,12 @@ class StructuredOutputRunner(Generic[StructuredModel]):
                     else:
                         self._emit(
                             "node.output_recovered",
-                            method=(
-                                ArtifactGenerationMethod.RAW_JSON_RECOVERED
-                            ),
+                            method=recovered_method,
                             reason_code="structured_parse_recovered",
                         )
                         return StructuredOutputResult(
                             value=value,
-                            generation_method=(
-                                ArtifactGenerationMethod.RAW_JSON_RECOVERED
-                            ),
+                            generation_method=recovered_method,
                         )
 
         if (
@@ -337,7 +336,10 @@ class StructuredOutputRunner(Generic[StructuredModel]):
                 candidate = parsed
             if candidate is None and failure_reason != "output_truncated":
                 try:
-                    candidate = _strict_json_object(raw)
+                    candidate, _recovered_method = _recover_structured_candidate(
+                        raw,
+                        self.schema,
+                    )
                 except _InvalidOutput as exc:
                     parser_issues = _validation_issues(parsing_error)
                     failure_reason = (
@@ -549,6 +551,79 @@ def _strict_json_object(raw: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise _InvalidOutput("schema_validation")
     return value
+
+
+def _recover_structured_candidate(
+    raw: Any,
+    schema: type[BaseModel],
+) -> tuple[dict[str, Any], ArtifactGenerationMethod]:
+    schema_name = schema.__name__
+
+    tool_calls = getattr(raw, "tool_calls", None)
+    if isinstance(tool_calls, list):
+        matches = [
+            item.get("args")
+            for item in tool_calls
+            if isinstance(item, dict) and item.get("name") == schema_name
+        ]
+        if len(matches) > 1:
+            raise _InvalidOutput("ambiguous_tool_calls")
+        if len(matches) == 1:
+            if not isinstance(matches[0], dict):
+                raise _InvalidOutput("schema_validation")
+            return matches[0], ArtifactGenerationMethod.TOOL_CALL_RECOVERED
+
+    invalid_tool_calls = getattr(raw, "invalid_tool_calls", None)
+    if isinstance(invalid_tool_calls, list):
+        matches = [
+            item.get("args")
+            for item in invalid_tool_calls
+            if isinstance(item, dict) and item.get("name") == schema_name
+        ]
+        if len(matches) > 1:
+            raise _InvalidOutput("ambiguous_tool_calls")
+        if len(matches) == 1:
+            return (
+                _strict_json_string_object(matches[0]),
+                ArtifactGenerationMethod.TOOL_CALL_RECOVERED,
+            )
+
+    additional_kwargs = getattr(raw, "additional_kwargs", None)
+    provider_calls = (
+        additional_kwargs.get("tool_calls")
+        if isinstance(additional_kwargs, dict)
+        else None
+    )
+    if isinstance(provider_calls, list):
+        matches = []
+        for item in provider_calls:
+            function = item.get("function") if isinstance(item, dict) else None
+            if isinstance(function, dict) and function.get("name") == schema_name:
+                matches.append(function.get("arguments"))
+        if len(matches) > 1:
+            raise _InvalidOutput("ambiguous_tool_calls")
+        if len(matches) == 1:
+            return (
+                _strict_json_string_object(matches[0]),
+                ArtifactGenerationMethod.TOOL_CALL_RECOVERED,
+            )
+
+    return (
+        _strict_json_object(raw),
+        ArtifactGenerationMethod.RAW_JSON_RECOVERED,
+    )
+
+
+def _strict_json_string_object(value: Any) -> dict[str, Any]:
+    if not isinstance(value, str):
+        raise _InvalidOutput("schema_validation")
+    try:
+        candidate = json.loads(value)
+    except (TypeError, ValueError) as exc:
+        raise _InvalidOutput("non_json_response") from exc
+    if not isinstance(candidate, dict):
+        raise _InvalidOutput("schema_validation")
+    return candidate
 
 
 def _raw_content(raw: Any) -> str:
