@@ -32,6 +32,7 @@ from tradingagents.application.contracts import (
     MarketReferenceLevel,
     NodeMetrics,
     NumericAuditAppendixStatus,
+    NumericAuditComponentType,
     NumericAuditOmission,
     NumericAuditPhase,
     NumericAuditSnapshot,
@@ -943,7 +944,8 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
                 omitted_components=(
                     NumericAuditOmission(
                         component_path="numeric.calculation.calc_valuation",
-                        label="calc_valuation",
+                        component_type=NumericAuditComponentType.CALCULATION,
+                        reference_label="calc_valuation",
                         issue_codes=(
                             "numeric.calculation.calc_valuation.formula.invalid_syntax",
                         ),

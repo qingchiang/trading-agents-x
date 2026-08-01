@@ -44,35 +44,41 @@
   ],
   "numeric_candidate": {
     "requested": true,
-    "scenario_reference_ranges": [
-      {
-        "kind": "base",
+    "scenario_reference_ranges": {
+      "base": [
+        {
+        "category": "technical",
         "label": "Base technical range",
         "low": {"basis": "interpreted", "value": 5000, "evidence_refs": ["ev_6501a0000001"]},
         "high": {"basis": "interpreted", "value": 5500, "evidence_refs": ["ev_6501a0000001"]},
         "unit": "JPY",
         "interpretation": "Observed technical reference band.",
         "limitations": ["Historical levels are not forecasts."]
-      },
-      {
-        "kind": "bull",
+        }
+      ],
+      "bull": [
+        {
+        "category": "technical",
         "label": "Bull reference range",
         "low": {"basis": "interpreted", "value": 5700, "evidence_refs": ["ev_6501a0000001"]},
         "high": {"basis": "interpreted", "value": 6200, "evidence_refs": ["ev_6501a0000001"]},
         "unit": "JPY",
         "interpretation": "Observed market reference band.",
         "limitations": ["Historical levels are not forecasts."]
-      },
-      {
-        "kind": "bear",
+        }
+      ],
+      "bear": [
+        {
+        "category": "historical",
         "label": "Bear reference range",
         "low": {"basis": "interpreted", "value": 4200, "evidence_refs": ["ev_6501a0000001"]},
         "high": {"basis": "interpreted", "value": 4700, "evidence_refs": ["ev_6501a0000001"]},
         "unit": "JPY",
         "interpretation": "Observed downside reference band.",
         "limitations": ["Historical levels are not forecasts."]
-      }
-    ],
+        }
+      ]
+    },
     "valuation_assessment": {
       "method": "Scenario earnings-multiple cross-check",
       "low": {"basis": "derived", "calculation_id": "calc_bear_price"},

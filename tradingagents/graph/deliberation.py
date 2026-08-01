@@ -33,6 +33,7 @@ from tradingagents.application.contracts import (
     MarketReferenceLevel,
     MemoryContext,
     NumericAuditAppendixStatus,
+    NumericAuditComponentType,
     NumericAuditOmission,
     NumericAuditPhase,
     NumericAuditSnapshot,
@@ -49,6 +50,7 @@ from tradingagents.application.contracts import (
     RiskReview,
     RiskReviewAdjustment,
     RiskReviewDisposition,
+    ScenarioReferenceCategory,
     ScenarioReferenceRange,
     ValuationAssessment,
 )
@@ -201,13 +203,37 @@ RangeEndpointDraft: TypeAlias = Annotated[
 class ScenarioReferenceRangeDraft(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    kind: ResearchScenarioKind
+    category: ScenarioReferenceCategory
     label: str = Field(min_length=1, max_length=120)
     low: RangeEndpointDraft
     high: RangeEndpointDraft
     unit: str = Field(min_length=1, max_length=32)
     interpretation: str = Field(min_length=1)
     limitations: tuple[str, ...] = Field(min_length=1)
+
+
+class ScenarioReferenceRangesDraft(BaseModel):
+    """Fixed scenario buckets that structurally prevent duplicate kinds."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    base: tuple[ScenarioReferenceRangeDraft, ...] = ()
+    bull: tuple[ScenarioReferenceRangeDraft, ...] = ()
+    bear: tuple[ScenarioReferenceRangeDraft, ...] = ()
+
+    def items(
+        self,
+    ) -> tuple[
+        tuple[ResearchScenarioKind, tuple[ScenarioReferenceRangeDraft, ...]], ...
+    ]:
+        return (
+            (ResearchScenarioKind.BASE, self.base),
+            (ResearchScenarioKind.BULL, self.bull),
+            (ResearchScenarioKind.BEAR, self.bear),
+        )
+
+    def has_content(self) -> bool:
+        return bool(self.base or self.bull or self.bear)
 
 
 class ValuationAssessmentDraft(BaseModel):
@@ -267,7 +293,9 @@ class DecisionNumericDraft(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     requested: bool
-    scenario_reference_ranges: tuple[ScenarioReferenceRangeDraft, ...] = ()
+    scenario_reference_ranges: ScenarioReferenceRangesDraft = Field(
+        default_factory=ScenarioReferenceRangesDraft
+    )
     valuation_assessment: ValuationAssessmentDraft | None = None
     market_reference_levels: tuple[MarketReferenceLevelDraft, ...] = ()
     calculation_records: tuple[CalculationRecordDraft, ...] = ()
@@ -838,14 +866,14 @@ def invoke_research_decision(
     core_value = core.value
     scenario_values = []
     for scenario in core_value.scenarios:
-        numeric_scenario = numeric.scenario_reference_ranges.get(scenario.kind)
+        numeric_scenarios = numeric.scenario_reference_ranges.get(scenario.kind, ())
         scenario_values.append(
             ResearchScenario(
                 kind=scenario.kind,
                 core_assumptions=scenario.core_assumptions,
                 outcome=scenario.outcome,
                 evidence_refs=scenario.evidence_refs,
-                reference_range=numeric_scenario,
+                reference_ranges=numeric_scenarios,
             )
         )
     decision = ResearchDecision(
@@ -877,7 +905,9 @@ def invoke_research_decision(
 
 @dataclass(frozen=True)
 class _NumericDecisionAssembly:
-    scenario_reference_ranges: dict[ResearchScenarioKind, ScenarioReferenceRange]
+    scenario_reference_ranges: dict[
+        ResearchScenarioKind, tuple[ScenarioReferenceRange, ...]
+    ]
     valuation_assessment: ValuationAssessment | None
     market_reference_levels: tuple[MarketReferenceLevel, ...]
     calculation_records: tuple[CalculationRecord, ...]
@@ -959,15 +989,17 @@ def _invoke_decision_numeric(
 
     example = DecisionNumericDraft(
         requested=True,
-        scenario_reference_ranges=(
-            ScenarioReferenceRangeDraft(
-                kind=ResearchScenarioKind.BASE,
-                label=example_text["scenario_range_label"],
-                low=example_low,
-                high=example_high,
-                unit="USD",
-                interpretation=example_text["scenario_range_interpretation"],
-                limitations=(example_text["valuation_limitation"],),
+        scenario_reference_ranges=ScenarioReferenceRangesDraft(
+            base=(
+                ScenarioReferenceRangeDraft(
+                    category=ScenarioReferenceCategory.TECHNICAL,
+                    label=example_text["scenario_range_label"],
+                    low=example_low,
+                    high=example_high,
+                    unit="USD",
+                    interpretation=example_text["scenario_range_interpretation"],
+                    limitations=(example_text["valuation_limitation"],),
+                ),
             ),
         ),
         valuation_assessment=ValuationAssessmentDraft(
@@ -1074,7 +1106,7 @@ def _invoke_decision_numeric(
                     omissions=(
                         NumericAuditOmission(
                             component_path="numeric.appendix",
-                            label="Optional numeric appendix",
+                            component_type=NumericAuditComponentType.APPENDIX,
                             issue_codes=tuple(
                                 dict.fromkeys(
                                     issue
@@ -1310,57 +1342,61 @@ def _assemble_numeric_draft(
         except OutputValidationError as exc:
             issues.append(exc.issue_code)
 
-    scenario_values: dict[ResearchScenarioKind, ScenarioReferenceRange] = {}
+    scenario_values: dict[
+        ResearchScenarioKind, tuple[ScenarioReferenceRange, ...]
+    ] = {}
     linked_ids: set[str] = set()
-    seen_scenarios: set[ResearchScenarioKind] = set()
-    for scenario in draft.scenario_reference_ranges:
-        prefix = f"numeric.scenario.{scenario.kind.value}"
-        if scenario.kind in seen_scenarios:
-            issues.append(f"{prefix}.duplicate")
-            continue
-        seen_scenarios.add(scenario.kind)
-        try:
-            require_text(scenario.label)
-            require_text(scenario.interpretation)
-            require_nonempty_texts(scenario.limitations)
-        except OutputValidationError as exc:
-            issues.append(f"{prefix}.{exc.issue_code}")
-            continue
-        endpoints: dict[str, AuditedRangeEndpoint] = {}
-        for endpoint_name, endpoint_draft in (
-            ("low", scenario.low),
-            ("high", scenario.high),
-        ):
+    for scenario_kind, scenario_ranges in draft.scenario_reference_ranges.items():
+        assembled_ranges: list[ScenarioReferenceRange] = []
+        for index, scenario in enumerate(scenario_ranges):
+            prefix = f"numeric.scenario.{scenario_kind.value}.ranges.{index}"
             try:
-                endpoints[endpoint_name] = _assemble_range_endpoint(
-                    endpoint_draft,
-                    calculations=calculations,
-                    evidence_items=evidence_items,
-                    bundle=bundle,
-                    allowed_evidence_refs=allowed_evidence_refs,
-                    value_catalog=value_catalog,
-                    issue_prefix=f"{prefix}.{endpoint_name}",
-                )
+                require_text(scenario.label)
+                require_text(scenario.interpretation)
+                require_nonempty_texts(scenario.limitations)
             except OutputValidationError as exc:
-                issues.append(exc.issue_code)
-        if set(endpoints) != {"low", "high"}:
-            continue
-        if endpoints["high"].value < endpoints["low"].value:
-            issues.append(f"{prefix}.invalid_range")
-            continue
-        scenario_values[scenario.kind] = ScenarioReferenceRange(
-            label=scenario.label,
-            low=endpoints["low"],
-            high=endpoints["high"],
-            unit=scenario.unit,
-            interpretation=scenario.interpretation,
-            limitations=scenario.limitations,
-        )
-        linked_ids.update(
-            endpoint.calculation_id
-            for endpoint in endpoints.values()
-            if endpoint.calculation_id is not None
-        )
+                issues.append(f"{prefix}.{exc.issue_code}")
+                continue
+            endpoints: dict[str, AuditedRangeEndpoint] = {}
+            for endpoint_name, endpoint_draft in (
+                ("low", scenario.low),
+                ("high", scenario.high),
+            ):
+                try:
+                    endpoints[endpoint_name] = _assemble_range_endpoint(
+                        endpoint_draft,
+                        calculations=calculations,
+                        evidence_items=evidence_items,
+                        bundle=bundle,
+                        allowed_evidence_refs=allowed_evidence_refs,
+                        value_catalog=value_catalog,
+                        issue_prefix=f"{prefix}.{endpoint_name}",
+                    )
+                except OutputValidationError as exc:
+                    issues.append(exc.issue_code)
+            if set(endpoints) != {"low", "high"}:
+                continue
+            if endpoints["high"].value < endpoints["low"].value:
+                issues.append(f"{prefix}.invalid_range")
+                continue
+            assembled_ranges.append(
+                ScenarioReferenceRange(
+                    category=scenario.category,
+                    label=scenario.label,
+                    low=endpoints["low"],
+                    high=endpoints["high"],
+                    unit=scenario.unit,
+                    interpretation=scenario.interpretation,
+                    limitations=scenario.limitations,
+                )
+            )
+            linked_ids.update(
+                endpoint.calculation_id
+                for endpoint in endpoints.values()
+                if endpoint.calculation_id is not None
+            )
+        if assembled_ranges:
+            scenario_values[scenario_kind] = tuple(assembled_ranges)
 
     valuation: ValuationAssessment | None = None
     if draft.valuation_assessment is not None:
@@ -1476,7 +1512,7 @@ def _assemble_numeric_draft(
     if draft.requested and not (scenario_values or valuation is not None or reference_levels):
         issues.append("numeric.requested.empty")
     if not draft.requested and (
-        draft.scenario_reference_ranges
+        draft.scenario_reference_ranges.has_content()
         or draft.valuation_assessment is not None
         or draft.market_reference_levels
         or draft.calculation_records
@@ -1498,7 +1534,9 @@ def _assemble_numeric_draft(
     omissions = _numeric_omissions(draft, tuple(issues))
     if issues:
         status = NumericAuditStatus.PARTIAL if has_content else NumericAuditStatus.INCOMPLETE
-        omitted = ", ".join(item.label for item in omissions)
+        omitted = ", ".join(
+            item.reference_label or item.component_path for item in omissions
+        )
         warnings = (
             ResearchWarning(
                 code=f"decision.numeric_audit_{status.value}",
@@ -1530,34 +1568,69 @@ def _numeric_omissions(
     draft: DecisionNumericDraft,
     issues: tuple[str, ...],
 ) -> tuple[NumericAuditOmission, ...]:
-    grouped: dict[tuple[str, str], list[str]] = {}
+    grouped: dict[
+        tuple[
+            str,
+            NumericAuditComponentType,
+            ResearchScenarioKind | None,
+            str | None,
+        ],
+        list[str],
+    ] = {}
     reference_labels = {
         str(index): item.label for index, item in enumerate(draft.market_reference_levels)
+    }
+    scenario_labels = {
+        (kind.value, str(index)): item.label
+        for kind, ranges in draft.scenario_reference_ranges.items()
+        for index, item in enumerate(ranges)
     }
     for issue in issues:
         parts = issue.split(".")
         path = "numeric.appendix"
-        label = "Optional numeric appendix"
+        component_type = NumericAuditComponentType.APPENDIX
+        scenario_kind: ResearchScenarioKind | None = None
+        reference_label: str | None = None
         if len(parts) >= 4 and parts[:2] == ["numeric", "calculation"]:
             path = ".".join(parts[:3])
-            label = parts[2]
-        elif len(parts) >= 4 and parts[:2] == ["numeric", "scenario"]:
-            path = ".".join(parts[:3])
-            label = f"{parts[2].title()} scenario range"
+            component_type = NumericAuditComponentType.CALCULATION
+            reference_label = parts[2]
+        elif (
+            len(parts) >= 6
+            and parts[:2] == ["numeric", "scenario"]
+            and parts[3] == "ranges"
+        ):
+            path = ".".join(parts[:5])
+            component_type = NumericAuditComponentType.SCENARIO_RANGE
+            try:
+                scenario_kind = ResearchScenarioKind(parts[2])
+            except ValueError:
+                scenario_kind = None
+            reference_label = scenario_labels.get((parts[2], parts[4]))
         elif parts[:2] == ["numeric", "valuation"]:
             path = "numeric.valuation"
-            label = "Valuation assessment"
+            component_type = NumericAuditComponentType.VALUATION
         elif len(parts) >= 4 and parts[:2] == ["numeric", "market_reference"]:
             path = ".".join(parts[:3])
-            label = reference_labels.get(parts[2], f"Market reference {parts[2]}")
-        grouped.setdefault((path, label), []).append(issue)
+            component_type = NumericAuditComponentType.MARKET_REFERENCE
+            reference_label = reference_labels.get(parts[2])
+        grouped.setdefault(
+            (path, component_type, scenario_kind, reference_label), []
+        ).append(issue)
     return tuple(
         NumericAuditOmission(
             component_path=path,
-            label=label,
+            component_type=component_type,
+            scenario_kind=scenario_kind,
+            reference_label=reference_label,
             issue_codes=tuple(dict.fromkeys(component_issues)),
         )
-        for (path, label), component_issues in grouped.items()
+        for (
+            path,
+            component_type,
+            scenario_kind,
+            reference_label,
+        ), component_issues in grouped.items()
     )
 
 

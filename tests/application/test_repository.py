@@ -31,6 +31,7 @@ from tradingagents.application.contracts import (
     JudgeDraft,
     KeyClaim,
     NumericAuditAppendixStatus,
+    NumericAuditComponentType,
     NumericAuditOmission,
     NumericAuditPhase,
     NumericAuditSnapshot,
@@ -732,7 +733,8 @@ def test_complete_persists_result_and_resolved_memory(
         omitted_components=(
             NumericAuditOmission(
                 component_path="numeric.calculation.calc_1",
-                label="calc_1",
+                component_type=NumericAuditComponentType.CALCULATION,
+                reference_label="calc_1",
                 issue_codes=(
                     "numeric.calculation.calc_1.formula.invalid_syntax",
                 ),

@@ -157,6 +157,26 @@ class ResearchScenarioKind(str, Enum):
     BEAR = "bear"
 
 
+class ScenarioReferenceCategory(str, Enum):
+    """Research purpose of a non-valuation scenario reference range."""
+
+    TECHNICAL = "technical"
+    HISTORICAL = "historical"
+    ANALYST_CONSENSUS = "analyst_consensus"
+    FUNDAMENTAL = "fundamental"
+    OTHER = "other"
+
+
+class NumericAuditComponentType(str, Enum):
+    """Stable component identity for localized numeric audit omissions."""
+
+    APPENDIX = "appendix"
+    CALCULATION = "calculation"
+    SCENARIO_RANGE = "scenario_range"
+    VALUATION = "valuation"
+    MARKET_REFERENCE = "market_reference"
+
+
 class NumericAuditStatus(str, Enum):
     COMPLETE = "complete"
     PARTIAL = "partial"
@@ -214,7 +234,9 @@ class NumericAuditSnapshot(FrozenModel):
 
 class NumericAuditOmission(FrozenModel):
     component_path: str = Field(pattern=r"^[a-z0-9_.-]+$")
-    label: str = Field(min_length=1, max_length=200)
+    component_type: NumericAuditComponentType
+    scenario_kind: ResearchScenarioKind | None = None
+    reference_label: str | None = Field(default=None, min_length=1, max_length=200)
     issue_codes: tuple[str, ...] = Field(min_length=1)
 
     @field_validator("issue_codes")
@@ -844,6 +866,7 @@ class AuditedRangeEndpoint(FrozenModel):
 class ScenarioReferenceRange(FrozenModel):
     """A scenario-specific reference band, not necessarily a valuation."""
 
+    category: ScenarioReferenceCategory
     label: str = Field(min_length=1, max_length=120)
     low: AuditedRangeEndpoint
     high: AuditedRangeEndpoint
@@ -863,7 +886,7 @@ class ResearchScenario(FrozenModel):
     core_assumptions: tuple[str, ...] = Field(min_length=1)
     outcome: str = Field(min_length=1)
     evidence_refs: tuple[str, ...] = ()
-    reference_range: ScenarioReferenceRange | None = None
+    reference_ranges: tuple[ScenarioReferenceRange, ...] = ()
 
     @field_validator("evidence_refs")
     @classmethod
@@ -1044,8 +1067,7 @@ class ResearchDecision(FrozenModel):
         merged = list(value.get("evidence_refs") or ())
         for scenario in value.get("scenarios") or ():
             merged.extend(_field_value(scenario, "evidence_refs") or ())
-            reference_range = _field_value(scenario, "reference_range")
-            if reference_range is not None:
+            for reference_range in _field_value(scenario, "reference_ranges") or ():
                 for endpoint_name in ("low", "high"):
                     endpoint = _field_value(reference_range, endpoint_name)
                     merged.extend(_field_value(endpoint, "evidence_refs") or ())

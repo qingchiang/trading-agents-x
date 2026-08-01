@@ -31,6 +31,7 @@ from tradingagents.application.contracts import (
     RebuttalReview,
     ResearchScenarioKind,
     RiskReview,
+    ScenarioReferenceCategory,
     ScenarioReferenceRange,
     ValuationAssessment,
 )
@@ -78,7 +79,7 @@ class _StaticInvoker:
                 payload.pop("calculation_records", None)
                 payload.pop("numeric_audit_status", None)
                 for scenario in payload["scenarios"]:
-                    scenario.pop("reference_range", None)
+                    scenario.pop("reference_ranges", None)
                 parsed = ResearchDecisionCoreDraft.model_validate(payload)
             elif self.schema is DecisionNumericDraft:
                 parsed = _numeric_draft_from_decision(payload)
@@ -97,12 +98,15 @@ class _StaticLLM:
 
 
 def _numeric_draft_from_decision(payload: dict[str, Any]) -> DecisionNumericDraft:
-    scenario_reference_ranges = []
+    scenario_reference_ranges: dict[str, list[dict[str, Any]]] = {
+        "base": [],
+        "bull": [],
+        "bear": [],
+    }
     for scenario in payload["scenarios"]:
-        reference_range = scenario.get("reference_range")
-        if reference_range is not None:
-            scenario_reference_ranges.append(
-                {"kind": scenario["kind"]} | _range_draft(reference_range)
+        for reference_range in scenario.get("reference_ranges") or ():
+            scenario_reference_ranges[scenario["kind"]].append(
+                _range_draft(reference_range)
             )
     calculations = []
     for calculation in payload.get("calculation_records") or ():
@@ -129,7 +133,10 @@ def _numeric_draft_from_decision(payload: dict[str, Any]) -> DecisionNumericDraf
         }
     references = [_reference_draft(item) for item in payload.get("market_reference_levels") or ()]
     has_content = bool(
-        scenario_reference_ranges or valuation or references or calculations
+        any(scenario_reference_ranges.values())
+        or valuation
+        or references
+        or calculations
     )
     return DecisionNumericDraft.model_validate(
         {
@@ -159,6 +166,7 @@ def _endpoint_draft(endpoint: dict[str, Any]) -> dict[str, Any]:
 
 def _range_draft(reference_range: dict[str, Any]) -> dict[str, Any]:
     return {
+        "category": reference_range["category"],
         "label": reference_range["label"],
         "low": _endpoint_draft(reference_range["low"]),
         "high": _endpoint_draft(reference_range["high"]),
@@ -227,7 +235,7 @@ def _core_draft_from_decision(payload: dict[str, Any]) -> ResearchDecisionCoreDr
         {
             key: value
             for key, value in scenario.items()
-            if key != "reference_range"
+            if key != "reference_ranges"
         }
         for scenario in payload["scenarios"]
     ]
@@ -763,7 +771,7 @@ def test_numeric_serializer_repairs_seven_invalid_input_names() -> None:
     ]
     invalid_numeric = {
         "requested": True,
-        "scenario_reference_ranges": [],
+        "scenario_reference_ranges": {"base": [], "bull": [], "bear": []},
         "valuation_assessment": None,
         "market_reference_levels": [],
         "calculation_records": invalid_records,
@@ -824,7 +832,7 @@ def test_final_serializers_preserve_output_language_in_primary_and_repair(
     invalid_core["thesis"] = ""
     invalid_numeric = {
         "requested": True,
-        "scenario_reference_ranges": [],
+        "scenario_reference_ranges": {"base": [], "bull": [], "bear": []},
         "valuation_assessment": None,
         "market_reference_levels": [],
         "calculation_records": [],
@@ -1221,25 +1229,28 @@ def test_final_decision_recomputes_optional_calculation_result() -> None:
             "scenarios": tuple(
                 scenario.model_copy(
                     update={
-                        "reference_range": ScenarioReferenceRange(
-                            label="Derived scenario reference",
-                            low=AuditedRangeEndpoint(
-                                value=999,
-                                basis=MarketReferenceBasis.DERIVED,
-                                evidence_refs=(ref,),
-                                calculation_id="calc_scenario",
-                                as_of_date=date(2026, 7, 24),
+                        "reference_ranges": (
+                            ScenarioReferenceRange(
+                                category=ScenarioReferenceCategory.FUNDAMENTAL,
+                                label="Derived scenario reference",
+                                low=AuditedRangeEndpoint(
+                                    value=999,
+                                    basis=MarketReferenceBasis.DERIVED,
+                                    evidence_refs=(ref,),
+                                    calculation_id="calc_scenario",
+                                    as_of_date=date(2026, 7, 24),
+                                ),
+                                high=AuditedRangeEndpoint(
+                                    value=999,
+                                    basis=MarketReferenceBasis.DERIVED,
+                                    evidence_refs=(ref,),
+                                    calculation_id="calc_scenario",
+                                    as_of_date=date(2026, 7, 24),
+                                ),
+                                unit="USD",
+                                interpretation="Illustrative derived range.",
+                                limitations=("Illustrative scenario only.",),
                             ),
-                            high=AuditedRangeEndpoint(
-                                value=999,
-                                basis=MarketReferenceBasis.DERIVED,
-                                evidence_refs=(ref,),
-                                calculation_id="calc_scenario",
-                                as_of_date=date(2026, 7, 24),
-                            ),
-                            unit="USD",
-                            interpretation="Illustrative derived range.",
-                            limitations=("Illustrative scenario only.",),
                         ),
                     }
                 )

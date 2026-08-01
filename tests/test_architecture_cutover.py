@@ -71,6 +71,7 @@ def test_public_api_exposes_typed_application_contract():
         "MarketReferenceLevel",
         "NumericAuditStatus",
         "NumericAuditAppendixStatus",
+        "NumericAuditComponentType",
         "NumericAuditOmission",
         "NumericAuditPhase",
         "NumericAuditSnapshot",
@@ -94,6 +95,7 @@ def test_public_api_exposes_typed_application_contract():
         "AuditedRangeEndpoint",
         "NumericTemporalBasis",
         "ScenarioReferenceRange",
+        "ScenarioReferenceCategory",
         "StructuredRecoveryNotice",
         "__version__",
     ]
