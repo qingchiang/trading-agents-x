@@ -77,6 +77,9 @@ class RoleContextBuilder:
             }
         )
         self.memory = memory
+        self.output_language = str(
+            state.get("output_language") or "English (en)"
+        )
         self.catalog = build_evidence_catalog(self.bundle)
         self.shared_prefix = self._shared_prefix()
 
@@ -118,6 +121,12 @@ class RoleContextBuilder:
             "title": title,
             "objective": objective,
             "instructions": instructions,
+            "output_language": self.output_language,
+            "language_requirement": (
+                "Write every human-readable field in this complete output-language "
+                f"instruction: {self.output_language}. Keep IDs, enums, Evidence "
+                "refs, and other wire values unchanged."
+            ),
         }
         prompt = (
             self.shared_prefix
@@ -181,7 +190,12 @@ class RoleContextBuilder:
             "profile": self.state.get("profile"),
             "evidence_catalog": self.catalog,
         }
-        return _SYSTEM_RULES + "\n\nRESEARCH DOSSIER:\n" + _stable_json(
+        language_rule = (
+            "\n- Write every human-readable field in this complete output-language "
+            f"instruction: {self.output_language}. Keep IDs, enums, Evidence refs, "
+            "and other wire values unchanged."
+        )
+        return _SYSTEM_RULES + language_rule + "\n\nRESEARCH DOSSIER:\n" + _stable_json(
             dossier
         )
 

@@ -84,6 +84,10 @@ def test_roles_share_a_byte_identical_stable_prefix() -> None:
     )
     assert "Complete localized report" not in bull.shared_prefix
     assert "report_index" not in bull.shared_prefix
+    language = state["output_language"]
+    assert language in bull.shared_prefix
+    assert bull.prompt.count(language) >= 3
+    assert risk.prompt.count(language) >= 3
 
 
 def test_full_report_context_does_not_duplicate_primary_claims() -> None:

@@ -815,6 +815,7 @@ class ResearchGraph:
                     prompt=context.prompt,
                     node=f"{node}.write",
                     allowed_evidence_refs=_state_evidence_refs(state),
+                    output_language=state["output_language"],
                     invoke_config={
                         "callbacks": [self.metrics],
                         "metadata": {"research_node": f"{node}.write"},
@@ -893,6 +894,7 @@ class ResearchGraph:
                     prompt=context.prompt,
                     state=state,
                     node=f"{node}.serialize",
+                    output_language=state["output_language"],
                     event_writer=runtime.stream_writer,
                 )
             agenda = output.value
@@ -903,7 +905,7 @@ class ResearchGraph:
                 role="moderator",
                 content=agenda,
                 generation_method=output.generation_method,
-                prompt_version="debate-agenda-v6-readable",
+                prompt_version="debate-agenda-v7-language-contract",
             )
             self._finish_node(
                 runtime,
@@ -966,6 +968,7 @@ class ResearchGraph:
                     prompt=context.prompt,
                     node=f"{node}.write",
                     allowed_evidence_refs=_state_evidence_refs(state),
+                    output_language=state["output_language"],
                     invoke_config={
                         "callbacks": [self.metrics],
                         "metadata": {"research_node": f"{node}.write"},
@@ -1092,6 +1095,7 @@ class ResearchGraph:
                 prompt=context.prompt,
                 node=f"{node}.write",
                 allowed_evidence_refs=_state_evidence_refs(state),
+                output_language=state["output_language"],
                 invoke_config={
                     "callbacks": [self.metrics],
                     "metadata": {"research_node": f"{node}.write"},
@@ -1176,6 +1180,7 @@ class ResearchGraph:
                     prompt=context.prompt,
                     node=f"{node}.write",
                     allowed_evidence_refs=_state_evidence_refs(state),
+                    output_language=state["output_language"],
                     invoke_config={
                         "callbacks": [self.metrics],
                         "metadata": {"research_node": f"{node}.write"},
@@ -1282,6 +1287,7 @@ class ResearchGraph:
                     ),
                     node=f"{node}.reason",
                     allowed_evidence_refs=_state_evidence_refs(state),
+                    output_language=state["output_language"],
                     invoke_config={
                         "callbacks": [self.metrics],
                         "metadata": {"research_node": f"{node}.reason"},

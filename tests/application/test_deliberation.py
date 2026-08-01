@@ -382,6 +382,7 @@ def test_research_markdown_uses_inline_ledger_refs_without_definitions() -> None
         prompt="Write the case.",
         node="case.bull.write",
         allowed_evidence_refs=(ref,),
+        output_language="English (en)",
     )
 
     assert result.markdown == f"# Case\n\nSupported.[^{ref}]"
@@ -446,10 +447,44 @@ def test_agenda_audit_failure_uses_explicit_navigation_fallback() -> None:
         prompt="Completed moderator brief.",
         state=state,
         node="debate.agenda.audit",
+        output_language="English (en)",
     )
 
     assert result.value.issues[0].id == "debate.issue_audit_fallback"
     assert result.generation_method is ArtifactGenerationMethod.MARKDOWN_AUDIT_INCOMPLETE
+
+
+def test_agenda_prompt_and_fallback_follow_standard_output_language() -> None:
+    state = _state()
+    language = "Simplified Chinese (简体中文, zh-CN)"
+    llm = _StaticLLM({"summary": "", "issues": []})
+
+    result = invoke_debate_agenda(
+        llm,
+        prompt="已完成的主持人简报。",
+        state=state,
+        node="debate.agenda.audit",
+        output_language=language,
+    )
+
+    assert "多空案例对一个重要经营机制存在分歧" in llm.prompts[0]
+    assert all(language in prompt for prompt in llm.prompts)
+    assert result.value.summary.startswith("已完成的多空案例")
+    assert result.value.issues[0].question.endswith("是什么？")
+
+
+def test_custom_language_agenda_failure_keeps_checkpoint_boundary() -> None:
+    state = _state()
+    custom_language = "Use formal Chinese and preserve Japanese legal names."
+
+    with pytest.raises(StructuredOutputError):
+        invoke_debate_agenda(
+            _StaticLLM({"summary": "", "issues": []}),
+            prompt="Completed moderator brief.",
+            state=state,
+            node="debate.agenda.audit",
+            output_language=custom_language,
+        )
 
 
 @pytest.mark.parametrize(
