@@ -42,6 +42,7 @@ from tradingagents.graph.deliberation import (
     CalculationInputDraft,
     CalculationRecordDraft,
     DecisionNumericDraft,
+    DerivedRangeEndpointDraft,
     InterpretedRangeEndpointDraft,
     ObservedMarketReferenceLevelDraft,
     ObservedRangeEndpointDraft,
@@ -1455,6 +1456,124 @@ def test_equal_observed_values_with_different_locators_are_not_promoted() -> Non
         "numeric.scenario.base.ranges.0.invalid_range",
         "numeric.requested.empty",
     )
+
+
+def test_interpreted_singleton_is_promoted_to_interpreted_reference() -> None:
+    bundle, draft = _numeric_regression()
+    source_range = draft.scenario_reference_ranges.base[0]
+    singleton = source_range.model_copy(
+        update={"high": source_range.low.model_copy()}
+    )
+    draft = DecisionNumericDraft(
+        requested=True,
+        scenario_reference_ranges=ScenarioReferenceRangesDraft(base=(singleton,)),
+    )
+
+    result = _assemble_numeric_draft(
+        draft,
+        bundle=bundle,
+        allowed_evidence_refs={item.ref for item in bundle.items},
+        value_catalog=_value_catalog(bundle),
+        salvage=False,
+        node="committee.final.serialize.numeric",
+    )
+
+    assert result.scenario_reference_ranges == {}
+    assert len(result.market_reference_levels) == 1
+    reference = result.market_reference_levels[0]
+    assert reference.basis is MarketReferenceBasis.INTERPRETED
+    assert reference.value == singleton.low.value
+    assert reference.source_locator is None
+    assert result.status is NumericAuditStatus.COMPLETE
+
+
+def test_derived_singleton_is_promoted_and_keeps_calculation() -> None:
+    bundle, draft = _numeric_regression()
+    calculation = draft.calculation_records[0]
+    endpoint = DerivedRangeEndpointDraft(calculation_id=calculation.id)
+    draft = DecisionNumericDraft(
+        requested=True,
+        scenario_reference_ranges=ScenarioReferenceRangesDraft(
+            base=(
+                ScenarioReferenceRangeDraft(
+                    category=ScenarioReferenceCategory.FUNDAMENTAL,
+                    label="Derived earnings reference",
+                    low=endpoint,
+                    high=endpoint,
+                    unit=calculation.unit,
+                    interpretation="One derived valuation reference.",
+                    limitations=("The input assumptions may change.",),
+                ),
+            )
+        ),
+        calculation_records=(calculation,),
+    )
+
+    result = _assemble_numeric_draft(
+        draft,
+        bundle=bundle,
+        allowed_evidence_refs={item.ref for item in bundle.items},
+        value_catalog=_value_catalog(bundle),
+        salvage=False,
+        node="committee.final.serialize.numeric",
+    )
+
+    assert len(result.market_reference_levels) == 1
+    reference = result.market_reference_levels[0]
+    assert reference.basis is MarketReferenceBasis.DERIVED
+    assert reference.calculation_ids == (calculation.id,)
+    assert [item.id for item in result.calculation_records] == [calculation.id]
+    assert result.status is NumericAuditStatus.COMPLETE
+
+
+def test_reversed_range_and_valuation_are_canonically_ordered() -> None:
+    bundle, draft = _numeric_regression()
+    source_range = draft.scenario_reference_ranges.base[0]
+    reversed_range = source_range.model_copy(
+        update={"low": source_range.high, "high": source_range.low}
+    )
+    valuation = draft.valuation_assessment
+    assert valuation is not None
+    reversed_valuation = valuation.model_copy(
+        update={"low": valuation.high, "high": valuation.low}
+    )
+    draft = draft.model_copy(
+        update={
+            "scenario_reference_ranges": ScenarioReferenceRangesDraft(
+                base=(reversed_range,)
+            ),
+            "valuation_assessment": reversed_valuation,
+        }
+    )
+
+    result = _assemble_numeric_draft(
+        draft,
+        bundle=bundle,
+        allowed_evidence_refs={item.ref for item in bundle.items},
+        value_catalog=_value_catalog(bundle),
+        salvage=False,
+        node="committee.final.serialize.numeric",
+    )
+
+    assembled_range = result.scenario_reference_ranges[ResearchScenarioKind.BASE][0]
+    assert assembled_range.low.value < assembled_range.high.value
+    assert result.valuation_assessment is not None
+    assert result.valuation_assessment.low.value < result.valuation_assessment.high.value
+    assert result.reordered_ranges == 2
+    assert result.status is NumericAuditStatus.COMPLETE
+    events: list[dict[str, Any]] = []
+    _emit_numeric_normalization_event(
+        result,
+        event_writer=events.append,
+        node="committee.final.serialize.numeric",
+    )
+    assert events == [
+        {
+            "event_type": "decision.numeric_range_reordered",
+            "node": "committee.final.serialize.numeric",
+            "payload": {"count": 2},
+        }
+    ]
 
 
 def test_invalid_scenario_range_only_omits_that_range() -> None:

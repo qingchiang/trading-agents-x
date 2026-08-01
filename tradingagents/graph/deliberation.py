@@ -1083,6 +1083,7 @@ class _NumericDecisionAssembly:
     omissions: tuple[NumericAuditOmission, ...] = ()
     audit: DecisionNumericAuditAppendix | None = None
     promoted_singletons: int = 0
+    reordered_ranges: int = 0
 
 
 def _emit_numeric_normalization_event(
@@ -1097,6 +1098,14 @@ def _emit_numeric_normalization_event(
                 "event_type": "decision.numeric_singleton_promoted",
                 "node": node,
                 "payload": {"count": assembly.promoted_singletons},
+            }
+        )
+    if event_writer is not None and assembly.reordered_ranges:
+        event_writer(
+            {
+                "event_type": "decision.numeric_range_reordered",
+                "node": node,
+                "payload": {"count": assembly.reordered_ranges},
             }
         )
     return assembly
@@ -1542,6 +1551,53 @@ def _empty_numeric_assembly(
     )
 
 
+def _same_numeric_endpoint_identity(
+    low: RangeEndpointDraft,
+    high: RangeEndpointDraft,
+) -> bool:
+    if type(low) is not type(high):
+        return False
+    if isinstance(low, ObservedRangeEndpointDraft) and isinstance(
+        high, ObservedRangeEndpointDraft
+    ):
+        return low.value_ref == high.value_ref
+    if isinstance(low, InterpretedRangeEndpointDraft) and isinstance(
+        high, InterpretedRangeEndpointDraft
+    ):
+        return (
+            low.value == high.value
+            and set(low.anchor_value_refs) == set(high.anchor_value_refs)
+            and set(low.context_evidence_refs) == set(high.context_evidence_refs)
+        )
+    if isinstance(low, DerivedRangeEndpointDraft) and isinstance(
+        high, DerivedRangeEndpointDraft
+    ):
+        return low.calculation_id == high.calculation_id
+    return False
+
+
+def _market_reference_identity(level: MarketReferenceLevel) -> str:
+    if level.basis is MarketReferenceBasis.OBSERVED:
+        payload: Any = (
+            level.source_locator.model_dump(mode="json")
+            if level.source_locator is not None
+            else None
+        )
+    elif level.basis is MarketReferenceBasis.INTERPRETED:
+        payload = {
+            "value": level.value,
+            "evidence_refs": sorted(level.evidence_refs),
+            "date_evidence_refs": sorted(level.date_evidence_refs),
+        }
+    else:
+        payload = sorted(level.calculation_ids)
+    return json.dumps(
+        {"basis": level.basis.value, "identity": payload},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
 def _assemble_numeric_draft(
     draft: DecisionNumericDraft,
     *,
@@ -1602,6 +1658,7 @@ def _assemble_numeric_draft(
     duplicate_warnings: list[ResearchWarning] = []
     unknown_unit_present = False
     promoted_references: list[MarketReferenceLevel] = []
+    reordered_ranges = 0
     linked_ids: set[str] = set()
     for scenario_kind, scenario_ranges in draft.scenario_reference_ranges.items():
         assembled_ranges: list[ScenarioReferenceRange] = []
@@ -1655,9 +1712,6 @@ def _assemble_numeric_draft(
                     issues.append(exc.issue_code)
             if set(endpoints) != {"low", "high"}:
                 continue
-            if endpoints["high"].value < endpoints["low"].value:
-                issues.append(f"{prefix}.invalid_range")
-                continue
             try:
                 measurement_kind, unit = _observed_range_measurement(
                     scenario,
@@ -1668,12 +1722,7 @@ def _assemble_numeric_draft(
                 issues.append(exc.issue_code)
                 continue
             if endpoints["high"].value == endpoints["low"].value:
-                if (
-                    isinstance(scenario.low, ObservedRangeEndpointDraft)
-                    and isinstance(scenario.high, ObservedRangeEndpointDraft)
-                    and scenario.low.value_ref == scenario.high.value_ref
-                    and endpoints["low"].source_locator is not None
-                ):
+                if _same_numeric_endpoint_identity(scenario.low, scenario.high):
                     endpoint = endpoints["low"]
                     promoted_references.append(
                         MarketReferenceLevel(
@@ -1685,16 +1734,29 @@ def _assemble_numeric_draft(
                             interpretation=scenario.interpretation,
                             evidence_refs=endpoint.evidence_refs,
                             date_evidence_refs=endpoint.date_evidence_refs,
-                            basis=MarketReferenceBasis.OBSERVED,
+                            basis=endpoint.basis,
                             source_locator=endpoint.source_locator,
+                            calculation_ids=(
+                                (endpoint.calculation_id,)
+                                if endpoint.calculation_id is not None
+                                else ()
+                            ),
                             temporal_basis=endpoint.temporal_basis,
                         )
                     )
                     if measurement_kind is MeasurementKind.UNKNOWN:
                         unknown_unit_present = True
+                    if endpoint.calculation_id is not None:
+                        linked_ids.add(endpoint.calculation_id)
                     continue
                 issues.append(f"{prefix}.invalid_range")
                 continue
+            if endpoints["high"].value < endpoints["low"].value:
+                endpoints["low"], endpoints["high"] = (
+                    endpoints["high"],
+                    endpoints["low"],
+                )
+                reordered_ranges += 1
             assembled_ranges.append(
                 ScenarioReferenceRange(
                     category=scenario.category,
@@ -1757,16 +1819,16 @@ def _assemble_numeric_draft(
             issues.append(exc.issue_code)
         else:
             if high.value < low.value:
-                issues.append(f"{prefix}.invalid_range")
-            else:
-                valuation = ValuationAssessment(
-                    method=item.method,
-                    low=low,
-                    high=high,
-                    currency=item.currency,
-                    limitations=item.limitations,
-                )
-                linked_ids.update(valuation.calculation_ids)
+                low, high = high, low
+                reordered_ranges += 1
+            valuation = ValuationAssessment(
+                method=item.method,
+                low=low,
+                high=high,
+                currency=item.currency,
+                limitations=item.limitations,
+            )
+            linked_ids.update(valuation.calculation_ids)
 
     reference_levels: list[MarketReferenceLevel] = []
     for index, item in enumerate(draft.market_reference_levels):
@@ -1857,17 +1919,13 @@ def _assemble_numeric_draft(
                 unknown_unit_present = True
             linked_ids.update(calculation_ids)
 
-    explicit_locators = {
-        level.source_locator.model_dump_json()
-        for level in reference_levels
-        if level.source_locator is not None
-    }
+    explicit_references = {_market_reference_identity(level) for level in reference_levels}
     for promoted in promoted_references:
-        locator = promoted.source_locator
-        if locator is None or locator.model_dump_json() in explicit_locators:
+        identity = _market_reference_identity(promoted)
+        if identity in explicit_references:
             continue
         reference_levels.append(promoted)
-        explicit_locators.add(locator.model_dump_json())
+        explicit_references.add(identity)
 
     if unknown_unit_present:
         duplicate_warnings.append(
@@ -1933,6 +1991,7 @@ def _assemble_numeric_draft(
         issues=tuple(issues),
         omissions=omissions,
         promoted_singletons=len(promoted_references),
+        reordered_ranges=reordered_ranges,
     )
 
 
