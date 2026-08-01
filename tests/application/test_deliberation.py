@@ -8,7 +8,6 @@ import pytest
 from tests.factories import analyst_report, research_decision
 from tradingagents.application.contracts import (
     ArtifactGenerationMethod,
-    CalculationPurpose,
     CalculationRecord,
     DebateAgenda,
     DebateImportance,
@@ -99,25 +98,38 @@ def _numeric_draft_from_decision(payload: dict[str, Any]) -> DecisionNumericDraf
     for calculation in payload.get("calculation_records") or ():
         calculations.append(
             {
-                **calculation,
+                key: value
+                for key, value in calculation.items()
+                if key not in {"result", "as_of_date"}
+            }
+            | {
                 "inputs": [
                     {"name": name, "value": value}
                     for name, value in calculation["inputs"].items()
                 ],
             }
         )
+    valuation = payload.get("valuation_assessment")
+    if valuation is not None:
+        valuation = {
+            key: value for key, value in valuation.items() if key != "as_of_date"
+        }
+    references = [
+        {key: value for key, value in item.items() if key != "as_of_date"}
+        for item in payload.get("market_reference_levels") or ()
+    ]
     has_content = bool(
         scenario_valuations
-        or payload.get("valuation_assessment")
-        or payload.get("market_reference_levels")
+        or valuation
+        or references
         or calculations
     )
     return DecisionNumericDraft.model_validate(
         {
             "requested": has_content,
             "scenario_valuations": scenario_valuations,
-            "valuation_assessment": payload.get("valuation_assessment"),
-            "market_reference_levels": payload.get("market_reference_levels"),
+            "valuation_assessment": valuation,
+            "market_reference_levels": references,
             "calculation_records": calculations,
         }
     )
@@ -462,7 +474,6 @@ def test_final_decision_accepts_reproducible_critical_calculation() -> None:
             "calculation_records": (
                 CalculationRecord(
                     id="calc_valuation",
-                    purpose=CalculationPurpose.VALUATION,
                     formula="earnings * multiple",
                     inputs={"earnings": 10, "multiple": 10},
                     input_evidence_refs=(ref,),
@@ -560,16 +571,13 @@ def test_numeric_serializer_repairs_seven_invalid_input_names() -> None:
     invalid_records = [
         {
             "id": f"calc_valuation_{index}",
-            "purpose": "valuation",
             "formula": "earnings * multiple",
             "inputs": [
                 {"name": "盈利", "value": 10},
                 {"name": "倍数", "value": 10},
             ],
             "input_evidence_refs": [ref],
-            "result": 100,
             "unit": "USD",
-            "as_of_date": "2026-07-24",
             "limitations": ["Illustrative only."],
         }
         for index in range(7)
@@ -634,16 +642,13 @@ def test_calculation_draft_exposes_identifier_inputs_in_json_schema() -> None:
 def test_calculation_draft_converts_typed_inputs_to_public_mapping() -> None:
     draft = CalculationRecordDraft(
         id="calc_valuation",
-        purpose=CalculationPurpose.VALUATION,
         formula="earnings * multiple",
         inputs=(
             CalculationInputDraft(name="earnings", value=10),
             CalculationInputDraft(name="multiple", value=10),
         ),
         input_evidence_refs=("ev_0123456789ab",),
-        result=100,
         unit="USD",
-        as_of_date=date(2026, 7, 24),
         limitations=("The multiple is scenario-dependent.",),
     )
 
@@ -680,15 +685,25 @@ def test_formula_validation_reports_component_scoped_input_issues(
     assert error.value.issue_code == issue
 
 
-def test_final_decision_omits_unreproducible_optional_calculation() -> None:
+def test_final_decision_recomputes_optional_calculation_result() -> None:
     state = _state()
     ref = state["evidence_bundle"]["items"][0]["ref"]
     decision = research_decision(evidence_refs=(ref,)).model_copy(
         update={
+            "scenarios": tuple(
+                scenario.model_copy(
+                    update={
+                        "valuation_range": ValuationRange(low=100, high=120),
+                        "valuation_calculation_ids": ("calc_scenario",),
+                    }
+                )
+                if scenario.kind.value == "base"
+                else scenario
+                for scenario in research_decision(evidence_refs=(ref,)).scenarios
+            ),
             "calculation_records": (
                 CalculationRecord(
                     id="calc_scenario",
-                    purpose=CalculationPurpose.SCENARIO,
                     formula="base * growth",
                     inputs={"base": 100, "growth": 1.1},
                     input_evidence_refs=(ref,),
@@ -710,16 +725,10 @@ def test_final_decision_omits_unreproducible_optional_calculation() -> None:
         require_risk_adjustments=False,
     )
 
-    assert len(llm.prompts) == 3
-    assert result.value.calculation_records == ()
-    assert result.value.numeric_audit_status is NumericAuditStatus.INCOMPLETE
-    assert result.warnings[0].code == "decision.numeric_audit_incomplete"
-    assert result.numeric_audit is not None
-    assert [item.phase.value for item in result.numeric_audit.snapshots] == [
-        "initial",
-        "repair",
-    ]
-    assert result.numeric_audit.snapshots[-1].candidate is not None
+    assert len(llm.prompts) == 2
+    assert result.value.calculation_records[0].result == pytest.approx(110.0)
+    assert result.value.numeric_audit_status is NumericAuditStatus.COMPLETE
+    assert result.numeric_audit is None
 
 
 def test_final_decision_preserves_valid_numeric_components_after_repair_failure() -> None:
@@ -750,8 +759,7 @@ def test_final_decision_preserves_valid_numeric_components_after_repair_failure(
             "calculation_records": (
                 CalculationRecord(
                     id="calc_valuation",
-                    purpose=CalculationPurpose.VALUATION,
-                    formula="earnings * multiple",
+                    formula="earnings * missing_multiple",
                     inputs={"earnings": 10, "multiple": 10},
                     input_evidence_refs=(ref,),
                     result=999,

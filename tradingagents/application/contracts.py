@@ -866,17 +866,10 @@ class RiskReviewAdjustment(FrozenModel):
         return _unique_evidence_refs(value)
 
 
-class CalculationPurpose(str, Enum):
-    VALUATION = "valuation"
-    SCENARIO = "scenario"
-    MARKET_REFERENCE = "market_reference"
-
-
 class CalculationRecord(FrozenModel):
     """A decision-critical calculation, not a presentation-table cell."""
 
     id: str = Field(pattern=r"^calc_[a-z0-9][a-z0-9_.-]*$")
-    purpose: CalculationPurpose
     formula: str = Field(min_length=1)
     inputs: dict[str, int | float] = Field(min_length=1)
     input_evidence_refs: tuple[str, ...] = Field(min_length=1)

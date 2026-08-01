@@ -525,6 +525,7 @@ def _render_risk_review(content: RiskReview) -> str:
 
 
 def _render_research_decision(content: ResearchDecision) -> str:
+    calculation_uses = _calculation_uses(content)
     lines = [
         "> Non-personalized research opinion. This is not an account-level "
         "instruction, position size, or order.",
@@ -644,8 +645,10 @@ def _render_research_decision(content: ResearchDecision) -> str:
             lines.extend(
                 [
                     "",
-                    f"#### `{calculation.id}` · {calculation.purpose.value}",
+                    f"#### `{calculation.id}`",
                     "",
+                    "- Used by: "
+                    + ", ".join(calculation_uses.get(calculation.id, ())),
                     f"- Formula: `{calculation.formula}`",
                     f"- Inputs: `{inputs}`",
                     f"- Result: `{calculation.result}` {calculation.unit}",
@@ -686,6 +689,28 @@ def _render_research_decision(content: ResearchDecision) -> str:
     else:
         lines.extend(["", "_No risk-review adjustments were recorded._"])
     return "\n".join(lines)
+
+
+def _calculation_uses(content: ResearchDecision) -> dict[str, tuple[str, ...]]:
+    uses: dict[str, list[str]] = {}
+
+    def add(calculation_ids: tuple[str, ...], label: str) -> None:
+        for calculation_id in calculation_ids:
+            uses.setdefault(calculation_id, []).append(label)
+
+    for scenario in content.scenarios:
+        add(
+            scenario.valuation_calculation_ids,
+            f"{scenario.kind.value.title()} scenario",
+        )
+    if content.valuation_assessment is not None:
+        add(content.valuation_assessment.calculation_ids, "Valuation assessment")
+    for level in content.market_reference_levels:
+        add(level.calculation_ids, f"Market reference: {level.label}")
+    return {
+        calculation_id: tuple(dict.fromkeys(labels))
+        for calculation_id, labels in uses.items()
+    }
 
 
 def _render_numeric_audit_appendix(

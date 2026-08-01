@@ -697,7 +697,7 @@ def test_complete_persists_result_and_resolved_memory(
                 method=ArtifactGenerationMethod.TOOL_CALL_RECOVERED,
                 reason_code="semantic_validation",
                 validation_issues=(
-                    "semantic.numeric.calculation.calc_1.result_mismatch",
+                    "semantic.numeric.calculation.calc_1.formula.invalid_syntax",
                 ),
                 schema_valid=True,
                 candidate={
@@ -713,7 +713,7 @@ def test_complete_persists_result_and_resolved_memory(
                 component_path="numeric.calculation.calc_1",
                 label="calc_1",
                 issue_codes=(
-                    "numeric.calculation.calc_1.result_mismatch",
+                    "numeric.calculation.calc_1.formula.invalid_syntax",
                 ),
             ),
         ),

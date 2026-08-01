@@ -52,7 +52,6 @@ def test_public_api_exposes_typed_application_contract():
         "AnalysisResult",
         "AnalystClaimType",
         "AnalystReport",
-        "CalculationPurpose",
         "CalculationRecord",
         "ClaimImportance",
         "DebateAgenda",

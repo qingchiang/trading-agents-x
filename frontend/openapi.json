@@ -325,15 +325,6 @@
         "title": "AssetType",
         "type": "string"
       },
-      "CalculationPurpose": {
-        "enum": [
-          "valuation",
-          "scenario",
-          "market_reference"
-        ],
-        "title": "CalculationPurpose",
-        "type": "string"
-      },
       "CalculationRecord": {
         "additionalProperties": false,
         "description": "A decision-critical calculation, not a presentation-table cell.",
@@ -384,9 +375,6 @@
             "title": "Limitations",
             "type": "array"
           },
-          "purpose": {
-            "$ref": "#/components/schemas/CalculationPurpose"
-          },
           "result": {
             "anyOf": [
               {
@@ -407,7 +395,6 @@
         },
         "required": [
           "id",
-          "purpose",
           "formula",
           "inputs",
           "input_evidence_refs",

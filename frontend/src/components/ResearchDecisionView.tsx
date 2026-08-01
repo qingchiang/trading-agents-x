@@ -73,6 +73,7 @@ export function ResearchDecisionContent({
     (left, right) =>
       scenarioOrder.indexOf(left.kind) - scenarioOrder.indexOf(right.kind),
   );
+  const calculationUses = buildCalculationUses(decision, t);
 
   return (
     <div className={embedded ? "decision-content embedded" : "decision-content"}>
@@ -358,11 +359,14 @@ export function ResearchDecisionContent({
                 <article key={calculation.id}>
                   <header>
                     <div>
-                      <strong>{humanize(calculation.purpose)}</strong>
+                      <strong>
+                        {calculationUses.get(calculation.id)?.join(" · ") ??
+                          t("calculationUnlinked")}
+                      </strong>
                       <small>{calculation.id}</small>
                     </div>
-                    <span>
-                      {calculation.result.toLocaleString()} {calculation.unit}
+                    <span title={String(calculation.result)}>
+                      {formatCalculationValue(calculation.result)} {calculation.unit}
                     </span>
                   </header>
                   <code>{calculation.formula}</code>
@@ -453,6 +457,40 @@ function formatRange(low: number, high: number, currency?: string): string {
   return `${low.toLocaleString()}–${high.toLocaleString()}${
     currency ? ` ${currency}` : ""
   }`;
+}
+
+function formatCalculationValue(value: number): string {
+  return value.toLocaleString(undefined, { maximumFractionDigits: 6 });
+}
+
+function buildCalculationUses(
+  decision: ResearchDecision,
+  t: (key: string, options?: Record<string, unknown>) => string,
+): Map<string, string[]> {
+  const uses = new Map<string, string[]>();
+  const add = (ids: string[] | undefined, label: string) => {
+    (ids ?? []).forEach((id) => {
+      const labels = uses.get(id) ?? [];
+      if (!labels.includes(label)) labels.push(label);
+      uses.set(id, labels);
+    });
+  };
+  decision.scenarios.forEach((scenario) =>
+    add(
+      scenario.valuation_calculation_ids,
+      t("calculationUseScenario", { scenario: t(scenarioKey(scenario.kind)) }),
+    ),
+  );
+  if (decision.valuation_assessment) {
+    add(decision.valuation_assessment.calculation_ids, t("valuationAssessment"));
+  }
+  (decision.market_reference_levels ?? []).forEach((level) =>
+    add(
+      level.calculation_ids,
+      t("calculationUseMarketReference", { label: level.label }),
+    ),
+  );
+  return uses;
 }
 
 function humanize(value: string): string {

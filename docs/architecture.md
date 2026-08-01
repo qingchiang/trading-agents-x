@@ -90,6 +90,15 @@ components omitted from the canonical decision. It is persisted atomically
 with the decision for user inspection and export, but memory retrieval,
 outcome settlement, ratings, and thesis generation ignore it.
 
+Decision-critical calculations keep model-proposed formulas, named numeric
+inputs, units, limitations, and evidence references. The application evaluates
+those formulas with a restricted arithmetic interpreter and is the sole source
+of the canonical result and date. Calculation use is derived from the
+valuation, scenario, and market-reference components that reference its ID, so
+one calculation may support more than one component without carrying a
+conflicting single-purpose label. Canonical dates come from the latest relevant
+Evidence Ledger effective date and are never guessed from the analysis date.
+
 Non-personalized ratings, conditional investment views, auditable valuation
 ranges, scenarios, and market reference levels are allowed. Position
 percentage, account configuration, order quantity/type, broker instructions,

@@ -16,7 +16,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from tradingagents.application.contracts import (
     ArtifactGenerationMethod,
-    CalculationPurpose,
     CalculationRecord,
     DebateAgenda,
     DebateImportance,
@@ -101,13 +100,10 @@ class CalculationRecordDraft(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     id: str = Field(pattern=r"^calc_[a-z0-9][a-z0-9_.-]*$")
-    purpose: CalculationPurpose
     formula: str = Field(min_length=1)
     inputs: tuple[CalculationInputDraft, ...] = Field(min_length=1)
     input_evidence_refs: tuple[str, ...] = Field(min_length=1)
-    result: int | float
     unit: str = Field(min_length=1, max_length=32)
-    as_of_date: date
     limitations: tuple[str, ...] = Field(min_length=1)
 
     @field_validator("inputs")
@@ -171,7 +167,6 @@ class ValuationAssessmentDraft(BaseModel):
     method: str = Field(min_length=1)
     valuation_range: ValuationRange
     currency: str = Field(min_length=1, max_length=16)
-    as_of_date: date
     input_evidence_refs: tuple[str, ...] = Field(min_length=1)
     limitations: tuple[str, ...] = Field(min_length=1)
     calculation_ids: tuple[str, ...] = Field(min_length=1)
@@ -183,7 +178,6 @@ class MarketReferenceLevelDraft(BaseModel):
     label: str = Field(min_length=1, max_length=120)
     value: float
     unit: str = Field(min_length=1, max_length=32)
-    as_of_date: date
     interpretation: str = Field(min_length=1)
     evidence_refs: tuple[str, ...] = Field(min_length=1)
     basis: MarketReferenceBasis
@@ -769,7 +763,6 @@ def _invoke_decision_numeric(
             method="Evidence-backed earnings multiple",
             valuation_range=ValuationRange(low=90, high=110),
             currency="USD",
-            as_of_date=bundle.analysis_date,
             input_evidence_refs=(allowed_evidence_refs[0],),
             limitations=("The multiple is scenario-dependent.",),
             calculation_ids=("calc_valuation",),
@@ -779,7 +772,6 @@ def _invoke_decision_numeric(
                 label="Observed recent close",
                 value=100,
                 unit="USD",
-                as_of_date=bundle.analysis_date,
                 interpretation=(
                     "A directly observed reference, not an execution order."
                 ),
@@ -790,16 +782,13 @@ def _invoke_decision_numeric(
         calculation_records=(
             CalculationRecordDraft(
                 id="calc_valuation",
-                purpose=CalculationPurpose.VALUATION,
                 formula="earnings * multiple",
                 inputs=(
                     CalculationInputDraft(name="earnings", value=10),
                     CalculationInputDraft(name="multiple", value=10),
                 ),
                 input_evidence_refs=(allowed_evidence_refs[0],),
-                result=100,
                 unit="USD",
-                as_of_date=bundle.analysis_date,
                 limitations=("The multiple is scenario-dependent.",),
             ),
         ),
@@ -819,8 +808,10 @@ def _invoke_decision_numeric(
             "names must be ASCII identifiers and the formula must use every "
             "input exactly. Observed market references require evidence but "
             "no calculation. Derived references, valuation assessments, and "
-            "scenario valuation ranges must name calculation IDs with matching "
-            "purposes. Do not change the qualitative decision core."
+            "scenario valuation ranges must name valid calculation IDs. Do not "
+            "supply calculation results or dates; the application derives both "
+            "from the formula and Evidence Ledger. Do not change the qualitative "
+            "decision core."
         ),
     )
     try:
@@ -1039,6 +1030,7 @@ def _assemble_numeric_draft(
 ) -> _NumericDecisionAssembly:
     issues: list[str] = []
     calculations: dict[str, CalculationRecord] = {}
+    evidence_dates = {item.ref: item.effective_date for item in bundle.items}
     duplicate_ids = {
         item.id
         for item in draft.calculation_records
@@ -1050,8 +1042,6 @@ def _assemble_numeric_draft(
             issues.append(f"{prefix}.duplicate_id")
             continue
         try:
-            if item.as_of_date > bundle.analysis_date:
-                raise OutputValidationError(f"{prefix}.future_date")
             require_nonempty_texts(item.limitations)
             require_valid_refs(
                 item.input_evidence_refs,
@@ -1064,22 +1054,20 @@ def _assemble_numeric_draft(
                 inputs,
                 issue_prefix=prefix,
             )
-            if not math.isclose(
-                calculated,
-                float(item.result),
-                rel_tol=1e-9,
-                abs_tol=1e-9,
-            ):
-                raise OutputValidationError(f"{prefix}.result_mismatch")
+            as_of_date = _latest_evidence_date(
+                item.input_evidence_refs,
+                evidence_dates=evidence_dates,
+                analysis_date=bundle.analysis_date,
+                issue_prefix=prefix,
+            )
             calculations[item.id] = CalculationRecord(
                 id=item.id,
-                purpose=item.purpose,
                 formula=item.formula,
                 inputs=inputs,
                 input_evidence_refs=item.input_evidence_refs,
-                result=item.result,
+                result=calculated,
                 unit=item.unit,
-                as_of_date=item.as_of_date,
+                as_of_date=as_of_date,
                 limitations=item.limitations,
             )
         except OutputValidationError as exc:
@@ -1096,7 +1084,6 @@ def _assemble_numeric_draft(
         seen_scenarios.add(scenario.kind)
         if _valid_component_calculations(
             scenario.calculation_ids,
-            purpose=CalculationPurpose.SCENARIO,
             calculations=calculations,
             issues=issues,
             prefix=prefix,
@@ -1109,9 +1096,7 @@ def _assemble_numeric_draft(
         item = draft.valuation_assessment
         prefix = "numeric.valuation"
         valid = True
-        if item.as_of_date > bundle.analysis_date:
-            issues.append(f"{prefix}.future_date")
-            valid = False
+        as_of_date: date | None = None
         try:
             require_valid_refs(
                 item.input_evidence_refs,
@@ -1124,18 +1109,31 @@ def _assemble_numeric_draft(
             valid = False
         if not _valid_component_calculations(
             item.calculation_ids,
-            purpose=CalculationPurpose.VALUATION,
             calculations=calculations,
             issues=issues,
             prefix=prefix,
         ):
             valid = False
         if valid:
+            try:
+                as_of_date = _latest_component_date(
+                    evidence_refs=item.input_evidence_refs,
+                    calculation_ids=item.calculation_ids,
+                    evidence_dates=evidence_dates,
+                    calculations=calculations,
+                    analysis_date=bundle.analysis_date,
+                    issue_prefix=prefix,
+                )
+            except OutputValidationError as exc:
+                issues.append(exc.issue_code)
+                valid = False
+        if valid:
+            assert as_of_date is not None
             valuation = ValuationAssessment(
                 method=item.method,
                 valuation_range=item.valuation_range,
                 currency=item.currency,
-                as_of_date=item.as_of_date,
+                as_of_date=as_of_date,
                 input_evidence_refs=item.input_evidence_refs,
                 limitations=item.limitations,
                 calculation_ids=item.calculation_ids,
@@ -1146,9 +1144,7 @@ def _assemble_numeric_draft(
     for index, item in enumerate(draft.market_reference_levels):
         prefix = f"numeric.market_reference.{index}"
         valid = True
-        if item.as_of_date > bundle.analysis_date:
-            issues.append(f"{prefix}.future_date")
-            valid = False
+        as_of_date: date | None = None
         try:
             require_text(item.interpretation)
             require_valid_refs(
@@ -1165,19 +1161,32 @@ def _assemble_numeric_draft(
                 valid = False
         elif not _valid_component_calculations(
             item.calculation_ids,
-            purpose=CalculationPurpose.MARKET_REFERENCE,
             calculations=calculations,
             issues=issues,
             prefix=prefix,
         ):
             valid = False
         if valid:
+            try:
+                as_of_date = _latest_component_date(
+                    evidence_refs=item.evidence_refs,
+                    calculation_ids=item.calculation_ids,
+                    evidence_dates=evidence_dates,
+                    calculations=calculations,
+                    analysis_date=bundle.analysis_date,
+                    issue_prefix=prefix,
+                )
+            except OutputValidationError as exc:
+                issues.append(exc.issue_code)
+                valid = False
+        if valid:
+            assert as_of_date is not None
             reference_levels.append(
                 MarketReferenceLevel(
                     label=item.label,
                     value=item.value,
                     unit=item.unit,
-                    as_of_date=item.as_of_date,
+                    as_of_date=as_of_date,
                     interpretation=item.interpretation,
                     evidence_refs=item.evidence_refs,
                     basis=item.basis,
@@ -1293,7 +1302,6 @@ def _numeric_omissions(
 def _valid_component_calculations(
     calculation_ids: tuple[str, ...],
     *,
-    purpose: CalculationPurpose,
     calculations: Mapping[str, CalculationRecord],
     issues: list[str],
     prefix: str,
@@ -1308,10 +1316,50 @@ def _valid_component_calculations(
     if missing:
         issues.append(f"{prefix}.unknown_calculation")
         return False
-    if any(calculations[item].purpose is not purpose for item in calculation_ids):
-        issues.append(f"{prefix}.calculation_purpose_mismatch")
-        return False
     return True
+
+
+def _latest_evidence_date(
+    evidence_refs: tuple[str, ...],
+    *,
+    evidence_dates: Mapping[str, date | None],
+    analysis_date: date,
+    issue_prefix: str,
+) -> date:
+    dates: list[date] = []
+    for evidence_ref in evidence_refs:
+        effective_date = evidence_dates.get(evidence_ref)
+        if effective_date is None:
+            raise OutputValidationError(f"{issue_prefix}.date_unavailable")
+        if effective_date > analysis_date:
+            raise OutputValidationError(f"{issue_prefix}.future_date")
+        dates.append(effective_date)
+    if not dates:
+        raise OutputValidationError(f"{issue_prefix}.date_unavailable")
+    return max(dates)
+
+
+def _latest_component_date(
+    *,
+    evidence_refs: tuple[str, ...],
+    calculation_ids: tuple[str, ...],
+    evidence_dates: Mapping[str, date | None],
+    calculations: Mapping[str, CalculationRecord],
+    analysis_date: date,
+    issue_prefix: str,
+) -> date:
+    direct_date = _latest_evidence_date(
+        evidence_refs,
+        evidence_dates=evidence_dates,
+        analysis_date=analysis_date,
+        issue_prefix=issue_prefix,
+    )
+    dates = [direct_date]
+    dates.extend(calculations[item].as_of_date for item in calculation_ids)
+    result = max(dates)
+    if result > analysis_date:
+        raise OutputValidationError(f"{issue_prefix}.future_date")
+    return result
 
 
 def debate_round_has_material_progress(

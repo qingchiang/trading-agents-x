@@ -43,7 +43,6 @@ export interface components {
     };
     ArtifactGenerationMethod: "tool_call" | "tool_call_recovered" | "json_mode" | "raw_json_recovered" | "json_mode_recovered" | "sectioned_recovery" | "markdown_audited" | "markdown_audit_incomplete";
     AssetType: "stock" | "crypto";
-    CalculationPurpose: "valuation" | "scenario" | "market_reference";
     CalculationRecord: {
       as_of_date: string;
       formula: string;
@@ -51,7 +50,6 @@ export interface components {
       input_evidence_refs: string[];
       inputs: Record<string, number>;
       limitations: string[];
-      purpose: components["schemas"]["CalculationPurpose"];
       result: number;
       unit: string;
     };

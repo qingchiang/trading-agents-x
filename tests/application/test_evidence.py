@@ -915,7 +915,7 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
                         method=ArtifactGenerationMethod.TOOL_CALL,
                         reason_code="semantic_validation",
                         validation_issues=(
-                            "semantic.numeric.calculation.calc_valuation.result_mismatch",
+                            "semantic.numeric.calculation.calc_valuation.formula.invalid_syntax",
                         ),
                         schema_valid=True,
                         candidate={
@@ -930,7 +930,7 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
                         component_path="numeric.calculation.calc_valuation",
                         label="calc_valuation",
                         issue_codes=(
-                            "numeric.calculation.calc_valuation.result_mismatch",
+                            "numeric.calculation.calc_valuation.formula.invalid_syntax",
                         ),
                     ),
                 ),
