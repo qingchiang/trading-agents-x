@@ -11,12 +11,13 @@ from collections.abc import Callable, Mapping
 from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from datetime import date
-from typing import Any
+from typing import Annotated, Any, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from tradingagents.application.contracts import (
     ArtifactGenerationMethod,
+    AuditedRangeEndpoint,
     CalculationRecord,
     DebateAgenda,
     DebateImportance,
@@ -33,6 +34,7 @@ from tradingagents.application.contracts import (
     NumericAuditPhase,
     NumericAuditSnapshot,
     NumericAuditStatus,
+    NumericTemporalBasis,
     RebuttalReview,
     ReportLanguage,
     ResearchCase,
@@ -44,8 +46,8 @@ from tradingagents.application.contracts import (
     RiskReview,
     RiskReviewAdjustment,
     RiskReviewDisposition,
+    ScenarioReferenceRange,
     ValuationAssessment,
-    ValuationRange,
 )
 from tradingagents.application.markdown_evidence import normalize_evidence_markdown
 from tradingagents.graph.output_validation import (
@@ -155,26 +157,50 @@ class ResearchDecisionCoreDraft(BaseModel):
     risk_review_adjustments: tuple[RiskReviewAdjustment, ...] = ()
 
 
-class ScenarioValuationDraft(BaseModel):
+class ObservedRangeEndpointDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    basis: Literal[MarketReferenceBasis.OBSERVED] = MarketReferenceBasis.OBSERVED
+    value: float
+    evidence_refs: tuple[str, ...] = Field(min_length=1)
+
+
+class DerivedRangeEndpointDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    basis: Literal[MarketReferenceBasis.DERIVED] = MarketReferenceBasis.DERIVED
+    calculation_id: str = Field(pattern=r"^calc_[a-z0-9][a-z0-9_.-]*$")
+
+
+RangeEndpointDraft: TypeAlias = Annotated[
+    ObservedRangeEndpointDraft | DerivedRangeEndpointDraft,
+    Field(discriminator="basis"),
+]
+
+
+class ScenarioReferenceRangeDraft(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     kind: ResearchScenarioKind
-    valuation_range: ValuationRange
-    calculation_ids: tuple[str, ...] = Field(min_length=1)
+    label: str = Field(min_length=1, max_length=120)
+    low: RangeEndpointDraft
+    high: RangeEndpointDraft
+    unit: str = Field(min_length=1, max_length=32)
+    interpretation: str = Field(min_length=1)
+    limitations: tuple[str, ...] = Field(min_length=1)
 
 
 class ValuationAssessmentDraft(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     method: str = Field(min_length=1)
-    valuation_range: ValuationRange
+    low: DerivedRangeEndpointDraft
+    high: DerivedRangeEndpointDraft
     currency: str = Field(min_length=1, max_length=16)
-    input_evidence_refs: tuple[str, ...] = Field(min_length=1)
     limitations: tuple[str, ...] = Field(min_length=1)
-    calculation_ids: tuple[str, ...] = Field(min_length=1)
 
 
-class MarketReferenceLevelDraft(BaseModel):
+class ObservedMarketReferenceLevelDraft(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     label: str = Field(min_length=1, max_length=120)
@@ -182,8 +208,23 @@ class MarketReferenceLevelDraft(BaseModel):
     unit: str = Field(min_length=1, max_length=32)
     interpretation: str = Field(min_length=1)
     evidence_refs: tuple[str, ...] = Field(min_length=1)
-    basis: MarketReferenceBasis
-    calculation_ids: tuple[str, ...] = ()
+    basis: Literal[MarketReferenceBasis.OBSERVED] = MarketReferenceBasis.OBSERVED
+
+
+class DerivedMarketReferenceLevelDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    label: str = Field(min_length=1, max_length=120)
+    unit: str = Field(min_length=1, max_length=32)
+    interpretation: str = Field(min_length=1)
+    basis: Literal[MarketReferenceBasis.DERIVED] = MarketReferenceBasis.DERIVED
+    calculation_id: str = Field(pattern=r"^calc_[a-z0-9][a-z0-9_.-]*$")
+
+
+MarketReferenceLevelDraft: TypeAlias = Annotated[
+    ObservedMarketReferenceLevelDraft | DerivedMarketReferenceLevelDraft,
+    Field(discriminator="basis"),
+]
 
 
 class DecisionNumericDraft(BaseModel):
@@ -192,7 +233,7 @@ class DecisionNumericDraft(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     requested: bool
-    scenario_valuations: tuple[ScenarioValuationDraft, ...] = ()
+    scenario_reference_ranges: tuple[ScenarioReferenceRangeDraft, ...] = ()
     valuation_assessment: ValuationAssessmentDraft | None = None
     market_reference_levels: tuple[MarketReferenceLevelDraft, ...] = ()
     calculation_records: tuple[CalculationRecordDraft, ...] = ()
@@ -740,19 +781,14 @@ def invoke_research_decision(
     core_value = core.value
     scenario_values = []
     for scenario in core_value.scenarios:
-        numeric_scenario = numeric.scenario_valuations.get(scenario.kind)
+        numeric_scenario = numeric.scenario_reference_ranges.get(scenario.kind)
         scenario_values.append(
             ResearchScenario(
                 kind=scenario.kind,
                 core_assumptions=scenario.core_assumptions,
                 outcome=scenario.outcome,
                 evidence_refs=scenario.evidence_refs,
-                valuation_range=(
-                    numeric_scenario.valuation_range if numeric_scenario is not None else None
-                ),
-                valuation_calculation_ids=(
-                    numeric_scenario.calculation_ids if numeric_scenario is not None else ()
-                ),
+                reference_range=numeric_scenario,
             )
         )
     decision = ResearchDecision(
@@ -784,7 +820,7 @@ def invoke_research_decision(
 
 @dataclass(frozen=True)
 class _NumericDecisionAssembly:
-    scenario_valuations: dict[ResearchScenarioKind, ScenarioValuationDraft]
+    scenario_reference_ranges: dict[ResearchScenarioKind, ScenarioReferenceRange]
     valuation_assessment: ValuationAssessment | None
     market_reference_levels: tuple[MarketReferenceLevel, ...]
     calculation_records: tuple[CalculationRecord, ...]
@@ -833,14 +869,17 @@ def _invoke_decision_numeric(
         requested=True,
         valuation_assessment=ValuationAssessmentDraft(
             method=example_text["valuation_method"],
-            valuation_range=ValuationRange(low=90, high=110),
+            low=DerivedRangeEndpointDraft(
+                calculation_id="calc_valuation_low",
+            ),
+            high=DerivedRangeEndpointDraft(
+                calculation_id="calc_valuation_high",
+            ),
             currency="USD",
-            input_evidence_refs=(allowed_evidence_refs[0],),
             limitations=(example_text["valuation_limitation"],),
-            calculation_ids=("calc_valuation",),
         ),
         market_reference_levels=(
-            MarketReferenceLevelDraft(
+            ObservedMarketReferenceLevelDraft(
                 label=example_text["reference_label"],
                 value=100,
                 unit="USD",
@@ -851,10 +890,21 @@ def _invoke_decision_numeric(
         ),
         calculation_records=(
             CalculationRecordDraft(
-                id="calc_valuation",
+                id="calc_valuation_low",
                 formula="earnings * multiple",
                 inputs=(
                     CalculationInputDraft(name="earnings", value=10),
+                    CalculationInputDraft(name="multiple", value=10),
+                ),
+                input_evidence_refs=(allowed_evidence_refs[0],),
+                unit="USD",
+                limitations=(example_text["valuation_limitation"],),
+            ),
+            CalculationRecordDraft(
+                id="calc_valuation_high",
+                formula="earnings * multiple",
+                inputs=(
+                    CalculationInputDraft(name="earnings", value=11),
                     CalculationInputDraft(name="multiple", value=10),
                 ),
                 input_evidence_refs=(allowed_evidence_refs[0],),
@@ -1071,7 +1121,7 @@ def _empty_numeric_assembly(
     status: NumericAuditStatus,
 ) -> _NumericDecisionAssembly:
     return _NumericDecisionAssembly(
-        scenario_valuations={},
+        scenario_reference_ranges={},
         valuation_assessment=None,
         market_reference_levels=(),
         calculation_records=(),
@@ -1138,132 +1188,146 @@ def _assemble_numeric_draft(
                 result=calculated,
                 unit=item.unit,
                 as_of_date=as_of_date,
+                temporal_basis=NumericTemporalBasis.POINT_IN_TIME,
                 limitations=item.limitations,
             )
         except OutputValidationError as exc:
             issues.append(exc.issue_code)
 
-    scenario_values: dict[ResearchScenarioKind, ScenarioValuationDraft] = {}
+    scenario_values: dict[ResearchScenarioKind, ScenarioReferenceRange] = {}
     linked_ids: set[str] = set()
     seen_scenarios: set[ResearchScenarioKind] = set()
-    for scenario in draft.scenario_valuations:
+    for scenario in draft.scenario_reference_ranges:
         prefix = f"numeric.scenario.{scenario.kind.value}"
         if scenario.kind in seen_scenarios:
             issues.append(f"{prefix}.duplicate")
             continue
         seen_scenarios.add(scenario.kind)
-        if _valid_component_calculations(
-            scenario.calculation_ids,
-            calculations=calculations,
-            issues=issues,
-            prefix=prefix,
+        try:
+            require_text(scenario.label)
+            require_text(scenario.interpretation)
+            require_nonempty_texts(scenario.limitations)
+        except OutputValidationError as exc:
+            issues.append(f"{prefix}.{exc.issue_code}")
+            continue
+        endpoints: dict[str, AuditedRangeEndpoint] = {}
+        for endpoint_name, endpoint_draft in (
+            ("low", scenario.low),
+            ("high", scenario.high),
         ):
-            scenario_values[scenario.kind] = scenario
-            linked_ids.update(scenario.calculation_ids)
+            try:
+                endpoints[endpoint_name] = _assemble_range_endpoint(
+                    endpoint_draft,
+                    calculations=calculations,
+                    evidence_dates=evidence_dates,
+                    allowed_evidence_refs=allowed_evidence_refs,
+                    analysis_date=bundle.analysis_date,
+                    issue_prefix=f"{prefix}.{endpoint_name}",
+                )
+            except OutputValidationError as exc:
+                issues.append(exc.issue_code)
+        if set(endpoints) != {"low", "high"}:
+            continue
+        if endpoints["high"].value < endpoints["low"].value:
+            issues.append(f"{prefix}.invalid_range")
+            continue
+        scenario_values[scenario.kind] = ScenarioReferenceRange(
+            label=scenario.label,
+            low=endpoints["low"],
+            high=endpoints["high"],
+            unit=scenario.unit,
+            interpretation=scenario.interpretation,
+            limitations=scenario.limitations,
+        )
+        linked_ids.update(
+            endpoint.calculation_id
+            for endpoint in endpoints.values()
+            if endpoint.calculation_id is not None
+        )
 
     valuation: ValuationAssessment | None = None
     if draft.valuation_assessment is not None:
         item = draft.valuation_assessment
         prefix = "numeric.valuation"
-        valid = True
-        as_of_date: date | None = None
         try:
-            require_valid_refs(
-                item.input_evidence_refs,
-                allowed_evidence_refs,
-                required=True,
-            )
+            require_text(item.method)
             require_nonempty_texts(item.limitations)
-        except OutputValidationError as exc:
-            issues.append(f"{prefix}.{exc.issue_code}")
-            valid = False
-        if not _valid_component_calculations(
-            item.calculation_ids,
-            calculations=calculations,
-            issues=issues,
-            prefix=prefix,
-        ):
-            valid = False
-        if valid:
-            try:
-                as_of_date = _latest_component_date(
-                    evidence_refs=item.input_evidence_refs,
-                    calculation_ids=item.calculation_ids,
-                    evidence_dates=evidence_dates,
-                    calculations=calculations,
-                    analysis_date=bundle.analysis_date,
-                    issue_prefix=prefix,
-                )
-            except OutputValidationError as exc:
-                issues.append(exc.issue_code)
-                valid = False
-        if valid:
-            assert as_of_date is not None
-            valuation = ValuationAssessment(
-                method=item.method,
-                valuation_range=item.valuation_range,
-                currency=item.currency,
-                as_of_date=as_of_date,
-                input_evidence_refs=item.input_evidence_refs,
-                limitations=item.limitations,
-                calculation_ids=item.calculation_ids,
+            low = _assemble_range_endpoint(
+                item.low,
+                calculations=calculations,
+                evidence_dates=evidence_dates,
+                allowed_evidence_refs=allowed_evidence_refs,
+                analysis_date=bundle.analysis_date,
+                issue_prefix=f"{prefix}.low",
             )
-            linked_ids.update(item.calculation_ids)
+            high = _assemble_range_endpoint(
+                item.high,
+                calculations=calculations,
+                evidence_dates=evidence_dates,
+                allowed_evidence_refs=allowed_evidence_refs,
+                analysis_date=bundle.analysis_date,
+                issue_prefix=f"{prefix}.high",
+            )
+        except OutputValidationError as exc:
+            issues.append(exc.issue_code)
+        else:
+            if high.value < low.value:
+                issues.append(f"{prefix}.invalid_range")
+            else:
+                valuation = ValuationAssessment(
+                    method=item.method,
+                    low=low,
+                    high=high,
+                    currency=item.currency,
+                    limitations=item.limitations,
+                )
+                linked_ids.update(valuation.calculation_ids)
 
     reference_levels: list[MarketReferenceLevel] = []
     for index, item in enumerate(draft.market_reference_levels):
         prefix = f"numeric.market_reference.{index}"
-        valid = True
-        as_of_date: date | None = None
         try:
             require_text(item.interpretation)
-            require_valid_refs(
-                item.evidence_refs,
-                allowed_evidence_refs,
-                required=True,
-            )
-        except OutputValidationError as exc:
-            issues.append(f"{prefix}.{exc.issue_code}")
-            valid = False
-        if item.basis is MarketReferenceBasis.OBSERVED:
-            if item.calculation_ids:
-                issues.append(f"{prefix}.observed_has_calculation")
-                valid = False
-        elif not _valid_component_calculations(
-            item.calculation_ids,
-            calculations=calculations,
-            issues=issues,
-            prefix=prefix,
-        ):
-            valid = False
-        if valid:
-            try:
-                as_of_date = _latest_component_date(
-                    evidence_refs=item.evidence_refs,
-                    calculation_ids=item.calculation_ids,
+            if isinstance(item, ObservedMarketReferenceLevelDraft):
+                require_valid_refs(
+                    item.evidence_refs,
+                    allowed_evidence_refs,
+                    required=True,
+                )
+                as_of_date = _latest_evidence_date(
+                    item.evidence_refs,
                     evidence_dates=evidence_dates,
-                    calculations=calculations,
                     analysis_date=bundle.analysis_date,
                     issue_prefix=prefix,
                 )
-            except OutputValidationError as exc:
-                issues.append(exc.issue_code)
-                valid = False
-        if valid:
-            assert as_of_date is not None
+                value = item.value
+                evidence_refs = item.evidence_refs
+                calculation_ids: tuple[str, ...] = ()
+            else:
+                calculation = calculations.get(item.calculation_id)
+                if calculation is None:
+                    raise OutputValidationError(f"{prefix}.unknown_calculation")
+                as_of_date = calculation.as_of_date
+                value = float(calculation.result)
+                evidence_refs = calculation.input_evidence_refs
+                calculation_ids = (item.calculation_id,)
+        except OutputValidationError as exc:
+            issues.append(exc.issue_code)
+        else:
             reference_levels.append(
                 MarketReferenceLevel(
                     label=item.label,
-                    value=item.value,
+                    value=value,
                     unit=item.unit,
                     as_of_date=as_of_date,
                     interpretation=item.interpretation,
-                    evidence_refs=item.evidence_refs,
+                    evidence_refs=evidence_refs,
                     basis=item.basis,
-                    calculation_ids=item.calculation_ids,
+                    calculation_ids=calculation_ids,
+                    temporal_basis=NumericTemporalBasis.POINT_IN_TIME,
                 )
             )
-            linked_ids.update(item.calculation_ids)
+            linked_ids.update(calculation_ids)
 
     orphaned = set(calculations).difference(linked_ids)
     for calculation_id in sorted(orphaned):
@@ -1271,7 +1335,7 @@ def _assemble_numeric_draft(
     if draft.requested and not (scenario_values or valuation is not None or reference_levels):
         issues.append("numeric.requested.empty")
     if not draft.requested and (
-        draft.scenario_valuations
+        draft.scenario_reference_ranges
         or draft.valuation_assessment is not None
         or draft.market_reference_levels
         or draft.calculation_records
@@ -1310,7 +1374,7 @@ def _assemble_numeric_draft(
         status = NumericAuditStatus.COMPLETE if has_content else NumericAuditStatus.NOT_APPLICABLE
         warnings = ()
     return _NumericDecisionAssembly(
-        scenario_valuations=scenario_values,
+        scenario_reference_ranges=scenario_values,
         valuation_assessment=valuation,
         market_reference_levels=tuple(reference_levels),
         calculation_records=kept_calculations,
@@ -1356,24 +1420,45 @@ def _numeric_omissions(
     )
 
 
-def _valid_component_calculations(
-    calculation_ids: tuple[str, ...],
+def _assemble_range_endpoint(
+    draft: RangeEndpointDraft,
     *,
     calculations: Mapping[str, CalculationRecord],
-    issues: list[str],
-    prefix: str,
-) -> bool:
-    if not calculation_ids:
-        issues.append(f"{prefix}.missing_calculation")
-        return False
-    if len(calculation_ids) != len(set(calculation_ids)):
-        issues.append(f"{prefix}.duplicate_calculation")
-        return False
-    missing = [item for item in calculation_ids if item not in calculations]
-    if missing:
-        issues.append(f"{prefix}.unknown_calculation")
-        return False
-    return True
+    evidence_dates: Mapping[str, date | None],
+    allowed_evidence_refs: set[str],
+    analysis_date: date,
+    issue_prefix: str,
+) -> AuditedRangeEndpoint:
+    if isinstance(draft, ObservedRangeEndpointDraft):
+        require_valid_refs(
+            draft.evidence_refs,
+            allowed_evidence_refs,
+            required=True,
+        )
+        as_of_date = _latest_evidence_date(
+            draft.evidence_refs,
+            evidence_dates=evidence_dates,
+            analysis_date=analysis_date,
+            issue_prefix=issue_prefix,
+        )
+        return AuditedRangeEndpoint(
+            value=draft.value,
+            basis=MarketReferenceBasis.OBSERVED,
+            evidence_refs=draft.evidence_refs,
+            as_of_date=as_of_date,
+            temporal_basis=NumericTemporalBasis.POINT_IN_TIME,
+        )
+    calculation = calculations.get(draft.calculation_id)
+    if calculation is None:
+        raise OutputValidationError(f"{issue_prefix}.unknown_calculation")
+    return AuditedRangeEndpoint(
+        value=float(calculation.result),
+        basis=MarketReferenceBasis.DERIVED,
+        evidence_refs=calculation.input_evidence_refs,
+        calculation_id=calculation.id,
+        as_of_date=calculation.as_of_date,
+        temporal_basis=calculation.temporal_basis,
+    )
 
 
 def _latest_evidence_date(
@@ -1394,29 +1479,6 @@ def _latest_evidence_date(
     if not dates:
         raise OutputValidationError(f"{issue_prefix}.date_unavailable")
     return max(dates)
-
-
-def _latest_component_date(
-    *,
-    evidence_refs: tuple[str, ...],
-    calculation_ids: tuple[str, ...],
-    evidence_dates: Mapping[str, date | None],
-    calculations: Mapping[str, CalculationRecord],
-    analysis_date: date,
-    issue_prefix: str,
-) -> date:
-    direct_date = _latest_evidence_date(
-        evidence_refs,
-        evidence_dates=evidence_dates,
-        analysis_date=analysis_date,
-        issue_prefix=issue_prefix,
-    )
-    dates = [direct_date]
-    dates.extend(calculations[item].as_of_date for item in calculation_ids)
-    result = max(dates)
-    if result > analysis_date:
-        raise OutputValidationError(f"{issue_prefix}.future_date")
-    return result
 
 
 def debate_round_has_material_progress(

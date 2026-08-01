@@ -765,24 +765,22 @@ class RiskReview(FrozenModel):
         return _unique_research_ids(value)
 
 
-class ValuationRange(FrozenModel):
-    low: float
-    high: float
+class NumericTemporalBasis(str, Enum):
+    """How the application determined the date of a formal numeric value."""
 
-    @model_validator(mode="after")
-    def validate_range(self) -> ValuationRange:
-        if self.high < self.low:
-            raise ValueError("valuation range high must be >= low")
-        return self
+    POINT_IN_TIME = "point_in_time"
+    LIVE_SNAPSHOT = "live_snapshot"
 
 
-class ResearchScenario(FrozenModel):
-    kind: ResearchScenarioKind
-    core_assumptions: tuple[str, ...] = Field(min_length=1)
-    outcome: str = Field(min_length=1)
-    evidence_refs: tuple[str, ...] = ()
-    valuation_range: ValuationRange | None = None
-    valuation_calculation_ids: tuple[str, ...] = ()
+class AuditedRangeEndpoint(FrozenModel):
+    """One evidence-backed endpoint of a scenario or valuation range."""
+
+    value: float
+    basis: MarketReferenceBasis
+    evidence_refs: tuple[str, ...] = Field(min_length=1)
+    calculation_id: str | None = None
+    as_of_date: date
+    temporal_basis: NumericTemporalBasis = NumericTemporalBasis.POINT_IN_TIME
 
     @field_validator("evidence_refs")
     @classmethod
@@ -792,22 +790,47 @@ class ResearchScenario(FrozenModel):
     ) -> tuple[str, ...]:
         return _unique_evidence_refs(value)
 
-    @field_validator("valuation_calculation_ids")
+    @field_validator("calculation_id")
     @classmethod
-    def validate_calculation_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        return _unique_research_ids(value)
+    def validate_calculation_id(cls, value: str | None) -> str | None:
+        if value is not None and not _RESEARCH_ID_PATTERN.fullmatch(value):
+            raise ValueError("invalid calculation identifier")
+        return value
+
+    @model_validator(mode="after")
+    def validate_basis(self) -> AuditedRangeEndpoint:
+        if self.basis is MarketReferenceBasis.OBSERVED and self.calculation_id:
+            raise ValueError("observed endpoint must not reference a calculation")
+        if self.basis is MarketReferenceBasis.DERIVED and not self.calculation_id:
+            raise ValueError("derived endpoint requires a calculation")
+        return self
 
 
-class ValuationAssessment(FrozenModel):
-    method: str = Field(min_length=1)
-    valuation_range: ValuationRange
-    currency: str = Field(min_length=1, max_length=16)
-    as_of_date: date
-    input_evidence_refs: tuple[str, ...] = Field(min_length=1)
+class ScenarioReferenceRange(FrozenModel):
+    """A scenario-specific reference band, not necessarily a valuation."""
+
+    label: str = Field(min_length=1, max_length=120)
+    low: AuditedRangeEndpoint
+    high: AuditedRangeEndpoint
+    unit: str = Field(min_length=1, max_length=32)
+    interpretation: str = Field(min_length=1)
     limitations: tuple[str, ...] = Field(min_length=1)
-    calculation_ids: tuple[str, ...] = Field(min_length=1)
 
-    @field_validator("input_evidence_refs")
+    @model_validator(mode="after")
+    def validate_range(self) -> ScenarioReferenceRange:
+        if self.high.value < self.low.value:
+            raise ValueError("reference range high must be >= low")
+        return self
+
+
+class ResearchScenario(FrozenModel):
+    kind: ResearchScenarioKind
+    core_assumptions: tuple[str, ...] = Field(min_length=1)
+    outcome: str = Field(min_length=1)
+    evidence_refs: tuple[str, ...] = ()
+    reference_range: ScenarioReferenceRange | None = None
+
+    @field_validator("evidence_refs")
     @classmethod
     def validate_evidence_refs(
         cls,
@@ -815,10 +838,40 @@ class ValuationAssessment(FrozenModel):
     ) -> tuple[str, ...]:
         return _unique_evidence_refs(value)
 
-    @field_validator("calculation_ids")
-    @classmethod
-    def validate_calculation_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        return _unique_research_ids(value)
+class ValuationAssessment(FrozenModel):
+    method: str = Field(min_length=1)
+    low: AuditedRangeEndpoint
+    high: AuditedRangeEndpoint
+    currency: str = Field(min_length=1, max_length=16)
+    limitations: tuple[str, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_valuation(self) -> ValuationAssessment:
+        if self.low.basis is not MarketReferenceBasis.DERIVED:
+            raise ValueError("valuation low endpoint must be derived")
+        if self.high.basis is not MarketReferenceBasis.DERIVED:
+            raise ValueError("valuation high endpoint must be derived")
+        if self.high.value < self.low.value:
+            raise ValueError("valuation high must be >= low")
+        return self
+
+    @property
+    def calculation_ids(self) -> tuple[str, ...]:
+        return tuple(
+            dict.fromkeys(
+                item
+                for item in (self.low.calculation_id, self.high.calculation_id)
+                if item is not None
+            )
+        )
+
+    @property
+    def input_evidence_refs(self) -> tuple[str, ...]:
+        return tuple(dict.fromkeys((*self.low.evidence_refs, *self.high.evidence_refs)))
+
+    @property
+    def as_of_date(self) -> date:
+        return max(self.low.as_of_date, self.high.as_of_date)
 
 
 class MarketReferenceLevel(FrozenModel):
@@ -830,6 +883,7 @@ class MarketReferenceLevel(FrozenModel):
     evidence_refs: tuple[str, ...] = Field(min_length=1)
     basis: MarketReferenceBasis = MarketReferenceBasis.OBSERVED
     calculation_ids: tuple[str, ...] = ()
+    temporal_basis: NumericTemporalBasis = NumericTemporalBasis.POINT_IN_TIME
 
     @field_validator("evidence_refs")
     @classmethod
@@ -876,6 +930,7 @@ class CalculationRecord(FrozenModel):
     result: int | float
     unit: str = Field(min_length=1, max_length=32)
     as_of_date: date
+    temporal_basis: NumericTemporalBasis = NumericTemporalBasis.POINT_IN_TIME
     limitations: tuple[str, ...] = Field(min_length=1)
 
     @field_validator("inputs")
@@ -932,9 +987,16 @@ class ResearchDecision(FrozenModel):
         merged = list(value.get("evidence_refs") or ())
         for scenario in value.get("scenarios") or ():
             merged.extend(_field_value(scenario, "evidence_refs") or ())
+            reference_range = _field_value(scenario, "reference_range")
+            if reference_range is not None:
+                for endpoint_name in ("low", "high"):
+                    endpoint = _field_value(reference_range, endpoint_name)
+                    merged.extend(_field_value(endpoint, "evidence_refs") or ())
         valuation = value.get("valuation_assessment")
         if valuation is not None:
-            merged.extend(_field_value(valuation, "input_evidence_refs") or ())
+            for endpoint_name in ("low", "high"):
+                endpoint = _field_value(valuation, endpoint_name)
+                merged.extend(_field_value(endpoint, "evidence_refs") or ())
         for level in value.get("market_reference_levels") or ():
             merged.extend(_field_value(level, "evidence_refs") or ())
         for calculation in value.get("calculation_records") or ():

@@ -6,6 +6,7 @@ from .application.contracts import (
     AnalysisResult,
     AnalystClaimType,
     AnalystReport,
+    AuditedRangeEndpoint,
     CalculationRecord,
     ClaimImportance,
     DebateAgenda,
@@ -27,6 +28,7 @@ from .application.contracts import (
     NumericAuditPhase,
     NumericAuditSnapshot,
     NumericAuditStatus,
+    NumericTemporalBasis,
     RebuttalReview,
     ReportAuditStatus,
     ReportLanguage,
@@ -41,9 +43,9 @@ from .application.contracts import (
     RiskReviewAdjustment,
     RiskReviewDisposition,
     RunProfile,
+    ScenarioReferenceRange,
     TableDataType,
     ValuationAssessment,
-    ValuationRange,
 )
 from .client import TradingAgents
 from .version import __version__
@@ -91,7 +93,9 @@ __all__ = [
     "TableDataType",
     "TradingAgents",
     "ValuationAssessment",
-    "ValuationRange",
+    "AuditedRangeEndpoint",
+    "NumericTemporalBasis",
+    "ScenarioReferenceRange",
     "__version__",
 ]
 

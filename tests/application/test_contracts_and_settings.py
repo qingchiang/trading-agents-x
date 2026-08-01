@@ -48,12 +48,24 @@ def test_research_decision_accepts_audited_nonpersonalized_opinions() -> None:
             "rating": "Overweight",
             "valuation_assessment": {
                 "method": "Comparable multiples",
-                "valuation_range": {"low": 90.0, "high": 110.0},
+                "low": {
+                    "value": 90.0,
+                    "basis": "derived",
+                    "evidence_refs": ["ev_0123456789ab"],
+                    "calculation_id": "calc_valuation_low",
+                    "as_of_date": "2026-07-24",
+                    "temporal_basis": "point_in_time",
+                },
+                "high": {
+                    "value": 110.0,
+                    "basis": "derived",
+                    "evidence_refs": ["ev_0123456789ab"],
+                    "calculation_id": "calc_valuation_high",
+                    "as_of_date": "2026-07-24",
+                    "temporal_basis": "point_in_time",
+                },
                 "currency": "USD",
-                "as_of_date": "2026-07-24",
-                "input_evidence_refs": ["ev_0123456789ab"],
                 "limitations": ["Peer comparability is imperfect."],
-                "calculation_ids": ["calc_valuation"],
             },
             "market_reference_levels": [
                 {

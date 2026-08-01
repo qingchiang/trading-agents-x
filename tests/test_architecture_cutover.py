@@ -90,7 +90,9 @@ def test_public_api_exposes_typed_application_contract():
         "TableDataType",
         "TradingAgents",
         "ValuationAssessment",
-        "ValuationRange",
+        "AuditedRangeEndpoint",
+        "NumericTemporalBasis",
+        "ScenarioReferenceRange",
         "__version__",
     ]
     assert "TradingAgentsGraph" not in tradingagents.__all__

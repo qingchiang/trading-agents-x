@@ -21,11 +21,13 @@ from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
     ArtifactGenerationMethod,
+    AuditedRangeEndpoint,
     DecisionNumericAuditAppendix,
     EvidenceBundle,
     EvidenceItem,
     EvidenceQuality,
     EvidenceTemporalScope,
+    MarketReferenceBasis,
     MarketReferenceLevel,
     NodeMetrics,
     NumericAuditAppendixStatus,
@@ -43,7 +45,6 @@ from tradingagents.application.contracts import (
     RunView,
     TableDataType,
     ValuationAssessment,
-    ValuationRange,
 )
 from tradingagents.application.evidence import extract_evidence_tables
 from tradingagents.application.exporting import (
@@ -826,12 +827,22 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
         update={
             "valuation_assessment": ValuationAssessment(
                 method="Scenario-weighted multiple",
-                valuation_range=ValuationRange(low=100, high=125),
+                low=AuditedRangeEndpoint(
+                    value=100,
+                    basis=MarketReferenceBasis.DERIVED,
+                    evidence_refs=("ev_0123456789ab",),
+                    calculation_id="calc_valuation_low",
+                    as_of_date=date(2026, 7, 24),
+                ),
+                high=AuditedRangeEndpoint(
+                    value=125,
+                    basis=MarketReferenceBasis.DERIVED,
+                    evidence_refs=("ev_0123456789ab",),
+                    calculation_id="calc_valuation_high",
+                    as_of_date=date(2026, 7, 24),
+                ),
                 currency="USD",
-                as_of_date=date(2026, 7, 24),
-                input_evidence_refs=("ev_0123456789ab",),
                 limitations=("Cycle duration remains uncertain.",),
-                calculation_ids=("calc_valuation",),
             ),
             "market_reference_levels": (
                 MarketReferenceLevel(

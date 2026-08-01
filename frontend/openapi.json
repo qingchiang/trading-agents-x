@@ -325,6 +325,55 @@
         "title": "AssetType",
         "type": "string"
       },
+      "AuditedRangeEndpoint": {
+        "additionalProperties": false,
+        "description": "One evidence-backed endpoint of a scenario or valuation range.",
+        "properties": {
+          "as_of_date": {
+            "format": "date",
+            "title": "As Of Date",
+            "type": "string"
+          },
+          "basis": {
+            "$ref": "#/components/schemas/MarketReferenceBasis"
+          },
+          "calculation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calculation Id"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "temporal_basis": {
+            "$ref": "#/components/schemas/NumericTemporalBasis",
+            "default": "point_in_time"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "value",
+          "basis",
+          "evidence_refs",
+          "as_of_date"
+        ],
+        "title": "AuditedRangeEndpoint",
+        "type": "object"
+      },
       "CalculationRecord": {
         "additionalProperties": false,
         "description": "A decision-critical calculation, not a presentation-table cell.",
@@ -385,6 +434,10 @@
               }
             ],
             "title": "Result"
+          },
+          "temporal_basis": {
+            "$ref": "#/components/schemas/NumericTemporalBasis",
+            "default": "point_in_time"
           },
           "unit": {
             "maxLength": 32,
@@ -1427,6 +1480,10 @@
             "title": "Label",
             "type": "string"
           },
+          "temporal_basis": {
+            "$ref": "#/components/schemas/NumericTemporalBasis",
+            "default": "point_in_time"
+          },
           "unit": {
             "maxLength": 32,
             "minLength": 1,
@@ -1807,6 +1864,15 @@
           "not_applicable"
         ],
         "title": "NumericAuditStatus",
+        "type": "string"
+      },
+      "NumericTemporalBasis": {
+        "description": "How the application determined the date of a formal numeric value.",
+        "enum": [
+          "point_in_time",
+          "live_snapshot"
+        ],
+        "title": "NumericTemporalBasis",
         "type": "string"
       },
       "ProviderCapabilities": {
@@ -2384,18 +2450,10 @@
             "title": "Outcome",
             "type": "string"
           },
-          "valuation_calculation_ids": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Valuation Calculation Ids",
-            "type": "array"
-          },
-          "valuation_range": {
+          "reference_range": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ValuationRange"
+                "$ref": "#/components/schemas/ScenarioReferenceRange"
               },
               {
                 "type": "null"
@@ -3160,6 +3218,53 @@
         "title": "RunView",
         "type": "object"
       },
+      "ScenarioReferenceRange": {
+        "additionalProperties": false,
+        "description": "A scenario-specific reference band, not necessarily a valuation.",
+        "properties": {
+          "high": {
+            "$ref": "#/components/schemas/AuditedRangeEndpoint"
+          },
+          "interpretation": {
+            "minLength": 1,
+            "title": "Interpretation",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Limitations",
+            "type": "array"
+          },
+          "low": {
+            "$ref": "#/components/schemas/AuditedRangeEndpoint"
+          },
+          "unit": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "low",
+          "high",
+          "unit",
+          "interpretation",
+          "limitations"
+        ],
+        "title": "ScenarioReferenceRange",
+        "type": "object"
+      },
       "TableDataType": {
         "description": "Machine-readable type of values in one deterministic evidence column.",
         "enum": [
@@ -3218,32 +3323,14 @@
       "ValuationAssessment": {
         "additionalProperties": false,
         "properties": {
-          "as_of_date": {
-            "format": "date",
-            "title": "As Of Date",
-            "type": "string"
-          },
-          "calculation_ids": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Calculation Ids",
-            "type": "array"
-          },
           "currency": {
             "maxLength": 16,
             "minLength": 1,
             "title": "Currency",
             "type": "string"
           },
-          "input_evidence_refs": {
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Input Evidence Refs",
-            "type": "array"
+          "high": {
+            "$ref": "#/components/schemas/AuditedRangeEndpoint"
           },
           "limitations": {
             "items": {
@@ -3253,44 +3340,23 @@
             "title": "Limitations",
             "type": "array"
           },
+          "low": {
+            "$ref": "#/components/schemas/AuditedRangeEndpoint"
+          },
           "method": {
             "minLength": 1,
             "title": "Method",
             "type": "string"
-          },
-          "valuation_range": {
-            "$ref": "#/components/schemas/ValuationRange"
           }
         },
         "required": [
           "method",
-          "valuation_range",
+          "low",
+          "high",
           "currency",
-          "as_of_date",
-          "input_evidence_refs",
-          "limitations",
-          "calculation_ids"
+          "limitations"
         ],
         "title": "ValuationAssessment",
-        "type": "object"
-      },
-      "ValuationRange": {
-        "additionalProperties": false,
-        "properties": {
-          "high": {
-            "title": "High",
-            "type": "number"
-          },
-          "low": {
-            "title": "Low",
-            "type": "number"
-          }
-        },
-        "required": [
-          "low",
-          "high"
-        ],
-        "title": "ValuationRange",
         "type": "object"
       }
     }

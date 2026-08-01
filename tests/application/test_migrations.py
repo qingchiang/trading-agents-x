@@ -55,7 +55,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     finally:
         engine.dispose()
 
-    assert revision == "0001_markdown_research"
+    assert revision == "0001_reference_ranges"
     assert {
         "id",
         "run_id",

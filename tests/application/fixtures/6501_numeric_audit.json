@@ -21,36 +21,41 @@
   ],
   "numeric_candidate": {
     "requested": true,
-    "scenario_valuations": [
+    "scenario_reference_ranges": [
       {
         "kind": "base",
-        "valuation_range": {"low": 5000, "high": 5500},
-        "calculation_ids": ["calc_base_price"]
+        "label": "Base technical range",
+        "low": {"basis": "observed", "value": 5000, "evidence_refs": ["ev_6501a0000001"]},
+        "high": {"basis": "observed", "value": 5500, "evidence_refs": ["ev_6501a0000001"]},
+        "unit": "JPY",
+        "interpretation": "Observed technical reference band.",
+        "limitations": ["Historical levels are not forecasts."]
       },
       {
         "kind": "bull",
-        "valuation_range": {"low": 5700, "high": 6200},
-        "calculation_ids": ["calc_bull_price"]
+        "label": "Bull reference range",
+        "low": {"basis": "observed", "value": 5700, "evidence_refs": ["ev_6501a0000001"]},
+        "high": {"basis": "observed", "value": 6200, "evidence_refs": ["ev_6501a0000001"]},
+        "unit": "JPY",
+        "interpretation": "Observed market reference band.",
+        "limitations": ["Historical levels are not forecasts."]
       },
       {
         "kind": "bear",
-        "valuation_range": {"low": 4200, "high": 4700},
-        "calculation_ids": ["calc_bear_price"]
+        "label": "Bear reference range",
+        "low": {"basis": "observed", "value": 4200, "evidence_refs": ["ev_6501a0000001"]},
+        "high": {"basis": "observed", "value": 4700, "evidence_refs": ["ev_6501a0000001"]},
+        "unit": "JPY",
+        "interpretation": "Observed downside reference band.",
+        "limitations": ["Historical levels are not forecasts."]
       }
     ],
     "valuation_assessment": {
       "method": "Scenario earnings-multiple cross-check",
-      "valuation_range": {"low": 4453, "high": 5986},
+      "low": {"basis": "derived", "calculation_id": "calc_bear_price"},
+      "high": {"basis": "derived", "calculation_id": "calc_bull_price"},
       "currency": "JPY",
-      "input_evidence_refs": ["ev_6501a0000001", "ev_6501a0000002"],
-      "limitations": ["Frozen regression values are illustrative, not live research."],
-      "calculation_ids": [
-        "calc_current_pe",
-        "calc_forward_pe",
-        "calc_base_price",
-        "calc_bull_price",
-        "calc_bear_price"
-      ]
+      "limitations": ["Frozen regression values are illustrative, not live research."]
     },
     "market_reference_levels": [
       {
@@ -59,26 +64,21 @@
         "unit": "JPY",
         "interpretation": "Directly observed close.",
         "evidence_refs": ["ev_6501a0000001"],
-        "basis": "observed",
-        "calculation_ids": []
+        "basis": "observed"
       },
       {
         "label": "Current P/E",
-        "value": 26.19,
         "unit": "x",
         "interpretation": "Derived from the observed close and current EPS.",
-        "evidence_refs": ["ev_6501a0000001", "ev_6501a0000002"],
         "basis": "derived",
-        "calculation_ids": ["calc_current_pe"]
+        "calculation_id": "calc_current_pe"
       },
       {
         "label": "Forward P/E",
-        "value": 29.57,
         "unit": "x",
         "interpretation": "Derived from the observed close and forward EPS.",
-        "evidence_refs": ["ev_6501a0000001", "ev_6501a0000002"],
         "basis": "derived",
-        "calculation_ids": ["calc_forward_pe"]
+        "calculation_id": "calc_forward_pe"
       }
     ],
     "calculation_records": [
@@ -110,17 +110,6 @@
         "inputs": [
           {"name": "bull_multiple", "value": 29.76},
           {"name": "eps_current", "value": 201.14}
-        ],
-        "input_evidence_refs": ["ev_6501a0000002"],
-        "unit": "JPY",
-        "limitations": ["The multiple is scenario-dependent."]
-      },
-      {
-        "id": "calc_base_price",
-        "formula": "base_multiple * eps_forward",
-        "inputs": [
-          {"name": "base_multiple", "value": 29.76},
-          {"name": "eps_forward", "value": 178.13}
         ],
         "input_evidence_refs": ["ev_6501a0000002"],
         "unit": "JPY",

@@ -116,7 +116,7 @@ function StructuredCandidate({ candidate }: { candidate: Record<string, unknown>
   const { t } = useTranslation();
   const groups = [
     ["valuation_assessment", "numericCandidateGroup.valuation"],
-    ["scenario_valuations", "numericCandidateGroup.scenarios"],
+    ["scenario_reference_ranges", "numericCandidateGroup.scenarios"],
     ["market_reference_levels", "numericCandidateGroup.references"],
     ["calculation_records", "numericCandidateGroup.calculations"],
   ] as const;

@@ -571,22 +571,25 @@ def _render_research_decision(content: ResearchDecision) -> str:
                 level=5,
             )
         )
-        if scenario.valuation_range is not None:
+        if scenario.reference_range is not None:
+            reference_range = scenario.reference_range
             lines.extend(
                 [
                     "",
                     (
-                        "**Valuation range:** "
-                        f"`{scenario.valuation_range.low}`–"
-                        f"`{scenario.valuation_range.high}`"
+                        f"**Scenario reference range ({reference_range.label}):** "
+                        f"`{reference_range.low.value}`–"
+                        f"`{reference_range.high.value}` {reference_range.unit}"
                     ),
+                    (
+                        "**Endpoint basis:** "
+                        f"`{reference_range.low.basis.value}` / "
+                        f"`{reference_range.high.basis.value}`"
+                    ),
+                    reference_range.interpretation,
                 ]
             )
-            if scenario.valuation_calculation_ids:
-                lines.append(
-                    "**Calculation IDs:** "
-                    + _render_ids(scenario.valuation_calculation_ids)
-                )
+            lines.extend(_render_list("Limitations", reference_range.limitations))
         lines.extend(
             [
                 "",
@@ -603,8 +606,8 @@ def _render_research_decision(content: ResearchDecision) -> str:
                 f"- Method: {assessment.method}",
                 (
                     "- Range: "
-                    f"`{assessment.valuation_range.low}`–"
-                    f"`{assessment.valuation_range.high}` "
+                    f"`{assessment.low.value}`–"
+                    f"`{assessment.high.value}` "
                     f"{assessment.currency}"
                 ),
                 f"- As of: `{assessment.as_of_date.isoformat()}`",
@@ -699,10 +702,18 @@ def _calculation_uses(content: ResearchDecision) -> dict[str, tuple[str, ...]]:
             uses.setdefault(calculation_id, []).append(label)
 
     for scenario in content.scenarios:
-        add(
-            scenario.valuation_calculation_ids,
-            f"{scenario.kind.value.title()} scenario",
-        )
+        if scenario.reference_range is not None:
+            add(
+                tuple(
+                    item
+                    for item in (
+                        scenario.reference_range.low.calculation_id,
+                        scenario.reference_range.high.calculation_id,
+                    )
+                    if item is not None
+                ),
+                f"{scenario.kind.value.title()} scenario reference range",
+            )
     if content.valuation_assessment is not None:
         add(content.valuation_assessment.calculation_ids, "Valuation assessment")
     for level in content.market_reference_levels:

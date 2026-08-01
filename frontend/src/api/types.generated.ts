@@ -43,6 +43,14 @@ export interface components {
     };
     ArtifactGenerationMethod: "tool_call" | "tool_call_recovered" | "json_mode" | "raw_json_recovered" | "json_mode_recovered" | "sectioned_recovery" | "markdown_audited" | "markdown_audit_incomplete";
     AssetType: "stock" | "crypto";
+    AuditedRangeEndpoint: {
+      as_of_date: string;
+      basis: components["schemas"]["MarketReferenceBasis"];
+      calculation_id?: string | null;
+      evidence_refs: string[];
+      temporal_basis?: components["schemas"]["NumericTemporalBasis"];
+      value: number;
+    };
     CalculationRecord: {
       as_of_date: string;
       formula: string;
@@ -51,6 +59,7 @@ export interface components {
       inputs: Record<string, number>;
       limitations: string[];
       result: number;
+      temporal_basis?: components["schemas"]["NumericTemporalBasis"];
       unit: string;
     };
     CapabilitiesResponse: {
@@ -204,6 +213,7 @@ export interface components {
       evidence_refs: string[];
       interpretation: string;
       label: string;
+      temporal_basis?: components["schemas"]["NumericTemporalBasis"];
       unit: string;
       value: number;
     };
@@ -260,6 +270,7 @@ export interface components {
       validation_issues?: string[];
     };
     NumericAuditStatus: "complete" | "partial" | "incomplete" | "not_applicable";
+    NumericTemporalBasis: "point_in_time" | "live_snapshot";
     ProviderCapabilities: {
       api_key_configured: boolean | null;
       api_key_required: boolean;
@@ -344,8 +355,7 @@ export interface components {
       evidence_refs?: string[];
       kind: components["schemas"]["ResearchScenarioKind"];
       outcome: string;
-      valuation_calculation_ids?: string[];
-      valuation_range?: components["schemas"]["ValuationRange"] | null;
+      reference_range?: components["schemas"]["ScenarioReferenceRange"] | null;
     };
     ResearchScenarioKind: "base" | "bull" | "bear";
     ResearchWarning: {
@@ -452,6 +462,14 @@ export interface components {
       trashed_at?: string | null;
       updated_at: string;
     };
+    ScenarioReferenceRange: {
+      high: components["schemas"]["AuditedRangeEndpoint"];
+      interpretation: string;
+      label: string;
+      limitations: string[];
+      low: components["schemas"]["AuditedRangeEndpoint"];
+      unit: string;
+    };
     TableDataType: "text" | "integer" | "number" | "percent" | "currency" | "date" | "datetime" | "boolean";
     ValidationError: {
       ctx?: {
@@ -462,17 +480,11 @@ export interface components {
       type: string;
     };
     ValuationAssessment: {
-      as_of_date: string;
-      calculation_ids: string[];
       currency: string;
-      input_evidence_refs: string[];
+      high: components["schemas"]["AuditedRangeEndpoint"];
       limitations: string[];
+      low: components["schemas"]["AuditedRangeEndpoint"];
       method: string;
-      valuation_range: components["schemas"]["ValuationRange"];
-    };
-    ValuationRange: {
-      high: number;
-      low: number;
     };
   };
 }

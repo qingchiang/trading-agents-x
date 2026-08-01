@@ -11,6 +11,7 @@ from langchain_core.messages import AIMessage
 from tests.factories import analyst_report, research_decision
 from tradingagents.application.contracts import (
     ArtifactGenerationMethod,
+    AuditedRangeEndpoint,
     CalculationRecord,
     DebateAgenda,
     DebateImportance,
@@ -25,8 +26,8 @@ from tradingagents.application.contracts import (
     RebuttalReview,
     ResearchScenarioKind,
     RiskReview,
+    ScenarioReferenceRange,
     ValuationAssessment,
-    ValuationRange,
 )
 from tradingagents.application.metrics import MetricsCallback
 from tradingagents.graph.deliberation import (
@@ -70,8 +71,7 @@ class _StaticInvoker:
                 payload.pop("calculation_records", None)
                 payload.pop("numeric_audit_status", None)
                 for scenario in payload["scenarios"]:
-                    scenario.pop("valuation_range", None)
-                    scenario.pop("valuation_calculation_ids", None)
+                    scenario.pop("reference_range", None)
                 parsed = ResearchDecisionCoreDraft.model_validate(payload)
             elif self.schema is DecisionNumericDraft:
                 parsed = _numeric_draft_from_decision(payload)
@@ -90,15 +90,12 @@ class _StaticLLM:
 
 
 def _numeric_draft_from_decision(payload: dict[str, Any]) -> DecisionNumericDraft:
-    scenario_valuations = []
+    scenario_reference_ranges = []
     for scenario in payload["scenarios"]:
-        if scenario.get("valuation_range") is not None:
-            scenario_valuations.append(
-                {
-                    "kind": scenario["kind"],
-                    "valuation_range": scenario["valuation_range"],
-                    "calculation_ids": scenario["valuation_calculation_ids"],
-                }
+        reference_range = scenario.get("reference_range")
+        if reference_range is not None:
+            scenario_reference_ranges.append(
+                {"kind": scenario["kind"]} | _range_draft(reference_range)
             )
     calculations = []
     for calculation in payload.get("calculation_records") or ():
@@ -106,7 +103,7 @@ def _numeric_draft_from_decision(payload: dict[str, Any]) -> DecisionNumericDraf
             {
                 key: value
                 for key, value in calculation.items()
-                if key not in {"result", "as_of_date"}
+                if key not in {"result", "as_of_date", "temporal_basis"}
             }
             | {
                 "inputs": [
@@ -116,21 +113,63 @@ def _numeric_draft_from_decision(payload: dict[str, Any]) -> DecisionNumericDraf
         )
     valuation = payload.get("valuation_assessment")
     if valuation is not None:
-        valuation = {key: value for key, value in valuation.items() if key != "as_of_date"}
-    references = [
-        {key: value for key, value in item.items() if key != "as_of_date"}
-        for item in payload.get("market_reference_levels") or ()
-    ]
-    has_content = bool(scenario_valuations or valuation or references or calculations)
+        valuation = {
+            "method": valuation["method"],
+            "low": _endpoint_draft(valuation["low"]),
+            "high": _endpoint_draft(valuation["high"]),
+            "currency": valuation["currency"],
+            "limitations": valuation["limitations"],
+        }
+    references = [_reference_draft(item) for item in payload.get("market_reference_levels") or ()]
+    has_content = bool(
+        scenario_reference_ranges or valuation or references or calculations
+    )
     return DecisionNumericDraft.model_validate(
         {
             "requested": has_content,
-            "scenario_valuations": scenario_valuations,
+            "scenario_reference_ranges": scenario_reference_ranges,
             "valuation_assessment": valuation,
             "market_reference_levels": references,
             "calculation_records": calculations,
         }
     )
+
+
+def _endpoint_draft(endpoint: dict[str, Any]) -> dict[str, Any]:
+    if endpoint["basis"] == "observed":
+        return {
+            "basis": "observed",
+            "value": endpoint["value"],
+            "evidence_refs": endpoint["evidence_refs"],
+        }
+    return {"basis": "derived", "calculation_id": endpoint["calculation_id"]}
+
+
+def _range_draft(reference_range: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "label": reference_range["label"],
+        "low": _endpoint_draft(reference_range["low"]),
+        "high": _endpoint_draft(reference_range["high"]),
+        "unit": reference_range["unit"],
+        "interpretation": reference_range["interpretation"],
+        "limitations": reference_range["limitations"],
+    }
+
+
+def _reference_draft(item: dict[str, Any]) -> dict[str, Any]:
+    if item["basis"] == "observed":
+        return {
+            key: value
+            for key, value in item.items()
+            if key not in {"as_of_date", "calculation_ids", "temporal_basis"}
+        }
+    return {
+        "label": item["label"],
+        "unit": item["unit"],
+        "interpretation": item["interpretation"],
+        "basis": "derived",
+        "calculation_id": item["calculation_ids"][0],
+    }
 
 
 def _core_draft_from_decision(payload: dict[str, Any]) -> ResearchDecisionCoreDraft:
@@ -143,7 +182,7 @@ def _core_draft_from_decision(payload: dict[str, Any]) -> ResearchDecisionCoreDr
         {
             key: value
             for key, value in scenario.items()
-            if key not in {"valuation_range", "valuation_calculation_ids"}
+            if key != "reference_range"
         }
         for scenario in payload["scenarios"]
     ]
@@ -452,12 +491,22 @@ def test_final_decision_accepts_reproducible_critical_calculation() -> None:
         update={
             "valuation_assessment": ValuationAssessment(
                 method="Earnings multiple",
-                valuation_range=ValuationRange(low=90, high=110),
+                low=AuditedRangeEndpoint(
+                    value=100,
+                    basis=MarketReferenceBasis.DERIVED,
+                    evidence_refs=(ref,),
+                    calculation_id="calc_valuation",
+                    as_of_date=date(2026, 7, 24),
+                ),
+                high=AuditedRangeEndpoint(
+                    value=100,
+                    basis=MarketReferenceBasis.DERIVED,
+                    evidence_refs=(ref,),
+                    calculation_id="calc_valuation",
+                    as_of_date=date(2026, 7, 24),
+                ),
                 currency="USD",
-                as_of_date=date(2026, 7, 24),
-                input_evidence_refs=(ref,),
                 limitations=("The multiple is scenario-dependent.",),
-                calculation_ids=("calc_valuation",),
             ),
             "calculation_records": (
                 CalculationRecord(
@@ -572,7 +621,7 @@ def test_numeric_serializer_repairs_seven_invalid_input_names() -> None:
     ]
     invalid_numeric = {
         "requested": True,
-        "scenario_valuations": [],
+        "scenario_reference_ranges": [],
         "valuation_assessment": None,
         "market_reference_levels": [],
         "calculation_records": invalid_records,
@@ -633,7 +682,7 @@ def test_final_serializers_preserve_output_language_in_primary_and_repair(
     invalid_core["thesis"] = ""
     invalid_numeric = {
         "requested": True,
-        "scenario_valuations": [],
+        "scenario_reference_ranges": [],
         "valuation_assessment": None,
         "market_reference_levels": [],
         "calculation_records": [],
@@ -707,10 +756,9 @@ def test_6501_numeric_regression_canonicalizes_results_dates_and_shared_usage() 
     assert calculations["calc_current_pe"].result == pytest.approx(5267 / 201.14)
     assert calculations["calc_forward_pe"].result == pytest.approx(5267 / 178.13)
     assert calculations["calc_bull_price"].result == pytest.approx(29.76 * 201.14)
-    assert calculations["calc_base_price"].result == pytest.approx(29.76 * 178.13)
     assert calculations["calc_bear_price"].result == pytest.approx(25 * 178.13)
     assert {item.as_of_date for item in calculations.values()} == {date(2026, 7, 31)}
-    assert set(result.scenario_valuations) == {
+    assert set(result.scenario_reference_ranges) == {
         ResearchScenarioKind.BASE,
         ResearchScenarioKind.BULL,
         ResearchScenarioKind.BEAR,
@@ -721,7 +769,10 @@ def test_6501_numeric_regression_canonicalizes_results_dates_and_shared_usage() 
     assert {item.as_of_date for item in result.market_reference_levels} == {
         date(2026, 7, 31)
     }
-    assert "calc_current_pe" in result.valuation_assessment.calculation_ids
+    assert set(result.valuation_assessment.calculation_ids) == {
+        "calc_bear_price",
+        "calc_bull_price",
+    }
     assert "calc_current_pe" in result.market_reference_levels[1].calculation_ids
     assert result.status is NumericAuditStatus.COMPLETE
 
@@ -900,8 +951,26 @@ def test_final_decision_recomputes_optional_calculation_result() -> None:
             "scenarios": tuple(
                 scenario.model_copy(
                     update={
-                        "valuation_range": ValuationRange(low=100, high=120),
-                        "valuation_calculation_ids": ("calc_scenario",),
+                        "reference_range": ScenarioReferenceRange(
+                            label="Derived scenario reference",
+                            low=AuditedRangeEndpoint(
+                                value=999,
+                                basis=MarketReferenceBasis.DERIVED,
+                                evidence_refs=(ref,),
+                                calculation_id="calc_scenario",
+                                as_of_date=date(2026, 7, 24),
+                            ),
+                            high=AuditedRangeEndpoint(
+                                value=999,
+                                basis=MarketReferenceBasis.DERIVED,
+                                evidence_refs=(ref,),
+                                calculation_id="calc_scenario",
+                                as_of_date=date(2026, 7, 24),
+                            ),
+                            unit="USD",
+                            interpretation="Illustrative derived range.",
+                            limitations=("Illustrative scenario only.",),
+                        ),
                     }
                 )
                 if scenario.kind.value == "base"
@@ -945,12 +1014,22 @@ def test_final_decision_preserves_valid_numeric_components_after_repair_failure(
         update={
             "valuation_assessment": ValuationAssessment(
                 method="Earnings multiple",
-                valuation_range=ValuationRange(low=90, high=110),
+                low=AuditedRangeEndpoint(
+                    value=100,
+                    basis=MarketReferenceBasis.DERIVED,
+                    evidence_refs=(ref,),
+                    calculation_id="calc_valuation",
+                    as_of_date=date(2026, 7, 24),
+                ),
+                high=AuditedRangeEndpoint(
+                    value=100,
+                    basis=MarketReferenceBasis.DERIVED,
+                    evidence_refs=(ref,),
+                    calculation_id="calc_valuation",
+                    as_of_date=date(2026, 7, 24),
+                ),
                 currency="USD",
-                as_of_date=date(2026, 7, 24),
-                input_evidence_refs=(ref,),
                 limitations=("The multiple is scenario-dependent.",),
-                calculation_ids=("calc_valuation",),
             ),
             "market_reference_levels": (
                 MarketReferenceLevel(

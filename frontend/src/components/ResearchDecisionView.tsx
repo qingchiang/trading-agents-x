@@ -145,15 +145,28 @@ export function ResearchDecisionContent({
             >
               <header>
                 <span>{t(scenarioKey(scenario.kind))}</span>
-                {scenario.valuation_range && (
+                {scenario.reference_range && (
                   <strong>
                     {formatRange(
-                      scenario.valuation_range.low,
-                      scenario.valuation_range.high,
+                      scenario.reference_range.low.value,
+                      scenario.reference_range.high.value,
+                      scenario.reference_range.unit,
                     )}
                   </strong>
                 )}
               </header>
+              {scenario.reference_range && (
+                <div className="scenario-reference-range">
+                  <strong>{t("scenarioReferenceRange")}</strong>
+                  <span>{scenario.reference_range.label}</span>
+                  <Markdown
+                    evidenceAliases={evidenceIndex.aliases}
+                    onEvidence={onEvidence}
+                  >
+                    {scenario.reference_range.interpretation}
+                  </Markdown>
+                </div>
+              )}
               <h3>{t("scenarioOutcome")}</h3>
               <Markdown
                 evidenceAliases={evidenceIndex.aliases}
@@ -186,8 +199,8 @@ export function ResearchDecisionContent({
               </span>
               <h2>
                 {formatRange(
-                  decision.valuation_assessment.valuation_range.low,
-                  decision.valuation_assessment.valuation_range.high,
+                  decision.valuation_assessment.low.value,
+                  decision.valuation_assessment.high.value,
                   decision.valuation_assessment.currency,
                 )}
               </h2>
@@ -198,7 +211,12 @@ export function ResearchDecisionContent({
                 </div>
                 <div>
                   <dt>{t("asOfDate")}</dt>
-                  <dd>{decision.valuation_assessment.as_of_date}</dd>
+                  <dd>
+                    {latestEndpointDate(
+                      decision.valuation_assessment.low.as_of_date,
+                      decision.valuation_assessment.high.as_of_date,
+                    )}
+                  </dd>
                 </div>
               </dl>
               <MarkdownList
@@ -208,9 +226,10 @@ export function ResearchDecisionContent({
                 onEvidence={onEvidence}
               />
               <EvidenceLinks
-                refs={visibleRefs(
-                  decision.valuation_assessment.input_evidence_refs,
-                )}
+                refs={visibleRefs([
+                  ...decision.valuation_assessment.low.evidence_refs,
+                  ...decision.valuation_assessment.high.evidence_refs,
+                ])}
                 evidenceIndex={evidenceIndex}
                 onEvidence={onEvidence}
                 compact
@@ -477,12 +496,23 @@ function buildCalculationUses(
   };
   decision.scenarios.forEach((scenario) =>
     add(
-      scenario.valuation_calculation_ids,
+      scenario.reference_range
+        ? [
+            scenario.reference_range.low.calculation_id,
+            scenario.reference_range.high.calculation_id,
+          ].filter((value): value is string => Boolean(value))
+        : [],
       t("calculationUseScenario", { scenario: t(scenarioKey(scenario.kind)) }),
     ),
   );
   if (decision.valuation_assessment) {
-    add(decision.valuation_assessment.calculation_ids, t("valuationAssessment"));
+    add(
+      [
+        decision.valuation_assessment.low.calculation_id,
+        decision.valuation_assessment.high.calculation_id,
+      ].filter((value): value is string => Boolean(value)),
+      t("valuationAssessment"),
+    );
   }
   (decision.market_reference_levels ?? []).forEach((level) =>
     add(
@@ -491,6 +521,10 @@ function buildCalculationUses(
     ),
   );
   return uses;
+}
+
+function latestEndpointDate(left: string, right: string): string {
+  return left >= right ? left : right;
 }
 
 function humanize(value: string): string {

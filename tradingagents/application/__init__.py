@@ -5,6 +5,7 @@ from .contracts import (
     AnalysisResult,
     AnalystClaimType,
     AnalystReport,
+    AuditedRangeEndpoint,
     CalculationRecord,
     ClaimImportance,
     DebateAgenda,
@@ -30,6 +31,7 @@ from .contracts import (
     NumericAuditPhase,
     NumericAuditSnapshot,
     NumericAuditStatus,
+    NumericTemporalBasis,
     RebuttalReview,
     ReportAuditStatus,
     ReportSection,
@@ -47,9 +49,9 @@ from .contracts import (
     RunMetrics,
     RunProfile,
     RunStatus,
+    ScenarioReferenceRange,
     TableDataType,
     ValuationAssessment,
-    ValuationRange,
 )
 from .settings import AppSettings, RunSettings
 
@@ -104,5 +106,7 @@ __all__ = [
     "RunStatus",
     "TableDataType",
     "ValuationAssessment",
-    "ValuationRange",
+    "AuditedRangeEndpoint",
+    "NumericTemporalBasis",
+    "ScenarioReferenceRange",
 ]

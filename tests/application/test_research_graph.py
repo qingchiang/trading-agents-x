@@ -156,8 +156,7 @@ class _StructuredInvoker:
             payload.pop("calculation_records", None)
             payload.pop("numeric_audit_status", None)
             for scenario in payload["scenarios"]:
-                scenario.pop("valuation_range", None)
-                scenario.pop("valuation_calculation_ids", None)
+                scenario.pop("reference_range", None)
             parsed = ResearchDecisionCoreDraft.model_validate(payload)
         elif self.schema is DecisionNumericDraft:
             parsed = DecisionNumericDraft(requested=False)
