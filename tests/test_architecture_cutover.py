@@ -64,6 +64,7 @@ def test_public_api_exposes_typed_application_contract():
         "EvidenceTableCell",
         "EvidenceTableColumn",
         "EvidenceTableRow",
+        "EvidenceValueLocator",
         "JudgeDraft",
         "KeyClaim",
         "MarketReferenceBasis",
@@ -93,6 +94,7 @@ def test_public_api_exposes_typed_application_contract():
         "AuditedRangeEndpoint",
         "NumericTemporalBasis",
         "ScenarioReferenceRange",
+        "StructuredRecoveryNotice",
         "__version__",
     ]
     assert "TradingAgentsGraph" not in tradingagents.__all__
