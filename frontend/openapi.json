@@ -793,8 +793,8 @@
             "type": "array"
           },
           "version": {
-            "const": "6",
-            "default": "6",
+            "const": "7",
+            "default": "7",
             "title": "Version",
             "type": "string"
           }

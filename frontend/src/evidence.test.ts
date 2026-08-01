@@ -8,7 +8,7 @@ import {
 
 test("assigns one stable alias to exact duplicate evidence bodies", () => {
   const evidence = {
-    version: "4",
+    version: "7",
     instrument: "7011.T",
     analysis_date: "2026-07-27",
     items: [

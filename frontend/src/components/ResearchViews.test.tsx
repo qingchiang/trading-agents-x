@@ -16,7 +16,7 @@ import ResearchDecisionView from "./ResearchDecisionView";
 
 const evidenceRef = "ev_0123456789ab";
 const evidence: EvidenceBundle = {
-  version: "5",
+  version: "7",
   instrument: "NVDA",
   analysis_date: "2026-07-24",
   digest: "fixture",

@@ -538,7 +538,7 @@ class EvidenceTable(FrozenModel):
 class EvidenceBundle(FrozenModel):
     """Versioned evidence snapshot shared by every agent in one run."""
 
-    version: Literal["6"] = "6"
+    version: Literal["7"] = "7"
     instrument: str
     analysis_date: date
     items: tuple[EvidenceItem, ...]
@@ -1598,7 +1598,7 @@ class RecentInstrument(FrozenModel):
 class RunExport(FrozenModel):
     """Versioned, self-contained durable run export."""
 
-    schema_version: Literal["3"] = "3"
+    schema_version: Literal["4"] = "4"
     run: RunView
     result: AnalysisResult
     evidence: EvidenceBundle | None = None

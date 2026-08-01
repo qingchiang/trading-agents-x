@@ -1,0 +1,55 @@
+{
+  "analysis_date": "2026-08-01",
+  "instrument": "3778.T",
+  "evidence": {
+    "price": {
+      "ref": "ev_3778a0000001",
+      "value": 3075.0,
+      "measurement_kind": "currency",
+      "unit": "JPY",
+      "effective_date": "2026-07-31"
+    },
+    "company_eps": {
+      "ref": "ev_3778a0000002",
+      "value": 37.46,
+      "measurement_kind": "currency",
+      "unit": "JPY/share",
+      "effective_date": "2026-07-31"
+    },
+    "consensus_eps": {
+      "ref": "ev_3778a0000003",
+      "value": 74.3,
+      "measurement_kind": "currency",
+      "unit": "JPY/share",
+      "effective_date": "2026-08-01"
+    }
+  },
+  "interpreted_singleton": {
+    "label": "Analyst EPS consensus",
+    "value": 74.3,
+    "expected_destination": "market_reference_levels"
+  },
+  "reversed_valuation": {
+    "method": "Forward PE range",
+    "low_calculation": "price / company_eps",
+    "high_calculation": "price / consensus_eps",
+    "expected_low": 41.38627187079408,
+    "expected_high": 82.08755931767219,
+    "measurement_kind": "ratio",
+    "unit": "x"
+  },
+  "metadata_regressions": [
+    {"field": "close", "expected_kind": "currency", "expected_unit": "JPY"},
+    {"field": "target_price", "expected_kind": "currency", "expected_unit": "JPY"},
+    {"field": "macro_without_explicit_unit", "expected_kind": "unknown", "expected_unit": null}
+  ],
+  "label_regression": {
+    "invalid": "Latest close (2026-07-31)",
+    "expected": "Latest close",
+    "date_source": "evidence"
+  },
+  "no_op_repair": {
+    "initial_digest": "31f4d89191e54adb",
+    "repair_digest": "31f4d89191e54adb"
+  }
+}

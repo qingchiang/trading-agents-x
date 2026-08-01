@@ -313,10 +313,17 @@ class _SequenceLLM:
 _NUMERIC_REGRESSION_FIXTURE = (
     Path(__file__).parent / "fixtures" / "6501_numeric_audit.json"
 )
+_NUMERIC_3778_FIXTURE = (
+    Path(__file__).parent / "fixtures" / "3778_numeric_normalization.json"
+)
 
 
 def _numeric_regression_payload() -> dict[str, Any]:
     return json.loads(_NUMERIC_REGRESSION_FIXTURE.read_text(encoding="utf-8"))
+
+
+def _numeric_3778_payload() -> dict[str, Any]:
+    return json.loads(_NUMERIC_3778_FIXTURE.read_text(encoding="utf-8"))
 
 
 def _numeric_regression() -> tuple[EvidenceBundle, DecisionNumericDraft]:
@@ -1611,6 +1618,107 @@ def test_reversed_range_and_valuation_are_canonically_ordered() -> None:
             "payload": {"count": 2},
         }
     ]
+
+
+def test_3778_singleton_and_reversed_pe_valuation_normalize_without_repair() -> None:
+    payload = _numeric_3778_payload()
+    evidence = payload["evidence"]
+    items = tuple(
+        EvidenceItem(
+            ref=item["ref"],
+            source="fixture.3778",
+            evidence_type=name,
+            requested_date=payload["analysis_date"],
+            effective_date=item["effective_date"],
+            value=item["value"],
+            measurement_kind=item["measurement_kind"],
+            unit=item["unit"],
+        )
+        for name, item in evidence.items()
+    )
+    bundle = EvidenceBundle(
+        instrument=payload["instrument"],
+        analysis_date=payload["analysis_date"],
+        items=items,
+    )
+    catalog = build_numeric_value_catalog(bundle)
+    by_ref = {entry.locator.evidence_ref: entry.id for entry in catalog}
+    price = evidence["price"]
+    company_eps = evidence["company_eps"]
+    consensus_eps = evidence["consensus_eps"]
+    singleton = payload["interpreted_singleton"]
+    valuation = payload["reversed_valuation"]
+    calculations = (
+        CalculationRecordDraft(
+            id="calc_company_pe",
+            formula=valuation["low_calculation"],
+            inputs=(
+                CalculationInputDraft(name="price", value=price["value"]),
+                CalculationInputDraft(name="company_eps", value=company_eps["value"]),
+            ),
+            input_evidence_refs=(price["ref"], company_eps["ref"]),
+            unit=valuation["unit"],
+            limitations=("Company guidance may change.",),
+        ),
+        CalculationRecordDraft(
+            id="calc_consensus_pe",
+            formula=valuation["high_calculation"],
+            inputs=(
+                CalculationInputDraft(name="price", value=price["value"]),
+                CalculationInputDraft(name="consensus_eps", value=consensus_eps["value"]),
+            ),
+            input_evidence_refs=(price["ref"], consensus_eps["ref"]),
+            unit=valuation["unit"],
+            limitations=("Consensus coverage is limited.",),
+        ),
+    )
+    endpoint = InterpretedRangeEndpointDraft(
+        value=singleton["value"],
+        anchor_value_refs=(by_ref[consensus_eps["ref"]],),
+    )
+    draft = DecisionNumericDraft(
+        requested=True,
+        scenario_reference_ranges=ScenarioReferenceRangesDraft(
+            bull=(
+                ScenarioReferenceRangeDraft(
+                    category=ScenarioReferenceCategory.ANALYST_CONSENSUS,
+                    label=singleton["label"],
+                    low=endpoint,
+                    high=endpoint,
+                    interpretation="Consensus EPS is a point reference.",
+                    limitations=("Coverage is limited.",),
+                ),
+            )
+        ),
+        valuation_assessment=ValuationAssessmentDraft(
+            method=valuation["method"],
+            low=DerivedRangeEndpointDraft(calculation_id="calc_company_pe"),
+            high=DerivedRangeEndpointDraft(calculation_id="calc_consensus_pe"),
+            limitations=("Both EPS inputs may change.",),
+        ),
+        calculation_records=calculations,
+    )
+
+    result = _assemble_numeric_draft(
+        draft,
+        bundle=bundle,
+        allowed_evidence_refs={item.ref for item in items},
+        value_catalog={entry.id: entry for entry in catalog},
+        salvage=False,
+        node="committee.final.serialize.numeric",
+    )
+
+    assert result.status is NumericAuditStatus.COMPLETE
+    assert result.promoted_singletons == 1
+    assert result.reordered_ranges == 1
+    assert result.scenario_reference_ranges == {}
+    assert result.market_reference_levels[0].value == singleton["value"]
+    assert result.valuation_assessment is not None
+    assert result.valuation_assessment.measurement_kind is MeasurementKind.RATIO
+    assert result.valuation_assessment.unit == valuation["unit"]
+    assert result.valuation_assessment.low.value == pytest.approx(valuation["expected_low"])
+    assert result.valuation_assessment.high.value == pytest.approx(valuation["expected_high"])
+    assert payload["no_op_repair"]["initial_digest"] == payload["no_op_repair"]["repair_digest"]
 
 
 def test_invalid_scenario_range_only_omits_that_range() -> None:
