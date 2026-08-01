@@ -118,7 +118,7 @@ class FredFormattingTests(unittest.TestCase):
         self.assertIn("**Latest:** 4.4 (2025-09-01)", out)
         # change over the window: 4.4 - 4.1 = +0.30
         self.assertIn("+0.30", out)
-        self.assertIn("| 2025-06-01 | 4.1 |", out)
+        self.assertIn("| 2025-06-01 | 4.1 | percent | % |", out)
 
     def test_missing_value_is_skipped(self):
         with mock.patch.object(fred, "_request", side_effect=_request_stub()):

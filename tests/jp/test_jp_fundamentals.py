@@ -158,6 +158,9 @@ class JPFundamentalsTests(unittest.TestCase):
         self.assertIn("Forward PE: 38.49 (analyst consensus, live only; requested", out)
         self.assertIn("16 analysts, not point-in-time historical data, EPS 92.67", out)
         self.assertIn("company guidance +14.4% vs analyst -6.3% (divergent)", out)
+        self.assertIn("| forward_eps | 92.67 | currency | JPY/share |", out)
+        self.assertIn("| forward_pe |", out)
+        self.assertIn("| forward_eps_growth |", out)
 
     def test_flat_company_guidance_vs_decline_reads_divergent(self):
         # Sign boundary: flat company guidance (NxFEPS == EPS → 0% growth) vs an

@@ -18,6 +18,7 @@ import logging
 from datetime import datetime
 
 from ..lookahead import is_near_live
+from ..measurement import instrument_currency
 from ..y_finance import get_analyst_ratings
 from .jquants_common import parse_number as _num
 from .market import is_tokyo_ticker
@@ -54,7 +55,8 @@ def get_analyst_ratings_block(ticker: str, curr_date: str) -> str:
     tgt_mean = _num(ratings.get("targetMeanPrice"))
 
     lines = []
-    numeric_rows: list[tuple[str, float]] = []
+    currency = instrument_currency(ticker)
+    numeric_rows: list[tuple[str, float, str, str | None]] = []
     # Rating line whenever there is a real rating, independent of the analyst
     # count — yfinance can report a rating with numberOfAnalystOpinions None/0, so
     # the count is an optional trailing clause, not a gate on the whole block.
@@ -63,9 +65,9 @@ def get_analyst_ratings_block(ticker: str, curr_date: str) -> str:
         count = f"; {int(n_analysts)} analysts" if n_analysts else ""
         lines.append(f"- Rating: {str(key).replace('_', ' ')}{mean_note}{count}")
         if mean is not None:
-            numeric_rows.append(("recommendation_mean", mean))
+            numeric_rows.append(("recommendation_mean", mean, "index", None))
         if n_analysts is not None:
-            numeric_rows.append(("analyst_count", n_analysts))
+            numeric_rows.append(("analyst_count", n_analysts, "count", "analysts"))
 
     if tgt_mean is not None:
         hi = _num(ratings.get("targetHighPrice"))
@@ -82,13 +84,13 @@ def get_analyst_ratings_block(ticker: str, curr_date: str) -> str:
                 f"retrieval-time current price {current:,.0f}"
             )
         lines.append(f"- 12-month price target (mean): {tgt_mean:,.0f}{band}{upside}")
-        numeric_rows.append(("target_mean_price", tgt_mean))
+        numeric_rows.append(("target_mean_price", tgt_mean, "currency", currency))
         if lo is not None:
-            numeric_rows.append(("target_low_price", lo))
+            numeric_rows.append(("target_low_price", lo, "currency", currency))
         if hi is not None:
-            numeric_rows.append(("target_high_price", hi))
+            numeric_rows.append(("target_high_price", hi, "currency", currency))
         if current is not None:
-            numeric_rows.append(("retrieval_time_price", current))
+            numeric_rows.append(("retrieval_time_price", current, "currency", currency))
 
     if not lines:
         return ""
@@ -98,8 +100,11 @@ def get_analyst_ratings_block(ticker: str, curr_date: str) -> str:
     numeric_table = ""
     if numeric_rows:
         numeric_table = (
-            "\n\n| Metric | Value |\n|---|---:|\n"
-            + "\n".join(f"| {name} | {value} |" for name, value in numeric_rows)
+            "\n\n| Metric | Value | Measurement | Unit |\n|---|---:|---|---|\n"
+            + "\n".join(
+                f"| {name} | {value} | {measurement} | {unit or '—'} |"
+                for name, value, measurement, unit in numeric_rows
+            )
         )
     return (
         "yfinance analyst consensus (sell-side; LIVE snapshot)\n"

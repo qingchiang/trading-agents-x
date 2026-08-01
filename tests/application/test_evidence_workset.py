@@ -4,6 +4,8 @@ from datetime import date, timedelta
 
 import pytest
 
+from tradingagents.application.contracts import EvidenceItem, MeasurementKind
+from tradingagents.application.evidence import extract_evidence_tables
 from tradingagents.application.evidence_workset import (
     build_market_data_artifact,
     market_analytical_views,
@@ -54,6 +56,32 @@ def test_complete_ohlcv_is_kept_in_artifact_not_model_content() -> None:
     assert "complete source table is retained outside" in overview
     assert "2024-01-02,99.00,102.00,98.00,100.00,1000000" not in overview
     assert len(overview) < len(artifact["source_content"]) // 4
+
+
+@pytest.mark.unit
+def test_ohlcv_artifact_carries_producer_owned_column_measurements() -> None:
+    _overview, artifact = build_market_data_artifact(
+        _ohlcv(5),
+        symbol="3778.T",
+        start_date="2024-01-02",
+        end_date="2024-01-06",
+    )
+    item = EvidenceItem.create(
+        source="fixture",
+        evidence_type="get_stock_data",
+        requested_date=date(2024, 1, 6),
+        effective_date=date(2024, 1, 6),
+        content=artifact["source_content"],
+        provenance={"column_measurements": artifact["column_measurements"]},
+    )
+
+    table = extract_evidence_tables((item,))[0]
+    columns = {column.label: column for column in table.columns}
+
+    assert columns["Close"].measurement_kind is MeasurementKind.CURRENCY
+    assert columns["Close"].unit == "JPY"
+    assert columns["Volume"].measurement_kind is MeasurementKind.QUANTITY
+    assert columns["Volume"].unit == "shares"
 
 
 @pytest.mark.unit

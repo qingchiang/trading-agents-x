@@ -1584,6 +1584,7 @@ def _collect_evidence(
                 {
                     "dataset_id": artifact.get("dataset_id"),
                     "analytical_views": artifact.get("analytical_views", {}),
+                    "column_measurements": artifact.get("column_measurements", {}),
                 },
             )
             continue

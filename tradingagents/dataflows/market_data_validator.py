@@ -15,6 +15,7 @@ from collections.abc import Iterable
 import pandas as pd
 from stockstats import wrap
 
+from tradingagents.dataflows.measurement import instrument_currency
 from tradingagents.dataflows.stockstats_utils import (
     _assert_ohlcv_not_stale,
     load_ohlcv,
@@ -27,41 +28,6 @@ DEFAULT_SNAPSHOT_INDICATORS: tuple[str, ...] = (
     "rsi", "boll", "boll_ub", "boll_lb",
     "macd", "macds", "macdh", "atr",
 )
-
-
-def _instrument_currency(symbol: str) -> str:
-    normalized = symbol.upper()
-    for suffix, currency in (
-        (".T", "JPY"),
-        (".SS", "CNY"),
-        (".SZ", "CNY"),
-        (".HK", "HKD"),
-        (".L", "GBP"),
-        (".TO", "CAD"),
-        (".AX", "AUD"),
-        (".NS", "INR"),
-        (".BO", "INR"),
-    ):
-        if normalized.endswith(suffix):
-            return currency
-    index_currency = {
-        "^N225": "JPY",
-        "^HSI": "HKD",
-        "^FTSE": "GBP",
-        "^GSPTSE": "CAD",
-        "^AXJO": "AUD",
-        "^NSEI": "INR",
-        "^BSESN": "INR",
-    }
-    if normalized in index_currency:
-        return index_currency[normalized]
-    if normalized.endswith("=X") and len(normalized) >= 8:
-        return normalized[3:6]
-    if "-" in normalized:
-        quote = normalized.rsplit("-", 1)[-1]
-        if len(quote) == 3 and quote.isalpha():
-            return quote
-    return "USD"
 
 
 def _indicator_measurement(name: str, currency: str) -> tuple[str, str | None]:
@@ -143,7 +109,7 @@ def render_verified_market_snapshot(
     stock_df = wrap(df.copy())
 
     selected = tuple(indicators or DEFAULT_SNAPSHOT_INDICATORS)
-    currency = _instrument_currency(symbol)
+    currency = instrument_currency(symbol)
     indicator_values: dict[str, str] = {}
     for name in selected:
         try:

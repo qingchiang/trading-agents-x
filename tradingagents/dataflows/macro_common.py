@@ -23,6 +23,7 @@ from datetime import datetime, timedelta
 from typing import NamedTuple
 
 from .config import get_config
+from .measurement import classify_vendor_unit
 from .utils import get_current_date
 
 logger = logging.getLogger(__name__)
@@ -450,7 +451,12 @@ def render_macro_report(source_label: str, data: dict, curr_date: str) -> str:
         shown = points[-MAX_ROWS:]
         note = f"\n_(showing the most recent {MAX_ROWS} of {len(points)} observations)_\n"
 
+    measurement, unit = classify_vendor_unit(data.get("units"))
     table = (
-        "\n| Date | Value |\n| --- | --- |\n" + "\n".join(f"| {d} | {v} |" for d, v in shown) + "\n"
+        "\n| Date | Value | Measurement | Unit |\n| --- | --- | --- | --- |\n"
+        + "\n".join(
+            f"| {d} | {v} | {measurement} | {unit or '—'} |" for d, v in shown
+        )
+        + "\n"
     )
     return header + summary + note + table

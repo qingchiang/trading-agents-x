@@ -9,10 +9,11 @@ import json
 import math
 from dataclasses import asdict
 from datetime import date
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 import pandas as pd
 
+from tradingagents.dataflows.measurement import instrument_currency
 from tradingagents.provenance import (
     ProvenanceRecord,
     extract_provenance,
@@ -32,6 +33,7 @@ class EvidenceToolArtifact(TypedDict):
     provenance: list[dict[str, str | None]]
     temporal_scope: str
     analytical_views: dict[str, Any]
+    column_measurements: NotRequired[dict[str, dict[str, str | None]]]
 
 
 _OHLCV_REQUIRED = {"date", "close"}
@@ -70,8 +72,21 @@ def build_market_data_artifact(
         "provenance": [asdict(record) for record in records],
         "temporal_scope": temporal_scope_from_records(records),
         "analytical_views": views,
+        "column_measurements": market_column_measurements(symbol),
     }
     return render_market_overview(dataset_id, views), artifact
+
+
+def market_column_measurements(symbol: str) -> dict[str, dict[str, str | None]]:
+    """Describe raw OHLCV columns using producer-owned instrument semantics."""
+
+    currency = instrument_currency(symbol)
+    return {
+        column: {"measurement_kind": "currency", "unit": currency}
+        for column in ("Open", "High", "Low", "Close", "Adj Close")
+    } | {
+        "Volume": {"measurement_kind": "quantity", "unit": "shares"},
+    }
 
 
 def is_evidence_tool_artifact(value: Any) -> bool:

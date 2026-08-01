@@ -39,6 +39,8 @@ class AnalystRatingsBlockTests(unittest.TestCase):
         self.assertIn("Requested analysis date: 2026-06-26", out)
         self.assertIn("Retrieved at:", out)
         self.assertIn("Not point-in-time historical data", out)
+        self.assertIn("| target_mean_price | 5323.078 | currency | JPY |", out)
+        self.assertIn("| analyst_count | 16.0 | count | analysts |", out)
 
     def test_non_jp_ticker_returns_empty(self):
         # yfinance-sourced but injected as a JP fill; a US name uses StockTwits/Reddit.

@@ -105,7 +105,11 @@ def extract_evidence_tables(
             *_csv_table_candidates(group.content),
         ]
         for title, headers, raw_rows, source_format in candidates:
-            columns = _columns(headers, raw_rows)
+            columns = _columns(
+                headers,
+                raw_rows,
+                measurements=_producer_column_measurements(source),
+            )
             rows = _rows(columns, raw_rows)
             if not rows:
                 continue
@@ -280,6 +284,8 @@ def _nearest_heading(
 def _columns(
     headers: list[str],
     rows: list[list[str]],
+    *,
+    measurements: dict[str, tuple[MeasurementKind, str | None]] | None = None,
 ) -> tuple[EvidenceTableColumn, ...]:
     keys: set[str] = set()
     columns = []
@@ -296,16 +302,40 @@ def _columns(
         keys.add(key)
         values = [row[index - 1] for row in rows]
         data_type, unit = _infer_column_type(label, values)
+        producer_measurement = (measurements or {}).get(label.casefold())
         columns.append(
             EvidenceTableColumn(
                 key=key,
                 label=label,
                 data_type=data_type,
-                measurement_kind=_column_measurement_kind(data_type),
-                unit=unit,
+                measurement_kind=(
+                    producer_measurement[0]
+                    if producer_measurement is not None
+                    else _column_measurement_kind(data_type)
+                ),
+                unit=(producer_measurement[1] if producer_measurement is not None else unit),
             )
         )
     return tuple(columns)
+
+
+def _producer_column_measurements(
+    item: EvidenceItem,
+) -> dict[str, tuple[MeasurementKind, str | None]]:
+    """Read only explicit producer metadata carried with an immutable payload."""
+
+    raw = item.provenance.get("column_measurements")
+    if not isinstance(raw, dict):
+        return {}
+    output: dict[str, tuple[MeasurementKind, str | None]] = {}
+    for label, metadata in raw.items():
+        if not isinstance(label, str) or not isinstance(metadata, dict):
+            continue
+        kind = _measurement_kind(str(metadata.get("measurement_kind", "unknown")))
+        raw_unit = metadata.get("unit")
+        unit = raw_unit.strip() if isinstance(raw_unit, str) and raw_unit.strip() else None
+        output[label.casefold()] = (kind, unit)
+    return output
 
 
 def _column_measurement_kind(data_type: TableDataType) -> MeasurementKind:

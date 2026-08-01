@@ -42,6 +42,7 @@ from tradingagents.provenance import (
 )
 
 from ..lookahead import is_near_live
+from ..measurement import instrument_currency
 from ..y_finance import get_analyst_forward
 from . import jquants_fundamentals as jqf
 from .jquants_common import parse_number as _num
@@ -235,14 +236,28 @@ def _analyst_forward_line(
             f"analyst {analyst_growth * 100:+.1f}% ({agree})"
         )
     retrieved = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    currency = instrument_currency(ticker)
     line = (
         f"- Forward PE: {_ratio(fwd_pe)} (analyst consensus, live only; requested "
         f"{curr_date}, retrieved {retrieved}{count}, "
         f"not point-in-time historical data, EPS {_ratio(eps)}){note}"
     )
+    rows = [
+        f"| forward_eps | {eps} | currency | {currency}/share |",
+        f"| forward_pe | {fwd_pe} | ratio | x |",
+    ]
+    if analyst_growth is not None:
+        rows.append(f"| forward_eps_growth | {analyst_growth * 100} | percent | % |")
+    if n_analysts is not None:
+        rows.append(f"| analyst_count | {n_analysts} | count | analysts |")
+    content = (
+        line
+        + "\n\n| Metric | Value | Measurement | Unit |\n|---|---:|---|---|\n"
+        + "\n".join(rows)
+    )
     return attach_evidence_span(
         attach_provenance(
-            line,
+            content,
             ProvenanceRecord(
                 evidence="get_fundamentals",
                 source="yfinance analyst consensus",
