@@ -848,15 +848,24 @@ def test_numeric_serializer_repairs_seven_invalid_input_names() -> None:
 
 
 @pytest.mark.parametrize(
-    ("output_language", "localized_example"),
+    ("output_language", "localized_example", "assumption_example"),
     (
-        ("Simplified Chinese (简体中文, zh-CN)", "现有证据支持一项平衡的研究结论"),
-        ("使用正式、克制的繁体中文", "The evidence supports a balanced conclusion"),
+        (
+            "Simplified Chinese (简体中文, zh-CN)",
+            "现有证据支持一项平衡的研究结论",
+            "分析师 EPS 共识上修至每股 185–195 日元",
+        ),
+        (
+            "使用正式、克制的繁体中文",
+            "The evidence supports a balanced conclusion",
+            "Analyst EPS consensus rises to JPY 185-195 per share",
+        ),
     ),
 )
 def test_final_serializers_preserve_output_language_in_primary_and_repair(
     output_language: str,
     localized_example: str,
+    assumption_example: str,
 ) -> None:
     state = _state()
     state["output_language"] = output_language
@@ -893,6 +902,7 @@ def test_final_serializers_preserve_output_language_in_primary_and_repair(
     assert all(output_language in prompt for _schema, prompt in llm.prompts)
     assert localized_example in llm.prompts[0][1]
     assert localized_example in llm.prompts[1][1]
+    assert all(assumption_example in prompt for _schema, prompt in llm.prompts[:2])
 
 
 def test_final_serializer_phases_record_child_wall_time_without_parent_span() -> None:

@@ -636,12 +636,43 @@ def invoke_risk_review(
     )
 
 
+def decision_scenario_assumption_guidance(output_language: str) -> str:
+    """Return reader-facing scenario guidance without adding a hard validator."""
+
+    if output_language == ReportLanguage.SIMPLIFIED_CHINESE.prompt_label:
+        return (
+            "每条情景假设必须在脱离上下文后仍可独立理解。涉及共识、指引、"
+            "目标值或预测时，必须写明指标主体（例如 EPS、收入、营业利润或目标价）、"
+            "数值与单位，以及理解该假设所需的时间范围或条件。例如："
+            "‘分析师 EPS 共识上修至每股 185–195 日元’；不要只写"
+            "‘共识上修至 185–195 日元’。"
+        )
+    if output_language == ReportLanguage.JAPANESE.prompt_label:
+        return (
+            "各シナリオの前提は、文脈から切り離しても単独で理解できるように書くこと。"
+            "コンセンサス、ガイダンス、目標値または予想に触れる場合は、指標の主体"
+            "（EPS、売上高、営業利益、目標株価など）、数値と単位、および必要な期間や"
+            "条件を明記すること。例：『アナリストのEPSコンセンサスが1株185～195円へ"
+            "上方修正される』。『コンセンサスが185～195円へ上方修正される』だけでは"
+            "不十分。"
+        )
+    return (
+        "Write every scenario assumption so it remains independently understandable "
+        "outside its surrounding context. When referring to consensus, guidance, a "
+        "target, or a forecast, name the metric subject (for example EPS, revenue, "
+        "operating profit, or target price), its value and unit, and any time period "
+        "or condition needed to interpret it. Example: 'Analyst EPS consensus rises "
+        "to JPY 185-195 per share'; do not write only 'Consensus rises to JPY 185-195'."
+    )
+
+
 def _decision_language_rules(output_language: str) -> str:
     return (
         "Write every human-readable field in the requested report language: "
         f"{output_language}. Keep rating values, schema enums, IDs, formula "
         "variable names, Evidence refs, Memory refs, and unit wire values in "
-        "their required schema format."
+        "their required schema format. "
+        + decision_scenario_assumption_guidance(output_language)
     )
 
 
@@ -765,11 +796,11 @@ def _decision_example_text(output_language: str) -> dict[str, str]:
             "invalidation": "新证据直接否定核心论点。",
             "question": "哪一种情景将占据主导？",
             "horizon": "6至12个月",
-            "base_assumption": "当前证据仍具有代表性。",
+            "base_assumption": "分析师 EPS 共识维持在每股 185–195 日元。",
             "base_outcome": "核心论点大体按预期演进。",
-            "bull_assumption": "建设性机制进一步增强。",
+            "bull_assumption": "未来十二个月分析师 EPS 共识上修至每股 200 日元以上。",
             "bull_outcome": "结果优于基准情景。",
-            "bear_assumption": "主要风险开始兑现。",
+            "bear_assumption": "未来十二个月分析师 EPS 共识下修至每股 175 日元以下。",
             "bear_outcome": "结果弱于基准情景。",
             "valuation_method": "基于证据的盈利倍数法",
             "valuation_limitation": "估值倍数取决于情景假设。",
@@ -788,11 +819,11 @@ def _decision_example_text(output_language: str) -> dict[str, str]:
             "invalidation": "新たな証拠が中核仮説を直接否定する。",
             "question": "どのシナリオが優勢になるか。",
             "horizon": "6〜12か月",
-            "base_assumption": "現在の証拠が引き続き代表性を持つ。",
+            "base_assumption": "アナリストのEPSコンセンサスが1株185～195円で維持される。",
             "base_outcome": "仮説は概ね想定どおりに進展する。",
-            "bull_assumption": "上振れメカニズムが強まる。",
+            "bull_assumption": "今後12か月のEPSコンセンサスが1株200円超へ上方修正される。",
             "bull_outcome": "結果は基本シナリオを上回る。",
-            "bear_assumption": "主要リスクが顕在化する。",
+            "bear_assumption": "今後12か月のEPSコンセンサスが1株175円未満へ下方修正される。",
             "bear_outcome": "結果は基本シナリオを下回る。",
             "valuation_method": "証拠に基づく利益倍率法",
             "valuation_limitation": "倍率はシナリオ前提に左右される。",
@@ -810,11 +841,11 @@ def _decision_example_text(output_language: str) -> dict[str, str]:
         "invalidation": "New evidence directly contradicts the thesis.",
         "question": "Which scenario will dominate?",
         "horizon": "6-12 months",
-        "base_assumption": "Current evidence remains representative.",
+        "base_assumption": "Analyst EPS consensus remains JPY 185-195 per share.",
         "base_outcome": "The thesis develops broadly as expected.",
-        "bull_assumption": "The constructive mechanism strengthens.",
+        "bull_assumption": "Twelve-month analyst EPS consensus rises above JPY 200 per share.",
         "bull_outcome": "The result exceeds the base case.",
-        "bear_assumption": "The principal risk materializes.",
+        "bear_assumption": "Twelve-month analyst EPS consensus falls below JPY 175 per share.",
         "bear_outcome": "The result falls below the base case.",
         "valuation_method": "Evidence-backed earnings multiple",
         "valuation_limitation": "The multiple is scenario-dependent.",

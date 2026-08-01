@@ -80,6 +80,7 @@ from tradingagents.graph.analyst_synthesis import (
 )
 from tradingagents.graph.deliberation import (
     debate_round_has_material_progress,
+    decision_scenario_assumption_guidance,
     invoke_debate_agenda,
     invoke_judge_draft,
     invoke_rebuttal,
@@ -1268,6 +1269,9 @@ class ResearchGraph:
                     )
                 ),
             )
+            assumption_guidance = decision_scenario_assumption_guidance(
+                state["output_language"]
+            )
             with self.metrics.phase(
                 f"{node}.reason",
                 event_writer=runtime.stream_writer,
@@ -1280,6 +1284,8 @@ class ResearchGraph:
                         "catalysts, risks, invalidation, unresolved questions, "
                         "time horizon, any valuation or market-reference "
                         "calculations, and risk-review dispositions."
+                        "\n\nSCENARIO ASSUMPTION READABILITY:\n"
+                        + assumption_guidance
                     ),
                     node=f"{node}.reason",
                     allowed_evidence_refs=_state_evidence_refs(state),
@@ -1320,7 +1326,7 @@ class ResearchGraph:
                 role="final_committee",
                 content=decision,
                 generation_method=output.generation_method,
-                prompt_version="final-committee-v8-language-contract",
+                prompt_version="final-committee-v9-self-contained-scenarios",
             )
             self._finish_node(
                 runtime,

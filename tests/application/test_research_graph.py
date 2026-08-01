@@ -359,7 +359,7 @@ def test_profiles_share_contract_but_use_distinct_topologies(
     assert required_nodes <= completed
     assert not forbidden_nodes & completed
     assert set(execution.reports) == {"market", "news"}
-    assert execution.evidence.version == "5"
+    assert execution.evidence.version == "6"
     assert execution.evidence.digest
     assert execution.decision.rating is ResearchRating.HOLD
     valid_refs = {item.ref for item in execution.evidence.items}
@@ -400,6 +400,12 @@ def test_profiles_share_contract_but_use_distinct_topologies(
         assert "DECISION SYNTHESIS BRIEF:" in final_prompt
         assert "RESEARCH CONTEXT:" not in final_prompt
         assert "REQUIRED RISK REVIEW ROLES:" in final_prompt
+        final_reasoning_prompt = next(
+            prompt
+            for schema, prompt in deep.calls
+            if schema == "ResearchMarkdown" and "SCENARIO ASSUMPTION READABILITY:" in prompt
+        )
+        assert "Analyst EPS consensus rises to JPY 185-195 per share" in final_reasoning_prompt
         agenda_prompt = next(
             prompt for schema, prompt in quick.calls if schema == "DebateAgenda"
         )
