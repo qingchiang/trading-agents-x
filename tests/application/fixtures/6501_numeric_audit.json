@@ -1,0 +1,142 @@
+{
+  "analysis_date": "2026-08-01",
+  "evidence": [
+    {
+      "ref": "ev_6501a0000001",
+      "source": "fixture.market",
+      "evidence_type": "observed close",
+      "requested_date": "2026-08-01",
+      "effective_date": "2026-07-31",
+      "value": 5267,
+      "unit": "JPY"
+    },
+    {
+      "ref": "ev_6501a0000002",
+      "source": "fixture.fundamentals",
+      "evidence_type": "earnings inputs",
+      "requested_date": "2026-08-01",
+      "effective_date": "2026-07-31",
+      "content": "Frozen EPS and multiple inputs for numeric-audit regression."
+    }
+  ],
+  "numeric_candidate": {
+    "requested": true,
+    "scenario_valuations": [
+      {
+        "kind": "base",
+        "valuation_range": {"low": 5000, "high": 5500},
+        "calculation_ids": ["calc_base_price"]
+      },
+      {
+        "kind": "bull",
+        "valuation_range": {"low": 5700, "high": 6200},
+        "calculation_ids": ["calc_bull_price"]
+      },
+      {
+        "kind": "bear",
+        "valuation_range": {"low": 4200, "high": 4700},
+        "calculation_ids": ["calc_bear_price"]
+      }
+    ],
+    "valuation_assessment": {
+      "method": "Scenario earnings-multiple cross-check",
+      "valuation_range": {"low": 4453, "high": 5986},
+      "currency": "JPY",
+      "input_evidence_refs": ["ev_6501a0000001", "ev_6501a0000002"],
+      "limitations": ["Frozen regression values are illustrative, not live research."],
+      "calculation_ids": [
+        "calc_current_pe",
+        "calc_forward_pe",
+        "calc_base_price",
+        "calc_bull_price",
+        "calc_bear_price"
+      ]
+    },
+    "market_reference_levels": [
+      {
+        "label": "Observed close",
+        "value": 5267,
+        "unit": "JPY",
+        "interpretation": "Directly observed close.",
+        "evidence_refs": ["ev_6501a0000001"],
+        "basis": "observed",
+        "calculation_ids": []
+      },
+      {
+        "label": "Current P/E",
+        "value": 26.19,
+        "unit": "x",
+        "interpretation": "Derived from the observed close and current EPS.",
+        "evidence_refs": ["ev_6501a0000001", "ev_6501a0000002"],
+        "basis": "derived",
+        "calculation_ids": ["calc_current_pe"]
+      },
+      {
+        "label": "Forward P/E",
+        "value": 29.57,
+        "unit": "x",
+        "interpretation": "Derived from the observed close and forward EPS.",
+        "evidence_refs": ["ev_6501a0000001", "ev_6501a0000002"],
+        "basis": "derived",
+        "calculation_ids": ["calc_forward_pe"]
+      }
+    ],
+    "calculation_records": [
+      {
+        "id": "calc_current_pe",
+        "formula": "price / eps_current",
+        "inputs": [
+          {"name": "price", "value": 5267},
+          {"name": "eps_current", "value": 201.14}
+        ],
+        "input_evidence_refs": ["ev_6501a0000001", "ev_6501a0000002"],
+        "unit": "x",
+        "limitations": ["EPS definition must remain consistent."]
+      },
+      {
+        "id": "calc_forward_pe",
+        "formula": "price / eps_forward",
+        "inputs": [
+          {"name": "price", "value": 5267},
+          {"name": "eps_forward", "value": 178.13}
+        ],
+        "input_evidence_refs": ["ev_6501a0000001", "ev_6501a0000002"],
+        "unit": "x",
+        "limitations": ["Forward EPS is an estimate."]
+      },
+      {
+        "id": "calc_bull_price",
+        "formula": "bull_multiple * eps_current",
+        "inputs": [
+          {"name": "bull_multiple", "value": 29.76},
+          {"name": "eps_current", "value": 201.14}
+        ],
+        "input_evidence_refs": ["ev_6501a0000002"],
+        "unit": "JPY",
+        "limitations": ["The multiple is scenario-dependent."]
+      },
+      {
+        "id": "calc_base_price",
+        "formula": "base_multiple * eps_forward",
+        "inputs": [
+          {"name": "base_multiple", "value": 29.76},
+          {"name": "eps_forward", "value": 178.13}
+        ],
+        "input_evidence_refs": ["ev_6501a0000002"],
+        "unit": "JPY",
+        "limitations": ["The multiple is scenario-dependent."]
+      },
+      {
+        "id": "calc_bear_price",
+        "formula": "bear_multiple * eps_forward",
+        "inputs": [
+          {"name": "bear_multiple", "value": 25},
+          {"name": "eps_forward", "value": 178.13}
+        ],
+        "input_evidence_refs": ["ev_6501a0000002"],
+        "unit": "JPY",
+        "limitations": ["The multiple is scenario-dependent."]
+      }
+    ]
+  }
+}

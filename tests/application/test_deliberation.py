@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 import pytest
+from langchain_core.messages import AIMessage
 
 from tests.factories import analyst_report, research_decision
 from tradingagents.application.contracts import (
@@ -20,6 +23,7 @@ from tradingagents.application.contracts import (
     NumericAuditAppendixStatus,
     NumericAuditStatus,
     RebuttalReview,
+    ResearchScenarioKind,
     RiskReview,
     ValuationAssessment,
     ValuationRange,
@@ -30,6 +34,7 @@ from tradingagents.graph.deliberation import (
     CalculationRecordDraft,
     DecisionNumericDraft,
     ResearchDecisionCoreDraft,
+    _assemble_numeric_draft,
     _evaluate_formula,
     _numeric_audit_snapshot,
     debate_round_has_material_progress,
@@ -170,6 +175,10 @@ class _SequenceInvoker:
         del config
         self.owner.prompts.append((self.schema.__name__, prompt))
         response = self.owner.responses[self.schema.__name__].pop(0)
+        if isinstance(response, dict) and (
+            "raw" in response or "parsed" in response or "parsing_error" in response
+        ):
+            return response
         return {"raw": None, "parsed": response}
 
 
@@ -182,6 +191,21 @@ class _SequenceLLM:
 
     def with_structured_output(self, schema: Any, **_kwargs: Any) -> _SequenceInvoker:
         return _SequenceInvoker(self, schema)
+
+
+_NUMERIC_REGRESSION_FIXTURE = (
+    Path(__file__).parent / "fixtures" / "6501_numeric_audit.json"
+)
+
+
+def _numeric_regression() -> tuple[EvidenceBundle, DecisionNumericDraft]:
+    payload = json.loads(_NUMERIC_REGRESSION_FIXTURE.read_text(encoding="utf-8"))
+    bundle = EvidenceBundle(
+        instrument="6501.T",
+        analysis_date=payload["analysis_date"],
+        items=tuple(EvidenceItem.model_validate(item) for item in payload["evidence"]),
+    )
+    return bundle, DecisionNumericDraft.model_validate(payload["numeric_candidate"])
 
 
 def _state(*, content: str = "Fixture evidence.") -> dict[str, Any]:
@@ -666,6 +690,152 @@ def test_final_serializer_phases_record_child_wall_time_without_parent_span() ->
         ("phase.started", "committee.final.serialize.numeric"),
         ("phase.completed", "committee.final.serialize.numeric"),
     ]
+
+
+def test_6501_numeric_regression_canonicalizes_results_dates_and_shared_usage() -> None:
+    bundle, draft = _numeric_regression()
+
+    result = _assemble_numeric_draft(
+        draft,
+        bundle=bundle,
+        allowed_evidence_refs={item.ref for item in bundle.items},
+        salvage=False,
+        node="committee.final.serialize.numeric",
+    )
+
+    calculations = {item.id: item for item in result.calculation_records}
+    assert calculations["calc_current_pe"].result == pytest.approx(5267 / 201.14)
+    assert calculations["calc_forward_pe"].result == pytest.approx(5267 / 178.13)
+    assert calculations["calc_bull_price"].result == pytest.approx(29.76 * 201.14)
+    assert calculations["calc_base_price"].result == pytest.approx(29.76 * 178.13)
+    assert calculations["calc_bear_price"].result == pytest.approx(25 * 178.13)
+    assert {item.as_of_date for item in calculations.values()} == {date(2026, 7, 31)}
+    assert set(result.scenario_valuations) == {
+        ResearchScenarioKind.BASE,
+        ResearchScenarioKind.BULL,
+        ResearchScenarioKind.BEAR,
+    }
+    assert result.valuation_assessment is not None
+    assert result.valuation_assessment.as_of_date == date(2026, 7, 31)
+    assert len(result.market_reference_levels) == 3
+    assert {item.as_of_date for item in result.market_reference_levels} == {
+        date(2026, 7, 31)
+    }
+    assert "calc_current_pe" in result.valuation_assessment.calculation_ids
+    assert "calc_current_pe" in result.market_reference_levels[1].calculation_ids
+    assert result.status is NumericAuditStatus.COMPLETE
+
+
+def test_6501_invalid_numeric_tool_candidate_is_repaired_and_retained() -> None:
+    bundle, valid_numeric = _numeric_regression()
+    state = _state()
+    state["evidence_bundle"] = bundle.model_dump(mode="json")
+    state["output_language"] = "Simplified Chinese (简体中文, zh-CN)"
+    core = _core_draft_from_decision(
+        research_decision(evidence_refs=(bundle.items[0].ref,)).model_dump(mode="json")
+    )
+    invalid_candidate = valid_numeric.model_dump(mode="json")
+    invalid_candidate["calculation_records"][3]["limitations"] = []
+    parsing_error = None
+    try:
+        DecisionNumericDraft.model_validate(invalid_candidate)
+    except Exception as exc:  # Pydantic detail is intentionally not persisted.
+        parsing_error = exc
+    llm = _SequenceLLM(
+        {
+            "ResearchDecisionCoreDraft": [core],
+            "DecisionNumericDraft": [
+                {
+                    "raw": AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "name": "DecisionNumericDraft",
+                                "args": invalid_candidate,
+                                "id": "call_numeric",
+                                "type": "tool_call",
+                            }
+                        ],
+                    ),
+                    "parsed": None,
+                    "parsing_error": parsing_error,
+                },
+                valid_numeric,
+            ],
+        }
+    )
+
+    result = invoke_research_decision(
+        llm,
+        prompt="Form the final decision.",
+        state=state,
+        node="committee.final.serialize",
+        require_risk_adjustments=False,
+    )
+
+    assert result.value.numeric_audit_status is NumericAuditStatus.COMPLETE
+    assert result.numeric_audit is not None
+    assert result.numeric_audit.status is NumericAuditAppendixStatus.RECOVERED
+    assert result.numeric_audit.snapshots[0].candidate == invalid_candidate
+    assert result.numeric_audit.snapshots[0].candidate_digest
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_issue"),
+    (
+        ("missing_date", "numeric.calculation.calc_current_pe.date_unavailable"),
+        ("invalid_ref", "refs.invalid"),
+        ("invalid_formula", "numeric.calculation.calc_current_pe.formula.invalid_syntax"),
+        ("division_by_zero", "numeric.calculation.calc_current_pe.formula.division_by_zero"),
+    ),
+)
+def test_6501_numeric_regression_keeps_strict_failure_boundaries(
+    mutation: str,
+    expected_issue: str,
+) -> None:
+    bundle, draft = _numeric_regression()
+    first = draft.calculation_records[0]
+    if mutation == "missing_date":
+        missing_ref = first.input_evidence_refs[-1]
+        bundle = bundle.model_copy(
+            update={
+                "items": tuple(
+                    item.model_copy(update={"effective_date": None})
+                    if item.ref == missing_ref
+                    else item
+                    for item in bundle.items
+                )
+            }
+        )
+    elif mutation == "invalid_ref":
+        first = first.model_copy(update={"input_evidence_refs": ("ev_ffffffffffff",)})
+    elif mutation == "invalid_formula":
+        first = first.model_copy(update={"formula": "price +"})
+    else:
+        first = first.model_copy(
+            update={
+                "formula": "price / divisor",
+                "inputs": (
+                    CalculationInputDraft(name="price", value=5267),
+                    CalculationInputDraft(name="divisor", value=0),
+                ),
+            }
+        )
+    if mutation != "missing_date":
+        draft = draft.model_copy(
+            update={"calculation_records": (first, *draft.calculation_records[1:])}
+        )
+
+    with pytest.raises(OutputValidationError) as error:
+        _assemble_numeric_draft(
+            draft,
+            bundle=bundle,
+            allowed_evidence_refs={item.ref for item in bundle.items},
+            salvage=False,
+            node="committee.final.serialize.numeric",
+        )
+
+    assert expected_issue in error.value.issue_codes
 
 
 def test_calculation_draft_exposes_identifier_inputs_in_json_schema() -> None:
