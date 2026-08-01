@@ -38,6 +38,7 @@ from tradingagents.application.contracts import (
     NumericAuditSnapshot,
     NumericAuditStatus,
     ResearchArtifact,
+    ResearchScenarioKind,
     ResearchWarning,
     RiskReviewAdjustment,
     RiskReviewDisposition,
@@ -45,6 +46,8 @@ from tradingagents.application.contracts import (
     RunMetrics,
     RunStatus,
     RunView,
+    ScenarioReferenceCategory,
+    ScenarioReferenceRange,
     TableDataType,
     ValuationAssessment,
 )
@@ -1037,6 +1040,103 @@ def test_export_framework_uses_standard_locales_and_custom_language_fallback(
     assert all(heading in markdown for heading in expected)
     with zipfile.ZipFile(io.BytesIO(render_run_export_package(run_export))) as archive:
         assert archive.read("report.md").decode() == markdown
+
+
+@pytest.mark.parametrize(
+    ("output_language", "category_label", "omission_label"),
+    (
+        ("en", "Analyst consensus", "Base · Scenario reference range"),
+        ("zh-CN", "卖方共识", "基准情景 · 情景参考区间"),
+        ("ja", "アナリスト予想", "基本シナリオ · シナリオ参考レンジ"),
+    ),
+)
+def test_export_localizes_scenario_range_categories_and_omissions(
+    output_language: str,
+    category_label: str,
+    omission_label: str,
+) -> None:
+    ref = "ev_0123456789ab"
+    endpoint = AuditedRangeEndpoint(
+        value=100,
+        basis=MarketReferenceBasis.INTERPRETED,
+        evidence_refs=(ref,),
+        as_of_date=date(2026, 7, 24),
+    )
+    decision = research_decision(evidence_refs=(ref,))
+    decision = decision.model_copy(
+        update={
+            "scenarios": tuple(
+                scenario.model_copy(
+                    update={
+                        "reference_ranges": (
+                            ScenarioReferenceRange(
+                                category=ScenarioReferenceCategory.ANALYST_CONSENSUS,
+                                label="Target range",
+                                low=endpoint,
+                                high=endpoint.model_copy(update={"value": 120}),
+                                unit="JPY",
+                                interpretation="Consensus reference.",
+                                limitations=("Coverage may change.",),
+                            ),
+                        )
+                    }
+                )
+                if scenario.kind is ResearchScenarioKind.BASE
+                else scenario
+                for scenario in decision.scenarios
+            )
+        }
+    )
+    now = datetime(2026, 8, 1, 12, tzinfo=timezone.utc)
+    run_export = RunExport(
+        run=RunView(
+            id="fixture-run",
+            status=RunStatus.SUCCEEDED,
+            request=AnalysisRequest(
+                ticker="6501.T",
+                analysis_date="2026-08-01",
+                output_language=output_language,
+            ),
+            config_snapshot={},
+            attempt=1,
+            cancel_requested=False,
+            created_at=now,
+            updated_at=now,
+        ),
+        result=AnalysisResult(
+            run_id="fixture-run",
+            status=RunStatus.SUCCEEDED,
+            instrument="6501.T",
+            reports={},
+            decision=decision,
+            numeric_audit=DecisionNumericAuditAppendix(
+                status=NumericAuditAppendixStatus.PARTIAL,
+                snapshots=(
+                    NumericAuditSnapshot(
+                        phase=NumericAuditPhase.REPAIR,
+                        method=ArtifactGenerationMethod.TOOL_CALL_RECOVERED,
+                        reason_code="semantic_validation",
+                        schema_valid=True,
+                    ),
+                ),
+                omitted_components=(
+                    NumericAuditOmission(
+                        component_path="numeric.scenario.base.ranges.1",
+                        component_type=NumericAuditComponentType.SCENARIO_RANGE,
+                        scenario_kind=ResearchScenarioKind.BASE,
+                        reference_label="Secondary target range",
+                        issue_codes=("numeric.scenario.base.ranges.1.low.invalid",),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    markdown = render_run_export_markdown(run_export)
+
+    assert category_label in markdown
+    assert omission_label in markdown
+    assert "Secondary target range" in markdown
 
 
 def test_zh_export_localizes_framework_and_keeps_canonical_refs_in_sources() -> None:

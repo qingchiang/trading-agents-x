@@ -55,7 +55,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     finally:
         engine.dispose()
 
-    assert revision == "0001_research_contract_v3"
+    assert revision == "0001_research_contract_v4"
     assert {
         "id",
         "run_id",

@@ -54,6 +54,15 @@
         "unit": "JPY",
         "interpretation": "Observed technical reference band.",
         "limitations": ["Historical levels are not forecasts."]
+        },
+        {
+        "category": "analyst_consensus",
+        "label": "Analyst target range",
+        "low": {"basis": "interpreted", "value": 4600, "evidence_refs": ["ev_6501a0000003"]},
+        "high": {"basis": "interpreted", "value": 7100, "evidence_refs": ["ev_6501a0000003"]},
+        "unit": "JPY",
+        "interpretation": "Selected analyst target range from a live-only consensus snapshot.",
+        "limitations": ["Coverage and targets may change after retrieval."]
         }
       ],
       "bull": [
@@ -162,5 +171,26 @@
         "limitations": ["The multiple is scenario-dependent."]
       }
     ]
+  },
+  "no_op_repair_candidate": {
+    "requested": true,
+    "scenario_reference_ranges": {
+      "base": [
+        {
+          "category": "technical",
+          "label": "Unsupported duplicate repair fixture",
+          "low": {"basis": "interpreted", "value": 5000, "evidence_refs": ["ev_ffffffffffff"]},
+          "high": {"basis": "interpreted", "value": 5500, "evidence_refs": ["ev_6501a0000001"]},
+          "unit": "JPY",
+          "interpretation": "A deliberately invalid frozen repair candidate.",
+          "limitations": ["Regression fixture only."]
+        }
+      ],
+      "bull": [],
+      "bear": []
+    },
+    "valuation_assessment": null,
+    "market_reference_levels": [],
+    "calculation_records": []
   }
 }

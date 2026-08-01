@@ -301,6 +301,11 @@ def _numeric_regression() -> tuple[EvidenceBundle, DecisionNumericDraft]:
     return bundle, DecisionNumericDraft.model_validate(payload["numeric_candidate"])
 
 
+def _numeric_noop_repair_candidate() -> DecisionNumericDraft:
+    payload = json.loads(_NUMERIC_REGRESSION_FIXTURE.read_text(encoding="utf-8"))
+    return DecisionNumericDraft.model_validate(payload["no_op_repair_candidate"])
+
+
 def _value_catalog(bundle: EvidenceBundle) -> dict[str, Any]:
     return {item.id: item for item in build_numeric_value_catalog(bundle)}
 
@@ -914,6 +919,11 @@ def test_6501_numeric_regression_canonicalizes_results_dates_and_shared_usage() 
         ResearchScenarioKind.BULL,
         ResearchScenarioKind.BEAR,
     }
+    assert sum(len(items) for items in result.scenario_reference_ranges.values()) == 4
+    assert [
+        item.label
+        for item in result.scenario_reference_ranges[ResearchScenarioKind.BASE]
+    ] == ["Base technical range", "Analyst target range"]
     assert result.valuation_assessment is not None
     assert result.valuation_assessment.as_of_date == date(2026, 7, 31)
     assert len(result.market_reference_levels) == 4
@@ -1213,27 +1223,13 @@ def test_6501_invalid_numeric_tool_candidate_is_repaired_and_retained() -> None:
 
 
 def test_identical_failed_numeric_repair_is_degraded_not_recovered() -> None:
-    bundle, valid_numeric = _numeric_regression()
+    bundle, _ = _numeric_regression()
     state = _state()
     state["evidence_bundle"] = bundle.model_dump(mode="json")
     core = _core_draft_from_decision(
         research_decision(evidence_refs=(bundle.items[0].ref,)).model_dump(mode="json")
     )
-    invalid_range = valid_numeric.scenario_reference_ranges.base[0]
-    invalid_range = invalid_range.model_copy(
-        update={
-            "low": invalid_range.low.model_copy(
-                update={"evidence_refs": ("ev_ffffffffffff",)}
-            )
-        }
-    )
-    invalid_numeric = valid_numeric.model_copy(
-        update={
-            "scenario_reference_ranges": valid_numeric.scenario_reference_ranges.model_copy(
-                update={"base": (invalid_range,)}
-            )
-        }
-    )
+    invalid_numeric = _numeric_noop_repair_candidate()
     llm = _SequenceLLM(
         {
             "ResearchDecisionCoreDraft": [core],
@@ -1251,9 +1247,9 @@ def test_identical_failed_numeric_repair_is_degraded_not_recovered() -> None:
         event_writer=events.append,
     )
 
-    assert result.value.numeric_audit_status is NumericAuditStatus.PARTIAL
+    assert result.value.numeric_audit_status is NumericAuditStatus.INCOMPLETE
     assert result.numeric_audit is not None
-    assert result.numeric_audit.status is NumericAuditAppendixStatus.PARTIAL
+    assert result.numeric_audit.status is NumericAuditAppendixStatus.INCOMPLETE
     assert len(result.numeric_audit.snapshots) == 2
     assert (
         result.numeric_audit.snapshots[0].candidate_digest
@@ -1267,11 +1263,6 @@ def test_identical_failed_numeric_repair_is_degraded_not_recovered() -> None:
         warning.code == "decision.numeric_repair_noop"
         for warning in result.warnings
     )
-    assert ResearchScenarioKind.BULL in {
-        scenario.kind
-        for scenario in result.value.scenarios
-        if scenario.reference_ranges
-    }
 
 
 @pytest.mark.parametrize(
