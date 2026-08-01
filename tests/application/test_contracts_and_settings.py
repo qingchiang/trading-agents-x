@@ -66,7 +66,8 @@ def test_research_decision_accepts_audited_nonpersonalized_opinions() -> None:
                     "as_of_date": "2026-07-24",
                     "temporal_basis": "point_in_time",
                 },
-                "currency": "USD",
+                "measurement_kind": "currency",
+                "unit": "USD",
                 "limitations": ["Peer comparability is imperfect."],
             },
             "market_reference_levels": [

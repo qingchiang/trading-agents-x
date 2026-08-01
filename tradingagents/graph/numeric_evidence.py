@@ -30,18 +30,48 @@ class NumericValueCatalogEntry:
     locator: EvidenceValueLocator
     observed_date: date | None = None
 
-    def prompt_payload(self) -> dict[str, Any]:
-        return {
-            "value_ref": self.id,
-            "label": self.label,
-            "value": self.value,
-            "measurement_kind": self.measurement_kind.value,
-            "unit": self.unit,
-            "evidence_refs": list(self.evidence_refs),
+def compact_numeric_value_catalog(
+    entries: tuple[NumericValueCatalogEntry, ...],
+) -> dict[str, Any]:
+    """Build a prompt-only catalog with shared measurement definitions."""
+
+    known_measurements = sorted(
+        {
+            (entry.measurement_kind.value, entry.unit)
+            for entry in entries
+            if entry.measurement_kind is not MeasurementKind.UNKNOWN
+        },
+        key=lambda item: (item[0], item[1] or ""),
+    )
+    measurement_ids = {
+        measurement: f"m{index:02d}"
+        for index, measurement in enumerate(known_measurements, start=1)
+    }
+    measurements = {
+        measurement_ids[measurement]: {
+            "measurement_kind": measurement[0],
+            "unit": measurement[1],
+        }
+        for measurement in known_measurements
+    }
+    values = []
+    for entry in entries:
+        payload = {
+            "value_ref": entry.id,
+            "label": entry.label,
+            "value": entry.value,
+            "evidence_refs": list(entry.evidence_refs),
             "observed_date": (
-                self.observed_date.isoformat() if self.observed_date else None
+                entry.observed_date.isoformat() if entry.observed_date else None
             ),
         }
+        measurement_id = measurement_ids.get(
+            (entry.measurement_kind.value, entry.unit)
+        )
+        if measurement_id is not None:
+            payload["measurement_id"] = measurement_id
+        values.append(payload)
+    return {"measurements": measurements, "values": values}
 
 
 def build_numeric_value_catalog(

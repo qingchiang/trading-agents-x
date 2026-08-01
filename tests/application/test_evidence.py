@@ -30,6 +30,7 @@ from tradingagents.application.contracts import (
     EvidenceValueLocator,
     MarketReferenceBasis,
     MarketReferenceLevel,
+    MeasurementKind,
     NodeMetrics,
     NumericAuditAppendixStatus,
     NumericAuditComponentType,
@@ -848,7 +849,8 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
                     calculation_id="calc_valuation_high",
                     as_of_date=date(2026, 7, 24),
                 ),
-                currency="USD",
+                measurement_kind=MeasurementKind.CURRENCY,
+                unit="USD",
                 limitations=("Cycle duration remains uncertain.",),
             ),
             "market_reference_levels": (

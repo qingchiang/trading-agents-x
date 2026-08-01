@@ -931,7 +931,8 @@ class ValuationAssessment(FrozenModel):
     method: str = Field(min_length=1)
     low: AuditedRangeEndpoint
     high: AuditedRangeEndpoint
-    currency: str = Field(min_length=1, max_length=16)
+    measurement_kind: MeasurementKind
+    unit: str = Field(min_length=1, max_length=32)
     limitations: tuple[str, ...] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -940,6 +941,8 @@ class ValuationAssessment(FrozenModel):
             raise ValueError("valuation low endpoint must be derived")
         if self.high.basis is not MarketReferenceBasis.DERIVED:
             raise ValueError("valuation high endpoint must be derived")
+        if self.measurement_kind is MeasurementKind.UNKNOWN:
+            raise ValueError("valuation measurement must be known")
         if self.high.value < self.low.value:
             raise ValueError("valuation high must be >= low")
         return self

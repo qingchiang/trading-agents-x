@@ -1186,9 +1186,9 @@ def _render_research_decision(
                 f"- {labels['method']}: {assessment.method}",
                 (
                     f"- {labels['range']}: "
-                    f"`{format_decision_number(assessment.low.value, assessment.currency, output_language=labels.language)}`–"
-                    f"`{format_decision_number(assessment.high.value, assessment.currency, output_language=labels.language)}` "
-                    f"{assessment.currency}"
+                f"`{format_decision_number(assessment.low.value, assessment.unit, output_language=labels.language)}`–"
+                f"`{format_decision_number(assessment.high.value, assessment.unit, output_language=labels.language)}` "
+                f"{assessment.unit}"
                 ),
                 f"- {labels['as_of']}: `{assessment.as_of_date.isoformat()}`",
                 (

@@ -49,6 +49,7 @@ from tradingagents.graph.deliberation import (
     ResearchDecisionCoreDraft,
     ScenarioReferenceRangeDraft,
     ScenarioReferenceRangesDraft,
+    ValuationAssessmentDraft,
     _assemble_numeric_draft,
     _emit_numeric_normalization_event,
     _evaluate_formula,
@@ -138,7 +139,6 @@ def _numeric_draft_from_decision(payload: dict[str, Any]) -> DecisionNumericDraf
             "method": valuation["method"],
             "low": _endpoint_draft(valuation["low"]),
             "high": _endpoint_draft(valuation["high"]),
-            "currency": valuation["currency"],
             "limitations": valuation["limitations"],
         }
     references = [_reference_draft(item) for item in payload.get("market_reference_levels") or ()]
@@ -181,7 +181,6 @@ def _range_draft(reference_range: dict[str, Any]) -> dict[str, Any]:
         "label": reference_range["label"],
         "low": _endpoint_draft(reference_range["low"]),
         "high": _endpoint_draft(reference_range["high"]),
-        "unit": reference_range["unit"],
         "interpretation": reference_range["interpretation"],
         "limitations": reference_range["limitations"],
     }
@@ -199,7 +198,6 @@ def _reference_draft(item: dict[str, Any]) -> dict[str, Any]:
         return {
             "label": item["label"],
             "value": item["value"],
-            "unit": item["unit"],
             "interpretation": item["interpretation"],
             "anchor_value_refs": (_interpreted_value_ref(item),),
             "context_evidence_refs": (),
@@ -207,7 +205,6 @@ def _reference_draft(item: dict[str, Any]) -> dict[str, Any]:
         }
     return {
         "label": item["label"],
-        "unit": item["unit"],
         "interpretation": item["interpretation"],
         "basis": "derived",
         "calculation_id": item["calculation_ids"][0],
@@ -688,7 +685,8 @@ def test_final_decision_accepts_reproducible_critical_calculation() -> None:
                     calculation_id="calc_valuation",
                     as_of_date=date(2026, 7, 24),
                 ),
-                currency="USD",
+                measurement_kind=MeasurementKind.CURRENCY,
+                unit="USD",
                 limitations=("The multiple is scenario-dependent.",),
             ),
             "calculation_records": (
@@ -1151,6 +1149,8 @@ def test_6501_numeric_regression_canonicalizes_results_dates_and_shared_usage() 
     ] == ["Base technical range", "Analyst target range"]
     assert result.valuation_assessment is not None
     assert result.valuation_assessment.as_of_date == date(2026, 7, 31)
+    assert result.valuation_assessment.measurement_kind is MeasurementKind.CURRENCY
+    assert result.valuation_assessment.unit == "JPY"
     assert len(result.market_reference_levels) == 4
     assert {item.as_of_date for item in result.market_reference_levels} == {
         date(2026, 7, 31),
@@ -1168,6 +1168,42 @@ def test_6501_numeric_regression_canonicalizes_results_dates_and_shared_usage() 
     assert base_ranges[0].low.date_evidence_refs == ("ev_6501a0000001",)
     assert base_ranges[1].low.as_of_date == date(2026, 8, 1)
     assert base_ranges[1].low.temporal_basis is NumericTemporalBasis.LIVE_SNAPSHOT
+
+
+def test_valuation_assessment_inherits_ratio_measurement_from_calculations() -> None:
+    bundle, source = _numeric_regression()
+    calculations = tuple(
+        item
+        for item in source.calculation_records
+        if item.id in {"calc_current_pe", "calc_forward_pe"}
+    )
+    draft = DecisionNumericDraft(
+        requested=True,
+        valuation_assessment=ValuationAssessmentDraft(
+            method="Forward earnings multiple range",
+            low=DerivedRangeEndpointDraft(calculation_id="calc_forward_pe"),
+            high=DerivedRangeEndpointDraft(calculation_id="calc_current_pe"),
+            limitations=("The forward EPS remains an estimate.",),
+        ),
+        calculation_records=calculations,
+    )
+
+    result = _assemble_numeric_draft(
+        draft,
+        bundle=bundle,
+        allowed_evidence_refs={item.ref for item in bundle.items},
+        value_catalog=_value_catalog(bundle),
+        salvage=False,
+        node="committee.final.serialize.numeric",
+    )
+
+    valuation = result.valuation_assessment
+    assert valuation is not None
+    assert valuation.low.value < valuation.high.value
+    assert valuation.measurement_kind is MeasurementKind.RATIO
+    assert valuation.unit == "x"
+    assert result.reordered_ranges == 1
+    assert result.status is NumericAuditStatus.COMPLETE
 
 
 def test_interpreted_range_date_uses_anchor_not_context_evidence() -> None:
@@ -1198,7 +1234,6 @@ def test_interpreted_range_date_uses_anchor_not_context_evidence() -> None:
                     label="Technical support band",
                     low=endpoint,
                     high=endpoint.model_copy(update={"value": 5300}),
-                    unit="JPY",
                     interpretation="A rounded technical reference range.",
                     limitations=("The range is not a forecast.",),
                 ),
@@ -1215,13 +1250,16 @@ def test_interpreted_range_date_uses_anchor_not_context_evidence() -> None:
         node="committee.final.serialize.numeric",
     )
 
-    low = result.scenario_reference_ranges[ResearchScenarioKind.BASE][0].low
+    reference_range = result.scenario_reference_ranges[ResearchScenarioKind.BASE][0]
+    low = reference_range.low
     assert low.as_of_date == date.fromisoformat(date_case["expected_interpreted_date"])
     assert low.date_evidence_refs == (market_item.ref,)
     assert low.evidence_refs == (market_item.ref, context_item.ref)
+    assert reference_range.measurement_kind is MeasurementKind.CURRENCY
+    assert reference_range.unit == "JPY"
 
 
-def test_currency_valuation_label_requires_derived_calculation() -> None:
+def test_valuation_label_requires_derived_calculation() -> None:
     bundle, draft = _numeric_regression()
     interpreted = draft.scenario_reference_ranges.base[0].model_copy(
         update={"label": "估值回归价格区间"}
@@ -1500,7 +1538,6 @@ def test_derived_singleton_is_promoted_and_keeps_calculation() -> None:
                     label="Derived earnings reference",
                     low=endpoint,
                     high=endpoint,
-                    unit=calculation.unit,
                     interpretation="One derived valuation reference.",
                     limitations=("The input assumptions may change.",),
                 ),
@@ -2056,7 +2093,8 @@ def test_final_decision_preserves_valid_numeric_components_after_repair_failure(
                     calculation_id="calc_valuation",
                     as_of_date=date(2026, 7, 24),
                 ),
-                currency="USD",
+                measurement_kind=MeasurementKind.CURRENCY,
+                unit="USD",
                 limitations=("The multiple is scenario-dependent.",),
             ),
             "market_reference_levels": (

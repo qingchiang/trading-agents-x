@@ -53,7 +53,6 @@
         "label": "Base technical range",
         "low": {"basis": "interpreted", "value": 5000, "anchor_value_refs": ["nv_b031f094f3c7"]},
         "high": {"basis": "interpreted", "value": 5500, "anchor_value_refs": ["nv_b031f094f3c7"]},
-        "unit": "JPY",
         "interpretation": "Observed technical reference band.",
         "limitations": ["Historical levels are not forecasts."]
         },
@@ -62,7 +61,6 @@
         "label": "Analyst target range",
         "low": {"basis": "interpreted", "value": 4600, "anchor_value_refs": ["nv_b07c4c829290"]},
         "high": {"basis": "interpreted", "value": 7100, "anchor_value_refs": ["nv_b07c4c829290"]},
-        "unit": "JPY",
         "interpretation": "Selected analyst target range from a live-only consensus snapshot.",
         "limitations": ["Coverage and targets may change after retrieval."]
         }
@@ -73,7 +71,6 @@
         "label": "Bull reference range",
         "low": {"basis": "interpreted", "value": 5700, "anchor_value_refs": ["nv_b031f094f3c7"]},
         "high": {"basis": "interpreted", "value": 6200, "anchor_value_refs": ["nv_b031f094f3c7"]},
-        "unit": "JPY",
         "interpretation": "Observed market reference band.",
         "limitations": ["Historical levels are not forecasts."]
         }
@@ -84,7 +81,6 @@
         "label": "Bear reference range",
         "low": {"basis": "interpreted", "value": 4200, "anchor_value_refs": ["nv_b031f094f3c7"]},
         "high": {"basis": "interpreted", "value": 4700, "anchor_value_refs": ["nv_b031f094f3c7"]},
-        "unit": "JPY",
         "interpretation": "Observed downside reference band.",
         "limitations": ["Historical levels are not forecasts."]
         }
@@ -94,7 +90,6 @@
       "method": "Scenario earnings-multiple cross-check",
       "low": {"basis": "derived", "calculation_id": "calc_bear_price"},
       "high": {"basis": "derived", "calculation_id": "calc_bull_price"},
-      "currency": "JPY",
       "limitations": ["Frozen regression values are illustrative, not live research."]
     },
     "market_reference_levels": [
@@ -106,14 +101,12 @@
       },
       {
         "label": "Current P/E",
-        "unit": "x",
         "interpretation": "Derived from the observed close and current EPS.",
         "basis": "derived",
         "calculation_id": "calc_current_pe"
       },
       {
         "label": "Forward P/E",
-        "unit": "x",
         "interpretation": "Derived from the observed close and forward EPS.",
         "basis": "derived",
         "calculation_id": "calc_forward_pe"
@@ -181,7 +174,6 @@
           "label": "Unsupported duplicate repair fixture",
           "low": {"basis": "interpreted", "value": 5000, "anchor_value_refs": ["nv_ffffffffffff"]},
           "high": {"basis": "interpreted", "value": 5500, "anchor_value_refs": ["nv_b031f094f3c7"]},
-          "unit": "JPY",
           "interpretation": "A deliberately invalid frozen repair candidate.",
           "limitations": ["Regression fixture only."]
         }

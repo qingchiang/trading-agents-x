@@ -15,7 +15,10 @@ from tradingagents.application.contracts import (
     TableDataType,
 )
 from tradingagents.application.evidence import extract_evidence_tables
-from tradingagents.graph.numeric_evidence import build_numeric_value_catalog
+from tradingagents.graph.numeric_evidence import (
+    build_numeric_value_catalog,
+    compact_numeric_value_catalog,
+)
 
 
 def test_numeric_catalog_indexes_exact_item_scalar_with_locator() -> None:
@@ -135,3 +138,54 @@ def test_numeric_catalog_uses_row_measurement_metadata_for_mixed_value_column() 
     assert rsi.unit is None
     assert sma.measurement_kind is MeasurementKind.CURRENCY
     assert sma.unit == "JPY"
+
+
+def test_compact_numeric_catalog_shares_measurements_and_omits_unknowns() -> None:
+    items = (
+        EvidenceItem(
+            ref="ev_0123456789ab",
+            source="fixture",
+            evidence_type="close",
+            requested_date=date(2026, 8, 1),
+            effective_date=date(2026, 7, 31),
+            value=100,
+            measurement_kind=MeasurementKind.CURRENCY,
+            unit="JPY",
+        ),
+        EvidenceItem(
+            ref="ev_abcdef012345",
+            source="fixture",
+            evidence_type="moving average",
+            requested_date=date(2026, 8, 1),
+            effective_date=date(2026, 7, 31),
+            value=95,
+            measurement_kind=MeasurementKind.CURRENCY,
+            unit="JPY",
+        ),
+        EvidenceItem(
+            ref="ev_9876543210ab",
+            source="fixture",
+            evidence_type="untyped scalar",
+            requested_date=date(2026, 8, 1),
+            effective_date=date(2026, 7, 31),
+            value=7,
+        ),
+    )
+    bundle = EvidenceBundle(
+        instrument="6501.T",
+        analysis_date=date(2026, 8, 1),
+        items=items,
+    )
+
+    payload = compact_numeric_value_catalog(build_numeric_value_catalog(bundle))
+
+    assert payload["measurements"] == {
+        "m01": {"measurement_kind": "currency", "unit": "JPY"}
+    }
+    assert [item.get("measurement_id") for item in payload["values"]] == [
+        "m01",
+        "m01",
+        None,
+    ]
+    assert all("measurement_kind" not in item for item in payload["values"])
+    assert all("unit" not in item for item in payload["values"])

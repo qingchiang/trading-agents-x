@@ -61,6 +61,7 @@ from tradingagents.dataflows.symbol_utils import market_timezone
 from tradingagents.graph.numeric_evidence import (
     NumericValueCatalogEntry,
     build_numeric_value_catalog,
+    compact_numeric_value_catalog,
 )
 from tradingagents.graph.output_validation import (
     OutputValidationError,
@@ -213,7 +214,6 @@ class ScenarioReferenceRangeDraft(BaseModel):
     label: str = Field(min_length=1, max_length=120)
     low: RangeEndpointDraft
     high: RangeEndpointDraft
-    unit: str | None = Field(default=None, min_length=1, max_length=32)
     interpretation: str = Field(min_length=1)
     limitations: tuple[str, ...] = Field(min_length=1)
 
@@ -246,7 +246,6 @@ class ValuationAssessmentDraft(BaseModel):
     method: str = Field(min_length=1)
     low: DerivedRangeEndpointDraft
     high: DerivedRangeEndpointDraft
-    currency: str = Field(min_length=1, max_length=16)
     limitations: tuple[str, ...] = Field(min_length=1)
 
 
@@ -264,7 +263,6 @@ class InterpretedMarketReferenceLevelDraft(BaseModel):
 
     label: str = Field(min_length=1, max_length=120)
     value: float
-    unit: str = Field(min_length=1, max_length=32)
     interpretation: str = Field(min_length=1)
     anchor_value_refs: tuple[str, ...] = Field(min_length=1)
     context_evidence_refs: tuple[str, ...] = ()
@@ -283,7 +281,6 @@ class DerivedMarketReferenceLevelDraft(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     label: str = Field(min_length=1, max_length=120)
-    unit: str = Field(min_length=1, max_length=32)
     interpretation: str = Field(min_length=1)
     basis: Literal[MarketReferenceBasis.DERIVED] = MarketReferenceBasis.DERIVED
     calculation_id: str = Field(pattern=r"^calc_[a-z0-9][a-z0-9_.-]*$")
@@ -733,11 +730,9 @@ def _label_declares_other_scenario(
     return False
 
 
-def _currency_valuation_requires_calculation(
+def _valuation_label_requires_calculation(
     scenario: ScenarioReferenceRangeDraft,
 ) -> bool:
-    if scenario.unit is None or scenario.unit.upper() not in _FIAT_UNITS:
-        return False
     if not any(token in scenario.label.casefold() for token in _VALUATION_LABEL_TOKENS):
         return False
     return any(
@@ -759,30 +754,58 @@ def _measurement_from_unit(unit: str | None) -> MeasurementKind:
     return MeasurementKind.UNKNOWN
 
 
-def _observed_range_measurement(
+def _endpoint_measurement(
+    endpoint: RangeEndpointDraft,
+    *,
+    value_catalog: Mapping[str, NumericValueCatalogEntry],
+    calculations: Mapping[str, CalculationRecord],
+    issue_prefix: str,
+) -> tuple[MeasurementKind, str | None]:
+    if isinstance(endpoint, ObservedRangeEndpointDraft):
+        entry = value_catalog.get(endpoint.value_ref)
+        if entry is None:
+            return MeasurementKind.UNKNOWN, None
+        return entry.measurement_kind, entry.unit
+    if isinstance(endpoint, InterpretedRangeEndpointDraft):
+        entries = tuple(value_catalog.get(ref) for ref in endpoint.anchor_value_refs)
+        if any(entry is None for entry in entries):
+            return MeasurementKind.UNKNOWN, None
+        resolved = tuple(entry for entry in entries if entry is not None)
+        if any(
+            entry.measurement_kind is MeasurementKind.UNKNOWN for entry in resolved
+        ):
+            return MeasurementKind.UNKNOWN, None
+        measurements = {(entry.measurement_kind, entry.unit) for entry in resolved}
+        if len(measurements) != 1:
+            raise OutputValidationError(f"{issue_prefix}.measurement_mismatch")
+        return next(iter(measurements))
+    calculation = calculations.get(endpoint.calculation_id)
+    if calculation is None:
+        return MeasurementKind.UNKNOWN, None
+    return _measurement_from_unit(calculation.unit), calculation.unit
+
+
+def _range_measurement(
     scenario: ScenarioReferenceRangeDraft,
     *,
     value_catalog: Mapping[str, NumericValueCatalogEntry],
+    calculations: Mapping[str, CalculationRecord],
     issue_prefix: str,
 ) -> tuple[MeasurementKind, str | None]:
-    if not all(
-        isinstance(endpoint, ObservedRangeEndpointDraft)
+    measurements = tuple(
+        _endpoint_measurement(
+            endpoint,
+            value_catalog=value_catalog,
+            calculations=calculations,
+            issue_prefix=issue_prefix,
+        )
         for endpoint in (scenario.low, scenario.high)
-    ):
-        return _measurement_from_unit(scenario.unit), scenario.unit
-    entries = tuple(
-        value_catalog.get(endpoint.value_ref)
-        for endpoint in (scenario.low, scenario.high)
-        if isinstance(endpoint, ObservedRangeEndpointDraft)
     )
-    if any(entry is None for entry in entries):
+    if any(kind is MeasurementKind.UNKNOWN for kind, _ in measurements):
         return MeasurementKind.UNKNOWN, None
-    resolved = tuple(entry for entry in entries if entry is not None)
-    kinds = {entry.measurement_kind for entry in resolved}
-    units = {entry.unit for entry in resolved}
-    if len(kinds) != 1 or len(units) != 1:
+    if len(set(measurements)) != 1:
         raise OutputValidationError(f"{issue_prefix}.measurement_mismatch")
-    return resolved[0].measurement_kind, resolved[0].unit
+    return measurements[0]
 
 
 def _decision_example_text(output_language: str) -> dict[str, str]:
@@ -1128,6 +1151,7 @@ def _invoke_decision_numeric(
         allowed_evidence_refs=allowed,
     )
     value_catalog_by_id = {item.id: item for item in value_catalog}
+    value_catalog_prompt = compact_numeric_value_catalog(value_catalog)
     example_text = _decision_example_text(output_language)
     language_rules = _decision_language_rules(output_language)
     scenario_catalog = tuple(
@@ -1173,7 +1197,6 @@ def _invoke_decision_numeric(
     else:
         example_reference = DerivedMarketReferenceLevelDraft(
             label=example_text["reference_label"],
-            unit="USD",
             interpretation=example_text["reference_interpretation"],
             calculation_id="calc_valuation_low",
         )
@@ -1188,7 +1211,6 @@ def _invoke_decision_numeric(
                 label=example_text["scenario_range_label"],
                 low=ObservedRangeEndpointDraft(value_ref=example_low.id),
                 high=ObservedRangeEndpointDraft(value_ref=example_high.id),
-                unit=example_low.unit,
                 interpretation=example_text["scenario_range_interpretation"],
                 limitations=(example_text["valuation_limitation"],),
             )
@@ -1207,7 +1229,6 @@ def _invoke_decision_numeric(
             high=DerivedRangeEndpointDraft(
                 calculation_id="calc_valuation_high",
             ),
-            currency="USD",
             limitations=(example_text["valuation_limitation"],),
         ),
         market_reference_levels=(example_reference,),
@@ -1254,7 +1275,10 @@ def _invoke_decision_numeric(
             "Numeric Value Catalog. Rounded, selected, combined, or model-interpreted "
             "levels must use basis=interpreted with anchor_value_refs from the Numeric "
             "Value Catalog; context_evidence_refs are explanatory only and never set "
-            "the value date. Interpreted values require no calculation, but EPS times "
+            "the value date. Observed and interpreted measurements are inherited from "
+            "their catalog entries; derived measurements come from the calculation "
+            "unit. Do not supply or override units on ranges or market references. "
+            "Interpreted values require no calculation, but EPS times "
             "a multiple, DCF, and other arithmetic must use basis=derived with a valid "
             "calculation rather than being disguised as interpreted values. "
             "Each base, bull, and bear scenario range field is an array. Preserve "
@@ -1276,10 +1300,7 @@ def _invoke_decision_numeric(
             "from the formula and Evidence Ledger. Do not change the qualitative "
             f"decision core. {language_rules}\n"
             "VALID OBSERVED VALUE REFS:\n"
-            + json.dumps(
-                [item.prompt_payload() for item in value_catalog],
-                ensure_ascii=False,
-            )
+            + json.dumps(value_catalog_prompt, ensure_ascii=False)
             + "\nSCENARIO CATALOG:\n"
             + scenario_catalog_json
         ),
@@ -1295,13 +1316,12 @@ def _invoke_decision_numeric(
             "high. Put a single numeric level in market_reference_levels instead of "
             "repeating it as low and high. Labels name only the metric or research use "
             "and must omit dates, values, units, basis names, and scenario ownership. "
+            "Do not supply units on ranges, valuation assessments, or market references; "
+            "the application inherits them from catalog anchors or calculations. "
             "Use valuation_assessment only for genuinely derived valuation work. "
             + language_rules
             + "\n\nNUMERIC VALUE CATALOG:\n"
-            + json.dumps(
-                [item.prompt_payload() for item in value_catalog],
-                ensure_ascii=False,
-            )
+            + json.dumps(value_catalog_prompt, ensure_ascii=False)
             + "\n\nSCENARIO CATALOG:\n"
             + scenario_catalog_json
             + "\n\nLOCALIZED VALID EXAMPLE:\n"
@@ -1656,7 +1676,6 @@ def _assemble_numeric_draft(
 
     scenario_values: dict[ResearchScenarioKind, tuple[ScenarioReferenceRange, ...]] = {}
     duplicate_warnings: list[ResearchWarning] = []
-    unknown_unit_present = False
     promoted_references: list[MarketReferenceLevel] = []
     reordered_ranges = 0
     linked_ids: set[str] = set()
@@ -1683,7 +1702,7 @@ def _assemble_numeric_draft(
             ):
                 issues.append(f"{prefix}.scenario_mismatch")
                 continue
-            if _currency_valuation_requires_calculation(scenario):
+            if _valuation_label_requires_calculation(scenario):
                 issues.append(f"{prefix}.derived_calculation_required")
                 continue
             try:
@@ -1713,9 +1732,10 @@ def _assemble_numeric_draft(
             if set(endpoints) != {"low", "high"}:
                 continue
             try:
-                measurement_kind, unit = _observed_range_measurement(
+                measurement_kind, unit = _range_measurement(
                     scenario,
                     value_catalog=value_catalog,
+                    calculations=calculations,
                     issue_prefix=prefix,
                 )
             except OutputValidationError as exc:
@@ -1744,8 +1764,6 @@ def _assemble_numeric_draft(
                             temporal_basis=endpoint.temporal_basis,
                         )
                     )
-                    if measurement_kind is MeasurementKind.UNKNOWN:
-                        unknown_unit_present = True
                     if endpoint.calculation_id is not None:
                         linked_ids.add(endpoint.calculation_id)
                     continue
@@ -1769,8 +1787,6 @@ def _assemble_numeric_draft(
                     limitations=scenario.limitations,
                 )
             )
-            if measurement_kind is MeasurementKind.UNKNOWN:
-                unknown_unit_present = True
             linked_ids.update(
                 endpoint.calculation_id
                 for endpoint in endpoints.values()
@@ -1821,14 +1837,34 @@ def _assemble_numeric_draft(
             if high.value < low.value:
                 low, high = high, low
                 reordered_ranges += 1
-            valuation = ValuationAssessment(
-                method=item.method,
-                low=low,
-                high=high,
-                currency=item.currency,
-                limitations=item.limitations,
+            low_measurement = _endpoint_measurement(
+                item.low,
+                value_catalog=value_catalog,
+                calculations=calculations,
+                issue_prefix=f"{prefix}.low",
             )
-            linked_ids.update(valuation.calculation_ids)
+            high_measurement = _endpoint_measurement(
+                item.high,
+                value_catalog=value_catalog,
+                calculations=calculations,
+                issue_prefix=f"{prefix}.high",
+            )
+            if (
+                low_measurement[0] is MeasurementKind.UNKNOWN
+                or low_measurement[1] is None
+                or low_measurement != high_measurement
+            ):
+                issues.append(f"{prefix}.measurement_mismatch")
+            else:
+                valuation = ValuationAssessment(
+                    method=item.method,
+                    low=low,
+                    high=high,
+                    measurement_kind=low_measurement[0],
+                    unit=low_measurement[1],
+                    limitations=item.limitations,
+                )
+                linked_ids.update(valuation.calculation_ids)
 
     reference_levels: list[MarketReferenceLevel] = []
     for index, item in enumerate(draft.market_reference_levels):
@@ -1873,8 +1909,20 @@ def _assemble_numeric_draft(
                 as_of_date = resolved_date.value
                 temporal_basis = resolved_date.temporal_basis
                 value = item.value
-                measurement_kind = _measurement_from_unit(item.unit)
-                unit = item.unit
+                if any(
+                    entry.measurement_kind is MeasurementKind.UNKNOWN
+                    for entry in anchor_entries
+                ):
+                    measurement_kind = MeasurementKind.UNKNOWN
+                    unit = None
+                else:
+                    measurements = {
+                        (entry.measurement_kind, entry.unit)
+                        for entry in anchor_entries
+                    }
+                    if len(measurements) != 1:
+                        raise OutputValidationError(f"{prefix}.measurement_mismatch")
+                    measurement_kind, unit = next(iter(measurements))
                 date_evidence_refs = _catalog_evidence_refs(anchor_entries)
                 evidence_refs = tuple(
                     dict.fromkeys((*date_evidence_refs, *item.context_evidence_refs))
@@ -1887,8 +1935,8 @@ def _assemble_numeric_draft(
                     raise OutputValidationError(f"{prefix}.unknown_calculation")
                 as_of_date = calculation.as_of_date
                 value = float(calculation.result)
-                measurement_kind = _measurement_from_unit(item.unit)
-                unit = item.unit
+                measurement_kind = _measurement_from_unit(calculation.unit)
+                unit = calculation.unit
                 evidence_refs = calculation.input_evidence_refs
                 date_evidence_refs = calculation.input_evidence_refs
                 source_locator = None
@@ -1915,8 +1963,6 @@ def _assemble_numeric_draft(
                     temporal_basis=temporal_basis,
                 )
             )
-            if measurement_kind is MeasurementKind.UNKNOWN:
-                unknown_unit_present = True
             linked_ids.update(calculation_ids)
 
     explicit_references = {_market_reference_identity(level) for level in reference_levels}
@@ -1926,15 +1972,6 @@ def _assemble_numeric_draft(
             continue
         reference_levels.append(promoted)
         explicit_references.add(identity)
-
-    if unknown_unit_present:
-        duplicate_warnings.append(
-            ResearchWarning(
-                code="decision.numeric_unit_unknown",
-                message="Unit metadata is unavailable for one or more numeric references.",
-                source=node,
-            )
-        )
 
     orphaned = set(calculations).difference(linked_ids)
     for calculation_id in sorted(orphaned):
