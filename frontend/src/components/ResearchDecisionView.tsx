@@ -145,53 +145,75 @@ export function ResearchDecisionContent({
             >
               <header>
                 <span>{t(scenarioKey(scenario.kind))}</span>
-                {scenario.reference_range && (
-                  <strong>
-                    {formatRange(
-                      scenario.reference_range.low.value,
-                      scenario.reference_range.high.value,
-                      scenario.reference_range.unit,
-                    )}
-                  </strong>
-                )}
               </header>
-              {scenario.reference_range && (
-                <div className="scenario-reference-range">
-                  <strong>{t("scenarioReferenceRange")}</strong>
-                  <span>{scenario.reference_range.label}</span>
-                  <small className="numeric-date-line">
-                    {latestEndpointDate(
-                      scenario.reference_range.low.as_of_date,
-                      scenario.reference_range.high.as_of_date,
-                    )}
-                    <TemporalBasisBadge
-                      basis={latestTemporalBasis(
-                        scenario.reference_range.low.temporal_basis,
-                        scenario.reference_range.high.temporal_basis,
-                      )}
-                    />
-                  </small>
-                  <div className="scenario-endpoint-bases">
-                    <span
-                      className={`reference-basis basis-${scenario.reference_range.low.basis}`}
-                    >
-                      {t(`marketReferenceBasis.${scenario.reference_range.low.basis}`)}
-                    </span>
-                    {scenario.reference_range.high.basis !==
-                      scenario.reference_range.low.basis && (
-                      <span
-                        className={`reference-basis basis-${scenario.reference_range.high.basis}`}
+              {(scenario.reference_ranges ?? []).length > 0 && (
+                <div className="scenario-reference-ranges">
+                  <strong>{t("scenarioReferenceRanges")}</strong>
+                  {(scenario.reference_ranges ?? []).map(
+                    (referenceRange, index) => (
+                      <div
+                        className="scenario-reference-range"
+                        key={`${referenceRange.category}:${referenceRange.label}:${index}`}
                       >
-                        {t(`marketReferenceBasis.${scenario.reference_range.high.basis}`)}
-                      </span>
-                    )}
-                  </div>
-                  <Markdown
-                    evidenceAliases={evidenceIndex.aliases}
-                    onEvidence={onEvidence}
-                  >
-                    {scenario.reference_range.interpretation}
-                  </Markdown>
+                        <div className="scenario-reference-heading">
+                          <span className="scenario-range-category">
+                            {t(`scenarioRangeCategory.${referenceRange.category}`)}
+                          </span>
+                          <span>{referenceRange.label}</span>
+                          <strong>
+                            {formatRange(
+                              referenceRange.low.value,
+                              referenceRange.high.value,
+                              referenceRange.unit,
+                            )}
+                          </strong>
+                        </div>
+                        <small className="numeric-date-line">
+                          {latestEndpointDate(
+                            referenceRange.low.as_of_date,
+                            referenceRange.high.as_of_date,
+                          )}
+                          <TemporalBasisBadge
+                            basis={latestTemporalBasis(
+                              referenceRange.low.temporal_basis,
+                              referenceRange.high.temporal_basis,
+                            )}
+                          />
+                        </small>
+                        <div className="scenario-endpoint-bases">
+                          <span
+                            className={`reference-basis basis-${referenceRange.low.basis}`}
+                          >
+                            {t(`marketReferenceBasis.${referenceRange.low.basis}`)}
+                          </span>
+                          {referenceRange.high.basis !==
+                            referenceRange.low.basis && (
+                            <span
+                              className={`reference-basis basis-${referenceRange.high.basis}`}
+                            >
+                              {t(`marketReferenceBasis.${referenceRange.high.basis}`)}
+                            </span>
+                          )}
+                        </div>
+                        <Markdown
+                          evidenceAliases={evidenceIndex.aliases}
+                          onEvidence={onEvidence}
+                        >
+                          {referenceRange.interpretation}
+                        </Markdown>
+                        <EvidenceLinks
+                          refs={visibleRefs([
+                            ...referenceRange.low.evidence_refs,
+                            ...referenceRange.high.evidence_refs,
+                          ])}
+                          evidenceIndex={evidenceIndex}
+                          onEvidence={onEvidence}
+                          compact
+                          label={false}
+                        />
+                      </div>
+                    ),
+                  )}
                 </div>
               )}
               <h3>{t("scenarioOutcome")}</h3>
@@ -530,12 +552,12 @@ function buildCalculationUses(
   };
   decision.scenarios.forEach((scenario) =>
     add(
-      scenario.reference_range
-        ? [
-            scenario.reference_range.low.calculation_id,
-            scenario.reference_range.high.calculation_id,
-          ].filter((value): value is string => Boolean(value))
-        : [],
+      (scenario.reference_ranges ?? []).flatMap((referenceRange) =>
+        [
+          referenceRange.low.calculation_id,
+          referenceRange.high.calculation_id,
+        ].filter((value): value is string => Boolean(value)),
+      ),
       t("calculationUseScenario", { scenario: t(scenarioKey(scenario.kind)) }),
     ),
   );

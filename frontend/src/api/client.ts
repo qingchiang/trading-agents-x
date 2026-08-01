@@ -19,6 +19,7 @@ export type ResearchDecision = components["schemas"]["ResearchDecision"];
 export type DecisionNumericAuditAppendix =
   components["schemas"]["DecisionNumericAuditAppendix"];
 export type NumericAuditSnapshot = components["schemas"]["NumericAuditSnapshot"];
+export type NumericAuditOmission = components["schemas"]["NumericAuditOmission"];
 export type EvidenceBundle = components["schemas"]["EvidenceBundle"];
 export type EvidenceItem = components["schemas"]["EvidenceItem"];
 export type EvidenceTable = components["schemas"]["EvidenceTable"];

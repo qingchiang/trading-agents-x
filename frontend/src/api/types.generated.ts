@@ -262,10 +262,13 @@ export interface components {
       wall_time_seconds?: number;
     };
     NumericAuditAppendixStatus: "recovered" | "partial" | "incomplete";
+    NumericAuditComponentType: "appendix" | "calculation" | "scenario_range" | "valuation" | "market_reference";
     NumericAuditOmission: {
       component_path: string;
+      component_type: components["schemas"]["NumericAuditComponentType"];
       issue_codes: string[];
-      label: string;
+      reference_label?: string | null;
+      scenario_kind?: components["schemas"]["ResearchScenarioKind"] | null;
     };
     NumericAuditPhase: "initial" | "repair";
     NumericAuditSnapshot: {
@@ -364,7 +367,7 @@ export interface components {
       evidence_refs?: string[];
       kind: components["schemas"]["ResearchScenarioKind"];
       outcome: string;
-      reference_range?: components["schemas"]["ScenarioReferenceRange"] | null;
+      reference_ranges?: components["schemas"]["ScenarioReferenceRange"][];
     };
     ResearchScenarioKind: "base" | "bull" | "bear";
     ResearchWarning: {
@@ -471,7 +474,9 @@ export interface components {
       trashed_at?: string | null;
       updated_at: string;
     };
+    ScenarioReferenceCategory: "technical" | "historical" | "analyst_consensus" | "fundamental" | "other";
     ScenarioReferenceRange: {
+      category: components["schemas"]["ScenarioReferenceCategory"];
       high: components["schemas"]["AuditedRangeEndpoint"];
       interpretation: string;
       label: string;

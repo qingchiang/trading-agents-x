@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import type {
   DecisionNumericAuditAppendix,
+  NumericAuditOmission,
   NumericAuditSnapshot,
 } from "../api/client";
 
@@ -43,7 +44,7 @@ export default function NumericAuditAppendixView({
             <ul>
               {omissions.map((item) => (
                 <li key={item.component_path}>
-                  <strong>{item.label}</strong>
+                  <strong>{omissionLabel(item, t)}</strong>
                   <code>{item.component_path}</code>
                   <IssueCodes issues={item.issue_codes} />
                 </li>
@@ -73,6 +74,27 @@ export default function NumericAuditAppendixView({
       </div>
     </details>
   );
+}
+
+function omissionLabel(
+  item: NumericAuditOmission,
+  t: (key: string, options?: Record<string, unknown>) => string,
+): string {
+  const parts: string[] = [];
+  if (item.scenario_kind) {
+    parts.push(
+      t(
+        {
+          base: "scenarioBase",
+          bull: "scenarioBull",
+          bear: "scenarioBear",
+        }[item.scenario_kind],
+      ),
+    );
+  }
+  parts.push(t(`numericOmissionComponent.${item.component_type}`));
+  if (item.reference_label) parts.push(item.reference_label);
+  return parts.join(" · ");
 }
 
 function NumericSnapshotView({ snapshot }: { snapshot: NumericAuditSnapshot }) {

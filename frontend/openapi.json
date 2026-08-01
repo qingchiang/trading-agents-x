@@ -1825,6 +1825,18 @@
         "title": "NumericAuditAppendixStatus",
         "type": "string"
       },
+      "NumericAuditComponentType": {
+        "description": "Stable component identity for localized numeric audit omissions.",
+        "enum": [
+          "appendix",
+          "calculation",
+          "scenario_range",
+          "valuation",
+          "market_reference"
+        ],
+        "title": "NumericAuditComponentType",
+        "type": "string"
+      },
       "NumericAuditOmission": {
         "additionalProperties": false,
         "properties": {
@@ -1832,6 +1844,9 @@
             "pattern": "^[a-z0-9_.-]+$",
             "title": "Component Path",
             "type": "string"
+          },
+          "component_type": {
+            "$ref": "#/components/schemas/NumericAuditComponentType"
           },
           "issue_codes": {
             "items": {
@@ -1841,16 +1856,33 @@
             "title": "Issue Codes",
             "type": "array"
           },
-          "label": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Label",
-            "type": "string"
+          "reference_label": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Label"
+          },
+          "scenario_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchScenarioKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "component_path",
-          "label",
+          "component_type",
           "issue_codes"
         ],
         "title": "NumericAuditOmission",
@@ -2531,15 +2563,13 @@
             "title": "Outcome",
             "type": "string"
           },
-          "reference_range": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ScenarioReferenceRange"
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "reference_ranges": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ScenarioReferenceRange"
+            },
+            "title": "Reference Ranges",
+            "type": "array"
           }
         },
         "required": [
@@ -3299,10 +3329,25 @@
         "title": "RunView",
         "type": "object"
       },
+      "ScenarioReferenceCategory": {
+        "description": "Research purpose of a non-valuation scenario reference range.",
+        "enum": [
+          "technical",
+          "historical",
+          "analyst_consensus",
+          "fundamental",
+          "other"
+        ],
+        "title": "ScenarioReferenceCategory",
+        "type": "string"
+      },
       "ScenarioReferenceRange": {
         "additionalProperties": false,
         "description": "A scenario-specific reference band, not necessarily a valuation.",
         "properties": {
+          "category": {
+            "$ref": "#/components/schemas/ScenarioReferenceCategory"
+          },
           "high": {
             "$ref": "#/components/schemas/AuditedRangeEndpoint"
           },
@@ -3336,6 +3381,7 @@
           }
         },
         "required": [
+          "category",
           "label",
           "low",
           "high",

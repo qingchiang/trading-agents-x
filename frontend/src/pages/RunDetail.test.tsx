@@ -231,6 +231,49 @@ const detail = {
         core_assumptions: ["Current evidence remains representative."],
         outcome: `${kind} outcome.`,
         evidence_refs: ["ev_0123456789ab"],
+        reference_ranges:
+          kind === "base"
+            ? [
+                {
+                  category: "technical" as const,
+                  label: "Technical support",
+                  low: {
+                    value: 90,
+                    basis: "interpreted" as const,
+                    evidence_refs: ["ev_0123456789ab"],
+                    as_of_date: "2026-07-24",
+                  },
+                  high: {
+                    value: 105,
+                    basis: "interpreted" as const,
+                    evidence_refs: ["ev_0123456789ab"],
+                    as_of_date: "2026-07-24",
+                  },
+                  unit: "USD",
+                  interpretation: "Technical range from the sealed evidence.",
+                  limitations: ["Not a valuation."],
+                },
+                {
+                  category: "analyst_consensus" as const,
+                  label: "Analyst target range",
+                  low: {
+                    value: 95,
+                    basis: "interpreted" as const,
+                    evidence_refs: ["ev_0123456789ab"],
+                    as_of_date: "2026-07-24",
+                  },
+                  high: {
+                    value: 125,
+                    basis: "interpreted" as const,
+                    evidence_refs: ["ev_0123456789ab"],
+                    as_of_date: "2026-07-24",
+                  },
+                  unit: "USD",
+                  interpretation: "Consensus range from the sealed evidence.",
+                  limitations: ["Coverage may change."],
+                },
+              ]
+            : [],
       })),
       market_reference_levels: [
         {
@@ -248,7 +291,6 @@ const detail = {
       calculation_records: [
         {
           id: "calc_market_reference",
-          purpose: "market_reference",
           formula: "close",
           inputs: { close: 100 },
           input_evidence_refs: ["ev_0123456789ab"],
@@ -523,6 +565,9 @@ test("restores deliberation and resolves evidence references across run views", 
 
   fireEvent.click(screen.getByRole("tab", { name: "Decision" }));
   expect(await screen.findByText("Evidence is balanced.")).toBeVisible();
+  expect(screen.getByText("Technical support")).toBeVisible();
+  expect(screen.getByText("Analyst target range")).toBeVisible();
+  expect(screen.getByText("Analyst consensus")).toBeVisible();
   fireEvent.click(screen.getByText("Audited decision calculations"));
   expect(screen.getByText("calc_market_reference")).toBeVisible();
   const referenceTable = screen.getByRole("table", {
@@ -595,7 +640,7 @@ test("keeps a degraded numeric audit compact and opens run warnings on demand", 
     omitted_components: [
       {
         component_path: "numeric.valuation",
-        label: "Valuation assessment",
+        component_type: "valuation",
         issue_codes: ["numeric.valuation.unknown_calculation"],
       },
     ],

@@ -92,6 +92,16 @@ _EN_LABELS = {
     "bear": "Bear",
     "core_assumptions": "Core Assumptions",
     "scenario_reference_range": "Scenario reference range",
+    "category.technical": "Technical",
+    "category.historical": "Historical",
+    "category.analyst_consensus": "Analyst consensus",
+    "category.fundamental": "Fundamental",
+    "category.other": "Other",
+    "omission.appendix": "Numeric appendix",
+    "omission.calculation": "Calculation",
+    "omission.scenario_range": "Scenario reference range",
+    "omission.valuation": "Valuation assessment",
+    "omission.market_reference": "Market reference",
     "endpoint_basis": "Endpoint basis",
     "endpoint_dates": "Endpoint dates",
     "basis.observed": "direct observation",
@@ -267,6 +277,16 @@ _ZH_LABELS = {
     "bear": "悲观情景",
     "core_assumptions": "核心假设",
     "scenario_reference_range": "情景参考区间",
+    "category.technical": "技术",
+    "category.historical": "历史",
+    "category.analyst_consensus": "卖方共识",
+    "category.fundamental": "基本面",
+    "category.other": "其他",
+    "omission.appendix": "数值附录",
+    "omission.calculation": "计算",
+    "omission.scenario_range": "情景参考区间",
+    "omission.valuation": "估值评估",
+    "omission.market_reference": "市场参考位置",
     "endpoint_basis": "端点依据",
     "endpoint_dates": "端点日期",
     "basis.observed": "直接观察",
@@ -422,6 +442,16 @@ _JA_LABELS = {
     "bear": "弱気シナリオ",
     "core_assumptions": "主要前提",
     "scenario_reference_range": "シナリオ参考レンジ",
+    "category.technical": "テクニカル",
+    "category.historical": "過去データ",
+    "category.analyst_consensus": "アナリスト予想",
+    "category.fundamental": "ファンダメンタルズ",
+    "category.other": "その他",
+    "omission.appendix": "数値付録",
+    "omission.calculation": "計算",
+    "omission.scenario_range": "シナリオ参考レンジ",
+    "omission.valuation": "バリュエーション評価",
+    "omission.market_reference": "市場参考水準",
     "endpoint_basis": "端点の根拠",
     "endpoint_dates": "端点の日付",
     "basis.observed": "直接観測",
@@ -1100,14 +1130,14 @@ def _render_research_decision(
                 labels=labels,
             )
         )
-        if scenario.reference_range is not None:
-            reference_range = scenario.reference_range
+        for reference_range in scenario.reference_ranges:
             lines.extend(
                 [
                     "",
                     (
                         f"**{labels['scenario_reference_range']} "
-                        f"({reference_range.label}):** "
+                        f"({labels.enum_name('category', reference_range.category.value)} · "
+                        f"{reference_range.label}):** "
                         f"`{reference_range.low.value}`–"
                         f"`{reference_range.high.value}` {reference_range.unit}"
                     ),
@@ -1253,17 +1283,19 @@ def _calculation_uses(
             uses.setdefault(calculation_id, []).append(label)
 
     for scenario in content.scenarios:
-        if scenario.reference_range is not None:
+        for reference_range in scenario.reference_ranges:
             add(
                 tuple(
                     item
                     for item in (
-                        scenario.reference_range.low.calculation_id,
-                        scenario.reference_range.high.calculation_id,
+                        reference_range.low.calculation_id,
+                        reference_range.high.calculation_id,
                     )
                     if item is not None
                 ),
-                labels["calculation_use.scenario"].format(scenario=labels[scenario.kind.value]),
+                labels["calculation_use.scenario"].format(
+                    scenario=labels[scenario.kind.value]
+                ),
             )
     if content.valuation_assessment is not None:
         add(
@@ -1293,7 +1325,8 @@ def _render_numeric_audit_appendix(
         lines.extend(["", f"### {labels['omitted_components']}"])
         for item in appendix.omitted_components:
             lines.append(
-                f"- **{item.label}** (`{item.component_path}`): "
+                f"- **{_numeric_omission_label(item, labels)}** "
+                f"(`{item.component_path}`): "
                 + ", ".join(f"`{code}`" for code in item.issue_codes)
             )
     for snapshot in appendix.snapshots:
@@ -1333,6 +1366,16 @@ def _render_numeric_audit_appendix(
         else:
             lines.append(f"- {labels['candidate_unparseable']}")
     return "\n".join(lines)
+
+
+def _numeric_omission_label(item: Any, labels: ExportLabels) -> str:
+    parts: list[str] = []
+    if item.scenario_kind is not None:
+        parts.append(labels[item.scenario_kind.value])
+    parts.append(labels.enum_name("omission", item.component_type.value))
+    if item.reference_label:
+        parts.append(item.reference_label)
+    return " · ".join(parts)
 
 
 def _render_list(

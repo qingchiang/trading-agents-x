@@ -80,7 +80,8 @@ def _numeric_audit_warning_message(
     appendix: DecisionNumericAuditAppendix | None,
 ) -> str:
     labels = tuple(
-        item.label for item in (appendix.omitted_components if appendix else ())
+        item.reference_label or item.component_path
+        for item in (appendix.omitted_components if appendix else ())
     )
     omitted = f": {', '.join(labels)}" if labels else ""
     return (
