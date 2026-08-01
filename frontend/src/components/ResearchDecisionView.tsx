@@ -163,7 +163,7 @@ export function ResearchDecisionContent({
                           </span>
                           <span>{referenceRange.label}</span>
                           <strong
-                            title={`${referenceRange.low.value}–${referenceRange.high.value} ${referenceRange.unit ?? t("unitUnspecified")}`}
+                            title={`${referenceRange.low.value}–${referenceRange.high.value}${referenceRange.unit ? ` ${referenceRange.unit}` : ""}`}
                           >
                             {formatRange(
                               referenceRange.low.value,
@@ -171,7 +171,6 @@ export function ResearchDecisionContent({
                               referenceRange.unit ?? undefined,
                               numberLanguage,
                             )}
-                            {!referenceRange.unit && ` ${t("unitUnspecified")}`}
                           </strong>
                         </div>
                         <small className="numeric-date-line">
@@ -253,12 +252,12 @@ export function ResearchDecisionContent({
                 {t("valuationAssessment")}
               </span>
               <h2
-                title={`${decision.valuation_assessment.low.value}–${decision.valuation_assessment.high.value} ${decision.valuation_assessment.currency}`}
+                title={`${decision.valuation_assessment.low.value}–${decision.valuation_assessment.high.value} ${decision.valuation_assessment.unit}`}
               >
                 {formatRange(
                   decision.valuation_assessment.low.value,
                   decision.valuation_assessment.high.value,
-                  decision.valuation_assessment.currency,
+                  decision.valuation_assessment.unit,
                   numberLanguage,
                 )}
               </h2>
@@ -339,8 +338,8 @@ export function ResearchDecisionContent({
                           level.value,
                           level.unit ?? undefined,
                           numberLanguage,
-                        )}{" "}
-                        {level.unit ?? t("unitUnspecified")}
+                        )}
+                        {level.unit && ` ${level.unit}`}
                       </td>
                       <td className="market-reference-date" data-label={t("asOfDate")}>
                         {level.as_of_date}

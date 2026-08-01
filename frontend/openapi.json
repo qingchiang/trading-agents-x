@@ -3587,12 +3587,6 @@
       "ValuationAssessment": {
         "additionalProperties": false,
         "properties": {
-          "currency": {
-            "maxLength": 16,
-            "minLength": 1,
-            "title": "Currency",
-            "type": "string"
-          },
           "high": {
             "$ref": "#/components/schemas/AuditedRangeEndpoint"
           },
@@ -3607,9 +3601,18 @@
           "low": {
             "$ref": "#/components/schemas/AuditedRangeEndpoint"
           },
+          "measurement_kind": {
+            "$ref": "#/components/schemas/MeasurementKind"
+          },
           "method": {
             "minLength": 1,
             "title": "Method",
+            "type": "string"
+          },
+          "unit": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Unit",
             "type": "string"
           }
         },
@@ -3617,7 +3620,8 @@
           "method",
           "low",
           "high",
-          "currency",
+          "measurement_kind",
+          "unit",
           "limitations"
         ],
         "title": "ValuationAssessment",

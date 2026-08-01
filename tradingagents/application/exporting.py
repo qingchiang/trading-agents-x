@@ -172,7 +172,6 @@ _EN_LABELS = {
     "temporal_basis": "Temporal basis",
     "input_evidence": "Input evidence",
     "value": "Value",
-    "unit_unspecified": "unit unspecified",
     "basis": "Basis",
     "formula": "Formula",
     "inputs": "Inputs",
@@ -241,7 +240,6 @@ _EN_LABELS = {
 _ZH_LABELS = {
     **_EN_LABELS,
     "title": "TradingAgentsX 研究",
-    "unit_unspecified": "单位未标注",
     "export_schema": "导出结构版本",
     "run": "运行",
     "status": "状态",
@@ -407,7 +405,6 @@ _ZH_LABELS = {
 _JA_LABELS = {
     **_EN_LABELS,
     "title": "TradingAgentsX リサーチ",
-    "unit_unspecified": "単位未記載",
     "export_schema": "エクスポートスキーマ",
     "run": "実行",
     "status": "ステータス",
@@ -1136,7 +1133,7 @@ def _render_research_decision(
             )
         )
         for reference_range in scenario.reference_ranges:
-            display_unit = reference_range.unit or labels["unit_unspecified"]
+            display_unit = f" {reference_range.unit}" if reference_range.unit else ""
             lines.extend(
                 [
                     "",
@@ -1145,7 +1142,7 @@ def _render_research_decision(
                         f"({labels.enum_name('category', reference_range.category.value)} · "
                         f"{reference_range.label}):** "
                         f"`{format_decision_number(reference_range.low.value, reference_range.unit, output_language=labels.language)}`–"
-                        f"`{format_decision_number(reference_range.high.value, reference_range.unit, output_language=labels.language)}` "
+                        f"`{format_decision_number(reference_range.high.value, reference_range.unit, output_language=labels.language)}`"
                         f"{display_unit}"
                     ),
                     (
@@ -1205,14 +1202,14 @@ def _render_research_decision(
     lines.extend(["", f"### {labels['market_references']}"])
     if content.market_reference_levels:
         for level in content.market_reference_levels:
-            display_unit = level.unit or labels["unit_unspecified"]
+            display_unit = f" {level.unit}" if level.unit else ""
             lines.extend(
                 [
                     "",
                     f"#### {level.label}",
                     "",
                     f"- {labels['value']}: "
-                    f"`{format_decision_number(level.value, level.unit, output_language=labels.language)}` "
+                    f"`{format_decision_number(level.value, level.unit, output_language=labels.language)}`"
                     f"{display_unit}",
                     f"- {labels['as_of']}: `{level.as_of_date.isoformat()}`",
                     f"- {labels['evidence']}: {_render_refs(level.evidence_refs, labels)}",

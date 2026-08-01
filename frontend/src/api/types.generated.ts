@@ -512,11 +512,12 @@ export interface components {
       type: string;
     };
     ValuationAssessment: {
-      currency: string;
       high: components["schemas"]["AuditedRangeEndpoint"];
       limitations: string[];
       low: components["schemas"]["AuditedRangeEndpoint"];
+      measurement_kind: components["schemas"]["MeasurementKind"];
       method: string;
+      unit: string;
     };
   };
 }

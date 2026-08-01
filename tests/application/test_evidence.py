@@ -866,6 +866,17 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
                         evidence_ref="ev_0123456789ab"
                     ),
                 ),
+                MarketReferenceLevel(
+                    label="Unclassified signal",
+                    value=7.25,
+                    measurement_kind=MeasurementKind.UNKNOWN,
+                    unit=None,
+                    as_of_date=date(2026, 7, 24),
+                    interpretation="The source did not publish a unit.",
+                    evidence_refs=("ev_0123456789ab",),
+                    date_evidence_refs=("ev_0123456789ab",),
+                    basis=MarketReferenceBasis.INTERPRETED,
+                ),
             ),
             "risk_review_adjustments": (
                 RiskReviewAdjustment(
@@ -966,6 +977,8 @@ def test_markdown_export_emits_each_audit_section_once() -> None:
     )
 
     markdown = render_run_export_markdown(run_export)
+
+    assert "unit unspecified" not in markdown
 
     assert markdown.count("## Research Process") == 1
     assert markdown.count("## Reports") == 1

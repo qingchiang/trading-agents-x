@@ -5,12 +5,14 @@ import type {
   AnalystReport,
   EvidenceBundle,
   ResearchArtifact,
+  ResearchDecision,
 } from "../api/client";
 import { buildEvidenceReferenceIndex } from "../evidence";
 import i18n from "../i18n";
 import AnalystReportView from "./AnalystReportView";
 import DeliberationView from "./DeliberationView";
 import EvidenceTableView from "./EvidenceTableView";
+import ResearchDecisionView from "./ResearchDecisionView";
 
 const evidenceRef = "ev_0123456789ab";
 const evidence: EvidenceBundle = {
@@ -156,6 +158,81 @@ test("shows raw evidence tables outside the reading report", () => {
   );
   expect(screen.getByRole("heading", { name: "Daily prices" })).toBeVisible();
   expect(screen.getByRole("table")).toHaveTextContent("2026-07-24100");
+});
+
+test("uses generic valuation units and omits unknown unit placeholders", () => {
+  const decision: ResearchDecision = {
+    rating: "Hold",
+    confidence: 0.6,
+    executive_summary: "Balanced evidence.",
+    thesis: "Valuation depends on execution.",
+    evidence_refs: [evidenceRef],
+    memory_refs: [],
+    catalysts: [],
+    risks: ["Execution may weaken."],
+    invalidation_conditions: ["Guidance deteriorates."],
+    unresolved_questions: [],
+    time_horizon: "6-12 months",
+    scenarios: (["base", "bull", "bear"] as const).map((kind) => ({
+      kind,
+      core_assumptions: ["Current evidence remains representative."],
+      outcome: `${kind} outcome.`,
+      evidence_refs: [evidenceRef],
+    })),
+    valuation_assessment: {
+      method: "Forward PE",
+      low: {
+        value: 40,
+        basis: "derived",
+        evidence_refs: [evidenceRef],
+        date_evidence_refs: [evidenceRef],
+        calculation_id: "calc_low",
+        as_of_date: "2026-07-24",
+        temporal_basis: "point_in_time",
+      },
+      high: {
+        value: 50,
+        basis: "derived",
+        evidence_refs: [evidenceRef],
+        date_evidence_refs: [evidenceRef],
+        calculation_id: "calc_high",
+        as_of_date: "2026-07-24",
+        temporal_basis: "point_in_time",
+      },
+      measurement_kind: "ratio",
+      unit: "x",
+      limitations: ["Peer comparability is imperfect."],
+    },
+    market_reference_levels: [
+      {
+        label: "Unclassified signal",
+        value: 7.25,
+        measurement_kind: "unknown",
+        unit: null,
+        as_of_date: "2026-07-24",
+        interpretation: "The source did not publish a unit.",
+        evidence_refs: [evidenceRef],
+        date_evidence_refs: [evidenceRef],
+        basis: "interpreted",
+        temporal_basis: "point_in_time",
+        calculation_ids: [],
+      },
+    ],
+    calculation_records: [],
+    risk_review_adjustments: [],
+  };
+
+  render(
+    <ResearchDecisionView
+      decision={decision}
+      evidenceIndex={evidenceIndex}
+      onEvidence={vi.fn()}
+    />,
+  );
+
+  expect(screen.getByRole("heading", { name: "40–50 x" })).toBeVisible();
+  expect(screen.getByText("7.25")).toBeVisible();
+  expect(screen.queryByText("Unit unspecified")).not.toBeInTheDocument();
 });
 
 test("organizes shallow Markdown deliberation by role and issue", () => {
