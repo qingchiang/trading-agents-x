@@ -8,7 +8,7 @@ from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from typing import Any
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from tradingagents.application.contracts import (
     AnalystClaimType,
@@ -73,14 +73,42 @@ _ANALYST_QUALITY_RULES = {
 }
 
 
+class AuditKeyClaimDraft(FrozenModel):
+    """Strict serializer contract for one report claim."""
+
+    id: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
+    section_id: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
+    kind: AnalystClaimType
+    importance: ClaimImportance
+    statement: str = Field(min_length=1)
+    implication: str = Field(min_length=1)
+    confidence: float = Field(ge=0.0, le=1.0)
+    evidence_refs: tuple[str, ...] = Field(min_length=1)
+
+    def to_public(self) -> KeyClaim:
+        return KeyClaim.model_validate(self.model_dump(mode="json"))
+
+
 class AnalystAuditDraft(FrozenModel):
     """Small serializer-owned audit data, separate from report presentation."""
 
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
-    key_claims: tuple[KeyClaim, ...] = ()
+    key_claims: tuple[AuditKeyClaimDraft, ...] = Field(min_length=1)
     section_source_refs: dict[str, tuple[str, ...]] = Field(
         default_factory=dict,
     )
+
+    @model_validator(mode="after")
+    def validate_claim_set(self) -> AnalystAuditDraft:
+        claim_ids = tuple(claim.id for claim in self.key_claims)
+        if len(claim_ids) != len(set(claim_ids)):
+            raise ValueError("analyst audit claim IDs must be unique")
+        if not any(
+            claim.importance is ClaimImportance.PRIMARY
+            for claim in self.key_claims
+        ):
+            raise ValueError("analyst audit requires a primary claim")
+        return self
 
 
 def evidence_warnings(
@@ -275,6 +303,7 @@ def invoke_analyst_report(
                 sections=sections,
                 bundle=bundle,
                 confidence_override=confidence_override,
+                output_language=output_language,
                 node=f"{node}.audit",
                 event_writer=event_writer,
             )
@@ -306,6 +335,7 @@ def invoke_analyst_report(
         )
 
     audit = audit_result.value
+    key_claims = tuple(claim.to_public() for claim in audit.key_claims)
     section_refs = audit.section_source_refs
     audited_sections = tuple(
         section.model_copy(
@@ -328,7 +358,7 @@ def invoke_analyst_report(
                 *source_refs,
                 *(
                     ref
-                    for claim in audit.key_claims
+                    for claim in key_claims
                     for ref in claim.evidence_refs
                 ),
                 *(
@@ -349,7 +379,7 @@ def invoke_analyst_report(
                 if confidence_override is not None
                 else audit.confidence
             ),
-            key_claims=audit.key_claims,
+            key_claims=key_claims,
             source_refs=audited_refs,
             audit_status=ReportAuditStatus.COMPLETE,
             warnings=base_warnings,
@@ -402,6 +432,7 @@ def _extract_report_audit(
     sections: tuple[ReportSection, ...],
     bundle: EvidenceBundle,
     confidence_override: float | None,
+    output_language: str,
     node: str,
     event_writer: Callable[[dict[str, Any]], None] | None,
 ) -> StructuredOutputResult[AnalystAuditDraft]:
@@ -420,14 +451,6 @@ def _extract_report_audit(
             confidence_override,
         }:
             raise OutputValidationError("analyst_audit.confidence")
-        if not any(
-            claim.importance is ClaimImportance.PRIMARY
-            for claim in audit.key_claims
-        ):
-            raise OutputValidationError("analyst_audit.primary_claim")
-        claim_ids = [claim.id for claim in audit.key_claims]
-        if len(claim_ids) != len(set(claim_ids)):
-            raise OutputValidationError("analyst_audit.claim_ids")
         for claim in audit.key_claims:
             if claim.section_id not in section_ids:
                 raise OutputValidationError("analyst_audit.section_id")
@@ -446,16 +469,17 @@ def _extract_report_audit(
 
     first_section = sections[0]
     first_ref = valid_refs[0]
+    example_statement, example_implication = _audit_example_text(output_language)
     example = AnalystAuditDraft(
         confidence=confidence_override if confidence_override is not None else 0.7,
         key_claims=(
-            KeyClaim(
+            AuditKeyClaimDraft(
                 id=f"{analyst}.claim_1",
                 section_id=first_section.id,
                 kind=AnalystClaimType.INFERENCE,
                 importance=ClaimImportance.PRIMARY,
-                statement="One decision-relevant claim from the report.",
-                implication="Why this claim matters to the research conclusion.",
+                statement=example_statement,
+                implication=example_implication,
                 confidence=0.7,
                 evidence_refs=(first_ref,),
             ),
@@ -466,6 +490,9 @@ def _extract_report_audit(
 {analyst} report. Do not rewrite, summarize, or improve the Markdown.
 
 Rules:
+- Human-readable claim statements and implications must use this complete
+  output-language instruction: {output_language}
+- IDs, enums, and Evidence refs must remain in their required wire format.
 - Select only decision-relevant primary and supporting claims.
 - Every claim must point to an existing section ID and at least one allowed
   evidence ref.
@@ -479,6 +506,9 @@ SECTIONS:
 
 REPORT MARKDOWN:
 {markdown}
+
+LOCALIZED VALID EXAMPLE:
+{json.dumps(example.model_dump(mode="json"), ensure_ascii=False)}
 """
     return StructuredOutputRunner(
         llm=llm,
@@ -491,12 +521,32 @@ REPORT MARKDOWN:
         include_candidate_in_repair=True,
         repair_instructions=(
             "Preserve valid claims. Use only supplied section IDs and evidence "
-            "refs. Keep the object small and do not include report Markdown."
+            "refs. Keep the object small and do not include report Markdown. "
+            "Write statement and implication fields in this output language: "
+            f"{output_language}"
         ),
     ).invoke(
         prompt,
         example=example.model_dump(mode="json"),
         allowed_evidence_refs=valid_refs,
+    )
+
+
+def _audit_example_text(output_language: str) -> tuple[str, str]:
+    normalized = output_language.casefold()
+    if "zh-cn" in normalized or "简体中文" in output_language:
+        return (
+            "报告中的一项决策相关观点。",
+            "说明该观点为何影响最终研究结论。",
+        )
+    if normalized == "ja" or "japanese" in normalized or "日本語" in output_language:
+        return (
+            "レポートに含まれる意思決定上重要な主張。",
+            "この主張が最終的な調査結論に与える影響。",
+        )
+    return (
+        "One decision-relevant claim from the report.",
+        "Why this claim matters to the research conclusion.",
     )
 
 

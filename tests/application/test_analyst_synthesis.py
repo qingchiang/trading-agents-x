@@ -3,16 +3,19 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
+import pytest
+from pydantic import ValidationError
+
 from tradingagents.application.contracts import (
     AnalystClaimType,
     ClaimImportance,
     EvidenceBundle,
     EvidenceItem,
-    KeyClaim,
     ReportAuditStatus,
 )
 from tradingagents.graph.analyst_synthesis import (
     AnalystAuditDraft,
+    AuditKeyClaimDraft,
     invoke_analyst_report,
     normalize_report_citations,
 )
@@ -41,11 +44,13 @@ class _MarkdownLLM:
 
 
 class _StructuredInvoker:
-    def __init__(self, value: Any) -> None:
+    def __init__(self, value: Any, prompts: list[str]) -> None:
         self.value = value
+        self.prompts = prompts
 
     def invoke(self, prompt: str, config: Any = None) -> dict[str, Any]:
-        del prompt, config
+        del config
+        self.prompts.append(prompt)
         if isinstance(self.value, Exception):
             raise self.value
         return {"raw": None, "parsed": self.value}
@@ -56,9 +61,10 @@ class _AuditLLM:
 
     def __init__(self, values: list[Any]) -> None:
         self.values = values
+        self.prompts: list[str] = []
 
     def with_structured_output(self, _schema: Any, **_kwargs: Any) -> _StructuredInvoker:
-        return _StructuredInvoker(self.values.pop(0))
+        return _StructuredInvoker(self.values.pop(0), self.prompts)
 
 
 def _bundle() -> EvidenceBundle:
@@ -89,7 +95,7 @@ def test_markdown_report_preserves_tables_and_extracts_small_audit() -> None:
     audit = AnalystAuditDraft(
         confidence=0.7,
         key_claims=(
-            KeyClaim(
+            AuditKeyClaimDraft(
                 id="fundamentals.claim_1",
                 section_id="fundamentals.section_1",
                 kind=AnalystClaimType.INFERENCE,
@@ -103,9 +109,10 @@ def test_markdown_report_preserves_tables_and_extracts_small_audit() -> None:
         section_source_refs={"fundamentals.section_1": (ref,)},
     )
 
+    audit_llm = _AuditLLM([audit])
     result = invoke_analyst_report(
         _MarkdownLLM([_Message(markdown)]),
-        _AuditLLM([audit]),
+        audit_llm,
         analyst="fundamentals",
         draft_narrative="Use the sealed evidence.",
         bundle=bundle,
@@ -118,8 +125,71 @@ def test_markdown_report_preserves_tables_and_extracts_small_audit() -> None:
 
     assert "| 收入 | 120亿元 | 100亿元 |" in result.value.markdown
     assert result.value.audit_status is ReportAuditStatus.COMPLETE
-    assert result.value.key_claims == audit.key_claims
+    assert [claim.model_dump() for claim in result.value.key_claims] == [
+        claim.model_dump() for claim in audit.key_claims
+    ]
     assert result.value.source_refs == (ref,)
+    assert "zh-CN" in audit_llm.prompts[0]
+    assert "报告中的一项决策相关观点" in audit_llm.prompts[0]
+
+
+def test_analyst_audit_schema_requires_cited_claims_and_primary_claim() -> None:
+    schema = AnalystAuditDraft.model_json_schema()
+    claim_schema = schema["$defs"]["AuditKeyClaimDraft"]
+
+    assert schema["properties"]["key_claims"]["minItems"] == 1
+    assert claim_schema["properties"]["evidence_refs"]["minItems"] == 1
+
+    with pytest.raises(ValidationError, match="at least 1 item"):
+        AuditKeyClaimDraft(
+            id="fundamentals.claim_1",
+            section_id="fundamentals.section_1",
+            kind=AnalystClaimType.INFERENCE,
+            importance=ClaimImportance.PRIMARY,
+            statement="收入增长。",
+            implication="支持增长判断。",
+            confidence=0.7,
+            evidence_refs=(),
+        )
+
+
+def test_custom_output_language_reaches_audit_primary_and_repair_prompts() -> None:
+    bundle = _bundle()
+    ref = bundle.items[0].ref
+    custom_language = "Use formal Chinese prose with Japanese company names unchanged."
+    valid = AnalystAuditDraft(
+        confidence=0.7,
+        key_claims=(
+            AuditKeyClaimDraft(
+                id="fundamentals.claim_1",
+                section_id="fundamentals.section_1",
+                kind=AnalystClaimType.INFERENCE,
+                importance=ClaimImportance.PRIMARY,
+                statement="收入改善。",
+                implication="支持增长判断。",
+                confidence=0.7,
+                evidence_refs=(ref,),
+            ),
+        ),
+    )
+    audit_llm = _AuditLLM([RuntimeError("schema failure"), valid])
+
+    result = invoke_analyst_report(
+        _MarkdownLLM([_Message(f"# 核心观察\n\n收入改善。[^{ref}]")]),
+        audit_llm,
+        analyst="fundamentals",
+        draft_narrative="Use the sealed evidence.",
+        bundle=bundle,
+        output_language=custom_language,
+        prepared_evidence=None,
+        confidence_override=None,
+        warnings=(),
+        node="analyst.fundamentals",
+    )
+
+    assert result.value.audit_status is ReportAuditStatus.COMPLETE
+    assert len(audit_llm.prompts) == 2
+    assert all(custom_language in prompt for prompt in audit_llm.prompts)
 
 
 def test_unknown_citation_is_removed_without_discarding_report() -> None:
@@ -223,7 +293,7 @@ def test_truncated_markdown_gets_one_continuation() -> None:
     audit = AnalystAuditDraft(
         confidence=0.6,
         key_claims=(
-            KeyClaim(
+            AuditKeyClaimDraft(
                 id="market.claim_1",
                 section_id="market.section_1",
                 kind=AnalystClaimType.INFERENCE,
