@@ -1034,8 +1034,70 @@ def test_invalid_numeric_requirement_candidate_does_not_repair_core() -> None:
     assert result.numeric_audit.snapshots == ()
     assert result.numeric_audit.omitted_components[0].component_path == "thesis"
     assert result.numeric_audit.omitted_components[0].issue_codes == (
-        "numeric.requirement_candidate.0.schema_invalid",
+        "numeric.requirement_candidate.0.stated_value.missing",
+        "numeric.requirement_candidate.0.fraction_digits.missing",
+        "numeric.requirement_candidate.0.formula.missing",
+        "numeric.requirement_candidate.0.inputs.missing",
+        "numeric.requirement_candidate.0.input_evidence_refs.missing",
+        "numeric.requirement_candidate.0.unit.missing",
+        "numeric.requirement_candidate.0.limitations.missing",
     )
+    assert [schema for schema, _prompt in llm.prompts].count(
+        "ResearchDecisionCoreEnvelope"
+    ) == 1
+
+
+def test_numeric_requirement_preflight_reports_safe_field_paths() -> None:
+    state = _state()
+    ref = state["evidence_bundle"]["items"][0]["ref"]
+    core = _core_draft_from_decision(
+        research_decision(evidence_refs=(ref,)).model_dump(mode="json")
+    )
+    envelope = ResearchDecisionCoreEnvelope.model_validate(
+        {
+            **core.model_dump(mode="json"),
+            "numeric_requirements_declared": True,
+            "numeric_requirement_candidates": [
+                {
+                    "id": "req_invalid",
+                    "component_path": "scenarios",
+                    "label": "Invalid scenario calculation",
+                    "stated_value": 1.0,
+                    "fraction_digits": 9,
+                    "formula": "value / divisor",
+                    "inputs": {"value": 1.0, "divisor": 2.0},
+                    "input_evidence_refs": [ref],
+                    "unit": "x",
+                    "display_text": "sensitive-candidate-value",
+                }
+            ],
+        }
+    )
+    llm = _SequenceLLM(
+        {
+            "ResearchDecisionCoreEnvelope": [envelope],
+            "DecisionNumericDraft": [DecisionNumericDraft(requested=False)],
+        }
+    )
+
+    result = invoke_research_decision(
+        llm,
+        prompt="Form the final decision.",
+        state=state,
+        node="committee.final",
+        require_risk_adjustments=False,
+    )
+
+    assert result.numeric_audit is not None
+    issue_codes = result.numeric_audit.omitted_components[0].issue_codes
+    assert issue_codes == (
+        "numeric.requirement_candidate.0.component_path.pattern",
+        "numeric.requirement_candidate.0.fraction_digits.range",
+        "numeric.requirement_candidate.0.inputs.list_type",
+        "numeric.requirement_candidate.0.limitations.missing",
+        "numeric.requirement_candidate.0.extra.forbidden",
+    )
+    assert "sensitive-candidate-value" not in " ".join(issue_codes)
     assert [schema for schema, _prompt in llm.prompts].count(
         "ResearchDecisionCoreEnvelope"
     ) == 1

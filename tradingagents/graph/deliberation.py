@@ -19,6 +19,7 @@ from pydantic import (
     ConfigDict,
     Field,
     SkipValidation,
+    ValidationError,
     field_serializer,
     field_validator,
 )
@@ -261,6 +262,60 @@ class _NumericRequirementPreflight:
     omissions: tuple[NumericAuditOmission, ...]
 
 
+_NUMERIC_REQUIREMENT_ERROR_REASONS = {
+    "dict_type": "object_type",
+    "extra_forbidden": "extra.forbidden",
+    "finite_number": "non_finite",
+    "float_parsing": "number_type",
+    "float_type": "number_type",
+    "greater_than_equal": "range",
+    "int_parsing": "integer_type",
+    "int_type": "integer_type",
+    "less_than_equal": "range",
+    "list_type": "list_type",
+    "literal_error": "enum",
+    "missing": "missing",
+    "model_type": "object_type",
+    "string_pattern_mismatch": "pattern",
+    "string_too_long": "too_long",
+    "string_too_short": "too_short",
+    "string_type": "string_type",
+    "too_long": "too_long",
+    "too_short": "too_short",
+    "tuple_type": "list_type",
+    "value_error": "invalid",
+}
+
+
+def _numeric_requirement_validation_issues(
+    prefix: str,
+    error: ValidationError,
+) -> tuple[str, ...]:
+    issues: list[str] = []
+    for detail in error.errors(
+        include_url=False,
+        include_context=False,
+        include_input=False,
+    ):
+        error_type = str(detail.get("type") or "schema_invalid")
+        reason = _NUMERIC_REQUIREMENT_ERROR_REASONS.get(
+            error_type,
+            re.sub(r"[^a-z0-9_.-]+", "_", error_type.lower()),
+        )
+        raw_location = detail.get("loc") or ()
+        location = [
+            str(part)
+            for part in raw_location
+            if isinstance(part, int)
+            or (isinstance(part, str) and re.fullmatch(r"[a-zA-Z0-9_-]+", part))
+        ]
+        if error_type == "extra_forbidden" and location:
+            location.pop()
+        segments = [prefix, *location, reason]
+        issues.append(".".join(segments))
+    return tuple(dict.fromkeys(issues)) or (f"{prefix}.schema_invalid",)
+
+
 def _preflight_numeric_requirements(
     envelope: ResearchDecisionCoreEnvelope,
     *,
@@ -284,6 +339,18 @@ def _preflight_numeric_requirements(
                 candidate_label = raw_label
         try:
             requirement = DecisionNumericRequirementDraft.model_validate(candidate)
+        except ValidationError as exc:
+            candidate_issues = _numeric_requirement_validation_issues(prefix, exc)
+            issues.extend(candidate_issues)
+            omissions.append(
+                NumericAuditOmission(
+                    component_path=candidate_path,
+                    component_type=NumericAuditComponentType.DECISION_CLAIM,
+                    reference_label=candidate_label,
+                    issue_codes=candidate_issues,
+                )
+            )
+            continue
         except (TypeError, ValueError):
             issue = f"{prefix}.schema_invalid"
             issues.append(issue)
