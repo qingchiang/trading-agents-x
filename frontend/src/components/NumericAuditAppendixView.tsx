@@ -4,20 +4,23 @@ import { useTranslation } from "react-i18next";
 import type {
   DecisionNumericAuditAppendix,
   NumericAuditOmission,
+  NumericRequirementCheck,
   NumericAuditSnapshot,
 } from "../api/client";
+import { formatDecisionNumber } from "../numericDisplay";
 
 export default function NumericAuditAppendixView({
   appendix,
 }: {
   appendix: DecisionNumericAuditAppendix;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const defaultPhase = appendix.snapshots.some((item) => item.phase === "repair")
     ? "repair"
     : appendix.snapshots.at(-1)?.phase;
   const [phase, setPhase] = useState(defaultPhase);
   const omissions = appendix.omitted_components ?? [];
+  const checks = appendix.requirement_checks ?? [];
   const snapshot = useMemo(
     () =>
       appendix.snapshots.find((item) => item.phase === phase) ??
@@ -29,15 +32,37 @@ export default function NumericAuditAppendixView({
   return (
     <details className="numeric-audit-appendix">
       <summary>
-        <span>{t(hasSnapshots ? "unverifiedNumericDrafts" : "numericAuditGaps")}</span>
+        <span>
+          {t(
+            checks.length > 0
+              ? "decisionRequirementAudit"
+              : hasSnapshots
+                ? "unverifiedNumericDrafts"
+                : "numericAuditGaps",
+          )}
+        </span>
         <span className={`numeric-audit-status status-${appendix.status}`}>
           {t(`numericAppendixStatus.${appendix.status}`)}
         </span>
       </summary>
       <div className="numeric-audit-appendix-body">
         <p className="numeric-audit-boundary" role="note">
-          {t(hasSnapshots ? "unverifiedNumericBoundary" : "numericAuditGapBoundary")}
+          {t(
+            checks.length > 0
+              ? "numericRequirementBoundary"
+              : hasSnapshots
+                ? "unverifiedNumericBoundary"
+                : "numericAuditGapBoundary",
+          )}
         </p>
+
+        {checks.length > 0 ? (
+          <RequirementChecks checks={checks} language={i18n.language} />
+        ) : (
+          <p className="numeric-requirement-empty">
+            {t("numericRequirementNotRecorded")}
+          </p>
+        )}
 
         {omissions.length > 0 && (
           <section className="numeric-audit-omissions">
@@ -74,6 +99,83 @@ export default function NumericAuditAppendixView({
         {snapshot && <NumericSnapshotView snapshot={snapshot} />}
       </div>
     </details>
+  );
+}
+
+function RequirementChecks({
+  checks,
+  language,
+}: {
+  checks: NumericRequirementCheck[];
+  language: string;
+}) {
+  const { t } = useTranslation();
+  return (
+    <section className="numeric-requirement-checks">
+      <h3>{t("decisionRequirementComparisons")}</h3>
+      <div className="numeric-requirement-grid">
+        {checks.map((check) => (
+          <article
+            className={`numeric-requirement-check display-${check.display_status} calculation-${check.calculation_status}`}
+            key={check.requirement_id}
+          >
+            <header>
+              <div>
+                <strong>{check.label}</strong>
+                <code>{check.component_path}</code>
+              </div>
+              <div className="numeric-requirement-statuses">
+                <span>{t(`numericCalculationStatus.${check.calculation_status}`)}</span>
+                <span>{t(`numericDisplayStatus.${check.display_status}`)}</span>
+              </div>
+            </header>
+            <dl className="numeric-requirement-summary">
+              <div>
+                <dt>{t("statedValue")}</dt>
+                <dd>{formatDecisionNumber(check.stated_value, check.unit, language)} {check.unit}</dd>
+              </div>
+              <div>
+                <dt>{t("canonicalResult")}</dt>
+                <dd>
+                  {check.canonical_result == null
+                    ? "—"
+                    : `${formatDecisionNumber(check.canonical_result, check.unit, language)} ${check.unit}`}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("comparisonPrecision")}</dt>
+                <dd>{check.fraction_digits}</dd>
+              </div>
+              <div>
+                <dt>{t("roundedComparison")}</dt>
+                <dd>
+                  {check.rounded_stated_value == null ||
+                  check.rounded_canonical_result == null
+                    ? "—"
+                    : `${check.rounded_stated_value} / ${check.rounded_canonical_result}`}
+                </dd>
+              </div>
+            </dl>
+            {check.display_status === "mismatched" && (
+              <p className="numeric-display-mismatch-note">
+                {t("numericDisplayMismatchExplanation")}
+              </p>
+            )}
+            <details className="numeric-requirement-detail">
+              <summary>{t("fullCalculationAudit")}</summary>
+              <dl>
+                <div><dt>{t("rawStatedValue")}</dt><dd><code>{check.stated_value}</code></dd></div>
+                <div><dt>{t("rawCanonicalResult")}</dt><dd><code>{check.canonical_result ?? "—"}</code></dd></div>
+                <div><dt>{t("formula")}</dt><dd><code>{check.formula}</code></dd></div>
+                <div><dt>{t("inputs")}</dt><dd><code>{JSON.stringify(check.inputs)}</code></dd></div>
+                <div><dt>{t("evidence")}</dt><dd><code>{check.input_evidence_refs.join(", ")}</code></dd></div>
+              </dl>
+              <IssueCodes issues={check.issue_codes ?? []} />
+            </details>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 

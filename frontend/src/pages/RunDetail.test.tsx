@@ -763,6 +763,59 @@ test("shows decision audit gaps without an empty candidate viewer", async () => 
   ).not.toBeInTheDocument();
 });
 
+test("shows requirement comparisons separately from candidate drafts", async () => {
+  const compared = structuredClone(detail);
+  compared.result!.decision!.numeric_audit_status = "partial";
+  compared.result!.numeric_audit = {
+    status: "partial",
+    requirement_checks: [
+      {
+        requirement_id: "req_forward_pe",
+        calculation_id: "calc_forward_pe",
+        component_path: "thesis",
+        label: "Forward PE",
+        stated_value: 45.8,
+        fraction_digits: 1,
+        unit: "x",
+        formula: "price / eps",
+        inputs: { price: 3834.343755, eps: 1 },
+        input_evidence_refs: ["ev_0123456789ab"],
+        canonical_result: 3834.343755,
+        rounded_stated_value: 45.8,
+        rounded_canonical_result: 3834.3,
+        calculation_status: "verified",
+        display_status: "mismatched",
+        issue_codes: ["numeric.requirement.req_forward_pe.result_mismatch"],
+      },
+    ],
+    omitted_components: [],
+    snapshots: [],
+  };
+  vi.mocked(api.run).mockResolvedValue(compared);
+
+  render(
+    <Router initialPath="/runs/run-1?view=decision">
+      <RunDetail />
+    </Router>,
+  );
+
+  const summary = await screen.findByText("Decision-critical calculation audit");
+  const appendix = summary.closest("details");
+  expect(appendix).not.toHaveAttribute("open");
+  fireEvent.click(summary);
+  expect(screen.getByText("Calculation verified")).toBeVisible();
+  expect(screen.getByText("Display mismatched")).toBeVisible();
+  expect(
+    screen.getByText(
+      "The calculation is valid, but the decision text or display scale does not match.",
+    ),
+  ).toBeVisible();
+  expect(screen.queryByText("price / eps")).not.toBeVisible();
+  fireEvent.click(screen.getByText("Formula, inputs, and Evidence"));
+  expect(screen.getByText("price / eps")).toBeVisible();
+  expect(screen.getByText("numeric.requirement.req_forward_pe.result_mismatch")).toBeVisible();
+});
+
 test("opens an editable new-run template instead of rerunning immediately", async () => {
   render(
     <Router initialPath="/runs/run-1">

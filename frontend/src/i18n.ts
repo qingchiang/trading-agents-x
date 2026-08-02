@@ -333,6 +333,31 @@ const en = {
       decision_claim: "Decision claim",
     },
     numericAuditGaps: "Unverified derived values",
+    decisionRequirementAudit: "Decision-critical calculation audit",
+    decisionRequirementComparisons: "Requirement comparisons",
+    numericRequirementBoundary:
+      "Calculations and decision-text display values are audited separately. A display mismatch does not invalidate an otherwise verified calculation.",
+    numericRequirementNotRecorded:
+      "This run did not record requirement comparison details.",
+    statedValue: "Structured display value",
+    canonicalResult: "Canonical result",
+    comparisonPrecision: "Comparison decimal places",
+    roundedComparison: "Rounded display / result",
+    rawStatedValue: "Raw display value",
+    rawCanonicalResult: "Raw canonical result",
+    fullCalculationAudit: "Formula, inputs, and Evidence",
+    numericDisplayMismatchExplanation:
+      "The calculation is valid, but the decision text or display scale does not match.",
+    numericCalculationStatus: {
+      verified: "Calculation verified",
+      invalid: "Calculation invalid",
+      missing: "Calculation missing",
+    },
+    numericDisplayStatus: {
+      matched: "Display matched",
+      mismatched: "Display mismatched",
+      not_checked: "Display not checked",
+    },
     numericAuditGapBoundary:
       "These decision-critical derived values were not fully verified. The qualitative decision is retained, but the listed values are excluded from canonical calculations.",
     unverifiedNumericDrafts: "Unverified numeric drafts",
@@ -348,6 +373,7 @@ const en = {
     numericCandidateUnparseable:
       "The provider output could not be parsed as a JSON object.",
     numericAppendixStatus: {
+      complete: "Complete",
       recovered: "Recovered",
       partial: "Partially retained",
       incomplete: "Not retained",
@@ -781,6 +807,30 @@ const zhCN = {
       decision_claim: "决策关键派生值",
     },
     numericAuditGaps: "未验证派生值",
+    decisionRequirementAudit: "决策关键计算审计",
+    decisionRequirementComparisons: "Requirement 对照",
+    numericRequirementBoundary:
+      "计算有效性与正文显示值分别审计；显示不一致不会使已经验证的计算失效。",
+    numericRequirementNotRecorded: "该运行未记录 Requirement 比较详情。",
+    statedValue: "结构化显示值",
+    canonicalResult: "Canonical 计算结果",
+    comparisonPrecision: "比较小数位数",
+    roundedComparison: "舍入后显示值 / 计算结果",
+    rawStatedValue: "完整显示值",
+    rawCanonicalResult: "完整 Canonical 结果",
+    fullCalculationAudit: "公式、输入值与 Evidence",
+    numericDisplayMismatchExplanation:
+      "计算有效，但正文数值或显示尺度未对齐。",
+    numericCalculationStatus: {
+      verified: "计算已验证",
+      invalid: "计算无效",
+      missing: "计算缺失",
+    },
+    numericDisplayStatus: {
+      matched: "显示一致",
+      mismatched: "显示不一致",
+      not_checked: "未比较显示值",
+    },
     numericAuditGapBoundary:
       "这些影响最终结论的派生值尚未通过完整计算审计。定性结论会保留，但所列数值不会进入正式计算记录。",
     unverifiedNumericDrafts: "未验证数值草案",
@@ -795,6 +845,7 @@ const zhCN = {
       "候选内容超过保留上限，仅保存摘要 {{digest}}。",
     numericCandidateUnparseable: "供应商输出无法解析为 JSON 对象。",
     numericAppendixStatus: {
+      complete: "完整",
       recovered: "已恢复",
       partial: "部分保留",
       incomplete: "未保留",
@@ -1234,6 +1285,31 @@ const ja = {
       decision_claim: "意思決定上の導出値",
     },
     numericAuditGaps: "未検証の導出値",
+    decisionRequirementAudit: "意思決定上の重要計算監査",
+    decisionRequirementComparisons: "Requirement 比較",
+    numericRequirementBoundary:
+      "計算の妥当性と本文の表示値は別々に監査します。表示不一致だけでは、検証済み計算を無効にしません。",
+    numericRequirementNotRecorded:
+      "この実行では Requirement の比較詳細を記録していません。",
+    statedValue: "構造化表示値",
+    canonicalResult: "Canonical 計算結果",
+    comparisonPrecision: "比較する小数桁数",
+    roundedComparison: "丸め後の表示値 / 計算結果",
+    rawStatedValue: "完全な表示値",
+    rawCanonicalResult: "完全な Canonical 結果",
+    fullCalculationAudit: "式、入力値、Evidence",
+    numericDisplayMismatchExplanation:
+      "計算は有効ですが、本文の数値または表示スケールが一致していません。",
+    numericCalculationStatus: {
+      verified: "計算検証済み",
+      invalid: "計算無効",
+      missing: "計算不足",
+    },
+    numericDisplayStatus: {
+      matched: "表示一致",
+      mismatched: "表示不一致",
+      not_checked: "表示未比較",
+    },
     numericAuditGapBoundary:
       "最終判断に影響するこれらの導出値は、計算監査を完全には通過していません。定性的判断は保持されますが、記載値は正式な計算記録から除外されます。",
     unverifiedNumericDrafts: "未検証の数値ドラフト",
@@ -1249,6 +1325,7 @@ const ja = {
     numericCandidateUnparseable:
       "プロバイダー出力を JSON オブジェクトとして解析できませんでした。",
     numericAppendixStatus: {
+      complete: "完全",
       recovered: "復旧済み",
       partial: "一部保持",
       incomplete: "未保持",

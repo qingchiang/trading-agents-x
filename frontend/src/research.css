@@ -1075,6 +1075,12 @@
   border-color: #b9dfca;
 }
 
+.numeric-audit-status.status-complete {
+  color: #246443;
+  background: #eaf7f0;
+  border-color: #b9dfca;
+}
+
 .numeric-audit-appendix-body {
   margin-top: 14px;
 }
@@ -1088,6 +1094,126 @@
   background: #fff8df;
   border-left: 4px solid #d6a735;
   border-radius: 6px;
+}
+
+.numeric-requirement-empty {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.numeric-requirement-checks {
+  margin-top: 16px;
+}
+
+.numeric-requirement-checks h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.numeric-requirement-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.numeric-requirement-check {
+  padding: 12px;
+  background: #fff;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+}
+
+.numeric-requirement-check.display-mismatched,
+.numeric-requirement-check.calculation-invalid,
+.numeric-requirement-check.calculation-missing {
+  border-color: #e7c56d;
+}
+
+.numeric-requirement-check > header {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.numeric-requirement-check > header > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.numeric-requirement-check > header code {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.numeric-requirement-statuses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  justify-content: flex-end;
+}
+
+.numeric-requirement-statuses span {
+  padding: 3px 7px;
+  color: #246443;
+  font-size: 11px;
+  font-weight: 750;
+  background: #eaf7f0;
+  border-radius: 999px;
+}
+
+.display-mismatched .numeric-requirement-statuses span:last-child,
+.calculation-invalid .numeric-requirement-statuses span:first-child,
+.calculation-missing .numeric-requirement-statuses span:first-child {
+  color: #72520f;
+  background: #fff3c4;
+}
+
+.numeric-requirement-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px 14px;
+  margin: 12px 0 0;
+}
+
+.numeric-requirement-summary div,
+.numeric-requirement-detail dl div {
+  min-width: 0;
+}
+
+.numeric-requirement-summary dt,
+.numeric-requirement-detail dt {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.numeric-requirement-summary dd,
+.numeric-requirement-detail dd {
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.numeric-display-mismatch-note {
+  margin: 10px 0 0;
+  color: #72520f;
+  font-size: 12px;
+}
+
+.numeric-requirement-detail {
+  margin-top: 10px;
+  font-size: 12px;
+}
+
+.numeric-requirement-detail > summary {
+  color: var(--muted);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.numeric-requirement-detail dl {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0 0;
 }
 
 .numeric-audit-omissions {

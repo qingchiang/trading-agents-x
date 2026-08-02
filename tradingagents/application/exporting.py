@@ -87,6 +87,16 @@ _EN_LABELS = {
     "recovered_at": "Recovered at",
     "unverified_numeric": "Unverified Numeric Drafts",
     "numeric_audit_gaps": "Unverified Derived Values",
+    "decision_requirement_audit": "Decision-Critical Calculation Audit",
+    "requirement_comparisons": "Requirement Comparisons",
+    "requirement_id": "Requirement",
+    "structured_value": "Structured display value",
+    "canonical_result": "Canonical result",
+    "comparison_precision": "Decimal places",
+    "rounded_comparison": "Rounded display / result",
+    "calculation_status": "Calculation status",
+    "display_status": "Display status",
+    "comparison_not_recorded": "This run did not record requirement comparison details.",
     "numeric_warning": (
         "The following model-proposed numeric content did not pass audit and "
         "was not used in the canonical research decision."
@@ -285,6 +295,16 @@ _ZH_LABELS = {
     "recovered_at": "恢复时间",
     "unverified_numeric": "未验证数值草案",
     "numeric_audit_gaps": "未验证派生值",
+    "decision_requirement_audit": "决策关键计算审计",
+    "requirement_comparisons": "Requirement 对照",
+    "requirement_id": "Requirement",
+    "structured_value": "结构化显示值",
+    "canonical_result": "Canonical 计算结果",
+    "comparison_precision": "比较小数位数",
+    "rounded_comparison": "舍入后显示值 / 计算结果",
+    "calculation_status": "计算状态",
+    "display_status": "显示状态",
+    "comparison_not_recorded": "该运行未记录 Requirement 比较详情。",
     "numeric_warning": "以下模型提出的数值内容未通过审计，未用于正式研究结论。",
     "numeric_gap_warning": "以下影响最终结论的派生值尚未通过完整计算审计；定性结论会保留，但这些数值不会进入正式计算记录。",
     "omitted_components": "已省略组件",
@@ -459,6 +479,16 @@ _JA_LABELS = {
     "recovered_at": "復旧日時",
     "unverified_numeric": "未検証の数値ドラフト",
     "numeric_audit_gaps": "未検証の導出値",
+    "decision_requirement_audit": "意思決定上の重要計算監査",
+    "requirement_comparisons": "Requirement 比較",
+    "requirement_id": "Requirement",
+    "structured_value": "構造化表示値",
+    "canonical_result": "Canonical 計算結果",
+    "comparison_precision": "比較する小数桁数",
+    "rounded_comparison": "丸め後の表示値 / 計算結果",
+    "calculation_status": "計算状態",
+    "display_status": "表示状態",
+    "comparison_not_recorded": "この実行では Requirement の比較詳細を記録していません。",
     "numeric_warning": "以下の数値案は監査を通過せず、正式結論には使用されていません。",
     "numeric_gap_warning": "最終判断に影響する以下の導出値は計算監査を完全には通過していません。定性的判断は保持されますが、正式な計算記録から除外されます。",
     "omitted_components": "省略された項目",
@@ -697,7 +727,11 @@ def render_run_export_markdown(run_export: RunExport) -> str:
         sections.extend(
             [
                 "",
-                _render_numeric_audit_appendix(result.numeric_audit, labels),
+                _render_numeric_audit_appendix(
+                    result.numeric_audit,
+                    labels,
+                    evidence_aliases,
+                ),
             ]
         )
 
@@ -1392,16 +1426,85 @@ def _decision_component_label(component_path: str, labels: ExportLabels) -> str:
 def _render_numeric_audit_appendix(
     appendix: DecisionNumericAuditAppendix,
     labels: ExportLabels,
+    evidence_aliases: Mapping[str, str],
 ) -> str:
     has_snapshots = bool(appendix.snapshots)
+    has_checks = bool(appendix.requirement_checks)
     lines = [
-        f"## {labels['unverified_numeric'] if has_snapshots else labels['numeric_audit_gaps']}",
-        "",
-        f"> **{labels['warnings']}:** "
-        f"{labels['numeric_warning'] if has_snapshots else labels['numeric_gap_warning']}",
+        f"## {labels['decision_requirement_audit'] if has_checks else labels['unverified_numeric'] if has_snapshots else labels['numeric_audit_gaps']}",
         "",
         f"- {labels['status_label']}: `{appendix.status.value}`",
     ]
+    if has_snapshots or appendix.omitted_components:
+        lines[1:1] = [
+            "",
+            f"> **{labels['warnings']}:** "
+            f"{labels['numeric_warning'] if has_snapshots else labels['numeric_gap_warning']}",
+        ]
+    if appendix.requirement_checks:
+        lines.extend(
+            [
+                "",
+                f"### {labels['requirement_comparisons']}",
+                "",
+                (
+                    f"| {labels['requirement_id']} | {labels['structured_value']} | "
+                    f"{labels['canonical_result']} | {labels['comparison_precision']} | "
+                    f"{labels['calculation_status']} | {labels['display_status']} |"
+                ),
+                "|---|---:|---:|---:|---|---|",
+            ]
+        )
+        for check in appendix.requirement_checks:
+            stated = format_decision_number(
+                float(check.stated_value),
+                check.unit,
+                output_language=labels.language,
+            )
+            canonical = (
+                format_decision_number(
+                    float(check.canonical_result),
+                    check.unit,
+                    output_language=labels.language,
+                )
+                if check.canonical_result is not None
+                else "—"
+            )
+            lines.append(
+                f"| {check.label} (`{check.component_path}`) | {stated} {check.unit} | "
+                f"{canonical}{f' {check.unit}' if check.canonical_result is not None else ''} | "
+                f"{check.fraction_digits} | `{check.calculation_status.value}` | "
+                f"`{check.display_status.value}` |"
+            )
+        for check in appendix.requirement_checks:
+            refs = _render_alias_refs(
+                check.input_evidence_refs,
+                evidence_aliases,
+                labels,
+            )
+            rounded = (
+                f"{check.rounded_stated_value} / {check.rounded_canonical_result}"
+                if check.rounded_stated_value is not None
+                and check.rounded_canonical_result is not None
+                else "—"
+            )
+            lines.extend(
+                [
+                    "",
+                    f"- **{check.label}** (`{check.requirement_id}`)",
+                    f"  - {labels['formula']}: `{check.formula}`",
+                    f"  - {labels['inputs']}: `{json.dumps(check.inputs, ensure_ascii=False, sort_keys=True)}`",
+                    f"  - {labels['rounded_comparison']}: `{rounded}`",
+                    f"  - {labels['evidence']}: {refs or '—'}",
+                ]
+            )
+            if check.issue_codes:
+                lines.append(
+                    f"  - {labels['issues']}: "
+                    + ", ".join(f"`{code}`" for code in check.issue_codes)
+                )
+    elif not has_snapshots and not appendix.omitted_components:
+        lines.extend(["", f"_{labels['comparison_not_recorded']}_"])
     if appendix.omitted_components:
         lines.extend(["", f"### {labels['omitted_components']}"])
         for item in appendix.omitted_components:

@@ -41,6 +41,9 @@ from tradingagents.application.contracts import (
     NumericAuditPhase,
     NumericAuditSnapshot,
     NumericAuditStatus,
+    NumericCalculationStatus,
+    NumericDisplayStatus,
+    NumericRequirementCheck,
     ResearchArtifact,
     ResearchScenarioKind,
     ResearchWarning,
@@ -854,6 +857,28 @@ def test_markdown_export_renders_decision_calculation_uses_and_gap_only_appendix
             decision=decision,
             numeric_audit=DecisionNumericAuditAppendix(
                 status=NumericAuditAppendixStatus.PARTIAL,
+                requirement_checks=(
+                    NumericRequirementCheck(
+                        requirement_id="req_forward_pe",
+                        calculation_id="calc_forward_pe",
+                        component_path="thesis",
+                        label="Forward PE",
+                        stated_value=45.8,
+                        fraction_digits=1,
+                        unit="x",
+                        formula="price / eps",
+                        inputs={"price": 3075, "eps": 37.46},
+                        input_evidence_refs=("ev_0123456789ab",),
+                        canonical_result=3075 / 37.46,
+                        rounded_stated_value=45.8,
+                        rounded_canonical_result=82.1,
+                        calculation_status=NumericCalculationStatus.VERIFIED,
+                        display_status=NumericDisplayStatus.MISMATCHED,
+                        issue_codes=(
+                            "numeric.requirement.req_forward_pe.result_mismatch",
+                        ),
+                    ),
+                ),
                 snapshots=(),
                 omitted_components=(
                     NumericAuditOmission(
@@ -872,7 +897,11 @@ def test_markdown_export_renders_decision_calculation_uses_and_gap_only_appendix
     markdown = render_run_export_markdown(run_export)
 
     assert "Thesis: Forward PE" in markdown
-    assert "## Unverified Derived Values" in markdown
+    assert "## Decision-Critical Calculation Audit" in markdown
+    assert "Structured display value" in markdown
+    assert "45.8 x" in markdown
+    assert "82.09 x" in markdown
+    assert "`mismatched`" in markdown
     assert "Decision-critical derived value · Remaining EPS" in markdown
     assert "Candidate was not parseable" not in markdown
 
