@@ -301,6 +301,34 @@ def _core_envelope(
     )
 
 
+def test_core_envelope_exposes_soft_numeric_requirement_schema() -> None:
+    schema = ResearchDecisionCoreEnvelope.model_json_schema()
+    candidates = schema["properties"]["numeric_requirement_candidates"]
+    candidate = candidates["items"]
+
+    assert candidate["type"] == "object"
+    assert candidate["additionalProperties"] is False
+    assert set(candidate["required"]) == {
+        "id",
+        "component_path",
+        "label",
+        "stated_value",
+        "fraction_digits",
+        "formula",
+        "inputs",
+        "input_evidence_refs",
+        "unit",
+        "limitations",
+    }
+    assert candidate["properties"]["inputs"]["type"] == "array"
+    assert candidate["properties"]["inputs"]["items"] == {
+        "$ref": "#/$defs/CalculationInputDraft"
+    }
+    component_pattern = candidate["properties"]["component_path"]["pattern"]
+    assert "risks\\.\\d+" in component_pattern
+    assert "scenarios\\.(?:base|bull|bear)" in component_pattern
+
+
 class _MarkdownLLM:
     def __init__(self, content: str):
         self.content = content
@@ -1041,6 +1069,9 @@ def test_invalid_numeric_requirement_candidate_does_not_repair_core() -> None:
         "numeric.requirement_candidate.0.input_evidence_refs.missing",
         "numeric.requirement_candidate.0.unit.missing",
         "numeric.requirement_candidate.0.limitations.missing",
+    )
+    assert result.numeric_audit.omitted_components[-1].issue_codes == (
+        "numeric.requirements.declared_missing",
     )
     assert [schema for schema, _prompt in llm.prompts].count(
         "ResearchDecisionCoreEnvelope"
