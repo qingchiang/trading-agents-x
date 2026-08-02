@@ -728,7 +728,10 @@ test("shows decision audit gaps without an empty candidate viewer", async () => 
         component_path: "thesis",
         component_type: "decision_claim",
         reference_label: "Forward PE",
-        issue_codes: ["numeric.requirement.req_guidance_pe.missing_calculation"],
+        issue_codes: [
+          "numeric.requirement_candidate.0.inputs.list_type",
+          "numeric.requirement_candidate.0.limitations.missing",
+        ],
       },
     ],
     snapshots: [],
@@ -744,6 +747,12 @@ test("shows decision audit gaps without an empty candidate viewer", async () => 
   const summary = await screen.findByText("Unverified derived values");
   fireEvent.click(summary);
   expect(screen.getByText("Decision claim · Forward PE")).toBeVisible();
+  expect(
+    screen.getByText("numeric.requirement_candidate.0.inputs.list_type"),
+  ).toBeVisible();
+  expect(
+    screen.getByText("numeric.requirement_candidate.0.limitations.missing"),
+  ).toBeVisible();
   expect(
     screen.getByText(
       "These decision-critical derived values were not fully verified. The qualitative decision is retained, but the listed values are excluded from canonical calculations.",
