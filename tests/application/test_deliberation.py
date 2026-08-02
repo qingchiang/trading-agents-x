@@ -54,6 +54,7 @@ from tradingagents.graph.deliberation import (
     ScenarioReferenceRangesDraft,
     ValuationAssessmentDraft,
     _assemble_numeric_draft,
+    _canonicalize_calculation_result,
     _emit_numeric_normalization_event,
     _evaluate_formula,
     _numeric_audit_snapshot,
@@ -2717,6 +2718,26 @@ def test_formula_validation_reports_component_scoped_input_issues(
         )
 
     assert error.value.issue_code == issue
+
+
+@pytest.mark.parametrize(
+    ("unit", "expected"),
+    (
+        ("%", 45.46),
+        (" percent ", 45.46),
+        ("pct", 45.46),
+        ("pp", 0.4546),
+        ("percentage points", 0.4546),
+        ("bps", 0.4546),
+        ("x", 0.4546),
+        ("JPY", 0.4546),
+    ),
+)
+def test_calculation_result_uses_unit_aware_canonical_values(
+    unit: str,
+    expected: float,
+) -> None:
+    assert _canonicalize_calculation_result(0.4546, unit) == pytest.approx(expected)
 
 
 def test_final_decision_recomputes_optional_calculation_result() -> None:

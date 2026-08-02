@@ -2145,9 +2145,14 @@ def _assemble_numeric_draft(
                 required=True,
             )
             inputs = item.input_mapping()
-            calculated = _evaluate_formula(
+            raw_calculated = _evaluate_formula(
                 item.formula,
                 inputs,
+                issue_prefix=prefix,
+            )
+            calculated = _canonicalize_calculation_result(
+                raw_calculated,
+                item.unit,
                 issue_prefix=prefix,
             )
             resolved_date = _latest_evidence_date(
@@ -3090,3 +3095,21 @@ def _evaluate_formula(
     if not math.isfinite(result):
         raise OutputValidationError(f"{issue_prefix}.formula.non_finite_result")
     return result
+
+
+_PERCENT_CALCULATION_UNITS = {"%", "PCT", "PERCENT"}
+
+
+def _canonicalize_calculation_result(
+    result: float,
+    unit: str,
+    *,
+    issue_prefix: str = "calculation",
+) -> float:
+    """Convert a safe formula result into the public unit's canonical value."""
+
+    normalized_unit = unit.strip().upper()
+    canonical = result * 100 if normalized_unit in _PERCENT_CALCULATION_UNITS else result
+    if not math.isfinite(canonical):
+        raise OutputValidationError(f"{issue_prefix}.formula.non_finite_result")
+    return canonical
