@@ -1185,6 +1185,14 @@ def invoke_research_decision(
                 raise OutputValidationError("decision.risk_review.missing_role")
         if any(item.source_role not in risk_roles for item in result.risk_review_adjustments):
             raise OutputValidationError("decision.risk_review.unknown_role")
+        for adjustment in result.risk_review_adjustments:
+            require_text(adjustment.subject)
+            require_text(adjustment.explanation)
+            require_valid_refs(
+                adjustment.evidence_refs,
+                set(valid_refs),
+                required=False,
+            )
         return result
 
     core_example = ResearchDecisionCoreEnvelope(
@@ -1341,6 +1349,16 @@ def invoke_research_decision(
         calculation_records=numeric.calculation_records,
         risk_review_adjustments=core_value.risk_review_adjustments,
         numeric_audit_status=numeric.status,
+    )
+    require_valid_refs(
+        decision.evidence_refs,
+        set(valid_refs),
+        required=True,
+    )
+    require_valid_refs(
+        decision.memory_refs,
+        set(valid_memory_refs),
+        required=False,
     )
     return ResearchDecisionOutput(
         value=decision,

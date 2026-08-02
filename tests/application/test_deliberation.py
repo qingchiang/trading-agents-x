@@ -33,6 +33,7 @@ from tradingagents.application.contracts import (
     ReportLanguage,
     ResearchScenarioKind,
     RiskReview,
+    RiskReviewAdjustment,
     ScenarioReferenceCategory,
     ScenarioReferenceRange,
     ValuationAssessment,
@@ -1038,6 +1039,63 @@ def test_invalid_numeric_requirement_candidate_does_not_repair_core() -> None:
     assert [schema for schema, _prompt in llm.prompts].count(
         "ResearchDecisionCoreEnvelope"
     ) == 1
+
+
+def test_unknown_risk_adjustment_evidence_remains_a_core_failure() -> None:
+    state = _state()
+    state["risk_reviews"] = {"integrated": {}}
+    ref = state["evidence_bundle"]["items"][0]["ref"]
+    core = _core_draft_from_decision(
+        research_decision(evidence_refs=(ref,)).model_dump(mode="json")
+    )
+    invalid = core.model_copy(
+        update={
+            "risk_review_adjustments": (
+                RiskReviewAdjustment(
+                    source_role="integrated",
+                    disposition="modified",
+                    subject="Risk calibration",
+                    explanation="The risk review changed confidence.",
+                    evidence_refs=("ev_deadbeefdead",),
+                ),
+            )
+        }
+    )
+    repaired = core.model_copy(
+        update={
+            "risk_review_adjustments": (
+                RiskReviewAdjustment(
+                    source_role="integrated",
+                    disposition="modified",
+                    subject="Risk calibration",
+                    explanation="The risk review changed confidence.",
+                    evidence_refs=(ref,),
+                ),
+            )
+        }
+    )
+    llm = _SequenceLLM(
+        {
+            "ResearchDecisionCoreEnvelope": [
+                _core_envelope(invalid),
+                _core_envelope(repaired),
+            ],
+            "DecisionNumericDraft": [DecisionNumericDraft(requested=False)],
+        }
+    )
+
+    result = invoke_research_decision(
+        llm,
+        prompt="Form the final decision.",
+        state=state,
+        node="committee.final",
+        require_risk_adjustments=True,
+    )
+
+    assert result.value.risk_review_adjustments[0].evidence_refs == (ref,)
+    assert [schema for schema, _prompt in llm.prompts].count(
+        "ResearchDecisionCoreEnvelope"
+    ) == 2
 
 
 def test_missing_decision_calculation_degrades_numeric_audit_only_once() -> None:
