@@ -3,6 +3,8 @@
   {"value": 4925.79, "unit": "JPY", "language": "ja", "expected": "4,925.79"},
   {"value": 5267, "unit": "JPY", "language": "en", "expected": "5,267"},
   {"value": 12.3456, "unit": "%", "language": "zh-CN", "expected": "12.35"},
+  {"value": -61.321073343630104, "unit": "%", "language": "zh-CN", "expected": "-61.32"},
+  {"value": 45.45570342205322, "unit": "%", "language": "zh-CN", "expected": "45.46"},
   {"value": 26.2345, "unit": "x", "language": "en", "expected": "26.23"},
   {"value": 0.001234567, "unit": "USD", "language": "en", "expected": "0.001235"},
   {"value": 1234.56789, "unit": "units", "language": "ja", "expected": "1,234.5679"},

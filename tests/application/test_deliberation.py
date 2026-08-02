@@ -379,6 +379,9 @@ _NUMERIC_REGRESSION_FIXTURE = (
 _NUMERIC_3778_FIXTURE = (
     Path(__file__).parent / "fixtures" / "3778_numeric_normalization.json"
 )
+_NUMERIC_9984_FIXTURE = (
+    Path(__file__).parent / "fixtures" / "9984_percentage_audit.json"
+)
 
 
 def _numeric_regression_payload() -> dict[str, Any]:
@@ -387,6 +390,10 @@ def _numeric_regression_payload() -> dict[str, Any]:
 
 def _numeric_3778_payload() -> dict[str, Any]:
     return json.loads(_NUMERIC_3778_FIXTURE.read_text(encoding="utf-8"))
+
+
+def _numeric_9984_payload() -> dict[str, Any]:
+    return json.loads(_NUMERIC_9984_FIXTURE.read_text(encoding="utf-8"))
 
 
 def _numeric_regression() -> tuple[EvidenceBundle, DecisionNumericDraft]:
@@ -1457,6 +1464,80 @@ def test_decision_requirements_use_decimal_rounding_and_publish_all_uses() -> No
         "risks.0",
         "risk_review_adjustments.0.explanation",
     ]
+
+
+def test_9984_percentage_requirements_complete_without_numeric_repair() -> None:
+    payload = _numeric_9984_payload()
+    state = _state()
+    ref = state["evidence_bundle"]["items"][0]["ref"]
+    core = _core_draft_from_decision(
+        research_decision(evidence_refs=(ref,)).model_dump(mode="json")
+    )
+    requirements = tuple(
+        DecisionNumericRequirementDraft(
+            id=item["id"],
+            component_path=item["component_path"],
+            label=item["label"],
+            stated_value=item["stated_value"],
+            fraction_digits=item["fraction_digits"],
+            formula=item["formula"],
+            inputs=tuple(
+                CalculationInputDraft(name=name, value=value)
+                for name, value in item["inputs"].items()
+            ),
+            input_evidence_refs=(ref,),
+            unit=item["unit"],
+            limitations=("Live regression fixture limitation.",),
+        )
+        for item in payload["requirements"]
+    )
+    numeric = DecisionNumericDraft(
+        requested=True,
+        calculation_records=tuple(
+            CalculationRecordDraft(
+                id=f"calc_{requirement.id.removeprefix('req_')}",
+                formula=requirement.formula,
+                inputs=requirement.inputs,
+                input_evidence_refs=requirement.input_evidence_refs,
+                unit=requirement.unit,
+                limitations=requirement.limitations,
+                requirement_ids=(requirement.id,),
+            )
+            for requirement in requirements
+        ),
+    )
+    llm = _SequenceLLM(
+        {
+            "ResearchDecisionCoreEnvelope": [
+                _core_envelope(core, requirements=requirements)
+            ],
+            "DecisionNumericDraft": [numeric],
+        }
+    )
+
+    result = invoke_research_decision(
+        llm,
+        prompt="Form the final decision.",
+        state=state,
+        node="committee.final",
+        require_risk_adjustments=False,
+    )
+
+    assert result.value.numeric_audit_status is NumericAuditStatus.COMPLETE
+    assert result.numeric_audit is None
+    assert [schema for schema, _prompt in llm.prompts].count(
+        "DecisionNumericDraft"
+    ) == 1
+    assert len(result.value.calculation_records) == 5
+    expected = [item["expected_result"] for item in payload["requirements"]]
+    assert [item.result for item in result.value.calculation_records] == pytest.approx(
+        expected
+    )
+    assert all(item.decision_uses for item in result.value.calculation_records)
+    serialized = json.loads(result.value.model_dump_json())
+    assert [item["result"] for item in serialized["calculation_records"]] == pytest.approx(
+        expected
+    )
 
 
 @pytest.mark.parametrize(
