@@ -49,6 +49,9 @@ from tradingagents.application.contracts import (
     NumericAuditPhase,
     NumericAuditSnapshot,
     NumericAuditStatus,
+    NumericCalculationStatus,
+    NumericDisplayStatus,
+    NumericRequirementCheck,
     NumericTemporalBasis,
     RebuttalReview,
     ReportLanguage,
@@ -1491,7 +1494,10 @@ class _NumericDecisionAssembly:
     status: NumericAuditStatus
     warnings: tuple[ResearchWarning, ...] = ()
     issues: tuple[str, ...] = ()
+    repair_issues: tuple[str, ...] = ()
+    audit_issues: tuple[str, ...] = ()
     omissions: tuple[NumericAuditOmission, ...] = ()
+    requirement_checks: tuple[NumericRequirementCheck, ...] = ()
     audit: DecisionNumericAuditAppendix | None = None
     promoted_singletons: int = 0
     reordered_ranges: int = 0
@@ -1535,6 +1541,11 @@ def _apply_requirement_preflight(
     )
     audit = DecisionNumericAuditAppendix(
         status=appendix_status,
+        requirement_checks=(
+            assembly.audit.requirement_checks
+            if assembly.audit is not None
+            else assembly.requirement_checks
+        ),
         snapshots=(assembly.audit.snapshots if assembly.audit is not None else ()),
         omitted_components=tuple(
             dict.fromkeys(
@@ -1836,6 +1847,10 @@ def _invoke_decision_numeric(
                     if requirements
                     else NumericAuditStatus.INCOMPLETE
                 ),
+                requirement_checks=_missing_requirement_checks(
+                    requirements,
+                    issue_suffix="missing_calculation",
+                ),
             )
             return _emit_numeric_normalization_event(
                 replace(
@@ -1857,6 +1872,7 @@ def _invoke_decision_numeric(
                                 or ("numeric.appendix.invalid",),
                             ),
                         ),
+                        requirement_checks=empty.requirement_checks,
                     ),
                 ),
                 event_writer=event_writer,
@@ -1897,6 +1913,7 @@ def _invoke_decision_numeric(
                     ),
                     failures=exc.failures,
                     omissions=assembly.omissions,
+                    requirement_checks=assembly.requirement_checks,
                 ),
             ),
             event_writer=event_writer,
@@ -1919,6 +1936,7 @@ def _invoke_decision_numeric(
                     status=NumericAuditAppendixStatus.RECOVERED,
                     failures=output.failed_attempts,
                     omissions=(),
+                    requirement_checks=assembly.requirement_checks,
                 ),
             ),
             event_writer=event_writer,
@@ -1953,10 +1971,12 @@ def _numeric_audit_appendix(
     status: NumericAuditAppendixStatus,
     failures: tuple[StructuredOutputFailure, ...],
     omissions: tuple[NumericAuditOmission, ...],
+    requirement_checks: tuple[NumericRequirementCheck, ...] = (),
 ) -> DecisionNumericAuditAppendix:
     snapshots = tuple(_numeric_audit_snapshot(failure) for failure in failures)
     return DecisionNumericAuditAppendix(
         status=status,
+        requirement_checks=requirement_checks,
         snapshots=snapshots[-2:],
         omitted_components=omissions,
     )
@@ -2067,6 +2087,7 @@ def _empty_numeric_assembly(
     *,
     node: str,
     status: NumericAuditStatus,
+    requirement_checks: tuple[NumericRequirementCheck, ...] = (),
 ) -> _NumericDecisionAssembly:
     return _NumericDecisionAssembly(
         scenario_reference_ranges={},
@@ -2074,6 +2095,7 @@ def _empty_numeric_assembly(
         market_reference_levels=(),
         calculation_records=(),
         status=status,
+        requirement_checks=requirement_checks,
         warnings=(
             ResearchWarning(
                 code=f"decision.numeric_audit_{status.value}",
@@ -2135,6 +2157,55 @@ def _market_reference_identity(level: MarketReferenceLevel) -> str:
     )
 
 
+def _requirement_check(
+    requirement: DecisionNumericRequirementDraft,
+    *,
+    calculation_status: NumericCalculationStatus,
+    display_status: NumericDisplayStatus,
+    calculation_id: str | None = None,
+    canonical_result: int | float | None = None,
+    rounded_stated_value: int | float | None = None,
+    rounded_canonical_result: int | float | None = None,
+    issue_codes: tuple[str, ...] = (),
+) -> NumericRequirementCheck:
+    return NumericRequirementCheck(
+        requirement_id=requirement.id,
+        calculation_id=calculation_id,
+        component_path=requirement.component_path,
+        label=requirement.label,
+        stated_value=requirement.stated_value,
+        fraction_digits=requirement.fraction_digits,
+        unit=requirement.unit,
+        formula=requirement.formula,
+        inputs=requirement_input_mapping(requirement),
+        input_evidence_refs=requirement.input_evidence_refs,
+        canonical_result=canonical_result,
+        rounded_stated_value=rounded_stated_value,
+        rounded_canonical_result=rounded_canonical_result,
+        calculation_status=calculation_status,
+        display_status=display_status,
+        issue_codes=issue_codes,
+    )
+
+
+def _missing_requirement_checks(
+    requirements: tuple[DecisionNumericRequirementDraft, ...],
+    *,
+    issue_suffix: str,
+) -> tuple[NumericRequirementCheck, ...]:
+    return tuple(
+        _requirement_check(
+            requirement,
+            calculation_status=NumericCalculationStatus.MISSING,
+            display_status=NumericDisplayStatus.NOT_CHECKED,
+            issue_codes=(
+                f"numeric.requirement.{requirement.id}.{issue_suffix}",
+            ),
+        )
+        for requirement in requirements
+    )
+
+
 def _assemble_numeric_draft(
     draft: DecisionNumericDraft,
     *,
@@ -2146,10 +2217,13 @@ def _assemble_numeric_draft(
     output_language: str = ReportLanguage.ENGLISH.prompt_label,
     requirements: tuple[DecisionNumericRequirementDraft, ...] = (),
 ) -> _NumericDecisionAssembly:
-    issues: list[str] = []
+    repair_issues: list[str] = []
+    audit_issues: list[str] = []
     calculations: dict[str, CalculationRecord] = {}
     calculation_drafts: dict[str, CalculationRecordDraft] = {}
     raw_calculation_results: dict[str, float] = {}
+    requirement_by_id = {item.id: item for item in requirements}
+    requirement_checks: dict[str, NumericRequirementCheck] = {}
     evidence_items = {item.ref: item for item in bundle.items}
     duplicate_ids = {
         item.id
@@ -2159,7 +2233,7 @@ def _assemble_numeric_draft(
     for item in draft.calculation_records:
         prefix = f"numeric.calculation.{item.id}"
         if item.id in duplicate_ids:
-            issues.append(f"{prefix}.duplicate_id")
+            repair_issues.append(f"{prefix}.duplicate_id")
             continue
         try:
             require_nonempty_texts(item.limitations)
@@ -2199,21 +2273,32 @@ def _assemble_numeric_draft(
             calculation_drafts[item.id] = item
             raw_calculation_results[item.id] = raw_calculated
         except OutputValidationError as exc:
-            issues.append(exc.issue_code)
+            repair_issues.append(exc.issue_code)
+            for requirement_id in item.requirement_ids:
+                requirement = requirement_by_id.get(requirement_id)
+                if requirement is not None:
+                    requirement_checks[requirement_id] = _requirement_check(
+                        requirement,
+                        calculation_id=item.id,
+                        calculation_status=NumericCalculationStatus.INVALID,
+                        display_status=NumericDisplayStatus.NOT_CHECKED,
+                        issue_codes=(exc.issue_code,),
+                    )
 
-    requirement_by_id = {item.id: item for item in requirements}
     requirement_uses: dict[str, list[DecisionCalculationUse]] = {}
     covered_requirements: set[str] = set()
     for calculation_id, item in calculation_drafts.items():
         for requirement_id in item.requirement_ids:
             requirement = requirement_by_id.get(requirement_id)
             if requirement is None:
-                issues.append(
+                repair_issues.append(
                     f"numeric.calculation.{calculation_id}.unknown_requirement"
                 )
                 continue
             prefix = f"numeric.requirement.{requirement_id}"
             mismatch: str | None = None
+            canonical_value: Decimal | None = None
+            stated_value: Decimal | None = None
             if _formula_identity(item.formula) != _formula_identity(requirement.formula):
                 mismatch = "formula_mismatch"
             elif item.input_mapping() != requirement_input_mapping(requirement):
@@ -2224,15 +2309,17 @@ def _assemble_numeric_draft(
                 mismatch = "unit_mismatch"
             else:
                 quantum = Decimal(1).scaleb(-requirement.fraction_digits)
-                canonical = Decimal(str(calculations[calculation_id].result)).quantize(
+                canonical_value = Decimal(
+                    str(calculations[calculation_id].result)
+                ).quantize(
                     quantum,
                     rounding=ROUND_HALF_UP,
                 )
-                stated = Decimal(str(requirement.stated_value)).quantize(
+                stated_value = Decimal(str(requirement.stated_value)).quantize(
                     quantum,
                     rounding=ROUND_HALF_UP,
                 )
-                if canonical != stated:
+                if canonical_value != stated_value:
                     raw_result = Decimal(
                         str(raw_calculation_results[calculation_id])
                     ).quantize(
@@ -2242,11 +2329,39 @@ def _assemble_numeric_draft(
                     mismatch = (
                         "percent_scale_mismatch"
                         if _is_percent_calculation_unit(item.unit)
-                        and raw_result == stated
+                        and raw_result == stated_value
                         else "result_mismatch"
                     )
             if mismatch is not None:
-                issues.append(f"{prefix}.{mismatch}")
+                issue = f"{prefix}.{mismatch}"
+                if mismatch == "result_mismatch":
+                    audit_issues.append(issue)
+                    covered_requirements.add(requirement_id)
+                    requirement_uses.setdefault(calculation_id, []).append(
+                        DecisionCalculationUse(
+                            component_path=requirement.component_path,
+                            label=requirement.label,
+                        )
+                    )
+                    requirement_checks[requirement_id] = _requirement_check(
+                        requirement,
+                        calculation_id=calculation_id,
+                        canonical_result=calculations[calculation_id].result,
+                        rounded_stated_value=float(stated_value),
+                        rounded_canonical_result=float(canonical_value),
+                        calculation_status=NumericCalculationStatus.VERIFIED,
+                        display_status=NumericDisplayStatus.MISMATCHED,
+                        issue_codes=(issue,),
+                    )
+                    continue
+                repair_issues.append(issue)
+                requirement_checks[requirement_id] = _requirement_check(
+                    requirement,
+                    calculation_id=calculation_id,
+                    calculation_status=NumericCalculationStatus.INVALID,
+                    display_status=NumericDisplayStatus.NOT_CHECKED,
+                    issue_codes=(issue,),
+                )
                 continue
             covered_requirements.add(requirement_id)
             requirement_uses.setdefault(calculation_id, []).append(
@@ -2255,12 +2370,32 @@ def _assemble_numeric_draft(
                     label=requirement.label,
                 )
             )
+            requirement_checks[requirement_id] = _requirement_check(
+                requirement,
+                calculation_id=calculation_id,
+                canonical_result=calculations[calculation_id].result,
+                rounded_stated_value=float(stated_value),
+                rounded_canonical_result=float(canonical_value),
+                calculation_status=NumericCalculationStatus.VERIFIED,
+                display_status=NumericDisplayStatus.MATCHED,
+            )
 
     for requirement in requirements:
         if requirement.id not in covered_requirements:
             issue = f"numeric.requirement.{requirement.id}.missing_calculation"
-            if not any(item.startswith(f"numeric.requirement.{requirement.id}.") for item in issues):
-                issues.append(issue)
+            existing_issues = (*repair_issues, *audit_issues)
+            if not any(
+                item.startswith(f"numeric.requirement.{requirement.id}.")
+                for item in existing_issues
+            ):
+                repair_issues.append(issue)
+            if requirement.id not in requirement_checks:
+                requirement_checks[requirement.id] = _requirement_check(
+                    requirement,
+                    calculation_status=NumericCalculationStatus.MISSING,
+                    display_status=NumericDisplayStatus.NOT_CHECKED,
+                    issue_codes=(issue,),
+                )
 
     calculations = {
         calculation_id: calculation.model_copy(
@@ -2295,17 +2430,17 @@ def _assemble_numeric_draft(
                 owner=scenario_kind,
                 output_language=output_language,
             ):
-                issues.append(f"{prefix}.scenario_mismatch")
+                repair_issues.append(f"{prefix}.scenario_mismatch")
                 continue
             if _valuation_label_requires_calculation(scenario):
-                issues.append(f"{prefix}.derived_calculation_required")
+                repair_issues.append(f"{prefix}.derived_calculation_required")
                 continue
             try:
                 require_text(scenario.label)
                 require_text(scenario.interpretation)
                 require_nonempty_texts(scenario.limitations)
             except OutputValidationError as exc:
-                issues.append(f"{prefix}.{exc.issue_code}")
+                repair_issues.append(f"{prefix}.{exc.issue_code}")
                 continue
             endpoints: dict[str, AuditedRangeEndpoint] = {}
             for endpoint_name, endpoint_draft in (
@@ -2323,7 +2458,7 @@ def _assemble_numeric_draft(
                         issue_prefix=f"{prefix}.{endpoint_name}",
                     )
                 except OutputValidationError as exc:
-                    issues.append(exc.issue_code)
+                    repair_issues.append(exc.issue_code)
             if set(endpoints) != {"low", "high"}:
                 continue
             try:
@@ -2334,7 +2469,7 @@ def _assemble_numeric_draft(
                     issue_prefix=prefix,
                 )
             except OutputValidationError as exc:
-                issues.append(exc.issue_code)
+                repair_issues.append(exc.issue_code)
                 continue
             if endpoints["high"].value == endpoints["low"].value:
                 if _same_numeric_endpoint_identity(scenario.low, scenario.high):
@@ -2362,7 +2497,7 @@ def _assemble_numeric_draft(
                     if endpoint.calculation_id is not None:
                         linked_ids.add(endpoint.calculation_id)
                     continue
-                issues.append(f"{prefix}.invalid_range")
+                repair_issues.append(f"{prefix}.invalid_range")
                 continue
             if endpoints["high"].value < endpoints["low"].value:
                 endpoints["low"], endpoints["high"] = (
@@ -2427,7 +2562,7 @@ def _assemble_numeric_draft(
                 issue_prefix=f"{prefix}.high",
             )
         except OutputValidationError as exc:
-            issues.append(exc.issue_code)
+            repair_issues.append(exc.issue_code)
         else:
             if high.value < low.value:
                 low, high = high, low
@@ -2449,7 +2584,7 @@ def _assemble_numeric_draft(
                 or low_measurement[1] is None
                 or low_measurement != high_measurement
             ):
-                issues.append(f"{prefix}.measurement_mismatch")
+                repair_issues.append(f"{prefix}.measurement_mismatch")
             else:
                 valuation = ValuationAssessment(
                     method=item.method,
@@ -2540,7 +2675,7 @@ def _assemble_numeric_draft(
             if isinstance(item, ObservedMarketReferenceLevelDraft):
                 date_evidence_refs = catalog_entry.evidence_refs
         except OutputValidationError as exc:
-            issues.append(exc.issue_code)
+            repair_issues.append(exc.issue_code)
         else:
             reference_levels.append(
                 MarketReferenceLevel(
@@ -2570,23 +2705,23 @@ def _assemble_numeric_draft(
 
     orphaned = set(calculations).difference(linked_ids)
     for calculation_id in sorted(orphaned):
-        issues.append(f"numeric.calculation.{calculation_id}.orphaned")
+        repair_issues.append(f"numeric.calculation.{calculation_id}.orphaned")
     if draft.requested and not (
         scenario_values or valuation is not None or reference_levels or linked_ids
     ):
-        issues.append("numeric.requested.empty")
+        repair_issues.append("numeric.requested.empty")
     if not draft.requested and (
         draft.scenario_reference_ranges.has_content()
         or draft.valuation_assessment is not None
         or draft.market_reference_levels
         or draft.calculation_records
     ):
-        issues.append("numeric.not_requested.has_content")
+        repair_issues.append("numeric.not_requested.has_content")
 
-    if issues and not salvage:
+    if repair_issues and not salvage:
         raise OutputValidationError(
-            issues[0],
-            issue_codes=tuple(issues),
+            repair_issues[0],
+            issue_codes=tuple(repair_issues),
         )
 
     kept_calculations = tuple(
@@ -2599,18 +2734,28 @@ def _assemble_numeric_draft(
     )
     omissions = _numeric_omissions(
         draft,
-        tuple(issues),
+        tuple(repair_issues),
         requirements=requirements,
     )
-    if issues:
+    all_issues = tuple(dict.fromkeys((*repair_issues, *audit_issues)))
+    if all_issues:
         status = (
             NumericAuditStatus.PARTIAL
             if has_content or requirements
             else NumericAuditStatus.INCOMPLETE
         )
         omitted = ", ".join(item.reference_label or item.component_path for item in omissions)
-        warnings = (
+        warning = (
             ResearchWarning(
+                code="decision.numeric_display_mismatch",
+                message=(
+                    "A decision-critical calculation was valid, but its canonical "
+                    "result did not match the value stated in the decision text."
+                ),
+                source=node,
+            )
+            if audit_issues and not repair_issues
+            else ResearchWarning(
                 code=f"decision.numeric_audit_{status.value}",
                 message=(
                     "Optional numeric components were omitted because their "
@@ -2619,12 +2764,24 @@ def _assemble_numeric_draft(
                     + " The qualitative decision remains audited."
                 ),
                 source=node,
-            ),
-            *duplicate_warnings,
+            )
         )
+        warnings = (warning, *duplicate_warnings)
     else:
         status = NumericAuditStatus.COMPLETE if has_content else NumericAuditStatus.NOT_APPLICABLE
         warnings = tuple(duplicate_warnings)
+    appendix_status = (
+        NumericAuditAppendixStatus.COMPLETE
+        if status is NumericAuditStatus.COMPLETE
+        else NumericAuditAppendixStatus.PARTIAL
+        if status is NumericAuditStatus.PARTIAL
+        else NumericAuditAppendixStatus.INCOMPLETE
+    )
+    checks = tuple(
+        requirement_checks[item.id]
+        for item in requirements
+        if item.id in requirement_checks
+    )
     return _NumericDecisionAssembly(
         scenario_reference_ranges=scenario_values,
         valuation_assessment=valuation,
@@ -2632,8 +2789,21 @@ def _assemble_numeric_draft(
         calculation_records=kept_calculations,
         status=status,
         warnings=warnings,
-        issues=tuple(issues),
+        issues=all_issues,
+        repair_issues=tuple(repair_issues),
+        audit_issues=tuple(audit_issues),
         omissions=omissions,
+        requirement_checks=checks,
+        audit=(
+            DecisionNumericAuditAppendix(
+                status=appendix_status,
+                requirement_checks=checks,
+                snapshots=(),
+                omitted_components=omissions,
+            )
+            if requirements
+            else None
+        ),
         promoted_singletons=len(promoted_references),
         reordered_ranges=reordered_ranges,
     )

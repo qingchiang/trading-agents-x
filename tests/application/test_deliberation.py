@@ -28,6 +28,8 @@ from tradingagents.application.contracts import (
     MeasurementKind,
     NumericAuditAppendixStatus,
     NumericAuditStatus,
+    NumericCalculationStatus,
+    NumericDisplayStatus,
     NumericTemporalBasis,
     RebuttalReview,
     ReportLanguage,
@@ -1524,7 +1526,14 @@ def test_9984_percentage_requirements_complete_without_numeric_repair() -> None:
     )
 
     assert result.value.numeric_audit_status is NumericAuditStatus.COMPLETE
-    assert result.numeric_audit is None
+    assert result.numeric_audit is not None
+    assert result.numeric_audit.status is NumericAuditAppendixStatus.COMPLETE
+    assert len(result.numeric_audit.requirement_checks) == 5
+    assert all(
+        check.calculation_status is NumericCalculationStatus.VERIFIED
+        and check.display_status is NumericDisplayStatus.MATCHED
+        for check in result.numeric_audit.requirement_checks
+    )
     assert [schema for schema, _prompt in llm.prompts].count(
         "DecisionNumericDraft"
     ) == 1
@@ -1594,6 +1603,62 @@ def test_decision_requirement_mismatch_is_rejected(
         )
 
     assert expected_issue in error.value.issue_codes
+
+
+def test_display_mismatch_keeps_verified_calculation_and_comparison() -> None:
+    state = _state()
+    bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
+    ref = bundle.items[0].ref
+    requirement = DecisionNumericRequirementDraft(
+        id="req_guidance_pe",
+        component_path="thesis",
+        label="Forward PE",
+        stated_value=45.8,
+        fraction_digits=1,
+        formula="price / guidance_eps",
+        inputs=(
+            CalculationInputDraft(name="price", value=3834.343755),
+            CalculationInputDraft(name="guidance_eps", value=1),
+        ),
+        input_evidence_refs=(ref,),
+        unit="x",
+        limitations=("Guidance may change.",),
+    )
+    calculation = CalculationRecordDraft(
+        id="calc_guidance_pe",
+        formula=requirement.formula,
+        inputs=requirement.inputs,
+        input_evidence_refs=requirement.input_evidence_refs,
+        unit=requirement.unit,
+        limitations=requirement.limitations,
+        requirement_ids=(requirement.id,),
+    )
+
+    result = _assemble_numeric_draft(
+        DecisionNumericDraft(requested=True, calculation_records=(calculation,)),
+        bundle=bundle,
+        allowed_evidence_refs={ref},
+        value_catalog=_value_catalog(bundle),
+        salvage=False,
+        node="committee.final.serialize.numeric",
+        requirements=(requirement,),
+    )
+
+    assert result.status is NumericAuditStatus.PARTIAL
+    assert len(result.calculation_records) == 1
+    assert result.calculation_records[0].decision_uses[0].component_path == "thesis"
+    assert result.omissions == ()
+    assert result.audit is not None
+    check = result.audit.requirement_checks[0]
+    assert check.calculation_status is NumericCalculationStatus.VERIFIED
+    assert check.display_status is NumericDisplayStatus.MISMATCHED
+    assert check.stated_value == 45.8
+    assert check.canonical_result == pytest.approx(3834.343755)
+    assert check.rounded_stated_value == 45.8
+    assert check.rounded_canonical_result == 3834.3
+    assert check.issue_codes == (
+        "numeric.requirement.req_guidance_pe.result_mismatch",
+    )
 
 
 def test_percent_formula_using_display_scale_reports_specific_mismatch() -> None:
