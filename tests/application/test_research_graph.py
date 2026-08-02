@@ -40,7 +40,7 @@ from tradingagents.graph.deliberation import (
     DecisionNumericDraft,
     JudgeAudit,
     RebuttalAudit,
-    ResearchDecisionCoreDraft,
+    ResearchDecisionCoreEnvelope,
 )
 from tradingagents.graph.research_graph import (
     ResearchGraph,
@@ -116,7 +116,7 @@ class _StructuredInvoker:
                     ),
                 ),
             )
-        elif self.schema is ResearchDecisionCoreDraft:
+        elif self.schema is ResearchDecisionCoreEnvelope:
             risk_roles = tuple(
                 role
                 for role in (
@@ -158,7 +158,13 @@ class _StructuredInvoker:
             payload.pop("numeric_audit_status", None)
             for scenario in payload["scenarios"]:
                 scenario.pop("reference_ranges", None)
-            parsed = ResearchDecisionCoreDraft.model_validate(payload)
+            parsed = ResearchDecisionCoreEnvelope.model_validate(
+                {
+                    **payload,
+                    "numeric_requirements_declared": False,
+                    "numeric_requirement_candidates": [],
+                }
+            )
         elif self.schema is DecisionNumericDraft:
             parsed = DecisionNumericDraft(requested=False)
         else:
@@ -403,7 +409,7 @@ def test_profiles_share_contract_but_use_distinct_topologies(
         final_prompt = next(
             prompt
             for schema, prompt in deep.calls
-            if schema == "ResearchDecisionCoreDraft"
+            if schema == "ResearchDecisionCoreEnvelope"
         )
         assert "DECISION SYNTHESIS BRIEF:" in final_prompt
         assert "RESEARCH CONTEXT:" not in final_prompt
@@ -439,7 +445,7 @@ def test_profiles_share_contract_but_use_distinct_topologies(
                 "AnalystAuditDraft",
             },
             {
-                "ResearchDecisionCoreDraft",
+                "ResearchDecisionCoreEnvelope",
                 "DecisionNumericDraft",
                 "ResearchMarkdown",
             },
@@ -455,7 +461,7 @@ def test_profiles_share_contract_but_use_distinct_topologies(
             },
             {
                 "JudgeAudit",
-                "ResearchDecisionCoreDraft",
+                "ResearchDecisionCoreEnvelope",
                 "DecisionNumericDraft",
                 "ResearchMarkdown",
             },
@@ -470,7 +476,7 @@ def test_profiles_share_contract_but_use_distinct_topologies(
                 "DebateAgenda",
                 "RebuttalAudit",
                 "JudgeAudit",
-                "ResearchDecisionCoreDraft",
+                "ResearchDecisionCoreEnvelope",
                 "DecisionNumericDraft",
                 "ResearchMarkdown",
             },

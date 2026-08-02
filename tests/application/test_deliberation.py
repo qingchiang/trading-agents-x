@@ -48,6 +48,7 @@ from tradingagents.graph.deliberation import (
     ObservedMarketReferenceLevelDraft,
     ObservedRangeEndpointDraft,
     ResearchDecisionCoreDraft,
+    ResearchDecisionCoreEnvelope,
     ScenarioReferenceRangeDraft,
     ScenarioReferenceRangesDraft,
     ValuationAssessmentDraft,
@@ -85,14 +86,20 @@ class _StaticInvoker:
         parsed = self.owner.value
         if hasattr(parsed, "model_dump"):
             payload = parsed.model_dump(mode="json")
-            if self.schema is ResearchDecisionCoreDraft:
+            if self.schema is ResearchDecisionCoreEnvelope:
                 payload.pop("valuation_assessment", None)
                 payload.pop("market_reference_levels", None)
                 payload.pop("calculation_records", None)
                 payload.pop("numeric_audit_status", None)
                 for scenario in payload["scenarios"]:
                     scenario.pop("reference_ranges", None)
-                parsed = ResearchDecisionCoreDraft.model_validate(payload)
+                parsed = ResearchDecisionCoreEnvelope.model_validate(
+                    {
+                        **payload,
+                        "numeric_requirements_declared": False,
+                        "numeric_requirement_candidates": [],
+                    }
+                )
             elif self.schema is DecisionNumericDraft:
                 parsed = _numeric_draft_from_decision(payload)
         return {"raw": None, "parsed": parsed}
@@ -272,6 +279,25 @@ def _core_draft_from_decision(payload: dict[str, Any]) -> ResearchDecisionCoreDr
         for scenario in payload["scenarios"]
     ]
     return ResearchDecisionCoreDraft.model_validate(payload)
+
+
+def _core_envelope(
+    core: ResearchDecisionCoreDraft,
+    *,
+    requirements: tuple[DecisionNumericRequirementDraft, ...] = (),
+    declared: bool | None = None,
+) -> ResearchDecisionCoreEnvelope:
+    return ResearchDecisionCoreEnvelope.model_validate(
+        {
+            **core.model_dump(mode="json"),
+            "numeric_requirements_declared": (
+                bool(requirements) if declared is None else declared
+            ),
+            "numeric_requirement_candidates": [
+                item.model_dump(mode="json") for item in requirements
+            ],
+        }
+    )
 
 
 class _MarkdownLLM:
@@ -869,7 +895,7 @@ def test_numeric_serializer_repairs_seven_invalid_input_names() -> None:
     )
     llm = _SequenceLLM(
         {
-            "ResearchDecisionCoreDraft": [core],
+            "ResearchDecisionCoreEnvelope": [_core_envelope(core)],
             "DecisionNumericDraft": [invalid_numeric, recovered_numeric],
         }
     )
@@ -902,32 +928,27 @@ def test_numeric_serializer_repairs_seven_invalid_input_names() -> None:
 def test_core_declares_decision_critical_numeric_requirement() -> None:
     state = _state()
     ref = state["evidence_bundle"]["items"][0]["ref"]
-    core = _core_draft_from_decision(
+    core_draft = _core_draft_from_decision(
         research_decision(evidence_refs=(ref,)).model_dump(mode="json")
     ).model_copy(
-        update={
-            "thesis": "The decision-critical earnings multiple is 82.1x.",
-            "numeric_requirements": (
-                DecisionNumericRequirementDraft(
-                    id="req_guidance_pe",
-                    component_path="thesis",
-                    label="Company-guidance forward PE",
-                    display_text="82.1x",
-                    stated_value=82.1,
-                    fraction_digits=1,
-                    formula="price / eps",
-                    inputs=(
-                        CalculationInputDraft(name="price", value=3075),
-                        CalculationInputDraft(name="eps", value=37.46),
-                    ),
-                    input_evidence_refs=(ref,),
-                    unit="x",
-                    limitations=("Guidance may change.",),
-                ),
-            ),
-        }
+        update={"thesis": "The decision-critical earnings multiple is 82.1x."}
     )
-    requirement = core.numeric_requirements[0]
+    requirement = DecisionNumericRequirementDraft(
+        id="req_guidance_pe",
+        component_path="thesis",
+        label="Company-guidance forward PE",
+        stated_value=82.1,
+        fraction_digits=1,
+        formula="price / eps",
+        inputs=(
+            CalculationInputDraft(name="price", value=3075),
+            CalculationInputDraft(name="eps", value=37.46),
+        ),
+        input_evidence_refs=(ref,),
+        unit="x",
+        limitations=("Guidance may change.",),
+    )
+    core = _core_envelope(core_draft, requirements=(requirement,))
     recovered_numeric = DecisionNumericDraft(
         requested=True,
         calculation_records=(
@@ -944,7 +965,7 @@ def test_core_declares_decision_critical_numeric_requirement() -> None:
     )
     llm = _SequenceLLM(
         {
-            "ResearchDecisionCoreDraft": [core],
+            "ResearchDecisionCoreEnvelope": [core],
             "DecisionNumericDraft": [
                 DecisionNumericDraft(requested=False),
                 recovered_numeric,
@@ -967,43 +988,79 @@ def test_core_declares_decision_critical_numeric_requirement() -> None:
     assert result.value.calculation_records[0].decision_uses[0].component_path == "thesis"
     assert result.numeric_audit is not None
     assert result.numeric_audit.status is NumericAuditAppendixStatus.RECOVERED
-    assert '"numeric_requirements"' in llm.prompts[0][1]
+    assert '"numeric_requirement_candidates"' in llm.prompts[0][1]
     assert "decision-critical calculation checklist" in llm.prompts[0][1]
     assert "DECISION NUMERIC REQUIREMENTS" in llm.prompts[1][1]
+
+
+def test_invalid_numeric_requirement_candidate_does_not_repair_core() -> None:
+    state = _state()
+    ref = state["evidence_bundle"]["items"][0]["ref"]
+    core = _core_draft_from_decision(
+        research_decision(evidence_refs=(ref,)).model_dump(mode="json")
+    )
+    envelope = ResearchDecisionCoreEnvelope.model_validate(
+        {
+            **core.model_dump(mode="json"),
+            "numeric_requirements_declared": True,
+            "numeric_requirement_candidates": [
+                {
+                    "id": "req_invalid",
+                    "component_path": "thesis",
+                    "label": "Incomplete candidate",
+                }
+            ],
+        }
+    )
+    llm = _SequenceLLM(
+        {
+            "ResearchDecisionCoreEnvelope": [envelope],
+            "DecisionNumericDraft": [DecisionNumericDraft(requested=False)],
+        }
+    )
+
+    result = invoke_research_decision(
+        llm,
+        prompt="Form the final decision.",
+        state=state,
+        node="committee.final",
+        require_risk_adjustments=False,
+    )
+
+    assert result.value.thesis == core.thesis
+    assert [schema for schema, _prompt in llm.prompts].count(
+        "ResearchDecisionCoreEnvelope"
+    ) == 1
 
 
 def test_missing_decision_calculation_degrades_numeric_audit_only_once() -> None:
     state = _state()
     ref = state["evidence_bundle"]["items"][0]["ref"]
-    core = _core_draft_from_decision(
+    core_draft = _core_draft_from_decision(
         research_decision(evidence_refs=(ref,)).model_dump(mode="json")
     ).model_copy(
-        update={
-            "thesis": "The remaining quarterly EPS is 16.08.",
-            "numeric_requirements": (
-                DecisionNumericRequirementDraft(
-                    id="req_eps_remaining",
-                    component_path="thesis",
-                    label="Remaining EPS guidance",
-                    display_text="16.08",
-                    stated_value=16.08,
-                    fraction_digits=2,
-                    formula="guidance_eps - first_quarter_eps",
-                    inputs=(
-                        CalculationInputDraft(name="guidance_eps", value=37.46),
-                        CalculationInputDraft(name="first_quarter_eps", value=21.38),
-                    ),
-                    input_evidence_refs=(ref,),
-                    unit="JPY/share",
-                    limitations=("Quarterly phasing may vary.",),
-                ),
-            ),
-        }
+        update={"thesis": "The remaining quarterly EPS is 16.08."}
     )
+    requirement = DecisionNumericRequirementDraft(
+        id="req_eps_remaining",
+        component_path="thesis",
+        label="Remaining EPS guidance",
+        stated_value=16.08,
+        fraction_digits=2,
+        formula="guidance_eps - first_quarter_eps",
+        inputs=(
+            CalculationInputDraft(name="guidance_eps", value=37.46),
+            CalculationInputDraft(name="first_quarter_eps", value=21.38),
+        ),
+        input_evidence_refs=(ref,),
+        unit="JPY/share",
+        limitations=("Quarterly phasing may vary.",),
+    )
+    core = _core_envelope(core_draft, requirements=(requirement,))
     empty_numeric = DecisionNumericDraft(requested=False)
     llm = _SequenceLLM(
         {
-            "ResearchDecisionCoreDraft": [core],
+            "ResearchDecisionCoreEnvelope": [core],
             "DecisionNumericDraft": [empty_numeric, empty_numeric],
         }
     )
@@ -1045,7 +1102,6 @@ def test_decision_requirements_use_decimal_rounding_and_publish_all_uses() -> No
             id="req_guidance_pe",
             component_path="thesis",
             label="Forward PE",
-            display_text="82.1x",
             stated_value=values["stated_forward_pe"],
             fraction_digits=1,
             formula="price / guidance_eps",
@@ -1063,7 +1119,6 @@ def test_decision_requirements_use_decimal_rounding_and_publish_all_uses() -> No
             id="req_eps_remaining",
             component_path="risks.0",
             label="Remaining EPS",
-            display_text="16.08",
             stated_value=values["stated_remaining_eps"],
             fraction_digits=2,
             formula="guidance_eps - first_quarter_eps",
@@ -1083,7 +1138,6 @@ def test_decision_requirements_use_decimal_rounding_and_publish_all_uses() -> No
             id="req_eps_run_rate",
             component_path="risk_review_adjustments.0.explanation",
             label="Required quarterly EPS",
-            display_text="5.36",
             stated_value=values["stated_quarterly_run_rate"],
             fraction_digits=2,
             formula="remaining_eps / remaining_quarters",
@@ -1160,7 +1214,6 @@ def test_decision_requirement_mismatch_is_rejected(
         id="req_guidance_pe",
         component_path="thesis",
         label="Forward PE",
-        display_text="82.1x",
         stated_value=82.1,
         fraction_digits=1,
         formula="price / guidance_eps",
@@ -1233,7 +1286,7 @@ def test_final_serializers_preserve_output_language_in_primary_and_repair(
     }
     llm = _SequenceLLM(
         {
-            "ResearchDecisionCoreDraft": [invalid_core, core],
+            "ResearchDecisionCoreEnvelope": [invalid_core, _core_envelope(core)],
             "DecisionNumericDraft": [invalid_numeric, DecisionNumericDraft(requested=False)],
         }
     )
@@ -1366,7 +1419,7 @@ def test_repeated_cross_scenario_repair_preserves_other_numeric_components() -> 
     )
     llm = _SequenceLLM(
         {
-            "ResearchDecisionCoreDraft": [core],
+            "ResearchDecisionCoreEnvelope": [_core_envelope(core)],
             "DecisionNumericDraft": [invalid_numeric, invalid_numeric],
         }
     )
@@ -2208,7 +2261,7 @@ def test_6501_invalid_numeric_tool_candidate_is_repaired_and_retained() -> None:
         parsing_error = exc
     llm = _SequenceLLM(
         {
-            "ResearchDecisionCoreDraft": [core],
+            "ResearchDecisionCoreEnvelope": [_core_envelope(core)],
             "DecisionNumericDraft": [
                 {
                     "raw": AIMessage(
@@ -2255,7 +2308,7 @@ def test_identical_failed_numeric_repair_is_degraded_not_recovered() -> None:
     invalid_numeric = _numeric_noop_repair_candidate()
     llm = _SequenceLLM(
         {
-            "ResearchDecisionCoreDraft": [core],
+            "ResearchDecisionCoreEnvelope": [_core_envelope(core)],
             "DecisionNumericDraft": [invalid_numeric, invalid_numeric],
         }
     )

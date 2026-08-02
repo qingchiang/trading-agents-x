@@ -166,7 +166,6 @@ class DecisionNumericRequirementDraft(BaseModel):
         )
     )
     label: str = Field(min_length=1, max_length=200)
-    display_text: str = Field(min_length=1, max_length=120)
     stated_value: float = Field(allow_inf_nan=False)
     fraction_digits: int = Field(ge=0, le=8)
     formula: str = Field(min_length=1)
@@ -217,7 +216,70 @@ class ResearchDecisionCoreDraft(BaseModel):
         max_length=3,
     )
     risk_review_adjustments: tuple[RiskReviewAdjustment, ...] = ()
-    numeric_requirements: tuple[DecisionNumericRequirementDraft, ...] = ()
+
+
+class ResearchDecisionCoreEnvelope(ResearchDecisionCoreDraft):
+    """Serializer wire envelope with soft numeric annotation candidates."""
+
+    numeric_requirements_declared: bool = False
+    numeric_requirement_candidates: tuple[Any, ...] = ()
+
+    def qualitative_core(self) -> ResearchDecisionCoreDraft:
+        return ResearchDecisionCoreDraft.model_validate(
+            self.model_dump(
+                exclude={
+                    "numeric_requirements_declared",
+                    "numeric_requirement_candidates",
+                }
+            )
+        )
+
+
+@dataclass(frozen=True)
+class _NumericRequirementPreflight:
+    requirements: tuple[DecisionNumericRequirementDraft, ...]
+    issues: tuple[str, ...]
+
+
+def _preflight_numeric_requirements(
+    envelope: ResearchDecisionCoreEnvelope,
+    *,
+    valid_evidence_refs: set[str],
+) -> _NumericRequirementPreflight:
+    requirements: list[DecisionNumericRequirementDraft] = []
+    issues: list[str] = []
+    seen_ids: set[str] = set()
+    core = envelope.qualitative_core()
+    for index, candidate in enumerate(envelope.numeric_requirement_candidates):
+        prefix = f"numeric.requirement_candidate.{index}"
+        try:
+            requirement = DecisionNumericRequirementDraft.model_validate(candidate)
+        except (TypeError, ValueError):
+            issues.append(f"{prefix}.schema_invalid")
+            continue
+        if requirement.id in seen_ids:
+            issues.append(f"{prefix}.duplicate_id")
+            continue
+        if _decision_component_text(core, requirement.component_path) is None:
+            issues.append(f"{prefix}.unknown_component")
+            continue
+        try:
+            require_valid_refs(
+                requirement.input_evidence_refs,
+                valid_evidence_refs,
+                required=True,
+            )
+        except OutputValidationError:
+            issues.append(f"{prefix}.invalid_evidence")
+            continue
+        seen_ids.add(requirement.id)
+        requirements.append(requirement)
+    if envelope.numeric_requirements_declared and not requirements:
+        issues.append("numeric.requirements.declared_missing")
+    return _NumericRequirementPreflight(
+        requirements=tuple(requirements),
+        issues=tuple(issues),
+    )
 
 
 class ObservedRangeEndpointDraft(BaseModel):
@@ -1035,8 +1097,8 @@ def invoke_research_decision(
     )
 
     def validate_core(
-        result: ResearchDecisionCoreDraft,
-    ) -> ResearchDecisionCoreDraft:
+        result: ResearchDecisionCoreEnvelope,
+    ) -> ResearchDecisionCoreEnvelope:
         scenario_kinds = tuple(item.kind for item in result.scenarios)
         if len(set(scenario_kinds)) != len(scenario_kinds):
             raise OutputValidationError("decision.scenarios.duplicate_kind")
@@ -1067,30 +1129,9 @@ def invoke_research_decision(
                 raise OutputValidationError("decision.risk_review.missing_role")
         if any(item.source_role not in risk_roles for item in result.risk_review_adjustments):
             raise OutputValidationError("decision.risk_review.unknown_role")
-        requirement_ids = tuple(item.id for item in result.numeric_requirements)
-        if len(requirement_ids) != len(set(requirement_ids)):
-            raise OutputValidationError("decision.numeric_requirements.duplicate_id")
-        for requirement in result.numeric_requirements:
-            component_text = _decision_component_text(
-                result,
-                requirement.component_path,
-            )
-            if component_text is None:
-                raise OutputValidationError(
-                    f"decision.numeric_requirements.{requirement.id}.unknown_component"
-                )
-            if requirement.display_text not in component_text:
-                raise OutputValidationError(
-                    f"decision.numeric_requirements.{requirement.id}.display_text_missing"
-                )
-            require_valid_refs(
-                requirement.input_evidence_refs,
-                set(valid_refs),
-                required=True,
-            )
         return result
 
-    core_example = ResearchDecisionCoreDraft(
+    core_example = ResearchDecisionCoreEnvelope(
         rating=ResearchRating.HOLD,
         confidence=0.5,
         executive_summary=example_text["executive_summary"],
@@ -1121,12 +1162,12 @@ def invoke_research_decision(
             ),
         ),
         risk_review_adjustments=example_adjustments,
-        numeric_requirements=(
+        numeric_requirements_declared=True,
+        numeric_requirement_candidates=(
             DecisionNumericRequirementDraft(
                 id="req_example_multiple",
                 component_path="thesis",
                 label=example_text["requirement_label"],
-                display_text="2.0x",
                 stated_value=2.0,
                 fraction_digits=1,
                 formula="earnings / shares",
@@ -1149,7 +1190,7 @@ def invoke_research_decision(
     with core_phase:
         core = StructuredOutputRunner(
             llm=llm,
-            schema=ResearchDecisionCoreDraft,
+            schema=ResearchDecisionCoreEnvelope,
             validator=validate_core,
             node=core_node,
             event_writer=event_writer,
@@ -1161,7 +1202,9 @@ def invoke_research_decision(
                 "Keep valid research content. Use only allowed evidence and memory "
                 "refs. Do not include valuation ranges, market-reference levels, "
                 "or optional numeric components in this core object. Register every "
-                "decision-critical derived exact number in numeric_requirements; "
+                "decision-critical derived exact number in "
+                "numeric_requirement_candidates and set "
+                "numeric_requirements_declared accordingly; "
                 "directly observed Evidence values need no requirement. The scenarios "
                 "must contain "
                 "exactly one base, one bull, and one bear case. Required "
@@ -1171,7 +1214,9 @@ def invoke_research_decision(
             prompt + "\n\nSerialize only the strict qualitative decision core. Numeric "
             "valuation, scenario ranges, market reference levels, and canonical "
             "calculations are handled by a separate audit step. Preserve the brief's "
-            "decision-critical calculation checklist as numeric_requirements. "
+            "decision-critical calculation checklist as soft "
+            "numeric_requirement_candidates. These annotations do not replace "
+            "the strict qualitative fields. "
             + language_rules
             + "\n\nLOCALIZED VALID EXAMPLE:\n"
             + json.dumps(core_example.model_dump(mode="json"), ensure_ascii=False),
@@ -1180,7 +1225,12 @@ def invoke_research_decision(
             allowed_memory_refs=valid_memory_refs,
         )
 
-    core_value = core.value
+    core_envelope = core.value
+    core_value = core_envelope.qualitative_core()
+    requirement_preflight = _preflight_numeric_requirements(
+        core_envelope,
+        valid_evidence_refs=set(valid_refs),
+    )
     numeric_node = f"{node}.numeric"
     numeric_phase = (
         metrics.phase(numeric_node, event_writer=event_writer)
@@ -1197,7 +1247,7 @@ def invoke_research_decision(
             event_writer=event_writer,
             output_language=resolved_language,
             core_scenarios=core_value.scenarios,
-            requirements=core_value.numeric_requirements,
+            requirements=requirement_preflight.requirements,
         )
     scenario_values = []
     for scenario in core_value.scenarios:
