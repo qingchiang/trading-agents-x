@@ -138,6 +138,43 @@ class CalculationRecordDraft(BaseModel):
         return {item.name: item.value for item in self.inputs}
 
 
+class DecisionNumericRequirementDraft(BaseModel):
+    """A derived number used by one strict qualitative decision component."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: str = Field(pattern=r"^req_[a-z0-9][a-z0-9_.-]*$")
+    component_path: str = Field(
+        pattern=(
+            r"^(?:executive_summary|thesis|risks\.\d+|"
+            r"invalidation_conditions\.\d+|"
+            r"scenarios\.(?:base|bull|bear)\."
+            r"(?:outcome|core_assumptions\.\d+)|"
+            r"risk_review_adjustments\.\d+\.explanation)$"
+        )
+    )
+    label: str = Field(min_length=1, max_length=200)
+    display_text: str = Field(min_length=1, max_length=120)
+    stated_value: float = Field(allow_inf_nan=False)
+    fraction_digits: int = Field(ge=0, le=8)
+    formula: str = Field(min_length=1)
+    inputs: tuple[CalculationInputDraft, ...] = Field(min_length=1)
+    input_evidence_refs: tuple[str, ...] = Field(min_length=1)
+    unit: str = Field(min_length=1, max_length=32)
+    limitations: tuple[str, ...] = Field(min_length=1)
+
+    @field_validator("inputs")
+    @classmethod
+    def validate_unique_inputs(
+        cls,
+        value: tuple[CalculationInputDraft, ...],
+    ) -> tuple[CalculationInputDraft, ...]:
+        names = tuple(item.name for item in value)
+        if len(names) != len(set(names)):
+            raise ValueError("numeric requirement input names must be unique")
+        return value
+
+
 class ResearchScenarioCoreDraft(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -168,6 +205,7 @@ class ResearchDecisionCoreDraft(BaseModel):
         max_length=3,
     )
     risk_review_adjustments: tuple[RiskReviewAdjustment, ...] = ()
+    numeric_requirements: tuple[DecisionNumericRequirementDraft, ...] = ()
 
 
 class ObservedRangeEndpointDraft(BaseModel):
@@ -673,6 +711,49 @@ def _decision_language_rules(output_language: str) -> str:
     )
 
 
+def _decision_component_text(
+    decision: ResearchDecisionCoreDraft,
+    component_path: str,
+) -> str | None:
+    """Resolve the bounded public field paths accepted by numeric requirements."""
+
+    parts = component_path.split(".")
+    if component_path in {"executive_summary", "thesis"}:
+        return str(getattr(decision, component_path))
+    if parts[0] in {"risks", "invalidation_conditions"} and len(parts) == 2:
+        values = getattr(decision, parts[0])
+        index = int(parts[1])
+        return values[index] if index < len(values) else None
+    if parts[0] == "scenarios" and len(parts) in {3, 4}:
+        scenario = next(
+            (item for item in decision.scenarios if item.kind.value == parts[1]),
+            None,
+        )
+        if scenario is None:
+            return None
+        if parts[2] == "outcome" and len(parts) == 3:
+            return scenario.outcome
+        if parts[2] == "core_assumptions" and len(parts) == 4:
+            index = int(parts[3])
+            return (
+                scenario.core_assumptions[index]
+                if index < len(scenario.core_assumptions)
+                else None
+            )
+    if (
+        parts[0] == "risk_review_adjustments"
+        and len(parts) == 3
+        and parts[2] == "explanation"
+    ):
+        index = int(parts[1])
+        return (
+            decision.risk_review_adjustments[index].explanation
+            if index < len(decision.risk_review_adjustments)
+            else None
+        )
+    return None
+
+
 _SCENARIO_LABEL_PATTERNS: dict[
     ReportLanguage,
     dict[ResearchScenarioKind, tuple[str, ...]],
@@ -814,6 +895,8 @@ def _decision_example_text(output_language: str) -> dict[str, str]:
             "adjustment_subject": "置信度校准",
             "adjustment_explanation": "最终结论已纳入风险审查意见。",
             "executive_summary": "现有证据支持一项平衡的研究结论。",
+            "requirement_thesis": "该观点取决于约 2.0x 的决策关键盈利倍数。",
+            "requirement_label": "决策关键盈利倍数",
             "thesis": "该观点取决于一个可验证的经营机制。",
             "risk": "证据支持的下行风险可能会兑现。",
             "invalidation": "新证据直接否定核心论点。",
@@ -837,6 +920,8 @@ def _decision_example_text(output_language: str) -> dict[str, str]:
             "adjustment_subject": "確信度の調整",
             "adjustment_explanation": "最終判断にはリスクレビューを反映した。",
             "executive_summary": "現時点の証拠は均衡の取れた判断を支持する。",
+            "requirement_thesis": "この見解は意思決定上重要な約2.0xの利益倍率に依存する。",
+            "requirement_label": "意思決定上重要な利益倍率",
             "thesis": "この見解は検証可能な事業メカニズムに依存する。",
             "risk": "証拠に裏付けられた下振れリスクが顕在化し得る。",
             "invalidation": "新たな証拠が中核仮説を直接否定する。",
@@ -859,6 +944,8 @@ def _decision_example_text(output_language: str) -> dict[str, str]:
         "adjustment_subject": "Confidence calibration",
         "adjustment_explanation": "The final decision incorporates the risk review.",
         "executive_summary": "The evidence supports a balanced conclusion.",
+        "requirement_thesis": "The view depends on a decision-critical multiple of 2.0x.",
+        "requirement_label": "Decision-critical earnings multiple",
         "thesis": "The view depends on a testable operating mechanism.",
         "risk": "The evidence-backed downside may materialize.",
         "invalidation": "New evidence directly contradicts the thesis.",
@@ -967,13 +1054,34 @@ def invoke_research_decision(
                 raise OutputValidationError("decision.risk_review.missing_role")
         if any(item.source_role not in risk_roles for item in result.risk_review_adjustments):
             raise OutputValidationError("decision.risk_review.unknown_role")
+        requirement_ids = tuple(item.id for item in result.numeric_requirements)
+        if len(requirement_ids) != len(set(requirement_ids)):
+            raise OutputValidationError("decision.numeric_requirements.duplicate_id")
+        for requirement in result.numeric_requirements:
+            component_text = _decision_component_text(
+                result,
+                requirement.component_path,
+            )
+            if component_text is None:
+                raise OutputValidationError(
+                    f"decision.numeric_requirements.{requirement.id}.unknown_component"
+                )
+            if requirement.display_text not in component_text:
+                raise OutputValidationError(
+                    f"decision.numeric_requirements.{requirement.id}.display_text_missing"
+                )
+            require_valid_refs(
+                requirement.input_evidence_refs,
+                set(valid_refs),
+                required=True,
+            )
         return result
 
     core_example = ResearchDecisionCoreDraft(
         rating=ResearchRating.HOLD,
         confidence=0.5,
         executive_summary=example_text["executive_summary"],
-        thesis=example_text["thesis"],
+        thesis=example_text["requirement_thesis"],
         evidence_refs=(first_ref,),
         risks=(example_text["risk"],),
         invalidation_conditions=(example_text["invalidation"],),
@@ -1000,6 +1108,24 @@ def invoke_research_decision(
             ),
         ),
         risk_review_adjustments=example_adjustments,
+        numeric_requirements=(
+            DecisionNumericRequirementDraft(
+                id="req_example_multiple",
+                component_path="thesis",
+                label=example_text["requirement_label"],
+                display_text="2.0x",
+                stated_value=2.0,
+                fraction_digits=1,
+                formula="earnings / shares",
+                inputs=(
+                    CalculationInputDraft(name="earnings", value=2),
+                    CalculationInputDraft(name="shares", value=1),
+                ),
+                input_evidence_refs=(first_ref,),
+                unit="x",
+                limitations=(example_text["valuation_limitation"],),
+            ),
+        ),
     )
     core_node = f"{node}.core"
     core_phase = (
@@ -1021,14 +1147,18 @@ def invoke_research_decision(
             repair_instructions=(
                 "Keep valid research content. Use only allowed evidence and memory "
                 "refs. Do not include valuation ranges, market-reference levels, "
-                "or calculations in this core object. The scenarios must contain "
+                "or optional numeric components in this core object. Register every "
+                "decision-critical derived exact number in numeric_requirements; "
+                "directly observed Evidence values need no requirement. The scenarios "
+                "must contain "
                 "exactly one base, one bull, and one bear case. Required "
                 f"risk-review roles: {json.dumps(risk_roles)}. {language_rules}"
             ),
         ).invoke(
             prompt + "\n\nSerialize only the strict qualitative decision core. Numeric "
-            "valuation, scenario ranges, market reference levels, and calculations "
-            "are handled by a separate audit step. "
+            "valuation, scenario ranges, market reference levels, and canonical "
+            "calculations are handled by a separate audit step. Preserve the brief's "
+            "decision-critical calculation checklist as numeric_requirements. "
             + language_rules
             + "\n\nLOCALIZED VALID EXAMPLE:\n"
             + json.dumps(core_example.model_dump(mode="json"), ensure_ascii=False),

@@ -42,6 +42,7 @@ from tradingagents.graph.deliberation import (
     CalculationInputDraft,
     CalculationRecordDraft,
     DecisionNumericDraft,
+    DecisionNumericRequirementDraft,
     DerivedRangeEndpointDraft,
     InterpretedRangeEndpointDraft,
     ObservedMarketReferenceLevelDraft,
@@ -125,7 +126,13 @@ def _numeric_draft_from_decision(payload: dict[str, Any]) -> DecisionNumericDraf
             {
                 key: value
                 for key, value in calculation.items()
-                if key not in {"result", "as_of_date", "temporal_basis"}
+                if key
+                not in {
+                    "result",
+                    "as_of_date",
+                    "temporal_basis",
+                    "decision_uses",
+                }
             }
             | {
                 "inputs": [
@@ -890,6 +897,54 @@ def test_numeric_serializer_repairs_seven_invalid_input_names() -> None:
     assert len(issues) > 8
     assert issues[0].startswith("schema.calculation_records.0.inputs")
     assert any(issue.startswith("schema.calculation_records.6.inputs") for issue in issues)
+
+
+def test_core_declares_decision_critical_numeric_requirement() -> None:
+    state = _state()
+    ref = state["evidence_bundle"]["items"][0]["ref"]
+    core = _core_draft_from_decision(
+        research_decision(evidence_refs=(ref,)).model_dump(mode="json")
+    ).model_copy(
+        update={
+            "thesis": "The decision-critical earnings multiple is 82.1x.",
+            "numeric_requirements": (
+                DecisionNumericRequirementDraft(
+                    id="req_guidance_pe",
+                    component_path="thesis",
+                    label="Company-guidance forward PE",
+                    display_text="82.1x",
+                    stated_value=82.1,
+                    fraction_digits=1,
+                    formula="price / eps",
+                    inputs=(
+                        CalculationInputDraft(name="price", value=3075),
+                        CalculationInputDraft(name="eps", value=37.46),
+                    ),
+                    input_evidence_refs=(ref,),
+                    unit="x",
+                    limitations=("Guidance may change.",),
+                ),
+            ),
+        }
+    )
+    llm = _SequenceLLM(
+        {
+            "ResearchDecisionCoreDraft": [core],
+            "DecisionNumericDraft": [DecisionNumericDraft(requested=False)],
+        }
+    )
+
+    result = invoke_research_decision(
+        llm,
+        prompt="Form the final decision.",
+        state=state,
+        node="committee.final",
+        require_risk_adjustments=False,
+    )
+
+    assert result.value.thesis == core.thesis
+    assert '"numeric_requirements"' in llm.prompts[0][1]
+    assert "decision-critical calculation checklist" in llm.prompts[0][1]
 
 
 @pytest.mark.parametrize(

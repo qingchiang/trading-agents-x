@@ -1283,7 +1283,15 @@ class ResearchGraph:
                         "Cover the rating rationale, thesis, three scenarios, "
                         "catalysts, risks, invalidation, unresolved questions, "
                         "time horizon, any valuation or market-reference "
-                        "calculations, and risk-review dispositions."
+                        "calculations, and risk-review dispositions. End with a "
+                        "short decision-critical calculation checklist. For each "
+                        "derived exact number that materially affects the rating, "
+                        "thesis, risks, invalidation, scenarios, or risk-review "
+                        "adjustments, state its formula, named numeric inputs, input "
+                        "Evidence refs, displayed value and precision, unit, and the "
+                        "decision field that uses it. Write 'none' when no such "
+                        "derived number exists. Directly observed Evidence values do "
+                        "not belong in this checklist."
                         "\n\nSCENARIO ASSUMPTION READABILITY:\n"
                         + assumption_guidance
                     ),

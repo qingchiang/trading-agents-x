@@ -29,6 +29,11 @@ _SYMBOL_PATTERN = re.compile(r"^[A-Z0-9^][A-Z0-9.^=_-]*$")
 _MEMORY_REF_PATTERN = re.compile(r"^memory:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _EVIDENCE_REF_PATTERN = re.compile(r"^ev_[a-f0-9]{12}$")
 _RESEARCH_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_.-]*$")
+_DECISION_COMPONENT_PATH_PATTERN = re.compile(
+    r"^(?:executive_summary|thesis|risks\.\d+|invalidation_conditions\.\d+|"
+    r"scenarios\.(?:base|bull|bear)\.(?:outcome|core_assumptions\.\d+)|"
+    r"risk_review_adjustments\.\d+\.explanation)$"
+)
 
 
 def _unique_evidence_refs(value: tuple[str, ...]) -> tuple[str, ...]:
@@ -1040,6 +1045,13 @@ class RiskReviewAdjustment(FrozenModel):
         return _unique_evidence_refs(value)
 
 
+class DecisionCalculationUse(FrozenModel):
+    """One readable decision component that relies on a calculation."""
+
+    component_path: str = Field(pattern=_DECISION_COMPONENT_PATH_PATTERN.pattern)
+    label: str = Field(min_length=1, max_length=200)
+
+
 class CalculationRecord(FrozenModel):
     """A decision-critical calculation, not a presentation-table cell."""
 
@@ -1052,6 +1064,7 @@ class CalculationRecord(FrozenModel):
     as_of_date: date
     temporal_basis: NumericTemporalBasis = NumericTemporalBasis.POINT_IN_TIME
     limitations: tuple[str, ...] = Field(min_length=1)
+    decision_uses: tuple[DecisionCalculationUse, ...] = ()
 
     @field_validator("inputs")
     @classmethod
