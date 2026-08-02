@@ -239,6 +239,7 @@ class ResearchDecisionCoreEnvelope(ResearchDecisionCoreDraft):
 class _NumericRequirementPreflight:
     requirements: tuple[DecisionNumericRequirementDraft, ...]
     issues: tuple[str, ...]
+    omissions: tuple[NumericAuditOmission, ...]
 
 
 def _preflight_numeric_requirements(
@@ -248,20 +249,57 @@ def _preflight_numeric_requirements(
 ) -> _NumericRequirementPreflight:
     requirements: list[DecisionNumericRequirementDraft] = []
     issues: list[str] = []
+    omissions: list[NumericAuditOmission] = []
     seen_ids: set[str] = set()
     core = envelope.qualitative_core()
     for index, candidate in enumerate(envelope.numeric_requirement_candidates):
         prefix = f"numeric.requirement_candidate.{index}"
+        candidate_path = prefix
+        candidate_label: str | None = None
+        if isinstance(candidate, Mapping):
+            raw_path = candidate.get("component_path")
+            if isinstance(raw_path, str) and re.fullmatch(r"[a-z0-9_.-]+", raw_path):
+                candidate_path = raw_path
+            raw_label = candidate.get("label")
+            if isinstance(raw_label, str) and 0 < len(raw_label) <= 200:
+                candidate_label = raw_label
         try:
             requirement = DecisionNumericRequirementDraft.model_validate(candidate)
         except (TypeError, ValueError):
-            issues.append(f"{prefix}.schema_invalid")
+            issue = f"{prefix}.schema_invalid"
+            issues.append(issue)
+            omissions.append(
+                NumericAuditOmission(
+                    component_path=candidate_path,
+                    component_type=NumericAuditComponentType.DECISION_CLAIM,
+                    reference_label=candidate_label,
+                    issue_codes=(issue,),
+                )
+            )
             continue
         if requirement.id in seen_ids:
-            issues.append(f"{prefix}.duplicate_id")
+            issue = f"{prefix}.duplicate_id"
+            issues.append(issue)
+            omissions.append(
+                NumericAuditOmission(
+                    component_path=requirement.component_path,
+                    component_type=NumericAuditComponentType.DECISION_CLAIM,
+                    reference_label=requirement.label,
+                    issue_codes=(issue,),
+                )
+            )
             continue
         if _decision_component_text(core, requirement.component_path) is None:
-            issues.append(f"{prefix}.unknown_component")
+            issue = f"{prefix}.unknown_component"
+            issues.append(issue)
+            omissions.append(
+                NumericAuditOmission(
+                    component_path=requirement.component_path,
+                    component_type=NumericAuditComponentType.DECISION_CLAIM,
+                    reference_label=requirement.label,
+                    issue_codes=(issue,),
+                )
+            )
             continue
         try:
             require_valid_refs(
@@ -270,15 +308,33 @@ def _preflight_numeric_requirements(
                 required=True,
             )
         except OutputValidationError:
-            issues.append(f"{prefix}.invalid_evidence")
+            issue = f"{prefix}.invalid_evidence"
+            issues.append(issue)
+            omissions.append(
+                NumericAuditOmission(
+                    component_path=requirement.component_path,
+                    component_type=NumericAuditComponentType.DECISION_CLAIM,
+                    reference_label=requirement.label,
+                    issue_codes=(issue,),
+                )
+            )
             continue
         seen_ids.add(requirement.id)
         requirements.append(requirement)
     if envelope.numeric_requirements_declared and not requirements:
-        issues.append("numeric.requirements.declared_missing")
+        issue = "numeric.requirements.declared_missing"
+        issues.append(issue)
+        omissions.append(
+            NumericAuditOmission(
+                component_path="numeric.requirements",
+                component_type=NumericAuditComponentType.DECISION_CLAIM,
+                issue_codes=(issue,),
+            )
+        )
     return _NumericRequirementPreflight(
         requirements=tuple(requirements),
         issues=tuple(issues),
+        omissions=tuple(omissions),
     )
 
 
@@ -1249,6 +1305,12 @@ def invoke_research_decision(
             core_scenarios=core_value.scenarios,
             requirements=requirement_preflight.requirements,
         )
+    numeric = _apply_requirement_preflight(
+        numeric,
+        requirement_preflight,
+        node=numeric_node,
+        event_writer=event_writer,
+    )
     scenario_values = []
     for scenario in core_value.scenarios:
         numeric_scenarios = numeric.scenario_reference_ranges.get(scenario.kind, ())
@@ -1301,6 +1363,79 @@ class _NumericDecisionAssembly:
     audit: DecisionNumericAuditAppendix | None = None
     promoted_singletons: int = 0
     reordered_ranges: int = 0
+
+
+def _apply_requirement_preflight(
+    assembly: _NumericDecisionAssembly,
+    preflight: _NumericRequirementPreflight,
+    *,
+    node: str,
+    event_writer: EventWriter | None,
+) -> _NumericDecisionAssembly:
+    if not preflight.issues:
+        return assembly
+    status = (
+        NumericAuditStatus.INCOMPLETE
+        if assembly.status is NumericAuditStatus.INCOMPLETE
+        else NumericAuditStatus.PARTIAL
+    )
+    warning = ResearchWarning(
+        code=f"decision.numeric_audit_{status.value}",
+        message=(
+            "Decision-critical numeric annotations were incomplete; the "
+            "qualitative decision was retained and unverified calculations "
+            "were omitted."
+        ),
+        source=node,
+    )
+    warnings = (
+        assembly.warnings
+        if any(item.code == warning.code for item in assembly.warnings)
+        else (*assembly.warnings, warning)
+    )
+    omissions = tuple(
+        dict.fromkeys((*assembly.omissions, *preflight.omissions))
+    )
+    appendix_status = (
+        NumericAuditAppendixStatus.INCOMPLETE
+        if status is NumericAuditStatus.INCOMPLETE
+        else NumericAuditAppendixStatus.PARTIAL
+    )
+    audit = DecisionNumericAuditAppendix(
+        status=appendix_status,
+        snapshots=(assembly.audit.snapshots if assembly.audit is not None else ()),
+        omitted_components=tuple(
+            dict.fromkeys(
+                (
+                    *(
+                        assembly.audit.omitted_components
+                        if assembly.audit is not None
+                        else ()
+                    ),
+                    *omissions,
+                )
+            )
+        ),
+    )
+    if event_writer is not None:
+        event_writer(
+            {
+                "event_type": "node.numeric_audit_degraded",
+                "node": node,
+                "payload": {
+                    "reason_code": "numeric_requirement_preflight",
+                    "validation_issues": list(preflight.issues),
+                },
+            }
+        )
+    return replace(
+        assembly,
+        status=status,
+        warnings=warnings,
+        issues=tuple(dict.fromkeys((*assembly.issues, *preflight.issues))),
+        omissions=omissions,
+        audit=audit,
+    )
 
 
 def _emit_numeric_normalization_event(

@@ -1028,6 +1028,13 @@ def test_invalid_numeric_requirement_candidate_does_not_repair_core() -> None:
     )
 
     assert result.value.thesis == core.thesis
+    assert result.value.numeric_audit_status is NumericAuditStatus.PARTIAL
+    assert result.numeric_audit is not None
+    assert result.numeric_audit.snapshots == ()
+    assert result.numeric_audit.omitted_components[0].component_path == "thesis"
+    assert result.numeric_audit.omitted_components[0].issue_codes == (
+        "numeric.requirement_candidate.0.schema_invalid",
+    )
     assert [schema for schema, _prompt in llm.prompts].count(
         "ResearchDecisionCoreEnvelope"
     ) == 1
