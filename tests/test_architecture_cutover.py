@@ -57,6 +57,7 @@ def test_public_api_exposes_typed_application_contract():
         "DebateAgenda",
         "DebateImportance",
         "DebateIssue",
+        "DecisionBrief",
         "DecisionCalculationUse",
         "DecisionNumericAuditAppendix",
         "EvidenceBundle",
