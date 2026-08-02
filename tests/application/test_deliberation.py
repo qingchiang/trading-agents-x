@@ -62,6 +62,7 @@ from tradingagents.graph.deliberation import (
     _numeric_audit_snapshot,
     _numeric_example_pair,
     debate_round_has_material_progress,
+    decision_reference_label_guidance,
     decision_scenario_assumption_guidance,
     invoke_debate_agenda,
     invoke_judge_draft,
@@ -1837,6 +1838,25 @@ def test_final_serializers_preserve_output_language_in_primary_and_repair(
         "formulas must return a fractional ratio" in prompt
         for _schema, prompt in llm.prompts
     )
+
+
+@pytest.mark.parametrize(
+    ("output_language", "expected_label"),
+    (
+        (ReportLanguage.ENGLISH.prompt_label, "analyst target lower bound"),
+        (ReportLanguage.SIMPLIFIED_CHINESE.prompt_label, "目标价下限"),
+        (ReportLanguage.JAPANESE.prompt_label, "目標株価下限"),
+    ),
+)
+def test_singleton_target_label_guidance_is_localized(
+    output_language: str,
+    expected_label: str,
+) -> None:
+    guidance = decision_reference_label_guidance(output_language)
+
+    assert expected_label in guidance
+    assert "two distinct" in guidance
+    assert "Never duplicate one value ref" in guidance
 
 
 def test_final_serializer_phases_record_child_wall_time_without_parent_span() -> None:

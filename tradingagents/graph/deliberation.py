@@ -937,6 +937,32 @@ def decision_percentage_calculation_guidance() -> str:
     )
 
 
+def decision_reference_label_guidance(output_language: str) -> str:
+    """Return localized naming rules for analyst target references."""
+
+    if output_language == ReportLanguage.SIMPLIFIED_CHINESE.prompt_label:
+        examples = (
+            "单个 target_low/min 称为‘目标价下限’，单个 target_high/max 称为"
+            "‘目标价上限’，单个 target_mean/average 称为‘目标价均值’。"
+        )
+    elif output_language == ReportLanguage.JAPANESE.prompt_label:
+        examples = (
+            "単一の target_low/min は『目標株価下限』、target_high/max は"
+            "『目標株価上限』、target_mean/average は『目標株価平均』と呼ぶこと。"
+        )
+    else:
+        examples = (
+            "Name a single target_low/min 'analyst target lower bound', a single "
+            "target_high/max 'analyst target upper bound', and a single "
+            "target_mean/average 'analyst target mean'."
+        )
+    return (
+        examples
+        + " Only call an item an analyst target range when it uses two distinct "
+        "low and high endpoints. Never duplicate one value ref to preserve a range label."
+    )
+
+
 def _decision_language_rules(output_language: str) -> str:
     return (
         "Write every human-readable field in the requested report language: "
@@ -1647,6 +1673,7 @@ def _invoke_decision_numeric(
     example_text = _decision_example_text(output_language)
     language_rules = _decision_language_rules(output_language)
     percentage_rules = decision_percentage_calculation_guidance()
+    reference_label_rules = decision_reference_label_guidance(output_language)
     scenario_catalog = tuple(
         {
             "kind": scenario.kind.value,
@@ -1819,7 +1846,7 @@ def _invoke_decision_numeric(
             "covered by a calculation whose requirement_ids includes that item's ID. "
             "Copy its formula, named inputs, Evidence refs, unit, and limitations "
             "without changing them. When requirements are present, requested must be "
-            f"true. {percentage_rules} {language_rules}\n"
+            f"true. {percentage_rules} {reference_label_rules} {language_rules}\n"
             "VALID OBSERVED VALUE REFS:\n"
             + json.dumps(value_catalog_prompt, ensure_ascii=False)
             + "\nSCENARIO CATALOG:\n"
@@ -1844,6 +1871,8 @@ def _invoke_decision_numeric(
             "the application inherits them from catalog anchors or calculations. "
             "Use valuation_assessment only for genuinely derived valuation work. "
             + percentage_rules
+            + " "
+            + reference_label_rules
             + " "
             + language_rules
             + "\n\nNUMERIC VALUE CATALOG:\n"
