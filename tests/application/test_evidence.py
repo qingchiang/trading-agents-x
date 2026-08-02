@@ -617,7 +617,7 @@ def test_failed_run_export_preserves_non_final_decision_brief() -> None:
 
     markdown = render_run_export_markdown(run_export)
 
-    assert run_export.schema_version == "6"
+    assert run_export.schema_version == "7"
     assert "Decision Synthesis Brief" in markdown
     assert "Non-final reasoning draft" in markdown
     assert "Non-final synthesis.[E01]" in markdown

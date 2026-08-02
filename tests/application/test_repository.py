@@ -37,6 +37,9 @@ from tradingagents.application.contracts import (
     NumericAuditPhase,
     NumericAuditSnapshot,
     NumericAuditStatus,
+    NumericCalculationStatus,
+    NumericDisplayStatus,
+    NumericRequirementCheck,
     RebuttalReview,
     ReportAuditStatus,
     ReportSection,
@@ -723,6 +726,25 @@ def test_complete_persists_result_and_resolved_memory(
     ).model_copy(update={"numeric_audit_status": NumericAuditStatus.PARTIAL})
     numeric_audit = DecisionNumericAuditAppendix(
         status=NumericAuditAppendixStatus.PARTIAL,
+        requirement_checks=(
+            NumericRequirementCheck(
+                requirement_id="req_forward_pe",
+                calculation_id="calc_forward_pe",
+                component_path="thesis",
+                label="Forward PE",
+                stated_value=45.8,
+                fraction_digits=1,
+                unit="x",
+                formula="close_price / eps",
+                inputs={"close_price": 4000.0, "eps": 87.35},
+                input_evidence_refs=(evidence_item.ref,),
+                canonical_result=45.79278763594734,
+                rounded_stated_value=45.8,
+                rounded_canonical_result=45.8,
+                calculation_status=NumericCalculationStatus.VERIFIED,
+                display_status=NumericDisplayStatus.MATCHED,
+            ),
+        ),
         snapshots=(
             NumericAuditSnapshot(
                 phase=NumericAuditPhase.REPAIR,

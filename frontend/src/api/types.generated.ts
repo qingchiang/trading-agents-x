@@ -106,6 +106,7 @@ export interface components {
     };
     DecisionNumericAuditAppendix: {
       omitted_components?: components["schemas"]["NumericAuditOmission"][];
+      requirement_checks?: components["schemas"]["NumericRequirementCheck"][];
       snapshots: components["schemas"]["NumericAuditSnapshot"][];
       status: components["schemas"]["NumericAuditAppendixStatus"];
     };
@@ -279,7 +280,7 @@ export interface components {
       tool_calls?: number;
       wall_time_seconds?: number;
     };
-    NumericAuditAppendixStatus: "recovered" | "partial" | "incomplete";
+    NumericAuditAppendixStatus: "complete" | "recovered" | "partial" | "incomplete";
     NumericAuditComponentType: "appendix" | "calculation" | "scenario_range" | "valuation" | "market_reference" | "decision_claim";
     NumericAuditOmission: {
       component_path: string;
@@ -300,6 +301,26 @@ export interface components {
       validation_issues?: string[];
     };
     NumericAuditStatus: "complete" | "partial" | "incomplete" | "not_applicable";
+    NumericCalculationStatus: "verified" | "invalid" | "missing";
+    NumericDisplayStatus: "matched" | "mismatched" | "not_checked";
+    NumericRequirementCheck: {
+      calculation_id?: string | null;
+      calculation_status: components["schemas"]["NumericCalculationStatus"];
+      canonical_result?: number | null;
+      component_path: string;
+      display_status: components["schemas"]["NumericDisplayStatus"];
+      formula: string;
+      fraction_digits: number;
+      input_evidence_refs: string[];
+      inputs: Record<string, number>;
+      issue_codes?: string[];
+      label: string;
+      requirement_id: string;
+      rounded_canonical_result?: number | null;
+      rounded_stated_value?: number | null;
+      stated_value: number;
+      unit: string;
+    };
     NumericTemporalBasis: "point_in_time" | "live_snapshot";
     ProviderCapabilities: {
       api_key_configured: boolean | null;

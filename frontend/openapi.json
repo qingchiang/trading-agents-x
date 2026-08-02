@@ -733,7 +733,7 @@
       },
       "DecisionNumericAuditAppendix": {
         "additionalProperties": false,
-        "description": "Unverified numeric proposals kept outside the canonical decision.",
+        "description": "Decision calculation comparisons and unverified numeric proposals.",
         "properties": {
           "omitted_components": {
             "default": [],
@@ -741,6 +741,14 @@
               "$ref": "#/components/schemas/NumericAuditOmission"
             },
             "title": "Omitted Components",
+            "type": "array"
+          },
+          "requirement_checks": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/NumericRequirementCheck"
+            },
+            "title": "Requirement Checks",
             "type": "array"
           },
           "snapshots": {
@@ -1954,6 +1962,7 @@
       },
       "NumericAuditAppendixStatus": {
         "enum": [
+          "complete",
           "recovered",
           "partial",
           "incomplete"
@@ -2115,6 +2124,180 @@
         ],
         "title": "NumericAuditStatus",
         "type": "string"
+      },
+      "NumericCalculationStatus": {
+        "enum": [
+          "verified",
+          "invalid",
+          "missing"
+        ],
+        "title": "NumericCalculationStatus",
+        "type": "string"
+      },
+      "NumericDisplayStatus": {
+        "enum": [
+          "matched",
+          "mismatched",
+          "not_checked"
+        ],
+        "title": "NumericDisplayStatus",
+        "type": "string"
+      },
+      "NumericRequirementCheck": {
+        "additionalProperties": false,
+        "description": "Auditable comparison between a stated value and a canonical result.",
+        "properties": {
+          "calculation_id": {
+            "anyOf": [
+              {
+                "pattern": "^calc_[a-z0-9][a-z0-9_.-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calculation Id"
+          },
+          "calculation_status": {
+            "$ref": "#/components/schemas/NumericCalculationStatus"
+          },
+          "canonical_result": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Result"
+          },
+          "component_path": {
+            "pattern": "^(?:executive_summary|thesis|risks\\.\\d+|invalidation_conditions\\.\\d+|scenarios\\.(?:base|bull|bear)\\.(?:outcome|core_assumptions\\.\\d+)|risk_review_adjustments\\.\\d+\\.explanation)$",
+            "title": "Component Path",
+            "type": "string"
+          },
+          "display_status": {
+            "$ref": "#/components/schemas/NumericDisplayStatus"
+          },
+          "formula": {
+            "minLength": 1,
+            "title": "Formula",
+            "type": "string"
+          },
+          "fraction_digits": {
+            "maximum": 8.0,
+            "minimum": 0.0,
+            "title": "Fraction Digits",
+            "type": "integer"
+          },
+          "input_evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Input Evidence Refs",
+            "type": "array"
+          },
+          "inputs": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                }
+              ]
+            },
+            "minProperties": 1,
+            "title": "Inputs",
+            "type": "object"
+          },
+          "issue_codes": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Issue Codes",
+            "type": "array"
+          },
+          "label": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "requirement_id": {
+            "pattern": "^req_[a-z0-9][a-z0-9_.-]*$",
+            "title": "Requirement Id",
+            "type": "string"
+          },
+          "rounded_canonical_result": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rounded Canonical Result"
+          },
+          "rounded_stated_value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rounded Stated Value"
+          },
+          "stated_value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Stated Value"
+          },
+          "unit": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "requirement_id",
+          "component_path",
+          "label",
+          "stated_value",
+          "fraction_digits",
+          "unit",
+          "formula",
+          "inputs",
+          "input_evidence_refs",
+          "calculation_status",
+          "display_status"
+        ],
+        "title": "NumericRequirementCheck",
+        "type": "object"
       },
       "NumericTemporalBasis": {
         "description": "How the application determined the date of a formal numeric value.",
