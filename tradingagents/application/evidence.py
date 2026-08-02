@@ -301,8 +301,17 @@ def _columns(
             duplicate += 1
         keys.add(key)
         values = [row[index - 1] for row in rows]
-        data_type, unit = _infer_column_type(label, values)
-        producer_measurement = (measurements or {}).get(label.casefold())
+        is_metadata_carrier = key in {"measurement", "unit"}
+        data_type, inferred_unit = (
+            (TableDataType.TEXT, None)
+            if is_metadata_carrier
+            else _infer_column_type(label, values)
+        )
+        producer_measurement = (
+            None
+            if is_metadata_carrier
+            else (measurements or {}).get(label.casefold())
+        )
         columns.append(
             EvidenceTableColumn(
                 key=key,
@@ -313,7 +322,11 @@ def _columns(
                     if producer_measurement is not None
                     else _column_measurement_kind(data_type)
                 ),
-                unit=(producer_measurement[1] if producer_measurement is not None else unit),
+                unit=(
+                    producer_measurement[1]
+                    if producer_measurement is not None
+                    else inferred_unit
+                ),
             )
         )
     return tuple(columns)
@@ -360,17 +373,22 @@ def _rows(
             column.key: displayed
             for column, displayed in zip(columns, values, strict=True)
         }
-        measurement_kind = _measurement_kind(
-            displayed_by_key.get(measurement_column.key, "")
+        measurement_kind = (
+            _measurement_kind(displayed_by_key.get(measurement_column.key, ""))
             if measurement_column is not None
-            else ""
+            else None
         )
         raw_unit = (
             displayed_by_key.get(unit_column.key, "").strip()
             if unit_column is not None
             else ""
         )
-        unit = None if raw_unit.casefold() in _UNAVAILABLE_VALUES else raw_unit
+        unit = (
+            None
+            if unit_column is None or raw_unit.casefold() in _UNAVAILABLE_VALUES
+            else raw_unit
+        )
+        has_row_measurement = measurement_column is not None or unit_column is not None
         for column, displayed in zip(columns, values, strict=True):
             is_measured_value = (
                 column.key not in {"measurement", "unit"}
@@ -384,8 +402,12 @@ def _rows(
             )
             cells[column.key] = EvidenceTableCell(
                 raw_value=_typed_value(displayed, column.data_type),
-                measurement_kind=(measurement_kind if is_measured_value else None),
-                unit=(unit if is_measured_value else None),
+                measurement_kind=(
+                    measurement_kind
+                    if is_measured_value and has_row_measurement
+                    else None
+                ),
+                unit=(unit if is_measured_value and has_row_measurement else None),
             )
         output.append(
             EvidenceTableRow(

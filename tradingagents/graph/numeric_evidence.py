@@ -124,13 +124,25 @@ def build_numeric_value_catalog(
                 if not refs:
                     continue
                 entries.append(
+                    # A cell override is atomic. An unannotated cell inherits the
+                    # complete column measurement instead of combining a default
+                    # UNKNOWN kind with the column unit.
+                    #
+                    # Explicit row-level metadata remains authoritative for
+                    # heterogeneous value columns.
                     _entry(
                         label=f"{table.title} · {row_label} · {column.label}",
                         value=float(cell.raw_value),
                         measurement_kind=(
-                            cell.measurement_kind or column.measurement_kind
+                            column.measurement_kind
+                            if cell.measurement_kind is None and cell.unit is None
+                            else cell.measurement_kind or column.measurement_kind
                         ),
-                        unit=cell.unit or column.unit,
+                        unit=(
+                            column.unit
+                            if cell.measurement_kind is None and cell.unit is None
+                            else cell.unit
+                        ),
                         evidence_refs=refs,
                         locator=EvidenceValueLocator(
                             evidence_ref=refs[0],

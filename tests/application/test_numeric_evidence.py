@@ -140,6 +140,82 @@ def test_numeric_catalog_uses_row_measurement_metadata_for_mixed_value_column() 
     assert sma.unit == "JPY"
 
 
+def test_numeric_catalog_inherits_column_measurement_for_unannotated_cells() -> None:
+    ref = "ev_0123456789ab"
+    table = EvidenceTable.create(
+        title="Daily OHLCV",
+        purpose="Frozen price history",
+        columns=(
+            EvidenceTableColumn(
+                key="date",
+                label="Date",
+                data_type=TableDataType.DATE,
+            ),
+            EvidenceTableColumn(
+                key="high",
+                label="High",
+                data_type=TableDataType.NUMBER,
+                measurement_kind=MeasurementKind.CURRENCY,
+                unit="JPY",
+            ),
+        ),
+        rows=(
+            EvidenceTableRow(
+                id="row_0001",
+                cells={
+                    "date": EvidenceTableCell(raw_value="2026-07-31"),
+                    "high": EvidenceTableCell(raw_value=4025),
+                },
+            ),
+        ),
+        evidence_refs=(ref,),
+        source_format="structured",
+    )
+    bundle = EvidenceBundle(
+        instrument="3778.T",
+        analysis_date=date(2026, 8, 1),
+        items=(
+            EvidenceItem(
+                ref=ref,
+                source="fixture",
+                evidence_type="daily prices",
+                requested_date=date(2026, 8, 1),
+                effective_date=date(2026, 7, 31),
+            ),
+        ),
+        tables=(table,),
+    )
+
+    entry = build_numeric_value_catalog(bundle)[0]
+
+    assert entry.measurement_kind is MeasurementKind.CURRENCY
+    assert entry.unit == "JPY"
+
+
+def test_table_parser_keeps_metadata_carriers_unmeasured() -> None:
+    item = EvidenceItem(
+        ref="ev_0123456789ab",
+        source="fixture",
+        evidence_type="verified market snapshot",
+        requested_date=date(2026, 8, 1),
+        effective_date=date(2026, 7, 31),
+        content=(
+            "| Indicator | Value | Measurement | Unit |\n"
+            "|---|---:|---|---|\n"
+            "| close | 3075 | currency | JPY |"
+        ),
+    )
+
+    table = extract_evidence_tables((item,))[0]
+    columns = {column.key: column for column in table.columns}
+
+    assert columns["measurement"].data_type is TableDataType.TEXT
+    assert columns["measurement"].unit is None
+    assert columns["unit"].data_type is TableDataType.TEXT
+    assert columns["unit"].measurement_kind is MeasurementKind.UNKNOWN
+    assert columns["unit"].unit is None
+
+
 def test_compact_numeric_catalog_shares_measurements_and_omits_unknowns() -> None:
     items = (
         EvidenceItem(
