@@ -1603,7 +1603,26 @@ def _emit_numeric_normalization_event(
                 "payload": {"count": assembly.reordered_ranges},
             }
         )
+    if event_writer is not None and assembly.audit_issues:
+        event_writer(
+            {
+                "event_type": "node.numeric_audit_degraded",
+                "node": node,
+                "payload": {
+                    "reason_code": "numeric_display_mismatch",
+                    "validation_issues": list(assembly.audit_issues),
+                },
+            }
+        )
     return assembly
+
+
+def _numeric_assembly_requires_repair(
+    assembly: _NumericDecisionAssembly,
+) -> bool:
+    """Return whether another numeric serializer call can change the result."""
+
+    return bool(assembly.repair_issues)
 
 
 def _invoke_decision_numeric(
@@ -1644,16 +1663,21 @@ def _invoke_decision_numeric(
     )
 
     def validate(draft: DecisionNumericDraft) -> DecisionNumericDraft:
-        _assemble_numeric_draft(
+        assembly = _assemble_numeric_draft(
             draft,
             bundle=bundle,
             allowed_evidence_refs=allowed,
             value_catalog=value_catalog_by_id,
-            salvage=False,
+            salvage=True,
             node=node,
             output_language=output_language,
             requirements=requirements,
         )
+        if _numeric_assembly_requires_repair(assembly):
+            raise OutputValidationError(
+                assembly.repair_issues[0],
+                issue_codes=assembly.repair_issues,
+            )
         return draft
 
     def numeric_event(raw: dict[str, Any]) -> None:

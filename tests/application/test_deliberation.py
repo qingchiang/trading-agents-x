@@ -1661,6 +1661,73 @@ def test_display_mismatch_keeps_verified_calculation_and_comparison() -> None:
     )
 
 
+def test_display_mismatch_does_not_retry_numeric_serializer() -> None:
+    state = _state()
+    ref = state["evidence_bundle"]["items"][0]["ref"]
+    core = _core_draft_from_decision(
+        research_decision(evidence_refs=(ref,)).model_dump(mode="json")
+    )
+    requirement = DecisionNumericRequirementDraft(
+        id="req_guidance_pe",
+        component_path="thesis",
+        label="Forward PE",
+        stated_value=45.8,
+        fraction_digits=1,
+        formula="price / guidance_eps",
+        inputs=(
+            CalculationInputDraft(name="price", value=3834.343755),
+            CalculationInputDraft(name="guidance_eps", value=1),
+        ),
+        input_evidence_refs=(ref,),
+        unit="x",
+        limitations=("Guidance may change.",),
+    )
+    numeric = DecisionNumericDraft(
+        requested=True,
+        calculation_records=(
+            CalculationRecordDraft(
+                id="calc_guidance_pe",
+                formula=requirement.formula,
+                inputs=requirement.inputs,
+                input_evidence_refs=requirement.input_evidence_refs,
+                unit=requirement.unit,
+                limitations=requirement.limitations,
+                requirement_ids=(requirement.id,),
+            ),
+        ),
+    )
+    llm = _SequenceLLM(
+        {
+            "ResearchDecisionCoreEnvelope": [
+                _core_envelope(core, requirements=(requirement,))
+            ],
+            "DecisionNumericDraft": [numeric],
+        }
+    )
+    events: list[dict[str, Any]] = []
+
+    result = invoke_research_decision(
+        llm,
+        prompt="Form the final decision.",
+        state=state,
+        node="committee.final",
+        require_risk_adjustments=False,
+        event_writer=events.append,
+    )
+
+    assert result.value.numeric_audit_status is NumericAuditStatus.PARTIAL
+    assert len(result.value.calculation_records) == 1
+    assert [schema for schema, _prompt in llm.prompts].count(
+        "DecisionNumericDraft"
+    ) == 1
+    numeric_events = [
+        event["event_type"]
+        for event in events
+        if event["event_type"].startswith("node.numeric_audit")
+    ]
+    assert numeric_events == ["node.numeric_audit_degraded"]
+
+
 def test_percent_formula_using_display_scale_reports_specific_mismatch() -> None:
     state = _state()
     bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
