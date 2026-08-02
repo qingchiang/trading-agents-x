@@ -11,6 +11,7 @@ from collections.abc import Callable, Mapping
 from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from datetime import date, datetime
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Annotated, Any, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -22,6 +23,7 @@ from tradingagents.application.contracts import (
     DebateAgenda,
     DebateImportance,
     DebateIssue,
+    DecisionCalculationUse,
     DecisionNumericAuditAppendix,
     EvidenceBundle,
     EvidenceItem,
@@ -122,6 +124,7 @@ class CalculationRecordDraft(BaseModel):
     input_evidence_refs: tuple[str, ...] = Field(min_length=1)
     unit: str = Field(min_length=1, max_length=32)
     limitations: tuple[str, ...] = Field(min_length=1)
+    requirement_ids: tuple[str, ...] = ()
 
     @field_validator("inputs")
     @classmethod
@@ -136,6 +139,14 @@ class CalculationRecordDraft(BaseModel):
 
     def input_mapping(self) -> dict[str, int | float]:
         return {item.name: item.value for item in self.inputs}
+
+    @field_validator("requirement_ids")
+    @classmethod
+    def validate_requirement_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        result = tuple(dict.fromkeys(value))
+        if any(not re.fullmatch(r"req_[a-z0-9][a-z0-9_.-]*", item) for item in result):
+            raise ValueError("invalid numeric requirement identifier")
+        return result
 
 
 class DecisionNumericRequirementDraft(BaseModel):
@@ -1184,6 +1195,7 @@ def invoke_research_decision(
             event_writer=event_writer,
             output_language=resolved_language,
             core_scenarios=core_value.scenarios,
+            requirements=core_value.numeric_requirements,
         )
     scenario_values = []
     for scenario in core_value.scenarios:
@@ -1274,6 +1286,7 @@ def _invoke_decision_numeric(
     event_writer: EventWriter | None,
     output_language: str,
     core_scenarios: tuple[ResearchScenarioCoreDraft, ...],
+    requirements: tuple[DecisionNumericRequirementDraft, ...],
 ) -> _NumericDecisionAssembly:
     allowed = set(allowed_evidence_refs)
     value_catalog = build_numeric_value_catalog(
@@ -1294,6 +1307,10 @@ def _invoke_decision_numeric(
         for scenario in core_scenarios
     )
     scenario_catalog_json = json.dumps(scenario_catalog, ensure_ascii=False)
+    requirement_catalog_json = json.dumps(
+        [item.model_dump(mode="json") for item in requirements],
+        ensure_ascii=False,
+    )
 
     def validate(draft: DecisionNumericDraft) -> DecisionNumericDraft:
         _assemble_numeric_draft(
@@ -1304,6 +1321,7 @@ def _invoke_decision_numeric(
             salvage=False,
             node=node,
             output_language=output_language,
+            requirements=requirements,
         )
         return draft
 
@@ -1346,6 +1364,43 @@ def _invoke_decision_numeric(
             )
         )
 
+    example_calculations = [
+        CalculationRecordDraft(
+            id="calc_valuation_low",
+            formula="earnings * multiple",
+            inputs=(
+                CalculationInputDraft(name="earnings", value=10),
+                CalculationInputDraft(name="multiple", value=10),
+            ),
+            input_evidence_refs=(allowed_evidence_refs[0],),
+            unit="USD",
+            limitations=(example_text["valuation_limitation"],),
+        ),
+        CalculationRecordDraft(
+            id="calc_valuation_high",
+            formula="earnings * multiple",
+            inputs=(
+                CalculationInputDraft(name="earnings", value=11),
+                CalculationInputDraft(name="multiple", value=10),
+            ),
+            input_evidence_refs=(allowed_evidence_refs[0],),
+            unit="USD",
+            limitations=(example_text["valuation_limitation"],),
+        ),
+    ]
+    if requirements:
+        requirement = requirements[0]
+        example_calculations.append(
+            CalculationRecordDraft(
+                id="calc_decision_requirement",
+                formula=requirement.formula,
+                inputs=requirement.inputs,
+                input_evidence_refs=requirement.input_evidence_refs,
+                unit=requirement.unit,
+                limitations=requirement.limitations,
+                requirement_ids=(requirement.id,),
+            )
+        )
     example = DecisionNumericDraft(
         requested=True,
         scenario_reference_ranges=ScenarioReferenceRangesDraft(
@@ -1362,30 +1417,7 @@ def _invoke_decision_numeric(
             limitations=(example_text["valuation_limitation"],),
         ),
         market_reference_levels=(example_reference,),
-        calculation_records=(
-            CalculationRecordDraft(
-                id="calc_valuation_low",
-                formula="earnings * multiple",
-                inputs=(
-                    CalculationInputDraft(name="earnings", value=10),
-                    CalculationInputDraft(name="multiple", value=10),
-                ),
-                input_evidence_refs=(allowed_evidence_refs[0],),
-                unit="USD",
-                limitations=(example_text["valuation_limitation"],),
-            ),
-            CalculationRecordDraft(
-                id="calc_valuation_high",
-                formula="earnings * multiple",
-                inputs=(
-                    CalculationInputDraft(name="earnings", value=11),
-                    CalculationInputDraft(name="multiple", value=10),
-                ),
-                input_evidence_refs=(allowed_evidence_refs[0],),
-                unit="USD",
-                limitations=(example_text["valuation_limitation"],),
-            ),
-        ),
+        calculation_records=tuple(example_calculations),
     )
     runner = StructuredOutputRunner(
         llm=llm,
@@ -1428,18 +1460,25 @@ def _invoke_decision_numeric(
             "from real valuation calculations such as EPS times a multiple or DCF. Do not "
             "supply calculation results or dates; the application derives both "
             "from the formula and Evidence Ledger. Do not change the qualitative "
-            f"decision core. {language_rules}\n"
+            "decision core. Every item in DECISION NUMERIC REQUIREMENTS must be "
+            "covered by a calculation whose requirement_ids includes that item's ID. "
+            "Copy its formula, named inputs, Evidence refs, unit, and limitations "
+            "without changing them. When requirements are present, requested must be "
+            f"true. {language_rules}\n"
             "VALID OBSERVED VALUE REFS:\n"
             + json.dumps(value_catalog_prompt, ensure_ascii=False)
             + "\nSCENARIO CATALOG:\n"
             + scenario_catalog_json
+            + "\nDECISION NUMERIC REQUIREMENTS:\n"
+            + requirement_catalog_json
         ),
     )
     try:
         output = runner.invoke(
             prompt + "\n\nExtract only optional decision-critical numeric content. "
-            "Set requested=false and return empty collections when the brief "
-            "does not support a numeric appendix. Do not copy ordinary report "
+            "Set requested=false and return empty collections only when the brief "
+            "does not support a numeric appendix and DECISION NUMERIC REQUIREMENTS "
+            "is empty. Do not copy ordinary report "
             "table arithmetic. Use scenario_reference_ranges for technical bands, "
             "52-week levels, or analyst target ranges; these are not valuations. "
             "A true range requires two distinct endpoints with low strictly less than "
@@ -1454,6 +1493,8 @@ def _invoke_decision_numeric(
             + json.dumps(value_catalog_prompt, ensure_ascii=False)
             + "\n\nSCENARIO CATALOG:\n"
             + scenario_catalog_json
+            + "\n\nDECISION NUMERIC REQUIREMENTS:\n"
+            + requirement_catalog_json
             + "\n\nLOCALIZED VALID EXAMPLE:\n"
             + json.dumps(example.model_dump(mode="json"), ensure_ascii=False),
             example=example.model_dump(mode="json"),
@@ -1462,9 +1503,17 @@ def _invoke_decision_numeric(
     except StructuredOutputError as exc:
         draft = _numeric_candidate(exc.candidate)
         if draft is None:
+            omissions = _requirement_omissions(
+                requirements,
+                issue_suffix="missing_calculation",
+            )
             empty = _empty_numeric_assembly(
                 node=node,
-                status=NumericAuditStatus.INCOMPLETE,
+                status=(
+                    NumericAuditStatus.PARTIAL
+                    if requirements
+                    else NumericAuditStatus.INCOMPLETE
+                ),
             )
             return _emit_numeric_normalization_event(
                 replace(
@@ -1472,7 +1521,7 @@ def _invoke_decision_numeric(
                     audit=_numeric_audit_appendix(
                         status=NumericAuditAppendixStatus.INCOMPLETE,
                         failures=exc.failures,
-                        omissions=(
+                        omissions=omissions or (
                             NumericAuditOmission(
                                 component_path="numeric.appendix",
                                 component_type=NumericAuditComponentType.APPENDIX,
@@ -1498,6 +1547,7 @@ def _invoke_decision_numeric(
             value_catalog=value_catalog_by_id,
             salvage=True,
             node=node,
+            requirements=requirements,
         )
         if _numeric_repair_is_noop(exc.failures):
             assembly = replace(
@@ -1537,6 +1587,7 @@ def _invoke_decision_numeric(
         value_catalog=value_catalog_by_id,
         salvage=False,
         node=node,
+        requirements=requirements,
     )
     if output.failed_attempts:
         return _emit_numeric_normalization_event(
@@ -1582,12 +1633,26 @@ def _numeric_audit_appendix(
     omissions: tuple[NumericAuditOmission, ...],
 ) -> DecisionNumericAuditAppendix:
     snapshots = tuple(_numeric_audit_snapshot(failure) for failure in failures)
-    if not snapshots:
-        raise ValueError("numeric audit appendix requires a failed attempt")
     return DecisionNumericAuditAppendix(
         status=status,
         snapshots=snapshots[-2:],
         omitted_components=omissions,
+    )
+
+
+def _requirement_omissions(
+    requirements: tuple[DecisionNumericRequirementDraft, ...],
+    *,
+    issue_suffix: str,
+) -> tuple[NumericAuditOmission, ...]:
+    return tuple(
+        NumericAuditOmission(
+            component_path=requirement.component_path,
+            component_type=NumericAuditComponentType.DECISION_CLAIM,
+            reference_label=requirement.label,
+            issue_codes=(f"numeric.requirement.{requirement.id}.{issue_suffix}",),
+        )
+        for requirement in requirements
     )
 
 
@@ -1757,9 +1822,11 @@ def _assemble_numeric_draft(
     salvage: bool,
     node: str,
     output_language: str = ReportLanguage.ENGLISH.prompt_label,
+    requirements: tuple[DecisionNumericRequirementDraft, ...] = (),
 ) -> _NumericDecisionAssembly:
     issues: list[str] = []
     calculations: dict[str, CalculationRecord] = {}
+    calculation_drafts: dict[str, CalculationRecordDraft] = {}
     evidence_items = {item.ref: item for item in bundle.items}
     duplicate_ids = {
         item.id
@@ -1801,14 +1868,72 @@ def _assemble_numeric_draft(
                 temporal_basis=resolved_date.temporal_basis,
                 limitations=item.limitations,
             )
+            calculation_drafts[item.id] = item
         except OutputValidationError as exc:
             issues.append(exc.issue_code)
+
+    requirement_by_id = {item.id: item for item in requirements}
+    requirement_uses: dict[str, list[DecisionCalculationUse]] = {}
+    covered_requirements: set[str] = set()
+    for calculation_id, item in calculation_drafts.items():
+        for requirement_id in item.requirement_ids:
+            requirement = requirement_by_id.get(requirement_id)
+            if requirement is None:
+                issues.append(
+                    f"numeric.calculation.{calculation_id}.unknown_requirement"
+                )
+                continue
+            prefix = f"numeric.requirement.{requirement_id}"
+            mismatch: str | None = None
+            if _formula_identity(item.formula) != _formula_identity(requirement.formula):
+                mismatch = "formula_mismatch"
+            elif item.input_mapping() != requirement_input_mapping(requirement):
+                mismatch = "inputs_mismatch"
+            elif set(item.input_evidence_refs) != set(requirement.input_evidence_refs):
+                mismatch = "evidence_mismatch"
+            elif item.unit != requirement.unit:
+                mismatch = "unit_mismatch"
+            else:
+                quantum = Decimal(1).scaleb(-requirement.fraction_digits)
+                canonical = Decimal(str(calculations[calculation_id].result)).quantize(
+                    quantum,
+                    rounding=ROUND_HALF_UP,
+                )
+                stated = Decimal(str(requirement.stated_value)).quantize(
+                    quantum,
+                    rounding=ROUND_HALF_UP,
+                )
+                if canonical != stated:
+                    mismatch = "result_mismatch"
+            if mismatch is not None:
+                issues.append(f"{prefix}.{mismatch}")
+                continue
+            covered_requirements.add(requirement_id)
+            requirement_uses.setdefault(calculation_id, []).append(
+                DecisionCalculationUse(
+                    component_path=requirement.component_path,
+                    label=requirement.label,
+                )
+            )
+
+    for requirement in requirements:
+        if requirement.id not in covered_requirements:
+            issue = f"numeric.requirement.{requirement.id}.missing_calculation"
+            if not any(item.startswith(f"numeric.requirement.{requirement.id}.") for item in issues):
+                issues.append(issue)
+
+    calculations = {
+        calculation_id: calculation.model_copy(
+            update={"decision_uses": tuple(requirement_uses.get(calculation_id, ()))},
+        )
+        for calculation_id, calculation in calculations.items()
+    }
 
     scenario_values: dict[ResearchScenarioKind, tuple[ScenarioReferenceRange, ...]] = {}
     duplicate_warnings: list[ResearchWarning] = []
     promoted_references: list[MarketReferenceLevel] = []
     reordered_ranges = 0
-    linked_ids: set[str] = set()
+    linked_ids: set[str] = set(requirement_uses)
     for scenario_kind, scenario_ranges in draft.scenario_reference_ranges.items():
         assembled_ranges: list[ScenarioReferenceRange] = []
         seen_range_keys: set[str] = set()
@@ -2106,7 +2231,9 @@ def _assemble_numeric_draft(
     orphaned = set(calculations).difference(linked_ids)
     for calculation_id in sorted(orphaned):
         issues.append(f"numeric.calculation.{calculation_id}.orphaned")
-    if draft.requested and not (scenario_values or valuation is not None or reference_levels):
+    if draft.requested and not (
+        scenario_values or valuation is not None or reference_levels or linked_ids
+    ):
         issues.append("numeric.requested.empty")
     if not draft.requested and (
         draft.scenario_reference_ranges.has_content()
@@ -2127,10 +2254,20 @@ def _assemble_numeric_draft(
         for calculation_id, calculation in calculations.items()
         if calculation_id in linked_ids
     )
-    has_content = bool(scenario_values or valuation is not None or reference_levels)
-    omissions = _numeric_omissions(draft, tuple(issues))
+    has_content = bool(
+        scenario_values or valuation is not None or reference_levels or kept_calculations
+    )
+    omissions = _numeric_omissions(
+        draft,
+        tuple(issues),
+        requirements=requirements,
+    )
     if issues:
-        status = NumericAuditStatus.PARTIAL if has_content else NumericAuditStatus.INCOMPLETE
+        status = (
+            NumericAuditStatus.PARTIAL
+            if has_content or requirements
+            else NumericAuditStatus.INCOMPLETE
+        )
         omitted = ", ".join(item.reference_label or item.component_path for item in omissions)
         warnings = (
             ResearchWarning(
@@ -2165,6 +2302,8 @@ def _assemble_numeric_draft(
 def _numeric_omissions(
     draft: DecisionNumericDraft,
     issues: tuple[str, ...],
+    *,
+    requirements: tuple[DecisionNumericRequirementDraft, ...] = (),
 ) -> tuple[NumericAuditOmission, ...]:
     grouped: dict[
         tuple[
@@ -2183,6 +2322,7 @@ def _numeric_omissions(
         for kind, ranges in draft.scenario_reference_ranges.items()
         for index, item in enumerate(ranges)
     }
+    requirement_labels = {item.id: (item.component_path, item.label) for item in requirements}
     for issue in issues:
         parts = issue.split(".")
         path = "numeric.appendix"
@@ -2208,6 +2348,14 @@ def _numeric_omissions(
             path = ".".join(parts[:3])
             component_type = NumericAuditComponentType.MARKET_REFERENCE
             reference_label = reference_labels.get(parts[2])
+        elif len(parts) >= 4 and parts[:2] == ["numeric", "requirement"]:
+            component_type = NumericAuditComponentType.DECISION_CLAIM
+            requirement_path, requirement_label = requirement_labels.get(
+                parts[2],
+                (f"numeric.requirement.{parts[2]}", parts[2]),
+            )
+            path = requirement_path
+            reference_label = requirement_label
         grouped.setdefault((path, component_type, scenario_kind, reference_label), []).append(issue)
     return tuple(
         NumericAuditOmission(
@@ -2565,6 +2713,19 @@ def _is_truncated(response: Any) -> bool:
         "max_tokens",
         "max_output_tokens",
     }
+
+
+def requirement_input_mapping(
+    requirement: DecisionNumericRequirementDraft,
+) -> dict[str, int | float]:
+    return {item.name: item.value for item in requirement.inputs}
+
+
+def _formula_identity(formula: str) -> str | None:
+    try:
+        return ast.dump(ast.parse(formula, mode="eval"), include_attributes=False)
+    except SyntaxError:
+        return None
 
 
 def _evaluate_formula(

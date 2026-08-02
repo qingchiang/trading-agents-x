@@ -927,10 +927,28 @@ def test_core_declares_decision_critical_numeric_requirement() -> None:
             ),
         }
     )
+    requirement = core.numeric_requirements[0]
+    recovered_numeric = DecisionNumericDraft(
+        requested=True,
+        calculation_records=(
+            CalculationRecordDraft(
+                id="calc_guidance_pe",
+                formula=requirement.formula,
+                inputs=requirement.inputs,
+                input_evidence_refs=requirement.input_evidence_refs,
+                unit=requirement.unit,
+                limitations=requirement.limitations,
+                requirement_ids=(requirement.id,),
+            ),
+        ),
+    )
     llm = _SequenceLLM(
         {
             "ResearchDecisionCoreDraft": [core],
-            "DecisionNumericDraft": [DecisionNumericDraft(requested=False)],
+            "DecisionNumericDraft": [
+                DecisionNumericDraft(requested=False),
+                recovered_numeric,
+            ],
         }
     )
 
@@ -943,8 +961,225 @@ def test_core_declares_decision_critical_numeric_requirement() -> None:
     )
 
     assert result.value.thesis == core.thesis
+    assert result.value.numeric_audit_status is NumericAuditStatus.COMPLETE
+    assert len(result.value.calculation_records) == 1
+    assert result.value.calculation_records[0].result == pytest.approx(3075 / 37.46)
+    assert result.value.calculation_records[0].decision_uses[0].component_path == "thesis"
+    assert result.numeric_audit is not None
+    assert result.numeric_audit.status is NumericAuditAppendixStatus.RECOVERED
     assert '"numeric_requirements"' in llm.prompts[0][1]
     assert "decision-critical calculation checklist" in llm.prompts[0][1]
+    assert "DECISION NUMERIC REQUIREMENTS" in llm.prompts[1][1]
+
+
+def test_missing_decision_calculation_degrades_numeric_audit_only_once() -> None:
+    state = _state()
+    ref = state["evidence_bundle"]["items"][0]["ref"]
+    core = _core_draft_from_decision(
+        research_decision(evidence_refs=(ref,)).model_dump(mode="json")
+    ).model_copy(
+        update={
+            "thesis": "The remaining quarterly EPS is 16.08.",
+            "numeric_requirements": (
+                DecisionNumericRequirementDraft(
+                    id="req_eps_remaining",
+                    component_path="thesis",
+                    label="Remaining EPS guidance",
+                    display_text="16.08",
+                    stated_value=16.08,
+                    fraction_digits=2,
+                    formula="guidance_eps - first_quarter_eps",
+                    inputs=(
+                        CalculationInputDraft(name="guidance_eps", value=37.46),
+                        CalculationInputDraft(name="first_quarter_eps", value=21.38),
+                    ),
+                    input_evidence_refs=(ref,),
+                    unit="JPY/share",
+                    limitations=("Quarterly phasing may vary.",),
+                ),
+            ),
+        }
+    )
+    empty_numeric = DecisionNumericDraft(requested=False)
+    llm = _SequenceLLM(
+        {
+            "ResearchDecisionCoreDraft": [core],
+            "DecisionNumericDraft": [empty_numeric, empty_numeric],
+        }
+    )
+    events: list[dict[str, Any]] = []
+
+    result = invoke_research_decision(
+        llm,
+        prompt="Form the final decision.",
+        state=state,
+        node="committee.final",
+        require_risk_adjustments=False,
+        event_writer=events.append,
+    )
+
+    assert result.value.thesis == core.thesis
+    assert result.value.calculation_records == ()
+    assert result.value.numeric_audit_status is NumericAuditStatus.PARTIAL
+    assert result.numeric_audit is not None
+    assert result.numeric_audit.status is NumericAuditAppendixStatus.PARTIAL
+    assert result.numeric_audit.omitted_components[0].component_path == "thesis"
+    assert result.numeric_audit.omitted_components[0].issue_codes == (
+        "numeric.requirement.req_eps_remaining.missing_calculation",
+    )
+    assert [event["event_type"] for event in events] == [
+        "node.numeric_audit_retry",
+        "node.numeric_audit_degraded",
+    ]
+    assert [schema for schema, _prompt in llm.prompts].count("DecisionNumericDraft") == 2
+
+
+def test_decision_requirements_use_decimal_rounding_and_publish_all_uses() -> None:
+    state = _state()
+    bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
+    ref = bundle.items[0].ref
+    requirements = (
+        DecisionNumericRequirementDraft(
+            id="req_guidance_pe",
+            component_path="thesis",
+            label="Forward PE",
+            display_text="82.1x",
+            stated_value=82.1,
+            fraction_digits=1,
+            formula="price / guidance_eps",
+            inputs=(
+                CalculationInputDraft(name="price", value=3075),
+                CalculationInputDraft(name="guidance_eps", value=37.46),
+            ),
+            input_evidence_refs=(ref,),
+            unit="x",
+            limitations=("Guidance may change.",),
+        ),
+        DecisionNumericRequirementDraft(
+            id="req_eps_remaining",
+            component_path="risks.0",
+            label="Remaining EPS",
+            display_text="16.08",
+            stated_value=16.08,
+            fraction_digits=2,
+            formula="guidance_eps - first_quarter_eps",
+            inputs=(
+                CalculationInputDraft(name="guidance_eps", value=37.46),
+                CalculationInputDraft(name="first_quarter_eps", value=21.38),
+            ),
+            input_evidence_refs=(ref,),
+            unit="JPY/share",
+            limitations=("Quarterly phasing may vary.",),
+        ),
+        DecisionNumericRequirementDraft(
+            id="req_eps_run_rate",
+            component_path="risk_review_adjustments.0.explanation",
+            label="Required quarterly EPS",
+            display_text="5.36",
+            stated_value=5.36,
+            fraction_digits=2,
+            formula="remaining_eps / remaining_quarters",
+            inputs=(
+                CalculationInputDraft(name="remaining_eps", value=16.08),
+                CalculationInputDraft(name="remaining_quarters", value=3),
+            ),
+            input_evidence_refs=(ref,),
+            unit="JPY/share",
+            limitations=("Assumes even quarterly phasing.",),
+        ),
+    )
+    draft = DecisionNumericDraft(
+        requested=True,
+        calculation_records=tuple(
+            CalculationRecordDraft(
+                id=f"calc_{requirement.id.removeprefix('req_')}",
+                formula=requirement.formula,
+                inputs=requirement.inputs,
+                input_evidence_refs=requirement.input_evidence_refs,
+                unit=requirement.unit,
+                limitations=requirement.limitations,
+                requirement_ids=(requirement.id,),
+            )
+            for requirement in requirements
+        ),
+    )
+
+    result = _assemble_numeric_draft(
+        draft,
+        bundle=bundle,
+        allowed_evidence_refs={ref},
+        value_catalog=_value_catalog(bundle),
+        salvage=False,
+        node="committee.final.serialize.numeric",
+        requirements=requirements,
+    )
+
+    assert result.status is NumericAuditStatus.COMPLETE
+    assert [item.result for item in result.calculation_records] == pytest.approx(
+        [3075 / 37.46, 16.08, 5.36]
+    )
+    assert [item.decision_uses[0].component_path for item in result.calculation_records] == [
+        "thesis",
+        "risks.0",
+        "risk_review_adjustments.0.explanation",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("update", "expected_issue"),
+    (
+        ({"unit": "JPY"}, "numeric.requirement.req_guidance_pe.unit_mismatch"),
+        (
+            {"formula": "price * guidance_eps"},
+            "numeric.requirement.req_guidance_pe.formula_mismatch",
+        ),
+    ),
+)
+def test_decision_requirement_mismatch_is_rejected(
+    update: dict[str, Any],
+    expected_issue: str,
+) -> None:
+    state = _state()
+    bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
+    ref = bundle.items[0].ref
+    requirement = DecisionNumericRequirementDraft(
+        id="req_guidance_pe",
+        component_path="thesis",
+        label="Forward PE",
+        display_text="82.1x",
+        stated_value=82.1,
+        fraction_digits=1,
+        formula="price / guidance_eps",
+        inputs=(
+            CalculationInputDraft(name="price", value=3075),
+            CalculationInputDraft(name="guidance_eps", value=37.46),
+        ),
+        input_evidence_refs=(ref,),
+        unit="x",
+        limitations=("Guidance may change.",),
+    )
+    calculation = CalculationRecordDraft(
+        id="calc_guidance_pe",
+        formula=requirement.formula,
+        inputs=requirement.inputs,
+        input_evidence_refs=requirement.input_evidence_refs,
+        unit=requirement.unit,
+        limitations=requirement.limitations,
+        requirement_ids=(requirement.id,),
+    ).model_copy(update=update)
+
+    with pytest.raises(OutputValidationError) as error:
+        _assemble_numeric_draft(
+            DecisionNumericDraft(requested=True, calculation_records=(calculation,)),
+            bundle=bundle,
+            allowed_evidence_refs={ref},
+            value_catalog=_value_catalog(bundle),
+            salvage=False,
+            node="committee.final.serialize.numeric",
+            requirements=(requirement,),
+        )
+
+    assert expected_issue in error.value.issue_codes
 
 
 @pytest.mark.parametrize(

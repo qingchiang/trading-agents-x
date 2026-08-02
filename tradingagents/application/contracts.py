@@ -180,6 +180,7 @@ class NumericAuditComponentType(str, Enum):
     SCENARIO_RANGE = "scenario_range"
     VALUATION = "valuation"
     MARKET_REFERENCE = "market_reference"
+    DECISION_CLAIM = "decision_claim"
 
 
 class NumericAuditStatus(str, Enum):
@@ -257,7 +258,7 @@ class DecisionNumericAuditAppendix(FrozenModel):
     """Unverified numeric proposals kept outside the canonical decision."""
 
     status: NumericAuditAppendixStatus
-    snapshots: tuple[NumericAuditSnapshot, ...] = Field(min_length=1, max_length=2)
+    snapshots: tuple[NumericAuditSnapshot, ...] = Field(max_length=2)
     omitted_components: tuple[NumericAuditOmission, ...] = ()
 
 
