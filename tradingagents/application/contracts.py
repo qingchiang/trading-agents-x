@@ -740,6 +740,27 @@ class AnalystReport(FrozenModel):
         return self
 
 
+class DecisionBrief(FrozenModel):
+    """Readable Final reasoning persisted before strict decision serialization."""
+
+    markdown: str = Field(min_length=1)
+    evidence_refs: tuple[str, ...] = ()
+    warnings: tuple[ResearchWarning, ...] = ()
+
+    @field_validator("evidence_refs")
+    @classmethod
+    def validate_evidence_refs(
+        cls,
+        value: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        return _unique_evidence_refs(value)
+
+    @field_validator("warnings", mode="before")
+    @classmethod
+    def coerce_warnings(cls, value: Any) -> tuple[ResearchWarning, ...]:
+        return _coerce_warnings(value)
+
+
 class ResearchCase(FrozenModel):
     """A readable constructive or skeptical research case."""
 
@@ -1304,6 +1325,7 @@ class MemoryContext(FrozenModel):
 
 ResearchArtifactContent = (
     AnalystReport
+    | DecisionBrief
     | ResearchCase
     | DebateAgenda
     | RebuttalReview
@@ -1316,6 +1338,8 @@ ResearchArtifactContent = (
 def _artifact_content_type(content: ResearchArtifactContent) -> str:
     if isinstance(content, AnalystReport):
         return "analyst_report"
+    if isinstance(content, DecisionBrief):
+        return "decision_brief"
     if isinstance(content, ResearchCase):
         return "research_case"
     if isinstance(content, DebateAgenda):

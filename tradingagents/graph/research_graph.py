@@ -50,6 +50,7 @@ from tradingagents.agents.utils.technical_indicators_tools import (
 from tradingagents.application.contracts import (
     AnalystReport,
     ArtifactGenerationMethod,
+    DecisionBrief,
     DecisionNumericAuditAppendix,
     EvidenceBundle,
     EvidenceItem,
@@ -141,6 +142,7 @@ class ResearchState(TypedDict, total=False):
     rebuttals: Annotated[list[dict[str, Any]], operator.add]
     risk_reviews: Annotated[dict[str, dict[str, Any]], _merge_dicts]
     judge_draft: dict[str, Any]
+    decision_brief: dict[str, Any]
     final_decision: dict[str, Any]
     numeric_audit: dict[str, Any] | None
     rebuttal_round: int
@@ -486,9 +488,14 @@ class ResearchGraph:
         source: str,
     ) -> None:
         if self.profile is RunProfile.FAST:
-            workflow.add_node("committee.final", self._create_final_committee(fast=True))
+            workflow.add_node("committee.final", self._create_final_brief(fast=True))
+            workflow.add_node(
+                "committee.final.serialize",
+                self._create_final_serializer(fast=True),
+            )
             workflow.add_edge(source, "committee.final")
-            workflow.add_edge("committee.final", END)
+            workflow.add_edge("committee.final", "committee.final.serialize")
+            workflow.add_edge("committee.final.serialize", END)
             return
 
         workflow.add_node(
@@ -535,7 +542,7 @@ class ResearchGraph:
                 self._create_risk_node(_PERSPECTIVE_SPECS["risk"]),
             )
             workflow.add_edge("judge.research", "risk.review")
-            workflow.add_node("committee.final", self._create_final_committee(fast=False))
+            workflow.add_node("committee.final", self._create_final_brief(fast=False))
             workflow.add_edge("risk.review", "committee.final")
         else:
             for key in ("aggressive", "neutral", "conservative"):
@@ -546,9 +553,14 @@ class ResearchGraph:
                 )
                 workflow.add_edge("judge.research", name)
                 workflow.add_edge(name, "committee.final")
-            workflow.add_node("committee.final", self._create_final_committee(fast=False))
+            workflow.add_node("committee.final", self._create_final_brief(fast=False))
 
-        workflow.add_edge("committee.final", END)
+        workflow.add_node(
+            "committee.final.serialize",
+            self._create_final_serializer(fast=False),
+        )
+        workflow.add_edge("committee.final", "committee.final.serialize")
+        workflow.add_edge("committee.final.serialize", END)
 
     def _create_analyst_collect_node(self, analyst: str):
         report_key = {
@@ -1221,8 +1233,8 @@ class ResearchGraph:
 
         return risk_node
 
-    def _create_final_committee(self, *, fast: bool):
-        def final_node(
+    def _create_final_brief(self, *, fast: bool):
+        def brief_node(
             state: ResearchState,
             runtime: Runtime[RunContext],
         ) -> dict[str, Any]:
@@ -1303,6 +1315,47 @@ class ResearchGraph:
                         "metadata": {"research_node": f"{node}.reason"},
                     },
                 )
+            brief = DecisionBrief(
+                markdown=written.markdown,
+                evidence_refs=written.evidence_refs,
+                warnings=written.warnings,
+            )
+            self._write_artifact(
+                runtime,
+                node=node,
+                stage="decision_brief",
+                role="final_committee",
+                content=brief,
+                generation_method=ArtifactGenerationMethod.MARKDOWN_AUDITED,
+                prompt_version="final-committee-brief-v1",
+            )
+            self._finish_node(
+                runtime,
+                node,
+                {
+                    "characters": len(brief.markdown),
+                    "evidence_count": len(brief.evidence_refs),
+                },
+                measure=False,
+            )
+            return {
+                "decision_brief": brief.model_dump(mode="json"),
+                "warnings": [
+                    warning.model_dump(mode="json") for warning in brief.warnings
+                ],
+            }
+
+        return brief_node
+
+    def _create_final_serializer(self, *, fast: bool):
+        def serializer_node(
+            state: ResearchState,
+            runtime: Runtime[RunContext],
+        ) -> dict[str, Any]:
+            node = "committee.final.serialize"
+            self._start_node(runtime, node, measure=False)
+            check_cancelled(runtime.context)
+            brief = DecisionBrief.model_validate(state["decision_brief"])
             output = invoke_research_decision(
                 self.deep_serializer_llm,
                 prompt=(
@@ -1310,7 +1363,7 @@ class ResearchGraph:
                     "strict final decision contract. Preserve its research "
                     "judgment; do not add unsupported facts. Use localized "
                     "reader-facing labels for market reference levels.\n\n"
-                    f"DECISION SYNTHESIS BRIEF:\n{written.markdown}\n\n"
+                    f"DECISION SYNTHESIS BRIEF:\n{brief.markdown}\n\n"
                     "ALLOWED EVIDENCE REFS:\n"
                     f"{json.dumps(_state_evidence_refs(state))}\n\n"
                     "ALLOWED MEMORY REFS:\n"
@@ -1319,7 +1372,7 @@ class ResearchGraph:
                     f"{json.dumps(tuple(state.get('risk_reviews', {})))}"
                 ),
                 state=state,
-                node=f"{node}.serialize",
+                node=node,
                 event_writer=runtime.stream_writer,
                 memory=runtime.context.memory,
                 require_risk_adjustments=not fast,
@@ -1354,12 +1407,11 @@ class ResearchGraph:
                 ),
                 "warnings": [
                     *_structured_recovery_warnings(node, output),
-                    *_research_markdown_warnings(written),
                     *(warning.model_dump(mode="json") for warning in output.warnings),
                 ],
             }
 
-        return final_node
+        return serializer_node
 
     def _deliberation_llm(self, spec: RoleSpec | None = None) -> Any:
         """Resolve role models according to the quality-first profile contract."""

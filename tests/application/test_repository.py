@@ -24,6 +24,7 @@ from tradingagents.application.contracts import (
     DebateAgenda,
     DebateImportance,
     DebateIssue,
+    DecisionBrief,
     DecisionNumericAuditAppendix,
     EvidenceBundle,
     EvidenceItem,
@@ -485,6 +486,15 @@ def test_artifact_prompt_version_is_audited_and_part_of_identity(
 @pytest.mark.parametrize(
     ("content", "content_type", "stage", "role"),
     (
+        (
+            DecisionBrief(
+                markdown="# Decision synthesis\n\nDraft reasoning.",
+                evidence_refs=(),
+            ),
+            "decision_brief",
+            "decision_brief",
+            "final_committee",
+        ),
         (research_case(role="bull"), "research_case", "case", "bull"),
         (
             DebateAgenda(

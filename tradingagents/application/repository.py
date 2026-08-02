@@ -22,6 +22,7 @@ from .contracts import (
     AnalystReport,
     ArtifactGenerationMethod,
     DebateAgenda,
+    DecisionBrief,
     DecisionNumericAuditAppendix,
     EvidenceBundle,
     EvidenceSealView,
@@ -1405,6 +1406,7 @@ class RunRepository:
     def _artifact(record: Any) -> ResearchArtifact:
         content_models = {
             "analyst_report": AnalystReport,
+            "decision_brief": DecisionBrief,
             "research_case": ResearchCase,
             "debate_agenda": DebateAgenda,
             "rebuttal_review": RebuttalReview,

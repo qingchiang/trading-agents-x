@@ -17,6 +17,7 @@ from tradingagents.application.contracts import (
     DebateAgenda,
     DebateImportance,
     DebateIssue,
+    DecisionBrief,
     EvidenceBundle,
     EvidenceItem,
     EvidenceQuality,
@@ -295,7 +296,12 @@ def _memory_context() -> MemoryContext:
     [
         (
             RunProfile.FAST,
-            {"analyst.market", "analyst.news", "committee.final"},
+            {
+                "analyst.market",
+                "analyst.news",
+                "committee.final",
+                "committee.final.serialize",
+            },
             {"case.bull", "judge.research", "risk.review"},
         ),
         (
@@ -309,6 +315,7 @@ def _memory_context() -> MemoryContext:
                 "judge.research",
                 "risk.review",
                 "committee.final",
+                "committee.final.serialize",
             },
             {"risk.aggressive", "risk.conservative"},
         ),
@@ -321,6 +328,7 @@ def _memory_context() -> MemoryContext:
                 "risk.neutral",
                 "risk.conservative",
                 "committee.final",
+                "committee.final.serialize",
             },
             {"risk.review"},
         ),
@@ -747,6 +755,7 @@ def test_graph_emits_only_typed_visible_research_artifacts(
         ("rebuttal", "bear"),
         ("judge", "research_judge"),
         ("risk", "integrated"),
+        ("decision_brief", "final_committee"),
         ("decision", "final_committee"),
     }
     assert all(
@@ -758,6 +767,7 @@ def test_graph_emits_only_typed_visible_research_artifacts(
             "rebuttal_review",
             "judge_draft",
             "risk_review",
+            "decision_brief",
             "research_decision",
         }
         for artifact in artifacts
@@ -775,6 +785,93 @@ def test_graph_emits_only_typed_visible_research_artifacts(
         ("news", "analyst-news-v6-sealed-context"),
     }
     assert all(artifact.prompt_version != "research-v1" for artifact in artifacts)
+    brief = next(
+        artifact.content
+        for artifact in artifacts
+        if isinstance(artifact.content, DecisionBrief)
+    )
+    assert brief.markdown
+
+
+def test_retry_after_final_serialization_reuses_checkpointed_brief(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _AnalystSubgraph(analyst)
+            for analyst in self.selected_analysts
+        },
+    )
+    llm = _FakeLLM()
+    artifacts: list[ResearchArtifactDraft] = []
+    graph = ResearchGraph(
+        quick_llm=llm,
+        deep_llm=llm,
+        profile=RunProfile.FAST,
+        selected_analysts=("market",),
+    )
+    context = _context(
+        app_settings,
+        RunProfile.FAST,
+        analysts=("market",),
+        artifact_writer=artifacts.append,
+    )
+    checkpointer = MemorySaver()
+    original = research_graph_module.invoke_research_decision
+    serializer_calls = 0
+
+    def fail_once(*args, **kwargs):
+        nonlocal serializer_calls
+        serializer_calls += 1
+        if serializer_calls == 1:
+            raise RuntimeError("fixture final serialization failure")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(
+        research_graph_module,
+        "invoke_research_decision",
+        fail_once,
+    )
+
+    with pytest.raises(RuntimeError, match="fixture final serialization failure"):
+        graph.execute(
+            context,
+            checkpointer=checkpointer,
+            checkpoint_thread_id="final-brief-retry",
+        )
+
+    assert sum(
+        isinstance(artifact.content, DecisionBrief) for artifact in artifacts
+    ) == 1
+    final_reasoning_calls = sum(
+        schema == "ResearchMarkdown"
+        and "SCENARIO ASSUMPTION READABILITY:" in prompt
+        for schema, prompt in llm.calls
+    )
+
+    execution = graph.execute(
+        context,
+        checkpointer=checkpointer,
+        checkpoint_thread_id="final-brief-retry",
+        resume=True,
+    )
+
+    assert execution.decision.rating is ResearchRating.HOLD
+    assert serializer_calls == 2
+    assert sum(
+        isinstance(artifact.content, DecisionBrief) for artifact in artifacts
+    ) == 1
+    assert (
+        sum(
+            schema == "ResearchMarkdown"
+            and "SCENARIO ASSUMPTION READABILITY:" in prompt
+            for schema, prompt in llm.calls
+        )
+        == final_reasoning_calls
+    )
 
 
 def test_deep_debate_stops_when_rebuttals_add_no_new_information(

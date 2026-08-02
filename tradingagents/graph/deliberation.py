@@ -86,6 +86,7 @@ class ResearchMarkdown:
     """One readable artifact body and non-fatal citation warnings."""
 
     markdown: str
+    evidence_refs: tuple[str, ...]
     warnings: tuple[ResearchWarning, ...]
 
 
@@ -417,6 +418,7 @@ def write_research_markdown(
     )
     return ResearchMarkdown(
         markdown=normalized.markdown,
+        evidence_refs=normalized.evidence_refs,
         warnings=normalized.warnings,
     )
 
