@@ -823,8 +823,8 @@
             "type": "array"
           },
           "version": {
-            "const": "7",
-            "default": "7",
+            "const": "8",
+            "default": "8",
             "title": "Version",
             "type": "string"
           }

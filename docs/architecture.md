@@ -91,13 +91,17 @@ with the decision for user inspection and export, but memory retrieval,
 outcome settlement, ratings, and thesis generation ignore it.
 
 Decision-critical calculations keep model-proposed formulas, named numeric
-inputs, units, limitations, and evidence references. The application evaluates
-those formulas with a restricted arithmetic interpreter and is the sole source
-of the canonical result and date. Calculation use is derived from the
-valuation, scenario, and market-reference components that reference its ID, so
-one calculation may support more than one component without carrying a
-conflicting single-purpose label. Canonical dates come from the latest relevant
-Evidence Ledger effective date and are never guessed from the analysis date.
+inputs, units, limitations, and evidence references. The strict qualitative
+decision core also declares every derived exact number that materially affects
+its thesis, risks, invalidation conditions, scenarios, or risk-review response.
+The numeric serializer must satisfy those declarations with calculation IDs;
+each retained calculation publishes its decision-component uses. The
+application evaluates formulas with a restricted arithmetic interpreter and is
+the sole source of the canonical result and date. A missing or invalid optional
+calculation degrades numeric audit status to `partial` without discarding an
+otherwise valid qualitative decision. Canonical dates come from the latest
+relevant Evidence Ledger effective date and are never guessed from the analysis
+date.
 
 Non-personalized ratings, conditional investment views, auditable valuation
 ranges, scenarios, and market reference levels are allowed. Position

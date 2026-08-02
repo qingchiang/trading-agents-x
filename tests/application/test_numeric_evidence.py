@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date, timedelta
+from pathlib import Path
 
 from tradingagents.application.contracts import (
     EvidenceBundle,
@@ -141,6 +143,11 @@ def test_numeric_catalog_uses_row_measurement_metadata_for_mixed_value_column() 
 
 
 def test_numeric_catalog_inherits_column_measurement_for_unannotated_cells() -> None:
+    regression = json.loads(
+        (Path(__file__).parent / "fixtures" / "3778_numeric_normalization.json").read_text(
+            encoding="utf-8"
+        )
+    )["measurement_inheritance"]
     ref = "ev_0123456789ab"
     table = EvidenceTable.create(
         title="Daily OHLCV",
@@ -155,8 +162,10 @@ def test_numeric_catalog_inherits_column_measurement_for_unannotated_cells() -> 
                 key="high",
                 label="High",
                 data_type=TableDataType.NUMBER,
-                measurement_kind=MeasurementKind.CURRENCY,
-                unit="JPY",
+                measurement_kind=MeasurementKind(
+                    regression["column"]["measurement_kind"]
+                ),
+                unit=regression["column"]["unit"],
             ),
         ),
         rows=(
@@ -164,7 +173,13 @@ def test_numeric_catalog_inherits_column_measurement_for_unannotated_cells() -> 
                 id="row_0001",
                 cells={
                     "date": EvidenceTableCell(raw_value="2026-07-31"),
-                    "high": EvidenceTableCell(raw_value=4025),
+                    "high": EvidenceTableCell(
+                        raw_value=4025,
+                        measurement_kind=regression["unannotated_cell"][
+                            "measurement_kind"
+                        ],
+                        unit=regression["unannotated_cell"]["unit"],
+                    ),
                 },
             ),
         ),
@@ -188,8 +203,8 @@ def test_numeric_catalog_inherits_column_measurement_for_unannotated_cells() -> 
 
     entry = build_numeric_value_catalog(bundle)[0]
 
-    assert entry.measurement_kind is MeasurementKind.CURRENCY
-    assert entry.unit == "JPY"
+    assert entry.measurement_kind.value == regression["expected"]["measurement_kind"]
+    assert entry.unit == regression["expected"]["unit"]
 
 
 def test_table_parser_keeps_metadata_carriers_unmeasured() -> None:

@@ -1038,18 +1038,22 @@ def test_decision_requirements_use_decimal_rounding_and_publish_all_uses() -> No
     state = _state()
     bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
     ref = bundle.items[0].ref
+    regression = _numeric_3778_payload()["decision_audit_gap"]
+    values = regression["values"]
     requirements = (
         DecisionNumericRequirementDraft(
             id="req_guidance_pe",
             component_path="thesis",
             label="Forward PE",
             display_text="82.1x",
-            stated_value=82.1,
+            stated_value=values["stated_forward_pe"],
             fraction_digits=1,
             formula="price / guidance_eps",
             inputs=(
-                CalculationInputDraft(name="price", value=3075),
-                CalculationInputDraft(name="guidance_eps", value=37.46),
+                CalculationInputDraft(name="price", value=values["price"]),
+                CalculationInputDraft(
+                    name="guidance_eps", value=values["company_guidance_eps"]
+                ),
             ),
             input_evidence_refs=(ref,),
             unit="x",
@@ -1060,12 +1064,16 @@ def test_decision_requirements_use_decimal_rounding_and_publish_all_uses() -> No
             component_path="risks.0",
             label="Remaining EPS",
             display_text="16.08",
-            stated_value=16.08,
+            stated_value=values["stated_remaining_eps"],
             fraction_digits=2,
             formula="guidance_eps - first_quarter_eps",
             inputs=(
-                CalculationInputDraft(name="guidance_eps", value=37.46),
-                CalculationInputDraft(name="first_quarter_eps", value=21.38),
+                CalculationInputDraft(
+                    name="guidance_eps", value=values["company_guidance_eps"]
+                ),
+                CalculationInputDraft(
+                    name="first_quarter_eps", value=values["first_quarter_eps"]
+                ),
             ),
             input_evidence_refs=(ref,),
             unit="JPY/share",
@@ -1076,11 +1084,13 @@ def test_decision_requirements_use_decimal_rounding_and_publish_all_uses() -> No
             component_path="risk_review_adjustments.0.explanation",
             label="Required quarterly EPS",
             display_text="5.36",
-            stated_value=5.36,
+            stated_value=values["stated_quarterly_run_rate"],
             fraction_digits=2,
             formula="remaining_eps / remaining_quarters",
             inputs=(
-                CalculationInputDraft(name="remaining_eps", value=16.08),
+                CalculationInputDraft(
+                    name="remaining_eps", value=values["stated_remaining_eps"]
+                ),
                 CalculationInputDraft(name="remaining_quarters", value=3),
             ),
             input_evidence_refs=(ref,),
@@ -1116,7 +1126,11 @@ def test_decision_requirements_use_decimal_rounding_and_publish_all_uses() -> No
 
     assert result.status is NumericAuditStatus.COMPLETE
     assert [item.result for item in result.calculation_records] == pytest.approx(
-        [3075 / 37.46, 16.08, 5.36]
+        [
+            values["price"] / values["company_guidance_eps"],
+            values["stated_remaining_eps"],
+            values["stated_quarterly_run_rate"],
+        ]
     )
     assert [item.decision_uses[0].component_path for item in result.calculation_records] == [
         "thesis",

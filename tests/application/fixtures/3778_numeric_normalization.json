@@ -43,6 +43,55 @@
     {"field": "target_price", "expected_kind": "currency", "expected_unit": "JPY"},
     {"field": "macro_without_explicit_unit", "expected_kind": "unknown", "expected_unit": null}
   ],
+  "measurement_inheritance": {
+    "column": {
+      "measurement_kind": "currency",
+      "unit": "JPY"
+    },
+    "unannotated_cell": {
+      "measurement_kind": null,
+      "unit": null
+    },
+    "expected": {
+      "measurement_kind": "currency",
+      "unit": "JPY"
+    }
+  },
+  "decision_audit_gap": {
+    "old_numeric_audit_status": "complete",
+    "old_calculation_records": [],
+    "values": {
+      "price": 3075.0,
+      "company_guidance_eps": 37.46,
+      "first_quarter_eps": 21.38,
+      "stated_forward_pe": 82.1,
+      "stated_remaining_eps": 16.08,
+      "stated_quarterly_run_rate": 5.36
+    },
+    "requirements": [
+      {
+        "id": "req_guidance_pe",
+        "component_path": "thesis",
+        "formula": "price / company_guidance_eps",
+        "fraction_digits": 1,
+        "unit": "x"
+      },
+      {
+        "id": "req_eps_remaining",
+        "component_path": "risks.0",
+        "formula": "company_guidance_eps - first_quarter_eps",
+        "fraction_digits": 2,
+        "unit": "JPY/share"
+      },
+      {
+        "id": "req_eps_run_rate",
+        "component_path": "risk_review_adjustments.0.explanation",
+        "formula": "remaining_eps / remaining_quarters",
+        "fraction_digits": 2,
+        "unit": "JPY/share"
+      }
+    ]
+  },
   "label_regression": {
     "invalid": "Latest close (2026-07-31)",
     "expected": "Latest close",
