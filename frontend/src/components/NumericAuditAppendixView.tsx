@@ -24,18 +24,19 @@ export default function NumericAuditAppendixView({
       appendix.snapshots.at(-1),
     [appendix.snapshots, phase],
   );
+  const hasSnapshots = appendix.snapshots.length > 0;
 
   return (
     <details className="numeric-audit-appendix">
       <summary>
-        <span>{t("unverifiedNumericDrafts")}</span>
+        <span>{t(hasSnapshots ? "unverifiedNumericDrafts" : "numericAuditGaps")}</span>
         <span className={`numeric-audit-status status-${appendix.status}`}>
           {t(`numericAppendixStatus.${appendix.status}`)}
         </span>
       </summary>
       <div className="numeric-audit-appendix-body">
         <p className="numeric-audit-boundary" role="note">
-          {t("unverifiedNumericBoundary")}
+          {t(hasSnapshots ? "unverifiedNumericBoundary" : "numericAuditGapBoundary")}
         </p>
 
         {omissions.length > 0 && (

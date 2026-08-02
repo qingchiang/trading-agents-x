@@ -81,9 +81,14 @@ _EN_LABELS = {
     "retry_count": "Extra calls",
     "recovered_at": "Recovered at",
     "unverified_numeric": "Unverified Numeric Drafts",
+    "numeric_audit_gaps": "Unverified Derived Values",
     "numeric_warning": (
         "The following model-proposed numeric content did not pass audit and "
         "was not used in the canonical research decision."
+    ),
+    "numeric_gap_warning": (
+        "The following decision-critical derived values were not fully verified. "
+        "The qualitative decision is retained, but these values are excluded from canonical calculations."
     ),
     "omitted_components": "Omitted Components",
     "executive_summary": "Executive Summary",
@@ -104,6 +109,7 @@ _EN_LABELS = {
     "omission.scenario_range": "Scenario reference range",
     "omission.valuation": "Valuation assessment",
     "omission.market_reference": "Market reference",
+    "omission.decision_claim": "Decision-critical derived value",
     "endpoint_basis": "Endpoint basis",
     "endpoint_dates": "Endpoint dates",
     "basis.observed": "direct observation",
@@ -218,6 +224,8 @@ _EN_LABELS = {
     "calculation_use.scenario": "{scenario} scenario reference range",
     "calculation_use.valuation": "Valuation assessment",
     "calculation_use.market": "Market reference: {label}",
+    "calculation_use.decision": "{location}: {label}",
+    "calculation_use.decision_claim": "Decision claim",
     "numeric_status.complete": "complete",
     "numeric_status.partial": "partial",
     "numeric_status.incomplete": "incomplete",
@@ -269,7 +277,9 @@ _ZH_LABELS = {
     "retry_count": "额外调用",
     "recovered_at": "恢复时间",
     "unverified_numeric": "未验证数值草案",
+    "numeric_audit_gaps": "未验证派生值",
     "numeric_warning": "以下模型提出的数值内容未通过审计，未用于正式研究结论。",
+    "numeric_gap_warning": "以下影响最终结论的派生值尚未通过完整计算审计；定性结论会保留，但这些数值不会进入正式计算记录。",
     "omitted_components": "已省略组件",
     "executive_summary": "执行摘要",
     "thesis": "核心论点",
@@ -289,6 +299,7 @@ _ZH_LABELS = {
     "omission.scenario_range": "情景参考区间",
     "omission.valuation": "估值评估",
     "omission.market_reference": "市场参考位置",
+    "omission.decision_claim": "决策关键派生值",
     "endpoint_basis": "端点依据",
     "endpoint_dates": "端点日期",
     "basis.observed": "直接观察",
@@ -383,6 +394,8 @@ _ZH_LABELS = {
     "calculation_use.scenario": "{scenario}情景参考区间",
     "calculation_use.valuation": "估值评估",
     "calculation_use.market": "市场参考：{label}",
+    "calculation_use.decision": "用于{location}：{label}",
+    "calculation_use.decision_claim": "决策结论",
     "numeric_status.complete": "完整",
     "numeric_status.partial": "部分完成",
     "numeric_status.incomplete": "未完成",
@@ -434,7 +447,9 @@ _JA_LABELS = {
     "retry_count": "追加呼び出し",
     "recovered_at": "復旧日時",
     "unverified_numeric": "未検証の数値ドラフト",
+    "numeric_audit_gaps": "未検証の導出値",
     "numeric_warning": "以下の数値案は監査を通過せず、正式結論には使用されていません。",
+    "numeric_gap_warning": "最終判断に影響する以下の導出値は計算監査を完全には通過していません。定性的判断は保持されますが、正式な計算記録から除外されます。",
     "omitted_components": "省略された項目",
     "executive_summary": "要約",
     "thesis": "中核仮説",
@@ -454,6 +469,7 @@ _JA_LABELS = {
     "omission.scenario_range": "シナリオ参考レンジ",
     "omission.valuation": "バリュエーション評価",
     "omission.market_reference": "市場参考水準",
+    "omission.decision_claim": "意思決定上の導出値",
     "endpoint_basis": "端点の根拠",
     "endpoint_dates": "端点の日付",
     "basis.observed": "直接観測",
@@ -548,6 +564,8 @@ _JA_LABELS = {
     "calculation_use.scenario": "{scenario}シナリオ参考レンジ",
     "calculation_use.valuation": "バリュエーション評価",
     "calculation_use.market": "市場参考：{label}",
+    "calculation_use.decision": "{location}に使用：{label}",
+    "calculation_use.decision_claim": "意思決定上の主張",
     "numeric_status.complete": "完了",
     "numeric_status.partial": "一部完了",
     "numeric_status.incomplete": "未完了",
@@ -1294,6 +1312,16 @@ def _calculation_uses(
         for calculation_id in calculation_ids:
             uses.setdefault(calculation_id, []).append(label)
 
+    for calculation in content.calculation_records:
+        for use in calculation.decision_uses:
+            add(
+                (calculation.id,),
+                labels["calculation_use.decision"].format(
+                    location=_decision_component_label(use.component_path, labels),
+                    label=use.label,
+                ),
+            )
+
     for scenario in content.scenarios:
         for reference_range in scenario.reference_ranges:
             add(
@@ -1322,14 +1350,35 @@ def _calculation_uses(
     return {calculation_id: tuple(dict.fromkeys(labels)) for calculation_id, labels in uses.items()}
 
 
+def _decision_component_label(component_path: str, labels: ExportLabels) -> str:
+    if component_path == "executive_summary":
+        return labels["executive_summary"]
+    if component_path == "thesis":
+        return labels["thesis"]
+    if component_path.startswith("risks."):
+        return labels["risks"]
+    if component_path.startswith("invalidation_conditions."):
+        return labels["invalidation"]
+    if component_path.startswith("risk_review_adjustments."):
+        return labels["risk_response"]
+    match = re.fullmatch(r"scenarios\.(base|bull|bear)\..+", component_path)
+    if match:
+        return labels["calculation_use.scenario"].format(
+            scenario=labels[match.group(1)]
+        )
+    return labels["calculation_use.decision_claim"]
+
+
 def _render_numeric_audit_appendix(
     appendix: DecisionNumericAuditAppendix,
     labels: ExportLabels,
 ) -> str:
+    has_snapshots = bool(appendix.snapshots)
     lines = [
-        f"## {labels['unverified_numeric']}",
+        f"## {labels['unverified_numeric'] if has_snapshots else labels['numeric_audit_gaps']}",
         "",
-        f"> **{labels['warnings']}:** {labels['numeric_warning']}",
+        f"> **{labels['warnings']}:** "
+        f"{labels['numeric_warning'] if has_snapshots else labels['numeric_gap_warning']}",
         "",
         f"- {labels['status_label']}: `{appendix.status.value}`",
     ]

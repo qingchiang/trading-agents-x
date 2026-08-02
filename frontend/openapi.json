@@ -410,6 +410,14 @@
             "title": "As Of Date",
             "type": "string"
           },
+          "decision_uses": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/DecisionCalculationUse"
+            },
+            "title": "Decision Uses",
+            "type": "array"
+          },
           "formula": {
             "minLength": 1,
             "title": "Formula",
@@ -668,6 +676,29 @@
         "title": "DebateIssue",
         "type": "object"
       },
+      "DecisionCalculationUse": {
+        "additionalProperties": false,
+        "description": "One readable decision component that relies on a calculation.",
+        "properties": {
+          "component_path": {
+            "pattern": "^(?:executive_summary|thesis|risks\\.\\d+|invalidation_conditions\\.\\d+|scenarios\\.(?:base|bull|bear)\\.(?:outcome|core_assumptions\\.\\d+)|risk_review_adjustments\\.\\d+\\.explanation)$",
+            "title": "Component Path",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "component_path",
+          "label"
+        ],
+        "title": "DecisionCalculationUse",
+        "type": "object"
+      },
       "DecisionNumericAuditAppendix": {
         "additionalProperties": false,
         "description": "Unverified numeric proposals kept outside the canonical decision.",
@@ -685,7 +716,6 @@
               "$ref": "#/components/schemas/NumericAuditSnapshot"
             },
             "maxItems": 2,
-            "minItems": 1,
             "title": "Snapshots",
             "type": "array"
           },
@@ -1906,7 +1936,8 @@
           "calculation",
           "scenario_range",
           "valuation",
-          "market_reference"
+          "market_reference",
+          "decision_claim"
         ],
         "title": "NumericAuditComponentType",
         "type": "string"

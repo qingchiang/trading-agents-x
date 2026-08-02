@@ -303,6 +303,12 @@ const detail = {
           unit: "USD",
           as_of_date: "2026-07-24",
           limitations: ["One point-in-time market observation."],
+          decision_uses: [
+            {
+              component_path: "thesis",
+              label: "Observed market anchor",
+            },
+          ],
         },
       ],
     },
@@ -575,6 +581,7 @@ test("restores deliberation and resolves evidence references across run views", 
   expect(screen.getByText("Analyst consensus")).toBeVisible();
   fireEvent.click(screen.getByText("Audited decision calculations"));
   expect(screen.getByText("calc_market_reference")).toBeVisible();
+  expect(screen.getByText("Thesis: Observed market anchor")).toBeVisible();
   const referenceTable = screen.getByRole("table", {
     name: "Market reference levels",
   });
@@ -709,6 +716,42 @@ test("keeps a degraded numeric audit compact and opens run warnings on demand", 
   fireEvent.click(screen.getByRole("button", { name: "Review warnings" }));
 
   expect(screen.getByText("Optional numeric conclusions were omitted.")).toBeVisible();
+});
+
+test("shows decision audit gaps without an empty candidate viewer", async () => {
+  const degraded = structuredClone(detail);
+  degraded.result!.decision!.numeric_audit_status = "partial";
+  degraded.result!.numeric_audit = {
+    status: "partial",
+    omitted_components: [
+      {
+        component_path: "thesis",
+        component_type: "decision_claim",
+        reference_label: "Forward PE",
+        issue_codes: ["numeric.requirement.req_guidance_pe.missing_calculation"],
+      },
+    ],
+    snapshots: [],
+  };
+  vi.mocked(api.run).mockResolvedValue(degraded);
+
+  render(
+    <Router initialPath="/runs/run-1?view=decision">
+      <RunDetail />
+    </Router>,
+  );
+
+  const summary = await screen.findByText("Unverified derived values");
+  fireEvent.click(summary);
+  expect(screen.getByText("Decision claim · Forward PE")).toBeVisible();
+  expect(
+    screen.getByText(
+      "These decision-critical derived values were not fully verified. The qualitative decision is retained, but the listed values are excluded from canonical calculations.",
+    ),
+  ).toBeVisible();
+  expect(
+    screen.queryByText("The provider output could not be parsed as a JSON object."),
+  ).not.toBeInTheDocument();
 });
 
 test("opens an editable new-run template instead of rerunning immediately", async () => {

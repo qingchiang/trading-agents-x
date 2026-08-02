@@ -22,6 +22,8 @@ from tradingagents.application.contracts import (
     AnalysisResult,
     ArtifactGenerationMethod,
     AuditedRangeEndpoint,
+    CalculationRecord,
+    DecisionCalculationUse,
     DecisionNumericAuditAppendix,
     EvidenceBundle,
     EvidenceItem,
@@ -744,6 +746,73 @@ def test_markdown_export_uses_canonical_report_order() -> None:
         < markdown.index("NEWS BODY")
         < markdown.index("SOCIAL BODY")
     )
+
+
+def test_markdown_export_renders_decision_calculation_uses_and_gap_only_appendix() -> None:
+    now = datetime(2026, 7, 24, 12, tzinfo=timezone.utc)
+    decision = research_decision(thesis="Forward PE is 82.1x.").model_copy(
+        update={
+            "calculation_records": (
+                CalculationRecord(
+                    id="calc_guidance_pe",
+                    formula="price / eps",
+                    inputs={"price": 3075, "eps": 37.46},
+                    input_evidence_refs=("ev_0123456789ab",),
+                    result=3075 / 37.46,
+                    unit="x",
+                    as_of_date=date(2026, 7, 24),
+                    limitations=("Guidance may change.",),
+                    decision_uses=(
+                        DecisionCalculationUse(
+                            component_path="thesis",
+                            label="Forward PE",
+                        ),
+                    ),
+                ),
+            ),
+            "numeric_audit_status": NumericAuditStatus.PARTIAL,
+        }
+    )
+    run_export = RunExport(
+        run=RunView(
+            id="fixture-run",
+            status=RunStatus.SUCCEEDED,
+            request=AnalysisRequest(ticker="3778.T", analysis_date="2026-07-24"),
+            config_snapshot={},
+            attempt=1,
+            cancel_requested=False,
+            created_at=now,
+            updated_at=now,
+        ),
+        result=AnalysisResult(
+            run_id="fixture-run",
+            status=RunStatus.SUCCEEDED,
+            instrument="3778.T",
+            reports={},
+            decision=decision,
+            numeric_audit=DecisionNumericAuditAppendix(
+                status=NumericAuditAppendixStatus.PARTIAL,
+                snapshots=(),
+                omitted_components=(
+                    NumericAuditOmission(
+                        component_path="risks.0",
+                        component_type=NumericAuditComponentType.DECISION_CLAIM,
+                        reference_label="Remaining EPS",
+                        issue_codes=(
+                            "numeric.requirement.req_eps_remaining.missing_calculation",
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    markdown = render_run_export_markdown(run_export)
+
+    assert "Thesis: Forward PE" in markdown
+    assert "## Unverified Derived Values" in markdown
+    assert "Decision-critical derived value · Remaining EPS" in markdown
+    assert "Candidate was not parseable" not in markdown
 
 
 def test_markdown_export_includes_total_and_per_node_metrics() -> None:

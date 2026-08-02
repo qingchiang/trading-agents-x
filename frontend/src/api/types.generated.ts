@@ -56,6 +56,7 @@ export interface components {
     };
     CalculationRecord: {
       as_of_date: string;
+      decision_uses?: components["schemas"]["DecisionCalculationUse"][];
       formula: string;
       id: string;
       input_evidence_refs: string[];
@@ -93,6 +94,10 @@ export interface components {
       id: string;
       importance: components["schemas"]["DebateImportance"];
       question: string;
+    };
+    DecisionCalculationUse: {
+      component_path: string;
+      label: string;
     };
     DecisionNumericAuditAppendix: {
       omitted_components?: components["schemas"]["NumericAuditOmission"][];
@@ -270,7 +275,7 @@ export interface components {
       wall_time_seconds?: number;
     };
     NumericAuditAppendixStatus: "recovered" | "partial" | "incomplete";
-    NumericAuditComponentType: "appendix" | "calculation" | "scenario_range" | "valuation" | "market_reference";
+    NumericAuditComponentType: "appendix" | "calculation" | "scenario_range" | "valuation" | "market_reference" | "decision_claim";
     NumericAuditOmission: {
       component_path: string;
       component_type: components["schemas"]["NumericAuditComponentType"];

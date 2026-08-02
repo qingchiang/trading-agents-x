@@ -306,6 +306,8 @@ const en = {
     calculationUnlinked: "Unlinked calculation",
     calculationUseScenario: "{{scenario}} scenario",
     calculationUseMarketReference: "Market reference: {{label}}",
+    calculationUseDecisionClaim: "Decision claim",
+    calculationUseDecision: "{{location}}: {{label}}",
     referenceItem: "Reference",
     referenceBasis: "Basis",
     interpretation: "Interpretation",
@@ -328,7 +330,11 @@ const en = {
       scenario_range: "Scenario reference range",
       valuation: "Valuation assessment",
       market_reference: "Market reference",
+      decision_claim: "Decision claim",
     },
+    numericAuditGaps: "Unverified derived values",
+    numericAuditGapBoundary:
+      "These decision-critical derived values were not fully verified. The qualitative decision is retained, but the listed values are excluded from canonical calculations.",
     unverifiedNumericDrafts: "Unverified numeric drafts",
     unverifiedNumericBoundary:
       "These model-proposed values did not pass numeric audit and were not used in the rating, thesis, memory, outcomes, or canonical numeric conclusions.",
@@ -745,6 +751,8 @@ const zhCN = {
     calculationUnlinked: "未关联计算",
     calculationUseScenario: "{{scenario}}情景",
     calculationUseMarketReference: "市场参考：{{label}}",
+    calculationUseDecisionClaim: "决策结论",
+    calculationUseDecision: "用于{{location}}：{{label}}",
     referenceItem: "参考项",
     referenceBasis: "类型",
     interpretation: "解释",
@@ -767,7 +775,11 @@ const zhCN = {
       scenario_range: "情景参考区间",
       valuation: "估值评估",
       market_reference: "市场参考位置",
+      decision_claim: "决策关键派生值",
     },
+    numericAuditGaps: "未验证派生值",
+    numericAuditGapBoundary:
+      "这些影响最终结论的派生值尚未通过完整计算审计。定性结论会保留，但所列数值不会进入正式计算记录。",
     unverifiedNumericDrafts: "未验证数值草案",
     unverifiedNumericBoundary:
       "这些模型建议值未通过数值审计，未用于研究评级、核心论点、Memory、Outcome 或正式数值结论。",
@@ -1190,6 +1202,8 @@ const ja = {
     calculationUnlinked: "未関連の計算",
     calculationUseScenario: "{{scenario}}シナリオ",
     calculationUseMarketReference: "市場参考：{{label}}",
+    calculationUseDecisionClaim: "意思決定上の主張",
+    calculationUseDecision: "{{location}}に使用：{{label}}",
     referenceItem: "参考項目",
     referenceBasis: "種別",
     interpretation: "説明",
@@ -1212,7 +1226,11 @@ const ja = {
       scenario_range: "シナリオ参考レンジ",
       valuation: "バリュエーション評価",
       market_reference: "市場参考水準",
+      decision_claim: "意思決定上の導出値",
     },
+    numericAuditGaps: "未検証の導出値",
+    numericAuditGapBoundary:
+      "最終判断に影響するこれらの導出値は、計算監査を完全には通過していません。定性的判断は保持されますが、記載値は正式な計算記録から除外されます。",
     unverifiedNumericDrafts: "未検証の数値ドラフト",
     unverifiedNumericBoundary:
       "これらのモデル提案値は数値監査を通過しておらず、評価、投資仮説、Memory、Outcome、正式な数値結論には使用されていません。",

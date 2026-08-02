@@ -453,7 +453,7 @@ export function ResearchDecisionContent({
                     <div>
                       <strong>
                         {calculationUses.get(calculation.id)?.join(" · ") ??
-                          t("calculationUnlinked")}
+                          t("decisionCalculations")}
                       </strong>
                       <small>{calculation.id}</small>
                     </div>
@@ -579,6 +579,11 @@ function buildCalculationUses(
       uses.set(id, labels);
     });
   };
+  (decision.calculation_records ?? []).forEach((calculation) =>
+    (calculation.decision_uses ?? []).forEach((use) =>
+      add([calculation.id], decisionCalculationUseLabel(use.component_path, use.label, t)),
+    ),
+  );
   decision.scenarios.forEach((scenario) =>
     add(
       (scenario.reference_ranges ?? []).flatMap((referenceRange) =>
@@ -606,6 +611,33 @@ function buildCalculationUses(
     ),
   );
   return uses;
+}
+
+function decisionCalculationUseLabel(
+  componentPath: string,
+  label: string,
+  t: (key: string, options?: Record<string, unknown>) => string,
+): string {
+  let location = t("calculationUseDecisionClaim");
+  if (componentPath === "executive_summary") {
+    location = t("executiveSummary");
+  } else if (componentPath === "thesis") {
+    location = t("thesis");
+  } else if (componentPath.startsWith("risks.")) {
+    location = t("risks");
+  } else if (componentPath.startsWith("invalidation_conditions.")) {
+    location = t("invalidationConditions");
+  } else if (componentPath.startsWith("risk_review_adjustments.")) {
+    location = t("riskReviewAdjustments");
+  } else {
+    const match = /^scenarios\.(base|bull|bear)\./.exec(componentPath);
+    if (match) {
+      location = t("calculationUseScenario", {
+        scenario: t(scenarioKey(match[1] as "base" | "bull" | "bear")),
+      });
+    }
+  }
+  return t("calculationUseDecision", { location, label });
 }
 
 function latestEndpointDate(left: string, right: string): string {
