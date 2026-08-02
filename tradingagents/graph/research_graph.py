@@ -1387,7 +1387,7 @@ class ResearchGraph:
                 role="final_committee",
                 content=decision,
                 generation_method=output.generation_method,
-                prompt_version="final-committee-v9-self-contained-scenarios",
+                prompt_version="final-committee-v10-typed-numeric-requirements",
             )
             self._finish_node(
                 runtime,

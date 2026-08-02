@@ -14,7 +14,14 @@ from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Annotated, Any, Literal, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SkipValidation,
+    field_serializer,
+    field_validator,
+)
 
 from tradingagents.application.contracts import (
     ArtifactGenerationMethod,
@@ -222,7 +229,19 @@ class ResearchDecisionCoreEnvelope(ResearchDecisionCoreDraft):
     """Serializer wire envelope with soft numeric annotation candidates."""
 
     numeric_requirements_declared: bool = False
-    numeric_requirement_candidates: tuple[Any, ...] = ()
+    numeric_requirement_candidates: tuple[
+        SkipValidation[DecisionNumericRequirementDraft], ...
+    ] = ()
+
+    @field_serializer("numeric_requirement_candidates", mode="plain")
+    def serialize_numeric_requirement_candidates(
+        self,
+        value: tuple[Any, ...],
+    ) -> tuple[Any, ...]:
+        return tuple(
+            item.model_dump(mode="json") if isinstance(item, BaseModel) else item
+            for item in value
+        )
 
     def qualitative_core(self) -> ResearchDecisionCoreDraft:
         return ResearchDecisionCoreDraft.model_validate(
@@ -1269,8 +1288,13 @@ def invoke_research_decision(
                 "decision-critical derived exact number in "
                 "numeric_requirement_candidates and set "
                 "numeric_requirements_declared accordingly; "
-                "directly observed Evidence values need no requirement. The scenarios "
-                "must contain "
+                "directly observed Evidence values need no requirement. Candidate "
+                "inputs must be an array of {name, value} objects, never a dynamic "
+                "mapping, and limitations must be an array of strings. Every "
+                "component_path must identify one exact core field such as risks.0 "
+                "or scenarios.base.core_assumptions.2; omit an uncertain annotation "
+                "instead of using a coarse path such as risks or scenarios. The "
+                "scenarios must contain "
                 "exactly one base, one bull, and one bear case. Required "
                 f"risk-review roles: {json.dumps(risk_roles)}. {language_rules}"
             ),
@@ -1280,7 +1304,10 @@ def invoke_research_decision(
             "calculations are handled by a separate audit step. Preserve the brief's "
             "decision-critical calculation checklist as soft "
             "numeric_requirement_candidates. These annotations do not replace "
-            "the strict qualitative fields. "
+            "the strict qualitative fields. Candidate inputs are arrays of named "
+            "values, limitations are string arrays, and component paths point to "
+            "specific indexed core fields. Omit a candidate when its exact core "
+            "location cannot be identified. "
             + language_rules
             + "\n\nLOCALIZED VALID EXAMPLE:\n"
             + json.dumps(core_example.model_dump(mode="json"), ensure_ascii=False),
