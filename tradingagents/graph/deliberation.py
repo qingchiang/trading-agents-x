@@ -918,6 +918,22 @@ def decision_scenario_assumption_guidance(output_language: str) -> str:
     )
 
 
+def decision_percentage_calculation_guidance() -> str:
+    """Return the stable wire contract for decision percentage calculations."""
+
+    return (
+        "For unit %, percent, or pct, formulas must return a fractional ratio in "
+        "the 0-to-1 convention and must not multiply by 100; stated_value uses "
+        "reader-facing percentage points, and the application deterministically "
+        "converts the formula result. For example, "
+        "(target_price - close_price) / close_price = 0.4546 uses "
+        "stated_value=45.46 and unit=%. A decline formula yielding -0.6132 uses "
+        "stated_value=-61.32 and unit=%. Use pp for percentage-point differences "
+        "and bps for basis points; those formula results are already in their "
+        "declared units and are not percent-scaled."
+    )
+
+
 def _decision_language_rules(output_language: str) -> str:
     return (
         "Write every human-readable field in the requested report language: "
@@ -1112,8 +1128,8 @@ def _decision_example_text(output_language: str) -> dict[str, str]:
             "adjustment_subject": "置信度校准",
             "adjustment_explanation": "最终结论已纳入风险审查意见。",
             "executive_summary": "现有证据支持一项平衡的研究结论。",
-            "requirement_thesis": "该观点取决于约 2.0x 的决策关键盈利倍数。",
-            "requirement_label": "决策关键盈利倍数",
+            "requirement_thesis": "分析师目标均价对应约 45.5% 的隐含上行空间。",
+            "requirement_label": "分析师目标价隐含上行空间",
             "thesis": "该观点取决于一个可验证的经营机制。",
             "risk": "证据支持的下行风险可能会兑现。",
             "invalidation": "新证据直接否定核心论点。",
@@ -1137,8 +1153,8 @@ def _decision_example_text(output_language: str) -> dict[str, str]:
             "adjustment_subject": "確信度の調整",
             "adjustment_explanation": "最終判断にはリスクレビューを反映した。",
             "executive_summary": "現時点の証拠は均衡の取れた判断を支持する。",
-            "requirement_thesis": "この見解は意思決定上重要な約2.0xの利益倍率に依存する。",
-            "requirement_label": "意思決定上重要な利益倍率",
+            "requirement_thesis": "アナリスト平均目標株価は約45.5%の上昇余地を示す。",
+            "requirement_label": "アナリスト目標株価の上昇余地",
             "thesis": "この見解は検証可能な事業メカニズムに依存する。",
             "risk": "証拠に裏付けられた下振れリスクが顕在化し得る。",
             "invalidation": "新たな証拠が中核仮説を直接否定する。",
@@ -1161,8 +1177,8 @@ def _decision_example_text(output_language: str) -> dict[str, str]:
         "adjustment_subject": "Confidence calibration",
         "adjustment_explanation": "The final decision incorporates the risk review.",
         "executive_summary": "The evidence supports a balanced conclusion.",
-        "requirement_thesis": "The view depends on a decision-critical multiple of 2.0x.",
-        "requirement_label": "Decision-critical earnings multiple",
+        "requirement_thesis": "The analyst mean target implies about 45.5% upside.",
+        "requirement_label": "Analyst target implied upside",
         "thesis": "The view depends on a testable operating mechanism.",
         "risk": "The evidence-backed downside may materialize.",
         "invalidation": "New evidence directly contradicts the thesis.",
@@ -1224,6 +1240,7 @@ def invoke_research_decision(
     )
     example_text = _decision_example_text(resolved_language)
     language_rules = _decision_language_rules(resolved_language)
+    percentage_rules = decision_percentage_calculation_guidance()
     example_adjustments = (
         (
             RiskReviewAdjustment(
@@ -1315,18 +1332,18 @@ def invoke_research_decision(
         numeric_requirements_declared=True,
         numeric_requirement_candidates=(
             DecisionNumericRequirementDraft(
-                id="req_example_multiple",
+                id="req_example_percentage",
                 component_path="thesis",
                 label=example_text["requirement_label"],
-                stated_value=2.0,
+                stated_value=45.5,
                 fraction_digits=1,
-                formula="earnings / shares",
+                formula="(target_price - close_price) / close_price",
                 inputs=(
-                    CalculationInputDraft(name="earnings", value=2),
-                    CalculationInputDraft(name="shares", value=1),
+                    CalculationInputDraft(name="target_price", value=145.5),
+                    CalculationInputDraft(name="close_price", value=100),
                 ),
                 input_evidence_refs=(first_ref,),
-                unit="x",
+                unit="%",
                 limitations=(example_text["valuation_limitation"],),
             ),
         ),
@@ -1360,7 +1377,8 @@ def invoke_research_decision(
                 "mapping, and limitations must be an array of strings. Every "
                 "component_path must identify one exact core field such as risks.0 "
                 "or scenarios.base.core_assumptions.2; omit an uncertain annotation "
-                "instead of using a coarse path such as risks or scenarios. The "
+                "instead of using a coarse path such as risks or scenarios. "
+                f"{percentage_rules} "
                 "scenarios must contain "
                 "exactly one base, one bull, and one bear case. Required "
                 f"risk-review roles: {json.dumps(risk_roles)}. {language_rules}"
@@ -1375,6 +1393,8 @@ def invoke_research_decision(
             "values, limitations are string arrays, and component paths point to "
             "specific indexed core fields. Omit a candidate when its exact core "
             "location cannot be identified. "
+            + percentage_rules
+            + " "
             + language_rules
             + "\n\nLOCALIZED VALID EXAMPLE:\n"
             + json.dumps(core_example.model_dump(mode="json"), ensure_ascii=False),
@@ -1596,6 +1616,7 @@ def _invoke_decision_numeric(
     value_catalog_prompt = compact_numeric_value_catalog(value_catalog)
     example_text = _decision_example_text(output_language)
     language_rules = _decision_language_rules(output_language)
+    percentage_rules = decision_percentage_calculation_guidance()
     scenario_catalog = tuple(
         {
             "kind": scenario.kind.value,
@@ -1763,7 +1784,7 @@ def _invoke_decision_numeric(
             "covered by a calculation whose requirement_ids includes that item's ID. "
             "Copy its formula, named inputs, Evidence refs, unit, and limitations "
             "without changing them. When requirements are present, requested must be "
-            f"true. {language_rules}\n"
+            f"true. {percentage_rules} {language_rules}\n"
             "VALID OBSERVED VALUE REFS:\n"
             + json.dumps(value_catalog_prompt, ensure_ascii=False)
             + "\nSCENARIO CATALOG:\n"
@@ -1787,6 +1808,8 @@ def _invoke_decision_numeric(
             "Do not supply units on ranges, valuation assessments, or market references; "
             "the application inherits them from catalog anchors or calculations. "
             "Use valuation_assessment only for genuinely derived valuation work. "
+            + percentage_rules
+            + " "
             + language_rules
             + "\n\nNUMERIC VALUE CATALOG:\n"
             + json.dumps(value_catalog_prompt, ensure_ascii=False)
@@ -2126,6 +2149,7 @@ def _assemble_numeric_draft(
     issues: list[str] = []
     calculations: dict[str, CalculationRecord] = {}
     calculation_drafts: dict[str, CalculationRecordDraft] = {}
+    raw_calculation_results: dict[str, float] = {}
     evidence_items = {item.ref: item for item in bundle.items}
     duplicate_ids = {
         item.id
@@ -2173,6 +2197,7 @@ def _assemble_numeric_draft(
                 limitations=item.limitations,
             )
             calculation_drafts[item.id] = item
+            raw_calculation_results[item.id] = raw_calculated
         except OutputValidationError as exc:
             issues.append(exc.issue_code)
 
@@ -2208,7 +2233,18 @@ def _assemble_numeric_draft(
                     rounding=ROUND_HALF_UP,
                 )
                 if canonical != stated:
-                    mismatch = "result_mismatch"
+                    raw_result = Decimal(
+                        str(raw_calculation_results[calculation_id])
+                    ).quantize(
+                        quantum,
+                        rounding=ROUND_HALF_UP,
+                    )
+                    mismatch = (
+                        "percent_scale_mismatch"
+                        if _is_percent_calculation_unit(item.unit)
+                        and raw_result == stated
+                        else "result_mismatch"
+                    )
             if mismatch is not None:
                 issues.append(f"{prefix}.{mismatch}")
                 continue
@@ -3100,6 +3136,10 @@ def _evaluate_formula(
 _PERCENT_CALCULATION_UNITS = {"%", "PCT", "PERCENT"}
 
 
+def _is_percent_calculation_unit(unit: str) -> bool:
+    return unit.strip().upper() in _PERCENT_CALCULATION_UNITS
+
+
 def _canonicalize_calculation_result(
     result: float,
     unit: str,
@@ -3108,8 +3148,7 @@ def _canonicalize_calculation_result(
 ) -> float:
     """Convert a safe formula result into the public unit's canonical value."""
 
-    normalized_unit = unit.strip().upper()
-    canonical = result * 100 if normalized_unit in _PERCENT_CALCULATION_UNITS else result
+    canonical = result * 100 if _is_percent_calculation_unit(unit) else result
     if not math.isfinite(canonical):
         raise OutputValidationError(f"{issue_prefix}.formula.non_finite_result")
     return canonical

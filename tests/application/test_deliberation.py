@@ -1515,6 +1515,55 @@ def test_decision_requirement_mismatch_is_rejected(
     assert expected_issue in error.value.issue_codes
 
 
+def test_percent_formula_using_display_scale_reports_specific_mismatch() -> None:
+    state = _state()
+    bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
+    ref = bundle.items[0].ref
+    requirement = DecisionNumericRequirementDraft(
+        id="req_target_upside",
+        component_path="thesis",
+        label="Target upside",
+        stated_value=45.46,
+        fraction_digits=2,
+        formula="((target_price - close_price) / close_price) * 100",
+        inputs=(
+            CalculationInputDraft(name="target_price", value=145.46),
+            CalculationInputDraft(name="close_price", value=100),
+        ),
+        input_evidence_refs=(ref,),
+        unit="%",
+        limitations=("The target may change.",),
+    )
+    calculation = CalculationRecordDraft(
+        id="calc_target_upside",
+        formula=requirement.formula,
+        inputs=requirement.inputs,
+        input_evidence_refs=requirement.input_evidence_refs,
+        unit=requirement.unit,
+        limitations=requirement.limitations,
+        requirement_ids=(requirement.id,),
+    )
+
+    with pytest.raises(OutputValidationError) as error:
+        _assemble_numeric_draft(
+            DecisionNumericDraft(
+                requested=True,
+                calculation_records=(calculation,),
+            ),
+            bundle=bundle,
+            allowed_evidence_refs={ref},
+            value_catalog=_value_catalog(bundle),
+            salvage=False,
+            node="committee.final.serialize.numeric",
+            requirements=(requirement,),
+        )
+
+    assert (
+        "numeric.requirement.req_target_upside.percent_scale_mismatch"
+        in error.value.issue_codes
+    )
+
+
 @pytest.mark.parametrize(
     ("output_language", "localized_example", "assumption_example"),
     (
@@ -1571,6 +1620,10 @@ def test_final_serializers_preserve_output_language_in_primary_and_repair(
     assert localized_example in llm.prompts[0][1]
     assert localized_example in llm.prompts[1][1]
     assert all(assumption_example in prompt for _schema, prompt in llm.prompts[:2])
+    assert all(
+        "formulas must return a fractional ratio" in prompt
+        for _schema, prompt in llm.prompts
+    )
 
 
 def test_final_serializer_phases_record_child_wall_time_without_parent_span() -> None:

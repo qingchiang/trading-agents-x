@@ -420,6 +420,8 @@ def test_profiles_share_contract_but_use_distinct_topologies(
             if schema == "ResearchMarkdown" and "SCENARIO ASSUMPTION READABILITY:" in prompt
         )
         assert "Analyst EPS consensus rises to JPY 185-195 per share" in final_reasoning_prompt
+        assert "PERCENTAGE CALCULATION CONTRACT:" in final_reasoning_prompt
+        assert "formulas must return a fractional ratio" in final_reasoning_prompt
         agenda_prompt = next(
             prompt for schema, prompt in quick.calls if schema == "DebateAgenda"
         )

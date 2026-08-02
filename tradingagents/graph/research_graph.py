@@ -81,6 +81,7 @@ from tradingagents.graph.analyst_synthesis import (
 )
 from tradingagents.graph.deliberation import (
     debate_round_has_material_progress,
+    decision_percentage_calculation_guidance,
     decision_scenario_assumption_guidance,
     invoke_debate_agenda,
     invoke_judge_draft,
@@ -1284,6 +1285,7 @@ class ResearchGraph:
             assumption_guidance = decision_scenario_assumption_guidance(
                 state["output_language"]
             )
+            percentage_guidance = decision_percentage_calculation_guidance()
             with self.metrics.phase(
                 f"{node}.reason",
                 event_writer=runtime.stream_writer,
@@ -1303,8 +1305,10 @@ class ResearchGraph:
                         "Evidence refs, displayed value and precision, unit, and the "
                         "decision field that uses it. Write 'none' when no such "
                         "derived number exists. Directly observed Evidence values do "
-                        "not belong in this checklist."
-                        "\n\nSCENARIO ASSUMPTION READABILITY:\n"
+                        "not belong in this checklist.\n\n"
+                        "PERCENTAGE CALCULATION CONTRACT:\n"
+                        + percentage_guidance
+                        + "\n\nSCENARIO ASSUMPTION READABILITY:\n"
                         + assumption_guidance
                     ),
                     node=f"{node}.reason",
@@ -1327,7 +1331,7 @@ class ResearchGraph:
                 role="final_committee",
                 content=brief,
                 generation_method=ArtifactGenerationMethod.MARKDOWN_AUDITED,
-                prompt_version="final-committee-brief-v1",
+                prompt_version="final-committee-brief-v2-percentage-contract",
             )
             self._finish_node(
                 runtime,
@@ -1387,7 +1391,7 @@ class ResearchGraph:
                 role="final_committee",
                 content=decision,
                 generation_method=output.generation_method,
-                prompt_version="final-committee-v10-typed-numeric-requirements",
+                prompt_version="final-committee-v11-percentage-contract",
             )
             self._finish_node(
                 runtime,
