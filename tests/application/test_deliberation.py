@@ -1103,6 +1103,113 @@ def test_numeric_requirement_preflight_reports_safe_field_paths() -> None:
     ) == 1
 
 
+def test_valid_numeric_requirements_survive_an_invalid_sibling() -> None:
+    state = _state()
+    ref = state["evidence_bundle"]["items"][0]["ref"]
+    core = _core_draft_from_decision(
+        research_decision(evidence_refs=(ref,)).model_dump(mode="json")
+    )
+    component_paths = (
+        "executive_summary",
+        "thesis",
+        "risks.0",
+        "invalidation_conditions.0",
+        "scenarios.base.outcome",
+        "scenarios.bull.core_assumptions.0",
+    )
+    requirements = tuple(
+        DecisionNumericRequirementDraft(
+            id=f"req_fixture_{index}",
+            component_path=component_path,
+            label=f"Fixture calculation {index}",
+            stated_value=2.0,
+            fraction_digits=1,
+            formula=f"value_{index} / divisor_{index}",
+            inputs=(
+                CalculationInputDraft(name=f"value_{index}", value=4),
+                CalculationInputDraft(name=f"divisor_{index}", value=2),
+            ),
+            input_evidence_refs=(ref,),
+            unit="x",
+            limitations=("Fixture limitation.",),
+        )
+        for index, component_path in enumerate(component_paths)
+    )
+    invalid_candidate = {
+        **requirements[0].model_dump(mode="json"),
+        "id": "req_invalid_sibling",
+        "component_path": "scenarios",
+    }
+    envelope = ResearchDecisionCoreEnvelope.model_validate(
+        {
+            **core.model_dump(mode="json"),
+            "numeric_requirements_declared": True,
+            "numeric_requirement_candidates": [
+                *(item.model_dump(mode="json") for item in requirements),
+                invalid_candidate,
+            ],
+        }
+    )
+    numeric = DecisionNumericDraft(
+        requested=True,
+        calculation_records=tuple(
+            CalculationRecordDraft(
+                id=f"calc_fixture_{index}",
+                formula=requirement.formula,
+                inputs=requirement.inputs,
+                input_evidence_refs=requirement.input_evidence_refs,
+                unit=requirement.unit,
+                limitations=requirement.limitations,
+                requirement_ids=(requirement.id,),
+            )
+            for index, requirement in enumerate(requirements)
+        ),
+    )
+    llm = _SequenceLLM(
+        {
+            "ResearchDecisionCoreEnvelope": [envelope],
+            "DecisionNumericDraft": [numeric],
+        }
+    )
+
+    result = invoke_research_decision(
+        llm,
+        prompt="Form the final decision.",
+        state=state,
+        node="committee.final",
+        require_risk_adjustments=False,
+    )
+
+    assert result.value.numeric_audit_status is NumericAuditStatus.PARTIAL
+    assert len(result.value.calculation_records) == len(requirements)
+    assert {
+        use.component_path
+        for calculation in result.value.calculation_records
+        for use in calculation.decision_uses
+    } == set(component_paths)
+    assert result.numeric_audit is not None
+    assert len(result.numeric_audit.omitted_components) == 1
+    assert result.numeric_audit.omitted_components[0].issue_codes == (
+        "numeric.requirement_candidate.6.component_path.pattern",
+    )
+    assert not any(
+        "declared_missing" in issue
+        for omission in result.numeric_audit.omitted_components
+        for issue in omission.issue_codes
+    )
+    assert [schema for schema, _prompt in llm.prompts].count(
+        "ResearchDecisionCoreEnvelope"
+    ) == 1
+    assert [schema for schema, _prompt in llm.prompts].count(
+        "DecisionNumericDraft"
+    ) == 1
+    numeric_prompt = next(
+        prompt for schema, prompt in llm.prompts if schema == "DecisionNumericDraft"
+    )
+    assert all(requirement.id in numeric_prompt for requirement in requirements)
+    assert "req_invalid_sibling" not in numeric_prompt
+
+
 def test_unknown_risk_adjustment_evidence_remains_a_core_failure() -> None:
     state = _state()
     state["risk_reviews"] = {"integrated": {}}
