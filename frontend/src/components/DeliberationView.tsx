@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import type {
   DebateAgenda,
+  DecisionBrief,
   JudgeDraft,
   RebuttalReview,
   ResearchArtifact,
@@ -30,6 +31,7 @@ export default function DeliberationView({
   const rebuttals = typedArtifacts(visible, isRebuttalReview);
   const judges = typedArtifacts(visible, isJudgeDraft);
   const risks = typedArtifacts(visible, isRiskReview);
+  const briefs = typedArtifacts(visible, isDecisionBrief);
   const decisions = typedArtifacts(visible, isResearchDecision);
   const dispositionByIssue = new Map(
     (judges.at(-1)?.content.issue_dispositions ?? []).map((item) => [
@@ -71,6 +73,12 @@ export default function DeliberationView({
     if (risks.length > 0) {
       entries.push({ id: "deliberation-risk", label: t("riskLenses") });
     }
+    briefs.forEach((_, index) =>
+      entries.push({
+        id: `deliberation-decision-brief-${index + 1}`,
+        label: numberedLabel(t("decisionBrief"), index, briefs.length),
+      }),
+    );
     decisions.forEach((_, index) =>
       entries.push({
         id: `deliberation-final-${index + 1}`,
@@ -78,7 +86,7 @@ export default function DeliberationView({
       }),
     );
     return entries;
-  }, [agendas, cases, decisions, judges, rebuttalsByRound, risks, t]);
+  }, [agendas, briefs, cases, decisions, judges, rebuttalsByRound, risks, t]);
 
   if (visible.length === 0) {
     return (
@@ -232,6 +240,23 @@ export default function DeliberationView({
           </div>
         </section>
       )}
+
+      {briefs.map((artifact, index) => (
+        <section
+          className="deliberation-stage"
+          id={`deliberation-decision-brief-${index + 1}`}
+          tabIndex={-1}
+          key={artifact.id}
+        >
+          <StageHeading title={t("decisionBrief")} />
+          <ArtifactFrame artifact={artifact}>
+            <div className="decision-brief-notice" role="note">
+              {t("decisionBriefNotice")}
+            </div>
+            {markdown(artifact.content.markdown)}
+          </ArtifactFrame>
+        </section>
+      ))}
 
       {decisions.map((artifact, index) => (
         <section
@@ -423,6 +448,17 @@ function isJudgeDraft(value: ResearchArtifact["content"]): value is JudgeDraft {
 
 function isRiskReview(value: ResearchArtifact["content"]): value is RiskReview {
   return "challenged_issue_ids" in value && "unresolved_issue_ids" in value;
+}
+
+function isDecisionBrief(
+  value: ResearchArtifact["content"],
+): value is DecisionBrief {
+  return (
+    "markdown" in value &&
+    "evidence_refs" in value &&
+    "warnings" in value &&
+    !("role" in value)
+  );
 }
 
 function isResearchDecision(

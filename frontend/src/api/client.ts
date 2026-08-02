@@ -9,6 +9,7 @@ export type RunDetail = components["schemas"]["RunDetail"];
 export type AnalysisResult = components["schemas"]["AnalysisResult"];
 export type RunEvent = components["schemas"]["RunEvent"];
 export type ResearchArtifact = components["schemas"]["ResearchArtifact"];
+export type DecisionBrief = components["schemas"]["DecisionBrief"];
 export type AnalystReport = components["schemas"]["AnalystReport"];
 export type ResearchCase = components["schemas"]["ResearchCase"];
 export type DebateAgenda = components["schemas"]["DebateAgenda"];

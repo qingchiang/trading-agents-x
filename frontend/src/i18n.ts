@@ -381,6 +381,9 @@ const en = {
     riskLenses: "Risk lenses",
     finalCommittee: "Final committee",
     finalResearchOpinion: "Final research opinion",
+    decisionBrief: "Decision synthesis brief",
+    decisionBriefNotice:
+      "Non-final reasoning draft. It has not passed the Final decision contract.",
     promptVersion: "prompt",
     bullCase: "Bull case",
     bearCase: "Bear case",
@@ -825,6 +828,8 @@ const zhCN = {
     riskLenses: "风险视角",
     finalCommittee: "最终委员会",
     finalResearchOpinion: "最终研究意见",
+    decisionBrief: "决策综合草稿",
+    decisionBriefNotice: "非正式结论，尚未通过 Final 决策契约审计。",
     promptVersion: "提示词版本",
     bullCase: "多方案例",
     bearCase: "空方案例",
@@ -1277,6 +1282,9 @@ const ja = {
     riskLenses: "リスク視点",
     finalCommittee: "最終委員会",
     finalResearchOpinion: "最終リサーチ見解",
+    decisionBrief: "意思決定統合ドラフト",
+    decisionBriefNotice:
+      "非公式の結論であり、Final 意思決定契約の監査をまだ通過していません。",
     promptVersion: "プロンプト",
     bullCase: "強気ケース",
     bearCase: "弱気ケース",

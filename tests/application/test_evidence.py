@@ -23,6 +23,7 @@ from tradingagents.application.contracts import (
     ArtifactGenerationMethod,
     AuditedRangeEndpoint,
     CalculationRecord,
+    DecisionBrief,
     DecisionCalculationUse,
     DecisionNumericAuditAppendix,
     EvidenceBundle,
@@ -560,6 +561,67 @@ def test_markdown_export_renders_an_exact_body_once_with_all_refs() -> None:
     assert f"`{first.ref}`" in markdown
     assert f"`{second.ref}`" in markdown
     assert "source-a, source-b" in markdown
+
+
+def test_failed_run_export_preserves_non_final_decision_brief() -> None:
+    item = EvidenceItem.create(
+        source="fixture",
+        evidence_type="market",
+        requested_date=date(2026, 7, 24),
+        content="Sealed evidence.",
+    )
+    evidence = EvidenceBundle(
+        instrument="3778.T",
+        analysis_date=date(2026, 7, 24),
+        items=(item,),
+    )
+    now = datetime(2026, 7, 24, 12, tzinfo=timezone.utc)
+    run_export = RunExport(
+        run=RunView(
+            id="fixture-run",
+            status=RunStatus.FAILED,
+            request=AnalysisRequest(ticker="3778.T", analysis_date="2026-07-24"),
+            config_snapshot={},
+            attempt=1,
+            cancel_requested=False,
+            created_at=now,
+            updated_at=now,
+        ),
+        result=AnalysisResult(
+            run_id="fixture-run",
+            status=RunStatus.FAILED,
+            instrument="3778.T",
+            reports={},
+            decision=None,
+            evidence=evidence,
+        ),
+        evidence=evidence,
+        artifacts=(
+            ResearchArtifact(
+                id="artifact-brief",
+                run_id="fixture-run",
+                attempt=1,
+                stage="decision_brief",
+                role="final_committee",
+                schema_version="2",
+                prompt_version="final-committee-brief-v1",
+                generation_method=ArtifactGenerationMethod.MARKDOWN_AUDITED,
+                content=DecisionBrief(
+                    markdown=f"# Draft\n\nNon-final synthesis.[^{item.ref}]",
+                    evidence_refs=(item.ref,),
+                ),
+                created_at=now,
+            ),
+        ),
+    )
+
+    markdown = render_run_export_markdown(run_export)
+
+    assert run_export.schema_version == "6"
+    assert "Decision Synthesis Brief" in markdown
+    assert "Non-final reasoning draft" in markdown
+    assert "Non-final synthesis.[E01]" in markdown
+    assert "No final decision was recorded." in markdown
 
 
 def test_markdown_export_uses_stable_evidence_markers_without_definitions() -> None:

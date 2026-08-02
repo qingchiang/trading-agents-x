@@ -676,6 +676,38 @@
         "title": "DebateIssue",
         "type": "object"
       },
+      "DecisionBrief": {
+        "additionalProperties": false,
+        "description": "Readable Final reasoning persisted before strict decision serialization.",
+        "properties": {
+          "evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "markdown": {
+            "minLength": 1,
+            "title": "Markdown",
+            "type": "string"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchWarning"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "markdown"
+        ],
+        "title": "DecisionBrief",
+        "type": "object"
+      },
       "DecisionCalculationUse": {
         "additionalProperties": false,
         "description": "One readable decision component that relies on a calculation.",
@@ -2372,6 +2404,9 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/AnalystReport"
+              },
+              {
+                "$ref": "#/components/schemas/DecisionBrief"
               },
               {
                 "$ref": "#/components/schemas/ResearchCase"

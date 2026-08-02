@@ -95,6 +95,11 @@ export interface components {
       importance: components["schemas"]["DebateImportance"];
       question: string;
     };
+    DecisionBrief: {
+      evidence_refs?: string[];
+      markdown: string;
+      warnings?: components["schemas"]["ResearchWarning"][];
+    };
     DecisionCalculationUse: {
       component_path: string;
       label: string;
@@ -340,7 +345,7 @@ export interface components {
     };
     ResearchArtifact: {
       attempt: number;
-      content: components["schemas"]["AnalystReport"] | components["schemas"]["ResearchCase"] | components["schemas"]["DebateAgenda"] | components["schemas"]["RebuttalReview"] | components["schemas"]["JudgeDraft"] | components["schemas"]["RiskReview"] | components["schemas"]["ResearchDecision"];
+      content: components["schemas"]["AnalystReport"] | components["schemas"]["DecisionBrief"] | components["schemas"]["ResearchCase"] | components["schemas"]["DebateAgenda"] | components["schemas"]["RebuttalReview"] | components["schemas"]["JudgeDraft"] | components["schemas"]["RiskReview"] | components["schemas"]["ResearchDecision"];
       created_at: string;
       generation_method: components["schemas"]["ArtifactGenerationMethod"];
       id: string;

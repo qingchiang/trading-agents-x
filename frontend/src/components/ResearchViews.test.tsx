@@ -328,6 +328,18 @@ test("organizes shallow Markdown deliberation by role and issue", () => {
     },
     {
       ...base,
+      id: "decision-brief",
+      stage: "decision_brief",
+      role: "final_committee",
+      round: 0,
+      content: {
+        markdown: `Draft synthesis.[^${evidenceRef}]`,
+        evidence_refs: [evidenceRef],
+        warnings: [],
+      },
+    },
+    {
+      ...base,
       id: "final",
       stage: "decision",
       role: "final_committee",
@@ -368,6 +380,13 @@ test("organizes shallow Markdown deliberation by role and issue", () => {
   expect(screen.getAllByText("Is demand durable?")[0]).toBeVisible();
   expect(screen.getByText(/material · unresolved/)).toBeVisible();
   expect(screen.getByText("Evidence remains mixed.")).toBeVisible();
+  expect(screen.getByRole("heading", { name: "Decision synthesis brief" })).toBeVisible();
+  expect(screen.getByText("Draft synthesis.")).toBeVisible();
+  expect(
+    screen.getByText(
+      "Non-final reasoning draft. It has not passed the Final decision contract.",
+    ),
+  ).toBeVisible();
   const navigation = screen.getByRole("navigation", {
     name: "Research stage navigation",
   });

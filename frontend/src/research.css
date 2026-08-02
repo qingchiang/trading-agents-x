@@ -996,6 +996,17 @@
   border-radius: 999px;
 }
 
+.decision-brief-notice {
+  margin-bottom: 18px;
+  padding: 10px 12px;
+  color: #72520f;
+  font-size: 13px;
+  font-weight: 700;
+  background: #fff8df;
+  border: 1px solid #ead7a0;
+  border-radius: 8px;
+}
+
 .decision-summary h2 {
   margin: 18px 0 7px;
   color: var(--ink);

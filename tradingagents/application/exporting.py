@@ -18,6 +18,7 @@ from tradingagents.application.numeric_display import format_decision_number
 from .contracts import (
     AnalystReport,
     DebateAgenda,
+    DecisionBrief,
     DecisionNumericAuditAppendix,
     EvidenceTable,
     JudgeDraft,
@@ -60,6 +61,10 @@ _EN_LABELS = {
     "no_reports": "No final reports were recorded.",
     "research_process": "Research Process",
     "no_process": "No deliberation artifacts were recorded for this run.",
+    "decision_brief": "Decision Synthesis Brief",
+    "decision_brief_notice": (
+        "Non-final reasoning draft. It has not passed the Final decision contract."
+    ),
     "research_decision": "Research Decision",
     "no_decision": "No final decision was recorded.",
     "warnings": "Warnings",
@@ -256,6 +261,8 @@ _ZH_LABELS = {
     "no_reports": "未记录最终研究报告。",
     "research_process": "研究过程",
     "no_process": "本次运行未记录研究过程产物。",
+    "decision_brief": "决策综合草稿",
+    "decision_brief_notice": "非正式结论，尚未通过 Final 决策契约审计。",
     "research_decision": "最终结论",
     "no_decision": "未记录最终研究结论。",
     "warnings": "警告",
@@ -426,6 +433,10 @@ _JA_LABELS = {
     "no_reports": "最終レポートは記録されていません。",
     "research_process": "リサーチプロセス",
     "no_process": "この実行には審議成果物が記録されていません。",
+    "decision_brief": "意思決定統合ドラフト",
+    "decision_brief_notice": (
+        "非公式の結論であり、Final 意思決定契約の監査をまだ通過していません。"
+    ),
     "research_decision": "最終結論",
     "no_decision": "最終結論は記録されていません。",
     "warnings": "警告",
@@ -641,10 +652,15 @@ def render_run_export_markdown(run_export: RunExport) -> str:
             ]
         )
     for artifact in process_artifacts:
+        artifact_title = (
+            labels["decision_brief"]
+            if isinstance(artifact.content, DecisionBrief)
+            else artifact.stage
+        )
         sections.extend(
             [
                 "",
-                (f"### {artifact.stage} · {artifact.role} · {labels['round']} {artifact.round}"),
+                (f"### {artifact_title} · {artifact.role} · {labels['round']} {artifact.round}"),
                 "",
                 f"- {labels['artifact']}: `{artifact.id}`",
                 f"- {labels['attempt']}: `{artifact.attempt}`",
@@ -658,6 +674,8 @@ def render_run_export_markdown(run_export: RunExport) -> str:
             _artifact_human_text(artifact.content, labels),
             evidence_aliases,
         )
+        if isinstance(artifact.content, DecisionBrief):
+            sections.extend(["", f"> **{labels['decision_brief_notice']}**"])
         if human_text:
             sections.extend(["", human_text])
 
@@ -1048,6 +1066,8 @@ def _artifact_human_text(
 ) -> str:
     if isinstance(content, AnalystReport):
         return _render_analyst_report(content, labels)
+    if isinstance(content, DecisionBrief):
+        return content.markdown
     if isinstance(content, ResearchCase):
         return _render_research_case(content)
     if isinstance(content, DebateAgenda):

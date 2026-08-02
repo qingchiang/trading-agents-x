@@ -1636,7 +1636,7 @@ class RecentInstrument(FrozenModel):
 class RunExport(FrozenModel):
     """Versioned, self-contained durable run export."""
 
-    schema_version: Literal["5"] = "5"
+    schema_version: Literal["6"] = "6"
     run: RunView
     result: AnalysisResult
     evidence: EvidenceBundle | None = None
