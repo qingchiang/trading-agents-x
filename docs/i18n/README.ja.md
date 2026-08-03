@@ -189,6 +189,11 @@ print(result.decision)
 `ResearchDecision`、metrics、warnings を返します。別 worker に渡す場合は
 `TradingAgents.enqueue(request, idempotency_key=...)` を使用します。
 
+root package が公開するのは `TradingAgents`、`AnalysisRequest`、
+`AnalysisResult`、`ResearchDecision`、`RunProfile`、`__version__` のみです。
+Evidence、deliberation、numeric audit の内部型は、それぞれの所有 module
+から import します。
+
 旧 `TradingAgentsGraph` 公開 export と `(final_state, decision)` tuple は
 削除されました。移行方法は
 [breaking migration guide](../migration-independent-platform.md) を参照して

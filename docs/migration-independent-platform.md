@@ -57,6 +57,11 @@ the typed decision are persisted automatically. Use
 `tradingagents export RUN_ID` or the export API when a Markdown/JSON file is
 needed.
 
+The supported root-package exports are `TradingAgents`, `AnalysisRequest`,
+`AnalysisResult`, `ResearchDecision`, `RunProfile`, and `__version__`. Import
+specialized evidence, deliberation, and numeric-audit contracts from their
+owning modules when internal integration work requires them.
+
 The following compatibility surfaces are removed:
 
 - `TradingAgentsGraph` public export;

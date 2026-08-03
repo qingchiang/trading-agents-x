@@ -232,8 +232,9 @@ Alembic manages application tables:
 | `runs` | request, redacted settings snapshot, status, lease, error, metrics |
 | `run_attempts` | attempt state, checkpoint thread, lease and resume count |
 | `run_events` | per-run monotonic sequence, attempt, node, sanitized payload |
-| `reports` | Markdown narrative and structured analyst payload |
-| `decisions` | typed decision, evidence bundle, market identity |
+| `run_artifacts` | versioned analyst, deliberation, and decision-stage artifacts |
+| `run_evidence` | independently sealed EvidenceBundle and digest |
+| `decisions` | typed final decision, numeric audit appendix, market identity |
 | `outcomes` | benchmark, five-interval dates, raw return, alpha |
 | `reflections` | outcome-aware research reflection |
 | `legacy_imports` | source/hash/status for idempotent Markdown migration |
@@ -570,6 +571,11 @@ release gates require recorded same-model executions and are documented in
 reported as measured model quality, latency, or token improvement.
 
 ## Implementation map
+
+The root package intentionally exposes only `TradingAgents`, `AnalysisRequest`,
+`AnalysisResult`, `ResearchDecision`, `RunProfile`, and `__version__` as its
+public Python API. Specialized contracts remain owned by their subsystem
+modules.
 
 - Public API: `tradingagents/client.py`,
   `tradingagents/application/contracts.py`

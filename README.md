@@ -229,6 +229,11 @@ print(result.decision)
 `ResearchDecision`, metrics, and warnings. To queue work for a separate worker,
 use `TradingAgents.enqueue(request, idempotency_key=...)`.
 
+The root package intentionally exports only `TradingAgents`, `AnalysisRequest`,
+`AnalysisResult`, `ResearchDecision`, `RunProfile`, and `__version__`. Internal
+evidence, deliberation, and numeric-audit types remain available from their
+owning modules rather than as root-package shortcuts.
+
 The legacy `TradingAgentsGraph` export and `(final_state, decision)` tuple are
 removed. See the [breaking migration guide](docs/migration-independent-platform.md).
 

@@ -174,6 +174,10 @@ print(result.decision)
 `ResearchDecision`、metrics 和 warnings。需要交给独立 worker 时，使用
 `TradingAgents.enqueue(request, idempotency_key=...)`。
 
+根包只公开 `TradingAgents`、`AnalysisRequest`、`AnalysisResult`、
+`ResearchDecision`、`RunProfile` 和 `__version__`。Evidence、deliberation 与
+numeric audit 等内部类型应从各自所属模块导入，不再由根包快捷导出。
+
 旧 `TradingAgentsGraph` 公共导出和 `(final_state, decision)` tuple 已删除。
 迁移方法见 [breaking migration guide](../migration-independent-platform.md)。
 
