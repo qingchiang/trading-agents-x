@@ -2411,12 +2411,39 @@ def _assemble_numeric_draft(
                         quantum,
                         rounding=ROUND_HALF_UP,
                     )
-                    mismatch = (
-                        "percent_scale_mismatch"
-                        if _is_percent_calculation_unit(item.unit)
-                        and raw_result == stated_value
-                        else "result_mismatch"
-                    )
+                    if _is_ratio_scaled_calculation_unit(item.unit) and raw_result == stated_value:
+                        mismatch = "percent_scale_mismatch"
+                    elif _display_values_approximately_match(
+                        stated_value=stated_value,
+                        comparison_value=canonical_value,
+                        raw_stated_value=Decimal(str(requirement.stated_value)),
+                        raw_comparison_value=Decimal(str(comparison_result)),
+                        quantum=quantum,
+                    ):
+                        covered_requirements.add(requirement_id)
+                        requirement_uses.setdefault(calculation_id, []).append(
+                            DecisionCalculationUse(
+                                component_path=requirement.component_path,
+                                label=requirement.label,
+                            )
+                        )
+                        requirement_checks[requirement_id] = _requirement_check(
+                            requirement,
+                            calculation_id=calculation_id,
+                            canonical_result=calculations[calculation_id].result,
+                            comparison_result=comparison_result,
+                            comparison_difference=(
+                                comparison_result - requirement.stated_value
+                            ),
+                            rounded_stated_value=float(stated_value),
+                            rounded_canonical_result=float(canonical_value),
+                            calculation_status=NumericCalculationStatus.VERIFIED,
+                            display_status=NumericDisplayStatus.APPROXIMATELY_MATCHED,
+                            issue_codes=(f"{prefix}.display_approximate",),
+                        )
+                        continue
+                    else:
+                        mismatch = "result_mismatch"
             if mismatch is not None:
                 issue = f"{prefix}.{mismatch}"
                 if mismatch == "result_mismatch":
@@ -3411,6 +3438,32 @@ _DISPLAY_SCALE_FACTORS = {
 
 def _is_percent_calculation_unit(unit: str) -> bool:
     return unit.strip().upper() in _PERCENT_CALCULATION_UNITS
+
+
+def _is_ratio_scaled_calculation_unit(unit: str) -> bool:
+    return unit.strip().upper() in (
+        _PERCENT_CALCULATION_UNITS
+        | _PERCENTAGE_POINT_CALCULATION_UNITS
+        | _BASIS_POINT_CALCULATION_UNITS
+    )
+
+
+def _display_values_approximately_match(
+    *,
+    stated_value: Decimal,
+    comparison_value: Decimal,
+    raw_stated_value: Decimal,
+    raw_comparison_value: Decimal,
+    quantum: Decimal,
+) -> bool:
+    if raw_stated_value and raw_comparison_value and (
+        raw_stated_value.is_signed() != raw_comparison_value.is_signed()
+    ):
+        return False
+    rounded_difference = abs(stated_value - comparison_value)
+    relative_base = max(abs(raw_stated_value), abs(raw_comparison_value), Decimal("1"))
+    relative_difference = abs(raw_stated_value - raw_comparison_value) / relative_base
+    return rounded_difference <= quantum and relative_difference <= Decimal("0.01")
 
 
 def _canonicalize_calculation_result(

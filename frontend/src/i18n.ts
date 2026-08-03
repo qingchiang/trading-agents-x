@@ -355,6 +355,7 @@ const en = {
     },
     numericDisplayStatus: {
       matched: "Display matched",
+      approximately_matched: "Display approximately matched",
       mismatched: "Display mismatched",
       not_checked: "Display not checked",
     },
@@ -828,6 +829,7 @@ const zhCN = {
     },
     numericDisplayStatus: {
       matched: "显示一致",
+      approximately_matched: "显示近似一致",
       mismatched: "显示不一致",
       not_checked: "未比较显示值",
     },
@@ -1307,6 +1309,7 @@ const ja = {
     },
     numericDisplayStatus: {
       matched: "表示一致",
+      approximately_matched: "表示はほぼ一致",
       mismatched: "表示不一致",
       not_checked: "表示未比較",
     },

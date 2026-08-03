@@ -1721,6 +1721,57 @@ def test_display_mismatch_keeps_verified_calculation_and_comparison() -> None:
     )
 
 
+def test_one_display_unit_difference_is_approximately_matched() -> None:
+    state = _state()
+    bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
+    ref = bundle.items[0].ref
+    requirement = DecisionNumericRequirementDraft(
+        id="req_growth",
+        component_path="thesis",
+        label="Revenue growth",
+        stated_value=85.24,
+        fraction_digits=2,
+        formula="(current_revenue - prior_revenue) / prior_revenue",
+        inputs=(
+            CalculationInputDraft(name="current_revenue", value=185.22763378875221),
+            CalculationInputDraft(name="prior_revenue", value=100),
+        ),
+        input_evidence_refs=(ref,),
+        unit="%",
+        display_scale=NumericDisplayScale.BASE,
+        limitations=("Fixture calculation.",),
+    )
+    calculation = CalculationRecordDraft(
+        id="calc_growth",
+        formula=requirement.formula,
+        inputs=requirement.inputs,
+        input_evidence_refs=requirement.input_evidence_refs,
+        unit=requirement.unit,
+        limitations=requirement.limitations,
+        requirement_ids=(requirement.id,),
+    )
+
+    result = _assemble_numeric_draft(
+        DecisionNumericDraft(requested=True, calculation_records=(calculation,)),
+        bundle=bundle,
+        allowed_evidence_refs={ref},
+        value_catalog=_value_catalog(bundle),
+        salvage=False,
+        node="committee.final.serialize.numeric",
+        requirements=(requirement,),
+    )
+
+    assert result.status is NumericAuditStatus.COMPLETE
+    assert result.warnings == ()
+    check = result.requirement_checks[0]
+    assert check.display_status is NumericDisplayStatus.APPROXIMATELY_MATCHED
+    assert check.rounded_stated_value == 85.24
+    assert check.rounded_canonical_result == 85.23
+    assert check.issue_codes == (
+        "numeric.requirement.req_growth.display_approximate",
+    )
+
+
 def test_display_mismatch_does_not_retry_numeric_serializer() -> None:
     state = _state()
     ref = state["evidence_bundle"]["items"][0]["ref"]

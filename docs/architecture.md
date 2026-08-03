@@ -109,6 +109,10 @@ never parsed to infer that scale. Ratio formulas for percent and percentage-poin
 values are converted by the application, as are ratio formulas expressed in
 basis points. The persisted audit comparison therefore retains both the raw
 canonical result and the deterministically scaled reader-facing value.
+Reader-facing values that differ by no more than one declared last-place unit
+and one percent relative error are retained as `approximately_matched`; this
+does not weaken formula, unit, sign, Evidence, or PIT validation and does not
+degrade an otherwise complete numeric audit.
 
 Non-personalized ratings, conditional investment views, auditable valuation
 ranges, scenarios, and market reference levels are allowed. Position
