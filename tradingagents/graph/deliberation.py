@@ -7,6 +7,7 @@ import hashlib
 import json
 import math
 import re
+import unicodedata
 from collections.abc import Callable, Mapping
 from contextlib import nullcontext
 from dataclasses import dataclass, replace
@@ -22,6 +23,7 @@ from pydantic import (
     ValidationError,
     field_serializer,
     field_validator,
+    model_validator,
 )
 
 from tradingagents.application.contracts import (
@@ -185,6 +187,11 @@ class DecisionNumericRequirementDraft(BaseModel):
     input_evidence_refs: tuple[str, ...] = Field(min_length=1)
     unit: str = Field(min_length=1, max_length=32)
     display_scale: NumericDisplayScale
+    display_role: Literal["scalar", "range_low", "range_high"] = "scalar"
+    display_group_id: str | None = Field(
+        default=None,
+        pattern=r"^group_[a-z0-9][a-z0-9_.-]*$",
+    )
     limitations: tuple[str, ...] = Field(min_length=1)
 
     @field_validator("inputs")
@@ -197,6 +204,14 @@ class DecisionNumericRequirementDraft(BaseModel):
         if len(names) != len(set(names)):
             raise ValueError("numeric requirement input names must be unique")
         return value
+
+    @model_validator(mode="after")
+    def validate_display_group(self) -> DecisionNumericRequirementDraft:
+        if self.display_role == "scalar" and self.display_group_id is not None:
+            raise ValueError("scalar requirements cannot belong to a range group")
+        if self.display_role != "scalar" and self.display_group_id is None:
+            raise ValueError("range endpoint requirements require a display group")
+        return self
 
 
 class ResearchScenarioCoreDraft(BaseModel):
@@ -321,6 +336,59 @@ def _numeric_requirement_validation_issues(
     return tuple(dict.fromkeys(issues)) or (f"{prefix}.schema_invalid",)
 
 
+def _normalize_numeric_requirement_candidate(candidate: Any) -> Any:
+    """Canonicalize unambiguous Unicode operands before soft schema validation."""
+
+    if isinstance(candidate, BaseModel):
+        return candidate
+    if not isinstance(candidate, Mapping):
+        return candidate
+    raw_inputs = candidate.get("inputs")
+    formula = candidate.get("formula")
+    if not isinstance(raw_inputs, (list, tuple)) or not isinstance(formula, str):
+        return candidate
+    names = [
+        item.get("name") if isinstance(item, Mapping) else None
+        for item in raw_inputs
+    ]
+    if not names or any(not isinstance(name, str) for name in names):
+        return candidate
+    if all(re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name) for name in names):
+        return candidate
+    normalized_names = [unicodedata.normalize("NFKC", name) for name in names]
+    if len(set(normalized_names)) != len(normalized_names) or any(
+        not name.isidentifier() for name in normalized_names
+    ):
+        return candidate
+    try:
+        tree = ast.parse(formula, mode="eval")
+    except SyntaxError:
+        return candidate
+    referenced_names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+    if referenced_names != set(normalized_names):
+        return candidate
+    replacements = {
+        name: f"v{index}" for index, name in enumerate(normalized_names, start=1)
+    }
+
+    class _OperandRenamer(ast.NodeTransformer):
+        def visit_Name(self, node: ast.Name) -> ast.Name:  # noqa: N802
+            replacement = replacements.get(node.id)
+            return ast.copy_location(ast.Name(id=replacement, ctx=node.ctx), node)
+
+    rewritten = _OperandRenamer().visit(tree)
+    ast.fix_missing_locations(rewritten)
+    normalized_inputs = [
+        {**dict(item), "name": replacements[name]}
+        for item, name in zip(raw_inputs, normalized_names, strict=True)
+    ]
+    return {
+        **dict(candidate),
+        "formula": ast.unparse(rewritten),
+        "inputs": normalized_inputs,
+    }
+
+
 def _preflight_numeric_requirements(
     envelope: ResearchDecisionCoreEnvelope,
     *,
@@ -332,6 +400,7 @@ def _preflight_numeric_requirements(
     seen_ids: set[str] = set()
     core = envelope.qualitative_core()
     for index, candidate in enumerate(envelope.numeric_requirement_candidates):
+        candidate = _normalize_numeric_requirement_candidate(candidate)
         prefix = f"numeric.requirement_candidate.{index}"
         candidate_path = prefix
         candidate_label: str | None = None
@@ -412,6 +481,41 @@ def _preflight_numeric_requirements(
             continue
         seen_ids.add(requirement.id)
         requirements.append(requirement)
+    grouped = {
+        group_id: tuple(item for item in requirements if item.display_group_id == group_id)
+        for group_id in {
+            item.display_group_id
+            for item in requirements
+            if item.display_group_id is not None
+        }
+    }
+    invalid_group_requirement_ids: set[str] = set()
+    for group_id, members in grouped.items():
+        roles = {item.display_role for item in members}
+        consistent = len(
+            {
+                (item.component_path, item.unit, item.display_scale)
+                for item in members
+            }
+        ) == 1
+        if len(members) == 2 and roles == {"range_low", "range_high"} and consistent:
+            continue
+        issue = f"numeric.requirement_group.{group_id}.invalid"
+        issues.append(issue)
+        for item in members:
+            invalid_group_requirement_ids.add(item.id)
+            omissions.append(
+                NumericAuditOmission(
+                    component_path=item.component_path,
+                    component_type=NumericAuditComponentType.DECISION_CLAIM,
+                    reference_label=item.label,
+                    issue_codes=(issue,),
+                )
+            )
+    if invalid_group_requirement_ids:
+        requirements = [
+            item for item in requirements if item.id not in invalid_group_requirement_ids
+        ]
     if envelope.numeric_requirements_declared and not requirements:
         issue = "numeric.requirements.declared_missing"
         issues.append(issue)
@@ -1424,8 +1528,12 @@ def invoke_research_decision(
                 "inputs must be an array of {name, value} objects, never a dynamic "
                 "mapping, and limitations must be an array of strings. Every "
                 "component_path must identify one exact core field such as risks.0 "
-                "or scenarios.base.core_assumptions.2; omit an uncertain annotation "
+                "or catalysts.0 or scenarios.base.core_assumptions.2; omit an uncertain annotation "
                 "instead of using a coarse path such as risks or scenarios. "
+                "Do not create requirements for unresolved_questions. A displayed "
+                "derived range requires two requirements with the same display_group_id "
+                "and distinct range_low/range_high display_role values; never attach "
+                "one scalar requirement to two calculations. "
                 f"{percentage_rules} {display_scale_rules} "
                 "scenarios must contain "
                 "exactly one base, one bull, and one bear case. Required "
@@ -1440,7 +1548,10 @@ def invoke_research_decision(
             "the strict qualitative fields. Candidate inputs are arrays of named "
             "values, limitations are string arrays, and component paths point to "
             "specific indexed core fields. Omit a candidate when its exact core "
-            "location cannot be identified. "
+            "location cannot be identified. Audit decision-critical derived values "
+            "in catalysts, but do not annotate unresolved questions. Use paired "
+            "range_low/range_high requirements with one display_group_id for a "
+            "derived range. "
             + percentage_rules
             + " "
             + display_scale_rules
@@ -2370,6 +2481,27 @@ def _assemble_numeric_draft(
 
     requirement_uses: dict[str, list[DecisionCalculationUse]] = {}
     covered_requirements: set[str] = set()
+    requirement_calculations: dict[str, list[str]] = {}
+    for calculation_id, item in calculation_drafts.items():
+        for requirement_id in item.requirement_ids:
+            requirement_calculations.setdefault(requirement_id, []).append(calculation_id)
+    multiply_covered_requirements = {
+        requirement_id
+        for requirement_id, calculation_ids in requirement_calculations.items()
+        if len(calculation_ids) > 1
+    }
+    for requirement_id in sorted(multiply_covered_requirements):
+        requirement = requirement_by_id.get(requirement_id)
+        if requirement is None:
+            continue
+        issue = f"numeric.requirement.{requirement_id}.multiple_calculations"
+        repair_issues.append(issue)
+        requirement_checks[requirement_id] = _requirement_check(
+            requirement,
+            calculation_status=NumericCalculationStatus.INVALID,
+            display_status=NumericDisplayStatus.NOT_CHECKED,
+            issue_codes=(issue,),
+        )
     for calculation_id, item in calculation_drafts.items():
         for requirement_id in item.requirement_ids:
             requirement = requirement_by_id.get(requirement_id)
@@ -2377,6 +2509,8 @@ def _assemble_numeric_draft(
                 repair_issues.append(
                     f"numeric.calculation.{calculation_id}.unknown_requirement"
                 )
+                continue
+            if requirement_id in multiply_covered_requirements:
                 continue
             prefix = f"numeric.requirement.{requirement_id}"
             mismatch: str | None = None

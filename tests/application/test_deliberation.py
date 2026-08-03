@@ -62,6 +62,7 @@ from tradingagents.graph.deliberation import (
     _evaluate_formula,
     _numeric_audit_snapshot,
     _numeric_example_pair,
+    _preflight_numeric_requirements,
     debate_round_has_material_progress,
     decision_reference_label_guidance,
     decision_scenario_assumption_guidance,
@@ -321,7 +322,7 @@ def test_core_envelope_exposes_soft_numeric_requirement_schema() -> None:
         "fraction_digits",
         "formula",
         "inputs",
-            "input_evidence_refs",
+        "input_evidence_refs",
             "unit",
             "display_scale",
             "limitations",
@@ -332,6 +333,8 @@ def test_core_envelope_exposes_soft_numeric_requirement_schema() -> None:
     }
     component_pattern = candidate["properties"]["component_path"]["pattern"]
     assert "risks\\.\\d+" in component_pattern
+    assert "catalysts\\.\\d+" in component_pattern
+    assert "unresolved_questions" not in component_pattern
     assert "scenarios\\.(?:base|bull|bear)" in component_pattern
 
 
@@ -1150,6 +1153,85 @@ def test_numeric_requirement_preflight_reports_safe_field_paths() -> None:
     ) == 1
 
 
+def test_numeric_requirement_preflight_canonicalizes_unicode_operands() -> None:
+    state = _state()
+    ref = state["evidence_bundle"]["items"][0]["ref"]
+    core = _core_draft_from_decision(
+        research_decision(evidence_refs=(ref,)).model_dump(mode="json")
+    )
+    envelope = ResearchDecisionCoreEnvelope.model_validate(
+        {
+            **core.model_dump(mode="json"),
+            "numeric_requirements_declared": True,
+            "numeric_requirement_candidates": [
+                {
+                    "id": "req_growth",
+                    "component_path": "thesis",
+                    "label": "Growth",
+                    "stated_value": 25.0,
+                    "fraction_digits": 1,
+                    "formula": "(本期利润 - 上期利润) / 上期利润",
+                    "inputs": [
+                        {"name": "本期利润", "value": 125},
+                        {"name": "上期利润", "value": 100},
+                    ],
+                    "input_evidence_refs": [ref],
+                    "unit": "%",
+                    "display_scale": "base",
+                    "limitations": ["Fixture limitation."],
+                }
+            ],
+        }
+    )
+
+    preflight = _preflight_numeric_requirements(
+        envelope,
+        valid_evidence_refs={ref},
+    )
+
+    assert preflight.issues == ()
+    assert [item.name for item in preflight.requirements[0].inputs] == ["v1", "v2"]
+    assert preflight.requirements[0].formula == "(v1 - v2) / v2"
+
+
+def test_numeric_requirement_range_group_requires_low_and_high() -> None:
+    state = _state()
+    ref = state["evidence_bundle"]["items"][0]["ref"]
+    core = _core_draft_from_decision(
+        research_decision(evidence_refs=(ref,)).model_dump(mode="json")
+    )
+    requirement = DecisionNumericRequirementDraft(
+        id="req_range_low",
+        component_path="scenarios.base.outcome",
+        label="Range low",
+        stated_value=10,
+        fraction_digits=0,
+        formula="earnings * multiple",
+        inputs=(
+            CalculationInputDraft(name="earnings", value=1),
+            CalculationInputDraft(name="multiple", value=10),
+        ),
+        input_evidence_refs=(ref,),
+        unit="USD",
+        display_scale=NumericDisplayScale.BASE,
+        display_role="range_low",
+        display_group_id="group_base_range",
+        limitations=("Fixture limitation.",),
+    )
+    envelope = _core_envelope(core, requirements=(requirement,))
+
+    preflight = _preflight_numeric_requirements(
+        envelope,
+        valid_evidence_refs={ref},
+    )
+
+    assert preflight.requirements == ()
+    assert preflight.issues == (
+        "numeric.requirement_group.group_base_range.invalid",
+        "numeric.requirements.declared_missing",
+    )
+
+
 def test_valid_numeric_requirements_survive_an_invalid_sibling() -> None:
     state = _state()
     ref = state["evidence_bundle"]["items"][0]["ref"]
@@ -1662,6 +1744,50 @@ def test_decision_requirement_mismatch_is_rejected(
         )
 
     assert expected_issue in error.value.issue_codes
+
+
+def test_scalar_requirement_cannot_cover_multiple_calculations() -> None:
+    state = _state()
+    bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
+    ref = bundle.items[0].ref
+    requirement = DecisionNumericRequirementDraft(
+        id="req_scalar",
+        component_path="thesis",
+        label="Scalar value",
+        stated_value=10,
+        fraction_digits=0,
+        formula="value",
+        inputs=(CalculationInputDraft(name="value", value=10),),
+        input_evidence_refs=(ref,),
+        unit="USD",
+        display_scale=NumericDisplayScale.BASE,
+        limitations=("Fixture limitation.",),
+    )
+    calculations = tuple(
+        CalculationRecordDraft(
+            id=f"calc_scalar_{index}",
+            formula=requirement.formula,
+            inputs=requirement.inputs,
+            input_evidence_refs=requirement.input_evidence_refs,
+            unit=requirement.unit,
+            limitations=requirement.limitations,
+            requirement_ids=(requirement.id,),
+        )
+        for index in range(2)
+    )
+
+    with pytest.raises(OutputValidationError) as error:
+        _assemble_numeric_draft(
+            DecisionNumericDraft(requested=True, calculation_records=calculations),
+            bundle=bundle,
+            allowed_evidence_refs={ref},
+            value_catalog=_value_catalog(bundle),
+            salvage=False,
+            node="committee.final.serialize.numeric",
+            requirements=(requirement,),
+        )
+
+    assert "numeric.requirement.req_scalar.multiple_calculations" in error.value.issue_codes
 
 
 def test_display_mismatch_keeps_verified_calculation_and_comparison() -> None:

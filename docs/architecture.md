@@ -113,6 +113,12 @@ Reader-facing values that differ by no more than one declared last-place unit
 and one percent relative error are retained as `approximately_matched`; this
 does not weaken formula, unit, sign, Evidence, or PIT validation and does not
 degrade an otherwise complete numeric audit.
+Serializer-facing operands remain ASCII identifiers. If a provider returns an
+otherwise unambiguous Unicode identifier, the application rewrites the formula
+AST and operands to stable `v1`, `v2`, and later names before validation; it
+never guesses an ambiguous mapping. A displayed derived range declares separate
+low and high requirements, so one scalar requirement cannot validate two
+different calculations.
 
 Non-personalized ratings, conditional investment views, auditable valuation
 ranges, scenarios, and market reference levels are allowed. Position
