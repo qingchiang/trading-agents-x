@@ -7,7 +7,7 @@ import pytest
 
 from tradingagents.dataflows.cn import cn_fundamentals, company
 from tradingagents.dataflows.errors import NoMarketDataError
-from tradingagents.provenance import extract_provenance
+from tradingagents.provenance import extract_evidence_spans, extract_provenance
 
 
 def _abstract(*, bank: bool = False) -> pd.DataFrame:
@@ -47,14 +47,17 @@ def _install_sources(monkeypatch, *, bank=False):
 def test_historical_analysis_never_queries_current_yfinance(monkeypatch):
     _install_sources(monkeypatch)
     current = mock.Mock(side_effect=AssertionError("current snapshot queried"))
+    profile = mock.Mock(side_effect=AssertionError("current profile queried"))
     monkeypatch.setattr(cn_fundamentals, "get_yfinance_fundamentals", current)
+    monkeypatch.setattr(cn_fundamentals, "get_company_profile", profile)
 
     output = cn_fundamentals.get_fundamentals("600519.SS", "2026-04-01")
 
     current.assert_not_called()
+    profile.assert_not_called()
     assert "Not requested: current-only valuation and forecasts are excluded" in output
     assert "Financial abstract" in output
-    assert "current company reference; not historical PIT" in output
+    assert "CNINFO profile source status: unavailable" in output
     assert {record.source for record in extract_provenance(output)} == {
         "AkShare / CNINFO company profile",
         "AkShare / Sina financial abstract",
@@ -65,7 +68,11 @@ def test_historical_analysis_never_queries_current_yfinance(monkeypatch):
 @pytest.mark.unit
 def test_live_analysis_adds_separate_yfinance_valuation_provenance(monkeypatch):
     _install_sources(monkeypatch)
-    monkeypatch.setattr(cn_fundamentals, "is_live", lambda _date: True)
+    monkeypatch.setattr(
+        cn_fundamentals,
+        "is_near_live",
+        lambda _date, _ticker: True,
+    )
     get_yf = mock.Mock(return_value="Market Cap: 123\nPE Ratio (TTM): 10")
     monkeypatch.setattr(cn_fundamentals, "get_yfinance_fundamentals", get_yf)
 
@@ -77,6 +84,18 @@ def test_live_analysis_adds_separate_yfinance_valuation_provenance(monkeypatch):
     records = extract_provenance(output)
     assert len(records) == 3
     assert len({record.source for record in records}) == 3
+    spans = extract_evidence_spans(output)
+    assert {span.temporal_scope for span in spans} == {
+        "point_in_time",
+        "live_only",
+    }
+    assert next(
+        span.content
+        for span in spans
+        if span.temporal_scope == "live_only"
+        and span.content
+        and "Market Cap: 123" in span.content
+    ).endswith("PE Ratio (TTM): 10")
 
 
 @pytest.mark.unit

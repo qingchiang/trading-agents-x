@@ -10,7 +10,7 @@ from unittest import mock
 import pytest
 
 from tradingagents.dataflows import macro_common
-from tradingagents.dataflows.config import set_config
+from tradingagents.dataflows.config import bind_config
 from tradingagents.dataflows.macro_common import SeriesCache, exact_year_over_year
 
 
@@ -80,7 +80,7 @@ class SeriesCacheTests(unittest.TestCase):
         # The default (no namespace) is memory-only, so it must not create files
         # even for a settled key.
         with tempfile.TemporaryDirectory() as tmp:
-            set_config({"data_cache_dir": tmp})
+            bind_config({"data_cache_dir": tmp})
             SeriesCache().put(("cpi", "2020-01-01", 365), {"points": []})
             self.assertEqual(os.listdir(tmp), [])
 
@@ -91,7 +91,7 @@ class SeriesCacheDiskTests(unittest.TestCase):
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        set_config({"data_cache_dir": self._tmp.name})
+        bind_config({"data_cache_dir": self._tmp.name})
 
     def tearDown(self):
         self._tmp.cleanup()

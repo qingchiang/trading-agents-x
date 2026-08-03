@@ -8,8 +8,8 @@ import pytest
 from tradingagents.dataflows.cn import cn_sentiment
 from tradingagents.dataflows.cn.common import AkShareRequestError, AkShareSchemaError
 from tradingagents.provenance import (
-    append_provenance_appendix,
     extract_provenance,
+    provenance_quality_issues,
     strip_provenance_markers,
 )
 
@@ -44,6 +44,14 @@ def test_research_signal_is_publication_date_bounded(monkeypatch):
 
     assert "2026-01-10" in result
     assert "upgrade" in result
+    _body, facts = cn_sentiment.get_research_signal_payload(
+        "000001.SZ", "2026-01-10"
+    )
+    assert [(fact["key"], fact["value"], fact["unit"]) for fact in facts] == [
+        ("target_low_1", 10.0, "CNY"),
+        ("target_high_1", 12.0, "CNY"),
+    ]
+    assert {fact["effective_date"] for fact in facts} == {"2026-01-10"}
 
 
 @pytest.mark.unit
@@ -119,12 +127,10 @@ def test_research_successful_empty_primary_and_fallback_do_not_warn(monkeypatch)
     monkeypatch.setattr(cn_sentiment, "research_rows", lambda *_args: [])
 
     result = cn_sentiment.get_research_signal("000001.SZ", "2026-01-10")
-    report = append_provenance_appendix(
-        "REPORT", extract_provenance(result), enabled=False
-    )
+    issues = provenance_quality_issues(extract_provenance(result))
 
     assert "no usable coverage" in result
-    assert "Data Quality Warnings" not in report
+    assert issues == []
 
 
 @pytest.mark.unit

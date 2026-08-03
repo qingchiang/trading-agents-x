@@ -10,6 +10,7 @@ the routing layer treats it as "unavailable" rather than a hard crash.
 """
 import logging
 import os
+import re
 from datetime import datetime, timedelta
 
 import requests
@@ -20,6 +21,7 @@ from .macro_common import SeriesCache, render_macro_report
 logger = logging.getLogger(__name__)
 
 FRED_API_BASE = "https://api.stlouisfed.org/fred"
+RAW_SERIES_ID = re.compile(r"^[A-Za-z0-9]{1,25}$")
 
 # Network timeout (seconds) so a stalled request can't hang the agents,
 # mirroring the Alpha Vantage client.
@@ -101,13 +103,11 @@ def _resolve_series_id(indicator: str) -> str:
     if key in MACRO_SERIES:
         return MACRO_SERIES[key]
     candidate = indicator.strip().upper()
-    # FRED series IDs never contain whitespace and are short; reject anything
-    # else (a descriptive phrase the LLM passed) rather than 400ing the API.
-    if not candidate or len(candidate) > 30 or any(c.isspace() for c in candidate):
+    if not RAW_SERIES_ID.fullmatch(candidate):
         raise ValueError(
-            f"'{indicator}' is not a known macro alias or a valid FRED series ID. "
-            f"Use an alias (e.g. 'cpi', 'unemployment', '10y_treasury') or a raw "
-            f"FRED series ID (e.g. 'CPIAUCSL')."
+            "Indicator is not a known macro alias or a valid FRED series ID. "
+            "Use an alias (e.g. 'cpi', 'unemployment', '10y_treasury') or a raw "
+            "1-25 character alphanumeric FRED series ID (e.g. 'CPIAUCSL')."
         )
     return candidate
 

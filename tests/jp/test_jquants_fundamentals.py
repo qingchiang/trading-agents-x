@@ -5,10 +5,9 @@ from unittest import mock
 
 import pytest
 
-import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
 from tradingagents.dataflows import interface
-from tradingagents.dataflows.config import set_config
+from tradingagents.dataflows.config import bind_config
 from tradingagents.dataflows.errors import NoMarketDataError
 from tradingagents.dataflows.jp import jquants_fundamentals as jf
 
@@ -187,17 +186,17 @@ class FundamentalsTests(unittest.TestCase):
 @pytest.mark.unit
 class FundamentalsRoutingTests(unittest.TestCase):
     def setUp(self):
-        config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def tearDown(self):
-        config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def test_jquants_registered_for_all_fundamental_methods(self):
         for method in ("get_fundamentals", "get_balance_sheet", "get_cashflow", "get_income_statement"):
             self.assertIn("jquants", interface.VENDOR_METHODS[method])
 
     def test_tokyo_ticker_routes_fundamentals_to_jquants(self):
-        set_config({"data_vendors_by_market": {".T": {"fundamental_data": "jquants"}}})
+        bind_config({"data_vendors_by_market": {".T": {"fundamental_data": "jquants"}}})
         jq = mock.Mock(return_value="JQ_FUND")
         yf = mock.Mock(return_value="YF_FUND")
         with mock.patch.dict(

@@ -10,13 +10,17 @@ import pytest
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableLambda
 
-import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
 from tradingagents.agents.analysts import news_analyst
 from tradingagents.agents.analysts.news_analyst import create_news_analyst
 from tradingagents.dataflows import boj, cn_macro, estat, fred, jp_macro, macro_panel
-from tradingagents.dataflows.config import set_config
-from tradingagents.provenance import append_provenance_appendix, extract_provenance
+from tradingagents.dataflows.config import bind_config
+from tradingagents.provenance import (
+    ProvenanceRecord,
+    attach_provenance,
+    extract_provenance,
+    provenance_quality_issues,
+)
 
 
 def _series(points, series_id="X", timing=None):
@@ -178,10 +182,11 @@ class MacroPanelTests(unittest.TestCase):
         self.assertEqual(cpi_record.effective, "2026-06-19")
         self.assertIn("non-vintage", cpi_record.timing)
         self.assertIn("NBS primary retrieval unavailable", cpi_record.timing)
-        warnings = append_provenance_appendix(
-            "REPORT", records.values(), enabled=False
-        )
-        self.assertIn("fallback source used", warnings)
+        reasons = {
+            issue.reason
+            for issue in provenance_quality_issues(records.values())
+        }
+        self.assertIn("fallback source used", reasons)
 
     def test_primary_fallback_capable_series_do_not_emit_fallback_warning(self):
         jp_data = _series(
@@ -221,10 +226,7 @@ class MacroPanelTests(unittest.TestCase):
             for record in extract_provenance(out)
             if record.evidence.startswith("global macro panel /")
         ]
-        self.assertEqual(
-            append_provenance_appendix("REPORT", records, enabled=False),
-            "REPORT",
-        )
+        self.assertEqual(provenance_quality_issues(records), [])
 
     def test_cells_dispatch_to_their_declared_source(self):
         # Japan CPI/core -> e-Stat; Japan policy rate / Tankan -> BOJ; everything
@@ -329,10 +331,11 @@ class MacroPanelTests(unittest.TestCase):
         )
         self.assertEqual(cpi_record.effective, "—")
         self.assertIn("retrieval unavailable", cpi_record.timing)
-        warnings = append_provenance_appendix(
-            "REPORT", [cpi_record], enabled=False
-        )
-        self.assertIn("source unavailable for requested date/window", warnings)
+        reasons = {
+            issue.reason
+            for issue in provenance_quality_issues([cpi_record])
+        }
+        self.assertIn("source unavailable for requested date/window", reasons)
 
     def test_single_point_shows_value_without_delta(self):
         # One in-window point must not render a fabricated "+0.00" change.
@@ -389,15 +392,10 @@ class NewsPanelInjectionTests(unittest.TestCase):
     get_macro_indicators microscope tool bound."""
 
     def setUp(self):
-        self._previous_config = deepcopy(config_module._config)
-        config_module._config = deepcopy(default_config.DEFAULT_CONFIG)
-
-    def tearDown(self):
-        config_module._config = self._previous_config
+        bind_config(deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def _run(self, panel_text="PANEL_XYZ", ticker="NVDA", market_flows=""):
         captured = {}
-        set_config({"provenance_appendix": True})
 
         def _bind(tools):
             captured["tools"] = [t.name for t in tools]
@@ -431,19 +429,49 @@ class NewsPanelInjectionTests(unittest.TestCase):
         captured, result, _ = self._run("PANEL_XYZ")
         self.assertIn("PANEL_XYZ", captured["prompt"])
         self.assertEqual(result["news_report"], result["messages"][0].content)
-        self.assertIn("## Data Provenance", result["news_report"])
-        self.assertIn("| global macro panel | unknown |", result["news_report"])
-        self.assertIn("no auditable source metadata captured", result["news_report"])
-        self.assertIn("| routed ticker news | — |", result["news_report"])
+        self.assertEqual(result["news_report"], "REPORT")
+        records = [
+            record
+            for block in result["prefetched_evidence"]
+            for record in block["records"]
+        ]
+        self.assertTrue(
+            any(
+                record["evidence"] == "global macro panel"
+                and record["source"] == "unknown"
+                and record["timing"] == "no auditable source metadata captured"
+                for record in records
+            )
+        )
+        self.assertTrue(
+            any(
+                record["evidence"] == "routed ticker news"
+                and record["timing"] == "not requested"
+                for record in records
+            )
+        )
 
     def test_panel_provenance_is_carried_into_report(self):
-        panel = macro_panel.get_global_macro_panel("2026-01-15")
+        panel = attach_provenance(
+            "PANEL",
+            *(
+                ProvenanceRecord(
+                    evidence="global macro panel",
+                    source=source,
+                    requested="2026-01-15",
+                    effective="2026-01-14",
+                    timing="point-in-time filtered",
+                )
+                for source in ("FRED", "e-Stat", "BOJ", "China macro")
+            ),
+        )
         _, result, _ = self._run(panel)
-        report = result["news_report"]
-        self.assertIn("| global macro panel | FRED |", report)
-        self.assertIn("| global macro panel | e-Stat |", report)
-        self.assertIn("| global macro panel | BOJ |", report)
-        self.assertIn("| global macro panel | China macro |", report)
+        records = result["prefetched_evidence"][0]["records"]
+        self.assertEqual(
+            {record["source"] for record in records},
+            {"FRED", "e-Stat", "BOJ", "China macro"},
+        )
+        self.assertNotIn("## Data Provenance", result["news_report"])
 
     def test_macro_indicators_tool_still_bound(self):
         captured, _, _ = self._run()
@@ -464,7 +492,7 @@ class NewsPanelInjectionTests(unittest.TestCase):
         self.assertIn("do not attempt to supply or override any date", captured["prompt"])
 
     def test_prompt_preserves_configured_recent_window_longer_than_90_dates(self):
-        set_config({"ticker_news_lookback_days": 120})
+        bind_config({"ticker_news_lookback_days": 120})
         captured, _, _ = self._run()
         self.assertIn(
             "window='recent' first; it covers 2025-09-17 through 2026-01-15",
@@ -489,24 +517,30 @@ class NewsPanelInjectionTests(unittest.TestCase):
             ticker="9984.T",
             market_flows="<no investor-flow data published on or before 2026-01-15>",
         )
-        row = next(
-            line
-            for line in result["news_report"].splitlines()
-            if "| regional investor flows |" in line
+        record = next(
+            record
+            for block in result["prefetched_evidence"]
+            for record in block["records"]
+            if record["evidence"] == "regional investor flows"
         )
-        self.assertIn("| — | available; no published records |", row)
+        self.assertEqual(record["effective"], "—")
+        self.assertEqual(record["timing"], "available; no published records")
+        self.assertIsNone(result["prefetched_evidence"][1]["content"])
 
     def test_unavailable_market_flows_do_not_claim_effective_data(self):
         _, result, _ = self._run(
             ticker="9984.T",
             market_flows="<investor flows unavailable: VendorRateLimitError>",
         )
-        row = next(
-            line
-            for line in result["news_report"].splitlines()
-            if "| regional investor flows |" in line
+        record = next(
+            record
+            for block in result["prefetched_evidence"]
+            for record in block["records"]
+            if record["evidence"] == "regional investor flows"
         )
-        self.assertIn("| — | unavailable |", row)
+        self.assertEqual(record["effective"], "—")
+        self.assertEqual(record["timing"], "unavailable")
+        self.assertIsNone(result["prefetched_evidence"][1]["content"])
 
     def test_us_prompt_has_no_tse_market_flow_block(self):
         captured, _, flows = self._run(ticker="NVDA", market_flows="")

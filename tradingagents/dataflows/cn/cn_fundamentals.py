@@ -8,10 +8,14 @@ from datetime import datetime, timezone
 
 import pandas as pd
 
-from tradingagents.provenance import ProvenanceRecord, attach_provenance
+from tradingagents.provenance import (
+    ProvenanceRecord,
+    attach_evidence_span,
+    attach_provenance,
+)
 
 from ..errors import NoMarketDataError
-from ..lookahead import is_live
+from ..lookahead import is_near_live
 from ..y_finance import get_fundamentals as get_yfinance_fundamentals
 from .common import canonical_a_share
 from .company import classify_entity, get_company_profile
@@ -130,18 +134,21 @@ def _render_abstract(frame: pd.DataFrame, entity_type: str) -> tuple[str, list[s
 
 
 def _live_yfinance_block(ticker: str, curr_date: str | None) -> str:
-    if curr_date is not None and not is_live(curr_date):
-        return attach_provenance(
-            "## Current valuation and analyst snapshot (yfinance)\n"
-            "Not requested: current-only valuation and forecasts are excluded from "
-            f"historical analysis dated {curr_date}.",
-            ProvenanceRecord(
-                evidence="get_fundamentals",
-                source="yfinance current valuation snapshot",
-                requested=curr_date,
-                effective="—",
-                timing="not queried for historical analysis",
+    if curr_date is not None and not is_near_live(curr_date, ticker):
+        return attach_evidence_span(
+            attach_provenance(
+                "## Current valuation and analyst snapshot (yfinance)\n"
+                "Not requested: current-only valuation and forecasts are excluded from "
+                f"historical analysis dated {curr_date}.",
+                ProvenanceRecord(
+                    evidence="get_fundamentals",
+                    source="yfinance current valuation snapshot",
+                    requested=curr_date,
+                    effective="—",
+                    timing="live-only; not queried for historical analysis",
+                ),
             ),
+            temporal_scope="live_only",
         )
     try:
         result = get_yfinance_fundamentals(ticker, curr_date)
@@ -157,16 +164,19 @@ def _live_yfinance_block(ticker: str, curr_date: str | None) -> str:
         body = "## Current valuation and analyst snapshot (yfinance)\n" + result
         effective = curr_date or retrieved[:10]
         timing = "current-only snapshot; not historical PIT"
-    return attach_provenance(
-        body,
-        ProvenanceRecord(
-            evidence="get_fundamentals",
-            source="yfinance current valuation snapshot",
-            requested=curr_date or retrieved[:10],
-            effective=effective,
-            timing=timing,
-            retrieved_at=retrieved,
+    return attach_evidence_span(
+        attach_provenance(
+            body,
+            ProvenanceRecord(
+                evidence="get_fundamentals",
+                source="yfinance current valuation snapshot",
+                requested=curr_date or retrieved[:10],
+                effective=effective,
+                timing=timing,
+                retrieved_at=retrieved,
+            ),
         ),
+        temporal_scope="live_only",
     )
 
 
@@ -176,14 +186,24 @@ def get_fundamentals(ticker: str, curr_date: str | None = None) -> str:
     canonical, _code, _exchange = canonical_a_share(ticker)
     profile_issue: str | None = None
     abstract_issue: str | None = None
-    try:
-        profile = get_company_profile(ticker)
-        if profile.empty:
-            profile_issue = "no company profile returned"
-    except Exception as exc:  # noqa: BLE001 - partial assembler result is useful
-        logger.warning("CN fundamentals: CNINFO profile failed for %s: %s", ticker, exc)
+    if curr_date is not None and not is_near_live(curr_date, ticker):
         profile = pd.DataFrame()
-        profile_issue = f"{type(exc).__name__}: {exc}"
+        profile_issue = (
+            "live-only company profile not queried for historical or future date"
+        )
+    else:
+        try:
+            profile = get_company_profile(ticker)
+            if profile.empty:
+                profile_issue = "no company profile returned"
+        except Exception as exc:  # noqa: BLE001 - partial assembler result is useful
+            logger.warning(
+                "CN fundamentals: CNINFO profile failed for %s: %s",
+                ticker,
+                exc,
+            )
+            profile = pd.DataFrame()
+            profile_issue = f"{type(exc).__name__}: {exc}"
 
     try:
         _canonical, raw = fetch_finance_records(ticker, "abstract")
@@ -213,67 +233,81 @@ def get_fundamentals(ticker: str, curr_date: str | None = None) -> str:
     )
     entity_type = classify_entity(profile, populated_fields.columns)
     requested = curr_date or "not provided (live retrieval)"
-    blocks = [
-        f"# China A-share Fundamentals for {canonical}",
-        f"# Entity mapping: {entity_type}",
-        f"# Requested analysis date: {requested}",
-        _render_profile(profile),
-    ]
-    records: list[ProvenanceRecord] = []
     if profile.empty:
-        blocks.append("CNINFO profile source status: unavailable.")
-        records.append(
-            ProvenanceRecord(
-                evidence="get_fundamentals",
-                source="AkShare / CNINFO company profile",
-                requested=requested,
-                effective="—",
-                timing=f"retrieval unavailable: {profile_issue or 'no data'}",
-            )
+        profile_body = (
+            f"# Entity mapping: {entity_type}\n\n"
+            f"{_render_profile(profile)}\n\n"
+            "CNINFO profile source status: unavailable."
+        )
+        profile_record = ProvenanceRecord(
+            evidence="get_fundamentals",
+            source="AkShare / CNINFO company profile",
+            requested=requested,
+            effective="—",
+            timing=(
+                "live-only; not queried for historical or future analysis"
+                if profile_issue
+                and profile_issue.startswith("live-only")
+                else f"live-only retrieval unavailable: {profile_issue or 'no data'}"
+            ),
         )
     else:
-        records.append(
-            ProvenanceRecord(
-                evidence="get_fundamentals",
-                source="AkShare / CNINFO company profile",
-                requested=requested,
-                effective="current reference",
-                timing="current company reference; not historical PIT",
-            )
+        profile_body = (
+            f"# Entity mapping: {entity_type}\n\n"
+            f"{_render_profile(profile)}"
         )
+        profile_record = ProvenanceRecord(
+            evidence="get_fundamentals",
+            source="AkShare / CNINFO company profile",
+            requested=requested,
+            effective="current reference",
+            timing="live-only current company reference; not historical PIT",
+        )
+    profile_block = attach_evidence_span(
+        attach_provenance(profile_body, profile_record),
+        temporal_scope="live_only",
+    )
 
     if abstract.empty:
-        blocks.append("## Financial abstract (AkShare / Sina)\nUnavailable for the requested date.")
-        records.append(
-            ProvenanceRecord(
-                evidence="get_fundamentals",
-                source="AkShare / Sina financial abstract",
-                requested=requested,
-                effective="—",
-                timing=f"retrieval unavailable: {abstract_issue or 'no data'}",
-            )
+        abstract_body = (
+            f"# China A-share Fundamentals for {canonical}\n"
+            f"# Requested analysis date: {requested}\n\n"
+            "## Financial abstract (AkShare / Sina)\n"
+            "Unavailable for the requested date."
+        )
+        abstract_record = ProvenanceRecord(
+            evidence="get_fundamentals",
+            source="AkShare / Sina financial abstract",
+            requested=requested,
+            effective="—",
+            timing=f"retrieval unavailable: {abstract_issue or 'no data'}",
         )
     else:
         table, missing = _render_abstract(abstract, entity_type)
         effective = abstract["VisibilityDate"].max().strftime("%Y-%m-%d")
-        blocks.extend(
-            [
+        abstract_body = "\n".join(
+            (
+                f"# China A-share Fundamentals for {canonical}",
+                f"# Requested analysis date: {requested}",
+                "",
                 "## Financial abstract (AkShare / Sina)",
                 "Visibility rule: max(report date, publication date, update date) <= cutoff.",
                 f"Latest visible disclosure/update: {effective}",
                 f"Missing mapped fields: {', '.join(missing) if missing else 'none'}",
                 table,
-            ]
-        )
-        records.append(
-            ProvenanceRecord(
-                evidence="get_fundamentals",
-                source="AkShare / Sina financial abstract",
-                requested=requested,
-                effective=effective,
-                timing="publication/update-date filtered; later conflicting date wins",
             )
         )
+        abstract_record = ProvenanceRecord(
+            evidence="get_fundamentals",
+            source="AkShare / Sina financial abstract",
+            requested=requested,
+            effective=effective,
+            timing="publication/update-date filtered; later conflicting date wins",
+        )
 
-    base = attach_provenance("\n\n".join(blocks), *records)
+    abstract_block = attach_evidence_span(
+        attach_provenance(abstract_body, abstract_record),
+        temporal_scope="point_in_time",
+    )
+    base = f"{profile_block}\n\n{abstract_block}"
     return base + "\n\n" + _live_yfinance_block(ticker, curr_date)

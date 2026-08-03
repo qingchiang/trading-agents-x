@@ -1,178 +1,118 @@
-"""Tests for TRADINGAGENTS_* env-var overlay onto DEFAULT_CONFIG."""
+"""Tests for explicit TRADINGAGENTS_* overlays at application boundaries."""
 
 from __future__ import annotations
 
-import importlib
-
 import pytest
 
-import tradingagents.default_config as default_config_module
+from tradingagents.default_config import build_default_config
 
 
-def _reload_with_env(monkeypatch, **overrides):
-    """Set/clear env vars then reload default_config to re-evaluate DEFAULT_CONFIG."""
-    for key in list(default_config_module._ENV_OVERRIDES):
-        monkeypatch.delenv(key, raising=False)
-    for key, val in overrides.items():
-        monkeypatch.setenv(key, val)
-    return importlib.reload(default_config_module)
+def _config(**overrides):
+    return build_default_config(overrides)
 
 
-def test_no_env_uses_built_in_defaults(monkeypatch):
-    dc = _reload_with_env(monkeypatch)
-    assert dc.DEFAULT_CONFIG["llm_provider"] == "openai"
-    assert dc.DEFAULT_CONFIG["deep_think_llm"] == "gpt-5.5"
-    assert dc.DEFAULT_CONFIG["quick_think_llm"] == "gpt-5.4-mini"
-    assert dc.DEFAULT_CONFIG["backend_url"] is None
-    assert dc.DEFAULT_CONFIG["max_debate_rounds"] == 1
-    assert dc.DEFAULT_CONFIG["checkpoint_enabled"] is False
-    assert dc.DEFAULT_CONFIG["provenance_appendix"] is False
-    assert dc.DEFAULT_CONFIG["news_article_limit"] == 30
-    assert dc.DEFAULT_CONFIG["sentiment_filing_limit"] == 20
-    assert dc.DEFAULT_CONFIG["memory_log_max_entries"] == 1000
-    assert dc.DEFAULT_CONFIG["memory_cross_ticker_limit"] == 3
+def test_no_env_uses_built_in_defaults():
+    config = _config()
+
+    assert config["llm_provider"] == "openai"
+    assert config["deep_think_llm"] == "gpt-5.5"
+    assert config["quick_think_llm"] == "gpt-5.4-mini"
+    assert config["backend_url"] is None
+    assert config["news_article_limit"] == 30
+    assert config["sentiment_filing_limit"] == 20
 
 
-def test_string_overrides(monkeypatch):
-    dc = _reload_with_env(
-        monkeypatch,
+def test_string_overrides():
+    config = _config(
         TRADINGAGENTS_LLM_PROVIDER="google",
         TRADINGAGENTS_DEEP_THINK_LLM="gemini-3-pro-preview",
         TRADINGAGENTS_QUICK_THINK_LLM="gemini-3-flash-preview",
         TRADINGAGENTS_LLM_BACKEND_URL="https://example.invalid/v1",
         TRADINGAGENTS_OUTPUT_LANGUAGE="Chinese",
     )
-    assert dc.DEFAULT_CONFIG["llm_provider"] == "google"
-    assert dc.DEFAULT_CONFIG["deep_think_llm"] == "gemini-3-pro-preview"
-    assert dc.DEFAULT_CONFIG["quick_think_llm"] == "gemini-3-flash-preview"
-    assert dc.DEFAULT_CONFIG["backend_url"] == "https://example.invalid/v1"
-    assert dc.DEFAULT_CONFIG["output_language"] == "Chinese"
+
+    assert config["llm_provider"] == "google"
+    assert config["deep_think_llm"] == "gemini-3-pro-preview"
+    assert config["quick_think_llm"] == "gemini-3-flash-preview"
+    assert config["backend_url"] == "https://example.invalid/v1"
+    assert config["output_language"] == "Chinese"
 
 
-def test_int_coercion(monkeypatch):
-    dc = _reload_with_env(
-        monkeypatch,
-        TRADINGAGENTS_MAX_DEBATE_ROUNDS="3",
-        TRADINGAGENTS_MAX_RISK_ROUNDS="2",
+def test_int_coercion():
+    config = _config(
         TRADINGAGENTS_TICKER_NEWS_LOOKBACK_DAYS="14",
         TRADINGAGENTS_SOCIAL_LOOKBACK_DAYS="7",
-        TRADINGAGENTS_MEMORY_LOG_MAX_ENTRIES="0",
-        TRADINGAGENTS_MEMORY_CROSS_TICKER_LIMIT="5",
     )
-    assert dc.DEFAULT_CONFIG["max_debate_rounds"] == 3
-    assert isinstance(dc.DEFAULT_CONFIG["max_debate_rounds"], int)
-    assert dc.DEFAULT_CONFIG["max_risk_discuss_rounds"] == 2
-    assert isinstance(dc.DEFAULT_CONFIG["max_risk_discuss_rounds"], int)
-    assert dc.DEFAULT_CONFIG["ticker_news_lookback_days"] == 14
-    assert dc.DEFAULT_CONFIG["social_lookback_days"] == 7
-    assert dc.DEFAULT_CONFIG["memory_log_max_entries"] == 0
-    assert dc.DEFAULT_CONFIG["memory_cross_ticker_limit"] == 5
+
+    assert config["ticker_news_lookback_days"] == 14
+    assert config["social_lookback_days"] == 7
 
 
-
-@pytest.mark.parametrize(
-    "raw,expected",
-    [
-        ("true", True), ("True", True), ("1", True), ("yes", True), ("on", True),
-        ("false", False), ("False", False), ("0", False), ("no", False), ("off", False),
-    ],
-)
-def test_bool_coercion(monkeypatch, raw, expected):
-    dc = _reload_with_env(
-        monkeypatch,
-        TRADINGAGENTS_CHECKPOINT_ENABLED=raw,
-        TRADINGAGENTS_PROVENANCE_APPENDIX=raw,
-    )
-    assert dc.DEFAULT_CONFIG["checkpoint_enabled"] is expected
-    assert dc.DEFAULT_CONFIG["provenance_appendix"] is expected
-
-
-def test_reasoning_thinking_overrides(monkeypatch):
-    """The provider reasoning/thinking knobs are env-configurable (non-interactive runs)."""
-    dc = _reload_with_env(
-        monkeypatch,
+def test_reasoning_thinking_overrides():
+    config = _config(
         TRADINGAGENTS_OPENAI_REASONING_EFFORT="high",
         TRADINGAGENTS_GOOGLE_THINKING_LEVEL="minimal",
         TRADINGAGENTS_ANTHROPIC_EFFORT="low",
         TRADINGAGENTS_QUICK_REASONING_EFFORT=" MAX ",
         TRADINGAGENTS_DEEP_REASONING_EFFORT="provider_default",
     )
-    assert dc.DEFAULT_CONFIG["openai_reasoning_effort"] == "high"
-    assert dc.DEFAULT_CONFIG["google_thinking_level"] == "minimal"
-    assert dc.DEFAULT_CONFIG["anthropic_effort"] == "low"
-    assert dc.DEFAULT_CONFIG["quick_reasoning_effort"] == " MAX "
-    assert dc.DEFAULT_CONFIG["deep_reasoning_effort"] == "provider_default"
+
+    assert config["openai_reasoning_effort"] == "high"
+    assert config["google_thinking_level"] == "minimal"
+    assert config["anthropic_effort"] == "low"
+    assert config["quick_reasoning_effort"] == " MAX "
+    assert config["deep_reasoning_effort"] == "provider_default"
 
 
-def test_reasoning_effort_defaults_to_none(monkeypatch):
-    """Unset reasoning/thinking knobs stay None so each provider uses its own default."""
-    dc = _reload_with_env(monkeypatch)
-    assert dc.DEFAULT_CONFIG["openai_reasoning_effort"] is None
-    assert dc.DEFAULT_CONFIG["google_thinking_level"] is None
-    assert dc.DEFAULT_CONFIG["anthropic_effort"] is None
-    assert dc.DEFAULT_CONFIG["quick_reasoning_effort"] is None
-    assert dc.DEFAULT_CONFIG["deep_reasoning_effort"] is None
+def test_reasoning_effort_defaults_to_none():
+    config = _config()
+
+    assert config["openai_reasoning_effort"] is None
+    assert config["google_thinking_level"] is None
+    assert config["anthropic_effort"] is None
+    assert config["quick_reasoning_effort"] is None
+    assert config["deep_reasoning_effort"] is None
 
 
-def test_empty_env_value_is_passthrough(monkeypatch):
-    """Empty TRADINGAGENTS_* values must not clobber the built-in default."""
-    dc = _reload_with_env(
-        monkeypatch,
+def test_empty_env_value_does_not_clobber_default():
+    config = _config(
         TRADINGAGENTS_LLM_PROVIDER="",
-        TRADINGAGENTS_MAX_DEBATE_ROUNDS="",
+        TRADINGAGENTS_TICKER_NEWS_LOOKBACK_DAYS="",
     )
-    assert dc.DEFAULT_CONFIG["llm_provider"] == "openai"
-    assert dc.DEFAULT_CONFIG["max_debate_rounds"] == 1
+
+    assert config["llm_provider"] == "openai"
+    assert config["ticker_news_lookback_days"] == 14
 
 
-def test_invalid_int_raises(monkeypatch):
-    """Garbage int values should surface a ValueError at import, not silently misconfigure."""
-    monkeypatch.setenv("TRADINGAGENTS_MAX_DEBATE_ROUNDS", "not-a-number")
-    with pytest.raises(ValueError, match="TRADINGAGENTS_MAX_DEBATE_ROUNDS"):
-        importlib.reload(default_config_module)
-    # Restore module state for subsequent tests in this process
-    monkeypatch.delenv("TRADINGAGENTS_MAX_DEBATE_ROUNDS", raising=False)
-    importlib.reload(default_config_module)
+def test_invalid_int_raises():
+    with pytest.raises(
+        ValueError,
+        match="TRADINGAGENTS_TICKER_NEWS_LOOKBACK_DAYS",
+    ):
+        _config(TRADINGAGENTS_TICKER_NEWS_LOOKBACK_DAYS="not-a-number")
 
 
 @pytest.mark.parametrize(
     "env_name",
     [
+        "TRADINGAGENTS_MAX_DEBATE_ROUNDS",
+        "TRADINGAGENTS_MAX_RISK_ROUNDS",
+        "TRADINGAGENTS_CHECKPOINT_ENABLED",
         "TRADINGAGENTS_MEMORY_LOG_MAX_ENTRIES",
         "TRADINGAGENTS_MEMORY_CROSS_TICKER_LIMIT",
     ],
 )
-@pytest.mark.parametrize("value", ["-1", "not-a-number"])
-def test_invalid_memory_limit_raises(monkeypatch, env_name, value):
-    monkeypatch.setenv(env_name, value)
-    with pytest.raises(ValueError, match=env_name):
-        importlib.reload(default_config_module)
-    monkeypatch.delenv(env_name, raising=False)
-    importlib.reload(default_config_module)
+def test_removed_legacy_environment_keys_are_ignored(env_name: str):
+    config = build_default_config({env_name: "legacy-value"})
+
+    assert "checkpoint_enabled" not in config
+    assert "memory_log_max_entries" not in config
+    assert "memory_cross_ticker_limit" not in config
+    assert "max_debate_rounds" not in config
+    assert "max_risk_discuss_rounds" not in config
 
 
-@pytest.mark.parametrize("bad", ["treu", "flase", "maybe", "2", "enabled"])
-def test_invalid_bool_raises(monkeypatch, bad):
-    """A misspelled boolean must fail loudly (like ints) instead of silently False."""
-    monkeypatch.setenv("TRADINGAGENTS_CHECKPOINT_ENABLED", bad)
-    with pytest.raises(ValueError, match="TRADINGAGENTS_CHECKPOINT_ENABLED"):
-        importlib.reload(default_config_module)
-    monkeypatch.delenv("TRADINGAGENTS_CHECKPOINT_ENABLED", raising=False)
-    importlib.reload(default_config_module)
+def test_unknown_env_var_is_ignored():
+    config = _config(TRADINGAGENTS_NONEXISTENT_KEY="oops")
 
-
-def test_invalid_provenance_bool_raises(monkeypatch):
-    monkeypatch.setenv("TRADINGAGENTS_PROVENANCE_APPENDIX", "sometimes")
-    with pytest.raises(ValueError, match="TRADINGAGENTS_PROVENANCE_APPENDIX"):
-        importlib.reload(default_config_module)
-    monkeypatch.delenv("TRADINGAGENTS_PROVENANCE_APPENDIX", raising=False)
-    importlib.reload(default_config_module)
-
-
-def test_unknown_env_var_is_ignored(monkeypatch):
-    """Env vars outside _ENV_OVERRIDES must not bleed into DEFAULT_CONFIG."""
-    dc = _reload_with_env(
-        monkeypatch,
-        TRADINGAGENTS_NONEXISTENT_KEY="oops",
-    )
-    assert "nonexistent_key" not in dc.DEFAULT_CONFIG
+    assert "nonexistent_key" not in config

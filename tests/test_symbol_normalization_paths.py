@@ -13,9 +13,8 @@ import pytest
 import tradingagents.agents.utils.agent_utils as au
 import tradingagents.dataflows.instrument_identity as identity_dataflow
 import tradingagents.dataflows.yfinance_news as ynews
-import tradingagents.graph.trading_graph as tg
+from tradingagents.application.outcomes import OutcomeSettlement
 from tradingagents.dataflows.symbol_utils import market_timezone
-from tradingagents.graph.trading_graph import TradingAgentsGraph
 
 
 @pytest.mark.parametrize(
@@ -61,7 +60,11 @@ def test_identity_lookup_normalizes_symbol(monkeypatch):
     assert identity.get("company_name") == "Gold Futures"
 
 
-def test_fetch_returns_normalizes_symbol(monkeypatch):
+def test_outcome_settlement_normalizes_symbol(
+    monkeypatch,
+    app_settings,
+    repository,
+):
     queried = []
 
     class FakeTicker:
@@ -74,18 +77,28 @@ def test_fetch_returns_normalizes_symbol(monkeypatch):
                 index=pd.date_range("2025-01-02", periods=6, freq="B"),
             )
 
-    monkeypatch.setattr(tg.yf, "Ticker", FakeTicker)
-    monkeypatch.setattr(tg, "market_today", lambda symbol: date(2025, 1, 20))
+    monkeypatch.setattr(
+        "tradingagents.application.outcomes.market_today",
+        lambda symbol: date(2025, 1, 20),
+    )
+    history = type("History", (), {"Ticker": FakeTicker})()
+    settlement = OutcomeSettlement(
+        app_settings,
+        repository,
+        history_provider=history,
+    )
 
-    # _fetch_returns does not use ``self``; call unbound to avoid building the graph.
-    outcome = TradingAgentsGraph._fetch_returns(
-        None, "XAUUSD", "2025-01-02", holding_days=5, benchmark="SPY"
+    outcome = settlement.observe(
+        "XAUUSD",
+        date(2025, 1, 2),
+        holding_intervals=5,
+        benchmark="SPY",
     )
 
     assert queried[0] == "GC=F"  # stock symbol normalized (#984)
     assert queried[1] == "SPY"   # benchmark left as the canonical symbol
     assert outcome is not None
-    assert outcome.holding_days == 5
+    assert outcome.holding_intervals == 5
 
 
 def test_news_lookup_normalizes_symbol(monkeypatch):

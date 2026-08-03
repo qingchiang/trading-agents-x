@@ -12,15 +12,18 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from tradingagents.application.evidence_workset import StructuredNumericFact
+
 from .cn.cn_sentiment import (
     get_holding_changes as get_cn_holding_changes,
     get_important_announcements as get_cn_important_announcements,
     get_margin_signal as get_cn_margin_signal,
-    get_research_signal as get_cn_research_signal,
+    get_research_signal_payload as get_cn_research_signal_payload,
 )
 from .jp.edinet_holdings import get_large_holdings
 from .jp.jquants_sentiment import get_margin_balance, get_short_positions
-from .jp.yfinance_sentiment import get_analyst_ratings_block
+from .jp.yfinance_sentiment import get_analyst_ratings_payload
+from .lookahead import is_near_live
 from .symbol_utils import match_exchange_suffix
 
 logger = logging.getLogger(__name__)
@@ -31,7 +34,10 @@ class SentimentSignal:
     """One market-specific signal and its provenance contract."""
 
     tag: str
-    fetch: Callable[[str, str], str]
+    fetch: Callable[
+        [str, str],
+        str | tuple[str, tuple[StructuredNumericFact, ...]],
+    ]
     evidence: str
     source: str
     title: str
@@ -48,6 +54,7 @@ class FetchedSentimentSignal:
     spec: SentimentSignal
     body: str
     retrieved_at: str | None = None
+    structured_numeric_facts: tuple[StructuredNumericFact, ...] = ()
 
 
 def _jp_signals() -> tuple[SentimentSignal, ...]:
@@ -109,7 +116,7 @@ def _jp_signals() -> tuple[SentimentSignal, ...]:
         ),
         SentimentSignal(
             tag="analyst_ratings",
-            fetch=get_analyst_ratings_block,
+            fetch=get_analyst_ratings_payload,
             evidence="analyst consensus",
             source="yfinance",
             title="Analyst consensus — sell-side rating & price target",
@@ -163,7 +170,7 @@ def _cn_signals() -> tuple[SentimentSignal, ...]:
         ),
         SentimentSignal(
             tag="cn_research",
-            fetch=get_cn_research_signal,
+            fetch=get_cn_research_signal_payload,
             evidence="sell-side ratings and target prices",
             source="Sina Finance / Eastmoney Research",
             title="Sell-side rating & target-price changes",
@@ -211,15 +218,33 @@ def fetch_sentiment_signals(
     """Fetch all registered signals without allowing an exception to escape."""
     fetched = []
     for spec in sentiment_signal_specs(ticker):
-        try:
-            body = spec.fetch(ticker, curr_date) or ""
-        except Exception as exc:
-            logger.warning(
-                "Sentiment signal %s failed for %s: %s", spec.tag, ticker, exc
+        structured_numeric_facts: tuple[StructuredNumericFact, ...] = ()
+        if spec.live_only and not is_near_live(curr_date, ticker):
+            body = (
+                "<live-only source unavailable for historical or future "
+                f"trade_date {curr_date}; vendor not queried>"
             )
-            body = f"<{spec.source} unavailable: {type(exc).__name__}>"
+        else:
+            try:
+                result = spec.fetch(ticker, curr_date)
+                if isinstance(result, tuple):
+                    body, structured_numeric_facts = result
+                else:
+                    body = result or ""
+            except Exception as exc:
+                logger.warning(
+                    "Sentiment signal %s failed for %s: %s", spec.tag, ticker, exc
+                )
+                body = f"<{spec.source} unavailable: {type(exc).__name__}>"
         retrieved_at = None
         if spec.live_only and body and "unavailable" not in body.casefold():
             retrieved_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        fetched.append(FetchedSentimentSignal(spec, body, retrieved_at))
+        fetched.append(
+            FetchedSentimentSignal(
+                spec,
+                body,
+                retrieved_at,
+                tuple(structured_numeric_facts),
+            )
+        )
     return tuple(fetched)

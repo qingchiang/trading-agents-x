@@ -8,7 +8,7 @@ from langchain_openai import ChatOpenAI
 
 from .api_key_env import get_api_key_env
 from .base_client import BaseLLMClient, normalize_content
-from .capabilities import get_capabilities
+from .capabilities import ModelCapabilities, ThinkingMode, get_capabilities
 from .reasoning_effort import RESOLVED_MARKER, resolve_native_reasoning_value
 from .validators import validate_model
 
@@ -23,26 +23,54 @@ class NormalizedChatOpenAI(ChatOpenAI):
     ``with_structured_output`` consults the per-model capability table
     (``capabilities.get_capabilities``) to pick the method and to decide
     whether ``tool_choice`` may be sent. Models that reject ``tool_choice``
-    (e.g. DeepSeek V4 and reasoner — per their official tool-calling
-    guide) still bind the schema as a tool, but no ``tool_choice``
-    parameter is sent.
+    (for example the legacy DeepSeek reasoner endpoint) still bind the schema
+    as a tool, but no ``tool_choice`` parameter is sent.
 
     Provider-specific quirks beyond structured-output (e.g. DeepSeek's
     reasoning_content roundtrip) live in subclasses so this base class
     stays small.
     """
 
+    def _model_capabilities(self) -> ModelCapabilities:
+        return get_capabilities(self.model_name)
+
     def invoke(self, input, config=None, **kwargs):
         return normalize_content(super().invoke(input, config, **kwargs))
 
+    @property
+    def preferred_structured_output_method(self) -> str:
+        """Expose the selected transport for application-level auditing."""
+        return self._model_capabilities().preferred_structured_method
+
+    @property
+    def structured_output_max_tokens(self) -> int | None:
+        """Return an explicit typed-output ceiling when the provider needs one."""
+        capability_limit = (
+            self._model_capabilities().structured_output_max_tokens
+        )
+        if capability_limit is None:
+            return None
+        configured = getattr(self, "max_tokens", None)
+        if isinstance(configured, int) and configured > 0:
+            return configured
+        return capability_limit
+
     def with_structured_output(self, schema, *, method=None, **kwargs):
-        caps = get_capabilities(self.model_name)
+        caps = self._model_capabilities()
         if caps.preferred_structured_method == "none":
             raise NotImplementedError(
                 f"{self.model_name} has no structured-output method available; "
                 f"agent factories will fall back to free-text generation."
             )
         method = method or caps.preferred_structured_method
+        if method == "json_mode" and not caps.supports_json_mode:
+            raise NotImplementedError(
+                f"{self.model_name} does not support provider-native JSON mode"
+            )
+        if method == "json_schema" and not caps.supports_json_schema:
+            raise NotImplementedError(
+                f"{self.model_name} does not support provider-native JSON Schema"
+            )
         # When the model rejects tool_choice, suppress langchain's hardcoded
         # value. The schema is still bound as a tool — exactly what
         # DeepSeek's official tool-calling examples do.
@@ -85,6 +113,22 @@ def _input_to_messages(input_: Any) -> list:
     return []
 
 
+def _configured_thinking_mode(client: Any) -> ThinkingMode | None:
+    """Read DeepSeek's explicit mode without treating omission as disabled."""
+    extra_body = getattr(client, "extra_body", None)
+    if not isinstance(extra_body, dict):
+        return None
+    thinking = extra_body.get("thinking")
+    if not isinstance(thinking, dict):
+        return None
+    mode = thinking.get("type")
+    if mode == "enabled":
+        return "enabled"
+    if mode == "disabled":
+        return "disabled"
+    return None
+
+
 class DeepSeekChatOpenAI(NormalizedChatOpenAI):
     """DeepSeek-specific overrides on top of the OpenAI-compatible client.
 
@@ -95,10 +139,17 @@ class DeepSeekChatOpenAI(NormalizedChatOpenAI):
     ``_create_chat_result`` captures it on receive and
     ``_get_request_payload`` re-attaches it on send.
 
-    Tool-choice handling for V4 and reasoner — those models reject the
-    ``tool_choice`` parameter — is handled by the capability dispatch in
-    ``NormalizedChatOpenAI.with_structured_output``, not here.
+    Structured-output handling is delegated to the capability dispatch in
+    ``NormalizedChatOpenAI.with_structured_output``. V4 thinking models prefer
+    JSON mode; V4 with thinking explicitly disabled can force a schema tool;
+    the legacy reasoner endpoint continues to bind an unforced tool.
     """
+
+    def _model_capabilities(self) -> ModelCapabilities:
+        return get_capabilities(
+            self.model_name,
+            thinking_mode=_configured_thinking_mode(self),
+        )
 
     def _get_request_payload(self, input_, *, stop=None, **kwargs):
         payload = super()._get_request_payload(input_, stop=stop, **kwargs)
@@ -164,17 +215,10 @@ class MinimaxChatOpenAI(NormalizedChatOpenAI):
 
 # Kwargs forwarded from user config to ChatOpenAI
 _PASSTHROUGH_KWARGS = (
-    "timeout", "max_retries", "reasoning_effort", "temperature",
+    "timeout", "max_retries", "max_tokens", "reasoning_effort", "temperature",
+    "extra_body",
     "api_key", "callbacks", "http_client", "http_async_client",
 )
-
-def _supports_reasoning_effort(model: str) -> bool:
-    """Whether the (native OpenAI) model accepts ``reasoning_effort``."""
-    model = model.lower().strip()
-    return model.startswith("gpt-5") or bool(
-        len(model) >= 2 and model[0] == "o" and model[1].isdigit() and model[1] != "0"
-    )
-
 
 @dataclass(frozen=True)
 class ProviderSpec:

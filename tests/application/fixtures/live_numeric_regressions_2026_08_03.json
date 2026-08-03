@@ -1,0 +1,274 @@
+{
+  "schema_version": "1",
+  "source": "Deidentified minimal cases from the 2026-08-03 live regression set.",
+  "covered_instruments": [
+    "4568.T",
+    "6501.T",
+    "7011.T",
+    "8058.T",
+    "AAPL",
+    "600487.SS",
+    "NVDA",
+    "002028.SZ",
+    "GOOG",
+    "600176.SS",
+    "601208.SS"
+  ],
+  "comparison_cases": [
+    {
+      "id": "4568_pp_scale",
+      "instrument": "4568.T",
+      "component_path": "thesis",
+      "label": "Dividend yield spread",
+      "stated_value": 0.24,
+      "fraction_digits": 2,
+      "formula": "dividend_yield - sovereign_yield",
+      "inputs": {"dividend_yield": 0.0304, "sovereign_yield": 0.02801},
+      "unit": "pp",
+      "display_scale": "base",
+      "expected_comparison_result": 0.239,
+      "expected_display_status": "matched",
+      "expected_numeric_status": "complete"
+    },
+    {
+      "id": "6501_statement_scale",
+      "instrument": "6501.T",
+      "component_path": "executive_summary",
+      "label": "Net cash",
+      "stated_value": 314.4,
+      "fraction_digits": 1,
+      "formula": "cash - debt",
+      "inputs": {"cash": 1323480, "debt": 1009037},
+      "unit": "JPY",
+      "display_scale": "thousand",
+      "expected_comparison_result": 314.443,
+      "expected_display_status": "matched",
+      "expected_numeric_status": "complete"
+    },
+    {
+      "id": "6501_sign_conflict",
+      "instrument": "6501.T",
+      "component_path": "thesis",
+      "label": "Margin balance decline",
+      "stated_value": -21.22,
+      "fraction_digits": 2,
+      "formula": "(old_balance - new_balance) / old_balance",
+      "inputs": {"old_balance": 7776000, "new_balance": 6125600},
+      "unit": "%",
+      "display_scale": "base",
+      "expected_comparison_result": 21.224279835390945,
+      "expected_display_status": "mismatched",
+      "expected_numeric_status": "partial"
+    },
+    {
+      "id": "7011_last_digit",
+      "instrument": "7011.T",
+      "component_path": "risks.2",
+      "label": "Q4 share of annual operating cash flow",
+      "stated_value": 72.75,
+      "fraction_digits": 2,
+      "formula": "q4_ocf / annual_ocf",
+      "inputs": {"q4_ocf": 685877, "annual_ocf": 942619},
+      "unit": "%",
+      "display_scale": "base",
+      "expected_comparison_result": 72.76290844975541,
+      "expected_display_status": "approximately_matched",
+      "expected_numeric_status": "complete"
+    },
+    {
+      "id": "8058_million_yen_scale",
+      "instrument": "8058.T",
+      "component_path": "thesis",
+      "label": "Guidance-implied net income",
+      "stated_value": 1099987.4,
+      "fraction_digits": 1,
+      "formula": "guidance_eps * total_shares",
+      "inputs": {"guidance_eps": 300.42, "total_shares": 3661498671},
+      "unit": "JPY",
+      "display_scale": "million",
+      "expected_comparison_result": 1099987.43074182,
+      "expected_display_status": "matched",
+      "expected_numeric_status": "complete"
+    },
+    {
+      "id": "aapl_clean_path",
+      "instrument": "AAPL",
+      "component_path": "scenarios.base.outcome",
+      "label": "Nine-month net income base",
+      "stated_value": 101.5,
+      "fraction_digits": 1,
+      "formula": "q1_income + q2_income + q3_income",
+      "inputs": {"q1_income": 42.097, "q2_income": 29.578, "q3_income": 29.789},
+      "unit": "USD",
+      "display_scale": "base",
+      "expected_comparison_result": 101.464,
+      "expected_display_status": "matched",
+      "expected_numeric_status": "complete"
+    },
+    {
+      "id": "600487_pe_magnitude",
+      "instrument": "600487.SS",
+      "component_path": "scenarios.bull.outcome",
+      "label": "Bull-case PE lower bound",
+      "stated_value": 23.48,
+      "fraction_digits": 2,
+      "formula": "market_cap / (h1_net_income * 2)",
+      "inputs": {"market_cap": 117424939008, "h1_net_income": 25},
+      "unit": "x",
+      "display_scale": "base",
+      "expected_comparison_result": 2348498780.16,
+      "expected_display_status": "mismatched",
+      "expected_numeric_status": "partial"
+    },
+    {
+      "id": "nvda_last_digit",
+      "instrument": "NVDA",
+      "component_path": "thesis",
+      "label": "Revenue year-over-year growth",
+      "stated_value": 85.24,
+      "fraction_digits": 2,
+      "formula": "(current_revenue - prior_revenue) / prior_revenue",
+      "inputs": {"current_revenue": 81.615, "prior_revenue": 44.062},
+      "unit": "%",
+      "display_scale": "base",
+      "expected_comparison_result": 85.22763378875221,
+      "expected_display_status": "approximately_matched",
+      "expected_numeric_status": "complete"
+    },
+    {
+      "id": "002028_target_upside_last_digit",
+      "instrument": "002028.SZ",
+      "component_path": "thesis",
+      "label": "Target-price upside",
+      "stated_value": 33.66,
+      "fraction_digits": 2,
+      "formula": "(target_price - close_price) / close_price",
+      "inputs": {"target_price": 209.2, "close_price": 156.51},
+      "unit": "%",
+      "display_scale": "base",
+      "expected_comparison_result": 33.66558047409111,
+      "expected_display_status": "approximately_matched",
+      "expected_numeric_status": "complete"
+    },
+    {
+      "id": "goog_statement_scale",
+      "instrument": "GOOG",
+      "component_path": "risks.0",
+      "label": "First-half capital expenditure",
+      "stated_value": 805.98,
+      "fraction_digits": 2,
+      "formula": "q1_capex + q2_capex",
+      "inputs": {"q1_capex": 35674000000, "q2_capex": 44924000000},
+      "unit": "USD",
+      "display_scale": "hundred_million",
+      "expected_comparison_result": 805.98,
+      "expected_display_status": "matched",
+      "expected_numeric_status": "complete"
+    },
+    {
+      "id": "goog_pp_scale",
+      "instrument": "GOOG",
+      "component_path": "thesis",
+      "label": "Normalized earnings-yield spread",
+      "stated_value": -1.7,
+      "fraction_digits": 1,
+      "formula": "(1 / normalized_pe) - treasury_yield",
+      "inputs": {"normalized_pe": 33.6, "treasury_yield": 0.0468},
+      "unit": "pp",
+      "display_scale": "base",
+      "expected_comparison_result": -1.703809523809524,
+      "expected_display_status": "matched",
+      "expected_numeric_status": "complete"
+    },
+    {
+      "id": "600176_last_digit",
+      "instrument": "600176.SS",
+      "component_path": "thesis",
+      "label": "Quarterly net-income growth",
+      "stated_value": 73.5,
+      "fraction_digits": 1,
+      "formula": "(current_income - prior_income) / prior_income",
+      "inputs": {"current_income": 12.67, "prior_income": 7.3},
+      "unit": "%",
+      "display_scale": "base",
+      "expected_comparison_result": 73.56164383561644,
+      "expected_display_status": "approximately_matched",
+      "expected_numeric_status": "complete"
+    },
+    {
+      "id": "601208_last_digit",
+      "instrument": "601208.SS",
+      "component_path": "thesis",
+      "label": "Quarterly net-income growth",
+      "stated_value": 103.4,
+      "fraction_digits": 1,
+      "formula": "(current_income - prior_income) / prior_income",
+      "inputs": {"current_income": 186832252.74, "prior_income": 91877310.2},
+      "unit": "%",
+      "display_scale": "base",
+      "expected_comparison_result": 103.34971967866775,
+      "expected_display_status": "approximately_matched",
+      "expected_numeric_status": "complete"
+    }
+  ],
+  "unicode_operand_case": {
+    "id": "600487_unicode_operands",
+    "instrument": "600487.SS",
+    "component_path": "thesis",
+    "label": "Profit growth",
+    "stated_value": 25.0,
+    "fraction_digits": 1,
+    "formula": "(本期利润 - 上期利润) / 上期利润",
+    "inputs": [
+      {"name": "本期利润", "value": 125},
+      {"name": "上期利润", "value": 100}
+    ],
+    "unit": "%",
+    "display_scale": "base",
+    "expected_formula": "(v1 - v2) / v2",
+    "expected_input_names": ["v1", "v2"]
+  },
+  "derived_range_case": {
+    "id": "8058_two_endpoint_range",
+    "instrument": "8058.T",
+    "display_group_id": "group_bull_price_range",
+    "requirements": [
+      {
+        "id": "req_bull_price_low",
+        "display_role": "range_low",
+        "stated_value": 5407.6,
+        "formula": "guidance_eps * pe_low",
+        "inputs": {"guidance_eps": 300.42, "pe_low": 18}
+      },
+      {
+        "id": "req_bull_price_high",
+        "display_role": "range_high",
+        "stated_value": 6609.2,
+        "formula": "guidance_eps * pe_high",
+        "inputs": {"guidance_eps": 300.42, "pe_high": 22}
+      }
+    ]
+  },
+  "catalog_cases": [
+    {
+      "id": "002028_sell_side_targets",
+      "instrument": "002028.SZ",
+      "effective_date": "2026-08-03",
+      "unit": "CNY",
+      "facts": [
+        {"key": "target_low_1", "value": 156.8},
+        {"key": "target_high_1", "value": 209.2}
+      ]
+    },
+    {
+      "id": "600176_sell_side_targets",
+      "instrument": "600176.SS",
+      "effective_date": "2026-08-03",
+      "unit": "CNY",
+      "facts": [
+        {"key": "target_low_1", "value": 29.53},
+        {"key": "target_high_1", "value": 73.93}
+      ]
+    }
+  ]
+}

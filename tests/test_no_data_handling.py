@@ -15,7 +15,7 @@ import pandas as pd
 import pytest
 
 from tradingagents.dataflows import interface, stockstats_utils
-from tradingagents.dataflows.config import set_config
+from tradingagents.dataflows.config import bind_config
 from tradingagents.dataflows.symbol_utils import NoMarketDataError
 from tradingagents.provenance import extract_provenance
 
@@ -25,7 +25,7 @@ class TestLoadOhlcvNoPoison(unittest.TestCase):
     def setUp(self):
         self._tmp = os.path.join(os.path.dirname(__file__), "_tmp_cache")
         os.makedirs(self._tmp, exist_ok=True)
-        set_config({"data_cache_dir": self._tmp})
+        bind_config({"data_cache_dir": self._tmp})
 
     def tearDown(self):
         for f in os.listdir(self._tmp):

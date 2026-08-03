@@ -9,13 +9,12 @@ import pandas as pd
 import pytest
 import requests
 
-import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
 from tradingagents.dataflows import interface, stockstats_utils, y_finance
 from tradingagents.dataflows.cn import akshare_indicator, akshare_stock, calendar, common
-from tradingagents.dataflows.config import set_config
+from tradingagents.dataflows.config import bind_config
 from tradingagents.dataflows.errors import NoMarketDataError
-from tradingagents.provenance import append_provenance_appendix, extract_provenance
+from tradingagents.provenance import extract_provenance, provenance_quality_issues
 
 
 def _eastmoney_frame(*, latest="2026-07-17", close=102.0):
@@ -121,11 +120,11 @@ def test_eastmoney_cold_fallback_preserves_extended_fields(monkeypatch):
     assert "fallback: Tencent primary retrieval unavailable" in extract_provenance(
         output
     )[0].timing
-    warnings = append_provenance_appendix(
-        "report", extract_provenance(output), enabled=False
-    )
-    assert "fallback source used" in warnings
-    assert "adjustment provider changed; technical indicators may differ" in warnings
+    reasons = {
+        issue.reason for issue in provenance_quality_issues(extract_provenance(output))
+    }
+    assert "fallback source used" in reasons
+    assert "adjustment provider changed; technical indicators may differ" in reasons
 
 
 @pytest.mark.unit
@@ -512,6 +511,7 @@ def test_indicator_and_snapshot_reuse_same_qfq_fetch(monkeypatch):
     em.assert_not_called()
     assert "# Actual data source: AkShare / Tencent" in indicator
     assert "Effective trading date: 2026-07-17" in indicator
+    assert "Latest valid indicator observation: 2026-07-17" in indicator
     assert "Data source: AkShare / Tencent" in snapshot
     assert "Price adjustment: qfq (forward-adjusted)" in snapshot
     assert "Latest trading row used: 2026-07-17" in snapshot
@@ -695,10 +695,8 @@ def test_rate_limit_is_retried_then_typed(monkeypatch):
 
 @pytest.mark.unit
 def test_router_falls_back_to_yfinance_after_akshare_no_data():
-    original = config_module._config
-    config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
-    # Avoid relying on the module-global config left by another test.
-    set_config(
+    bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
+    bind_config(
         {
             "data_vendors_by_market": {
                 ".SS": {"core_stock_apis": "akshare,yfinance"}
@@ -709,17 +707,14 @@ def test_router_falls_back_to_yfinance_after_akshare_no_data():
         side_effect=NoMarketDataError("600519.SS", "600519.SS", "empty")
     )
     yf = mock.Mock(return_value="YFINANCE_FALLBACK")
-    try:
-        with mock.patch.dict(
-            interface.VENDOR_METHODS,
-            {"get_stock_data": {"akshare": ak, "yfinance": yf}},
-            clear=False,
-        ):
-            output = interface.route_to_vendor(
-                "get_stock_data", "600519", "2026-07-01", "2026-07-17"
-            )
-    finally:
-        config_module._config = original
+    with mock.patch.dict(
+        interface.VENDOR_METHODS,
+        {"get_stock_data": {"akshare": ak, "yfinance": yf}},
+        clear=False,
+    ):
+        output = interface.route_to_vendor(
+            "get_stock_data", "600519", "2026-07-01", "2026-07-17"
+        )
     assert output == "YFINANCE_FALLBACK"
     ak.assert_called_once_with("600519.SS", "2026-07-01", "2026-07-17")
     yf.assert_called_once_with("600519.SS", "2026-07-01", "2026-07-17")
@@ -727,9 +722,8 @@ def test_router_falls_back_to_yfinance_after_akshare_no_data():
 
 @pytest.mark.unit
 def test_router_yfinance_fallback_records_adjustment_provider_change():
-    original = config_module._config
-    config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
-    set_config(
+    bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
+    bind_config(
         {
             "data_vendors_by_market": {
                 ".SS": {"core_stock_apis": "akshare,yfinance"}
@@ -745,21 +739,18 @@ def test_router_yfinance_fallback_records_adjustment_provider_change():
             "(yfinance auto_adjust=True)\n2026-07-17,100"
         )
     )
-    try:
-        with mock.patch.dict(
-            interface.VENDOR_METHODS,
-            {"get_stock_data": {"akshare": ak, "yfinance": yf}},
-            clear=False,
-        ):
-            output = interface.route_to_vendor(
-                "get_stock_data",
-                "600519",
-                "2026-07-01",
-                "2026-07-17",
-                _provenance=True,
-            )
-    finally:
-        config_module._config = original
+    with mock.patch.dict(
+        interface.VENDOR_METHODS,
+        {"get_stock_data": {"akshare": ak, "yfinance": yf}},
+        clear=False,
+    ):
+        output = interface.route_to_vendor(
+            "get_stock_data",
+            "600519",
+            "2026-07-01",
+            "2026-07-17",
+            _provenance=True,
+        )
 
     record = extract_provenance(output)[0]
     assert record.source == "yfinance"

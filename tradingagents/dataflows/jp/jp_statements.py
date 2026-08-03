@@ -23,9 +23,13 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from tradingagents.provenance import ProvenanceRecord, attach_provenance
+from tradingagents.provenance import (
+    ProvenanceRecord,
+    attach_evidence_span,
+    attach_provenance,
+)
 
-from ..lookahead import is_live
+from ..lookahead import is_near_live
 from ..y_finance import get_statement_frame
 from . import jquants_fundamentals as jqf
 
@@ -90,16 +94,22 @@ def _detail_status_marker(
     timing: str,
 ) -> str:
     """Return metadata-only yfinance status without a visible empty block."""
-    return attach_provenance(
-        "",
-        ProvenanceRecord(
-            evidence=_EVIDENCE_BY_KIND[kind],
-            source="yfinance curated detail",
-            requested=_requested_date_label(curr_date),
-            effective="—",
-            timing=timing,
+    return _detail_evidence_span(
+        attach_provenance(
+            "",
+            ProvenanceRecord(
+                evidence=_EVIDENCE_BY_KIND[kind],
+                source="yfinance curated detail",
+                requested=_requested_date_label(curr_date),
+                effective="—",
+                timing=f"live-only {timing}",
+            ),
         ),
     )
+
+
+def _detail_evidence_span(content: str) -> str:
+    return attach_evidence_span(content, temporal_scope="live_only")
 
 
 def _detail_block(ticker: str, kind: str, freq: str, curr_date: str | None) -> str:
@@ -110,15 +120,20 @@ def _detail_block(ticker: str, kind: str, freq: str, curr_date: str | None) -> s
     request, any failure or absence of curated rows returns '' so the official
     J-Quants summary still renders on its own.
     """
-    if curr_date is not None and not is_live(curr_date):
-        return attach_provenance(
-            _historical_detail_note(curr_date),
-            ProvenanceRecord(
-                evidence=_EVIDENCE_BY_KIND[kind],
-                source="yfinance curated detail",
-                requested=curr_date,
-                effective="—",
-                timing="unavailable for historical date; vendor not queried",
+    if curr_date is not None and not is_near_live(curr_date, ticker):
+        return _detail_evidence_span(
+            attach_provenance(
+                _historical_detail_note(curr_date),
+                ProvenanceRecord(
+                    evidence=_EVIDENCE_BY_KIND[kind],
+                    source="yfinance curated detail",
+                    requested=curr_date,
+                    effective="—",
+                    timing=(
+                        "live-only; unavailable for historical or future "
+                        "date; vendor not queried"
+                    ),
+                ),
             ),
         )
     try:
@@ -152,15 +167,17 @@ def _detail_block(ticker: str, kind: str, freq: str, curr_date: str | None) -> s
         "establish when these values were published.\n"
         + sub.to_csv()
     )
-    return attach_provenance(
-        block,
-        ProvenanceRecord(
-            evidence=_EVIDENCE_BY_KIND[kind],
-            source="yfinance curated detail",
-            requested=_requested_date_label(curr_date),
-            effective="current statement frame; fiscal period ends only",
-            timing="live non-point-in-time; may lag",
-            retrieved_at=retrieved,
+    return _detail_evidence_span(
+        attach_provenance(
+            block,
+            ProvenanceRecord(
+                evidence=_EVIDENCE_BY_KIND[kind],
+                source="yfinance curated detail",
+                requested=_requested_date_label(curr_date),
+                effective="current statement frame; fiscal period ends only",
+                timing="live non-point-in-time; may lag",
+                retrieved_at=retrieved,
+            ),
         ),
     )
 

@@ -1,35 +1,50 @@
+x-app: &app
+  build:
+    context: .
+  env_file:
+    - ${TRADINGAGENTS_ENV_FILE:-.env}
+  environment:
+    TRADINGAGENTS_HOME: /data
+    TRADINGAGENTS_DATABASE_PATH: /data/tradingagents.db
+    TRADINGAGENTS_CACHE_DIR: /data/cache
+    TRADINGAGENTS_HOST: 0.0.0.0
+    TRADINGAGENTS_PORT: "8000"
+  volumes:
+    - tradingagents_data:/data
+  restart: unless-stopped
+
 services:
-  tradingagents:
-    build: .
-    env_file:
-      - .env
-    volumes:
-      - tradingagents_data:/home/appuser/.tradingagents
-    tty: true
-    stdin_open: true
+  web:
+    <<: *app
+    command: ["serve"]
+    ports:
+      - "${TRADINGAGENTS_PUBLISH_HOST:-127.0.0.1}:${TRADINGAGENTS_WEB_PORT:-8000}:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=2)",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  worker:
+    <<: *app
+    command: ["worker"]
+    depends_on:
+      web:
+        condition: service_healthy
 
   ollama:
     image: ollama/ollama:latest
+    profiles: ["ollama"]
     volumes:
       - ollama_data:/root/.ollama
-    profiles:
-      - ollama
-
-  tradingagents-ollama:
-    build: .
-    env_file:
-      - .env
-    environment:
-      - TRADINGAGENTS_LLM_PROVIDER=ollama
-      - OLLAMA_BASE_URL=http://ollama:11434/v1
-    volumes:
-      - tradingagents_data:/home/appuser/.tradingagents
-    depends_on:
-      - ollama
-    tty: true
-    stdin_open: true
-    profiles:
-      - ollama
+    restart: unless-stopped
 
 volumes:
   tradingagents_data:

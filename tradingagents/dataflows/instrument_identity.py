@@ -14,7 +14,7 @@ from typing import Any
 
 import yfinance as yf
 
-from .lookahead import is_live
+from .lookahead import is_near_live
 from .stockstats_utils import yf_retry
 from .symbol_utils import normalize_symbol
 
@@ -103,7 +103,11 @@ def resolve_instrument_identity(ticker: str, curr_date: str | None = None) -> di
     and historical mode never calls ``.info`` to fill missing fields.
     """
     canonical = normalize_symbol(ticker)
-    mode = "live" if curr_date is None or is_live(curr_date) else "historical"
+    mode = (
+        "live"
+        if curr_date is None or is_near_live(curr_date, canonical)
+        else "historical"
+    )
     return _resolve_cached(canonical, mode)
 
 

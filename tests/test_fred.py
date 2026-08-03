@@ -9,10 +9,9 @@ from unittest import mock
 
 import pytest
 
-import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
 from tradingagents.dataflows import fred, interface, macro_common
-from tradingagents.dataflows.config import set_config
+from tradingagents.dataflows.config import bind_config
 
 # A small, stable set of observations to format against.
 _META = {
@@ -64,9 +63,22 @@ class FredResolutionTests(unittest.TestCase):
     def test_descriptive_phrase_is_rejected(self):
         # An LLM phrase (spaces / too long) is not a series ID — reject up front
         # with guidance rather than 400ing the API.
-        for bad in ("bank of japan rate", "the unemployment number", "X" * 31):
+        for bad in (
+            "bank of japan rate",
+            "the unemployment number",
+            "INVALID_SERIES",
+            "SERIES-ID",
+            "X" * 26,
+        ):
             with self.assertRaises(ValueError):
                 fred._resolve_series_id(bad)
+
+    def test_invalid_raw_id_never_reaches_http(self):
+        with mock.patch.object(fred, "_request") as request:
+            out = fred.get_macro_data("INVALID_SERIES", "2026-01-01")
+
+        request.assert_not_called()
+        self.assertIn("not a known macro alias", out)
 
     def test_get_macro_data_returns_guidance_on_bad_indicator(self):
         # Invalid indicator -> actionable message, not a crash (no API call).
@@ -106,7 +118,7 @@ class FredFormattingTests(unittest.TestCase):
         self.assertIn("**Latest:** 4.4 (2025-09-01)", out)
         # change over the window: 4.4 - 4.1 = +0.30
         self.assertIn("+0.30", out)
-        self.assertIn("| 2025-06-01 | 4.1 |", out)
+        self.assertIn("| 2025-06-01 | 4.1 | percent | % |", out)
 
     def test_missing_value_is_skipped(self):
         with mock.patch.object(fred, "_request", side_effect=_request_stub()):
@@ -125,7 +137,7 @@ class FredFormattingTests(unittest.TestCase):
         # the run is not aborted over an optional macro lookup.
         no_series = {"seriess": []}
         with mock.patch.object(fred, "_request", side_effect=_request_stub(meta=no_series)):
-            out = fred.get_macro_data("totally_unknown_xyz", "2025-09-30", 30)
+            out = fred.get_macro_data("totallyunknownxyz", "2025-09-30", 30)
         self.assertIn("not found", out)
 
     def test_long_series_is_truncated_but_change_uses_full_range(self):
@@ -203,8 +215,8 @@ class FredCacheTests(unittest.TestCase):
             return {"seriess": []}
 
         with mock.patch.object(fred, "_request", side_effect=_req):
-            self.assertIsNone(fred.fetch_series("totally_unknown_xyz", "2025-09-30", 30))
-            self.assertIsNone(fred.fetch_series("totally_unknown_xyz", "2025-09-30", 30))
+            self.assertIsNone(fred.fetch_series("totallyunknownxyz", "2025-09-30", 30))
+            self.assertIsNone(fred.fetch_series("totallyunknownxyz", "2025-09-30", 30))
         # A miss is NOT memoized (could be a transient outage), so it is retried.
         self.assertEqual(calls, ["series", "series"])
 
@@ -212,16 +224,16 @@ class FredCacheTests(unittest.TestCase):
 @pytest.mark.unit
 class FredRoutingTests(unittest.TestCase):
     def setUp(self):
-        config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def tearDown(self):
-        config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def test_macro_category_routes_to_fred(self):
         self.assertEqual(
             interface.get_category_for_method("get_macro_indicators"), "macro_data"
         )
-        set_config({"data_vendors": {"macro_data": "fred"}})
+        bind_config({"data_vendors": {"macro_data": "fred"}})
         with mock.patch.dict(
             interface.VENDOR_METHODS,
             {"get_macro_indicators": {"fred": lambda *a, **k: "MACRO_OK"}},
@@ -234,7 +246,7 @@ class FredRoutingTests(unittest.TestCase):
         # macro_data is optional: with only fred and no key, the router degrades
         # to a sentinel instead of aborting the run — a missing optional key must
         # not crash an analysis.
-        set_config({"data_vendors": {"macro_data": "fred"}})
+        bind_config({"data_vendors": {"macro_data": "fred"}})
 
         def _unconfigured(*a, **k):
             raise fred.FredNotConfiguredError("FRED_API_KEY not set")

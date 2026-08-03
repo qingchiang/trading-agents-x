@@ -1,0 +1,221 @@
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
+import { useTranslation } from "react-i18next";
+
+import type { AnalystReport } from "../api/client";
+import type { EvidenceReferenceIndex } from "../evidence";
+import Markdown from "./Markdown";
+
+export default function AnalystReportView({
+  report,
+  runId,
+  reportKey,
+  evidenceIndex,
+  onEvidence,
+}: {
+  report: AnalystReport | string;
+  runId: string;
+  reportKey: string;
+  evidenceIndex: EvidenceReferenceIndex;
+  onEvidence: (ref: string) => void;
+}) {
+  const { t } = useTranslation();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollStorageKey = `tradingagents-report-scroll:${runId}:${reportKey}`;
+
+  useLayoutEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    const saved = Number(sessionStorage.getItem(scrollStorageKey) ?? 0);
+    container.scrollTop = Number.isFinite(saved) ? Math.max(saved, 0) : 0;
+    return () => {
+      sessionStorage.setItem(scrollStorageKey, String(container.scrollTop));
+    };
+  }, [scrollStorageKey]);
+
+  const saveScroll = () => {
+    if (scrollRef.current) {
+      sessionStorage.setItem(
+        scrollStorageKey,
+        String(scrollRef.current.scrollTop),
+      );
+    }
+  };
+
+  if (typeof report === "string") {
+    return (
+      <div className="analyst-report" ref={scrollRef} onScroll={saveScroll}>
+        <Markdown
+          evidenceAliases={evidenceIndex.aliases}
+          onEvidence={onEvidence}
+        >
+          {report}
+        </Markdown>
+      </div>
+    );
+  }
+  const claims = report.key_claims ?? [];
+  const sections = report.report_sections ?? [];
+
+  return (
+    <div className="report-reading-layout">
+      <ReportSectionNavigation
+        sections={sections}
+        containerRef={scrollRef}
+      />
+      <div className="analyst-report" ref={scrollRef} onScroll={saveScroll}>
+        <div className="report-audit-summary">
+          {report.confidence !== null && report.confidence !== undefined && (
+            <span>
+              {t("confidence")} {Math.round(report.confidence * 100)}%
+            </span>
+          )}
+          <span>
+            {t("keyClaimsCount", { count: claims.length })}
+          </span>
+        </div>
+        {report.audit_status === "incomplete" && (
+          <div className="audit-incomplete-notice" role="status">
+            {t("auditIncomplete")}
+          </div>
+        )}
+        <Markdown
+          evidenceAliases={evidenceIndex.aliases}
+          onEvidence={onEvidence}
+          headingAnchors={sections.map((section) => section.anchor)}
+        >
+          {report.markdown}
+        </Markdown>
+        {claims.length > 0 && (
+          <details className="claim-audit-details">
+            <summary>{t("keyClaimsAudit")}</summary>
+            <ol>
+              {claims.map((claim) => (
+                <li key={claim.id}>
+                  <strong>{claim.statement}</strong>
+                  {claim.implication && <p>{claim.implication}</p>}
+                </li>
+              ))}
+            </ol>
+          </details>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ReportSectionNavigation({
+  sections,
+  containerRef,
+}: {
+  sections: AnalystReport["report_sections"];
+  containerRef: RefObject<HTMLDivElement | null>;
+}) {
+  const { t } = useTranslation();
+  const [active, setActive] = useState(sections[0]?.anchor ?? "");
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || sections.length === 0) return;
+    const update = () => {
+      const threshold = container.scrollTop + 48;
+      let next = sections[0].anchor;
+      for (const section of sections) {
+        const candidate = document.getElementById(headingDomId(section.anchor));
+        const heading =
+          candidate && container.contains(candidate) ? candidate : null;
+        if (heading && heading.offsetTop <= threshold) next = section.anchor;
+      }
+      setActive(next);
+    };
+    update();
+    container.addEventListener("scroll", update, { passive: true });
+    return () => container.removeEventListener("scroll", update);
+  }, [containerRef, sections]);
+
+  if (sections.length === 0) return null;
+  const jump = (anchor: string) => {
+    const container = containerRef.current;
+    const candidate = document.getElementById(headingDomId(anchor));
+    const heading =
+      container && candidate && container.contains(candidate) ? candidate : null;
+    if (!container || !heading) return;
+    container.scrollTop = Math.max(heading.offsetTop - 16, 0);
+    heading.focus({ preventScroll: true });
+    setActive(anchor);
+  };
+
+  return (
+    <>
+      <nav className="report-section-nav" aria-label={t("reportNavigation")}>
+        <strong>{t("onThisReport")}</strong>
+        {sections.map((section) => (
+          <button
+            type="button"
+            className={active === section.anchor ? "active" : ""}
+            aria-current={active === section.anchor ? "location" : undefined}
+            onClick={() => jump(section.anchor)}
+            key={section.id}
+          >
+            {section.title}
+          </button>
+        ))}
+      </nav>
+      <label className="report-section-select">
+        <span>{t("jumpToSection")}</span>
+        <select value={active} onChange={(event) => jump(event.target.value)}>
+          {sections.map((section) => (
+            <option value={section.anchor} key={section.id}>
+              {section.title}
+            </option>
+          ))}
+        </select>
+      </label>
+    </>
+  );
+}
+
+function headingDomId(anchor: string): string {
+  return `user-content-${anchor}`;
+}
+
+export function MarkdownList({
+  title,
+  items,
+  empty = "—",
+  evidenceIndex,
+  onEvidence,
+}: {
+  title: string;
+  items: string[];
+  empty?: string;
+  evidenceIndex: EvidenceReferenceIndex;
+  onEvidence: (ref: string) => void;
+}) {
+  return (
+    <section className="research-list">
+      <h3>{title}</h3>
+      {items.length > 0 ? (
+        <ul>
+          {items.map((item, index) => (
+            <li key={`${index}:${item}`}>
+              <Markdown
+                evidenceAliases={evidenceIndex.aliases}
+                onEvidence={onEvidence}
+              >
+                {item}
+              </Markdown>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="muted">{empty}</p>
+      )}
+    </section>
+  );
+}

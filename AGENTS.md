@@ -11,8 +11,9 @@ are useful across tasks.
 2. Read the relevant parts of [`docs/architecture.md`](docs/architecture.md)
    before changing the agent graph, data routing, point-in-time handling, or
    market adapters.
-3. Preserve existing agent-facing tool signatures unless the task explicitly
-   requires an interface change.
+3. Preserve established data-adapter signatures unless the task explicitly
+   requires an interface change. Public application contracts are the typed
+   objects exported from `tradingagents`.
 
 ## Commands
 
@@ -24,17 +25,24 @@ pytest tests/test_market_routing.py
 pytest tests/test_x.py::Cls::test_y
 ruff check .
 
+npm ci --prefix frontend
+npm test --prefix frontend
+npm run typecheck --prefix frontend
+npm run build --prefix frontend
+
 # Opt-in network contracts; default pytest and CI skip these.
 RUN_LIVE_DATA_TESTS=1 PYTHON_DOTENV_DISABLED=1 \
   uv run --extra dev pytest -q -m live_data
 
-python main.py
-tradingagents
+tradingagents run NVDA --date 2026-07-24
+tradingagents serve
+tradingagents worker
 ```
 
-CI (`.github/workflows/ci.yml`) runs pytest on Python 3.10-3.13, a bare-install
-import smoke test, and repo-wide ruff. Pytest markers are `unit`, `integration`,
-`live_data`, and `smoke`.
+CI (`.github/workflows/ci.yml`) runs pytest on Python 3.10-3.13, repo-wide Ruff,
+frontend unit/browser/type/build checks, OpenAPI/type drift checks, wheel and
+fresh-install validation, and Docker Web/worker smoke. Pytest markers are
+`unit`, `integration`, `live_data`, and `smoke`.
 
 ## Sandboxed environments
 
@@ -56,8 +64,22 @@ silently changing package sources.
 
 ## Engineering invariants
 
-- `TradingAgentsGraph` in `tradingagents/graph/trading_graph.py` is the public
-  API. The graph and direct Python callers share dataflow implementations.
+- `TradingAgents`, `AnalysisRequest`, `AnalysisResult`, `ResearchDecision`, and
+  `RunProfile` are the public Python API. Do not reintroduce
+  `TradingAgentsGraph` as a compatibility surface.
+- `AnalysisService` owns the full run lifecycle. Graph nodes return typed state;
+  they must not write reports, application tables, or standalone memory files.
+- SQLite is the application source of truth. Markdown and JSON are explicit
+  export formats, and legacy report trees remain read-only archives.
+- Load immutable application settings at an entry point and resolve immutable
+  settings/context for each run. Do not add mutable package-global config or
+  import-time dotenv loading.
+- All post-analyst roles consume the same sealed `EvidenceBundle`. The final
+  decision is research-only and must not contain account sizing, entries,
+  stops, targets, orders, or execution instructions.
+- Web and worker may share SQLite only on the same host-local filesystem. Do
+  not put the database/WAL on NFS or SMB, or add cross-host worker claims
+  without changing the repository/checkpointer architecture.
 - Data vendors are selected by configured, ordered chains. Do not silently use
   an unconfigured vendor or add ad hoc fallback outside the routing/assembler
   design.
@@ -73,6 +95,9 @@ silently changing package sources.
 - Do not change global HTTP-library behavior to accommodate one source. Keep
   retries, timeouts, caching, and schema validation local to the adapter or its
   shared subsystem utility.
+- Normal development does not merge `upstream/main`. Monitor upstream
+  read-only and adapt a relevant security/correctness fix only after auditing
+  it against TradingAgentsX contracts; see ADR 0001.
 
 ## Dependencies and package data
 

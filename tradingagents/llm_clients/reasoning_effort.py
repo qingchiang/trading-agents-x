@@ -45,7 +45,7 @@ _PROVIDER_LEVELS = {
         "max",
     ),
     "azure": ("none", "minimal", "low", "medium", "high", "xhigh", "max"),
-    "deepseek": ("high", "max"),
+    "deepseek": ("low", "high", "max"),
     "google": ("minimal", "low", "medium", "high"),
     "anthropic": ("low", "medium", "high", "xhigh", "max"),
 }
@@ -64,7 +64,7 @@ _OPENAI_MODEL_LEVELS = {
 }
 
 _DEEPSEEK_MODEL_LEVELS = {
-    "deepseek-v4-flash": ("high", "max"),
+    "deepseek-v4-flash": ("low", "high", "max"),
     "deepseek-v4-pro": ("high", "max"),
     "deepseek-reasoner": ("high", "max"),
 }
@@ -191,6 +191,21 @@ def model_effort_levels(provider: str, model: str) -> tuple[str, ...]:
     if provider == "anthropic":
         return _anthropic_levels(model)[1]
     return ()
+
+
+def known_model_effort_levels(provider: str, model: str) -> tuple[str, ...]:
+    """Return explicit levels only when model support is known.
+
+    Dynamic provider catalogs contain IDs that may be newer than this
+    capability policy. Those models must expose only ``provider_default`` in
+    the UI until support is understood instead of assuming the full provider
+    domain is safe.
+    """
+    normalized_provider = provider.strip().lower()
+    normalized_model = model.strip().lower()
+    if _model_status(normalized_provider, normalized_model) is not True:
+        return ()
+    return model_effort_levels(normalized_provider, normalized_model)
 
 
 def _model_status(provider: str, model: str) -> bool | None:

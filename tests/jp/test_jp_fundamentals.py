@@ -158,6 +158,9 @@ class JPFundamentalsTests(unittest.TestCase):
         self.assertIn("Forward PE: 38.49 (analyst consensus, live only; requested", out)
         self.assertIn("16 analysts, not point-in-time historical data, EPS 92.67", out)
         self.assertIn("company guidance +14.4% vs analyst -6.3% (divergent)", out)
+        self.assertIn("| forward_eps | 92.67 | currency | JPY/share |", out)
+        self.assertIn("| forward_pe |", out)
+        self.assertIn("| forward_eps_growth |", out)
 
     def test_flat_company_guidance_vs_decline_reads_divergent(self):
         # Sign boundary: flat company guidance (NxFEPS == EPS → 0% growth) vs an
@@ -183,13 +186,6 @@ class JPFundamentalsTests(unittest.TestCase):
         out, _ = self._run_live((None, None), today)
         self.assertIn("company guidance / 会社予想", out)
         self.assertNotIn("analyst consensus, live only", out)
-
-    def test_is_live_gates_on_recency(self):
-        d5 = (pd.Timestamp.now() - pd.Timedelta(days=5)).strftime("%Y-%m-%d")
-        d6 = (pd.Timestamp.now() - pd.Timedelta(days=6)).strftime("%Y-%m-%d")
-        self.assertTrue(jp_fundamentals.is_live(d5))
-        self.assertFalse(jp_fundamentals.is_live(d6))
-        self.assertFalse(jp_fundamentals.is_live("not-a-date"))  # malformed → not live
 
     def test_ttm_rolls_cumulative_quarters(self):
         # Mid-year: latest disclosure is a cumulative 3Q. TTM = 3Q_cum + prior_FY

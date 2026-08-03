@@ -1,26 +1,25 @@
 import copy
+from datetime import date
 from unittest import mock
 
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.runnables import RunnableLambda
 
-import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
 from tradingagents.agents.analysts.fundamentals_analyst import (
     create_fundamentals_analyst,
 )
 from tradingagents.agents.analysts.market_analyst import create_market_analyst
-from tradingagents.dataflows.config import set_config
+from tradingagents.dataflows.config import bind_config
+from tradingagents.graph.research_graph import _collect_evidence
 from tradingagents.provenance import ProvenanceRecord, attach_provenance
 
 
 @pytest.fixture(autouse=True)
 def _reset_config():
-    previous = config_module._config
-    config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+    bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
     yield
-    config_module._config = previous
 
 
 def _final_llm():
@@ -41,8 +40,7 @@ def _state(tool_content: str):
 
 
 @pytest.mark.unit
-def test_market_final_report_keeps_snapshot_source_and_effective_session():
-    set_config({"provenance_appendix": True})
+def test_market_final_report_keeps_audit_data_out_of_the_narrative():
     content = attach_provenance(
         "SNAPSHOT",
         ProvenanceRecord(
@@ -53,17 +51,30 @@ def test_market_final_report_keeps_snapshot_source_and_effective_session():
             timing="market-date filtered",
         ),
     )
-    result = create_market_analyst(_final_llm())(_state(content))
+    state = _state(content)
+    result = create_market_analyst(_final_llm())(state)
 
     report = result["market_report"]
     assert report == result["messages"][0].content
-    assert "| get_verified_market_snapshot | J-Quants | 2026-07-17 | 2026-07-16 |" in report
-    assert report.count("## Data Provenance") == 1
+    assert report == "MODEL REPORT"
+    evidence = _collect_evidence(
+        [*state["messages"], *result["messages"]],
+        report,
+        requested_date=date(2026, 7, 17),
+        analyst="market",
+        prefetched_blocks=result["prefetched_evidence"],
+    )
+    snapshot = next(
+        item
+        for item in evidence
+        if item.evidence_type == "get_verified_market_snapshot"
+    )
+    assert snapshot.source == "J-Quants"
+    assert snapshot.effective_date == date(2026, 7, 16)
 
 
 @pytest.mark.unit
-def test_fundamentals_final_report_distinguishes_sources_and_missing_tools():
-    set_config({"provenance_appendix": True})
+def test_fundamentals_keeps_sources_and_missing_tools_as_internal_evidence():
     content = attach_provenance(
         "STATEMENT",
         ProvenanceRecord(
@@ -82,15 +93,36 @@ def test_fundamentals_final_report_distinguishes_sources_and_missing_tools():
             retrieved_at="2026-07-17T01:02:03+00:00",
         ),
     )
-    result = create_fundamentals_analyst(_final_llm())(_state(content))
+    state = _state(content)
+    result = create_fundamentals_analyst(_final_llm())(state)
 
     report = result["fundamentals_report"]
     assert report == result["messages"][0].content
-    assert "J-Quants official summary" in report
-    assert "yfinance curated detail" in report
-    assert "live non-point-in-time; retrieved 2026-07-17T01:02:03+00:00" in report
-    assert "| balance sheet | — | 2026-07-17 | — | not requested |" in report
-    assert "| cash flow statement | — | 2026-07-17 | — | not requested |" in report
+    assert report == "MODEL REPORT"
+    evidence = _collect_evidence(
+        [*state["messages"], *result["messages"]],
+        report,
+        requested_date=date(2026, 7, 17),
+        analyst="fundamentals",
+        prefetched_blocks=result["prefetched_evidence"],
+    )
+    statement = next(
+        item
+        for item in evidence
+        if item.evidence_type == "get_income_statement"
+    )
+    assert {origin.source for origin in statement.origins} == {
+        "J-Quants official summary",
+        "yfinance curated detail",
+    }
+    missing = {
+        item.evidence_type
+        for item in evidence
+        if item.quality.value == "unavailable"
+    }
+    assert {"fundamentals overview", "balance sheet", "cash flow statement"} <= (
+        missing
+    )
 
 
 @pytest.mark.unit

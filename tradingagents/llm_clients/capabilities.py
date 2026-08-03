@@ -24,6 +24,7 @@ StructuredMethod = Literal[
     "json_schema",       # uses response_format={"type":"json_schema",...}
     "none",              # no structured output available; caller falls back to free-text
 ]
+ThinkingMode = Literal["enabled", "disabled"]
 
 
 @dataclass(frozen=True)
@@ -43,20 +44,43 @@ class ModelCapabilities:
     # (Coding Plan, MiniMax-Text-01, etc.), so we only set it where the
     # model actually consumes it. (#826)
     requires_reasoning_split: bool = False
+    # Provider-specific safety ceiling used only for typed output calls.
+    # DeepSeek JSON Output recommends an explicit max_tokens value to avoid
+    # unbounded whitespace or partially emitted JSON.
+    structured_output_max_tokens: int | None = None
 
 
-# DeepSeek's thinking models accept the ``tools`` array but reject the
-# ``tool_choice`` parameter (official Oh My Pi integration guide and the
-# 400 response in issue #678). Their official tool-calling examples
-# (api-docs.deepseek.com/guides/tool_calls) pass ``tools=[...]`` without
-# ``tool_choice`` — we mirror that pattern by setting supports_tool_choice
-# to False and letting the client suppress the kwarg.
-_DEEPSEEK_THINKING = ModelCapabilities(
+# The legacy reasoner endpoint accepts ``tools`` but rejects forced
+# ``tool_choice``. Keep that compatibility quirk isolated from the V4 API.
+_DEEPSEEK_REASONER = ModelCapabilities(
     supports_tool_choice=False,
     supports_json_mode=True,
     supports_json_schema=False,
     preferred_structured_method="function_calling",
     requires_reasoning_content_roundtrip=True,
+)
+
+# DeepSeek V4 defaults to thinking mode. In that mode the official endpoint
+# rejects ``required`` and named ``tool_choice`` values, so post-analyst
+# nodes use JSON Output instead of depending on an optional tool call.
+_DEEPSEEK_V4_THINKING = ModelCapabilities(
+    supports_tool_choice=False,
+    supports_json_mode=True,
+    supports_json_schema=False,
+    preferred_structured_method="json_mode",
+    requires_reasoning_content_roundtrip=True,
+    structured_output_max_tokens=16_384,
+)
+
+# The same V4 model IDs accept forced tools when thinking is explicitly
+# disabled. Keep this separate from the default thinking-mode contract so a
+# future non-thinking caller can use LangChain's schema tool reliably.
+_DEEPSEEK_V4_NON_THINKING = ModelCapabilities(
+    supports_tool_choice=True,
+    supports_json_mode=True,
+    supports_json_schema=False,
+    preferred_structured_method="function_calling",
+    structured_output_max_tokens=16_384,
 )
 
 _DEEPSEEK_CHAT = ModelCapabilities(
@@ -93,9 +117,9 @@ _DEFAULT = ModelCapabilities(
 # Exact-ID matches take precedence over pattern matches.
 _BY_ID: dict[str, ModelCapabilities] = {
     "deepseek-chat": _DEEPSEEK_CHAT,
-    "deepseek-reasoner": _DEEPSEEK_THINKING,
-    "deepseek-v4-flash": _DEEPSEEK_THINKING,
-    "deepseek-v4-pro": _DEEPSEEK_THINKING,
+    "deepseek-reasoner": _DEEPSEEK_REASONER,
+    "deepseek-v4-flash": _DEEPSEEK_V4_THINKING,
+    "deepseek-v4-pro": _DEEPSEEK_V4_THINKING,
     # MiniMax — full official model lineup per
     # platform.minimax.io/docs/api-reference/text-openai-api
     "MiniMax-M2.7": _MINIMAX_THINKING,
@@ -107,17 +131,26 @@ _BY_ID: dict[str, ModelCapabilities] = {
     "MiniMax-M2": _MINIMAX_THINKING,
 }
 
-# Forward-compat patterns. New ``deepseek-v5-*`` / ``deepseek-reasoner-*``
-# or ``MiniMax-M3*`` variants inherit the thinking-mode quirks automatically.
+# Pattern matches are limited to API families whose compatibility contract is
+# established. Future versioned DeepSeek models must be added after discovery
+# or an explicit probe instead of silently inheriting V4 behavior.
 _BY_PATTERN: list[tuple[re.Pattern[str], ModelCapabilities]] = [
-    (re.compile(r"^deepseek-v\d"), _DEEPSEEK_THINKING),
-    (re.compile(r"^deepseek-reasoner"), _DEEPSEEK_THINKING),
+    (re.compile(r"^deepseek-reasoner"), _DEEPSEEK_REASONER),
     (re.compile(r"^MiniMax-M\d"), _MINIMAX_THINKING),
 ]
 
 
-def get_capabilities(model_name: str) -> ModelCapabilities:
-    """Resolve capabilities by exact ID, then pattern, then default."""
+def get_capabilities(
+    model_name: str,
+    *,
+    thinking_mode: ThinkingMode | None = None,
+) -> ModelCapabilities:
+    """Resolve capabilities by model and, where relevant, thinking mode."""
+    if (
+        model_name in {"deepseek-v4-flash", "deepseek-v4-pro"}
+        and thinking_mode == "disabled"
+    ):
+        return _DEEPSEEK_V4_NON_THINKING
     if model_name in _BY_ID:
         return _BY_ID[model_name]
     for pattern, caps in _BY_PATTERN:

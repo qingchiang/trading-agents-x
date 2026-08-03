@@ -1,0 +1,249 @@
+{
+  "analysis_date": "2026-08-01",
+  "sealed_at": "2026-08-01T02:00:00+00:00",
+  "evidence": [
+    {
+      "ref": "ev_6501a0000001",
+      "source": "fixture.market",
+      "evidence_type": "observed close",
+      "requested_date": "2026-08-01",
+      "effective_date": "2026-07-31",
+      "value": 5267,
+      "measurement_kind": "currency",
+      "unit": "JPY"
+    },
+    {
+      "ref": "ev_6501a0000002",
+      "source": "fixture.fundamentals",
+      "evidence_type": "earnings inputs",
+      "requested_date": "2026-08-01",
+      "effective_date": "2026-07-31",
+      "content": "Frozen EPS and multiple inputs for numeric-audit regression."
+    },
+    {
+      "ref": "ev_6501a0000003",
+      "source": "fixture.yfinance",
+      "evidence_type": "analyst consensus target",
+      "requested_date": "2026-08-01",
+      "effective_date": null,
+      "value": 5600,
+      "measurement_kind": "currency",
+      "unit": "JPY",
+      "quality": "low",
+      "origins": [
+        {
+          "source": "yfinance analyst consensus",
+          "evidence_type": "analyst consensus target",
+          "requested": "2026-08-01",
+          "effective": "live snapshot",
+          "timing": "live-only retrieval",
+          "retrieved_at": "2026-08-01T01:45:16+00:00",
+          "quality": "low",
+          "temporal_scope": "live_only"
+        }
+      ]
+    }
+  ],
+  "numeric_candidate": {
+    "requested": true,
+    "scenario_reference_ranges": {
+      "base": [
+        {
+        "category": "technical",
+        "label": "Base technical range",
+        "low": {"basis": "interpreted", "value": 5000, "anchor_value_refs": ["nv_b031f094f3c7"]},
+        "high": {"basis": "interpreted", "value": 5500, "anchor_value_refs": ["nv_b031f094f3c7"]},
+        "interpretation": "Observed technical reference band.",
+        "limitations": ["Historical levels are not forecasts."]
+        },
+        {
+        "category": "analyst_consensus",
+        "label": "Analyst target range",
+        "low": {"basis": "interpreted", "value": 4600, "anchor_value_refs": ["nv_b07c4c829290"]},
+        "high": {"basis": "interpreted", "value": 7100, "anchor_value_refs": ["nv_b07c4c829290"]},
+        "interpretation": "Selected analyst target range from a live-only consensus snapshot.",
+        "limitations": ["Coverage and targets may change after retrieval."]
+        }
+      ],
+      "bull": [
+        {
+        "category": "technical",
+        "label": "Bull reference range",
+        "low": {"basis": "interpreted", "value": 5700, "anchor_value_refs": ["nv_b031f094f3c7"]},
+        "high": {"basis": "interpreted", "value": 6200, "anchor_value_refs": ["nv_b031f094f3c7"]},
+        "interpretation": "Observed market reference band.",
+        "limitations": ["Historical levels are not forecasts."]
+        }
+      ],
+      "bear": [
+        {
+        "category": "historical",
+        "label": "Bear reference range",
+        "low": {"basis": "interpreted", "value": 4200, "anchor_value_refs": ["nv_b031f094f3c7"]},
+        "high": {"basis": "interpreted", "value": 4700, "anchor_value_refs": ["nv_b031f094f3c7"]},
+        "interpretation": "Observed downside reference band.",
+        "limitations": ["Historical levels are not forecasts."]
+        }
+      ]
+    },
+    "valuation_assessment": {
+      "method": "Scenario earnings-multiple cross-check",
+      "low": {"basis": "derived", "calculation_id": "calc_bear_price"},
+      "high": {"basis": "derived", "calculation_id": "calc_bull_price"},
+      "limitations": ["Frozen regression values are illustrative, not live research."]
+    },
+    "market_reference_levels": [
+      {
+        "label": "Observed close",
+        "value_ref": "nv_b031f094f3c7",
+        "interpretation": "Directly observed close.",
+        "basis": "observed"
+      },
+      {
+        "label": "Current P/E",
+        "interpretation": "Derived from the observed close and current EPS.",
+        "basis": "derived",
+        "calculation_id": "calc_current_pe"
+      },
+      {
+        "label": "Forward P/E",
+        "interpretation": "Derived from the observed close and forward EPS.",
+        "basis": "derived",
+        "calculation_id": "calc_forward_pe"
+      },
+      {
+        "label": "Analyst consensus target",
+        "value_ref": "nv_b07c4c829290",
+        "interpretation": "A low-quality retrieval-time analyst target snapshot.",
+        "basis": "observed"
+      }
+    ],
+    "calculation_records": [
+      {
+        "id": "calc_current_pe",
+        "formula": "price / eps_current",
+        "inputs": [
+          {"name": "price", "value": 5267},
+          {"name": "eps_current", "value": 201.14}
+        ],
+        "input_evidence_refs": ["ev_6501a0000001", "ev_6501a0000002"],
+        "unit": "x",
+        "limitations": ["EPS definition must remain consistent."]
+      },
+      {
+        "id": "calc_forward_pe",
+        "formula": "price / eps_forward",
+        "inputs": [
+          {"name": "price", "value": 5267},
+          {"name": "eps_forward", "value": 178.13}
+        ],
+        "input_evidence_refs": ["ev_6501a0000001", "ev_6501a0000002"],
+        "unit": "x",
+        "limitations": ["Forward EPS is an estimate."]
+      },
+      {
+        "id": "calc_bull_price",
+        "formula": "bull_multiple * eps_current",
+        "inputs": [
+          {"name": "bull_multiple", "value": 29.76},
+          {"name": "eps_current", "value": 201.14}
+        ],
+        "input_evidence_refs": ["ev_6501a0000002"],
+        "unit": "JPY",
+        "limitations": ["The multiple is scenario-dependent."]
+      },
+      {
+        "id": "calc_bear_price",
+        "formula": "bear_multiple * eps_forward",
+        "inputs": [
+          {"name": "bear_multiple", "value": 25},
+          {"name": "eps_forward", "value": 178.13}
+        ],
+        "input_evidence_refs": ["ev_6501a0000002"],
+        "unit": "JPY",
+        "limitations": ["The multiple is scenario-dependent."]
+      }
+    ]
+  },
+  "no_op_repair_candidate": {
+    "requested": true,
+    "scenario_reference_ranges": {
+      "base": [
+        {
+          "category": "technical",
+          "label": "Unsupported duplicate repair fixture",
+          "low": {"basis": "interpreted", "value": 5000, "anchor_value_refs": ["nv_ffffffffffff"]},
+          "high": {"basis": "interpreted", "value": 5500, "anchor_value_refs": ["nv_b031f094f3c7"]},
+          "interpretation": "A deliberately invalid frozen repair candidate.",
+          "limitations": ["Regression fixture only."]
+        }
+      ],
+      "bull": [],
+      "bear": []
+    },
+    "valuation_assessment": null,
+    "market_reference_levels": [],
+    "calculation_records": []
+  },
+  "scenario_alignment_cases": [
+    {
+      "ticker": "6501.T",
+      "owner": "base",
+      "output_language": "Simplified Chinese (简体中文, zh-CN)",
+      "label": "悲观情景估值回归区间",
+      "expected_issue": "numeric.scenario.base.ranges.1.scenario_mismatch"
+    },
+    {
+      "ticker": "4568.T",
+      "owner": "base",
+      "output_language": "Simplified Chinese (简体中文, zh-CN)",
+      "label": "修复情景：一次性因素被确认（技术参考区间）",
+      "expected_issue": "numeric.scenario.base.ranges.1.scenario_mismatch"
+    },
+    {
+      "ticker": "4568.T",
+      "owner": "base",
+      "output_language": "Simplified Chinese (简体中文, zh-CN)",
+      "label": "恶化情景：利润走弱趋势化（技术参考区间）",
+      "expected_issue": "numeric.scenario.base.ranges.1.scenario_mismatch"
+    },
+    {
+      "ticker": "fixture-US",
+      "owner": "base",
+      "output_language": "English (en)",
+      "label": "Bear scenario valuation range",
+      "expected_issue": "numeric.scenario.base.ranges.1.scenario_mismatch"
+    },
+    {
+      "ticker": "fixture-JP",
+      "owner": "base",
+      "output_language": "Japanese (日本語, ja)",
+      "label": "弱気シナリオ評価レンジ",
+      "expected_issue": "numeric.scenario.base.ranges.1.scenario_mismatch"
+    }
+  ],
+  "date_anchor_case": {
+    "technical_anchor_date": "2026-07-31",
+    "background_date": "2026-08-01",
+    "expected_interpreted_date": "2026-07-31",
+    "live_consensus_date": "2026-08-01"
+  },
+  "presentation_regressions": {
+    "rsi": {
+      "value": 67.24,
+      "incorrect_unit": "JPY",
+      "expected_measurement_kind": "index",
+      "expected_unit": null
+    },
+    "singleton_reference": {
+      "label": "RSI reference",
+      "same_locator": true,
+      "expected_destination": "market_reference_levels"
+    },
+    "scenario_assumption": {
+      "ambiguous": "共识上修至 185–195 日元",
+      "expected": "分析师 EPS 共识上修至每股 185–195 日元",
+      "metric_subject": "EPS"
+    }
+  }
+}

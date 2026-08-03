@@ -1,9 +1,9 @@
-"""Deterministic data-provenance metadata and report appendix rendering.
+"""Deterministic data-provenance metadata and quality checks.
 
-Vendor results carry a small versioned HTML comment.  The comment is visible to
-the analyst model but hidden by Markdown renderers; analyst nodes parse it before
-ToolMessages are cleared and append one human-readable audit table to the report.
-No provenance is inferred from model prose.
+Vendor results carry a small versioned HTML comment. The comment is visible to
+the analyst model but hidden by Markdown renderers; application graph nodes
+convert it into typed evidence before ToolMessages are cleared. No provenance
+is inferred from model prose.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ import json
 import re
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
+from typing import Literal
 
 from langchain_core.messages import BaseMessage, ToolMessage
 
@@ -20,8 +21,19 @@ _MARKER_RE = re.compile(
     rf"<!--\s*{re.escape(_MARKER_PREFIX)}\s+(\{{.*?\}})\s*-->",
     re.DOTALL,
 )
-_APPENDIX_START = "<!-- tradingagents-data-provenance:start -->"
-_APPENDIX_END = "<!-- tradingagents-data-provenance:end -->"
+_SPAN_PREFIX = "tradingagents-evidence-span:v1"
+_SPAN_END = f"<!-- /{_SPAN_PREFIX} -->"
+_SPAN_RE = re.compile(
+    rf"<!--\s*{re.escape(_SPAN_PREFIX)}\s+(\{{.*?\}})\s*-->"
+    rf"(.*?)<!--\s*/{re.escape(_SPAN_PREFIX)}\s*-->",
+    re.DOTALL,
+)
+_SPAN_MARKER_RE = re.compile(
+    rf"<!--\s*/?{re.escape(_SPAN_PREFIX)}(?:\s+\{{.*?\}})?\s*-->",
+    re.DOTALL,
+)
+
+TemporalScopeName = Literal["point_in_time", "live_only", "unknown"]
 
 
 @dataclass(frozen=True)
@@ -34,6 +46,25 @@ class ProvenanceRecord:
     effective: str = "unknown"
     timing: str = "unknown"
     retrieved_at: str | None = None
+
+
+@dataclass(frozen=True)
+class ProvenanceQualityIssue:
+    """One deterministic quality issue derived from source metadata."""
+
+    evidence: str
+    source: str
+    code: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class EvidenceSpan:
+    """One explicitly bounded body with a shared temporal contract."""
+
+    content: str | None
+    records: tuple[ProvenanceRecord, ...]
+    temporal_scope: TemporalScopeName
 
 
 def provenance_marker(record: ProvenanceRecord) -> str:
@@ -59,9 +90,129 @@ def attach_provenance(text: str, *records: ProvenanceRecord) -> str:
     return "\n".join([*markers, text]) if text else "\n".join(markers)
 
 
+def attach_evidence_span(
+    text: str,
+    *,
+    temporal_scope: TemporalScopeName,
+) -> str:
+    """Wrap one body so composite tool responses retain temporal boundaries."""
+    if temporal_scope not in {"point_in_time", "live_only", "unknown"}:
+        raise ValueError(f"unsupported temporal scope: {temporal_scope!r}")
+    payload = json.dumps(
+        {"temporal_scope": temporal_scope},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return f"<!-- {_SPAN_PREFIX} {payload} -->{text}{_SPAN_END}"
+
+
+def extract_evidence_spans(text: str) -> list[EvidenceSpan]:
+    """Split explicit live-only blocks from the remaining point-in-time body."""
+    if not isinstance(text, str):
+        return []
+    matches = list(_SPAN_RE.finditer(text))
+    if not matches:
+        return []
+
+    explicit: list[EvidenceSpan] = []
+    remainder_parts: list[str] = []
+    cursor = 0
+    for match in matches:
+        remainder_parts.append(text[cursor : match.start()])
+        cursor = match.end()
+        try:
+            scope = json.loads(match.group(1)).get("temporal_scope", "unknown")
+        except (AttributeError, json.JSONDecodeError):
+            scope = "unknown"
+        if scope not in {"point_in_time", "live_only", "unknown"}:
+            scope = "unknown"
+        raw_content = match.group(2).strip()
+        explicit.append(
+            EvidenceSpan(
+                content=strip_provenance_markers(raw_content).strip() or None,
+                records=tuple(extract_provenance(raw_content)),
+                temporal_scope=scope,
+            )
+        )
+    remainder_parts.append(text[cursor:])
+    remainder = "\n".join(
+        part.strip() for part in remainder_parts if part.strip()
+    )
+    remainder_records = tuple(extract_provenance(remainder))
+    remainder_content = strip_provenance_markers(remainder).strip() or None
+    if remainder_records or remainder_content:
+        explicit.insert(
+            0,
+            EvidenceSpan(
+                content=remainder_content,
+                records=remainder_records,
+                temporal_scope=temporal_scope_from_records(
+                    remainder_records
+                ),
+            ),
+        )
+    return explicit
+
+
+def temporal_scope_from_records(
+    records: Iterable[ProvenanceRecord],
+) -> TemporalScopeName:
+    """Infer a conservative scope for unwrapped legacy source metadata."""
+    scopes = {_temporal_scope_from_record(record) for record in records}
+    scopes.discard("unknown")
+    return scopes.pop() if len(scopes) == 1 else "unknown"
+
+
+def _temporal_scope_from_record(record: ProvenanceRecord) -> TemporalScopeName:
+    text = " ".join(
+        (
+            record.evidence,
+            record.source,
+            record.effective,
+            record.timing,
+        )
+    ).casefold()
+    if any(
+        token in text
+        for token in (
+            "live-only",
+            "live only",
+            "live non-point-in-time",
+            "live non point in time",
+            "current-only",
+            "current snapshot",
+            "retrieval-time snapshot",
+            "retrieval-time analyst",
+            "not historical pit",
+            "not point-in-time",
+            "non-point-in-time",
+        )
+    ):
+        return "live_only"
+    if any(
+        token in text
+        for token in (
+            "point-in-time",
+            "date filtered",
+            "date-filtered",
+            "market-date filtered",
+            "trade-date filtered",
+            "observation-date filtered",
+            "publication-date filtered",
+            "publication/update-date filtered",
+            "disclosure-date filtered",
+            "fiscal period ends",
+        )
+    ):
+        return "point_in_time"
+    return "unknown"
+
+
 def strip_provenance_markers(text: str) -> str:
     """Remove machine metadata while preserving the human-readable vendor body."""
-    return _MARKER_RE.sub("", text).lstrip("\n") if isinstance(text, str) else text
+    if not isinstance(text, str):
+        return text
+    return _SPAN_MARKER_RE.sub("", _MARKER_RE.sub("", text)).lstrip("\n")
 
 
 def extract_provenance(value: str | Iterable[BaseMessage]) -> list[ProvenanceRecord]:
@@ -109,14 +260,19 @@ def _escape_cell(value: str) -> str:
 
 
 _WARNING_RULES = (
-    (("not requested",), "expected evidence was not requested"),
-    (("no auditable source metadata",), "no auditable source metadata captured"),
-    (("no usable data",), "no usable data from configured sources"),
-    (("unavailable",), "source unavailable for requested date/window"),
-    (("failed",), "source retrieval failed"),
-    (("fallback",), "fallback source used"),
+    (("not requested",), "not_requested", "expected evidence was not requested"),
+    (
+        ("no auditable source metadata",),
+        "missing_metadata",
+        "no auditable source metadata captured",
+    ),
+    (("no usable data",), "no_usable_data", "no usable data from configured sources"),
+    (("unavailable",), "unavailable", "source unavailable for requested date/window"),
+    (("failed",), "retrieval_failed", "source retrieval failed"),
+    (("fallback",), "fallback", "fallback source used"),
     (
         ("adjustment provider changed",),
+        "adjustment_changed",
         "adjustment provider changed; technical indicators may differ",
     ),
     (
@@ -126,13 +282,19 @@ _WARNING_RULES = (
             "not historical pit",
             "non-strict pit",
         ),
+        "not_point_in_time",
         "not point-in-time",
     ),
-    (("non-vintage",), "non-vintage series"),
-    (("not queried",), "source was not queried"),
-    (("truncated",), "result set truncated"),
-    (("stale",), "stale data"),
-    (("partial",), "partial coverage"),
+    (("non-vintage",), "non_vintage", "non-vintage series"),
+    (("not queried",), "not_queried", "source was not queried"),
+    (("truncated",), "truncated", "result set truncated"),
+    (("stale",), "stale", "stale data"),
+    (("partial",), "partial", "partial coverage"),
+    (
+        ("future-dated evidence withheld",),
+        "future_dated",
+        "future-dated evidence withheld",
+    ),
 )
 
 
@@ -143,9 +305,9 @@ def _is_successful_empty(timing: str) -> bool:
     )
 
 
-def _quality_warnings(
+def provenance_quality_issues(
     records: Iterable[ProvenanceRecord],
-) -> list[tuple[str, str, str]]:
+) -> list[ProvenanceQualityIssue]:
     """Return deterministic warnings for material provenance degradation.
 
     Routine date filtering and an empty-but-successful news window are not
@@ -153,126 +315,39 @@ def _quality_warnings(
     coverage, stale/truncated data, or timing that is unsuitable for strict
     historical interpretation.
     """
-    warnings: list[tuple[str, str, str]] = []
+    issues: list[ProvenanceQualityIssue] = []
     seen: set[tuple[str, str, str]] = set()
     for record in records:
         timing = record.timing.strip()
         timing_search = timing.casefold()
         reasons = list(
             dict.fromkeys(
-                label
-                for terms, label in _WARNING_RULES
+                (code, label)
+                for terms, code, label in _WARNING_RULES
                 if any(term in timing_search for term in terms)
             )
         )
         if record.source.strip().casefold() in {"", "unknown", "—"}:
-            reasons.append("source metadata unknown")
+            reasons.append(("unknown_source", "source metadata unknown"))
         if (
             record.effective.strip().casefold() in {"", "unknown", "—"}
             and not _is_successful_empty(timing_search)
         ):
-            reasons.append("effective date/window unknown")
+            reasons.append(
+                ("unknown_effective", "effective date/window unknown")
+            )
         evidence = _escape_cell(record.evidence)
         source = _escape_cell(record.source)
-        for reason in dict.fromkeys(reasons):
+        for code, reason in dict.fromkeys(reasons):
             key = (evidence.casefold(), source.casefold(), reason.casefold())
             if key not in seen:
-                warnings.append((evidence, source, reason))
-                seen.add(key)
-    return warnings
-
-
-def append_provenance_appendix(
-    report: str,
-    records: Iterable[ProvenanceRecord],
-    *,
-    expected: Iterable[tuple[str, str]] = (),
-    requested_date: str | None = None,
-    enabled: bool = True,
-) -> str:
-    """Append quality warnings and, when enabled, one provenance table.
-
-    ``enabled`` controls the detailed provenance table only. Material quality
-    warnings remain visible so disabling the audit appendix cannot hide a
-    fallback, unavailable source, timing limitation, or coverage problem.
-    """
-    report = report if isinstance(report, str) else str(report)
-    while _APPENDIX_START in report and _APPENDIX_END in report:
-        start = report.index(_APPENDIX_START)
-        end = report.index(_APPENDIX_END, start) + len(_APPENDIX_END)
-        before = report[:start].rstrip()
-        after = report[end:].lstrip()
-        report = f"{before}\n\n{after}" if before and after else before or after
-
-    deduped: list[ProvenanceRecord] = []
-    seen: set[ProvenanceRecord] = set()
-    for record in records:
-        if record not in seen:
-            deduped.append(record)
-            seen.add(record)
-
-    present = {record.evidence for record in deduped}
-    for evidence, label in expected:
-        if evidence not in present:
-            deduped.append(
-                ProvenanceRecord(
-                    evidence=label,
-                    source="—",
-                    requested=requested_date or "unknown",
-                    effective="—",
-                    timing="not requested",
-                )
-            )
-
-    if not deduped:
-        deduped.append(
-            ProvenanceRecord(
-                evidence="analyst evidence",
-                source="unknown",
-                requested=requested_date or "unknown",
-                effective="unknown",
-                timing="no auditable source metadata captured",
-            )
-        )
-
-    warnings = _quality_warnings(deduped)
-    if not enabled and not warnings:
-        return report
-
-    rows = [_APPENDIX_START, "---", ""]
-    if warnings:
-        rows.extend(["## Data Quality Warnings", ""])
-        rows.extend(
-            f"- **{evidence}** (source: {source}): {_escape_cell(reason)}"
-            for evidence, source, reason in warnings
-        )
-        rows.append("")
-    if enabled:
-        rows.extend(
-            [
-                "## Data Provenance",
-                "",
-                "| Evidence | Source | Requested / cutoff | Effective date / window | Timing status |",
-                "|---|---|---|---|---|",
-            ]
-        )
-        for record in deduped:
-            timing = record.timing
-            if record.retrieved_at:
-                timing = f"{timing}; retrieved {record.retrieved_at}"
-            rows.append(
-                "| "
-                + " | ".join(
-                    _escape_cell(value)
-                    for value in (
-                        record.evidence,
-                        record.source,
-                        record.requested,
-                        record.effective,
-                        timing,
+                issues.append(
+                    ProvenanceQualityIssue(
+                        evidence=evidence,
+                        source=source,
+                        code=code,
+                        reason=reason,
                     )
                 )
-                + " |"
-            )
-    rows.append(_APPENDIX_END)
-    return f"{report.rstrip()}\n\n" + "\n".join(rows)
+                seen.add(key)
+    return issues

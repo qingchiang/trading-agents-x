@@ -1,23 +1,24 @@
-"""The market analyst is bound (and prompt-instructed) to call
-get_verified_market_snapshot; if the executor ToolNode doesn't register it, the
-call fails and the model reports the tool "unavailable" and skips verification.
+"""The evidence graph exposes the verified snapshot in the market tool node."""
 
-Regression guard for that wiring gap (snapshot bound to the LLM but missing from
-the market ToolNode).
-"""
-import pytest
+from unittest.mock import MagicMock
 
-from tradingagents.graph.trading_graph import TradingAgentsGraph
+from tradingagents.application.contracts import RunProfile
+from tradingagents.graph.research_graph import ResearchGraph
 
 
-@pytest.mark.unit
 def test_market_toolnode_can_execute_verified_snapshot():
-    # _create_tool_nodes does not use self -> call unbound (avoids building LLMs).
-    nodes = TradingAgentsGraph._create_tool_nodes(None)
-    market_tools = set(nodes["market"].tools_by_name)
-    assert "get_verified_market_snapshot" in market_tools, (
-        "get_verified_market_snapshot is bound to the market analyst but not "
-        "registered in the market ToolNode, so the model's call fails."
+    llm = MagicMock()
+    graph = ResearchGraph(
+        quick_llm=llm,
+        deep_llm=llm,
+        profile=RunProfile.FAST,
+        selected_analysts=("market",),
     )
-    # the other core market tools must remain too
-    assert {"get_stock_data", "get_indicators"} <= market_tools
+
+    tool_node = graph._analyst_subgraphs["market"].nodes["tools"].bound
+
+    assert set(tool_node.tools_by_name) == {
+        "get_stock_data",
+        "get_indicators",
+        "get_verified_market_snapshot",
+    }

@@ -5,16 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "trading-agents-x"
 version = "0.4.0"
-description = "TradingAgentsX: a multi-agent LLM financial research framework for US, Japan, and China A-shares — an independent fork of TradingAgents"
+description = "A local evidence-first investment research run center for US, Japan, and China A-shares"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.10"
 dependencies = [
     "langchain-core>=0.3.81",
-    "backtrader>=1.9.78.123",
     "langchain-anthropic>=0.3.15",
-    "langchain-experimental>=0.3.4",
     "langchain-google-genai>=4.0.0",
     "langchain-openai>=0.3.23",
     "langgraph>=0.4.8",
@@ -22,23 +20,24 @@ dependencies = [
     "pandas>=2.3.0",
     "parsel>=1.10.0",
     "python-dotenv>=1.2.0",
-    "pytz>=2025.2",
-    "questionary>=2.1.0",
-    "redis>=6.2.0",
     "requests>=2.32.4",
     "rich>=14.0.0",
     "typer>=0.21.0",
-    "setuptools>=80.9.0",
     "stockstats>=0.6.5",
-    "tqdm>=4.67.1",
     "typing-extensions>=4.14.0",
     "yfinance>=1.4.1",
     "jpholiday>=1.0.3",
     "akshare>=1.18.64",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "sqlalchemy>=2.0",
+    "alembic>=1.14",
+    "pydantic>=2.10",
 ]
 
 [project.optional-dependencies]
 dev = [
+    "httpx2>=2.0",
     "ruff>=0.15",
     "pytest>=8.0",
     "pytest-subtests>=0.13",
@@ -62,8 +61,9 @@ Changelog = "https://github.com/qingchiang/trading-agents-x/blob/main/CHANGELOG.
 include = ["tradingagents*", "cli*"]
 
 [tool.setuptools.package-data]
-cli = ["static/*"]
 "tradingagents.dataflows" = ["data/*.json"]
+"tradingagents.persistence" = ["alembic/script.py.mako"]
+"tradingagents.web" = ["static/*", "static/assets/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

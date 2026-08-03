@@ -5,25 +5,7 @@ parameter: 'reasoning.effort'". The client must drop the kwarg for those rather
 than forward it and crash the run. The GPT-5 family and the o-series accept it.
 """
 
-import pytest
-
-from tradingagents.llm_clients.openai_client import (
-    OpenAIClient,
-    _supports_reasoning_effort,
-)
-
-
-@pytest.mark.parametrize(
-    "model,expected",
-    [
-        ("gpt-5.5", True), ("gpt-5.4", True), ("gpt-5.4-mini", True),
-        ("gpt-5.5-pro", True), ("o1", True), ("o3-mini", True),
-        ("gpt-4.1", False), ("gpt-4o", False), ("gpt-4o-mini", False),
-        ("gpt-3.5-turbo", False),
-    ],
-)
-def test_supports_reasoning_effort(model, expected):
-    assert _supports_reasoning_effort(model) is expected
+from tradingagents.llm_clients.openai_client import OpenAIClient
 
 
 def _effort_on(model, monkeypatch):

@@ -1,439 +1,266 @@
 # TradingAgentsX
 
-<div align="center">
-
 [English](../../README.md) · **简体中文** · [日本語](README.ja.md)
 
-</div>
+TradingAgentsX 是一个面向本地单用户的投资研究运行中心。它将 React Web
+界面、版本化 FastAPI、SQLite 持久队列与 evidence-first LangGraph 工作流
+组合在一起，支持美股、日股、中国 A 股以及兼容 Yahoo 符号的其他标的。
 
-<div align="center" style="line-height: 1;">
-  <a href="https://arxiv.org/abs/2412.20138" target="_blank"><img alt="arXiv" src="https://img.shields.io/badge/arXiv-2412.20138-B31B1B?logo=arxiv"/></a>
-  <img alt="License" src="https://img.shields.io/badge/License-Apache_2.0-blue.svg"/>
-</div>
+系统输出的是研究结论，不是账户指令。最终契约包括评级、置信度、论点、
+证据引用、催化剂、风险、失效条件和时间范围；不会生成仓位比例、账户配置、
+入场价、止损、目标价、订单或组合再平衡建议。
 
-TradingAgentsX 是建立在 TradingAgents 智能体图之上的多智能体 LLM 金融研究框架。
-它增加了日本股票（`.T`）和沪深 A 股（`.SS`/`.SZ`）的专用数据链，同时保留
-美国/默认路由。各市场自有数据源与 assembler 汇入同一工作流，并明确约束
-分析日期、记录来源出处和可审计的降级过程。
-
-> **Fork 说明。** 本项目是
+> **独立产品线。** TradingAgentsX 保留源自
 > [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents)
-> 的独立维护 fork（Apache-2.0）。`0.3.1` 及以前的版本沿革继承自上游；
-> 从 `0.4.0` 开始，TradingAgentsX 独立维护发布与版本线。项目仍可选择性
-> 吸收上游改动，但上游版本号不再决定本项目的版本号。上游署名与许可信息
-> 保留在 [LICENSE](../../LICENSE)、[NOTICE](../../NOTICE) 和
-> [版本历史](../../CHANGELOG.md) 中。
+> 的 Git 历史、Apache-2.0 归因和论文引用，但已不再把合并 upstream 作为
+> 开发策略。上游仅用于只读监控；相关安全或正确性修复会在审计后选择性重写
+> 或 cherry-pick。详见 [ADR 0001](../adr/0001-independent-product-line.md)。
 
-<div align="center">
+> 本项目是研究工具，不构成金融或投资建议。模型可能出错，数据也可能缺失、
+> 过期或不可用。
 
-[项目增强](#tradingagentsx-的增强) · [概览](#概览) ·
-[市场支持](#市场支持) · [安装](#安装) ·
-[CLI](#cli-用法) · [日本市场](#日本市场) · [中国 A 股](#中国-a-股) ·
-[Python API](#python-api) · [开发](#开发) ·
-[架构](../architecture.md) · [变更记录](../../CHANGELOG.md)
+## Web 运行中心
 
-</div>
+- **Dashboard：** 队列、带标的简称的最近运行、状态和待结算 outcome。
+- **New Run：** 标的、PIT 日期、analysts、Fast/Standard/Deep、
+  provider/model、reasoning、报告语言和近期标的建议。
+- **Runs：** 当前/归档切换、筛选、搜索、分页，以及可恢复的批量归档管理。
+- **Run Detail：** 可恢复的事件时间线、报告 tabs、结构化决策、warning、
+  可折叠审计详情、token/tool/wall-time 指标，以及取消、retry、
+  恢复归档、基于当前运行新建和导出。
+- **Memory：** 检索完整 decision、outcome 与 reflection，展开催化因素、
+  风险和失效条件，同时显示标的简称并返回对应运行的研究结论。
+- **Settings：** 只读能力列表、非敏感默认值和 API key 是否已配置。
 
-## TradingAgentsX 的增强
+UI 支持 `zh-CN`、`en`、`ja`。界面语言与报告输出语言相互独立。
+New Run 只显示已配置的服务商，并在选中后动态获取当前模型目录；发现失败时，
+环境默认模型和 quick/deep 各自独立的自定义模型 ID 仍可使用。
+服务商可配置并不代表整条 Research Graph 已获得同等级验证。目前 DeepSeek V4
+Flash 属于已验证配置；OpenAI、Anthropic、Google 和 Azure 原生集成为预览级，
+其他 OpenAI-compatible、本地模型与 Bedrock 适配器为兼容级。具体范围与升级
+标准见 [LLM provider 支持等级](../provider-support.md)。
+Markdown 禁用原始 HTML，并在显示前清洗。
 
-- **专用区域数据系统，而不只是支持股票代码后缀。** 日股与 A 股的 adapter
-  和 assembler 从本地数据源为市场、基本面、新闻、情绪、披露、持仓信号和
-  宏观分析提供证据。
-- **在数据流中落实 point-in-time 完整性。** 工作流注入分析日期；adapter
-  执行数据源可见性和市场本地日历边界。如果仅限当前时点的降级源无法用于
-  历史分析，数据链会明确拒绝使用。
-- **可审计的证据。** 结果通过结构化 provenance 保留请求日期、有效日期、
-  实际选中的来源、降级状态和重要限制，并显示 `Data Quality Warnings`。
-- **跨区域宏观背景。** 美国、日本和中国指标汇入同一个故障隔离面板；单个
-  提供商缺失不会抹去其他来源负责的单元格。
-- **独立运行控制与连续性。** Quick/deep 模型角色可分别配置 reasoning；
-  CLI 与 Python 运行共用有界、按市场隔离的复盘日志，并可选择启用检查点恢复。
-- **面向发布的验证。** CI 覆盖 Python 3.10–3.13、全仓库 lint 和干净安装
-  smoke；可选 live contract 验证跨市场 schema、已完成交易日截止边界、
-  实际来源和降级过程。
+## 快速开始
 
-### 数据流概览
-
-```mermaid
-flowchart LR
-    Input["股票代码 + 分析日期"] --> Context["规范股票代码<br/>市场本地上下文"]
-    Context --> Router{"已配置的市场路由"}
-    Router --> US["美国 / 默认数据源"]
-    Router --> JP["日本 assembler<br/>J-Quants · EDINET · TDnet"]
-    Router --> CN["中国 assembler<br/>腾讯 · CNINFO · 新浪"]
-    US --> Guard["数据源自有 PIT 检查<br/>校验 + 新鲜度"]
-    JP --> Guard
-    CN --> Guard
-    Macro["美国 / 日本 / 中国宏观面板"] --> Guard
-    Guard --> Provenance["结构化 provenance<br/>降级 + 质量警告"]
-    Provenance --> Analysts["市场 · 基本面<br/>新闻 · 情绪"]
-    Analysts --> Decision["辩论 · 交易员 · 风险<br/>组合决策 + 复盘"]
-```
-
-该图有意保持为高层概览。精确的路由优先级、assembler 归属、缓存和
-point-in-time 契约详见[架构文档](../architecture.md)。
-
-## 概览
-
-TradingAgentsX 保留上游的投资团队拓扑：市场、基本面、新闻和情绪四类
-分析师准备证据；多空研究员展开辩论；交易员提出仓位；最后由风险团队和
-投资组合经理给出最终决策。
-
-```text
-分析师 → 多空辩论 → 研究经理 → 交易员
-       → 风险辩论 → 投资组合经理 → 复盘
-```
-
-<p align="center">
-  <img src="../../assets/schema.png" style="width: 100%; height: auto;">
-</p>
-
-框架既支持交互式 CLI，也支持直接通过 Python 调用。分析师可以独立选择，
-LLM 提供商可以配置。CLI 与直接调用 `TradingAgentsGraph.propagate()` 的运行
-共用跨轮次复盘日志，也可以通过可选的 LangGraph 检查点恢复中断的分析。
-
-> TradingAgentsX 是金融研究框架，其输出不构成金融、投资或交易建议。结果取决于
-> 模型行为、数据质量、时间边界和运行配置。
-
-## 市场支持
-
-系统内部使用与 Yahoo 兼容的规范股票代码。支持的别名会在市场路由前统一
-规范化，例如 `600519` 转换为 `600519.SS`，`000001` 转换为
-`000001.SZ`，`600519.SH` 转换为 `600519.SS`。不支持或存在歧义的中国
-内地六位代码会明确报错，不会意外落入美股路由。
-
-| 市场 | 示例 | 数据链 |
-| --- | --- | --- |
-| 美国/默认 | `NVDA`、`SPY` | 基于 yfinance 的默认路由 |
-| 日本 | `7203.T` | J-Quants 和日本本土披露源，以及已配置的降级源 |
-| 中国 A 股 | `600519.SS`、`000001.SZ` | 腾讯/AkShare，以及中国基本面、新闻和宏观数据源 |
-| 其他 Yahoo 市场 | `0700.HK`、`AZN.L`、`RELIANCE.NS` | 默认 Yahoo 兼容行为；没有专用本地市场数据链 |
-| 加密货币/外汇 | `BTC-USD`、`EURUSD=X` | Yahoo 兼容默认路由及受支持的别名 |
-
-目前中国市场的专用支持范围是沪深个股。北交所 `.BJ`、香港 `.HK`、ETF、
-基金、期权以及中国市场盘中高频数据不在本阶段范围内。
-
-### 默认数据源路由
-
-箭头表示有序降级，括号表示多个来源会被组合使用。
-
-| 市场 | 行情与指标 | 基本面与财报 | 个股新闻 |
-| --- | --- | --- | --- |
-| 美国/默认 | yfinance | yfinance | yfinance |
-| 日本 `.T` | J-Quants → yfinance | 日本市场 assembler → J-Quants → yfinance | (EDINET + TDnet + Google News) → yfinance |
-| 中国 `.SS`/`.SZ` | 腾讯 qfq → 东方财富 qfq → yfinance | (CNINFO + 新浪) → yfinance | (CNINFO + 东方财富研报 + Google News) → yfinance |
-
-全球新闻分析师还会获得跨区域宏观面板。美国及全球单元格使用 FRED；日本
-单元格使用日本银行、e-Stat、财务省和 FRED；中国单元格使用国家统计局、
-东方财富、国家外汇管理局以及范围经过刻意限制的 ChinaMoney 降级源。某个
-来源缺失时，只会禁用其负责的单元格。
-
-路由、缓存、point-in-time 和失败处理约定详见
-[架构文档](../architecture.md)。
-
-### 数据完整性与来源记录
-
-- 面向智能体图的工具从工作流状态接收分析日期。历史分析不会静默注入仅适用
-  于当前时点的数据快照。
-- 数据源链是显式配置的。路由器不会增加未配置的降级源；有意组合多个来源的
-  逻辑由 assembler 负责。
-- 结果通过结构化 provenance 保留请求日期、有效日期、实际来源，以及时间或
-  降级状态。
-- 重要降级、陈旧数据、缺失或部分覆盖、截断，以及 non-PIT/non-vintage 限制
-  会显示在 `Data Quality Warnings` 下。新闻窗口成功返回空结果时不会产生警告。
-- 设置 `provenance_appendix = True` 或
-  `TRADINGAGENTS_PROVENANCE_APPENDIX=true` 可附加详细的英文
-  `Data Provenance` 表格。即使关闭该表格，重要警告仍然可见。
-
-## 安装
-
-需要 Python 3.10 或更高版本。
+支持 Python 3.10–3.13。只有开发前端时才需要 Node.js；发布 wheel 已携带
+编译后的 Web 静态资源。
 
 ```bash
 git clone https://github.com/qingchiang/trading-agents-x.git
 cd trading-agents-x
-
 python -m venv .venv
 source .venv/bin/activate
 pip install .
-```
-
-开发环境请安装 `dev` extra：
-
-```bash
-pip install -e ".[dev]"
-```
-
-### Docker
-
-```bash
-cp .env.example .env  # 添加你实际使用的密钥
-docker compose run --rm tradingagents
-```
-
-使用随项目提供的 Ollama 服务：
-
-```bash
-docker compose --profile ollama run --rm tradingagents-ollama
-```
-
-## 配置
-
-复制环境变量模板，并配置一个 LLM 提供商：
-
-```bash
 cp .env.example .env
 ```
 
-项目为 OpenAI、Anthropic、Google、Azure OpenAI 和 Amazon Bedrock 提供原生
-客户端。OpenAI 兼容注册表覆盖 xAI、DeepSeek、Qwen、GLM、MiniMax、
-OpenRouter、Mistral、Kimi、Groq、NVIDIA NIM、Ollama，以及 vLLM、
-LM Studio 等任意兼容端点。各提供商的变量请参阅
-[.env.example](../../.env.example)。
-
-Amazon Bedrock 需要执行 `pip install ".[bedrock]"`。Azure 用户可以从
-`.env.enterprise.example` 开始配置。Ollama 默认使用
-`http://localhost:11434/v1`，可通过 `OLLAMA_BASE_URL` 修改。
-
-常见示例：
-
-```dotenv
-OPENAI_API_KEY=...
-ANTHROPIC_API_KEY=...
-GOOGLE_API_KEY=...
-DEEPSEEK_API_KEY=...
-OPENROUTER_API_KEY=...
-```
-
-使用任意兼容端点时，将 `llm_provider` 设置为 `"openai_compatible"`，
-配置 `backend_url`（或 `TRADINGAGENTS_LLM_BACKEND_URL`）；仅当端点需要
-鉴权时才提供 `OPENAI_COMPATIBLE_API_KEY`。
-
-### 可选市场数据密钥
-
-首期中国市场数据链无需密钥。日本数据源会彼此独立地降级，因此以下密钥均非
-必需：
-
-```dotenv
-JQUANTS_API_KEY=...  # 行情、摘要以及取决于订阅方案的持仓数据
-EDINET_API_KEY=...   # 法定披露、持股变动和要约收购
-ESTAT_APP_ID=...     # 日本 CPI 序列
-FRED_API_KEY=...     # 美国/全球宏观数据及部分日本降级序列
-```
-
-## CLI 用法
+在 `.env` 中配置一个 LLM provider，然后一键启动本地 Web 和 worker：
 
 ```bash
-tradingagents
-# 或
-python -m cli.main
+tradingagents start
 ```
 
-CLI 可选择股票代码、分析日期、分析师、研究深度和 LLM 提供商。CLI 与
-Python 智能体图使用相同的规范股票代码和市场路由。
+该命令仍将两者作为独立子进程运行，合并输出会带有 `[web]` 和 `[worker]`
+彩色前缀，并尊重 `NO_COLOR`。第一次按 Ctrl+C 会请求协作式停机；再次按下
+或等待 30 秒后会强制结束仍未退出的子进程。被中断的研究会由下次启动的
+worker 从 checkpoint 恢复。仅在需要轮转落盘日志时传入 `--log-dir PATH`。
+需要交给其他进程管理器时，仍可分别启动：
 
-<p align="center">
-  <img src="../../assets/cli/cli_init.png" width="100%" style="display: inline-block;">
-</p>
+```bash
+tradingagents serve
+tradingagents worker
+```
 
-## 日本市场
+浏览器打开 <http://127.0.0.1:8000>。Web 负责接收和展示任务；默认单并发
+worker 领取队列任务，并在后台结算满足条件的 outcome。
 
-对于东京市场代码，四类分析师都会使用本土数据源，而不是完全依赖覆盖较薄的
-Yahoo 英文数据。
+不使用 Web 时也可以同步运行：
 
-| 领域 | 主要证据 |
+```bash
+tradingagents run 7203.T \
+  --date 2026-07-24 \
+  --profile standard \
+  --output-language ja
+```
+
+### Docker Compose
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+`web` 与 `worker` 共用一个本机 named volume；端口默认只发布到
+`127.0.0.1`。需要捆绑 Ollama 时，先在 `.env` 中设置
+`TRADINGAGENTS_LLM_PROVIDER=ollama` 和
+`OLLAMA_BASE_URL=http://ollama:11434/v1`，然后运行：
+
+```bash
+docker compose --profile ollama up --build
+```
+
+SQLite 与 WAL 文件必须位于 Web/worker 同一主机的本地文件系统，不能放在
+NFS、SMB 等网络文件系统。
+
+## 三种研究模式
+
+三种 profile 共用同一份封存后的 `EvidenceBundle` 和同一个
+`ResearchDecision` 契约。
+
+| Profile | 流程 |
 | --- | --- |
-| 行情/技术面 | J-Quants v2 调整后日线和经过验证的快照 |
-| 基本面 | J-Quants 摘要、披露安全的比率、基于 TOPIX 周线的 beta，以及筛选后的近实时财报明细 |
-| 新闻 | EDINET 文件、TDnet 适时披露、Google News Japan 和带标签的交易所板块背景 |
-| 情绪 | 个股融资融券/做空数据、EDINET 大量持股和要约收购文件，以及仅用于实盘的评级数据 |
-| 宏观 | 日本银行政策利率/Tankan、e-Stat CPI、财务省日频国债收益率和 FRED 降级源 |
+| Fast | 并行 analysts → 最终研究委员会 |
+| Standard | 并行 analysts → bull/bear 案例 → Debate Agenda → 一轮定向交叉反驳 → Research Judge → 单一 Risk Reviewer → Final Committee |
+| Deep | 并行 analysts → bull/bear 案例 → Debate Agenda → 一轮必选及最多两轮附加定向反驳 → Research Judge → aggressive/neutral/conservative 三个 risk lenses 并行 → Final Committee |
 
-J-Quants Light 覆盖行情、摘要和交易所板块资金流。Standard 还会解锁个股
-融资融券及空头仓位信号，不需要 Premium。没有 J-Quants 密钥时，行情和近
-实时基本面可以降级到 yfinance。如果降级源缺乏披露时间戳，历史财报会采取
-fail closed。没有 EDINET 时，其他新闻来源仍可独立运行。
+Deep 只有在仍存在重要开放争议，并且新增证据、因果机制或有效推翻具体 claim
+时才进入附加轮次。各 analyst 使用独立 state channel；原始数据和 provenance
+保存在封存 Evidence Ledger 中，人类可读报告与研究过程使用 Markdown，并只保留
+轻量、经校验的审计导航。系统中没有 Trader 节点。
 
-日本历史数据链会在可获得时强制执行发布日期边界。当日 EDINET 列表使用短期
-缓存，已沉淀的文件列表使用有界磁盘缓存；财务省收益率数据只有在下一个工作日
-日本时间 09:30 的发布边界之后才会进入分析。
+## 架构与运行生命周期
 
-## 中国 A 股
+`AnalysisService` 统一负责请求规范化、run 创建、memory 检索、graph 执行、
+事件/报告/决策持久化、checkpoint 清理和 outcome 调度。Graph node 不直接
+写文件或应用数据库表。
 
-目前中国市场以沪深个股的低频分析为目标。
+```text
+queued → running → succeeded | failed | cancelled
+```
 
-| 领域 | 主要证据 |
-| --- | --- |
-| 行情/技术面 | 腾讯前复权（`qfq`）OHLCV；依次降级至东方财富和 yfinance |
-| 基本面 | CNINFO 公司资料，加上经过披露日期过滤的新浪财务摘要和报表 |
-| 新闻 | 按精确代码匹配的 CNINFO 公告、东方财富研报和中文 Google News |
-| 情绪 | 沪深交易所融资融券、持股变动、评级/目标价和重要公告 |
-| 宏观 | 1 年期 LPR、中国 10 年期国债、CPI、GDP、失业率、制造业 PMI 和 USD/CNY 中间价 |
+worker 通过数据库 lease 原子领取任务。lease 过期后可从 LangGraph
+checkpoint 恢复：
 
-行情、验证快照和技术指标共用同一份 qfq 历史数据。通常的技术指标预热只需
-一次有界腾讯请求；只有需要更长历史时才进行分页。由于不同提供商的复权因子
-可能不同，降级时会替换整个请求窗口。
+- `retry` 在同一个 run 下增加 attempt，并可复用兼容 checkpoint；
+- “基于此运行新建”先打开可编辑的 New Run 表单，确认提交后才创建关联的新 run
+  并重新获取证据；
+- cancel 在 graph node 边界协作完成，不会强杀正在执行的 provider 请求；
+- 成功或取消后删除 checkpoint，失败时保留到后续处理。
 
-公司证据按来源组装，并分别保留 provenance。缺少可信可见时间元数据的历史
-数据会 fail closed，或明确标记为 non-PIT。低频 CNINFO 和东方财富候选数据
-共用一个按股票代码和分析截止日期严格隔离的有界缓存，使新闻和情绪分析可以
-复用结果而不会跨越分析日期边界。
+终态运行可在 Runs 页面移入回收站和恢复。移入后会立即退出 Dashboard、
+Memory、outcome 结算和近期标的建议。Web 启动时检查一次到期回收站记录；
+worker 在领取任务前检查，并在成功后每 24 小时再次执行，失败则 1 小时后
+重试。默认 30 天后永久清理，可通过
+`TRADINGAGENTS_TRASH_RETENTION_DAYS` 修改；设为 `0` 时关闭
+永久清理。
 
-中国宏观数据的时间语义因来源而异。国家统计局数据同时保留发布日期和观察期；
-GDP 是年初至今累计同比。只有在找不到符合要求的近期国家统计局发布时，CPI、
-GDP 和 PMI 才会降级到按观察期过滤的东方财富序列，并明确标记为
-non-vintage。USD/CNY 中间价以国家外汇管理局为主源。ChinaMoney 仅作为
-最新收益率曲线快照的降级源，不扩展为历史抓取器。
+事件先写入数据库，再发送给客户端。SSE 使用 `Last-Event-ID` 回放刷新或断线
+期间遗漏的事件，因此浏览器刷新不会丢失进度。
 
-AkShare 和无密钥中国市场 assembler 依赖公开网页端点，其 schema、分页和
-反爬行为可能随时变化。生产使用时应监控有效日期、实际来源和质量警告，不应
-把 HTTP 成功直接视为数据新鲜的证明。
+完整说明见 [架构文档](../architecture.md)。
 
 ## Python API
 
 ```python
-from tradingagents.default_config import DEFAULT_CONFIG
-from tradingagents.graph.trading_graph import TradingAgentsGraph
+from tradingagents import AnalysisRequest, RunProfile, TradingAgents
 
-config = DEFAULT_CONFIG.copy()
-config["llm_provider"] = "openai"
-config["quick_think_llm"] = "gpt-5.4-mini"
-config["deep_think_llm"] = "gpt-5.5"
-config["quick_reasoning_effort"] = "low"
-config["deep_reasoning_effort"] = "high"
+app = TradingAgents.from_env()
+result = app.run(
+    AnalysisRequest(
+        ticker="7203.T",
+        analysis_date="2026-07-24",
+        profile=RunProfile.STANDARD,
+        output_language="ja",
+    ),
+    on_event=lambda event: print(event.sequence, event.event_type),
+)
 
-graph = TradingAgentsGraph(debug=True, config=config)
-final_state, decision = graph.propagate("600519", "2026-07-17")
-print(decision)
+print(result.run_id, result.status)
+print(result.decision)
 ```
 
-`propagate()` 返回 `(final_state, decision)`。所有配置项请参阅
-[`tradingagents/default_config.py`](../../tradingagents/default_config.py)。
+`AnalysisResult` 返回 `run_id`、状态、规范化标的、typed reports、
+`ResearchDecision`、metrics 和 warnings。需要交给独立 worker 时，使用
+`TradingAgents.enqueue(request, idempotency_key=...)`。
 
-### 按角色配置推理强度
+根包只公开 `TradingAgents`、`AnalysisRequest`、`AnalysisResult`、
+`ResearchDecision`、`RunProfile` 和 `__version__`。Evidence、deliberation 与
+numeric audit 等内部类型应从各自所属模块导入，不再由根包快捷导出。
 
-`quick_reasoning_effort` 和 `deep_reasoning_effort` 分别配置两类模型角色。
-对应的环境变量为：
+旧 `TradingAgentsGraph` 公共导出和 `(final_state, decision)` tuple 已删除。
+迁移方法见 [breaking migration guide](../migration-independent-platform.md)。
+
+## CLI
+
+CLI 现在是非交互式命令：
+
+```text
+tradingagents run TICKER [options]
+tradingagents start [--color auto|always|never] [--log-dir PATH]
+tradingagents serve
+tradingagents worker [--once] [--log-level LEVEL]
+tradingagents runs list|show|cancel|retry
+tradingagents export RUN_ID [--format markdown|json] [-o PATH]
+tradingagents db backup PATH
+```
+
+Markdown/JSON 只作为显式导出格式；SQLite 是唯一事实源。
+
+## API 与安全
+
+版本化 API 覆盖 run 创建/查询、事件 SSE、cancel/retry、export、
+memory、capabilities 与 health。创建 run 时可发送 `Idempotency-Key`，
+避免浏览器重复提交；也可在用户确认模板表单后发送终态 run 的
+`source_run_id`。OpenAPI 位于 `/openapi.json`。
+
+API key 只从进程环境读取，不写入 SQLite、SSE 或浏览器存储。默认服务只绑定
+loopback。显式开启 LAN 时需要：
 
 ```dotenv
-TRADINGAGENTS_QUICK_REASONING_EFFORT=low
-TRADINGAGENTS_DEEP_REASONING_EFFORT=high
+TRADINGAGENTS_LAN_ENABLED=true
+TRADINGAGENTS_LAN_TOKEN=<long-random-token>
+TRADINGAGENTS_SESSION_SECRET=<different-long-random-secret>
+TRADINGAGENTS_HOST=0.0.0.0
+TRADINGAGENTS_PUBLISH_HOST=0.0.0.0
 ```
 
-角色专用值的优先级高于旧的提供商级设置。使用 `provider_default` 可以省略
-原生 SDK 参数，并阻止旧配置回退。具体支持的级别取决于提供商和模型；CLI
-目录是精选模型选项的准确信息源。
+Web 登录会将 token 换成签名的 `HttpOnly`、`SameSite=Strict` cookie，
+写请求还会检查同源。这是本地单用户安全边界，不是多租户身份系统。
 
-## 持久化与恢复
+## 市场、日期与证据
 
-成功完成的 CLI 与 `TradingAgentsGraph.propagate()` 运行都会把决策追加到
-`~/.tradingagents/memory/trading_memory.md`，无需先保存 CLI 报告。以后针对同一
-股票发起新的运行时，系统可以比较实际原始收益与相对基准收益，并在投资组合经理
-的上下文中加入简短复盘。可通过 `TRADINGAGENTS_MEMORY_LOG_PATH` 修改路径。
+| 市场 | 示例 | 专用路径 |
+| --- | --- | --- |
+| 美国/默认 | `NVDA`, `SPY` | yfinance 默认路线 |
+| 日本 | `7203.T` | J-Quants、EDINET、TDnet、日本新闻与宏观数据 |
+| 中国 A 股 | `600519.SS`, `000001.SZ` | Tencent/AkShare、CNINFO、Sina、Eastmoney 与中国宏观数据 |
+| Crypto/FX | `BTC-USD`, `EURUSD=X` | 兼容的默认路线 |
 
-pending 结果采用固定的 5 个交易时段观察窗口。系统会严格等待标的与区域基准共同
-拥有 6 个已完成的收盘点：第 1 个作为起点，第 6 个作为终点，由此形成 5 个对齐的
-交易间隔。标的和基准各自市场本地日期的当天行情都会被排除，因此节假日不同或交易日
-缺失只会推迟结算，不会缩短窗口。复盘会遵守 `TRADINGAGENTS_OUTPUT_LANGUAGE`，并且
-只表示 5 日短期市场反馈，不会宣称中长期投资逻辑已被证明或否定。系统还会使用
-`[2026-01-05 → 2026-01-12 | 5d]` 这样的语言中立前缀确定性地保留实际观察日期，
-不依赖模型是否在复盘正文中重复日期。
+历史分析以标的所在市场的本地日期为准。Evidence 保留 requested/effective
+date、带时区的 available time、实际来源、质量、fallback 和 provenance；
+封存时会拒绝未来可见证据。缺数据表示 unknown，不能自动解释成中性或利空。
 
-共享记忆文件默认最多保留 1000 条已结算记录。超过这一全局上限时，会按文件顺序
-删除最早的已结算记录；pending 记录不计入上限，也不会被裁剪。设置
-`TRADINGAGENTS_MEMORY_LOG_MAX_ENTRIES=0` 可取消已结算记录的数量限制；直接使用
-Python 配置时，`0` 或 `None` 均表示不限制。
+当 ticker 与 benchmark 已有六个共同完成收盘价时，后台 worker 形成五个
+交易区间，记录 raw return、alpha 与短期 reflection。它不是长期 thesis 或
+graph 质量的唯一真值。
 
-每次新的分析会注入同一 ticker 最近 5 条完整记忆；此外，默认还会注入其他 ticker
-最近 3 条仅包含复盘的经验，但候选必须同时属于相同资产类型和区域市场。例如沪深
-A 股属于同一市场，而中国、日本和美国市场互不共享。可通过
-`TRADINGAGENTS_MEMORY_CROSS_TICKER_LIMIT` 调整跨 ticker 条数；设置为 `0` 即关闭
-跨 ticker 记忆。
-
-已结算记录只有在保存的持有窗口至少为 `5d` 时才可以注入上下文。旧的 `1d`–`4d`
-记录，以及持有窗口缺失或格式异常的记录，都会原样保留在 Markdown 文件中，但不会
-作为同 ticker 或跨 ticker 记忆注入。
-
-检查点功能默认关闭。以下参数都作用于根命令：
+## 开发与验收
 
 ```bash
-tradingagents --checkpoint
-tradingagents --no-checkpoint
-tradingagents --clear-checkpoints
+pip install -e ".[dev]"
+pytest -q
+ruff check .
+
+npm ci --prefix frontend
+npm test --prefix frontend
+npm run typecheck --prefix frontend
+npm run build --prefix frontend
 ```
 
-- 不传 `--checkpoint` 或 `--no-checkpoint` 时，采用
-  `TRADINGAGENTS_CHECKPOINT_ENABLED` 的开关状态；未设置该环境变量时默认为关闭。
-- `--checkpoint` 会强制启用检查点，`--no-checkpoint` 会强制关闭检查点，两者的
-  优先级都高于环境变量。
-- `--clear-checkpoints` 会在问卷开始前删除全部检查点数据库，但它本身不会启用
-  检查点；本次运行是否启用仍由前两项规则决定。
+CI 覆盖 Python 3.10–3.13、Ruff、前端单测、Playwright、OpenAPI/TS 类型
+漂移、wheel/fresh-install 以及 Docker Web+worker smoke。
 
-启用检查点后，如果已经存在匹配的已保存运行，CLI 会自动从该状态继续；如果没有，
-则会从头开始分析，并在节点完成后持续保存新的检查点。匹配条件包括规范化股票代码、
-分析日期、分析师组合、辩论深度、风险深度和资产类型；任一条件不同都会开始新的运行。
+离线测试验证 application、graph、Evidence、provenance 与 PIT 契约，无需网络
+或 LLM 调用；通过这些测试不等于证明模型研究质量、延迟或 token 消耗得到改善。
 
-匹配的检查点通常来自上一次已启用检查点、但在成功完成前意外中断的运行，而且中断前
-至少已有一个状态写入 SQLite。成功完成的运行会追加决策并清除对应的 checkpoint
-thread，因此下次不会恢复已经成功完成的分析。
+## 迁移、备份与许可
 
-直接通过 Python 调用时，可在图配置中设置 `checkpoint_enabled=True`。每只股票的
-SQLite 检查点会写入
-`~/.tradingagents/cache/checkpoints/`；可通过 `TRADINGAGENTS_CACHE_DIR`
-修改基础目录。
+- [Breaking migration guide](../migration-independent-platform.md)
+- 在线备份：`tradingagents db backup /path/to/backup.db`
+- 旧 report 目录保留为只读档案，不迁移旧 checkpoint。
+- reports、events、decisions、outcomes 和 reflections 默认长期保留。
+- 首版不提供永久删除 API。
 
-## 可复现性
-
-LLM 采样和实时数据意味着重复运行很难做到字节级一致。历史分析通过排除仅适用
-于实盘的社交数据、身份快照和财报快照来减少一个主要漂移来源。对于给定的已
-获取 payload，精确公司身份、规范股票代码、验证行情快照、来源信息和日期截止
-边界都是确定的。
-
-降低 `temperature` 只对支持它的模型有帮助；推理模型通常不会采用该参数。
-应把本框架视为研究脚手架，而不是具有固定、可复现收益的策略。
-
-## 开发
-
-默认测试会禁用项目 dotenv 加载、用占位凭据替换真实密钥，并跳过所有实时网络
-契约测试。
-
-```bash
-PYTHON_DOTENV_DISABLED=1 uv run --extra dev pytest -q
-PYTHON_DOTENV_DISABLED=1 uv run --extra dev ruff check .
-```
-
-跨市场实时数据契约测试需要显式启用，并串行执行：
-
-```bash
-RUN_LIVE_DATA_TESTS=1 PYTHON_DOTENV_DISABLED=1 \
-  uv run --extra dev pytest -q -m live_data
-```
-
-实时测试会验证 schema、已完成日期边界、宽泛合理值范围、实际来源和可审计的
-降级过程，而不会固定具体价格或行数。默认 pytest 和 CI 会收集但跳过这些测试。
-
-DeepSeek 线级集成测试需要单独显式启用：
-
-```bash
-RUN_LIVE_LLM_TESTS=1 DEEPSEEK_API_KEY=... \
-  uv run --extra dev pytest -q tests/test_deepseek_reasoning.py -m integration
-```
-
-欢迎参与贡献。共享开发规则见 [AGENTS.md](../../AGENTS.md)，长期设计契约见
-[架构文档](../architecture.md)，版本历史见 [CHANGELOG.md](../../CHANGELOG.md)。
-
-## 引用
-
-如果本框架支持了你的研究，请引用原始 TradingAgents 论文：
-
-```bibtex
-@misc{xiao2025tradingagentsmultiagentsllmfinancial,
-      title={TradingAgents: Multi-Agents LLM Financial Trading Framework},
-      author={Yijia Xiao and Edward Sun and Di Luo and Wei Wang},
-      year={2025},
-      eprint={2412.20138},
-      archivePrefix={arXiv},
-      primaryClass={q-fin.TR},
-      url={https://arxiv.org/abs/2412.20138},
-}
-```
+TradingAgentsX 使用 Apache-2.0 许可证，详见 [LICENSE](../../LICENSE) 与
+[NOTICE](../../NOTICE)，并保留对原 TradingAgents 项目和论文的归因。

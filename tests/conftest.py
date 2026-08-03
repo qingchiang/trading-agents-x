@@ -1,6 +1,7 @@
 """Shared pytest fixtures that prevent CI hangs when API keys are absent."""
 
 import os
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -73,33 +74,24 @@ def _dummy_api_keys(monkeypatch, request):
 
 @pytest.fixture(autouse=True)
 def _isolate_config():
-    """Reset the global dataflows config before and after each test.
-
-    ``set_config`` merges (it never clears keys absent from the override), so a
-    test that sets e.g. ``tool_vendors`` would otherwise leak into later tests
-    and make routing behavior order-dependent. Replace the global outright so
-    every test starts from a clean DEFAULT_CONFIG.
-
-    Also point ``data_cache_dir`` at a throwaway dir so any on-disk cache a test
-    exercises (the macro SeriesCache disk layer, the EDINET learned code map, …)
-    never reads, writes, or deletes the user's real cache. Tests that need to
-    inspect the cache still override it with their own tmp dir.
-    """
+    """Bind an isolated run-scoped dataflow config for every test."""
     import copy
     import tempfile
 
-    import tradingagents.dataflows.config as config_module
     import tradingagents.default_config as default_config
+    from tradingagents.dataflows.config import bind_config, reset_config
 
-    def _fresh():
+    def _fresh(cache_dir):
         cfg = copy.deepcopy(default_config.DEFAULT_CONFIG)
         cfg["data_cache_dir"] = cache_dir
         return cfg
 
     with tempfile.TemporaryDirectory() as cache_dir:
-        config_module._config = _fresh()
-        yield
-        config_module._config = _fresh()
+        token = bind_config(_fresh(cache_dir), merge=False)
+        try:
+            yield
+        finally:
+            reset_config(token)
 
 
 @pytest.fixture()
@@ -111,3 +103,28 @@ def mock_llm_client():
         return_value=client,
     ):
         yield client
+
+
+@pytest.fixture
+def app_settings(tmp_path: Path):
+    from tradingagents.application.settings import AppSettings
+
+    return AppSettings.from_env(
+        environ={
+            "TRADINGAGENTS_HOME": str(tmp_path),
+            "TRADINGAGENTS_DATABASE_PATH": str(
+                tmp_path / "tradingagents.db"
+            ),
+            "TRADINGAGENTS_CACHE_DIR": str(tmp_path / "cache"),
+        },
+        load_env_files=False,
+    )
+
+
+@pytest.fixture
+def repository(app_settings):
+    from tradingagents.application.repository import RunRepository
+    from tradingagents.persistence import upgrade_database
+
+    upgrade_database(app_settings)
+    return RunRepository(app_settings)

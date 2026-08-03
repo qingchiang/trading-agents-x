@@ -86,6 +86,12 @@ class TestTool:
             source="J-Quants",
         )
         assert "Data source: J-Quants" in snap
+        assert "| rsi |" in snap
+        assert "| index | — |" in snap
+        assert "| close_50_sma |" in snap
+        assert "| currency | JPY |" in snap
+        assert "| Volume |" in snap
+        assert "| quantity | shares |" in snap
 
     def test_renderer_rejects_stale_vendor_frame(self):
         with pytest.raises(NoMarketDataError, match="stale"):

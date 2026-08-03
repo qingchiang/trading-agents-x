@@ -7,10 +7,10 @@ from langchain_core.messages import ToolMessage
 from tradingagents.dataflows import interface
 from tradingagents.provenance import (
     ProvenanceRecord,
-    append_provenance_appendix,
     attach_provenance,
     extract_provenance,
     provenance_marker,
+    provenance_quality_issues,
 )
 
 
@@ -45,45 +45,7 @@ def test_extractor_reads_tool_messages_and_ignores_malformed_or_prose_claims():
 
 
 @pytest.mark.unit
-def test_appendix_is_deduplicated_escaped_and_marks_missing_expected_tools():
-    record = ProvenanceRecord(
-        evidence="get_fundamentals",
-        source="J-Quants | official",
-        requested="2026-07-17",
-        effective="disclosures <= 2026-07-17",
-        timing="point-in-time",
-    )
-    first = append_provenance_appendix(
-        "REPORT",
-        [record, record],
-        expected=(("get_income_statement", "income statement"),),
-        requested_date="2026-07-17",
-    )
-    second = append_provenance_appendix(
-        first,
-        [record],
-        expected=(("get_income_statement", "income statement"),),
-        requested_date="2026-07-17",
-    )
-
-    assert second.count("## Data Provenance") == 1
-    assert (
-        "REPORT\n\n<!-- tradingagents-data-provenance:start -->\n---\n\n"
-        "## Data Quality Warnings"
-        in second
-    )
-    assert second.index("## Data Quality Warnings") < second.index("## Data Provenance")
-    assert second.count("\n---\n") == 1
-    assert second.count("J-Quants \\| official") == 1
-    assert "| income statement | — | 2026-07-17 | — | not requested |" in second
-    assert (
-        "- **income statement** (source: —): expected evidence was not requested"
-        in second
-    )
-
-
-@pytest.mark.unit
-def test_appendix_warns_for_degraded_timing_but_not_routine_empty_results():
+def test_quality_issues_cover_degraded_timing_but_not_routine_empty_results():
     records = [
         ProvenanceRecord(
             evidence="fundamentals",
@@ -109,121 +71,17 @@ def test_appendix_warns_for_degraded_timing_but_not_routine_empty_results():
         ),
     ]
 
-    report = append_provenance_appendix("REPORT", records)
+    issues = provenance_quality_issues(records)
+    observed = {(issue.evidence, issue.source, issue.reason) for issue in issues}
 
-    assert "## Data Quality Warnings" in report
-    assert "- **fundamentals** (source: yfinance): not point-in-time" in report
-    assert "- **macro** (source: FRED): fallback source used" in report
+    assert ("fundamentals", "yfinance", "not point-in-time") in observed
+    assert ("macro", "FRED", "fallback source used") in observed
     assert (
-        "- **snapshot** (source: AkShare / yfinance): "
-        "no usable data from configured sources"
-    ) in report
-    assert "- **news**" not in report
-
-
-@pytest.mark.unit
-def test_appendix_omits_warning_block_when_all_sources_are_date_safe():
-    report = append_provenance_appendix(
-        "REPORT",
-        [
-            ProvenanceRecord(
-                evidence="snapshot",
-                source="AkShare / Eastmoney",
-                effective="2026-07-17",
-                timing="market-date filtered; future rows excluded",
-            )
-        ],
-    )
-
-    assert "Data Quality Warnings" not in report
-    assert "## Data Provenance" in report
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize(
-    "timing",
-    [
-        "available; no relevant items in window",
-        "available; no published records",
-        "available; no curated line items matched",
-        "available; curated line items contained no values",
-        "available; no qualifying records",
-    ],
-)
-def test_successful_empty_results_do_not_warn_when_effective_date_is_absent(timing):
-    report = append_provenance_appendix(
-        "REPORT",
-        [
-            ProvenanceRecord(
-                evidence="evidence",
-                source="vendor",
-                effective="—",
-                timing=timing,
-            )
-        ],
-        enabled=False,
-    )
-
-    assert report == "REPORT"
-
-
-@pytest.mark.unit
-def test_disabled_appendix_leaves_safe_report_unchanged():
-    record = ProvenanceRecord(
-        evidence="get_news",
-        source="EDINET",
-        effective="2026-07-01 to 2026-07-17",
-        timing="publication-date filtered",
-    )
-    assert append_provenance_appendix("REPORT", [record], enabled=False) == "REPORT"
-
-
-@pytest.mark.unit
-def test_disabled_appendix_keeps_material_warnings_without_provenance_table():
-    record = ProvenanceRecord(
-        evidence="macro",
-        source="FRED",
-        effective="2026-06-01",
-        timing="monthly fallback; observation-date filtered; non-vintage",
-    )
-
-    report = append_provenance_appendix("REPORT", [record], enabled=False)
-
-    assert report.count("## Data Quality Warnings") == 1
-    assert "## Data Provenance" not in report
-    assert "- **macro** (source: FRED): fallback source used" in report
-    assert "- **macro** (source: FRED): non-vintage series" in report
-    assert report.count("\n---\n") == 1
-
-
-@pytest.mark.unit
-def test_warnings_dedupe_by_evidence_source_and_issue():
-    records = [
-        ProvenanceRecord(
-            evidence="news",
-            source="EDINET",
-            effective="2026-07-01 to 2026-07-17",
-            timing="unavailable",
-        ),
-        ProvenanceRecord(
-            evidence="news",
-            source="EDINET",
-            effective="2026-07-01 to 2026-07-17",
-            timing="source unavailable for requested window",
-        ),
-        ProvenanceRecord(
-            evidence="news",
-            source="TDnet",
-            effective="2026-07-01 to 2026-07-17",
-            timing="unavailable",
-        ),
-    ]
-
-    report = append_provenance_appendix("REPORT", records, enabled=False)
-
-    assert report.count("source unavailable for requested date/window") == 2
-    assert "- **news** (source: EDINET)" in report
-    assert "- **news** (source: TDnet)" in report
+        "snapshot",
+        "AkShare / yfinance",
+        "no usable data from configured sources",
+    ) in observed
+    assert not any(issue.evidence == "news" for issue in issues)
 
 
 @pytest.mark.unit
@@ -242,8 +100,7 @@ def test_warnings_dedupe_by_evidence_source_and_issue():
 def test_warning_taxonomy_covers_material_retrieval_and_coverage_issues(
     timing, expected_reason
 ):
-    report = append_provenance_appendix(
-        "REPORT",
+    issues = provenance_quality_issues(
         [
             ProvenanceRecord(
                 evidence="evidence",
@@ -251,63 +108,25 @@ def test_warning_taxonomy_covers_material_retrieval_and_coverage_issues(
                 effective="2026-07-17",
                 timing=timing,
             )
-        ],
-        enabled=False,
+        ]
     )
 
-    assert f"- **evidence** (source: vendor): {expected_reason}" in report
+    assert expected_reason in {issue.reason for issue in issues}
 
 
 @pytest.mark.unit
 def test_warning_taxonomy_marks_unknown_source_and_effective_window_separately():
-    report = append_provenance_appendix(
-        "REPORT",
-        [ProvenanceRecord(evidence="evidence", source="unknown")],
-        enabled=False,
-    )
+    reasons = {
+        issue.reason
+        for issue in provenance_quality_issues(
+            [ProvenanceRecord(evidence="evidence", source="unknown")]
+        )
+    }
 
-    assert "- **evidence** (source: unknown): source metadata unknown" in report
-    assert "- **evidence** (source: unknown): effective date/window unknown" in report
-
-
-@pytest.mark.unit
-def test_repeated_append_rebuilds_one_section_when_appendix_setting_changes():
-    record = ProvenanceRecord(
-        evidence="fundamentals",
-        source="yfinance",
-        effective="current snapshot",
-        timing="live non-point-in-time",
-    )
-    combined_analyst_report = "## Market analyst\nOK\n\n## News analyst\nLIMITED"
-    with_table = append_provenance_appendix(combined_analyst_report, [record])
-    warnings_only = append_provenance_appendix(with_table, [record], enabled=False)
-
-    assert warnings_only.startswith(combined_analyst_report)
-    assert warnings_only.count("tradingagents-data-provenance:start") == 1
-    assert warnings_only.count("## Data Quality Warnings") == 1
-    assert "## Data Provenance" not in warnings_only
-    assert warnings_only.count("\n---\n") == 1
-
-
-@pytest.mark.unit
-def test_append_removes_every_existing_section_from_combined_reports():
-    record = ProvenanceRecord(
-        evidence="news",
-        source="EDINET",
-        effective="2026-07-01 to 2026-07-17",
-        timing="unavailable",
-    )
-    market_report = append_provenance_appendix("MARKET", [record])
-    news_report = append_provenance_appendix("NEWS", [record])
-
-    rebuilt = append_provenance_appendix(
-        f"{market_report}\n\n{news_report}", [record], enabled=False
-    )
-
-    assert rebuilt.startswith("MARKET\n\nNEWS")
-    assert rebuilt.count("tradingagents-data-provenance:start") == 1
-    assert rebuilt.count("## Data Quality Warnings") == 1
-    assert "## Data Provenance" not in rebuilt
+    assert reasons == {
+        "effective date/window unknown",
+        "source metadata unknown",
+    }
 
 
 @pytest.mark.unit
@@ -407,6 +226,53 @@ def test_stock_route_uses_actual_returned_trading_dates():
 
 
 @pytest.mark.unit
+def test_indicator_route_uses_latest_valid_indicator_observation() -> None:
+    result = (
+        "## atr values from 2026-07-27 to 2026-08-01:\n\n"
+        "Latest valid indicator observation: 2026-07-31\n\n"
+        "2026-08-01: N/A: Not a trading day (weekend or holiday)\n"
+        "2026-07-31: 160.18145\n"
+    )
+    with mock.patch.dict(
+        interface.VENDOR_METHODS,
+        {"get_indicators": {"yfinance": mock.Mock(return_value=result)}},
+    ), mock.patch.object(interface, "get_vendor", return_value="yfinance"):
+        marked = interface.route_to_vendor(
+            "get_indicators",
+            "6501.T",
+            "atr",
+            "2026-08-01",
+            5,
+            _provenance=True,
+        )
+
+    record = extract_provenance(marked)[0]
+    assert record.requested == "2026-08-01"
+    assert record.effective == "2026-07-31"
+
+
+@pytest.mark.unit
+def test_snapshot_route_uses_latest_verified_trading_row() -> None:
+    result = (
+        "## Verified market data snapshot for 6501.T\n\n"
+        "- Requested analysis date: 2026-08-01\n"
+        "- Latest trading row used: 2026-07-31\n"
+    )
+    with mock.patch.dict(
+        interface.VENDOR_METHODS,
+        {"get_verified_market_snapshot": {"fixture": mock.Mock(return_value=result)}},
+    ), mock.patch.object(interface, "get_vendor", return_value="fixture"):
+        marked = interface.route_to_vendor(
+            "get_verified_market_snapshot",
+            "6501.T",
+            "2026-08-01",
+            _provenance=True,
+        )
+
+    assert extract_provenance(marked)[0].effective == "2026-07-31"
+
+
+@pytest.mark.unit
 def test_historical_live_only_sentinel_keeps_not_queried_semantics():
     result = (
         "LIVE_DATA_UNAVAILABLE: yfinance .info is a current snapshot and was "
@@ -425,7 +291,9 @@ def test_historical_live_only_sentinel_keeps_not_queried_semantics():
 
     record = extract_provenance(marked)[0]
     assert record.effective == "—"
-    assert record.timing == "unavailable for historical date; vendor not queried"
+    assert record.timing == (
+        "live-only; unavailable for historical or future date; vendor not queried"
+    )
     assert record.retrieved_at is None
 
 

@@ -1,4 +1,6 @@
 import os
+from collections.abc import Mapping
+from copy import deepcopy
 
 _TRADINGAGENTS_HOME = os.path.join(os.path.expanduser("~"), ".tradingagents")
 
@@ -13,12 +15,6 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_QUICK_THINK_LLM":      "quick_think_llm",
     "TRADINGAGENTS_LLM_BACKEND_URL":      "backend_url",
     "TRADINGAGENTS_OUTPUT_LANGUAGE":      "output_language",
-    "TRADINGAGENTS_MAX_DEBATE_ROUNDS":    "max_debate_rounds",
-    "TRADINGAGENTS_MAX_RISK_ROUNDS":      "max_risk_discuss_rounds",
-    "TRADINGAGENTS_CHECKPOINT_ENABLED":   "checkpoint_enabled",
-    "TRADINGAGENTS_MEMORY_LOG_MAX_ENTRIES": "memory_log_max_entries",
-    "TRADINGAGENTS_MEMORY_CROSS_TICKER_LIMIT": "memory_cross_ticker_limit",
-    "TRADINGAGENTS_PROVENANCE_APPENDIX":  "provenance_appendix",
     "TRADINGAGENTS_BENCHMARK_TICKER":     "benchmark_ticker",
     "TRADINGAGENTS_TEMPERATURE":          "temperature",
     "TRADINGAGENTS_LLM_MAX_RETRIES":      "llm_max_retries",
@@ -37,12 +33,6 @@ _ENV_OVERRIDES = {
 
 _BOOL_TRUE = ("true", "1", "yes", "on")
 _BOOL_FALSE = ("false", "0", "no", "off")
-_NON_NEGATIVE_INT_KEYS = {
-    "memory_log_max_entries",
-    "memory_cross_ticker_limit",
-}
-
-
 def _coerce(value: str, reference):
     """Coerce env-var string to the type of the existing default value.
 
@@ -66,31 +56,26 @@ def _coerce(value: str, reference):
     return value
 
 
-def _apply_env_overrides(config: dict) -> dict:
-    """Apply TRADINGAGENTS_* env vars to the config dict in-place."""
+def _apply_env_overrides(
+    config: dict,
+    environ: Mapping[str, str] | None = None,
+) -> dict:
+    """Apply TRADINGAGENTS_* values at an explicit application boundary."""
+    env = os.environ if environ is None else environ
     for env_var, key in _ENV_OVERRIDES.items():
-        raw = os.environ.get(env_var)
+        raw = env.get(env_var)
         if raw is None or raw == "":
             continue
         try:
             config[key] = _coerce(raw, config.get(key))
-            if key in _NON_NEGATIVE_INT_KEYS and config[key] < 0:
-                raise ValueError(f"must be >= 0, got {config[key]}")
         except ValueError as exc:
             raise ValueError(f"Invalid value for {env_var}: {exc}") from exc
     return config
 
 
-DEFAULT_CONFIG = _apply_env_overrides({
+_BASE_CONFIG = {
     "project_dir": os.path.abspath(os.path.join(os.path.dirname(__file__), ".")),
-    "results_dir": os.getenv("TRADINGAGENTS_RESULTS_DIR", os.path.join(_TRADINGAGENTS_HOME, "logs")),
-    "data_cache_dir": os.getenv("TRADINGAGENTS_CACHE_DIR", os.path.join(_TRADINGAGENTS_HOME, "cache")),
-    "memory_log_path": os.getenv("TRADINGAGENTS_MEMORY_LOG_PATH", os.path.join(_TRADINGAGENTS_HOME, "memory", "trading_memory.md")),
-    # Global cap on resolved memory entries. Pending entries are never pruned;
-    # 0 disables rotation.
-    "memory_log_max_entries": 1000,
-    # Cross-ticker reflections injected into PM context. 0 disables them.
-    "memory_cross_ticker_limit": 3,
+    "data_cache_dir": os.path.join(_TRADINGAGENTS_HOME, "cache"),
     # LLM settings
     "llm_provider": "openai",
     "deep_think_llm": "gpt-5.5",
@@ -118,20 +103,9 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # provider/SDK at its own default (usually 2). Raise it to ride out bursty
     # 429 throttling on rate-limited deployments instead of aborting a run (#1091).
     "llm_max_retries": None,
-    # Checkpoint/resume: when True, LangGraph saves state after each node
-    # so a crashed run can resume from the last successful step.
-    "checkpoint_enabled": False,
-    # Append a deterministic source/timing audit table to analyst reports.
-    # Off by default because this debug output is verbose and is also consumed
-    # by downstream agents; source/date warnings in the report body remain.
-    "provenance_appendix": False,
     # Output language for analyst reports and final decision
     # Internal agent debate stays in English for reasoning quality
     "output_language": "English",
-    # Debate and discussion settings
-    "max_debate_rounds": 1,
-    "max_risk_discuss_rounds": 1,
-    "max_recur_limit": 100,
     # News / data fetching parameters
     # Increase for longer lookback strategies or to broaden macro coverage;
     # decrease to reduce token usage in agent prompts.
@@ -239,4 +213,19 @@ DEFAULT_CONFIG = _apply_env_overrides({
         ".SZ":  "399001.SZ",   # Shenzhen (SZSE Component)
         "":     "SPY",         # default for US-listed tickers (no suffix)
     },
-})
+}
+
+
+def build_default_config(
+    environ: Mapping[str, str] | None = None,
+) -> dict:
+    """Return a fresh config, optionally applying an explicit environment."""
+    config = deepcopy(_BASE_CONFIG)
+    if environ is not None:
+        _apply_env_overrides(config, environ)
+    return config
+
+
+# Imports are deterministic. Entry points call ``build_default_config`` through
+# ``AppSettings.from_env`` after they have explicitly loaded environment files.
+DEFAULT_CONFIG = build_default_config()

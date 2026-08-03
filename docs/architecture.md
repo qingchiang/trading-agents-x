@@ -1,244 +1,592 @@
-# Project Architecture
+# TradingAgentsX Architecture
 
-This document records durable subsystem boundaries and data-quality contracts.
-Code and tests remain authoritative for exact schemas, limits, and retry values.
+This document defines durable subsystem boundaries and correctness contracts.
+Code and tests remain authoritative for exact schemas, limits, and provider
+behavior. The product-line decision is recorded separately in
+[ADR 0001](adr/0001-independent-product-line.md).
 
-## Runtime flow
+## Scope
 
-`TradingAgentsGraph` in `tradingagents/graph/trading_graph.py` is the public
-Python API. `propagate(ticker, trade_date, asset_type="stock")` normalizes the
-instrument and returns `(final_state, decision)`.
+TradingAgentsX is a local, single-user research system:
 
-The interactive CLI also runs through `propagate()`, using its optional stream
-callback to render full-state chunks. This keeps memory-log preparation and
-commit, checkpoint resume and cleanup, instrument context, and graph callbacks
-under one lifecycle. A resumed invocation submits no new graph input; its first
-streamed value is the restored checkpoint snapshot.
+- one Web process and, by default, one analysis worker;
+- one SQLite database on a local filesystem shared by those processes;
+- US/default, Japanese, China A-share, and compatible crypto/FX data paths;
+- research decisions, not accounts, holdings, cash, execution, or rebalancing;
+- no multi-tenancy, collaboration, schedules, watchlists, or cross-host worker
+  fleet in this architecture.
 
-```text
-analysts → bull/bear debate → research manager → trader
-         → risk debate → portfolio manager → reflection
+SQLite repositories and the LangGraph checkpointer may later be replaced by
+PostgreSQL-backed implementations without changing public research contracts.
+Redis is not part of the local architecture.
+
+## System boundaries
+
+```mermaid
+flowchart TB
+    subgraph Clients
+        WEB["React Web UI"]
+        PY["TradingAgents Python API"]
+        CLI["Typer CLI"]
+    end
+
+    WEB --> HTTP["FastAPI /api/v1"]
+    HTTP --> SERVICE["AnalysisService"]
+    PY --> SERVICE
+    CLI --> SERVICE
+    SERVICE --> REPO["RunRepository"]
+    REPO --> DB[("SQLite + WAL")]
+    WORKER["AnalysisWorker"] --> REPO
+    WORKER --> SERVICE
+    SERVICE --> GRAPH["ResearchGraph"]
+    GRAPH --> DATA["Market dataflows"]
+    GRAPH --> CHECKPOINT["LangGraph SQLite saver"]
+    CHECKPOINT --> DB
+    SETTLE["OutcomeSettlement"] --> REPO
+    WORKER --> SETTLE
+    DB --> SSE["Persistent SSE replay"]
+    SSE --> WEB
 ```
 
-The graph is assembled in `tradingagents/graph/setup.py`. Market, News,
-Sentiment, and Fundamentals analysts are independently configurable. Sentiment
-prefetches evidence instead of tool-calling; News prefetches the cross-region
-macro panel.
+### Public contracts
 
-### Decision memory
+`tradingagents` exports:
 
-Successful graph runs append a pending decision to the shared Markdown memory
-log. A later fresh run for the same ticker settles eligible pending decisions
-with realized and benchmark-relative returns, then injects memory into the
-portfolio-manager context. Pending entries are retained without a count or age
-limit. Resolved entries have a configurable global cap (1,000 by default);
-rotation removes the oldest resolved blocks in file order and never removes
-pending blocks.
+- `TradingAgents`
+- `AnalysisRequest`
+- `AnalysisResult`
+- `ResearchDecision`
+- `RunProfile`
 
-Settlement uses a fixed five-session outcome window. Ticker and benchmark
-histories end at their respective `market_today()` dates (exclusive), retain
-their exchange-local calendar labels, and are intersected by date. A pending
-record matures only when six common completed closes exist; returns use the
-first and sixth closes, producing five aligned trading intervals. Raw return is
-`end_stock / start_stock - 1`; alpha subtracts the benchmark return over those
-same dates. A fresh run for the same ticker performs this settlement before
-context construction; checkpoint restoration does not.
+`TradingAgentsGraph` is not a public compatibility surface. Direct callers and
+the CLI enter through `TradingAgents`/`AnalysisService`, which ensures that
+persistence and lifecycle behavior cannot be bypassed accidentally.
 
-The reflection prompt receives the ticker, benchmark, aligned-session count,
-observation dates, raw return, alpha, and original decision. It follows the
-configured output language and frames the result as short-term market feedback,
-not proof or disproof of a medium- or long-term thesis. It may compare the
-short-term move only with evidence explicitly present in the stored decision.
-The reflector deterministically prefixes the generated prose with the
-language-neutral observation range (`[start → end | 5d]`), so exact dates
-survive storage even when the model does not repeat them.
+`ResearchDecision` is intentionally account-free:
 
-Context selection keeps up to five full resolved entries for the same ticker.
-Cross-ticker context is reflection-only and defaults to the three most recent
-resolved entries whose asset type and regional market both match. Regional
-markets use the existing `market_timezone()` identity; crypto uses one
-`CRYPTO` bucket. New entries persist this identity in an optional `META` line.
-Legacy entries without metadata remain unchanged on disk and infer asset type
-and market from their canonical ticker when read.
+```text
+rating
+confidence
+executive_summary
+thesis
+evidence_refs
+memory_refs
+catalysts
+risks
+invalidation_conditions
+unresolved_questions
+time_horizon
+scenarios[base, bull, bear]
+valuation_assessment
+market_reference_levels
+risk_review_adjustments
+numeric_audit_status
+```
 
-Only resolved entries with a parseable holding window of at least `5d` are
-eligible for either context path. Older shorter-window entries and entries
-whose holding window is missing or malformed remain unchanged on disk but are
-excluded from context.
+Failed optional numeric candidates never enter `ResearchDecision`. A separate
+`DecisionNumericAuditAppendix` may retain up to two sanitized, parsed JSON
+snapshots (initial and repair), their safe validation issue codes, and the
+components omitted from the canonical decision. It is persisted atomically
+with the decision for user inspection and export, but memory retrieval,
+outcome settlement, ratings, and thesis generation ignore it.
 
-## Cross-cutting contracts
+Decision-critical calculations keep model-proposed formulas, named numeric
+inputs, units, limitations, and evidence references. The strict qualitative
+decision core also declares every derived exact number that materially affects
+its thesis, risks, invalidation conditions, scenarios, or risk-review response.
+Final qualitative serialization uses the provider's schema-focused client,
+while Final numeric selection uses the corresponding reasoning client. For
+DeepSeek V4 this means thinking-mode JSON Output followed by local Pydantic,
+Evidence, formula, date, and semantic validation; JSON validity is not treated
+as schema or research correctness.
+Debate Agenda likewise uses the profile-selected reasoning client because
+identifying material disagreements is a semantic research task rather than a
+mechanical audit. Shallow Analyst and deliberation audits continue to use
+schema-focused clients or deterministic extraction.
+The numeric serializer must satisfy those declarations with calculation IDs;
+each retained calculation publishes its decision-component uses. The
+application evaluates formulas with a restricted arithmetic interpreter and is
+the sole source of the canonical result and date. A missing or invalid optional
+calculation degrades numeric audit status to `partial` without discarding an
+otherwise valid qualitative decision. Canonical dates come from the latest
+relevant Evidence Ledger effective date and are never guessed from the analysis
+date.
 
-### Symbols and markets
+Formula results remain in canonical units. Reader-facing compact quantities use
+a separate, typed display scale (for example `hundred_million`); unit text is
+never parsed to infer that scale. Ratio formulas for percent and percentage-point
+values are converted by the application, as are ratio formulas expressed in
+basis points. The persisted audit comparison therefore retains both the raw
+canonical result and the deterministically scaled reader-facing value.
+Reader-facing values that differ by no more than one declared last-place unit
+and one percent relative error are retained as `approximately_matched`; this
+does not weaken formula, unit, sign, Evidence, or PIT validation and does not
+degrade an otherwise complete numeric audit.
+Serializer-facing operands remain ASCII identifiers. If a provider returns an
+otherwise unambiguous Unicode identifier, the application rewrites the formula
+AST and operands to stable `v1`, `v2`, and later names before validation; it
+never guesses an ambiguous mapping. A displayed derived range declares separate
+low and high requirements, so one scalar requirement cannot validate two
+different calculations.
 
-`normalize_symbol` converts supported aliases to the Yahoo-compatible canonical
-symbols used internally. It handles broker aliases, forex/crypto forms, bare
-A-share codes, and `CODE.SH` → `CODE.SS` before vendor routing.
+Non-personalized ratings, conditional investment views, auditable valuation
+ranges, scenarios, and market reference levels are allowed. Position
+percentage, account configuration, order quantity/type, broker instructions,
+mandatory entry/stop/take-profit levels, guarantees, and personalized
+execution fields do not belong in this contract.
 
-The initial China scope supports Shanghai and Shenzhen individual A-share
-equities. Ambiguous six-digit securities and Beijing `.BJ` fail loudly. A
-suffix in `benchmark_map` does not imply a dedicated vendor route: `.HK`, for
-example, has benchmark/calendar-aware Yahoo behavior but no HK dataflow.
+### Settings and runtime context
 
-One longest-match suffix helper drives vendor routing and benchmark selection,
-so `BRK.B` is not mistaken for an exchange suffix. `benchmark_ticker`, when set,
-overrides the regional `benchmark_map`.
+`AppSettings` and `RunSettings` are immutable Pydantic models.
+`AppSettings.from_env()` is called at an application entry point; dotenv files
+are never loaded as a package-import side effect. Provider keys remain in the
+process environment and are excluded from persisted configuration snapshots.
 
-### Analysis date and point-in-time safety
+Every run resolves its own `RunSettings` and immutable `RunContext`. LangGraph
+runtime context and `ToolRuntime` carry the request, analysis date, instrument
+context, dataflow configuration, memory, cancellation callback, and event
+writer. The dataflow `ContextVar` bridge exists only to support established
+adapter signatures during one scoped invocation; there is no mutable package
+configuration or `set_config()` operation.
 
-Direct tools retain their public signatures. Graph-facing variants inject
-`trade_date` from workflow state, hiding the cutoff from the LLM. All sources
-must truncate observations to it; sources with disclosure/update timestamps use
-the later visibility date conservatively.
+Two runs with different provider, model, reasoning, language, or vendor
+settings must remain isolated even if worker concurrency changes in the future.
 
-Live-only snapshots are withheld from historical runs. A provider without
-strict historical PIT support must fail closed or label the limitation. US
-yfinance statements are period-end-filtered and marked non-PIT; historical JP
-statements do not use current yfinance frames. Historical identity uses
-exact-symbol search metadata rather than current yfinance `.info`.
+## Application lifecycle
 
-### Routing, assemblers, and failures
+`AnalysisService` is the lifecycle owner. It:
 
-Agent tools call `route_to_vendor` in `tradingagents/dataflows/interface.py`.
-Configuration resolves in this order:
+1. normalizes and validates `AnalysisRequest`;
+2. resolves and redacts run configuration;
+3. creates or idempotently returns a run;
+4. retrieves deterministic decision memory;
+5. builds per-run LLM clients and `RunContext`;
+6. executes or resumes the graph;
+7. persists events, reports, evidence, decision, metrics, and warnings;
+8. cleans up or retains checkpoints according to terminal state;
+9. creates a pending outcome for background settlement.
+
+Graph nodes return state; they do not write files, reports, or application
+tables.
+
+### Run state and attempts
+
+```text
+queued → running → succeeded
+                 ↘ failed
+                 ↘ cancelled
+```
+
+The worker atomically claims one queued run and sets a lease. A process crash
+leaves the run recoverable after lease expiry. Heartbeats extend active leases.
+`tradingagents start` is a local foreground supervisor that health-gates and
+monitors the otherwise independent Web and worker processes; production-style
+and Docker deployments continue to manage those processes separately. Its
+merged output retains child colors and adds distinct service labels. The first
+interrupt requests cooperative shutdown and waits up to 30 seconds; a second
+interrupt forces termination.
+
+- `retry` is valid for a failed run, increments its attempt, and reuses the
+  compatible checkpoint thread.
+- a terminal run can seed an editable New Run form; submitting it creates a
+  linked run with a new ID and fresh data/evidence snapshot.
+- a queued cancellation becomes terminal immediately;
+- a running cancellation is checked cooperatively at graph-node boundaries;
+- supervisor shutdown returns a running claim to the queue at the next node
+  boundary without changing its attempt or deleting its checkpoint;
+- an in-flight provider call is force-killed only after the supervisor grace
+  period, after which lease expiry provides crash recovery.
+
+Successful and cancelled runs delete their checkpoint thread. Failed runs keep
+it for retry or later trash cleanup.
+
+### Trash lifecycle
+
+Only terminal runs can be moved to Trash. A trashed run remains readable and
+exportable, but is excluded immediately from default run listings, Dashboard
+summaries, Memory and `MemoryContext`, pending outcome settlement, and
+recent-instrument suggestions. Restore is idempotent and re-enables those
+consumers.
+
+The Web process performs one opportunistic expiry check at startup. The worker
+checks before its first claim and uses a monotonic in-process deadline for
+subsequent checks: 24 hours after success or one hour after failure. UTC
+database timestamps determine the configured retention boundary. Cleanup uses
+bounded SQLite write transactions, rechecks that each candidate is still
+trashed before deletion, removes its checkpoint and owned application rows,
+and detaches any child reruns. Concurrent Web/worker checks are therefore
+idempotent. `TRADINGAGENTS_TRASH_RETENTION_DAYS=0` disables permanent cleanup.
+
+`runs.instrument_name` stores the identity resolver's preferred display value
+(`short_name`, then `company_name`, `long_name`, or `name`). Resolution failure
+does not fail research. The recent-instruments API deduplicates non-trashed
+runs by ticker and never derives names from LLM output.
+
+### Database
+
+Alembic manages application tables:
+
+| Table | Responsibility |
+| --- | --- |
+| `runs` | request, redacted settings snapshot, status, lease, error, metrics |
+| `run_attempts` | attempt state, checkpoint thread, lease and resume count |
+| `run_events` | per-run monotonic sequence, attempt, node, sanitized payload |
+| `run_artifacts` | versioned analyst, deliberation, and decision-stage artifacts |
+| `run_evidence` | independently sealed EvidenceBundle and digest |
+| `decisions` | typed final decision, numeric audit appendix, market identity |
+| `outcomes` | benchmark, five-interval dates, raw return, alpha |
+| `reflections` | outcome-aware research reflection |
+
+LangGraph saver tables live in the same database file but remain owned by its
+saver. Application code does not treat them as domain tables.
+
+Every SQLite connection enables foreign keys, WAL, a bounded busy timeout, and
+normal synchronous mode. WAL still permits only one writer at a time. The
+database and `-wal`/`-shm` files must be on one host-local filesystem; NFS/SMB
+deployment is unsupported.
+
+`tradingagents db backup` uses SQLite's online backup operation and is the
+supported backup boundary.
+
+### Events and SSE
+
+Events are sanitized and committed before an in-process callback or SSE client
+can observe them. `run_events.sequence` is unique and monotonically increasing
+within a run.
+
+`GET /api/v1/runs/{id}/events`:
+
+1. takes the greater of `after` and `Last-Event-ID`;
+2. replays committed events after that sequence;
+3. polls for new events and emits periodic keepalives;
+4. closes after the run reaches a terminal state.
+
+Browser refresh therefore does not lose progress. SSE is one-way by design;
+run mutations use ordinary HTTP endpoints.
+
+## Evidence-first research graph
+
+### Independent analyst channels
+
+Market, Social/Sentiment, News, and Fundamentals collection agents begin in the
+same LangGraph superstep but use independent local message state and tools.
+After every collection channel completes, the graph seals and persists one
+immutable EvidenceBundle before any formal report is written. The four report
+writers then run in parallel with deterministic analyst-specific contexts
+containing the collection memo, compact source passages, analytical views, and
+table summaries/resampling; there is no LLM evidence-planning pass. A small
+non-thinking audit-extraction step follows each Markdown report. The durable
+`AnalystReport` handoff is:
+
+```text
+analyst
+markdown
+report_sections[{id, title, anchor, source_refs}]
+confidence
+key_claims[{id, section_id, kind, importance, statement, implication,
+            confidence, evidence_refs}]
+source_refs
+audit_status: complete | incomplete
+warnings
+```
+
+Markdown is the formal human-readable report. It may contain headings, lists,
+and GFM tables, and is not reconstructed from typed rows or cells. A
+non-thinking serializer extracts only the small navigation and claim audit
+envelope. If that extraction still fails after one bounded repair, the Markdown
+report is preserved with `audit_status=incomplete` and the graph continues. A
+missing or truncated report body still fails the analyst node.
+
+### Evidence sealing
+
+Each `EvidenceItem` records:
+
+```text
+ref
+source
+evidence_type
+requested_date
+effective_date
+available_at
+content or value
+unit
+quality
+fallback
+provenance
+```
+
+`EvidenceBundle(version="8")` deduplicates items, validates unique references,
+rejects effective dates after the analysis cutoff, interprets `available_at`
+in the instrument's market timezone, and seals both evidence items and
+deterministic raw `EvidenceTable` objects with a digest.
+
+The sealed bundle is written to `run_evidence` independently of the run's final
+status. Evidence sealing and its `evidence.sealed` event commit atomically, so a
+running or failed run can still expose the immutable ledger. Analyst artifacts,
+deliberation artifacts, and the final decision are also durable as soon as each
+stage completes; Run Detail and exports therefore show partial research rather
+than treating an unsuccessful attempt as empty.
+
+`EvidenceTable` is an audit fact table containing canonical raw values and
+source mappings. It is available on the Evidence page and as CSV in the
+research package, but is never copied wholesale into a model prompt or forced
+into a user report. Analysts receive a compact catalog, deterministic
+analytical views, table summaries/resampling, and source passages that do not
+duplicate a large fact table. Read-only local lookups operate on the sealed
+artifacts without recontacting the provider.
+
+Data adapters may attach small producer-owned structured numeric facts (for
+example analyst target prices and consensus EPS) beside readable source prose.
+Evidence sealing converts those facts into `source_format=structured` tables,
+so Final numeric audit does not scrape narrative text for a number, unit, or
+observation date. Calculation inputs may identify only the Evidence refs that
+establish their dates; explanatory background refs remain auditable without
+advancing or blocking the calculation date.
+
+### Markdown-first deliberation
+
+Post-analyst roles use a deterministic `RoleContextBuilder`. Every prompt starts
+with byte-identical system rules and a stable Research Dossier containing the
+instrument, cutoff, report/claim index, and metadata-only Evidence catalog.
+Role-specific material comes afterwards:
+
+- bull/bear receive complete Analyst Markdown and primary evidence summaries;
+- the agenda receives the two cases and claim index, and is generated directly
+  as a small typed artifact;
+- rebuttals receive the agenda, cases, prior rounds, and evidence already cited
+  by those artifacts;
+- the judge receives complete reports plus cases, agenda, and rebuttals;
+- risk receives the judge, agenda, report risk sections, and cited evidence;
+- final receives complete reports, judge, risk reviews, unresolved issues, and
+  decision-critical evidence, but not complete case/rebuttal history.
+
+There is no post-analyst LLM evidence-planning pass. The full raw
+EvidenceBundle is never broadcast to research roles, while the stable prefix
+allows the same provider/model to reuse its automatic context cache.
+
+Visible research-process artifacts have separate contracts:
+
+```text
+ResearchCase       role plus readable Markdown
+DebateAgenda       short summary plus prioritized issue IDs and questions
+RebuttalReview     role Markdown plus addressed and open issue IDs
+JudgeDraft         judge Markdown, preliminary rating, and issue dispositions
+RiskReview         role Markdown plus challenged and unresolved issue IDs
+ResearchDecision   strict final opinion, scenarios, calculations, and evidence
+```
+
+Cases and risk reviews use a reasoning-model Markdown write followed by a
+deterministic intersection with the valid claim, section, and issue IDs already
+present in graph state. Rebuttals and the judge use a small non-thinking audit
+against an explicit valid-ID list. If that shallow audit cannot be validated,
+the readable Markdown is preserved with `markdown_audit_incomplete`: Standard
+continues with no open rebuttal issues, Deep conservatively keeps agenda issues
+open, and a judge fallback leaves rating/confidence unknown while marking every
+issue unresolved. Graph routing depends on stable issue IDs and dispositions,
+not on parsing prose. The Final Committee uses a reasoning pass to form the
+synthesis brief, a strict serializer for the qualitative decision core, and a
+small serializer for the optional numeric appendix. Only derived,
+decision-critical valuation, scenario, or market-reference arithmetic uses
+`CalculationRecord`; directly observed market references remain evidence-backed
+observations. A numeric appendix gets one bounded repair. If it still cannot be
+fully audited, independently valid components are retained and the remaining
+numeric fields are omitted with an explicit warning instead of discarding the
+strict qualitative conclusion. Failed initial and repair candidates are kept
+only as a size-bounded, recursively redacted numeric audit appendix; raw
+provider messages, prompts, and hidden reasoning are never persisted.
+
+Every artifact records its prompt version and structured generation method. No
+artifact stores hidden reasoning traces or raw provider conversations.
+
+Adapters may still encode transport provenance in versioned markers. Analyst
+nodes extract those markers from tool messages into typed evidence and remove
+the control syntax from human narrative. Prose is never the canonical
+provenance transport between graph stages.
+
+### Profiles
+
+```mermaid
+flowchart LR
+    A["Parallel analysts"] --> E["Seal EvidenceBundle"]
+    E -->|Fast| FC["Final committee"]
+    E -->|Standard/Deep| BB["Bull + bear cases"]
+    BB --> DA["Debate agenda"]
+    DA --> R1["Required cross-rebuttal round"]
+    R1 -->|Standard| J["Research judge"]
+    J --> SR["Single risk reviewer"]
+    SR --> FC
+    R1 -->|Deep, material issue remains| R["0–2 additional rounds"]
+    R --> J2["Research judge"]
+    J2 --> RL["Aggressive + neutral + conservative risk lenses"]
+    RL --> FC
+```
+
+- **Fast:** no debate; the committee directly synthesizes analyst reports.
+- **Standard:** parallel bull/bear cases, a debate agenda, one required
+  cross-rebuttal round, a judge draft, one integrated risk review, then a final
+  committee.
+- **Deep:** parallel bull/bear cases, a debate agenda, one required and at most
+  two additional targeted rebuttal rounds, a judge draft, three parallel risk
+  lenses, then a final committee.
+
+Fast final synthesis and Standard judge/final synthesis use the deep model.
+Other Standard deliberation roles use the quick model. Deep uses the deep
+model for every case, agenda, rebuttal, judge, risk, and final role; analyst
+tool collection and report synthesis continue to use the quick model.
+
+Deep always executes its first targeted rebuttal. A later round requires a
+materially open agenda issue plus new evidence, a new causal mechanism, or a
+specific claim rejection; repeated thesis prose does not keep the loop alive.
+Role nodes are produced from `RoleSpec`; separate persona modules do not
+duplicate state copying and prompt assembly. There is no Trader node.
+
+### Observable execution phases
+
+Metrics and events use stable phase suffixes. They describe execution
+responsibility rather than separate public graph nodes:
+
+| Phase | Meaning |
+| --- | --- |
+| `collect` (or the base `analyst.<role>` node) | Deterministic data/tool collection; normally no LLM call |
+| `context` | Deterministic role-context assembly; no provider call |
+| `report`, `write`, `reason` | Reasoning-model report, deliberation Markdown, or final synthesis brief |
+| `audit` | Non-thinking extraction of a small report/deliberation audit envelope |
+| `serialize` | Non-thinking mapping of the final synthesis to the strict decision contract |
+
+Per-phase wall time surrounds the actual operation, so LLM calls, tool calls,
+tokens, and elapsed time belong to the same phase. Run Detail orders these rows
+by their first persisted timeline event, not by duration.
+
+## Decision memory and outcomes
+
+The repository supplies deterministic context:
+
+- up to five most recent resolved full entries for the same ticker;
+- up to three most recent resolved reflection-only entries for a different
+  ticker in the same asset type and regional market;
+- pending outcomes and legacy outcomes shorter than five intervals are excluded.
+
+No vector database is used. This avoids introducing an unmeasured semantic
+similarity feedback loop.
+
+Outcome settlement is a low-priority worker task, independent of a future run
+for the same ticker. Ticker and benchmark histories retain their own
+exchange-local date labels and are intersected by date. Six common completed
+closes form five intervals:
+
+```text
+raw return = ticker_close[5] / ticker_close[0] - 1
+alpha      = raw return - (benchmark_close[5] / benchmark_close[0] - 1)
+```
+
+Each pending outcome stores its next due time. The initial check is no earlier
+than the market-local day after six plausible closes (daily for crypto,
+weekdays as the lower bound for other markets). An incomplete observation is
+deferred for 24 hours; a provider or transport failure is retried after one
+hour. Exchange holidays therefore degrade to bounded daily checks instead of
+the worker poll interval.
+
+The stored range and reflection describe short-term feedback. They are not the
+sole truth for long-horizon thesis validity or graph quality.
+
+## Data routing and point-in-time contracts
+
+### Symbols and market dates
+
+`normalize_symbol` converts supported aliases to canonical
+Yahoo-compatible symbols before routing. It covers broker aliases, common
+forex/crypto forms, bare A-share codes, and `CODE.SH` → `CODE.SS`.
+Ambiguous or unsupported mainland symbols fail loudly.
+
+The analysis cutoff uses the instrument market's timezone, never the host's
+calendar or an unconditional UTC date. Historical tools receive that cutoff
+from runtime context rather than an LLM-provided argument.
+
+Sources truncate observations to the cutoff. A disclosure/update source uses
+the conservative visibility boundary. Live-only values are withheld from
+historical runs; absence remains unknown rather than becoming a neutral or
+bearish signal.
+
+### Vendor chains and assemblers
+
+Configuration resolution remains:
 
 1. `tool_vendors[method]`
 2. `data_vendors_by_market[suffix][category]`
 3. `data_vendors[category]`
 
-Comma-separated values are exact ordered fallback chains; the router never adds
-an unconfigured vendor. `default` selects every implementation registered for
-the method. The router is first-success: multi-source composition belongs in an
-assembler, which owns fault isolation, deduplication, and final caps. JP/CN news
-and market-specific fundamentals use this pattern.
-
-Global news, macro, and prediction markets are ticker-less and always use the
-default category route. No per-run market `ContextVar` exists.
-
-Adapters normalize missing configuration, throttling, empty/stale results,
-request failures, and schema failures. The router logs a failed leg and tries
-the next configured vendor. Exhausted clean no-data results become
-`NO_DATA_AVAILABLE`; optional macro/prediction retrieval errors degrade to an
-unavailable sentinel. Market prefetchers must also never abort the graph.
-Retries, timeouts, caches, and HTTP behavior remain local to each subsystem.
-
-### Provenance and quality warnings
-
-Vendor results carry structured provenance in versioned HTML comments. Analyst
-nodes extract it from tool messages; provenance is never inferred from LLM
-prose. Records identify evidence, actual source, requested/effective dates, and
-timing or fallback status.
-
-Material fallback, missing/partial coverage, truncation, stale data, and
-non-PIT/non-vintage limitations always render under `Data Quality Warnings`.
-Successful empty news windows do not warn. `provenance_appendix` controls only
-the detailed `Data Provenance` table.
-
-### Configuration
-
-`tradingagents/default_config.py` defines defaults and the centralized
-`TRADINGAGENTS_*` environment mapping. Runtime `set_config` calls replace
-scalars but merge dict-valued top-level keys one level deep. Tests reset with a
-deep copy of `DEFAULT_CONFIG` rather than another merge.
-
-## Market dataflows
-
-Parentheses denote sources composed inside an assembler; arrows are ordered
-fallback. Alpha Vantage remains available only through explicit configuration.
+A comma-separated value is an exact ordered fallback chain. The router never
+adds an unconfigured vendor. First-success routing and multi-source composition
+are different operations: an assembler owns composition, fault isolation,
+deduplication, and final caps.
 
 | Market | Prices/indicators | Fundamentals/statements | Ticker news |
 | --- | --- | --- | --- |
 | US/default | yfinance | yfinance | yfinance |
-| Japan `.T` | J-Quants → yfinance | JP method-specific assemblers → J-Quants → yfinance | JP assembler (EDINET + TDnet + Google News) → yfinance |
-| China `.SS`/`.SZ` | AkShare adapter (Tencent qfq → Eastmoney qfq) → yfinance | CN assemblers (CNINFO + Sina) → yfinance | CN assembler (CNINFO + Eastmoney Research + Google News) → yfinance |
+| Japan `.T` | J-Quants → yfinance | JP assemblers → J-Quants → yfinance | EDINET + TDnet + Google News → yfinance |
+| China `.SS`/`.SZ` | Tencent qfq → Eastmoney qfq → yfinance | CNINFO + Sina → yfinance | CNINFO + Eastmoney Research + Google News → yfinance |
 
-### US/default
+Ticker-less global news, macro, and prediction markets stay market-agnostic.
+Macro panel cells fail independently and retain actual-source/fallback
+provenance.
 
-Unsuffixed instruments use yfinance unless configured otherwise. StockTwits and
-Reddit are near-live sentiment sources and are not queried for historical runs.
-Generic yfinance statements carry explicit period-end-only/non-PIT labels.
+### Failures and quality
 
-### Japan
+Adapters use the typed vendor failure taxonomy. Missing configuration,
+rate-limit, transport, schema, stale, and valid-empty outcomes remain
+distinguishable. Retries, timeouts, caches, and HTTP behavior stay local to an
+adapter or its subsystem utility.
 
-- J-Quants API v2 supplies adjusted OHLCV, indicators, summaries, TOPIX, and
-  optional positioning signals; yfinance is the configured keyless fallback.
-- `jp_fundamentals` computes disclosure-safe ratios and TOPIX-weekly beta.
-  `jp_statements` permits curated yfinance detail only near-live.
-- `jp_news` keeps EDINET filings, TDnet disclosures, and Google News together,
-  then deduplicates under one article budget.
-- Sentiment uses per-name J-Quants margin/short data, EDINET holdings/TOB
-  filings, and live-only yfinance ratings. Exchange-section flows are News-level
-  context, not ticker sentiment.
-- EDINET date lists share bounded memory and gzip disk caches. Current-day data
-  remains short-lived and is not persisted as settled history.
+Material fallback, missing/partial coverage, truncation, staleness, and
+non-PIT/non-vintage limitations become typed warnings. A successful empty news
+window is not itself a warning.
 
-### China A-shares
+## Security boundary
 
-- Prices, snapshots, and indicators share forward-adjusted (`qfq`) OHLCV.
-  Tencent precedes Eastmoney; router-level yfinance fallback is flagged because
-  the adjustment provider changed.
-- `cn_fundamentals` combines a current-reference CNINFO profile with
-  disclosure-filtered Sina abstracts; `cn_statements` serves the Sina statements.
-  Financial/general mappings are separate. Current yfinance valuation is
-  omitted historically; any needed yfinance statement supplement is labeled
-  non-strict PIT.
-- `cn_news` fetches exact-code CNINFO announcements, Eastmoney research, and
-  Chinese Google News independently, then deduplicates under one cap. A bounded
-  exact-cutoff cache lets News and Sentiment reuse low-frequency candidates.
-- Sentiment covers SSE/SZSE margin data, Eastmoney holding changes with
-  conditional CNINFO fallback, Sina ratings with Eastmoney Research fallback,
-  and important CNINFO announcements. Missing coverage is unknown, not neutral.
-  StockTwits and Reddit are not queried for routed A-shares.
+The normal server binds to loopback and needs no login. LAN mode requires one
+environment token; the login endpoint exchanges it for a signed, expiring,
+`HttpOnly`, `SameSite=Strict` cookie. Mutating requests validate same origin.
 
-## Cross-region macro
+Provider keys, authorization headers, LAN tokens, session secrets, raw provider
+exceptions, and sensitive tool arguments must not be stored in application
+tables, events, SSE, API errors, or browser logs. Settings/capability endpoints
+expose only whether a key is configured.
 
-Macro is ticker-less. News receives a never-raising US/Japan/China panel;
-`get_macro_indicators` exposes the underlying series through content dispatch.
+This is a single-user local boundary. It does not provide TLS, user accounts,
+roles, tenant isolation, or Internet-facing hardening.
 
-| Series | Source chain |
-| --- | --- |
-| US macro, USD/JPY, dollar index, VIX | FRED |
-| Japan policy rate and Tankan | BOJ |
-| Japan CPI/core CPI | e-Stat |
-| Japan 10Y | Ministry of Finance daily → FRED monthly |
-| Japan GDP/unemployment | FRED |
-| China 1Y LPR | Eastmoney |
-| China CPI/GDP/official PMI | recent NBS release → non-vintage Eastmoney |
-| China unemployment | latest eligible NBS release |
-| China 10Y | Eastmoney → limited latest ChinaMoney curve snapshot |
-| USD/CNY central parity | SAFE → Eastmoney |
+## Validation boundaries
 
-US/Japan CPI and GDP panel cells require the exact prior-year calendar point;
-missing counterparts render `n/a`. China CPI/GDP preserve source-provided YoY.
-Microscope reports retain the raw observation series.
+The default suite is offline. It covers configuration isolation, lifecycle
+transitions, lease recovery, event ordering, checkpoint resume/cleanup,
+SSE replay, cancellation/retry/run templates, SQLite backup, migration, memory
+selection, point-in-time evidence sealing, API security, frontend behavior,
+wheel contents, and Docker startup.
 
-Panel cells fail independently, so a missing FRED key does not hide free BOJ,
-MOF, China, or configured e-Stat data. Audited fallback series retain actual
-source, frequency, effective observation date, and sanitized reason.
+These offline checks validate product contracts but do not measure comparative
+model research quality, latency, or token improvement. Any future benchmark
+must be designed around a small set of scenarios that can actually be run and
+recorded.
 
-Macro vendors share a bounded memory cache and namespaced best-effort disk
-cache. Today, T-1, and T-2 use 60-minute recent entries; T-3 and older dates use
-30-day settled entries. Failures and empty results are not cached. MOF raw CSVs
-refresh around the next government-business-day 09:30 JST publication boundary;
-settled history has a 30-day maximum age.
+## Implementation map
 
-## LLM clients
+The root package intentionally exposes only `TradingAgents`, `AnalysisRequest`,
+`AnalysisResult`, `ResearchDecision`, `RunProfile`, and `__version__` as its
+public Python API. Specialized contracts remain owned by their subsystem
+modules.
 
-`llm_clients/factory.py` lazily creates native Anthropic, Google, Azure, and
-Bedrock clients. OpenAI and other supported compatible services use a
-registry-driven client that centralizes endpoints, credentials, and wire quirks.
-Model catalog/capability modules define known models and reasoning controls.
-Unknown model IDs for supported providers may warn and proceed; unsupported
-providers fail loudly.
-
-## Implementation references
-
-- Graph: `tradingagents/graph/`
-- Injected tool wrappers: `tradingagents/agents/utils/`
+- Public API: `tradingagents/client.py`,
+  `tradingagents/application/contracts.py`
+- Lifecycle: `tradingagents/application/service.py`
+- Worker/outcomes: `tradingagents/application/worker.py`,
+  `tradingagents/application/outcomes.py`
+- Repository/schema: `tradingagents/application/repository.py`,
+  `tradingagents/application/database.py`
+- Migrations: `tradingagents/persistence/`
+- Graph: `tradingagents/graph/research_graph.py`
+- Agent tools: `tradingagents/agents/utils/`
+- HTTP/security: `tradingagents/web/`
+- React application: `frontend/`
 - Routing: `tradingagents/dataflows/interface.py`
-- Symbols: `tradingagents/dataflows/symbol_utils.py`
-- Provenance: `tradingagents/provenance.py`
-- Japan: `tradingagents/dataflows/jp/`
-- China: `tradingagents/dataflows/cn/`
-- Macro: `tradingagents/dataflows/macro_panel.py`, `macro_common.py`,
-  `jp_macro.py`, and `cn_macro.py`
-- Contracts: `tests/`, `tests/jp/`, `tests/cn/`, and `tests/live/`
+- Japan/China: `tradingagents/dataflows/jp/`,
+  `tradingagents/dataflows/cn/`

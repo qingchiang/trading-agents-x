@@ -19,7 +19,11 @@ def _frame(rowmap, dates=("2026-03-31", "2025-03-31")):
 
 
 def _live():
-    return mock.patch.object(jp_statements, "is_live", return_value=True)
+    return mock.patch.object(
+        jp_statements,
+        "is_near_live",
+        return_value=True,
+    )
 
 
 @pytest.mark.unit
@@ -103,7 +107,7 @@ class JPStatementsTests(unittest.TestCase):
         gsf.assert_called_once_with("7011.T", "income", "annual", None)
 
     def test_historical_date_does_not_request_yfinance_detail(self):
-        with mock.patch.object(jp_statements, "is_live", return_value=False), \
+        with mock.patch.object(jp_statements, "is_near_live", return_value=False), \
                 mock.patch.object(jp_statements.jqf, "get_cashflow", return_value="JQ-CF"), \
                 mock.patch.object(jp_statements, "get_statement_frame") as gsf:
             out = jp_statements.get_cashflow("7011.T", "quarterly", "2024-03-15")

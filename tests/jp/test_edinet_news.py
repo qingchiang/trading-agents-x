@@ -7,6 +7,7 @@ import os
 import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from datetime import date
 from pathlib import Path
 from unittest import mock
@@ -14,10 +15,9 @@ from unittest import mock
 import pytest
 import requests
 
-import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
 from tradingagents.dataflows import interface
-from tradingagents.dataflows.config import get_config, set_config
+from tradingagents.dataflows.config import bind_config, get_config
 from tradingagents.dataflows.errors import (
     VendorNotConfiguredError,
     VendorRateLimitError,
@@ -119,7 +119,7 @@ class NewsRenderTests(unittest.TestCase):
         mock_fetch.assert_called_once()  # second call served from cache
 
     def test_render_caps_at_news_article_limit(self):
-        set_config({"news_article_limit": 2})
+        bind_config({"news_article_limit": 2})
         try:
             mapping = {
                 "2026-06-22": [
@@ -131,7 +131,7 @@ class NewsRenderTests(unittest.TestCase):
                 out = edinet_news.get_news("9984.T", "2026-06-22", "2026-06-22")
             self.assertEqual(out.count("### "), 2)
         finally:
-            config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+            bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def test_long_window_is_capped(self):
         mock_fetch = mock.Mock(side_effect=_by_date({}))
@@ -230,9 +230,17 @@ class DocumentCacheTests(unittest.TestCase):
         with mock.patch.object(edinet_common, "tokyo_today", return_value=date(2026, 6, 23)), \
                 mock.patch.object(edinet_common, "fetch_documents", side_effect=slow_fetch) as fetch, \
                 ThreadPoolExecutor(max_workers=2) as pool:
-            first = pool.submit(edinet_common.documents_on, "2026-06-22")
+            first = pool.submit(
+                copy_context().run,
+                edinet_common.documents_on,
+                "2026-06-22",
+            )
             self.assertTrue(started.wait(timeout=1))
-            second = pool.submit(edinet_common.documents_on, "2026-06-22")
+            second = pool.submit(
+                copy_context().run,
+                edinet_common.documents_on,
+                "2026-06-22",
+            )
             release.set()
             self.assertEqual(first.result(), second.result())
 
@@ -299,17 +307,17 @@ class AuthTests(unittest.TestCase):
 @pytest.mark.unit
 class RoutingTests(unittest.TestCase):
     def setUp(self):
-        config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def tearDown(self):
-        config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def test_edinet_news_registered_for_get_news(self):
         self.assertIn("edinet_news", interface.VENDOR_METHODS["get_news"])
         self.assertIn("edinet_news", interface.VENDOR_LIST)
 
     def test_tokyo_ticker_routes_news_to_edinet(self):
-        set_config({"data_vendors_by_market": {".T": {"news_data": "edinet_news"}}})
+        bind_config({"data_vendors_by_market": {".T": {"news_data": "edinet_news"}}})
         edn = mock.Mock(return_value="EDINET_NEWS")
         yf = mock.Mock(return_value="YF_NEWS")
         with mock.patch.dict(
@@ -323,7 +331,7 @@ class RoutingTests(unittest.TestCase):
 
     def test_global_news_stays_market_agnostic(self):
         # get_global_news is ticker-less, so a .T news route must not touch it.
-        set_config({"data_vendors_by_market": {".T": {"news_data": "edinet_news"}}})
+        bind_config({"data_vendors_by_market": {".T": {"news_data": "edinet_news"}}})
         from tradingagents.dataflows.market_context import infer_market
         self.assertEqual(infer_market("get_global_news", ("2026-06-22",)), "")
 

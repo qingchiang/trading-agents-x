@@ -15,6 +15,7 @@ from collections.abc import Iterable
 import pandas as pd
 from stockstats import wrap
 
+from tradingagents.dataflows.measurement import instrument_currency
 from tradingagents.dataflows.stockstats_utils import (
     _assert_ohlcv_not_stale,
     load_ohlcv,
@@ -27,6 +28,12 @@ DEFAULT_SNAPSHOT_INDICATORS: tuple[str, ...] = (
     "rsi", "boll", "boll_ub", "boll_lb",
     "macd", "macds", "macdh", "atr",
 )
+
+
+def _indicator_measurement(name: str, currency: str) -> tuple[str, str | None]:
+    if name == "rsi" or name.startswith("rsi_"):
+        return "index", None
+    return "currency", currency
 
 
 def _verified_rows(data: pd.DataFrame, symbol: str, curr_date: str) -> pd.DataFrame:
@@ -102,6 +109,7 @@ def render_verified_market_snapshot(
     stock_df = wrap(df.copy())
 
     selected = tuple(indicators or DEFAULT_SNAPSHOT_INDICATORS)
+    currency = instrument_currency(symbol)
     indicator_values: dict[str, str] = {}
     for name in selected:
         try:
@@ -126,21 +134,33 @@ def render_verified_market_snapshot(
         "",
         "### Latest verified OHLCV row",
         "",
-        "| Field | Value |",
-        "|---|---:|",
+        "| Field | Value | Measurement | Unit |",
+        "|---|---:|---|---|",
     ]
     for field in ("Open", "High", "Low", "Close", "Volume"):
-        lines.append(f"| {field} | {_fmt(latest.get(field))} |")
+        measurement, unit = (
+            ("quantity", "shares")
+            if field == "Volume"
+            else ("currency", currency)
+        )
+        lines.append(
+            f"| {field} | {_fmt(latest.get(field))} | {measurement} | {unit} |"
+        )
 
     lines += ["", "### Verified technical indicators (latest row)", "",
-              "| Indicator | Value |", "|---|---:|"]
+              "| Indicator | Value | Measurement | Unit |", "|---|---:|---|---|"]
     for name, value in indicator_values.items():
-        lines.append(f"| {name} | {value} |")
+        measurement, unit = _indicator_measurement(name, currency)
+        lines.append(
+            f"| {name} | {value} | {measurement} | {unit or '—'} |"
+        )
 
     lines += ["", f"### Recent verified closes (last {len(recent)} rows)", "",
-              "| Date | Close |", "|---|---:|"]
+              "| Date | Close | Measurement | Unit |", "|---|---:|---|---|"]
     for _, row in recent.iterrows():
-        lines.append(f"| {_fmt(row['Date'])} | {_fmt(row.get('Close'))} |")
+        lines.append(
+            f"| {_fmt(row['Date'])} | {_fmt(row.get('Close'))} | currency | {currency} |"
+        )
 
     lines += [
         "",

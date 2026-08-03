@@ -1,0 +1,4803 @@
+{
+  "components": {
+    "schemas": {
+      "AnalysisRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "analysis_date": {
+            "format": "date",
+            "title": "Analysis Date",
+            "type": "string"
+          },
+          "analysts": {
+            "default": [
+              "market",
+              "social",
+              "news",
+              "fundamentals"
+            ],
+            "items": {
+              "enum": [
+                "market",
+                "social",
+                "news",
+                "fundamentals"
+              ],
+              "type": "string"
+            },
+            "title": "Analysts",
+            "type": "array"
+          },
+          "asset_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AssetType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "deep_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deep Model"
+          },
+          "deep_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deep Reasoning Effort"
+          },
+          "llm_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Provider"
+          },
+          "output_language": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportLanguage"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Language"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/RunProfile",
+            "default": "standard"
+          },
+          "quick_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quick Model"
+          },
+          "quick_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quick Reasoning Effort"
+          },
+          "ticker": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Ticker",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticker",
+          "analysis_date"
+        ],
+        "title": "AnalysisRequest",
+        "type": "object"
+      },
+      "AnalysisResult": {
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchDecision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvidenceBundle"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "instrument": {
+            "title": "Instrument",
+            "type": "string"
+          },
+          "instrument_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Name"
+          },
+          "metrics": {
+            "$ref": "#/components/schemas/RunMetrics"
+          },
+          "numeric_audit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DecisionNumericAuditAppendix"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "recoveries": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/StructuredRecoveryNotice"
+            },
+            "title": "Recoveries",
+            "type": "array"
+          },
+          "reports": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/AnalystReport"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "title": "Reports",
+            "type": "object"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchWarning"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "instrument",
+          "reports",
+          "decision"
+        ],
+        "title": "AnalysisResult",
+        "type": "object"
+      },
+      "AnalystClaimType": {
+        "enum": [
+          "observation",
+          "inference",
+          "forecast"
+        ],
+        "title": "AnalystClaimType",
+        "type": "string"
+      },
+      "AnalystReport": {
+        "additionalProperties": false,
+        "description": "Readable analyst report with a deliberately small audit envelope.",
+        "properties": {
+          "analyst": {
+            "enum": [
+              "market",
+              "social",
+              "news",
+              "fundamentals"
+            ],
+            "title": "Analyst",
+            "type": "string"
+          },
+          "audit_status": {
+            "$ref": "#/components/schemas/ReportAuditStatus"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "key_claims": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/KeyClaim"
+            },
+            "title": "Key Claims",
+            "type": "array"
+          },
+          "markdown": {
+            "minLength": 1,
+            "title": "Markdown",
+            "type": "string"
+          },
+          "report_sections": {
+            "items": {
+              "$ref": "#/components/schemas/ReportSection"
+            },
+            "minItems": 1,
+            "title": "Report Sections",
+            "type": "array"
+          },
+          "source_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Refs",
+            "type": "array"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchWarning"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "analyst",
+          "markdown",
+          "report_sections",
+          "audit_status"
+        ],
+        "title": "AnalystReport",
+        "type": "object"
+      },
+      "ArtifactGenerationMethod": {
+        "description": "Auditable method that produced a typed research artifact.",
+        "enum": [
+          "tool_call",
+          "tool_call_recovered",
+          "json_mode",
+          "raw_json_recovered",
+          "json_mode_recovered",
+          "sectioned_recovery",
+          "markdown_audited",
+          "markdown_audit_incomplete"
+        ],
+        "title": "ArtifactGenerationMethod",
+        "type": "string"
+      },
+      "AssetType": {
+        "enum": [
+          "stock",
+          "crypto"
+        ],
+        "title": "AssetType",
+        "type": "string"
+      },
+      "AuditedRangeEndpoint": {
+        "additionalProperties": false,
+        "description": "One evidence-backed endpoint of a scenario or valuation range.",
+        "properties": {
+          "as_of_date": {
+            "format": "date",
+            "title": "As Of Date",
+            "type": "string"
+          },
+          "basis": {
+            "$ref": "#/components/schemas/MarketReferenceBasis"
+          },
+          "calculation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calculation Id"
+          },
+          "date_evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Date Evidence Refs",
+            "type": "array"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "source_locator": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvidenceValueLocator"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "temporal_basis": {
+            "$ref": "#/components/schemas/NumericTemporalBasis",
+            "default": "point_in_time"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "value",
+          "basis",
+          "evidence_refs",
+          "date_evidence_refs",
+          "as_of_date"
+        ],
+        "title": "AuditedRangeEndpoint",
+        "type": "object"
+      },
+      "CalculationRecord": {
+        "additionalProperties": false,
+        "description": "A decision-critical calculation, not a presentation-table cell.",
+        "properties": {
+          "as_of_date": {
+            "format": "date",
+            "title": "As Of Date",
+            "type": "string"
+          },
+          "date_evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Date Evidence Refs",
+            "type": "array"
+          },
+          "decision_uses": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/DecisionCalculationUse"
+            },
+            "title": "Decision Uses",
+            "type": "array"
+          },
+          "formula": {
+            "minLength": 1,
+            "title": "Formula",
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^calc_[a-z0-9][a-z0-9_.-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "input_evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Input Evidence Refs",
+            "type": "array"
+          },
+          "inputs": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                }
+              ]
+            },
+            "minProperties": 1,
+            "title": "Inputs",
+            "type": "object"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Limitations",
+            "type": "array"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Result"
+          },
+          "temporal_basis": {
+            "$ref": "#/components/schemas/NumericTemporalBasis",
+            "default": "point_in_time"
+          },
+          "unit": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "formula",
+          "inputs",
+          "input_evidence_refs",
+          "result",
+          "unit",
+          "as_of_date",
+          "limitations"
+        ],
+        "title": "CalculationRecord",
+        "type": "object"
+      },
+      "CapabilitiesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "analysts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Analysts",
+            "type": "array"
+          },
+          "defaults": {
+            "$ref": "#/components/schemas/CapabilityDefaults"
+          },
+          "output_languages": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Output Languages",
+            "type": "array"
+          },
+          "profiles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Profiles",
+            "type": "array"
+          },
+          "providers": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ProviderCapabilities"
+            },
+            "title": "Providers",
+            "type": "object"
+          }
+        },
+        "required": [
+          "profiles",
+          "analysts",
+          "output_languages",
+          "providers",
+          "defaults"
+        ],
+        "title": "CapabilitiesResponse",
+        "type": "object"
+      },
+      "CapabilityDefaults": {
+        "additionalProperties": false,
+        "properties": {
+          "deep_model": {
+            "title": "Deep Model",
+            "type": "string"
+          },
+          "deep_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deep Reasoning Effort"
+          },
+          "lan_enabled": {
+            "title": "Lan Enabled",
+            "type": "boolean"
+          },
+          "llm_provider": {
+            "title": "Llm Provider",
+            "type": "string"
+          },
+          "output_language": {
+            "title": "Output Language",
+            "type": "string"
+          },
+          "profile": {
+            "title": "Profile",
+            "type": "string"
+          },
+          "quick_model": {
+            "title": "Quick Model",
+            "type": "string"
+          },
+          "quick_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quick Reasoning Effort"
+          },
+          "trash_retention_days": {
+            "minimum": 0.0,
+            "title": "Trash Retention Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "profile",
+          "llm_provider",
+          "quick_model",
+          "deep_model",
+          "quick_reasoning_effort",
+          "deep_reasoning_effort",
+          "output_language",
+          "lan_enabled",
+          "trash_retention_days"
+        ],
+        "title": "CapabilityDefaults",
+        "type": "object"
+      },
+      "ClaimImportance": {
+        "enum": [
+          "primary",
+          "supporting"
+        ],
+        "title": "ClaimImportance",
+        "type": "string"
+      },
+      "DebateAgenda": {
+        "additionalProperties": false,
+        "description": "Prioritized shallow agenda derived from the two readable cases.",
+        "properties": {
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/DebateIssue"
+            },
+            "minItems": 1,
+            "title": "Issues",
+            "type": "array"
+          },
+          "summary": {
+            "minLength": 1,
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary",
+          "issues"
+        ],
+        "title": "DebateAgenda",
+        "type": "object"
+      },
+      "DebateImportance": {
+        "enum": [
+          "critical",
+          "material",
+          "secondary"
+        ],
+        "title": "DebateImportance",
+        "type": "string"
+      },
+      "DebateIssue": {
+        "additionalProperties": false,
+        "description": "One material question used only for graph routing and navigation.",
+        "properties": {
+          "id": {
+            "pattern": "^debate\\.issue_[a-z0-9][a-z0-9_.-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "importance": {
+            "$ref": "#/components/schemas/DebateImportance"
+          },
+          "question": {
+            "minLength": 1,
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "question",
+          "importance"
+        ],
+        "title": "DebateIssue",
+        "type": "object"
+      },
+      "DecisionBrief": {
+        "additionalProperties": false,
+        "description": "Readable Final reasoning persisted before strict decision serialization.",
+        "properties": {
+          "evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "markdown": {
+            "minLength": 1,
+            "title": "Markdown",
+            "type": "string"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchWarning"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "markdown"
+        ],
+        "title": "DecisionBrief",
+        "type": "object"
+      },
+      "DecisionCalculationUse": {
+        "additionalProperties": false,
+        "description": "One readable decision component that relies on a calculation.",
+        "properties": {
+          "component_path": {
+            "pattern": "^(?:executive_summary|thesis|catalysts\\.\\d+|risks\\.\\d+|invalidation_conditions\\.\\d+|scenarios\\.(?:base|bull|bear)\\.(?:outcome|core_assumptions\\.\\d+)|risk_review_adjustments\\.\\d+\\.explanation)$",
+            "title": "Component Path",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "component_path",
+          "label"
+        ],
+        "title": "DecisionCalculationUse",
+        "type": "object"
+      },
+      "DecisionNumericAuditAppendix": {
+        "additionalProperties": false,
+        "description": "Decision calculation comparisons and unverified numeric proposals.",
+        "properties": {
+          "omitted_components": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/NumericAuditOmission"
+            },
+            "title": "Omitted Components",
+            "type": "array"
+          },
+          "requirement_checks": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/NumericRequirementCheck"
+            },
+            "title": "Requirement Checks",
+            "type": "array"
+          },
+          "snapshots": {
+            "items": {
+              "$ref": "#/components/schemas/NumericAuditSnapshot"
+            },
+            "maxItems": 2,
+            "title": "Snapshots",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/NumericAuditAppendixStatus"
+          }
+        },
+        "required": [
+          "status",
+          "snapshots"
+        ],
+        "title": "DecisionNumericAuditAppendix",
+        "type": "object"
+      },
+      "DiscoveredModelView": {
+        "additionalProperties": false,
+        "properties": {
+          "compatibility": {
+            "enum": [
+              "supported",
+              "unknown"
+            ],
+            "title": "Compatibility",
+            "type": "string"
+          },
+          "default_roles": {
+            "items": {
+              "enum": [
+                "quick",
+                "deep"
+              ],
+              "type": "string"
+            },
+            "title": "Default Roles",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "reasoning_efforts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasoning Efforts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "compatibility",
+          "reasoning_efforts",
+          "default_roles"
+        ],
+        "title": "DiscoveredModelView",
+        "type": "object"
+      },
+      "EvidenceBundle": {
+        "additionalProperties": false,
+        "description": "Versioned evidence snapshot shared by every agent in one run.",
+        "properties": {
+          "analysis_date": {
+            "format": "date",
+            "title": "Analysis Date",
+            "type": "string"
+          },
+          "digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Digest"
+          },
+          "instrument": {
+            "title": "Instrument",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "sealed_at": {
+            "format": "date-time",
+            "title": "Sealed At",
+            "type": "string"
+          },
+          "tables": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/EvidenceTable"
+            },
+            "title": "Tables",
+            "type": "array"
+          },
+          "version": {
+            "const": "8",
+            "default": "8",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instrument",
+          "analysis_date",
+          "items"
+        ],
+        "title": "EvidenceBundle",
+        "type": "object"
+      },
+      "EvidenceItem": {
+        "additionalProperties": false,
+        "description": "One immutable, auditable evidence item in a run.",
+        "properties": {
+          "available_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Available At"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "effective_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Date"
+          },
+          "evidence_type": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Evidence Type",
+            "type": "string"
+          },
+          "fallback": {
+            "default": false,
+            "title": "Fallback",
+            "type": "boolean"
+          },
+          "measurement_kind": {
+            "$ref": "#/components/schemas/MeasurementKind",
+            "default": "unknown"
+          },
+          "origins": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/EvidenceOrigin"
+            },
+            "title": "Origins",
+            "type": "array"
+          },
+          "provenance": {
+            "additionalProperties": true,
+            "title": "Provenance",
+            "type": "object"
+          },
+          "quality": {
+            "$ref": "#/components/schemas/EvidenceQuality",
+            "default": "medium"
+          },
+          "ref": {
+            "pattern": "^ev_[a-f0-9]{12}$",
+            "title": "Ref",
+            "type": "string"
+          },
+          "requested_date": {
+            "format": "date",
+            "title": "Requested Date",
+            "type": "string"
+          },
+          "source": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "ref",
+          "source",
+          "evidence_type",
+          "requested_date"
+        ],
+        "title": "EvidenceItem",
+        "type": "object"
+      },
+      "EvidenceOrigin": {
+        "additionalProperties": false,
+        "description": "One source record contributing to an evidence payload.",
+        "properties": {
+          "effective": {
+            "default": "unknown",
+            "minLength": 1,
+            "title": "Effective",
+            "type": "string"
+          },
+          "effective_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Date"
+          },
+          "evidence_type": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Evidence Type",
+            "type": "string"
+          },
+          "fallback": {
+            "default": false,
+            "title": "Fallback",
+            "type": "boolean"
+          },
+          "quality": {
+            "$ref": "#/components/schemas/EvidenceQuality",
+            "default": "medium"
+          },
+          "requested": {
+            "default": "unknown",
+            "minLength": 1,
+            "title": "Requested",
+            "type": "string"
+          },
+          "retrieved_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retrieved At"
+          },
+          "source": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          },
+          "temporal_scope": {
+            "$ref": "#/components/schemas/EvidenceTemporalScope",
+            "default": "unknown"
+          },
+          "timing": {
+            "default": "unknown",
+            "minLength": 1,
+            "title": "Timing",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "evidence_type"
+        ],
+        "title": "EvidenceOrigin",
+        "type": "object"
+      },
+      "EvidenceQuality": {
+        "enum": [
+          "high",
+          "medium",
+          "low",
+          "unavailable"
+        ],
+        "title": "EvidenceQuality",
+        "type": "string"
+      },
+      "EvidenceSealView": {
+        "additionalProperties": false,
+        "description": "Durable status of the immutable evidence boundary for one run.",
+        "properties": {
+          "digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Digest"
+          },
+          "item_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Item Count",
+            "type": "integer"
+          },
+          "sealed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sealed At"
+          },
+          "sealed_attempt": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sealed Attempt"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "sealed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "table_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Table Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "EvidenceSealView",
+        "type": "object"
+      },
+      "EvidenceTable": {
+        "additionalProperties": false,
+        "description": "A complete fact table deterministically extracted from source evidence.",
+        "properties": {
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceTableColumn"
+            },
+            "minItems": 1,
+            "title": "Columns",
+            "type": "array"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "id": {
+            "pattern": "^et_[a-f0-9]{12}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "purpose": {
+            "minLength": 1,
+            "title": "Purpose",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceTableRow"
+            },
+            "minItems": 1,
+            "title": "Rows",
+            "type": "array"
+          },
+          "source_format": {
+            "enum": [
+              "structured",
+              "markdown",
+              "csv"
+            ],
+            "title": "Source Format",
+            "type": "string"
+          },
+          "title": {
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "purpose",
+          "columns",
+          "rows",
+          "evidence_refs",
+          "source_format"
+        ],
+        "title": "EvidenceTable",
+        "type": "object"
+      },
+      "EvidenceTableCell": {
+        "additionalProperties": false,
+        "description": "One raw value in a deterministic source table.",
+        "properties": {
+          "measurement_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MeasurementKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "raw_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Value"
+          },
+          "source_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Refs",
+            "type": "array"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          }
+        },
+        "title": "EvidenceTableCell",
+        "type": "object"
+      },
+      "EvidenceTableColumn": {
+        "additionalProperties": false,
+        "description": "One machine-readable column in a deterministic source table.",
+        "properties": {
+          "data_type": {
+            "$ref": "#/components/schemas/TableDataType",
+            "default": "text"
+          },
+          "key": {
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "measurement_kind": {
+            "$ref": "#/components/schemas/MeasurementKind",
+            "default": "unknown"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          }
+        },
+        "required": [
+          "key",
+          "label"
+        ],
+        "title": "EvidenceTableColumn",
+        "type": "object"
+      },
+      "EvidenceTableRow": {
+        "additionalProperties": false,
+        "description": "One stable source row with provenance only where it differs by row.",
+        "properties": {
+          "cells": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/EvidenceTableCell"
+            },
+            "minProperties": 1,
+            "title": "Cells",
+            "type": "object"
+          },
+          "id": {
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "source_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Refs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "cells"
+        ],
+        "title": "EvidenceTableRow",
+        "type": "object"
+      },
+      "EvidenceTemporalScope": {
+        "description": "Whether source content is valid at the cutoff or only at retrieval time.",
+        "enum": [
+          "point_in_time",
+          "live_only",
+          "unknown"
+        ],
+        "title": "EvidenceTemporalScope",
+        "type": "string"
+      },
+      "EvidenceValueLocator": {
+        "additionalProperties": false,
+        "description": "Exact Evidence Ledger location for a directly observed scalar.",
+        "properties": {
+          "column": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z][a-z0-9_]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Column"
+          },
+          "evidence_ref": {
+            "pattern": "^ev_[a-f0-9]{12}$",
+            "title": "Evidence Ref",
+            "type": "string"
+          },
+          "row_id": {
+            "anyOf": [
+              {
+                "pattern": "^[a-z][a-z0-9_.-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Row Id"
+          },
+          "table_id": {
+            "anyOf": [
+              {
+                "pattern": "^et_[a-f0-9]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Id"
+          }
+        },
+        "required": [
+          "evidence_ref"
+        ],
+        "title": "EvidenceValueLocator",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HealthResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "database": {
+            "enum": [
+              "ok",
+              "error"
+            ],
+            "title": "Database",
+            "type": "string"
+          },
+          "queue": {
+            "$ref": "#/components/schemas/QueueHealth"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "degraded"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "database",
+          "queue",
+          "version"
+        ],
+        "title": "HealthResponse",
+        "type": "object"
+      },
+      "IssueDisposition": {
+        "additionalProperties": false,
+        "description": "A judge routing result without duplicating the readable rationale.",
+        "properties": {
+          "issue_id": {
+            "pattern": "^debate\\.issue_[a-z0-9][a-z0-9_.-]*$",
+            "title": "Issue Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "upheld",
+              "rejected",
+              "unresolved"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "issue_id",
+          "status"
+        ],
+        "title": "IssueDisposition",
+        "type": "object"
+      },
+      "JudgeDraft": {
+        "additionalProperties": false,
+        "description": "Readable preliminary judgment with shallow issue dispositions.",
+        "properties": {
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "issue_dispositions": {
+            "items": {
+              "$ref": "#/components/schemas/IssueDisposition"
+            },
+            "minItems": 1,
+            "title": "Issue Dispositions",
+            "type": "array"
+          },
+          "markdown": {
+            "minLength": 1,
+            "title": "Markdown",
+            "type": "string"
+          },
+          "preliminary_rating": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchRating"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "markdown",
+          "issue_dispositions"
+        ],
+        "title": "JudgeDraft",
+        "type": "object"
+      },
+      "KeyClaim": {
+        "additionalProperties": false,
+        "description": "A decision-relevant assertion extracted from a readable report.",
+        "properties": {
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "id": {
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "implication": {
+            "minLength": 1,
+            "title": "Implication",
+            "type": "string"
+          },
+          "importance": {
+            "$ref": "#/components/schemas/ClaimImportance"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/AnalystClaimType"
+          },
+          "section_id": {
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Section Id",
+            "type": "string"
+          },
+          "statement": {
+            "minLength": 1,
+            "title": "Statement",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "section_id",
+          "kind",
+          "importance",
+          "statement",
+          "implication",
+          "confidence"
+        ],
+        "title": "KeyClaim",
+        "type": "object"
+      },
+      "LoginRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "token": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "LoginRequest",
+        "type": "object"
+      },
+      "MarketReferenceBasis": {
+        "enum": [
+          "observed",
+          "interpreted",
+          "derived"
+        ],
+        "title": "MarketReferenceBasis",
+        "type": "string"
+      },
+      "MarketReferenceLevel": {
+        "additionalProperties": false,
+        "properties": {
+          "as_of_date": {
+            "format": "date",
+            "title": "As Of Date",
+            "type": "string"
+          },
+          "basis": {
+            "$ref": "#/components/schemas/MarketReferenceBasis",
+            "default": "observed"
+          },
+          "calculation_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Calculation Ids",
+            "type": "array"
+          },
+          "date_evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Date Evidence Refs",
+            "type": "array"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "interpretation": {
+            "minLength": 1,
+            "title": "Interpretation",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "measurement_kind": {
+            "$ref": "#/components/schemas/MeasurementKind",
+            "default": "unknown"
+          },
+          "source_locator": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvidenceValueLocator"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "temporal_basis": {
+            "$ref": "#/components/schemas/NumericTemporalBasis",
+            "default": "point_in_time"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "label",
+          "value",
+          "as_of_date",
+          "interpretation",
+          "evidence_refs",
+          "date_evidence_refs"
+        ],
+        "title": "MarketReferenceLevel",
+        "type": "object"
+      },
+      "MeasurementKind": {
+        "description": "Semantic measurement family owned by deterministic data producers.",
+        "enum": [
+          "currency",
+          "percent",
+          "ratio",
+          "index",
+          "quantity",
+          "count",
+          "basis_points",
+          "unitless",
+          "unknown"
+        ],
+        "title": "MeasurementKind",
+        "type": "string"
+      },
+      "MemoryEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "analysis_date": {
+            "title": "Analysis Date",
+            "type": "string"
+          },
+          "asset_type": {
+            "title": "Asset Type",
+            "type": "string"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/ResearchDecision"
+          },
+          "instrument_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Name"
+          },
+          "market": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/MemoryOutcome"
+          },
+          "reflection": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reflection"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "ticker",
+          "market",
+          "asset_type",
+          "analysis_date",
+          "decision",
+          "outcome",
+          "reflection"
+        ],
+        "title": "MemoryEntry",
+        "type": "object"
+      },
+      "MemoryOutcome": {
+        "additionalProperties": false,
+        "properties": {
+          "alpha_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alpha Return"
+          },
+          "benchmark": {
+            "title": "Benchmark",
+            "type": "string"
+          },
+          "holding_intervals": {
+            "title": "Holding Intervals",
+            "type": "integer"
+          },
+          "observation_end": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observation End"
+          },
+          "observation_start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observation Start"
+          },
+          "raw_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Return"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "resolved"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "benchmark",
+          "observation_start",
+          "observation_end",
+          "holding_intervals",
+          "raw_return",
+          "alpha_return"
+        ],
+        "title": "MemoryOutcome",
+        "type": "object"
+      },
+      "ModelDiscoveryWarningView": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ModelDiscoveryWarningView",
+        "type": "object"
+      },
+      "NodeMetrics": {
+        "additionalProperties": false,
+        "description": "Resource usage attributed to one research graph node.",
+        "properties": {
+          "cache_hit_input_tokens": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Cache Hit Input Tokens",
+            "type": "integer"
+          },
+          "cache_miss_input_tokens": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Cache Miss Input Tokens",
+            "type": "integer"
+          },
+          "detailed_usage_calls": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Detailed Usage Calls",
+            "type": "integer"
+          },
+          "input_tokens": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "llm_calls": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Llm Calls",
+            "type": "integer"
+          },
+          "output_tokens": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Output Tokens",
+            "type": "integer"
+          },
+          "reasoning_output_tokens": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Reasoning Output Tokens",
+            "type": "integer"
+          },
+          "tool_calls": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Tool Calls",
+            "type": "integer"
+          },
+          "wall_time_seconds": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Wall Time Seconds",
+            "type": "number"
+          }
+        },
+        "title": "NodeMetrics",
+        "type": "object"
+      },
+      "NumericAuditAppendixStatus": {
+        "enum": [
+          "complete",
+          "recovered",
+          "partial",
+          "incomplete"
+        ],
+        "title": "NumericAuditAppendixStatus",
+        "type": "string"
+      },
+      "NumericAuditComponentType": {
+        "description": "Stable component identity for localized numeric audit omissions.",
+        "enum": [
+          "appendix",
+          "calculation",
+          "scenario_range",
+          "valuation",
+          "market_reference",
+          "decision_claim"
+        ],
+        "title": "NumericAuditComponentType",
+        "type": "string"
+      },
+      "NumericAuditOmission": {
+        "additionalProperties": false,
+        "properties": {
+          "component_path": {
+            "pattern": "^[a-z0-9_.-]+$",
+            "title": "Component Path",
+            "type": "string"
+          },
+          "component_type": {
+            "$ref": "#/components/schemas/NumericAuditComponentType"
+          },
+          "issue_codes": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Issue Codes",
+            "type": "array"
+          },
+          "reference_label": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Label"
+          },
+          "scenario_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchScenarioKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "component_path",
+          "component_type",
+          "issue_codes"
+        ],
+        "title": "NumericAuditOmission",
+        "type": "object"
+      },
+      "NumericAuditPhase": {
+        "enum": [
+          "initial",
+          "repair"
+        ],
+        "title": "NumericAuditPhase",
+        "type": "string"
+      },
+      "NumericAuditSnapshot": {
+        "additionalProperties": false,
+        "description": "One sanitized failed numeric serializer candidate.",
+        "properties": {
+          "candidate": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate"
+          },
+          "candidate_digest": {
+            "anyOf": [
+              {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Digest"
+          },
+          "candidate_omitted": {
+            "anyOf": [
+              {
+                "const": "oversize",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Omitted"
+          },
+          "method": {
+            "$ref": "#/components/schemas/ArtifactGenerationMethod"
+          },
+          "phase": {
+            "$ref": "#/components/schemas/NumericAuditPhase"
+          },
+          "reason_code": {
+            "pattern": "^[a-z0-9_.-]+$",
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "schema_valid": {
+            "title": "Schema Valid",
+            "type": "boolean"
+          },
+          "validation_issues": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Validation Issues",
+            "type": "array"
+          }
+        },
+        "required": [
+          "phase",
+          "method",
+          "reason_code",
+          "schema_valid"
+        ],
+        "title": "NumericAuditSnapshot",
+        "type": "object"
+      },
+      "NumericAuditStatus": {
+        "enum": [
+          "complete",
+          "partial",
+          "incomplete",
+          "not_applicable"
+        ],
+        "title": "NumericAuditStatus",
+        "type": "string"
+      },
+      "NumericCalculationStatus": {
+        "enum": [
+          "verified",
+          "invalid",
+          "missing"
+        ],
+        "title": "NumericCalculationStatus",
+        "type": "string"
+      },
+      "NumericDisplayScale": {
+        "description": "Deterministic scale applied only when comparing reader-facing values.",
+        "enum": [
+          "base",
+          "thousand",
+          "ten_thousand",
+          "million",
+          "hundred_million",
+          "billion",
+          "trillion"
+        ],
+        "title": "NumericDisplayScale",
+        "type": "string"
+      },
+      "NumericDisplayStatus": {
+        "enum": [
+          "matched",
+          "approximately_matched",
+          "mismatched",
+          "not_checked"
+        ],
+        "title": "NumericDisplayStatus",
+        "type": "string"
+      },
+      "NumericRequirementCheck": {
+        "additionalProperties": false,
+        "description": "Auditable comparison between a stated value and a canonical result.",
+        "properties": {
+          "calculation_id": {
+            "anyOf": [
+              {
+                "pattern": "^calc_[a-z0-9][a-z0-9_.-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calculation Id"
+          },
+          "calculation_status": {
+            "$ref": "#/components/schemas/NumericCalculationStatus"
+          },
+          "canonical_result": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Result"
+          },
+          "comparison_difference": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparison Difference"
+          },
+          "comparison_result": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparison Result"
+          },
+          "component_path": {
+            "pattern": "^(?:executive_summary|thesis|catalysts\\.\\d+|risks\\.\\d+|invalidation_conditions\\.\\d+|scenarios\\.(?:base|bull|bear)\\.(?:outcome|core_assumptions\\.\\d+)|risk_review_adjustments\\.\\d+\\.explanation)$",
+            "title": "Component Path",
+            "type": "string"
+          },
+          "date_evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Date Evidence Refs",
+            "type": "array"
+          },
+          "display_scale": {
+            "$ref": "#/components/schemas/NumericDisplayScale",
+            "default": "base"
+          },
+          "display_status": {
+            "$ref": "#/components/schemas/NumericDisplayStatus"
+          },
+          "formula": {
+            "minLength": 1,
+            "title": "Formula",
+            "type": "string"
+          },
+          "fraction_digits": {
+            "maximum": 8.0,
+            "minimum": 0.0,
+            "title": "Fraction Digits",
+            "type": "integer"
+          },
+          "input_evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Input Evidence Refs",
+            "type": "array"
+          },
+          "inputs": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                }
+              ]
+            },
+            "minProperties": 1,
+            "title": "Inputs",
+            "type": "object"
+          },
+          "issue_codes": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Issue Codes",
+            "type": "array"
+          },
+          "label": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "requirement_id": {
+            "pattern": "^req_[a-z0-9][a-z0-9_.-]*$",
+            "title": "Requirement Id",
+            "type": "string"
+          },
+          "rounded_canonical_result": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rounded Canonical Result"
+          },
+          "rounded_stated_value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rounded Stated Value"
+          },
+          "stated_value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Stated Value"
+          },
+          "unit": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "requirement_id",
+          "component_path",
+          "label",
+          "stated_value",
+          "fraction_digits",
+          "unit",
+          "formula",
+          "inputs",
+          "input_evidence_refs",
+          "calculation_status",
+          "display_status"
+        ],
+        "title": "NumericRequirementCheck",
+        "type": "object"
+      },
+      "NumericTemporalBasis": {
+        "description": "How the application determined the date of a formal numeric value.",
+        "enum": [
+          "point_in_time",
+          "live_snapshot"
+        ],
+        "title": "NumericTemporalBasis",
+        "type": "string"
+      },
+      "ProviderCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "api_key_configured": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key Configured"
+          },
+          "api_key_required": {
+            "title": "Api Key Required",
+            "type": "boolean"
+          },
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "model_discovery_supported": {
+            "title": "Model Discovery Supported",
+            "type": "boolean"
+          },
+          "selectable": {
+            "title": "Selectable",
+            "type": "boolean"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable Reason"
+          }
+        },
+        "required": [
+          "label",
+          "api_key_required",
+          "api_key_configured",
+          "configured",
+          "selectable",
+          "model_discovery_supported"
+        ],
+        "title": "ProviderCapabilities",
+        "type": "object"
+      },
+      "ProviderModelCatalog": {
+        "additionalProperties": false,
+        "properties": {
+          "fetched_at": {
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/DiscoveredModelView"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "live",
+              "cache",
+              "fallback"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "stale": {
+            "title": "Stale",
+            "type": "boolean"
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelDiscoveryWarningView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "provider",
+          "models",
+          "source",
+          "fetched_at",
+          "stale"
+        ],
+        "title": "ProviderModelCatalog",
+        "type": "object"
+      },
+      "QueueHealth": {
+        "additionalProperties": false,
+        "properties": {
+          "pending_outcomes": {
+            "title": "Pending Outcomes",
+            "type": "integer"
+          },
+          "queued": {
+            "title": "Queued",
+            "type": "integer"
+          },
+          "running": {
+            "title": "Running",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "queued",
+          "running",
+          "pending_outcomes"
+        ],
+        "title": "QueueHealth",
+        "type": "object"
+      },
+      "RebuttalReview": {
+        "additionalProperties": false,
+        "description": "One readable response plus the issue IDs needed by graph control.",
+        "properties": {
+          "addressed_issue_ids": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Addressed Issue Ids",
+            "type": "array"
+          },
+          "markdown": {
+            "minLength": 1,
+            "title": "Markdown",
+            "type": "string"
+          },
+          "open_issue_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Open Issue Ids",
+            "type": "array"
+          },
+          "role": {
+            "enum": [
+              "bull",
+              "bear"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "round": {
+            "minimum": 1.0,
+            "title": "Round",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "role",
+          "round",
+          "markdown",
+          "addressed_issue_ids"
+        ],
+        "title": "RebuttalReview",
+        "type": "object"
+      },
+      "RecentInstrument": {
+        "additionalProperties": false,
+        "properties": {
+          "instrument_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Name"
+          },
+          "last_used_at": {
+            "format": "date-time",
+            "title": "Last Used At",
+            "type": "string"
+          },
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticker",
+          "last_used_at"
+        ],
+        "title": "RecentInstrument",
+        "type": "object"
+      },
+      "ReportAuditStatus": {
+        "enum": [
+          "complete",
+          "incomplete"
+        ],
+        "title": "ReportAuditStatus",
+        "type": "string"
+      },
+      "ReportLanguage": {
+        "enum": [
+          "en",
+          "zh-CN",
+          "ja"
+        ],
+        "title": "ReportLanguage",
+        "type": "string"
+      },
+      "ReportSection": {
+        "additionalProperties": false,
+        "description": "A deterministic heading extracted from the human-readable report.",
+        "properties": {
+          "anchor": {
+            "minLength": 1,
+            "title": "Anchor",
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "source_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Refs",
+            "type": "array"
+          },
+          "title": {
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "anchor"
+        ],
+        "title": "ReportSection",
+        "type": "object"
+      },
+      "ResearchArtifact": {
+        "additionalProperties": false,
+        "description": "Durable, typed output from one visible research stage.",
+        "properties": {
+          "attempt": {
+            "minimum": 1.0,
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnalystReport"
+              },
+              {
+                "$ref": "#/components/schemas/DecisionBrief"
+              },
+              {
+                "$ref": "#/components/schemas/ResearchCase"
+              },
+              {
+                "$ref": "#/components/schemas/DebateAgenda"
+              },
+              {
+                "$ref": "#/components/schemas/RebuttalReview"
+              },
+              {
+                "$ref": "#/components/schemas/JudgeDraft"
+              },
+              {
+                "$ref": "#/components/schemas/RiskReview"
+              },
+              {
+                "$ref": "#/components/schemas/ResearchDecision"
+              }
+            ],
+            "title": "Content"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "generation_method": {
+            "$ref": "#/components/schemas/ArtifactGenerationMethod"
+          },
+          "id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "prompt_version": {
+            "default": "research-v1",
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9_.-]*$",
+            "title": "Prompt Version",
+            "type": "string"
+          },
+          "role": {
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Role",
+            "type": "string"
+          },
+          "round": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Round",
+            "type": "integer"
+          },
+          "run_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Run Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "2",
+            "default": "2",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "stage": {
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Stage",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "attempt",
+          "stage",
+          "role",
+          "generation_method",
+          "content",
+          "created_at"
+        ],
+        "title": "ResearchArtifact",
+        "type": "object"
+      },
+      "ResearchCase": {
+        "additionalProperties": false,
+        "description": "A readable constructive or skeptical research case.",
+        "properties": {
+          "markdown": {
+            "minLength": 1,
+            "title": "Markdown",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "bull",
+              "bear"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "markdown"
+        ],
+        "title": "ResearchCase",
+        "type": "object"
+      },
+      "ResearchDecision": {
+        "additionalProperties": false,
+        "description": "Research-only conclusion; deliberately excludes account-level advice.",
+        "properties": {
+          "calculation_records": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CalculationRecord"
+            },
+            "title": "Calculation Records",
+            "type": "array"
+          },
+          "catalysts": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Catalysts",
+            "type": "array"
+          },
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "executive_summary": {
+            "minLength": 1,
+            "title": "Executive Summary",
+            "type": "string"
+          },
+          "invalidation_conditions": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Invalidation Conditions",
+            "type": "array"
+          },
+          "market_reference_levels": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/MarketReferenceLevel"
+            },
+            "title": "Market Reference Levels",
+            "type": "array"
+          },
+          "memory_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Memory Refs",
+            "type": "array"
+          },
+          "numeric_audit_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NumericAuditStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rating": {
+            "$ref": "#/components/schemas/ResearchRating"
+          },
+          "risk_review_adjustments": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RiskReviewAdjustment"
+            },
+            "title": "Risk Review Adjustments",
+            "type": "array"
+          },
+          "risks": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Risks",
+            "type": "array"
+          },
+          "scenarios": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchScenario"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "title": "Scenarios",
+            "type": "array"
+          },
+          "thesis": {
+            "minLength": 1,
+            "title": "Thesis",
+            "type": "string"
+          },
+          "time_horizon": {
+            "minLength": 1,
+            "title": "Time Horizon",
+            "type": "string"
+          },
+          "unresolved_questions": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Unresolved Questions",
+            "type": "array"
+          },
+          "valuation_assessment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ValuationAssessment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "rating",
+          "confidence",
+          "executive_summary",
+          "thesis",
+          "risks",
+          "invalidation_conditions",
+          "time_horizon",
+          "scenarios"
+        ],
+        "title": "ResearchDecision",
+        "type": "object"
+      },
+      "ResearchRating": {
+        "enum": [
+          "Buy",
+          "Overweight",
+          "Hold",
+          "Underweight",
+          "Sell"
+        ],
+        "title": "ResearchRating",
+        "type": "string"
+      },
+      "ResearchScenario": {
+        "additionalProperties": false,
+        "properties": {
+          "core_assumptions": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Core Assumptions",
+            "type": "array"
+          },
+          "evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ResearchScenarioKind"
+          },
+          "outcome": {
+            "minLength": 1,
+            "title": "Outcome",
+            "type": "string"
+          },
+          "reference_ranges": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ScenarioReferenceRange"
+            },
+            "title": "Reference Ranges",
+            "type": "array"
+          }
+        },
+        "required": [
+          "kind",
+          "core_assumptions",
+          "outcome"
+        ],
+        "title": "ResearchScenario",
+        "type": "object"
+      },
+      "ResearchScenarioKind": {
+        "enum": [
+          "base",
+          "bull",
+          "bear"
+        ],
+        "title": "ResearchScenarioKind",
+        "type": "string"
+      },
+      "ResearchWarning": {
+        "additionalProperties": false,
+        "description": "Structured, plain-text warning suitable for APIs and audit exports.",
+        "properties": {
+          "code": {
+            "default": "legacy.warning",
+            "pattern": "^[a-z0-9_.-]+$",
+            "title": "Code",
+            "type": "string"
+          },
+          "evidence_ref": {
+            "anyOf": [
+              {
+                "pattern": "^ev_[a-f0-9]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Ref"
+          },
+          "message": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "ResearchWarning",
+        "type": "object"
+      },
+      "RiskReview": {
+        "additionalProperties": false,
+        "description": "A readable challenge with only navigation metadata typed.",
+        "properties": {
+          "challenged_issue_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Challenged Issue Ids",
+            "type": "array"
+          },
+          "markdown": {
+            "minLength": 1,
+            "title": "Markdown",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "integrated",
+              "aggressive",
+              "neutral",
+              "conservative"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "unresolved_issue_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Unresolved Issue Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "role",
+          "markdown"
+        ],
+        "title": "RiskReview",
+        "type": "object"
+      },
+      "RiskReviewAdjustment": {
+        "additionalProperties": false,
+        "properties": {
+          "disposition": {
+            "$ref": "#/components/schemas/RiskReviewDisposition"
+          },
+          "evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "explanation": {
+            "minLength": 1,
+            "title": "Explanation",
+            "type": "string"
+          },
+          "source_role": {
+            "enum": [
+              "integrated",
+              "aggressive",
+              "neutral",
+              "conservative"
+            ],
+            "title": "Source Role",
+            "type": "string"
+          },
+          "subject": {
+            "minLength": 1,
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_role",
+          "disposition",
+          "subject",
+          "explanation"
+        ],
+        "title": "RiskReviewAdjustment",
+        "type": "object"
+      },
+      "RiskReviewDisposition": {
+        "enum": [
+          "retained",
+          "modified",
+          "rejected"
+        ],
+        "title": "RiskReviewDisposition",
+        "type": "string"
+      },
+      "RunAttemptView": {
+        "additionalProperties": false,
+        "description": "Observed execution usage and lifecycle for one retry attempt.",
+        "properties": {
+          "attempt": {
+            "minimum": 1.0,
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "metrics": {
+            "$ref": "#/components/schemas/RunMetrics"
+          },
+          "resume_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Resume Count",
+            "type": "integer"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          }
+        },
+        "required": [
+          "attempt",
+          "status"
+        ],
+        "title": "RunAttemptView",
+        "type": "object"
+      },
+      "RunBatchRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "run_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Run Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "run_ids"
+        ],
+        "title": "RunBatchRequest",
+        "type": "object"
+      },
+      "RunBatchResult": {
+        "additionalProperties": false,
+        "properties": {
+          "changed": {
+            "minimum": 0.0,
+            "title": "Changed",
+            "type": "integer"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/RunView"
+            },
+            "title": "Runs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "runs",
+          "changed"
+        ],
+        "title": "RunBatchResult",
+        "type": "object"
+      },
+      "RunCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "analysis_date": {
+            "format": "date",
+            "title": "Analysis Date",
+            "type": "string"
+          },
+          "analysts": {
+            "default": [
+              "market",
+              "social",
+              "news",
+              "fundamentals"
+            ],
+            "items": {
+              "enum": [
+                "market",
+                "social",
+                "news",
+                "fundamentals"
+              ],
+              "type": "string"
+            },
+            "title": "Analysts",
+            "type": "array"
+          },
+          "asset_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AssetType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "deep_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deep Model"
+          },
+          "deep_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deep Reasoning Effort"
+          },
+          "llm_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Provider"
+          },
+          "output_language": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportLanguage"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Language"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/RunProfile",
+            "default": "standard"
+          },
+          "quick_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quick Model"
+          },
+          "quick_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quick Reasoning Effort"
+          },
+          "source_run_id": {
+            "anyOf": [
+              {
+                "maxLength": 36,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Run Id"
+          },
+          "ticker": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Ticker",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticker",
+          "analysis_date"
+        ],
+        "title": "RunCreateRequest",
+        "type": "object"
+      },
+      "RunDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "attempts": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RunAttemptView"
+            },
+            "title": "Attempts",
+            "type": "array"
+          },
+          "evidence_status": {
+            "$ref": "#/components/schemas/EvidenceSealView"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnalysisResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "run": {
+            "$ref": "#/components/schemas/RunView"
+          }
+        },
+        "required": [
+          "run",
+          "evidence_status"
+        ],
+        "title": "RunDetail",
+        "type": "object"
+      },
+      "RunEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt": {
+            "minimum": 1.0,
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "node": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "sequence": {
+            "minimum": 1.0,
+            "title": "Sequence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run_id",
+          "sequence",
+          "attempt",
+          "event_type",
+          "created_at"
+        ],
+        "title": "RunEvent",
+        "type": "object"
+      },
+      "RunMetrics": {
+        "additionalProperties": false,
+        "properties": {
+          "cache_hit_input_tokens": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Cache Hit Input Tokens",
+            "type": "integer"
+          },
+          "cache_miss_input_tokens": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Cache Miss Input Tokens",
+            "type": "integer"
+          },
+          "detailed_usage_calls": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Detailed Usage Calls",
+            "type": "integer"
+          },
+          "input_tokens": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "llm_calls": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Llm Calls",
+            "type": "integer"
+          },
+          "node_metrics": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/NodeMetrics"
+            },
+            "title": "Node Metrics",
+            "type": "object"
+          },
+          "output_tokens": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Output Tokens",
+            "type": "integer"
+          },
+          "reasoning_output_tokens": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Reasoning Output Tokens",
+            "type": "integer"
+          },
+          "tool_calls": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Tool Calls",
+            "type": "integer"
+          },
+          "wall_time_seconds": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Wall Time Seconds",
+            "type": "number"
+          }
+        },
+        "title": "RunMetrics",
+        "type": "object"
+      },
+      "RunPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RunView"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "maximum": 200.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "minimum": 0.0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "RunPage",
+        "type": "object"
+      },
+      "RunProfile": {
+        "enum": [
+          "fast",
+          "standard",
+          "deep"
+        ],
+        "title": "RunProfile",
+        "type": "string"
+      },
+      "RunStatus": {
+        "enum": [
+          "queued",
+          "running",
+          "succeeded",
+          "failed",
+          "cancelled"
+        ],
+        "title": "RunStatus",
+        "type": "string"
+      },
+      "RunTrashState": {
+        "enum": [
+          "active",
+          "trashed",
+          "all"
+        ],
+        "title": "RunTrashState",
+        "type": "string"
+      },
+      "RunView": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "cancel_requested": {
+            "title": "Cancel Requested",
+            "type": "boolean"
+          },
+          "config_snapshot": {
+            "additionalProperties": true,
+            "title": "Config Snapshot",
+            "type": "object"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "instrument_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Name"
+          },
+          "metrics": {
+            "$ref": "#/components/schemas/RunMetrics"
+          },
+          "request": {
+            "$ref": "#/components/schemas/AnalysisRequest"
+          },
+          "source_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Run Id"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          },
+          "trashed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trashed At"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "request",
+          "config_snapshot",
+          "attempt",
+          "cancel_requested",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "RunView",
+        "type": "object"
+      },
+      "ScenarioReferenceCategory": {
+        "description": "Research purpose of a non-valuation scenario reference range.",
+        "enum": [
+          "technical",
+          "historical",
+          "analyst_consensus",
+          "fundamental",
+          "other"
+        ],
+        "title": "ScenarioReferenceCategory",
+        "type": "string"
+      },
+      "ScenarioReferenceRange": {
+        "additionalProperties": false,
+        "description": "A scenario-specific reference band, not necessarily a valuation.",
+        "properties": {
+          "category": {
+            "$ref": "#/components/schemas/ScenarioReferenceCategory"
+          },
+          "high": {
+            "$ref": "#/components/schemas/AuditedRangeEndpoint"
+          },
+          "interpretation": {
+            "minLength": 1,
+            "title": "Interpretation",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Limitations",
+            "type": "array"
+          },
+          "low": {
+            "$ref": "#/components/schemas/AuditedRangeEndpoint"
+          },
+          "measurement_kind": {
+            "$ref": "#/components/schemas/MeasurementKind",
+            "default": "unknown"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          }
+        },
+        "required": [
+          "category",
+          "label",
+          "low",
+          "high",
+          "interpretation",
+          "limitations"
+        ],
+        "title": "ScenarioReferenceRange",
+        "type": "object"
+      },
+      "StructuredRecoveryNotice": {
+        "additionalProperties": false,
+        "description": "One successful bounded structured-output recovery rebuilt from events.",
+        "properties": {
+          "attempt": {
+            "minimum": 1.0,
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "initial_reason_code": {
+            "pattern": "^[a-z0-9_.-]+$",
+            "title": "Initial Reason Code",
+            "type": "string"
+          },
+          "node": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Node",
+            "type": "string"
+          },
+          "recovered_at": {
+            "format": "date-time",
+            "title": "Recovered At",
+            "type": "string"
+          },
+          "recovery_method": {
+            "$ref": "#/components/schemas/ArtifactGenerationMethod"
+          },
+          "retry_count": {
+            "minimum": 1.0,
+            "title": "Retry Count",
+            "type": "integer"
+          },
+          "validation_issue_codes": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Validation Issue Codes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "attempt",
+          "node",
+          "initial_reason_code",
+          "recovery_method",
+          "retry_count",
+          "recovered_at"
+        ],
+        "title": "StructuredRecoveryNotice",
+        "type": "object"
+      },
+      "TableDataType": {
+        "description": "Machine-readable type of values in one deterministic evidence column.",
+        "enum": [
+          "text",
+          "integer",
+          "number",
+          "percent",
+          "currency",
+          "date",
+          "datetime",
+          "boolean"
+        ],
+        "title": "TableDataType",
+        "type": "string"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "ValuationAssessment": {
+        "additionalProperties": false,
+        "properties": {
+          "high": {
+            "$ref": "#/components/schemas/AuditedRangeEndpoint"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Limitations",
+            "type": "array"
+          },
+          "low": {
+            "$ref": "#/components/schemas/AuditedRangeEndpoint"
+          },
+          "measurement_kind": {
+            "$ref": "#/components/schemas/MeasurementKind"
+          },
+          "method": {
+            "minLength": 1,
+            "title": "Method",
+            "type": "string"
+          },
+          "unit": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "method",
+          "low",
+          "high",
+          "measurement_kind",
+          "unit",
+          "limitations"
+        ],
+        "title": "ValuationAssessment",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Local evidence-first investment research run center.",
+    "title": "TradingAgentsX API",
+    "version": "0.4.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/auth/login": {
+      "post": {
+        "operationId": "login_api_v1_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Login"
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "operationId": "logout_api_v1_auth_logout_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Logout"
+      }
+    },
+    "/api/v1/capabilities": {
+      "get": {
+        "operationId": "capabilities_api_v1_capabilities_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilitiesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Capabilities"
+      }
+    },
+    "/api/v1/health": {
+      "get": {
+        "operationId": "health_api_v1_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health"
+      }
+    },
+    "/api/v1/instruments/recent": {
+      "get": {
+        "operationId": "recent_instruments_api_v1_instruments_recent_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RecentInstrument"
+                  },
+                  "title": "Response Recent Instruments Api V1 Instruments Recent Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Recent Instruments"
+      }
+    },
+    "/api/v1/memory": {
+      "get": {
+        "operationId": "memory_api_v1_memory_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "ticker",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ticker"
+            }
+          },
+          {
+            "in": "query",
+            "name": "market",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Market"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "pending",
+                    "resolved"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MemoryEntry"
+                  },
+                  "title": "Response Memory Api V1 Memory Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Memory"
+      }
+    },
+    "/api/v1/providers/{provider}/models": {
+      "get": {
+        "operationId": "provider_models_api_v1_providers__provider__models_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderModelCatalog"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Provider Models"
+      }
+    },
+    "/api/v1/runs": {
+      "get": {
+        "operationId": "list_runs_api_v1_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "trash_state",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RunTrashState",
+              "default": "active"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/RunStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Runs"
+      },
+      "post": {
+        "operationId": "create_run_api_v1_runs_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Run"
+      }
+    },
+    "/api/v1/runs/restore": {
+      "post": {
+        "operationId": "restore_runs_api_v1_runs_restore_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunBatchResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Restore Runs"
+      }
+    },
+    "/api/v1/runs/trash": {
+      "post": {
+        "operationId": "trash_runs_api_v1_runs_trash_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunBatchResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Trash Runs"
+      }
+    },
+    "/api/v1/runs/{run_id}": {
+      "get": {
+        "operationId": "get_run_api_v1_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Run"
+      }
+    },
+    "/api/v1/runs/{run_id}/artifacts": {
+      "get": {
+        "operationId": "list_artifacts_api_v1_runs__run_id__artifacts_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "attempt",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Attempt"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ResearchArtifact"
+                  },
+                  "title": "Response List Artifacts Api V1 Runs  Run Id  Artifacts Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Artifacts"
+      }
+    },
+    "/api/v1/runs/{run_id}/cancel": {
+      "post": {
+        "operationId": "cancel_run_api_v1_runs__run_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Run"
+      }
+    },
+    "/api/v1/runs/{run_id}/events": {
+      "get": {
+        "operationId": "stream_events_api_v1_runs__run_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "After",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Last-Event-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last-Event-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream Events"
+      }
+    },
+    "/api/v1/runs/{run_id}/evidence": {
+      "get": {
+        "operationId": "get_evidence_api_v1_runs__run_id__evidence_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceBundle"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Evidence"
+      }
+    },
+    "/api/v1/runs/{run_id}/export": {
+      "get": {
+        "operationId": "export_run_api_v1_runs__run_id__export_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "package",
+              "enum": [
+                "package",
+                "markdown",
+                "json"
+              ],
+              "title": "Format",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Run"
+      }
+    },
+    "/api/v1/runs/{run_id}/retry": {
+      "post": {
+        "operationId": "retry_run_api_v1_runs__run_id__retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retry Run"
+      }
+    }
+  }
+}

@@ -11,17 +11,16 @@ from unittest import mock
 
 import pytest
 
-import tradingagents.dataflows.config as config_module
 import tradingagents.default_config as default_config
 from tradingagents.dataflows import interface, market_context
-from tradingagents.dataflows.config import set_config
+from tradingagents.dataflows.config import bind_config
 from tradingagents.dataflows.errors import NoMarketDataError, VendorNotConfiguredError
 
 
 def _reset_config():
-    # Hard reset: set_config() merges, so empty DEFAULT dicts don't clear keys
+    # Hard reset: bind_config() merges, so empty DEFAULT dicts don't clear keys
     # leaked by other tests. Replace the global outright.
-    config_module._config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+    bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
 
 def _returns(value):
@@ -43,7 +42,7 @@ class MarketRoutingTests(unittest.TestCase):
 
     def test_jp_suffix_routes_to_market_vendor(self):
         # A ".T" ticker uses the market-specific vendor, not the default one.
-        set_config({"data_vendors_by_market": {".T": {"core_stock_apis": "jquants"}}})
+        bind_config({"data_vendors_by_market": {".T": {"core_stock_apis": "jquants"}}})
         yf = mock.Mock(side_effect=_returns("YF"))
         with self._route("get_stock_data", {"yfinance": yf, "jquants": _returns("JP")}):
             result = interface.route_to_vendor(
@@ -54,7 +53,7 @@ class MarketRoutingTests(unittest.TestCase):
 
     def test_us_ticker_unaffected_by_market_routes(self):
         # Configuring a ".T" route must not change US-ticker routing at all.
-        set_config({"data_vendors_by_market": {".T": {"core_stock_apis": "jquants"}}})
+        bind_config({"data_vendors_by_market": {".T": {"core_stock_apis": "jquants"}}})
         jp = mock.Mock(side_effect=_returns("JP"))
         with self._route("get_stock_data", {"yfinance": _returns("YF"), "jquants": jp}):
             result = interface.route_to_vendor(
@@ -125,9 +124,10 @@ class MarketRoutingTests(unittest.TestCase):
 
     def test_empty_market_map_preserves_default_routing(self):
         # With no configured routes, even a ".T" ticker stays on the default chain
-        # (byte-for-byte pre-feature behavior). Set the dict directly rather than
-        # via set_config, whose one-level-deep dict merge cannot clear keys.
-        config_module._config["data_vendors_by_market"] = {}
+        # (byte-for-byte pre-feature behavior).
+        config = copy.deepcopy(default_config.DEFAULT_CONFIG)
+        config["data_vendors_by_market"] = {}
+        bind_config(config, merge=False)
         with self._route("get_stock_data", {"yfinance": _returns("YF"), "jquants": _returns("JP")}):
             result = interface.route_to_vendor(
                 "get_stock_data", "9984.T", "2026-01-01", "2026-01-10"
@@ -136,14 +136,14 @@ class MarketRoutingTests(unittest.TestCase):
 
     def test_market_without_category_falls_back_to_default(self):
         # ".T" routes core_stock_apis only; fundamental_data must use the default.
-        set_config({"data_vendors_by_market": {".T": {"core_stock_apis": "jquants"}}})
+        bind_config({"data_vendors_by_market": {".T": {"core_stock_apis": "jquants"}}})
         with self._route("get_fundamentals", {"yfinance": _returns("YF_F"), "jquants": _returns("JP_F")}):
             result = interface.route_to_vendor("get_fundamentals", "9984.T", "2026-01-01")
         self.assertEqual(result, "YF_F")
 
     def test_tool_vendor_overrides_market_route(self):
         # Tool-level config wins over a market route (documented precedence).
-        set_config({
+        bind_config({
             "data_vendors_by_market": {".T": {"core_stock_apis": "jquants"}},
             "tool_vendors": {"get_stock_data": "alpha_vantage"},
         })
@@ -158,7 +158,7 @@ class MarketRoutingTests(unittest.TestCase):
         # configured market route (analyzed across all markets at once). Pin the
         # default chain to fred so the assertion targets the market-route bypass,
         # not the real default chain (which now also lists boj as a macro vendor).
-        set_config({
+        bind_config({
             "data_vendors": {"macro_data": "fred"},
             "data_vendors_by_market": {".T": {"macro_data": "boj"}},
         })
@@ -171,7 +171,7 @@ class MarketRoutingTests(unittest.TestCase):
     def test_global_news_stays_global_when_ticker_news_is_routed(self):
         # Routing news_data for ".T" sends per-ticker news to the JP vendor, but
         # get_global_news is ticker-less and must stay on the default source.
-        set_config({"data_vendors_by_market": {".T": {"news_data": "edinet_news"}}})
+        bind_config({"data_vendors_by_market": {".T": {"news_data": "edinet_news"}}})
         jp = mock.Mock(side_effect=_returns("JP_NEWS"))
         with self._route("get_global_news", {"yfinance": _returns("GLOBAL"), "edinet_news": jp}):
             result = interface.route_to_vendor("get_global_news", "2026-01-01", 7, 10)
@@ -181,7 +181,7 @@ class MarketRoutingTests(unittest.TestCase):
     def test_ticker_news_is_routed_while_global_is_not(self):
         # The complement of the above: get_news (ticker-bearing) for a ".T" ticker
         # DOES route to the JP vendor under the same news_data route.
-        set_config({"data_vendors_by_market": {".T": {"news_data": "edinet_news"}}})
+        bind_config({"data_vendors_by_market": {".T": {"news_data": "edinet_news"}}})
         with self._route("get_news", {"yfinance": _returns("YF_NEWS"), "edinet_news": _returns("JP_NEWS")}):
             result = interface.route_to_vendor("get_news", "9984.T", "2026-01-01", "2026-01-10")
         self.assertEqual(result, "JP_NEWS")
@@ -251,7 +251,7 @@ class MarketRoutingTests(unittest.TestCase):
         yfinance.assert_called_once()
 
     def test_cn_market_route_does_not_change_global_news_vendor(self):
-        set_config({"data_vendors": {"news_data": "yfinance"}})
+        bind_config({"data_vendors": {"news_data": "yfinance"}})
         with self._route(
             "get_global_news", {"yfinance": _returns("GLOBAL NEWS")}
         ):

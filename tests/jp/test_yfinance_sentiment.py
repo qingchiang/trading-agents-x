@@ -23,7 +23,7 @@ _FULL = {
 @pytest.mark.unit
 class AnalystRatingsBlockTests(unittest.TestCase):
     def _block(self, ratings, ticker="7011.T", live=True):
-        with mock.patch.object(ys, "is_live", return_value=live), \
+        with mock.patch.object(ys, "is_near_live", return_value=live), \
                 mock.patch.object(ys, "get_analyst_ratings", return_value=ratings) as gar:
             out = ys.get_analyst_ratings_block(ticker, _LIVE)
         return out, gar
@@ -39,6 +39,14 @@ class AnalystRatingsBlockTests(unittest.TestCase):
         self.assertIn("Requested analysis date: 2026-06-26", out)
         self.assertIn("Retrieved at:", out)
         self.assertIn("Not point-in-time historical data", out)
+        with mock.patch.object(ys, "is_near_live", return_value=True), \
+                mock.patch.object(ys, "get_analyst_ratings", return_value=_FULL):
+            _body, facts = ys.get_analyst_ratings_payload("7011.T", _LIVE)
+        by_key = {fact["key"]: fact for fact in facts}
+        self.assertEqual(by_key["target_mean_price"]["value"], 5323.078)
+        self.assertEqual(by_key["target_mean_price"]["unit"], "JPY")
+        self.assertEqual(by_key["analyst_count"]["unit"], "analysts")
+        self.assertIsNone(by_key["target_mean_price"]["effective_date"])
 
     def test_non_jp_ticker_returns_empty(self):
         # yfinance-sourced but injected as a JP fill; a US name uses StockTwits/Reddit.
@@ -108,7 +116,7 @@ class AnalystRatingsBlockTests(unittest.TestCase):
 
     def test_fetch_error_degrades_to_empty(self):
         # Defensive: the getter degrades to {}, but a raise must not escape the prefetch.
-        with mock.patch.object(ys, "is_live", return_value=True), \
+        with mock.patch.object(ys, "is_near_live", return_value=True), \
                 mock.patch.object(ys, "get_analyst_ratings", side_effect=RuntimeError("boom")):
             out = ys.get_analyst_ratings_block("7011.T", _LIVE)
         self.assertEqual(out, "")

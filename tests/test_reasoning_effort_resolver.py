@@ -149,10 +149,15 @@ def test_unsupported_provider_warns_and_omits_explicit_value():
 
 
 @pytest.mark.parametrize(
-    "model", ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-reasoner"]
+    ("model", "levels"),
+    [
+        ("deepseek-v4-flash", ("low", "high", "max")),
+        ("deepseek-v4-pro", ("high", "max")),
+        ("deepseek-reasoner", ("high", "max")),
+    ],
 )
-def test_deepseek_thinking_models_support_high_and_max(model):
-    assert model_effort_levels("deepseek", model) == ("high", "max")
+def test_deepseek_thinking_models_expose_effective_levels(model, levels):
+    assert model_effort_levels("deepseek", model) == levels
     config = _config("deepseek", quick="max")
     config["quick_think_llm"] = model
     result = resolve_reasoning_effort(config, "quick")
@@ -167,11 +172,19 @@ def test_deepseek_chat_is_known_non_thinking_alias():
     assert result.kwargs == {}
 
 
-def test_deepseek_rejects_compatibility_only_effort_levels():
+def test_deepseek_flash_accepts_native_low_effort():
     config = _config("deepseek", quick="low")
     config["quick_think_llm"] = "deepseek-v4-flash"
-    with pytest.raises(ValueError, match="expected one of: high, max"):
-        resolve_reasoning_effort(config, "quick")
+    result = resolve_reasoning_effort(config, "quick")
+    assert result.kwargs == {"reasoning_effort": "low"}
+
+
+def test_deepseek_pro_omits_effectively_duplicated_low_effort():
+    config = _config("deepseek", quick="low")
+    config["quick_think_llm"] = "deepseek-v4-pro"
+    with pytest.warns(RuntimeWarning, match="does not support"):
+        result = resolve_reasoning_effort(config, "quick")
+    assert result.kwargs == {}
 
 
 def test_deepseek_does_not_inherit_openai_legacy_effort():

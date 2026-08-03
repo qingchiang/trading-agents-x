@@ -4,10 +4,11 @@ Temperature is a cross-provider knob: when set it must reach the underlying
 chat client; when unset the provider keeps its own default.
 """
 
-import importlib
-
 import pytest
 
+from tradingagents.application.llms import create_run_llms
+from tradingagents.application.settings import RunSettings
+from tradingagents.default_config import build_default_config
 from tradingagents.llm_clients.factory import create_llm_client
 
 
@@ -42,42 +43,56 @@ class TestTemperatureForwarding:
 
 @pytest.mark.unit
 class TestTemperatureEnvOverlay:
-    def test_env_sets_temperature(self, monkeypatch):
+    def test_explicit_environment_sets_temperature(self):
         import tradingagents.default_config as dc
-        monkeypatch.setenv("TRADINGAGENTS_TEMPERATURE", "0.2")
-        importlib.reload(dc)
-        # Stored on config (string from env is fine; consumed via float()).
-        assert dc.DEFAULT_CONFIG["temperature"] in ("0.2", 0.2)
-        assert float(dc.DEFAULT_CONFIG["temperature"]) == 0.2
-        monkeypatch.delenv("TRADINGAGENTS_TEMPERATURE", raising=False)
-        importlib.reload(dc)
 
-    def test_default_temperature_is_none(self, monkeypatch):
+        config = dc.build_default_config({"TRADINGAGENTS_TEMPERATURE": "0.2"})
+
+        assert float(config["temperature"]) == 0.2
+
+    def test_module_default_ignores_process_environment(self, monkeypatch):
         import tradingagents.default_config as dc
-        monkeypatch.delenv("TRADINGAGENTS_TEMPERATURE", raising=False)
-        importlib.reload(dc)
+
+        monkeypatch.setenv("TRADINGAGENTS_TEMPERATURE", "0.2")
+
         assert dc.DEFAULT_CONFIG["temperature"] is None
 
 
 @pytest.mark.unit
 class TestProviderKwargsTemperature:
-    """_get_provider_kwargs float-coerces and forwards temperature, or omits it."""
+    """Run construction forwards a resolved temperature to both role clients."""
 
-    def _kwargs_for(self, temperature):
-        from tradingagents.graph.trading_graph import TradingAgentsGraph
-        # Call the method without constructing the full graph.
-        graph = TradingAgentsGraph.__new__(TradingAgentsGraph)
-        graph.config = {"llm_provider": "openai", "temperature": temperature}
-        return TradingAgentsGraph._get_provider_kwargs(graph)
+    def _kwargs_for(self, monkeypatch, temperature):
+        calls = []
 
-    def test_float_string_coerced(self):
-        assert self._kwargs_for("0.3")["temperature"] == 0.3
+        def factory(**kwargs):
+            calls.append(kwargs)
 
-    def test_float_passthrough(self):
-        assert self._kwargs_for(0.0)["temperature"] == 0.0
+            class Client:
+                def get_llm(self):
+                    return object()
 
-    def test_none_omitted(self):
-        assert "temperature" not in self._kwargs_for(None)
+            return Client()
 
-    def test_empty_string_omitted(self):
-        assert "temperature" not in self._kwargs_for("")
+        monkeypatch.setattr(
+            "tradingagents.application.llms.create_llm_client",
+            factory,
+        )
+        settings = RunSettings(
+            temperature=temperature,
+            data_config=build_default_config({}),
+        )
+        create_run_llms(settings)
+        return calls
+
+    def test_float_string_coerced(self, monkeypatch):
+        calls = self._kwargs_for(monkeypatch, "0.3")
+        assert [call["temperature"] for call in calls] == [0.3, 0.3]
+
+    def test_float_passthrough(self, monkeypatch):
+        calls = self._kwargs_for(monkeypatch, 0.0)
+        assert [call["temperature"] for call in calls] == [0.0, 0.0]
+
+    def test_unset_temperature_is_omitted(self, monkeypatch):
+        calls = self._kwargs_for(monkeypatch, None)
+        assert all("temperature" not in call for call in calls)

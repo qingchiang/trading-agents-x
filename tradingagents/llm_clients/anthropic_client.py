@@ -11,13 +11,6 @@ _PASSTHROUGH_KWARGS = (
     "callbacks", "http_client", "http_async_client", "effort",
 )
 
-def _supports_effort(model: str) -> bool:
-    """Whether Anthropic accepts the ``effort`` parameter for this model."""
-    return resolve_native_reasoning_value(
-        "anthropic", model, "medium", warn=False
-    ) is not None
-
-
 class NormalizedChatAnthropic(ChatAnthropic):
     """ChatAnthropic with normalized content output.
 

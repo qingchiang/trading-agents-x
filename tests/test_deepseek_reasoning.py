@@ -5,10 +5,9 @@ Two pieces verified:
 1. ``reasoning_content`` is captured on receive into the AIMessage's
    ``additional_kwargs`` and re-attached on send so DeepSeek's API
    sees the same value across turns.
-2. ``with_structured_output`` consults the capability table and
-   suppresses ``tool_choice`` for models that reject it (V4 + reasoner),
-   matching DeepSeek's official tool-calling pattern at
-   https://api-docs.deepseek.com/guides/tool_calls.
+2. ``with_structured_output`` consults the capability table: V4 thinking
+   models prefer JSON mode, while the legacy reasoner endpoint binds an
+   unforced schema tool.
 """
 
 import os
@@ -18,6 +17,9 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.prompt_values import ChatPromptValue
 from pydantic import BaseModel
 
+from tradingagents.application.contracts import ArtifactGenerationMethod
+from tradingagents.graph.structured_output import StructuredOutputRunner
+from tradingagents.llm_clients.factory import create_llm_client
 from tradingagents.llm_clients.openai_client import (
     DeepSeekChatOpenAI,
     NormalizedChatOpenAI,
@@ -125,9 +127,19 @@ class TestDeepSeekReasoningContent:
         assert payload["reasoning_effort"] == "max"
         assert "thinking" not in payload.get("extra_body", {})
 
+    def test_flash_low_effort_is_sent_as_top_level_parameter(self):
+        client = DeepSeekChatOpenAI(
+            model="deepseek-v4-flash",
+            api_key="placeholder",
+            base_url="https://api.deepseek.com",
+            reasoning_effort="low",
+        )
+        payload = client._get_request_payload([HumanMessage(content="Analyze.")])
+        assert payload["reasoning_effort"] == "low"
+
 
 # ---------------------------------------------------------------------------
-# Capability-driven structured output: tool_choice suppressed for V4 + reasoner
+# Capability-driven structured output
 # ---------------------------------------------------------------------------
 
 
@@ -139,17 +151,15 @@ def _bound_kwargs(runnable):
 
 @pytest.mark.unit
 class TestStructuredOutputCapabilityDispatch:
-    """DeepSeek V4 and reasoner reject the tool_choice parameter
-    (official guide: api-docs.deepseek.com/guides/tool_calls passes
-    tools=[...] without tool_choice). Verify the capability dispatch
-    suppresses tool_choice for those models and sends it for chat."""
+    """V4 prefers JSON mode; legacy DeepSeek compatibility stays isolated."""
 
     class _Sample(BaseModel):
         answer: str
 
-    def _client(self, model):
+    def _client(self, model, **kwargs):
         return DeepSeekChatOpenAI(
             model=model, api_key="placeholder", base_url="https://api.deepseek.com",
+            **kwargs,
         )
 
     def test_chat_sends_tool_choice(self):
@@ -163,21 +173,81 @@ class TestStructuredOutputCapabilityDispatch:
         assert _bound_kwargs(bound).get("tool_choice") in (None, ...) or \
             "tool_choice" not in _bound_kwargs(bound)
 
-    def test_v4_flash_suppresses_tool_choice(self):
+    def test_v4_flash_defaults_to_json_mode(self):
         bound = self._client("deepseek-v4-flash").with_structured_output(self._Sample)
-        assert _bound_kwargs(bound).get("tool_choice") is None or \
-            "tool_choice" not in _bound_kwargs(bound)
+        assert _bound_kwargs(bound)["response_format"] == {
+            "type": "json_object"
+        }
 
-    def test_v4_pro_suppresses_tool_choice(self):
+    def test_v4_pro_defaults_to_json_mode(self):
         bound = self._client("deepseek-v4-pro").with_structured_output(self._Sample)
-        assert _bound_kwargs(bound).get("tool_choice") is None or \
-            "tool_choice" not in _bound_kwargs(bound)
+        assert _bound_kwargs(bound)["response_format"] == {
+            "type": "json_object"
+        }
 
-    def test_future_v_variant_via_regex(self):
-        """Forward-compat: unknown deepseek-v\\d-* IDs inherit V4 quirks."""
+    def test_v4_explicit_thinking_mode_stays_on_json_mode(self):
+        client = self._client(
+            "deepseek-v4-pro",
+            extra_body={"thinking": {"type": "enabled"}},
+        )
+        bound = client.with_structured_output(self._Sample)
+        assert _bound_kwargs(bound)["response_format"] == {
+            "type": "json_object"
+        }
+
+    def test_v4_json_mode_sets_response_format(self):
+        bound = self._client("deepseek-v4-flash").with_structured_output(
+            self._Sample,
+            method="json_mode",
+        )
+        assert _bound_kwargs(bound)["response_format"] == {
+            "type": "json_object"
+        }
+
+    @pytest.mark.parametrize(
+        "model",
+        ("deepseek-v4-flash", "deepseek-v4-pro"),
+    )
+    def test_v4_non_thinking_uses_forced_schema_tool(self, model):
+        client = self._client(
+            model,
+            extra_body={"thinking": {"type": "disabled"}},
+        )
+        bound = client.with_structured_output(self._Sample)
+        kwargs = _bound_kwargs(bound)
+        assert kwargs.get("tool_choice") is not None
+        assert "response_format" not in kwargs
+        assert client.preferred_structured_output_method == "function_calling"
+
+    def test_future_v_variant_uses_unknown_model_default(self):
+        """Future model IDs wait for discovery instead of inheriting V4."""
         bound = self._client("deepseek-v5-hypothetical").with_structured_output(self._Sample)
-        assert _bound_kwargs(bound).get("tool_choice") is None or \
-            "tool_choice" not in _bound_kwargs(bound)
+        kwargs = _bound_kwargs(bound)
+        assert kwargs.get("tool_choice") is not None
+        assert "response_format" not in kwargs
+
+    def test_v4_exposes_structured_output_safety_ceiling(self):
+        client = self._client("deepseek-v4-flash")
+        assert client.structured_output_max_tokens == 16_384
+
+    def test_explicit_client_max_tokens_overrides_safety_ceiling(self):
+        client = self._client("deepseek-v4-flash", max_tokens=8192)
+        assert client.structured_output_max_tokens == 8192
+
+    def test_factory_forwards_non_thinking_mode_and_token_budget(
+        self,
+        monkeypatch,
+    ):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "placeholder")
+        client = create_llm_client(
+            provider="deepseek",
+            model="deepseek-v4-flash",
+            extra_body={"thinking": {"type": "disabled"}},
+            max_tokens=8192,
+        ).get_llm()
+
+        assert client.preferred_structured_output_method == "function_calling"
+        assert client.structured_output_max_tokens == 8192
 
     def test_schema_is_still_bound_as_tool(self):
         """tool_choice is suppressed, but the schema is still bound as a tool —
@@ -207,36 +277,102 @@ def _live_deepseek_enabled():
 @pytest.mark.integration
 @pytest.mark.live_llm
 class TestDeepSeekLiveStructuredOutput:
-    """End-to-end: a real DeepSeek V4-flash call returns a typed instance.
-
-    Verifies the no-tool_choice path doesn't trigger the 400 reported in
-    issue #678 and that the structured-output binding still parses to a
-    Pydantic instance.
-    """
+    """Opt-in V4 probes for thinking JSON and non-thinking forced tools."""
 
     class _Pick(BaseModel):
         action: str
         confidence: float
 
-    def test_v4_flash_returns_structured_output(self):
+    @pytest.mark.parametrize(
+        "model",
+        (
+            "deepseek-v4-flash",
+            "deepseek-v4-pro",
+        ),
+    )
+    def test_v4_default_returns_structured_output(self, model):
         if not _live_deepseek_enabled():
             pytest.skip(
                 "Set RUN_LIVE_LLM_TESTS=1 and export DEEPSEEK_API_KEY to run live"
             )
         client = DeepSeekChatOpenAI(
-            model="deepseek-v4-flash",
+            model=model,
             api_key=os.environ["DEEPSEEK_API_KEY"],
             base_url="https://api.deepseek.com",
             timeout=60,
         )
+        runner = StructuredOutputRunner(
+            llm=client,
+            schema=self._Pick,
+            validator=lambda value: value,
+            node="live.pick",
+        )
+        result = runner.invoke(
+            "Pick BUY or SELL or HOLD for a tech stock with strong earnings. "
+            "Confidence is a float between 0 and 1.",
+            example={"action": "HOLD", "confidence": 0.5},
+            allowed_evidence_refs=(),
+        )
+        assert isinstance(result.value, self._Pick)
+        assert result.value.action in {"BUY", "SELL", "HOLD"}
+        assert 0.0 <= result.value.confidence <= 1.0
+        assert result.generation_method is ArtifactGenerationMethod.JSON_MODE
+
+    @pytest.mark.parametrize(
+        "model",
+        (
+            "deepseek-v4-flash",
+            "deepseek-v4-pro",
+        ),
+    )
+    def test_v4_non_thinking_forces_schema_tool(self, model):
+        if not _live_deepseek_enabled():
+            pytest.skip(
+                "Set RUN_LIVE_LLM_TESTS=1 and export DEEPSEEK_API_KEY to run live"
+            )
+        client = DeepSeekChatOpenAI(
+            model=model,
+            api_key=os.environ["DEEPSEEK_API_KEY"],
+            base_url="https://api.deepseek.com",
+            timeout=60,
+            max_tokens=256,
+            extra_body={"thinking": {"type": "disabled"}},
+        )
         bound = client.with_structured_output(self._Pick)
         result = bound.invoke(
-            "Pick BUY or SELL or HOLD for a tech stock with strong earnings. "
-            "Confidence is a float between 0 and 1."
+            "Choose BUY, SELL, or HOLD for a fictional stock. Confidence must "
+            "be a float between 0 and 1."
         )
         assert isinstance(result, self._Pick)
         assert result.action in {"BUY", "SELL", "HOLD"}
         assert 0.0 <= result.confidence <= 1.0
+
+    @pytest.mark.parametrize(
+        "model",
+        (
+            "deepseek-v4-flash",
+            "deepseek-v4-pro",
+        ),
+    )
+    def test_v4_non_thinking_accepts_required_tool_choice(self, model):
+        if not _live_deepseek_enabled():
+            pytest.skip(
+                "Set RUN_LIVE_LLM_TESTS=1 and export DEEPSEEK_API_KEY to run live"
+            )
+        client = DeepSeekChatOpenAI(
+            model=model,
+            api_key=os.environ["DEEPSEEK_API_KEY"],
+            base_url="https://api.deepseek.com",
+            timeout=60,
+            max_tokens=256,
+            extra_body={"thinking": {"type": "disabled"}},
+        )
+        bound = client.bind_tools([self._Pick], tool_choice="required")
+        result = bound.invoke(
+            "Call the supplied tool with action HOLD and confidence 0.5."
+        )
+        assert result.tool_calls
+        assert result.tool_calls[0]["name"] == "_Pick"
 
 
 # ---------------------------------------------------------------------------

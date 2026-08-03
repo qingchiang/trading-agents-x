@@ -9,6 +9,9 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  PYTHON_DOTENV_DISABLED: "1"
+
 jobs:
   test:
     name: tests (py${{ matrix.python-version }})
@@ -22,28 +25,49 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install (with dev extras)
+      - name: Install with development extras
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-      - name: Run test suite
+      - name: Run Python suite
         run: pytest -q
 
-  smoke-install:
-    name: clean-install smoke
+  frontend:
+    name: React, OpenAPI, and browser contracts
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Fresh install (no dev extras) and import
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install application and frontend
         run: |
           python -m pip install --upgrade pip
-          pip install .
-          # Catches undeclared runtime deps (e.g. #994 python-dotenv): a bare
-          # install must import the package and the CLI module.
-          python -c "import tradingagents, cli.main; print('clean-install import OK')"
+          pip install -e .
+          npm ci --prefix frontend
+      - name: Check generated API contract
+        run: |
+          python scripts/export_openapi.py --check
+          python scripts/generate_typescript_api.py --check
+      - name: Test, typecheck, and build frontend
+        run: |
+          npm test --prefix frontend
+          npm run typecheck --prefix frontend
+          npm run build --prefix frontend
+          git diff --exit-code -- \
+            frontend/openapi.json \
+            frontend/src/api/types.generated.ts \
+            tradingagents/web/static
+      - name: Install Playwright Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run browser workflow
+        run: npm run test:e2e --prefix frontend
 
   lint:
     name: ruff (strict, full repo)
@@ -55,7 +79,53 @@ jobs:
           python-version: "3.12"
       - name: Install ruff
         run: pip install "ruff>=0.15"
-      - name: Lint the repository
-        # The repo is fully clean under the strict select, so we lint everything
-        # (results/ and worklog/ are excluded via pyproject extend-exclude).
+      - name: Lint repository
         run: ruff check .
+
+  wheel:
+    name: wheel and fresh-install contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build wheel
+        run: |
+          python -m pip install --upgrade pip
+          pip wheel --no-deps --wheel-dir wheelhouse .
+      - name: Inspect wheel contents and metadata
+        run: python scripts/verify_wheel.py wheelhouse/trading_agents_x-*.whl
+      - name: Fresh install and runtime smoke
+        run: |
+          python -m venv /tmp/tradingagents-fresh
+          /tmp/tradingagents-fresh/bin/pip install wheelhouse/trading_agents_x-*.whl
+          /tmp/tradingagents-fresh/bin/python -c \
+            "import tradingagents, tradingagents.web; print(tradingagents.__version__)"
+          /tmp/tradingagents-fresh/bin/tradingagents --help
+
+  docker:
+    name: Docker Web and worker smoke
+    runs-on: ubuntu-latest
+    env:
+      TRADINGAGENTS_ENV_FILE: .env.example
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start local services
+        run: docker compose up --build --detach web worker
+      - name: Verify health and worker process
+        run: |
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8000/api/v1/health; then
+              break
+            fi
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:8000/api/v1/health
+          docker compose exec -T worker tradingagents --version
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+      - name: Stop services
+        if: always()
+        run: docker compose down --volumes

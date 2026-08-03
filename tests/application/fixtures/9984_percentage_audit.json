@@ -1,0 +1,62 @@
+{
+  "analysis_date": "2026-08-02",
+  "instrument": "9984.T",
+  "evidence_ref": "ev_9984a0000001",
+  "requirements": [
+    {
+      "id": "req_fwd_pe",
+      "component_path": "thesis",
+      "label": "Forward PE",
+      "stated_value": 17.81,
+      "fraction_digits": 2,
+      "formula": "close_price / fwd_eps",
+      "inputs": {"close_price": 5260.0, "fwd_eps": 295.29},
+      "unit": "x",
+      "expected_result": 17.812997392393918
+    },
+    {
+      "id": "req_pb",
+      "component_path": "thesis",
+      "label": "Price to book",
+      "stated_value": 1.72,
+      "fraction_digits": 2,
+      "formula": "close_price / bps_fy2026",
+      "inputs": {"close_price": 5260.0, "bps_fy2026": 3057.72},
+      "unit": "x",
+      "expected_result": 1.7202359928312601
+    },
+    {
+      "id": "req_bps_yoy_change",
+      "component_path": "thesis",
+      "label": "BPS year-over-year change",
+      "stated_value": -61.32,
+      "fraction_digits": 2,
+      "formula": "(bps_fy2026 - bps_fy2025) / bps_fy2025",
+      "inputs": {"bps_fy2026": 3057.72, "bps_fy2025": 7905.39},
+      "unit": "%",
+      "expected_result": -61.321073343630104
+    },
+    {
+      "id": "req_target_upside",
+      "component_path": "scenarios.bull.outcome",
+      "label": "Analyst target implied upside",
+      "stated_value": 45.46,
+      "fraction_digits": 2,
+      "formula": "(target_price - close_price) / close_price",
+      "inputs": {"target_price": 7650.97, "close_price": 5260.0},
+      "unit": "%",
+      "expected_result": 45.45570342205322
+    },
+    {
+      "id": "req_target_high_low_ratio",
+      "component_path": "risks.0",
+      "label": "Analyst target high-low ratio",
+      "stated_value": 3.57,
+      "fraction_digits": 2,
+      "formula": "max_target / min_target",
+      "inputs": {"max_target": 11200.0, "min_target": 3140.0},
+      "unit": "x",
+      "expected_result": 3.5668789808917198
+    }
+  ]
+}
