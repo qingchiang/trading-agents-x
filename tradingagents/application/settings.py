@@ -109,7 +109,6 @@ class RunSettings(BaseModel):
                 "output_language": report_language_prompt_label(
                     self.output_language
                 ),
-                "provenance_appendix": False,
             }
         )
         return config
@@ -184,7 +183,6 @@ class AppSettings(BaseModel):
             )
         )
         data_config = deepcopy(defaults)
-        data_config.pop("provenance_appendix", None)
         data_config["output_language"] = report_language_value(output_language)
         run_settings = RunSettings(
             llm_provider=provider,

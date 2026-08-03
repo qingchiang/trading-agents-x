@@ -110,7 +110,6 @@ from tradingagents.provenance import (
 )
 
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
-_CONTROL_COMMENT_RE = re.compile(r"<!--\s*tradingagents-data-provenance:(?:start|end)\s*-->")
 
 
 def _merge_dicts(
@@ -1845,10 +1844,7 @@ def _last_date(value: str | None) -> date | None:
 
 
 def _clean_narrative(value: str) -> str:
-    return _CONTROL_COMMENT_RE.sub(
-        "",
-        strip_provenance_markers(value),
-    ).strip()
+    return strip_provenance_markers(value).strip()
 
 
 def _structured_recovery_warnings(

@@ -320,7 +320,6 @@ def test_omitted_request_values_inherit_and_materialize_environment_defaults(
             "TRADINGAGENTS_OUTPUT_LANGUAGE": custom_language,
             "TRADINGAGENTS_QUICK_REASONING_EFFORT": "low",
             "TRADINGAGENTS_DEEP_REASONING_EFFORT": "high",
-            "TRADINGAGENTS_PROVENANCE_APPENDIX": "true",
         },
         load_env_files=False,
     )
@@ -343,8 +342,6 @@ def test_omitted_request_values_inherit_and_materialize_environment_defaults(
     assert materialized.deep_reasoning_effort == "high"
     assert "provenance" not in materialized.model_dump(mode="json")
     assert "provenance" not in resolved.snapshot()
-    assert "provenance_appendix" not in resolved.snapshot()["data_config"]
-    assert resolved.dataflow_config(settings)["provenance_appendix"] is False
 
 
 def test_removed_provenance_options_are_rejected() -> None:

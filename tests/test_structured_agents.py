@@ -57,10 +57,8 @@ def _run(
     news_side_effect: Exception | None = None,
     signals: tuple[FetchedSentimentSignal, ...] = (),
     llm=None,
-    provenance_appendix: bool = True,
 ):
     captured: dict = {}
-    bind_config({"provenance_appendix": provenance_appendix})
     if routes:
         bind_config({"data_vendors_by_market": routes})
     with (
@@ -281,30 +279,6 @@ def test_markdown_generation_failure_is_not_silently_fabricated():
 
     with pytest.raises(RuntimeError, match="provider failed"):
         _run(llm=llm)
-
-
-@pytest.mark.unit
-def test_prefetched_evidence_is_independent_of_appendix_display_setting():
-    enabled = _run(provenance_appendix=True)[-1]
-    disabled = _run(provenance_appendix=False)[-1]
-    enabled_evidence = _collect_evidence(
-        enabled["messages"],
-        enabled["sentiment_report"],
-        requested_date=date(2026, 1, 15),
-        analyst="social",
-        prefetched_blocks=enabled["prefetched_evidence"],
-    )
-    disabled_evidence = _collect_evidence(
-        disabled["messages"],
-        disabled["sentiment_report"],
-        requested_date=date(2026, 1, 15),
-        analyst="social",
-        prefetched_blocks=disabled["prefetched_evidence"],
-    )
-
-    assert enabled["sentiment_report"] == disabled["sentiment_report"]
-    assert enabled["prefetched_evidence"] == disabled["prefetched_evidence"]
-    assert enabled_evidence == disabled_evidence
 
 
 @pytest.mark.unit

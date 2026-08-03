@@ -1,10 +1,9 @@
-"""Deterministic data-provenance metadata and compatibility rendering.
+"""Deterministic data-provenance metadata and quality checks.
 
 Vendor results carry a small versioned HTML comment. The comment is visible to
 the analyst model but hidden by Markdown renderers; application graph nodes
-convert it into typed evidence before ToolMessages are cleared. The appendix
-renderer remains available only for direct low-level compatibility callers.
-No provenance is inferred from model prose.
+convert it into typed evidence before ToolMessages are cleared. No provenance
+is inferred from model prose.
 """
 
 from __future__ import annotations
@@ -22,8 +21,6 @@ _MARKER_RE = re.compile(
     rf"<!--\s*{re.escape(_MARKER_PREFIX)}\s+(\{{.*?\}})\s*-->",
     re.DOTALL,
 )
-_APPENDIX_START = "<!-- tradingagents-data-provenance:start -->"
-_APPENDIX_END = "<!-- tradingagents-data-provenance:end -->"
 _SPAN_PREFIX = "tradingagents-evidence-span:v1"
 _SPAN_END = f"<!-- /{_SPAN_PREFIX} -->"
 _SPAN_RE = re.compile(
@@ -354,100 +351,3 @@ def provenance_quality_issues(
                 )
                 seen.add(key)
     return issues
-
-
-def append_provenance_appendix(
-    report: str,
-    records: Iterable[ProvenanceRecord],
-    *,
-    expected: Iterable[tuple[str, str]] = (),
-    requested_date: str | None = None,
-    enabled: bool = True,
-) -> str:
-    """Append quality warnings and, when enabled, one provenance table.
-
-    ``enabled`` controls the detailed provenance table only. Material quality
-    warnings remain visible so disabling the audit appendix cannot hide a
-    fallback, unavailable source, timing limitation, or coverage problem.
-    """
-    report = report if isinstance(report, str) else str(report)
-    while _APPENDIX_START in report and _APPENDIX_END in report:
-        start = report.index(_APPENDIX_START)
-        end = report.index(_APPENDIX_END, start) + len(_APPENDIX_END)
-        before = report[:start].rstrip()
-        after = report[end:].lstrip()
-        report = f"{before}\n\n{after}" if before and after else before or after
-
-    deduped: list[ProvenanceRecord] = []
-    seen: set[ProvenanceRecord] = set()
-    for record in records:
-        if record not in seen:
-            deduped.append(record)
-            seen.add(record)
-
-    present = {record.evidence for record in deduped}
-    for evidence, label in expected:
-        if evidence not in present:
-            deduped.append(
-                ProvenanceRecord(
-                    evidence=label,
-                    source="—",
-                    requested=requested_date or "unknown",
-                    effective="—",
-                    timing="not requested",
-                )
-            )
-
-    if not deduped:
-        deduped.append(
-            ProvenanceRecord(
-                evidence="analyst evidence",
-                source="unknown",
-                requested=requested_date or "unknown",
-                effective="unknown",
-                timing="no auditable source metadata captured",
-            )
-        )
-
-    issues = provenance_quality_issues(deduped)
-    if not enabled and not issues:
-        return report
-
-    rows = [_APPENDIX_START, "---", ""]
-    if issues:
-        rows.extend(["## Data Quality Warnings", ""])
-        rows.extend(
-            f"- **{issue.evidence}** (source: {issue.source}): "
-            f"{_escape_cell(issue.reason)}"
-            for issue in issues
-        )
-        rows.append("")
-    if enabled:
-        rows.extend(
-            [
-                "## Data Provenance",
-                "",
-                "| Evidence | Source | Requested / cutoff | Effective date / window | Timing status |",
-                "|---|---|---|---|---|",
-            ]
-        )
-        for record in deduped:
-            timing = record.timing
-            if record.retrieved_at:
-                timing = f"{timing}; retrieved {record.retrieved_at}"
-            rows.append(
-                "| "
-                + " | ".join(
-                    _escape_cell(value)
-                    for value in (
-                        record.evidence,
-                        record.source,
-                        record.requested,
-                        record.effective,
-                        timing,
-                    )
-                )
-                + " |"
-            )
-    rows.append(_APPENDIX_END)
-    return f"{report.rstrip()}\n\n" + "\n".join(rows)

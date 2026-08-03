@@ -18,7 +18,6 @@ def test_no_env_uses_built_in_defaults():
     assert config["deep_think_llm"] == "gpt-5.5"
     assert config["quick_think_llm"] == "gpt-5.4-mini"
     assert config["backend_url"] is None
-    assert "provenance_appendix" not in config
     assert config["news_article_limit"] == 30
     assert config["sentiment_filing_limit"] == 20
 
@@ -101,7 +100,6 @@ def test_invalid_int_raises():
         "TRADINGAGENTS_CHECKPOINT_ENABLED",
         "TRADINGAGENTS_MEMORY_LOG_MAX_ENTRIES",
         "TRADINGAGENTS_MEMORY_CROSS_TICKER_LIMIT",
-        "TRADINGAGENTS_PROVENANCE_APPENDIX",
     ],
 )
 def test_removed_legacy_environment_keys_are_ignored(env_name: str):
@@ -112,7 +110,6 @@ def test_removed_legacy_environment_keys_are_ignored(env_name: str):
     assert "memory_cross_ticker_limit" not in config
     assert "max_debate_rounds" not in config
     assert "max_risk_discuss_rounds" not in config
-    assert "provenance_appendix" not in config
 
 
 def test_unknown_env_var_is_ignored():

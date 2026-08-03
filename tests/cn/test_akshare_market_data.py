@@ -14,7 +14,7 @@ from tradingagents.dataflows import interface, stockstats_utils, y_finance
 from tradingagents.dataflows.cn import akshare_indicator, akshare_stock, calendar, common
 from tradingagents.dataflows.config import bind_config
 from tradingagents.dataflows.errors import NoMarketDataError
-from tradingagents.provenance import append_provenance_appendix, extract_provenance
+from tradingagents.provenance import extract_provenance, provenance_quality_issues
 
 
 def _eastmoney_frame(*, latest="2026-07-17", close=102.0):
@@ -120,11 +120,11 @@ def test_eastmoney_cold_fallback_preserves_extended_fields(monkeypatch):
     assert "fallback: Tencent primary retrieval unavailable" in extract_provenance(
         output
     )[0].timing
-    warnings = append_provenance_appendix(
-        "report", extract_provenance(output), enabled=False
-    )
-    assert "fallback source used" in warnings
-    assert "adjustment provider changed; technical indicators may differ" in warnings
+    reasons = {
+        issue.reason for issue in provenance_quality_issues(extract_provenance(output))
+    }
+    assert "fallback source used" in reasons
+    assert "adjustment provider changed; technical indicators may differ" in reasons
 
 
 @pytest.mark.unit

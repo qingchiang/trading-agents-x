@@ -17,9 +17,9 @@ from tradingagents.dataflows import boj, cn_macro, estat, fred, jp_macro, macro_
 from tradingagents.dataflows.config import bind_config
 from tradingagents.provenance import (
     ProvenanceRecord,
-    append_provenance_appendix,
     attach_provenance,
     extract_provenance,
+    provenance_quality_issues,
 )
 
 
@@ -182,10 +182,11 @@ class MacroPanelTests(unittest.TestCase):
         self.assertEqual(cpi_record.effective, "2026-06-19")
         self.assertIn("non-vintage", cpi_record.timing)
         self.assertIn("NBS primary retrieval unavailable", cpi_record.timing)
-        warnings = append_provenance_appendix(
-            "REPORT", records.values(), enabled=False
-        )
-        self.assertIn("fallback source used", warnings)
+        reasons = {
+            issue.reason
+            for issue in provenance_quality_issues(records.values())
+        }
+        self.assertIn("fallback source used", reasons)
 
     def test_primary_fallback_capable_series_do_not_emit_fallback_warning(self):
         jp_data = _series(
@@ -225,10 +226,7 @@ class MacroPanelTests(unittest.TestCase):
             for record in extract_provenance(out)
             if record.evidence.startswith("global macro panel /")
         ]
-        self.assertEqual(
-            append_provenance_appendix("REPORT", records, enabled=False),
-            "REPORT",
-        )
+        self.assertEqual(provenance_quality_issues(records), [])
 
     def test_cells_dispatch_to_their_declared_source(self):
         # Japan CPI/core -> e-Stat; Japan policy rate / Tankan -> BOJ; everything
@@ -333,10 +331,11 @@ class MacroPanelTests(unittest.TestCase):
         )
         self.assertEqual(cpi_record.effective, "—")
         self.assertIn("retrieval unavailable", cpi_record.timing)
-        warnings = append_provenance_appendix(
-            "REPORT", [cpi_record], enabled=False
-        )
-        self.assertIn("source unavailable for requested date/window", warnings)
+        reasons = {
+            issue.reason
+            for issue in provenance_quality_issues([cpi_record])
+        }
+        self.assertIn("source unavailable for requested date/window", reasons)
 
     def test_single_point_shows_value_without_delta(self):
         # One in-window point must not render a fabricated "+0.00" change.
@@ -397,7 +396,6 @@ class NewsPanelInjectionTests(unittest.TestCase):
 
     def _run(self, panel_text="PANEL_XYZ", ticker="NVDA", market_flows=""):
         captured = {}
-        bind_config({"provenance_appendix": True})
 
         def _bind(tools):
             captured["tools"] = [t.name for t in tools]

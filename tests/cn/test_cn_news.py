@@ -13,7 +13,7 @@ from tradingagents.dataflows.news_quality import (
     build_chinese_company_aliases,
     classify_chinese_google_article,
 )
-from tradingagents.provenance import append_provenance_appendix, extract_provenance
+from tradingagents.provenance import extract_provenance, provenance_quality_issues
 
 
 @pytest.fixture(autouse=True)
@@ -392,12 +392,14 @@ def test_cn_assembler_promotes_partial_google_query_failure_to_provenance_warnin
     result = cn_news.get_news("600519.SS", "2026-01-01", "2026-01-10")
     records = extract_provenance(result)
     google_record = next(record for record in records if record.source == "Google News China")
-    report = append_provenance_appendix("REPORT", records, enabled=False)
+    issues = provenance_quality_issues(records)
 
     assert google_record.timing.endswith("partial coverage; query_failures=1/2")
-    assert (
-        "- **get_news** (source: Google News China): partial coverage"
-        in report
+    assert any(
+        issue.evidence == "get_news"
+        and issue.source == "Google News China"
+        and issue.reason == "partial coverage"
+        for issue in issues
     )
 
 
@@ -428,7 +430,7 @@ def test_cn_partial_empty_status_survives_yfinance_router_fallback(monkeypatch):
         )
 
     records = extract_provenance(result)
-    report = append_provenance_appendix("REPORT", records, enabled=False)
+    issues = provenance_quality_issues(records)
 
     assert any(
         record.source == "Google News China"
@@ -440,8 +442,14 @@ def test_cn_partial_empty_status_survives_yfinance_router_fallback(monkeypatch):
         and record.timing.startswith("fallback vendor selected;")
         for record in records
     )
-    assert "(source: Google News China): partial coverage" in report
-    assert "(source: yfinance): fallback source used" in report
+    assert any(
+        issue.source == "Google News China" and issue.reason == "partial coverage"
+        for issue in issues
+    )
+    assert any(
+        issue.source == "yfinance" and issue.reason == "fallback source used"
+        for issue in issues
+    )
 
 
 @pytest.mark.unit

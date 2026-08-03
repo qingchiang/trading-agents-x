@@ -41,7 +41,6 @@ def _state(tool_content: str):
 
 @pytest.mark.unit
 def test_market_final_report_keeps_audit_data_out_of_the_narrative():
-    bind_config({"provenance_appendix": True})
     content = attach_provenance(
         "SNAPSHOT",
         ProvenanceRecord(
@@ -76,7 +75,6 @@ def test_market_final_report_keeps_audit_data_out_of_the_narrative():
 
 @pytest.mark.unit
 def test_fundamentals_keeps_sources_and_missing_tools_as_internal_evidence():
-    bind_config({"provenance_appendix": True})
     content = attach_provenance(
         "STATEMENT",
         ProvenanceRecord(
