@@ -1,13 +1,13 @@
 """Graph tools must use AgentState.trade_date instead of model-supplied dates."""
 
 import warnings
-from typing import TypedDict
 from unittest import mock
 
 import pytest
 from langchain_core.messages import AIMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
+from typing_extensions import TypedDict
 
 from tradingagents.agents.utils.core_stock_tools import (
     get_stock_data_for_analysis,

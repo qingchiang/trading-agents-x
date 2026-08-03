@@ -2,9 +2,10 @@
 
 from collections.abc import Iterable
 from dataclasses import asdict
-from typing import Annotated, NotRequired, TypedDict
+from typing import Annotated
 
 from langgraph.graph import MessagesState
+from typing_extensions import NotRequired, TypedDict
 
 from tradingagents.application.evidence_workset import StructuredNumericFact
 from tradingagents.provenance import (

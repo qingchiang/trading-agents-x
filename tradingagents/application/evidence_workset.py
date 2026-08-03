@@ -9,9 +9,10 @@ import json
 import math
 from dataclasses import asdict
 from datetime import date
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import Any, Literal
 
 import pandas as pd
+from typing_extensions import NotRequired, TypedDict
 
 from tradingagents.dataflows.measurement import instrument_currency
 from tradingagents.provenance import (
