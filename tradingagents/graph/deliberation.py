@@ -3623,10 +3623,6 @@ _DISPLAY_SCALE_FACTORS = {
 }
 
 
-def _is_percent_calculation_unit(unit: str) -> bool:
-    return unit.strip().upper() in _PERCENT_CALCULATION_UNITS
-
-
 def _is_ratio_scaled_calculation_unit(unit: str) -> bool:
     return unit.strip().upper() in (
         _PERCENT_CALCULATION_UNITS

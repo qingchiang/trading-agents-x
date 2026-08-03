@@ -220,14 +220,6 @@ _PASSTHROUGH_KWARGS = (
     "api_key", "callbacks", "http_client", "http_async_client",
 )
 
-def _supports_reasoning_effort(model: str) -> bool:
-    """Whether the (native OpenAI) model accepts ``reasoning_effort``."""
-    model = model.lower().strip()
-    return model.startswith("gpt-5") or bool(
-        len(model) >= 2 and model[0] == "o" and model[1].isdigit() and model[1] != "0"
-    )
-
-
 @dataclass(frozen=True)
 class ProviderSpec:
     """Declarative config for one OpenAI-compatible provider.

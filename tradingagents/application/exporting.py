@@ -1031,10 +1031,6 @@ def _json_bytes(value: Any) -> bytes:
     ).encode()
 
 
-def _escape_table_cell(value: str) -> str:
-    return value.replace("\\", "\\\\").replace("|", "\\|").replace("\n", "<br>")
-
-
 def _render_analyst_report(
     report: AnalystReport,
     labels: ExportLabels,
