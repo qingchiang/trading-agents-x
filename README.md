@@ -347,14 +347,9 @@ CI covers Python 3.10–3.13, Ruff, frontend unit tests, Playwright workflows,
 OpenAPI/type drift, wheel contents and fresh installation, and Docker Web/worker
 smoke.
 
-The checked-in US/JP/CN/crypto fixtures validate evidence references,
-point-in-time boundaries, source attribution, research-only decisions, rating
-consistency, and risk recall without making network or LLM calls. They are
-contract fixtures, not proof of model quality. Quality and Deep risk-recall
-gates require recorded same-model, three-repetition comparisons against the
-exact main/Medium baseline. Token, call, and wall-time metrics are recorded for
-later optimization but are not V2 release thresholds; see
-[graph evaluation](docs/graph-evaluation.md).
+The offline suite validates application, graph, Evidence, provenance, and
+point-in-time contracts without network or LLM calls. Passing it does not prove
+comparative model research quality, latency, or token improvement.
 
 ## Migration, backup, and retention
 

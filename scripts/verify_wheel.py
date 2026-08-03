@@ -44,6 +44,9 @@ def verify(wheel: Path) -> None:
         names = set(archive.namelist())
         missing = sorted(_REQUIRED_FILES - names)
         forbidden = sorted(_FORBIDDEN_FILES & names)
+        forbidden.extend(
+            sorted(name for name in names if name.startswith("tradingagents/evals/"))
+        )
         if missing:
             raise ValueError(f"wheel is missing required files: {', '.join(missing)}")
         if forbidden:

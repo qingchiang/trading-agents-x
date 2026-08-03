@@ -304,78 +304,6 @@ class ResearchGraph:
             warnings=tuple(dict.fromkeys(warnings)),
         )
 
-    def execute_frozen(
-        self,
-        context: RunContext,
-        *,
-        evidence: EvidenceBundle,
-        reports: dict[str, AnalystReport],
-        on_event: Callable[[dict[str, Any]], None] | None = None,
-    ) -> GraphExecution:
-        """Run production deliberation prompts against approved frozen inputs.
-
-        This evaluation boundary intentionally skips data tools and Analyst
-        generation. It is used to compare research topologies with the exact
-        same sealed EvidenceBundle and validated AnalystReports.
-        """
-
-        if evidence.instrument != context.request.ticker:
-            raise ValueError("frozen evidence instrument does not match request")
-        if evidence.analysis_date != context.request.analysis_date:
-            raise ValueError("frozen evidence cutoff does not match request")
-        selected = set(reports)
-        expected = set(context.request.analysts)
-        if selected != expected:
-            raise ValueError("frozen reports do not match selected analysts")
-        reports = order_reports(reports)
-        valid_refs = {item.ref for item in evidence.items}
-        for analyst, report in reports.items():
-            if report.analyst != analyst:
-                raise ValueError("frozen report key does not match analyst")
-            _require_valid_refs(
-                report.source_refs,
-                valid_refs,
-                required=False,
-            )
-
-        workflow = StateGraph(ResearchState, context_schema=RunContext)
-        self._attach_research_workflow(workflow, START)
-        graph = workflow.compile()
-        final_state: dict[str, Any] | None = None
-        for mode, chunk in graph.stream(
-            self._frozen_state(context, evidence=evidence, reports=reports),
-            config={
-                "recursion_limit": 120,
-                "callbacks": [self.metrics],
-            },
-            context=context,
-            stream_mode=["values", "custom"],
-        ):
-            if mode == "custom":
-                if on_event:
-                    on_event(dict(chunk))
-            elif mode == "values":
-                final_state = dict(chunk)
-        if final_state is None:
-            raise RuntimeError("frozen research graph produced no state")
-        decision = ResearchDecision.model_validate(final_state["final_decision"])
-        numeric_audit = (
-            DecisionNumericAuditAppendix.model_validate(final_state["numeric_audit"])
-            if final_state.get("numeric_audit")
-            else None
-        )
-        warnings = tuple(
-            ResearchWarning.model_validate(value) for value in final_state.get("warnings", [])
-        )
-        return GraphExecution(
-            state=final_state,
-            evidence=evidence,
-            reports=order_reports(reports),
-            decision=decision,
-            numeric_audit=numeric_audit,
-            warnings=tuple(dict.fromkeys(warnings)),
-        )
-
     def _initial_state(self, context: RunContext) -> ResearchState:
         request = context.request
         return {
@@ -396,20 +324,6 @@ class ResearchGraph:
             "debate_continue": False,
             "warnings": [],
         }
-
-    def _frozen_state(
-        self,
-        context: RunContext,
-        *,
-        evidence: EvidenceBundle,
-        reports: dict[str, AnalystReport],
-    ) -> ResearchState:
-        state = self._initial_state(context)
-        state["analyst_reports"] = {
-            key: report.model_dump(mode="json") for key, report in reports.items()
-        }
-        state["evidence_bundle"] = evidence.model_dump(mode="json")
-        return state
 
     def _build_analyst_subgraphs(self) -> dict[str, Any]:
         factories = {

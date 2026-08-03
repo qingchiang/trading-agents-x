@@ -253,11 +253,8 @@ npm run build --prefix frontend
 CI 覆盖 Python 3.10–3.13、Ruff、前端单测、Playwright、OpenAPI/TS 类型
 漂移、wheel/fresh-install 以及 Docker Web+worker smoke。
 
-US/JP/CN/crypto 固定 fixtures 验证 evidence ref、PIT、来源归因、研究决策
-边界、rating consistency 和 risk recall，但不等于真实模型质量。质量与 Deep
-风险召回门槛必须使用同模型、每场景三次、对照精确 main/Medium 基线的真实
-记录。token、调用数和耗时继续记录，但不作为 V2 发布门槛，详见
-[Graph 评测说明](../graph-evaluation.md)。
+离线测试验证 application、graph、Evidence、provenance 与 PIT 契约，无需网络
+或 LLM 调用；通过这些测试不等于证明模型研究质量、延迟或 token 消耗得到改善。
 
 ## 迁移、备份与许可
 

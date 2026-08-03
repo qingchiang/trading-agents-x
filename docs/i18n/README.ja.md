@@ -277,13 +277,9 @@ CI は Python 3.10–3.13、Ruff、frontend unit test、Playwright、
 OpenAPI/TypeScript drift、wheel/fresh install、Docker Web+worker smoke を
 検証します。
 
-US/JP/CN/crypto の固定 fixtures は evidence refs、PIT、source attribution、
-research-only decision、rating consistency、risk recall の契約テストです。
-実モデルの品質を証明するものではありません。quality と Deep risk-recall
-の gate には、正確な main/Medium baseline と同一モデル・各 scenario 3 回で
-比較した実測記録が必要です。token、call 数、wall time は記録しますが、V2
-の release threshold には使いません。詳細は
-[graph evaluation](../graph-evaluation.md) を参照してください。
+offline test は application、graph、Evidence、provenance、PIT の契約を
+network や LLM call なしで検証します。通過しても model research quality、
+latency、token consumption の改善を証明するものではありません。
 
 ## 移行・バックアップ・ライセンス
 

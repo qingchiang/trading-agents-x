@@ -565,10 +565,10 @@ SSE replay, cancellation/retry/run templates, SQLite backup, migration, memory
 selection, point-in-time evidence sealing, API security, frontend behavior,
 wheel contents, and Docker startup.
 
-Fixed US/JP/CN/crypto fixtures test graph output contracts. Model performance
-release gates require recorded same-model executions and are documented in
-[graph-evaluation.md](graph-evaluation.md); offline fixture success must not be
-reported as measured model quality, latency, or token improvement.
+These offline checks validate product contracts but do not measure comparative
+model research quality, latency, or token improvement. Any future benchmark
+must be designed around a small set of scenarios that can actually be run and
+recorded.
 
 ## Implementation map
 
@@ -592,4 +592,3 @@ modules.
 - Routing: `tradingagents/dataflows/interface.py`
 - Japan/China: `tradingagents/dataflows/jp/`,
   `tradingagents/dataflows/cn/`
-- Evaluation contracts: `tradingagents/evals/`, `evals/fixtures/`

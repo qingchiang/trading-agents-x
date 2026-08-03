@@ -19,7 +19,7 @@ runtime:
 - recoverable queue, event, and checkpoint lifecycles;
 - typed, evidence-first analyst handoffs;
 - research decisions rather than account-level Trader/portfolio instructions;
-- graph profiles designed and evaluated for this product.
+- graph profiles designed for this product.
 
 Continuing to optimize for mergeability would make these requirements harder
 to implement and would keep two incompatible product models coupled.
