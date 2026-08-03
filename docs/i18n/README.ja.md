@@ -42,7 +42,12 @@ UI は `ja`、`en`、`zh-CN` に対応します。UI locale とレポート出�
 独立しています。New Run は設定済み provider のみを表示し、選択時に現在の
 model catalog を取得します。取得失敗時も環境のデフォルト値と quick/deep
 それぞれの custom model ID を利用できます。Markdown は raw HTML を無効化し、
-表示前に sanitize します。
+表示前に sanitize します。Provider を設定できることは、Research Graph 全体が
+同じ水準で検証済みであることを意味しません。現在の検証済み構成は DeepSeek
+V4 Flash です。OpenAI、Anthropic、Google、Azure のネイティブ統合は preview、
+その他の OpenAI-compatible、ローカルモデル、Bedrock アダプターは
+compatibility レベルです。範囲と認定方針は
+[LLM provider support levels](../provider-support.md) を参照してください。
 
 ## クイックスタート
 

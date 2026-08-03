@@ -35,6 +35,10 @@ TradingAgentsX 是一个面向本地单用户的投资研究运行中心。它�
 UI 支持 `zh-CN`、`en`、`ja`。界面语言与报告输出语言相互独立。
 New Run 只显示已配置的服务商，并在选中后动态获取当前模型目录；发现失败时，
 环境默认模型和 quick/deep 各自独立的自定义模型 ID 仍可使用。
+服务商可配置并不代表整条 Research Graph 已获得同等级验证。目前 DeepSeek V4
+Flash 属于已验证配置；OpenAI、Anthropic、Google 和 Azure 原生集成为预览级，
+其他 OpenAI-compatible、本地模型与 Bedrock 适配器为兼容级。具体范围与升级
+标准见 [LLM provider 支持等级](../provider-support.md)。
 Markdown 禁用原始 HTML，并在显示前清洗。
 
 ## 快速开始

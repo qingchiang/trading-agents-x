@@ -58,6 +58,13 @@ New Run lists only configured providers and discovers their current model
 catalog on demand. If discovery is unavailable, configured defaults and an
 independent custom model ID for each role remain usable.
 
+Provider availability is not an end-to-end reliability guarantee. DeepSeek V4
+Flash is the currently validated Research Graph configuration; native OpenAI,
+Anthropic, Google, and Azure integrations are preview-level, while other
+OpenAI-compatible, local, and Bedrock adapters are compatibility-level. See
+[LLM provider support levels](docs/provider-support.md) for the exact scope and
+qualification policy.
+
 Markdown is rendered without raw HTML and sanitized before display.
 
 ## Quick start
