@@ -596,6 +596,94 @@ def test_analyst_core_uses_the_dedicated_serializer_client(
     }
 
 
+def test_final_numeric_uses_reasoning_client_while_core_uses_serializer(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _AnalystSubgraph(analyst)
+            for analyst in self.selected_analysts
+        },
+    )
+    quick = _FakeLLM()
+    reasoning = _FakeLLM()
+    serializer = _FakeLLM()
+    graph = ResearchGraph(
+        quick_llm=quick,
+        deep_llm=reasoning,
+        deep_serializer_llm=serializer,
+        profile=RunProfile.FAST,
+        selected_analysts=("market",),
+    )
+
+    graph.execute(
+        _context(
+            app_settings,
+            RunProfile.FAST,
+            analysts=("market",),
+        ),
+        checkpoint_thread_id="final-numeric-reasoning-client",
+    )
+
+    assert "ResearchDecisionCoreEnvelope" in {
+        schema for schema, _prompt in serializer.calls
+    }
+    assert "DecisionNumericDraft" not in {
+        schema for schema, _prompt in serializer.calls
+    }
+    assert "DecisionNumericDraft" in {
+        schema for schema, _prompt in reasoning.calls
+    }
+    assert "ResearchDecisionCoreEnvelope" not in {
+        schema for schema, _prompt in reasoning.calls
+    }
+
+
+def test_debate_agenda_uses_reasoning_client_not_serializer(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _AnalystSubgraph(analyst)
+            for analyst in self.selected_analysts
+        },
+    )
+    reasoning = _FakeLLM()
+    serializer = _FakeLLM()
+    deep = _FakeLLM()
+    deep_serializer = _FakeLLM()
+    graph = ResearchGraph(
+        quick_llm=reasoning,
+        deep_llm=deep,
+        quick_serializer_llm=serializer,
+        deep_serializer_llm=deep_serializer,
+        profile=RunProfile.STANDARD,
+        selected_analysts=("market",),
+    )
+
+    graph.execute(
+        _context(
+            app_settings,
+            RunProfile.STANDARD,
+            analysts=("market",),
+        ),
+        checkpoint_thread_id="agenda-reasoning-client",
+    )
+
+    assert "DebateAgenda" in {
+        schema for schema, _prompt in reasoning.calls
+    }
+    assert "DebateAgenda" not in {
+        schema for schema, _prompt in serializer.calls
+    }
+
+
 def test_frozen_execution_uses_production_deliberation_without_analyst_calls(
     app_settings,
     monkeypatch,

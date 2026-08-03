@@ -1372,6 +1372,7 @@ def _numeric_example_pair(
 def invoke_research_decision(
     llm: Any,
     *,
+    numeric_llm: Any | None = None,
     prompt: str,
     state: Mapping[str, Any],
     node: str,
@@ -1381,6 +1382,7 @@ def invoke_research_decision(
     output_language: str | None = None,
     metrics: Any | None = None,
 ) -> ResearchDecisionOutput:
+    numeric_output_llm = llm if numeric_llm is None else numeric_llm
     bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
     valid_refs = tuple(item.ref for item in bundle.items)
     valid_memory_refs = tuple(memory.refs if memory is not None else ())
@@ -1591,7 +1593,7 @@ def invoke_research_decision(
     )
     with numeric_phase:
         numeric = _invoke_decision_numeric(
-            llm,
+            numeric_output_llm,
             prompt=prompt,
             node=numeric_node,
             bundle=bundle,

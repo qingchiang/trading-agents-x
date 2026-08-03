@@ -94,6 +94,15 @@ Decision-critical calculations keep model-proposed formulas, named numeric
 inputs, units, limitations, and evidence references. The strict qualitative
 decision core also declares every derived exact number that materially affects
 its thesis, risks, invalidation conditions, scenarios, or risk-review response.
+Final qualitative serialization uses the provider's schema-focused client,
+while Final numeric selection uses the corresponding reasoning client. For
+DeepSeek V4 this means thinking-mode JSON Output followed by local Pydantic,
+Evidence, formula, date, and semantic validation; JSON validity is not treated
+as schema or research correctness.
+Debate Agenda likewise uses the profile-selected reasoning client because
+identifying material disagreements is a semantic research task rather than a
+mechanical audit. Shallow Analyst and deliberation audits continue to use
+schema-focused clients or deterministic extraction.
 The numeric serializer must satisfy those declarations with calculation IDs;
 each retained calculation publishes its decision-component uses. The
 application evaluates formulas with a restricted arithmetic interpreter and is

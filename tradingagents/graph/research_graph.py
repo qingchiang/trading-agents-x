@@ -900,7 +900,7 @@ class ResearchGraph:
                 event_writer=runtime.stream_writer,
             ):
                 output = invoke_debate_agenda(
-                    self._deliberation_serializer_llm(),
+                    self._deliberation_llm(),
                     prompt=context.prompt,
                     state=state,
                     node=f"{node}.serialize",
@@ -915,7 +915,7 @@ class ResearchGraph:
                 role="moderator",
                 content=agenda,
                 generation_method=output.generation_method,
-                prompt_version="debate-agenda-v8-compact-context",
+                prompt_version="debate-agenda-v9-thinking-json",
             )
             self._finish_node(
                 runtime,
@@ -1362,6 +1362,7 @@ class ResearchGraph:
             brief = DecisionBrief.model_validate(state["decision_brief"])
             output = invoke_research_decision(
                 self.deep_serializer_llm,
+                numeric_llm=self.deep_llm,
                 prompt=(
                     "Map the completed decision synthesis brief to the "
                     "strict final decision contract. Preserve its research "
@@ -1391,7 +1392,7 @@ class ResearchGraph:
                 role="final_committee",
                 content=decision,
                 generation_method=output.generation_method,
-                prompt_version="final-committee-v11-percentage-contract",
+                prompt_version="final-committee-v12-thinking-numeric",
             )
             self._finish_node(
                 runtime,

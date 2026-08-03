@@ -604,6 +604,35 @@ def test_agenda_prompt_and_fallback_follow_standard_output_language() -> None:
     assert result.value.issues[0].question.endswith("是什么？")
 
 
+def test_agenda_supports_reasoning_json_mode_transport() -> None:
+    state = _state()
+    agenda = DebateAgenda(
+        summary="One material disagreement requires resolution.",
+        issues=(
+            DebateIssue(
+                id="debate.issue_1",
+                question="Will the operating improvement persist?",
+                importance=DebateImportance.MATERIAL,
+            ),
+        ),
+    )
+    llm = _StaticLLM(agenda)
+    llm.preferred_structured_output_method = "json_mode"
+
+    result = invoke_debate_agenda(
+        llm,
+        prompt="Compare the completed bull and bear cases.",
+        state=state,
+        node="debate.agenda.serialize",
+        output_language="English (en)",
+    )
+
+    assert result.value == agenda
+    assert len(llm.prompts) == 1
+    assert "Return exactly one JSON object" in llm.prompts[0]
+    assert '"title": "DebateAgenda"' in llm.prompts[0]
+
+
 def test_custom_language_agenda_failure_keeps_checkpoint_boundary() -> None:
     state = _state()
     custom_language = "Use formal Chinese and preserve Japanese legal names."
@@ -939,6 +968,31 @@ def test_numeric_prompt_distinguishes_observed_ranges_from_valuations() -> None:
         "bull": [],
         "bear": [],
     }
+
+
+def test_numeric_serializer_can_use_separate_json_mode_reasoning_client() -> None:
+    state = _state()
+    ref = state["evidence_bundle"]["items"][0]["ref"]
+    decision = research_decision(evidence_refs=(ref,))
+    core_llm = _StaticLLM(decision)
+    numeric_llm = _StaticLLM(decision)
+    numeric_llm.preferred_structured_output_method = "json_mode"
+
+    result = invoke_research_decision(
+        core_llm,
+        numeric_llm=numeric_llm,
+        prompt="Form the final decision.",
+        state=state,
+        node="committee.final",
+        require_risk_adjustments=False,
+    )
+
+    assert result.value.rating is decision.rating
+    assert len(core_llm.prompts) == 1
+    assert len(numeric_llm.prompts) == 1
+    assert "Return exactly one JSON object" not in core_llm.prompts[0]
+    assert "Return exactly one JSON object" in numeric_llm.prompts[0]
+    assert '"title": "DecisionNumericDraft"' in numeric_llm.prompts[0]
 
 
 def test_numeric_prompt_example_pair_is_compatible_and_strictly_ordered() -> None:
