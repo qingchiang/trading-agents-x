@@ -353,10 +353,18 @@ class NumericRequirementCheck(FrozenModel):
             if (
                 self.calculation_id is None
                 or self.canonical_result is None
-                or self.comparison_result is None
-                or self.comparison_difference is None
             ):
                 raise ValueError("verified calculations require an ID and result")
+            comparison_fields = (
+                self.comparison_result,
+                self.comparison_difference,
+            )
+            if any(item is not None for item in comparison_fields) and any(
+                item is None for item in comparison_fields
+            ):
+                raise ValueError(
+                    "display comparison fields must be all present or all absent"
+                )
             if self.display_status is NumericDisplayStatus.NOT_CHECKED:
                 raise ValueError("verified calculations require a display comparison")
             if (

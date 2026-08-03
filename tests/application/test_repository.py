@@ -50,7 +50,7 @@ from tradingagents.application.contracts import (
     RunStatus,
     RunTrashState,
 )
-from tradingagents.application.database import RunAttemptRecord, RunRecord
+from tradingagents.application.database import DecisionRecord, RunAttemptRecord, RunRecord
 from tradingagents.application.maintenance import TrashMaintenance
 from tradingagents.application.repository import (
     ArtifactConflictError,
@@ -855,6 +855,32 @@ def test_complete_persists_result_and_resolved_memory(
     assert repository.memory_entries() == []
     repository.restore_runs((run.id,))
     assert repository.memory_context("NVDA", "stock").items[0].run_id == run.id
+
+    with repository.sessions() as session:
+        record = session.scalar(
+            select(DecisionRecord).where(DecisionRecord.run_id == run.id)
+        )
+        assert record is not None
+        historical_audit = dict(record.numeric_audit_json or {})
+        historical_checks = []
+        for item in historical_audit.get("requirement_checks", []):
+            historical = dict(item)
+            historical.pop("display_scale", None)
+            historical.pop("comparison_result", None)
+            historical.pop("comparison_difference", None)
+            historical.pop("date_evidence_refs", None)
+            historical_checks.append(historical)
+        record.numeric_audit_json = {
+            **historical_audit,
+            "requirement_checks": historical_checks,
+        }
+        session.commit()
+
+    historical_result = repository.get_result(run.id)
+    assert historical_result.numeric_audit is not None
+    historical_check = historical_result.numeric_audit.requirement_checks[0]
+    assert historical_check.comparison_result is None
+    assert historical_check.comparison_difference is None
 
 
 def test_failed_run_retains_sealed_evidence_and_analyst_reports(
