@@ -122,40 +122,9 @@ migrated into SQLite.
 
 ## Legacy Markdown memory
 
-Only decision/outcome/reflection blocks are importable. Old report trees and
-failed checkpoints are not imported.
-
-Start with a dry run:
-
-```bash
-tradingagents memory import /path/to/memory.log
-```
-
-The JSON report includes total, importable, malformed, skipped, and per-block
-issues. A dry run performs no database writes and does not create a backup.
-
-Apply after reviewing the report:
-
-```bash
-tradingagents memory import /path/to/memory.log --apply
-```
-
-Applied import behavior:
-
-- the original Markdown file is never edited;
-- a timestamped adjacent backup is created before importable blocks are
-  written, unless `--no-backup` is explicit;
-- each normalized block is keyed by a SHA-256 content hash;
-- rerunning the command skips hashes already recorded;
-- malformed blocks are reported independently and do not hide valid blocks;
-- pending blocks remain pending;
-- resolved blocks retain raw return, alpha, observation range, holding
-  intervals, and reflection when present;
-- legacy decisions receive conservative typed defaults for fields the old
-  format did not contain.
-
-An applied command exits with code 2 when malformed blocks exist, even if valid
-blocks were imported. This makes partial migration visible to automation.
+Keep legacy Markdown memory and report files as read-only archives. The
+independent platform does not parse or import them automatically; SQLite is the
+source of truth for all new runs, decisions, outcomes, and reflections.
 
 ## Reports and checkpoints
 

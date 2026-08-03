@@ -21,9 +21,9 @@ version numbers.
   Simplified Chinese, and Japanese UI locales.
 - **Durable application platform.** Added immutable app/run context, a central
   `AnalysisService`, SQLite/Alembic repositories for runs, attempts, events,
-  reports, typed decisions, outcomes, reflections, and legacy-import audit
-  records, plus single-worker database leases, crash recovery, cancellation,
-  retry, editable run templates, recoverable trash, and online backup.
+  reports, typed decisions, outcomes, and reflections, plus single-worker
+  database leases, crash recovery, cancellation, retry, editable run templates,
+  recoverable trash, and online backup.
 - **Versioned HTTP and Python APIs.** Added `/api/v1` run, event, lifecycle,
   export, memory, capability, and health endpoints with idempotent creation, and
   the typed `TradingAgents.run()` / `enqueue()` Python surface.
@@ -31,10 +31,9 @@ version numbers.
   handoffs, independent parallel analyst state, typed reports, Fast/Standard/
   Deep workflows, role-spec review factories, early-stopping rebuttal, and
   research-only decisions.
-- **Migration and release tooling.** Added dry-run/idempotent Markdown memory
-  import, multi-stage Web/worker images, loopback-first Compose deployment,
-  OpenAPI-to-TypeScript drift checks, wheel-content inspection, Playwright
-  workflows, and fixed cross-market graph evaluation contracts.
+- **Migration and release tooling.** Added multi-stage Web/worker images,
+  loopback-first Compose deployment, OpenAPI-to-TypeScript drift checks,
+  wheel-content inspection, and Playwright workflows.
 
 ### Changed
 
@@ -45,8 +44,7 @@ version numbers.
   reflections now persist in SQLite; Markdown and JSON are explicit export
   formats. Five-interval outcome settlement runs as a background worker task.
 - **Non-interactive CLI.** Replaced the questionnaire with explicit `run`,
-  `serve`, `worker`, `runs`, `memory import`, `export`, and `db backup`
-  commands.
+  `serve`, `worker`, `runs`, `export`, and `db backup` commands.
 - **Research-only final contract.** Replaced account-level trade instructions
   with rating, confidence, thesis, evidence refs, catalysts, risks,
   invalidation conditions, and time horizon.

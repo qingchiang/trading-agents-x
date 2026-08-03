@@ -8,7 +8,10 @@ from sqlalchemy import select
 from tests.factories import research_decision
 from tradingagents.application.contracts import (
     AnalysisRequest,
+    AnalysisResult,
+    EvidenceBundle,
     ResearchRating,
+    RunStatus,
 )
 from tradingagents.application.database import (
     DecisionRecord,
@@ -21,7 +24,6 @@ from tradingagents.application.repository import RunRepository
 def _seed_memory(
     repository: RunRepository,
     *,
-    content_hash: str,
     ticker: str,
     analysis_date: date,
     reflection: str,
@@ -51,21 +53,44 @@ def _seed_memory(
         ),
         time_horizon=time_horizon,
     )
-    run_id = repository.import_legacy_memory(
-        source_path="/fixture/memory.md",
-        content_hash=content_hash,
-        request=request,
-        decision=decision,
-        benchmark="SPY",
-        raw_return=0.01 if resolved else None,
-        alpha_return=0.005 if resolved else None,
-        holding_intervals=5,
-        observation_start=date(2026, 7, 1) if resolved else None,
-        observation_end=date(2026, 7, 8) if resolved else None,
-        reflection=reflection,
+    run, _ = repository.create_run(request, {"fixture": True})
+    repository.claim_run(run.id, "fixture-worker", 30)
+    evidence = EvidenceBundle(
+        instrument=request.ticker,
+        analysis_date=request.analysis_date,
+        items=(),
     )
-    assert run_id is not None
-    return run_id
+    repository.seal_evidence(run.id, evidence)
+    repository.complete(
+        run.id,
+        AnalysisResult(
+            run_id=run.id,
+            status=RunStatus.SUCCEEDED,
+            instrument=request.ticker,
+            reports={},
+            decision=decision,
+            evidence=evidence,
+        ),
+        evidence=evidence,
+        benchmark="SPY",
+    )
+    if resolved:
+        with repository.sessions() as session:
+            outcome_id = session.scalar(
+                select(OutcomeRecord.id)
+                .join(DecisionRecord)
+                .where(DecisionRecord.run_id == run.id)
+            )
+        assert outcome_id is not None
+        repository.resolve_outcome(
+            outcome_id,
+            observation_start=date(2026, 7, 1),
+            observation_end=date(2026, 7, 8),
+            raw_return=0.01,
+            alpha_return=0.005,
+            reflection=reflection,
+        )
+    return run.id
 
 
 def test_memory_context_uses_deterministic_same_and_cross_ticker_limits(
@@ -82,7 +107,6 @@ def test_memory_context_uses_deterministic_same_and_cross_ticker_limits(
         same_run_ids.append(
             _seed_memory(
                 repository,
-                content_hash=f"nvda-{index}",
                 ticker="NVDA",
                 analysis_date=date(2026, 6, index),
                 reflection=f"same-reflection-{index}",
@@ -94,7 +118,6 @@ def test_memory_context_uses_deterministic_same_and_cross_ticker_limits(
         cross_run_ids.append(
             _seed_memory(
                 repository,
-                content_hash=f"aapl-{index}",
                 ticker="AAPL",
                 analysis_date=date(2026, 5, index),
                 reflection=f"cross-reflection-{index}",
@@ -103,7 +126,6 @@ def test_memory_context_uses_deterministic_same_and_cross_ticker_limits(
         )
     _seed_memory(
         repository,
-        content_hash="jp-1",
         ticker="7203.T",
         analysis_date=date(2026, 5, 1),
         reflection="japan-reflection",
@@ -111,7 +133,6 @@ def test_memory_context_uses_deterministic_same_and_cross_ticker_limits(
     )
     _seed_memory(
         repository,
-        content_hash="crypto-1",
         ticker="BTC-USD",
         analysis_date=date(2026, 5, 1),
         reflection="crypto-reflection",
@@ -119,7 +140,6 @@ def test_memory_context_uses_deterministic_same_and_cross_ticker_limits(
     )
     _seed_memory(
         repository,
-        content_hash="pending-1",
         ticker="MSFT",
         analysis_date=date(2026, 5, 1),
         reflection="pending-reflection",
@@ -161,7 +181,6 @@ def test_china_cross_ticker_memory_shares_market_without_crossing_regions(
 ) -> None:
     _seed_memory(
         repository,
-        content_hash="shanghai",
         ticker="600519.SS",
         analysis_date=date(2026, 7, 1),
         reflection="Shanghai lesson",
@@ -169,7 +188,6 @@ def test_china_cross_ticker_memory_shares_market_without_crossing_regions(
     )
     _seed_memory(
         repository,
-        content_hash="shenzhen",
         ticker="000001.SZ",
         analysis_date=date(2026, 7, 2),
         reflection="Shenzhen lesson",
@@ -177,7 +195,6 @@ def test_china_cross_ticker_memory_shares_market_without_crossing_regions(
     )
     _seed_memory(
         repository,
-        content_hash="tokyo",
         ticker="7203.T",
         analysis_date=date(2026, 7, 3),
         reflection="Tokyo lesson",
@@ -232,7 +249,6 @@ def test_memory_limits_can_disable_each_context_class(
 ) -> None:
     _seed_memory(
         repository,
-        content_hash="same",
         ticker="NVDA",
         analysis_date=date(2026, 7, 1),
         reflection="same lesson",
@@ -240,7 +256,6 @@ def test_memory_limits_can_disable_each_context_class(
     )
     _seed_memory(
         repository,
-        content_hash="cross",
         ticker="AAPL",
         analysis_date=date(2026, 7, 2),
         reflection="cross lesson",
@@ -265,7 +280,6 @@ def test_memory_prompt_is_bounded_per_item_and_in_total(
     for index in range(8):
         _seed_memory(
             repository,
-            content_hash=f"bounded-{index}",
             ticker="NVDA" if index < 5 else "AAPL",
             analysis_date=date(2026, 7, index + 1),
             reflection=f"reflection-{index}-" + ("x" * 5_000),
@@ -285,7 +299,6 @@ def test_memory_context_skips_malformed_decisions_and_empty_reflections(
 ) -> None:
     malformed_run_id = _seed_memory(
         repository,
-        content_hash="malformed-decision",
         ticker="NVDA",
         analysis_date=date(2026, 7, 1),
         reflection="Should be excluded with its malformed decision.",
@@ -293,7 +306,6 @@ def test_memory_context_skips_malformed_decisions_and_empty_reflections(
     )
     empty_run_id = _seed_memory(
         repository,
-        content_hash="empty-reflection",
         ticker="NVDA",
         analysis_date=date(2026, 7, 2),
         reflection="Will become empty.",
@@ -328,7 +340,6 @@ def test_memory_entries_support_fuzzy_filters_and_full_field_search(
 ) -> None:
     nvda_run_id = _seed_memory(
         repository,
-        content_hash="search-nvda",
         ticker="NVDA",
         analysis_date=date(2026, 7, 1),
         reflection="Valuation lesson: demand quality mattered.",
@@ -342,7 +353,6 @@ def test_memory_entries_support_fuzzy_filters_and_full_field_search(
     repository.set_instrument_name(nvda_run_id, "NVIDIA")
     _seed_memory(
         repository,
-        content_hash="search-aapl",
         ticker="AAPL",
         analysis_date=date(2026, 7, 2),
         reflection="Margin durability was underestimated.",
@@ -350,7 +360,6 @@ def test_memory_entries_support_fuzzy_filters_and_full_field_search(
     )
     _seed_memory(
         repository,
-        content_hash="search-tokyo",
         ticker="7203.T",
         analysis_date=date(2026, 7, 3),
         reflection="Japan-specific currency lesson.",
@@ -358,7 +367,6 @@ def test_memory_entries_support_fuzzy_filters_and_full_field_search(
     )
     _seed_memory(
         repository,
-        content_hash="search-pending",
         ticker="MSFT",
         analysis_date=date(2026, 7, 4),
         reflection="Pending cloud lesson.",

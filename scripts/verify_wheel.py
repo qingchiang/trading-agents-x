@@ -23,6 +23,7 @@ _FORBIDDEN_FILES = {
     "tradingagents/graph/reflection.py",
     "tradingagents/agents/schemas.py",
     "tradingagents/application/table_display.py",
+    "tradingagents/application/legacy.py",
     "tradingagents/graph/analyst_report_drafts.py",
     (
         "tradingagents/persistence/alembic/versions/"

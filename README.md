@@ -247,14 +247,11 @@ tradingagents start [--color auto|always|never] [--log-dir PATH]
 tradingagents serve
 tradingagents worker [--once] [--log-level LEVEL]
 tradingagents runs list|show|cancel|retry
-tradingagents memory import PATH [--apply] [--no-backup]
 tradingagents export RUN_ID [--format markdown|json] [-o PATH]
 tradingagents db backup PATH
 ```
 
-`memory import` is a dry run by default. Applied imports are content-hash
-idempotent and back up the source unless `--no-backup` is explicit. Markdown
-and JSON are export formats; SQLite is the source of truth.
+Markdown and JSON are export formats; SQLite is the source of truth.
 
 ## HTTP API
 

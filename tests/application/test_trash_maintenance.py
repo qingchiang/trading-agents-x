@@ -19,7 +19,6 @@ from tradingagents.application.contracts import (
 )
 from tradingagents.application.database import (
     DecisionRecord,
-    LegacyImportRecord,
     OutcomeRecord,
     ReflectionRecord,
     RunArtifactRecord,
@@ -147,7 +146,7 @@ def _complete_trashed_run(repository, app_settings):
     return run
 
 
-def test_trash_maintenance_purges_owned_data_and_preserves_audit_links(
+def test_trash_maintenance_purges_owned_data_and_detaches_child_runs(
     repository,
     app_settings,
 ) -> None:
@@ -165,16 +164,6 @@ def test_trash_maintenance_purges_owned_data_and_preserves_audit_links(
     checkpoint_thread = repository.checkpoint_thread(run.id)
     _insert_checkpoint(app_settings, checkpoint_thread)
     _set_trashed_at(repository, run.id, now - timedelta(days=31))
-    with repository.sessions.begin() as session:
-        session.add(
-            LegacyImportRecord(
-                source_path="/legacy/memory.md",
-                content_hash="a" * 64,
-                status="imported",
-                run_id=run.id,
-                imported_at=now.replace(tzinfo=None),
-            )
-        )
 
     purged = TrashMaintenance(
         app_settings,
@@ -210,9 +199,6 @@ def test_trash_maintenance_purges_owned_data_and_preserves_audit_links(
             session.scalar(select(func.count()).select_from(ReflectionRecord))
             == 0
         )
-        legacy = session.scalar(select(LegacyImportRecord))
-        assert legacy is not None
-        assert legacy.run_id is None
     with repository.engine.connect() as connection:
         assert (
             connection.exec_driver_sql(

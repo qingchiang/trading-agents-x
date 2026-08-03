@@ -49,11 +49,11 @@ def test_root_is_noninteractive_and_exposes_the_new_command_tree() -> None:
         "serve",
         "worker",
         "runs",
-        "memory",
         "export",
         "db",
     ):
         assert command in result.output
+    assert "memory" not in result.output
     assert "questionnaire" not in result.output.lower()
     run_help = runner.invoke(cli.app, ["run", "--help"])
     assert run_help.exit_code == 0
@@ -452,53 +452,6 @@ def test_runs_retry_creates_a_new_attempt(
     assert payload["id"] == queued.id
     assert payload["status"] == "queued"
     assert payload["attempt"] == 2
-
-
-def test_memory_import_defaults_to_dry_run_and_can_apply(
-    monkeypatch,
-    cli_service: AnalysisService,
-    tmp_path: Path,
-) -> None:
-    source = tmp_path / "trading_memory.md"
-    original = (
-        "[2026-01-10 | NVDA | Buy | +4.2% | +2.1% | 5d]\n\n"
-        "META: asset_type=stock | market=America/New_York\n\n"
-        "DECISION:\nBuy because demand accelerated.\n"
-        "REFLECTION:\n"
-        "[2026-01-12 → 2026-01-20 | 5d]\nThe evidence was useful."
-    )
-    source.write_text(original, encoding="utf-8")
-    monkeypatch.setattr(cli, "_service", lambda: cli_service)
-
-    dry_run = runner.invoke(cli.app, ["memory", "import", str(source)])
-    applied = runner.invoke(
-        cli.app,
-        ["memory", "import", str(source), "--apply"],
-    )
-
-    assert dry_run.exit_code == applied.exit_code == 0
-    assert json.loads(dry_run.stdout)["dry_run"] is True
-    imported = json.loads(applied.stdout)
-    assert imported["imported"] == 1
-    assert Path(imported["backup"]).read_text(encoding="utf-8") == original
-    assert source.read_text(encoding="utf-8") == original
-
-
-def test_memory_import_reports_malformed_blocks_without_mutating_source(
-    monkeypatch,
-    cli_service: AnalysisService,
-    tmp_path: Path,
-) -> None:
-    source = tmp_path / "malformed.md"
-    original = "not a legacy memory block"
-    source.write_text(original, encoding="utf-8")
-    monkeypatch.setattr(cli, "_service", lambda: cli_service)
-
-    result = runner.invoke(cli.app, ["memory", "import", str(source)])
-
-    assert result.exit_code == 2
-    assert json.loads(result.stdout)["malformed"] == 1
-    assert source.read_text(encoding="utf-8") == original
 
 
 def test_export_writes_to_stdout_when_output_is_omitted(monkeypatch) -> None:

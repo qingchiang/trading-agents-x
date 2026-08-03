@@ -209,14 +209,12 @@ tradingagents start [--color auto|always|never] [--log-dir PATH]
 tradingagents serve
 tradingagents worker [--once] [--log-level LEVEL]
 tradingagents runs list|show|cancel|retry
-tradingagents memory import PATH [--apply] [--no-backup]
 tradingagents export RUN_ID [--format markdown|json] [-o PATH]
 tradingagents db backup PATH
 ```
 
-`memory import` はデフォルトで dry-run です。apply 時は content hash により
-冪等で、通常は元ファイルを先にバックアップします。Markdown/JSON は明示的な
-export 形式であり、SQLite が唯一の source of truth です。
+Markdown/JSON は明示的な export 形式であり、SQLite が唯一の source of
+truth です。
 
 ## API とセキュリティ
 

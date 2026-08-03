@@ -18,6 +18,7 @@ REMOVED_RUNTIME_MODULES = (
     "tradingagents.graph.reflection",
     "tradingagents.graph.analyst_execution",
     "tradingagents.reporting",
+    "tradingagents.application.legacy",
     "tradingagents.agents.utils.memory",
     "tradingagents.agents.trader.trader",
     "tradingagents.agents.managers.portfolio_manager",

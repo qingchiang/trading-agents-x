@@ -191,12 +191,10 @@ tradingagents start [--color auto|always|never] [--log-dir PATH]
 tradingagents serve
 tradingagents worker [--once] [--log-level LEVEL]
 tradingagents runs list|show|cancel|retry
-tradingagents memory import PATH [--apply] [--no-backup]
 tradingagents export RUN_ID [--format markdown|json] [-o PATH]
 tradingagents db backup PATH
 ```
 
-`memory import` 默认 dry-run。实际导入按内容 hash 幂等，并默认先备份原文件。
 Markdown/JSON 只作为显式导出格式；SQLite 是唯一事实源。
 
 ## API 与安全

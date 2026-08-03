@@ -239,20 +239,6 @@ class ReflectionRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
-class LegacyImportRecord(Base):
-    __tablename__ = "legacy_imports"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    source_path: Mapped[str] = mapped_column(Text, nullable=False)
-    content_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
-    status: Mapped[str] = mapped_column(String(20), nullable=False)
-    run_id: Mapped[str | None] = mapped_column(
-        ForeignKey("runs.id", ondelete="SET NULL"), nullable=True
-    )
-    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    imported_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-
-
 def create_sqlite_engine(path: Path, *, busy_timeout_ms: int = 5000) -> Engine:
     """Create an engine whose every connection enforces local SQLite policy."""
     engine = create_engine(

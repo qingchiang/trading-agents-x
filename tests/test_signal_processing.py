@@ -1,4 +1,4 @@
-"""The legacy importer recognizes old five-tier rating prose."""
+"""The heuristic parser recognizes five-tier rating prose."""
 
 import pytest
 

@@ -1,11 +1,23 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import date, datetime
+from importlib import resources
 
 import pytest
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import inspect, text
 
+from tests.factories import research_decision
+from tradingagents.application.contracts import (
+    AnalysisRequest,
+    AnalysisResult,
+    EvidenceBundle,
+    RunStatus,
+)
 from tradingagents.application.database import create_sqlite_engine
+from tradingagents.application.repository import RunRepository
 from tradingagents.persistence import (
     IncompatibleDatabaseError,
     upgrade_database,
@@ -55,7 +67,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     finally:
         engine.dispose()
 
-    assert revision == "0001_research_contract_v8"
+    assert revision == "0002_remove_legacy_imports"
     assert {
         "id",
         "run_id",
@@ -88,11 +100,110 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
         "sealed_at",
     }
     assert "reports" not in table_names
+    assert "legacy_imports" not in table_names
     assert "trashed_at" in run_columns
     assert "ix_runs_trash" in run_indexes
     assert "next_check_at" in outcome_columns
     assert "ix_outcomes_due" in outcome_indexes
     assert "numeric_audit_json" in decision_columns
+
+
+def test_v8_upgrade_preserves_research_data_and_downgrade_recreates_empty_table(
+    app_settings,
+) -> None:
+    upgrade_database(app_settings, revision="0001_research_contract_v8")
+    repository = RunRepository(app_settings)
+    request = AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
+    run, _ = repository.create_run(request, {"fixture": True})
+    repository.claim_run(run.id, "fixture-worker", 30)
+    evidence = EvidenceBundle(
+        instrument=request.ticker,
+        analysis_date=request.analysis_date,
+        items=(),
+    )
+    repository.seal_evidence(run.id, evidence)
+    repository.complete(
+        run.id,
+        AnalysisResult(
+            run_id=run.id,
+            status=RunStatus.SUCCEEDED,
+            instrument=request.ticker,
+            reports={},
+            decision=research_decision(evidence_refs=()),
+            evidence=evidence,
+        ),
+        evidence=evidence,
+        benchmark="SPY",
+    )
+    outcome_id = repository.pending_outcomes(
+        due_at=datetime(2100, 1, 1)
+    )[0]["outcome_id"]
+    repository.resolve_outcome(
+        outcome_id,
+        observation_start=date(2026, 7, 25),
+        observation_end=date(2026, 8, 1),
+        raw_return=0.05,
+        alpha_return=0.01,
+        reflection="Preserved reflection.",
+    )
+    with repository.engine.begin() as connection:
+        connection.exec_driver_sql(
+            "INSERT INTO legacy_imports "
+            "(source_path, content_hash, status, run_id, imported_at) "
+            "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
+            ("/archive/memory.md", "a" * 64, "imported", run.id),
+        )
+    repository.engine.dispose()
+
+    upgrade_database(app_settings)
+
+    engine = create_sqlite_engine(app_settings.database_path)
+    try:
+        inspector = inspect(engine)
+        assert "legacy_imports" not in inspector.get_table_names()
+        with engine.connect() as connection:
+            for table in (
+                "runs",
+                "run_evidence",
+                "decisions",
+                "outcomes",
+                "reflections",
+            ):
+                assert connection.scalar(text(f"SELECT count(*) FROM {table}")) == 1
+    finally:
+        engine.dispose()
+
+    migration_root = resources.files("tradingagents.persistence").joinpath(
+        "alembic"
+    )
+    with resources.as_file(migration_root) as script_location:
+        config = Config()
+        config.set_main_option("script_location", str(script_location))
+        config.set_main_option(
+            "sqlalchemy.url",
+            f"sqlite+pysqlite:///{app_settings.database_path}",
+        )
+        config.attributes["busy_timeout_ms"] = app_settings.busy_timeout_ms
+        command.downgrade(config, "0001_research_contract_v8")
+
+    engine = create_sqlite_engine(app_settings.database_path)
+    try:
+        inspector = inspect(engine)
+        assert "legacy_imports" in inspector.get_table_names()
+        assert {
+            "id",
+            "source_path",
+            "content_hash",
+            "status",
+            "run_id",
+            "error_message",
+            "imported_at",
+        } == {column["name"] for column in inspector.get_columns("legacy_imports")}
+        with engine.connect() as connection:
+            assert connection.scalar(text("SELECT count(*) FROM legacy_imports")) == 0
+            assert connection.scalar(text("SELECT count(*) FROM runs")) == 1
+    finally:
+        engine.dispose()
 
 
 def test_unreleased_revision_requires_explicit_database_reset(

@@ -19,7 +19,6 @@ from rich.table import Table
 
 from tradingagents import AnalysisRequest, RunProfile, TradingAgents
 from tradingagents.application.contracts import RunEvent, RunStatus
-from tradingagents.application.legacy import LegacyMemoryImporter
 from tradingagents.application.service import AnalysisService
 from tradingagents.application.settings import AppSettings
 from tradingagents.application.worker import AnalysisWorker
@@ -39,10 +38,8 @@ app = typer.Typer(
     add_completion=True,
 )
 runs_app = typer.Typer(help="Inspect and control durable research runs.")
-memory_app = typer.Typer(help="Import legacy decision memory.")
 db_app = typer.Typer(help="Maintain the local SQLite database.")
 app.add_typer(runs_app, name="runs")
-app.add_typer(memory_app, name="memory")
 app.add_typer(db_app, name="db")
 
 console = Console()
@@ -338,44 +335,6 @@ def cancel(run_id: str) -> None:
 def retry(run_id: str) -> None:
     """Queue a new attempt for a failed run, reusing a compatible checkpoint."""
     _print_lifecycle(lambda service: service.retry(run_id))
-
-
-@memory_app.command("import")
-def import_memory(
-    source: Annotated[
-        Path,
-        typer.Argument(exists=True, dir_okay=False, readable=True),
-    ],
-    apply: Annotated[
-        bool,
-        typer.Option(
-            "--apply",
-            help="Write importable blocks; the default is a dry run.",
-        ),
-    ] = False,
-    backup: Annotated[
-        bool,
-        typer.Option(
-            "--backup/--no-backup",
-            help="Back up the source before an applied import.",
-        ),
-    ] = True,
-) -> None:
-    """Dry-run or import legacy Markdown decision memory idempotently."""
-    service = _service()
-    importer = LegacyMemoryImporter(service.settings, service.repository)
-    try:
-        report = importer.import_file(
-            source,
-            dry_run=not apply,
-            create_backup=backup,
-        )
-    except (OSError, ValueError) as exc:
-        event_console.print(f"[red]Memory import failed: {exc}[/red]")
-        raise typer.Exit(code=1) from None
-    typer.echo(report.model_dump_json(indent=2))
-    if report.malformed:
-        raise typer.Exit(code=2)
 
 
 @app.command()

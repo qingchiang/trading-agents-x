@@ -214,9 +214,8 @@ subsequent checks: 24 hours after success or one hour after failure. UTC
 database timestamps determine the configured retention boundary. Cleanup uses
 bounded SQLite write transactions, rechecks that each candidate is still
 trashed before deletion, removes its checkpoint and owned application rows,
-and leaves `legacy_imports` hashes with a null run link. Concurrent Web/worker
-checks are therefore idempotent. `TRADINGAGENTS_TRASH_RETENTION_DAYS=0`
-disables permanent cleanup.
+and detaches any child reruns. Concurrent Web/worker checks are therefore
+idempotent. `TRADINGAGENTS_TRASH_RETENTION_DAYS=0` disables permanent cleanup.
 
 `runs.instrument_name` stores the identity resolver's preferred display value
 (`short_name`, then `company_name`, `long_name`, or `name`). Resolution failure
@@ -237,7 +236,6 @@ Alembic manages application tables:
 | `decisions` | typed final decision, numeric audit appendix, market identity |
 | `outcomes` | benchmark, five-interval dates, raw return, alpha |
 | `reflections` | outcome-aware research reflection |
-| `legacy_imports` | source/hash/status for idempotent Markdown migration |
 
 LangGraph saver tables live in the same database file but remain owned by its
 saver. Application code does not treat them as domain tables.
