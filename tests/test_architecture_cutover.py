@@ -76,6 +76,7 @@ def test_public_api_exposes_typed_application_contract():
         "NumericAuditAppendixStatus",
         "NumericAuditComponentType",
         "NumericCalculationStatus",
+        "NumericDisplayScale",
         "NumericDisplayStatus",
         "NumericAuditOmission",
         "NumericAuditPhase",
