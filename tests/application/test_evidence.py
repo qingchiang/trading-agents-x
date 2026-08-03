@@ -620,7 +620,7 @@ def test_failed_run_export_preserves_non_final_decision_brief() -> None:
 
     markdown = render_run_export_markdown(run_export)
 
-    assert run_export.schema_version == "7"
+    assert run_export.schema_version == "8"
     assert "Decision Synthesis Brief" in markdown
     assert "Non-final reasoning draft" in markdown
     assert "Non-final synthesis.[E01]" in markdown
@@ -870,6 +870,8 @@ def test_markdown_export_renders_decision_calculation_uses_and_gap_only_appendix
                         inputs={"price": 3075, "eps": 37.46},
                         input_evidence_refs=("ev_0123456789ab",),
                         canonical_result=3075 / 37.46,
+                        comparison_result=3075 / 37.46,
+                        comparison_difference=(3075 / 37.46) - 45.8,
                         rounded_stated_value=45.8,
                         rounded_canonical_result=82.1,
                         calculation_status=NumericCalculationStatus.VERIFIED,

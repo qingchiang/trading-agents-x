@@ -50,6 +50,7 @@ from tradingagents.application.contracts import (
     NumericAuditSnapshot,
     NumericAuditStatus,
     NumericCalculationStatus,
+    NumericDisplayScale,
     NumericDisplayStatus,
     NumericRequirementCheck,
     NumericTemporalBasis,
@@ -169,7 +170,7 @@ class DecisionNumericRequirementDraft(BaseModel):
     id: str = Field(pattern=r"^req_[a-z0-9][a-z0-9_.-]*$")
     component_path: str = Field(
         pattern=(
-            r"^(?:executive_summary|thesis|risks\.\d+|"
+            r"^(?:executive_summary|thesis|catalysts\.\d+|risks\.\d+|"
             r"invalidation_conditions\.\d+|"
             r"scenarios\.(?:base|bull|bear)\."
             r"(?:outcome|core_assumptions\.\d+)|"
@@ -183,6 +184,7 @@ class DecisionNumericRequirementDraft(BaseModel):
     inputs: tuple[CalculationInputDraft, ...] = Field(min_length=1)
     input_evidence_refs: tuple[str, ...] = Field(min_length=1)
     unit: str = Field(min_length=1, max_length=32)
+    display_scale: NumericDisplayScale
     limitations: tuple[str, ...] = Field(min_length=1)
 
     @field_validator("inputs")
@@ -931,9 +933,24 @@ def decision_percentage_calculation_guidance() -> str:
         "converts the formula result. For example, "
         "(target_price - close_price) / close_price = 0.4546 uses "
         "stated_value=45.46 and unit=%. A decline formula yielding -0.6132 uses "
-        "stated_value=-61.32 and unit=%. Use pp for percentage-point differences "
-        "and bps for basis points; those formula results are already in their "
-        "declared units and are not percent-scaled."
+        "stated_value=-61.32 and unit=%. Percentage-point formulas also return a "
+        "fractional difference and use unit=pp; the application multiplies by 100. "
+        "Basis-point formulas return a fractional difference and use unit=bps; the "
+        "application multiplies by 10,000. Never multiply these formulas by their "
+        "reader-facing scale."
+    )
+
+
+def decision_display_scale_guidance() -> str:
+    """Return the canonical contract for compact reader-facing quantities."""
+
+    return (
+        "Every numeric requirement must declare display_scale separately from its "
+        "canonical unit. Formula inputs and results stay in base units. Use base, "
+        "thousand, ten_thousand, million, hundred_million, billion, or trillion. "
+        "For example, raw result 80,598,000,000 with unit=USD and "
+        "display_scale=hundred_million compares with stated_value=805.98. Do not "
+        "encode scale in unit strings such as billion USD, 亿美元, or 百万日元."
     )
 
 
@@ -982,7 +999,7 @@ def _decision_component_text(
     parts = component_path.split(".")
     if component_path in {"executive_summary", "thesis"}:
         return str(getattr(decision, component_path))
-    if parts[0] in {"risks", "invalidation_conditions"} and len(parts) == 2:
+    if parts[0] in {"catalysts", "risks", "invalidation_conditions"} and len(parts) == 2:
         values = getattr(decision, parts[0])
         index = int(parts[1])
         return values[index] if index < len(values) else None
@@ -1270,6 +1287,7 @@ def invoke_research_decision(
     example_text = _decision_example_text(resolved_language)
     language_rules = _decision_language_rules(resolved_language)
     percentage_rules = decision_percentage_calculation_guidance()
+    display_scale_rules = decision_display_scale_guidance()
     example_adjustments = (
         (
             RiskReviewAdjustment(
@@ -1373,6 +1391,7 @@ def invoke_research_decision(
                 ),
                 input_evidence_refs=(first_ref,),
                 unit="%",
+                display_scale=NumericDisplayScale.BASE,
                 limitations=(example_text["valuation_limitation"],),
             ),
         ),
@@ -1407,7 +1426,7 @@ def invoke_research_decision(
                 "component_path must identify one exact core field such as risks.0 "
                 "or scenarios.base.core_assumptions.2; omit an uncertain annotation "
                 "instead of using a coarse path such as risks or scenarios. "
-                f"{percentage_rules} "
+                f"{percentage_rules} {display_scale_rules} "
                 "scenarios must contain "
                 "exactly one base, one bull, and one bear case. Required "
                 f"risk-review roles: {json.dumps(risk_roles)}. {language_rules}"
@@ -1423,6 +1442,8 @@ def invoke_research_decision(
             "specific indexed core fields. Omit a candidate when its exact core "
             "location cannot be identified. "
             + percentage_rules
+            + " "
+            + display_scale_rules
             + " "
             + language_rules
             + "\n\nLOCALIZED VALID EXAMPLE:\n"
@@ -1673,6 +1694,7 @@ def _invoke_decision_numeric(
     example_text = _decision_example_text(output_language)
     language_rules = _decision_language_rules(output_language)
     percentage_rules = decision_percentage_calculation_guidance()
+    display_scale_rules = decision_display_scale_guidance()
     reference_label_rules = decision_reference_label_guidance(output_language)
     scenario_catalog = tuple(
         {
@@ -1846,7 +1868,8 @@ def _invoke_decision_numeric(
             "covered by a calculation whose requirement_ids includes that item's ID. "
             "Copy its formula, named inputs, Evidence refs, unit, and limitations "
             "without changing them. When requirements are present, requested must be "
-            f"true. {percentage_rules} {reference_label_rules} {language_rules}\n"
+            f"true. {percentage_rules} {display_scale_rules} "
+            f"{reference_label_rules} {language_rules}\n"
             "VALID OBSERVED VALUE REFS:\n"
             + json.dumps(value_catalog_prompt, ensure_ascii=False)
             + "\nSCENARIO CATALOG:\n"
@@ -1871,6 +1894,8 @@ def _invoke_decision_numeric(
             "the application inherits them from catalog anchors or calculations. "
             "Use valuation_assessment only for genuinely derived valuation work. "
             + percentage_rules
+            + " "
+            + display_scale_rules
             + " "
             + reference_label_rules
             + " "
@@ -2217,6 +2242,8 @@ def _requirement_check(
     display_status: NumericDisplayStatus,
     calculation_id: str | None = None,
     canonical_result: int | float | None = None,
+    comparison_result: int | float | None = None,
+    comparison_difference: int | float | None = None,
     rounded_stated_value: int | float | None = None,
     rounded_canonical_result: int | float | None = None,
     issue_codes: tuple[str, ...] = (),
@@ -2229,10 +2256,13 @@ def _requirement_check(
         stated_value=requirement.stated_value,
         fraction_digits=requirement.fraction_digits,
         unit=requirement.unit,
+        display_scale=requirement.display_scale,
         formula=requirement.formula,
         inputs=requirement_input_mapping(requirement),
         input_evidence_refs=requirement.input_evidence_refs,
         canonical_result=canonical_result,
+        comparison_result=comparison_result,
+        comparison_difference=comparison_difference,
         rounded_stated_value=rounded_stated_value,
         rounded_canonical_result=rounded_canonical_result,
         calculation_status=calculation_status,
@@ -2362,9 +2392,11 @@ def _assemble_numeric_draft(
                 mismatch = "unit_mismatch"
             else:
                 quantum = Decimal(1).scaleb(-requirement.fraction_digits)
-                canonical_value = Decimal(
-                    str(calculations[calculation_id].result)
-                ).quantize(
+                comparison_result = _scale_for_display(
+                    calculations[calculation_id].result,
+                    requirement.display_scale,
+                )
+                canonical_value = Decimal(str(comparison_result)).quantize(
                     quantum,
                     rounding=ROUND_HALF_UP,
                 )
@@ -2400,6 +2432,10 @@ def _assemble_numeric_draft(
                         requirement,
                         calculation_id=calculation_id,
                         canonical_result=calculations[calculation_id].result,
+                        comparison_result=comparison_result,
+                        comparison_difference=(
+                            comparison_result - requirement.stated_value
+                        ),
                         rounded_stated_value=float(stated_value),
                         rounded_canonical_result=float(canonical_value),
                         calculation_status=NumericCalculationStatus.VERIFIED,
@@ -2427,6 +2463,8 @@ def _assemble_numeric_draft(
                 requirement,
                 calculation_id=calculation_id,
                 canonical_result=calculations[calculation_id].result,
+                comparison_result=comparison_result,
+                comparison_difference=(comparison_result - requirement.stated_value),
                 rounded_stated_value=float(stated_value),
                 rounded_canonical_result=float(canonical_value),
                 calculation_status=NumericCalculationStatus.VERIFIED,
@@ -3357,6 +3395,18 @@ def _evaluate_formula(
 
 
 _PERCENT_CALCULATION_UNITS = {"%", "PCT", "PERCENT"}
+_PERCENTAGE_POINT_CALCULATION_UNITS = {"PP", "PERCENTAGE POINTS"}
+_BASIS_POINT_CALCULATION_UNITS = {"BPS", "BASIS POINTS"}
+
+_DISPLAY_SCALE_FACTORS = {
+    NumericDisplayScale.BASE: Decimal("1"),
+    NumericDisplayScale.THOUSAND: Decimal("1000"),
+    NumericDisplayScale.TEN_THOUSAND: Decimal("10000"),
+    NumericDisplayScale.MILLION: Decimal("1000000"),
+    NumericDisplayScale.HUNDRED_MILLION: Decimal("100000000"),
+    NumericDisplayScale.BILLION: Decimal("1000000000"),
+    NumericDisplayScale.TRILLION: Decimal("1000000000000"),
+}
 
 
 def _is_percent_calculation_unit(unit: str) -> bool:
@@ -3371,7 +3421,25 @@ def _canonicalize_calculation_result(
 ) -> float:
     """Convert a safe formula result into the public unit's canonical value."""
 
-    canonical = result * 100 if _is_percent_calculation_unit(unit) else result
+    normalized_unit = unit.strip().upper()
+    if normalized_unit in (
+        _PERCENT_CALCULATION_UNITS | _PERCENTAGE_POINT_CALCULATION_UNITS
+    ):
+        canonical = result * 100
+    elif normalized_unit in _BASIS_POINT_CALCULATION_UNITS:
+        canonical = result * 10_000
+    else:
+        canonical = result
     if not math.isfinite(canonical):
         raise OutputValidationError(f"{issue_prefix}.formula.non_finite_result")
     return canonical
+
+
+def _scale_for_display(
+    result: int | float,
+    scale: NumericDisplayScale,
+) -> float:
+    value = Decimal(str(result)) / _DISPLAY_SCALE_FACTORS[scale]
+    if not value.is_finite():
+        raise OutputValidationError("calculation.display_scale.non_finite")
+    return float(value)

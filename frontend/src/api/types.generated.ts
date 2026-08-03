@@ -302,12 +302,16 @@ export interface components {
     };
     NumericAuditStatus: "complete" | "partial" | "incomplete" | "not_applicable";
     NumericCalculationStatus: "verified" | "invalid" | "missing";
-    NumericDisplayStatus: "matched" | "mismatched" | "not_checked";
+    NumericDisplayScale: "base" | "thousand" | "ten_thousand" | "million" | "hundred_million" | "billion" | "trillion";
+    NumericDisplayStatus: "matched" | "approximately_matched" | "mismatched" | "not_checked";
     NumericRequirementCheck: {
       calculation_id?: string | null;
       calculation_status: components["schemas"]["NumericCalculationStatus"];
       canonical_result?: number | null;
+      comparison_difference?: number | null;
+      comparison_result?: number | null;
       component_path: string;
+      display_scale?: components["schemas"]["NumericDisplayScale"];
       display_status: components["schemas"]["NumericDisplayStatus"];
       formula: string;
       fraction_digits: number;

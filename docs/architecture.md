@@ -103,6 +103,13 @@ otherwise valid qualitative decision. Canonical dates come from the latest
 relevant Evidence Ledger effective date and are never guessed from the analysis
 date.
 
+Formula results remain in canonical units. Reader-facing compact quantities use
+a separate, typed display scale (for example `hundred_million`); unit text is
+never parsed to infer that scale. Ratio formulas for percent and percentage-point
+values are converted by the application, as are ratio formulas expressed in
+basis points. The persisted audit comparison therefore retains both the raw
+canonical result and the deterministically scaled reader-facing value.
+
 Non-personalized ratings, conditional investment views, auditable valuation
 ranges, scenarios, and market reference levels are allowed. Position
 percentage, account configuration, order quantity/type, broker instructions,

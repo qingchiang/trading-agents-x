@@ -92,6 +92,7 @@ _EN_LABELS = {
     "requirement_id": "Requirement",
     "structured_value": "Structured display value",
     "canonical_result": "Canonical result",
+    "display_scale": "Display scale",
     "comparison_precision": "Decimal places",
     "rounded_comparison": "Rounded display / result",
     "calculation_status": "Calculation status",
@@ -300,6 +301,7 @@ _ZH_LABELS = {
     "requirement_id": "Requirement",
     "structured_value": "结构化显示值",
     "canonical_result": "Canonical 计算结果",
+    "display_scale": "显示尺度",
     "comparison_precision": "比较小数位数",
     "rounded_comparison": "舍入后显示值 / 计算结果",
     "calculation_status": "计算状态",
@@ -484,6 +486,7 @@ _JA_LABELS = {
     "requirement_id": "Requirement",
     "structured_value": "構造化表示値",
     "canonical_result": "Canonical 計算結果",
+    "display_scale": "表示スケール",
     "comparison_precision": "比較する小数桁数",
     "rounded_comparison": "丸め後の表示値 / 計算結果",
     "calculation_status": "計算状態",
@@ -1461,18 +1464,18 @@ def _render_numeric_audit_appendix(
                 check.unit,
                 output_language=labels.language,
             )
-            canonical = (
+            comparison = (
                 format_decision_number(
-                    float(check.canonical_result),
+                    float(check.comparison_result),
                     check.unit,
                     output_language=labels.language,
                 )
-                if check.canonical_result is not None
+                if check.comparison_result is not None
                 else "—"
             )
             lines.append(
                 f"| {check.label} (`{check.component_path}`) | {stated} {check.unit} | "
-                f"{canonical}{f' {check.unit}' if check.canonical_result is not None else ''} | "
+                f"{comparison}{f' {check.unit}' if check.comparison_result is not None else ''} | "
                 f"{check.fraction_digits} | `{check.calculation_status.value}` | "
                 f"`{check.display_status.value}` |"
             )
@@ -1495,6 +1498,8 @@ def _render_numeric_audit_appendix(
                     f"  - {labels['formula']}: `{check.formula}`",
                     f"  - {labels['inputs']}: `{json.dumps(check.inputs, ensure_ascii=False, sort_keys=True)}`",
                     f"  - {labels['rounded_comparison']}: `{rounded}`",
+                    f"  - {labels['canonical_result']}: `{check.canonical_result}`",
+                    f"  - {labels['display_scale']}: `{check.display_scale.value}`",
                     f"  - {labels['evidence']}: {refs or '—'}",
                 ]
             )

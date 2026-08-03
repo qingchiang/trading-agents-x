@@ -29,6 +29,7 @@ from tradingagents.application.contracts import (
     NumericAuditAppendixStatus,
     NumericAuditStatus,
     NumericCalculationStatus,
+    NumericDisplayScale,
     NumericDisplayStatus,
     NumericTemporalBasis,
     RebuttalReview,
@@ -320,9 +321,10 @@ def test_core_envelope_exposes_soft_numeric_requirement_schema() -> None:
         "fraction_digits",
         "formula",
         "inputs",
-        "input_evidence_refs",
-        "unit",
-        "limitations",
+            "input_evidence_refs",
+            "unit",
+            "display_scale",
+            "limitations",
     }
     assert candidate["properties"]["inputs"]["type"] == "array"
     assert candidate["properties"]["inputs"]["items"] == {
@@ -986,6 +988,7 @@ def test_core_declares_decision_critical_numeric_requirement() -> None:
         ),
         input_evidence_refs=(ref,),
         unit="x",
+        display_scale=NumericDisplayScale.BASE,
         limitations=("Guidance may change.",),
     )
     core = _core_envelope(core_draft, requirements=(requirement,))
@@ -1079,6 +1082,7 @@ def test_invalid_numeric_requirement_candidate_does_not_repair_core() -> None:
         "numeric.requirement_candidate.0.inputs.missing",
         "numeric.requirement_candidate.0.input_evidence_refs.missing",
         "numeric.requirement_candidate.0.unit.missing",
+        "numeric.requirement_candidate.0.display_scale.missing",
         "numeric.requirement_candidate.0.limitations.missing",
     )
     assert result.numeric_audit.omitted_components[-1].issue_codes == (
@@ -1136,6 +1140,7 @@ def test_numeric_requirement_preflight_reports_safe_field_paths() -> None:
         "numeric.requirement_candidate.0.component_path.pattern",
         "numeric.requirement_candidate.0.fraction_digits.range",
         "numeric.requirement_candidate.0.inputs.list_type",
+        "numeric.requirement_candidate.0.display_scale.missing",
         "numeric.requirement_candidate.0.limitations.missing",
         "numeric.requirement_candidate.0.extra.forbidden",
     )
@@ -1173,6 +1178,7 @@ def test_valid_numeric_requirements_survive_an_invalid_sibling() -> None:
             ),
             input_evidence_refs=(ref,),
             unit="x",
+            display_scale=NumericDisplayScale.BASE,
             limitations=("Fixture limitation.",),
         )
         for index, component_path in enumerate(component_paths)
@@ -1330,6 +1336,7 @@ def test_missing_decision_calculation_degrades_numeric_audit_only_once() -> None
         ),
         input_evidence_refs=(ref,),
         unit="JPY/share",
+        display_scale=NumericDisplayScale.BASE,
         limitations=("Quarterly phasing may vary.",),
     )
     core = _core_envelope(core_draft, requirements=(requirement,))
@@ -1389,6 +1396,7 @@ def test_decision_requirements_use_decimal_rounding_and_publish_all_uses() -> No
             ),
             input_evidence_refs=(ref,),
             unit="x",
+            display_scale=NumericDisplayScale.BASE,
             limitations=("Guidance may change.",),
         ),
         DecisionNumericRequirementDraft(
@@ -1408,6 +1416,7 @@ def test_decision_requirements_use_decimal_rounding_and_publish_all_uses() -> No
             ),
             input_evidence_refs=(ref,),
             unit="JPY/share",
+            display_scale=NumericDisplayScale.BASE,
             limitations=("Quarterly phasing may vary.",),
         ),
         DecisionNumericRequirementDraft(
@@ -1425,6 +1434,7 @@ def test_decision_requirements_use_decimal_rounding_and_publish_all_uses() -> No
             ),
             input_evidence_refs=(ref,),
             unit="JPY/share",
+            display_scale=NumericDisplayScale.BASE,
             limitations=("Assumes even quarterly phasing.",),
         ),
     )
@@ -1469,6 +1479,52 @@ def test_decision_requirements_use_decimal_rounding_and_publish_all_uses() -> No
     ]
 
 
+def test_decision_requirement_compares_canonical_amount_at_display_scale() -> None:
+    state = _state()
+    bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
+    ref = bundle.items[0].ref
+    requirement = DecisionNumericRequirementDraft(
+        id="req_capex",
+        component_path="thesis",
+        label="Capital expenditure",
+        stated_value=805.98,
+        fraction_digits=2,
+        formula="first_half + second_half",
+        inputs=(
+            CalculationInputDraft(name="first_half", value=40_000_000_000),
+            CalculationInputDraft(name="second_half", value=40_598_000_000),
+        ),
+        input_evidence_refs=(ref,),
+        unit="USD",
+        display_scale=NumericDisplayScale.HUNDRED_MILLION,
+        limitations=("Fixture calculation.",),
+    )
+    calculation = CalculationRecordDraft(
+        id="calc_capex",
+        formula=requirement.formula,
+        inputs=requirement.inputs,
+        input_evidence_refs=requirement.input_evidence_refs,
+        unit=requirement.unit,
+        limitations=requirement.limitations,
+        requirement_ids=(requirement.id,),
+    )
+
+    result = _assemble_numeric_draft(
+        DecisionNumericDraft(requested=True, calculation_records=(calculation,)),
+        bundle=bundle,
+        allowed_evidence_refs={ref},
+        value_catalog=_value_catalog(bundle),
+        salvage=False,
+        node="committee.final.serialize.numeric",
+        requirements=(requirement,),
+    )
+
+    assert result.calculation_records[0].result == 80_598_000_000
+    assert result.requirement_checks[0].comparison_result == 805.98
+    assert result.requirement_checks[0].comparison_difference == 0
+    assert result.requirement_checks[0].display_status is NumericDisplayStatus.MATCHED
+
+
 def test_9984_percentage_requirements_complete_without_numeric_repair() -> None:
     payload = _numeric_9984_payload()
     state = _state()
@@ -1490,6 +1546,7 @@ def test_9984_percentage_requirements_complete_without_numeric_repair() -> None:
             ),
             input_evidence_refs=(ref,),
             unit=item["unit"],
+            display_scale=NumericDisplayScale.BASE,
             limitations=("Live regression fixture limitation.",),
         )
         for item in payload["requirements"]
@@ -1580,6 +1637,7 @@ def test_decision_requirement_mismatch_is_rejected(
         ),
         input_evidence_refs=(ref,),
         unit="x",
+        display_scale=NumericDisplayScale.BASE,
         limitations=("Guidance may change.",),
     )
     calculation = CalculationRecordDraft(
@@ -1623,6 +1681,7 @@ def test_display_mismatch_keeps_verified_calculation_and_comparison() -> None:
         ),
         input_evidence_refs=(ref,),
         unit="x",
+        display_scale=NumericDisplayScale.BASE,
         limitations=("Guidance may change.",),
     )
     calculation = CalculationRecordDraft(
@@ -1681,6 +1740,7 @@ def test_display_mismatch_does_not_retry_numeric_serializer() -> None:
         ),
         input_evidence_refs=(ref,),
         unit="x",
+        display_scale=NumericDisplayScale.BASE,
         limitations=("Guidance may change.",),
     )
     numeric = DecisionNumericDraft(
@@ -1746,6 +1806,7 @@ def test_percent_formula_using_display_scale_reports_specific_mismatch() -> None
         ),
         input_evidence_refs=(ref,),
         unit="%",
+        display_scale=NumericDisplayScale.BASE,
         limitations=("The target may change.",),
     )
     calculation = CalculationRecordDraft(
@@ -3012,9 +3073,9 @@ def test_formula_validation_reports_component_scoped_input_issues(
         ("%", 45.46),
         (" percent ", 45.46),
         ("pct", 45.46),
-        ("pp", 0.4546),
-        ("percentage points", 0.4546),
-        ("bps", 0.4546),
+        ("pp", 45.46),
+        ("percentage points", 45.46),
+        ("bps", 4546),
         ("x", 0.4546),
         ("JPY", 0.4546),
     ),

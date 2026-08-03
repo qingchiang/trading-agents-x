@@ -30,7 +30,8 @@ _MEMORY_REF_PATTERN = re.compile(r"^memory:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _EVIDENCE_REF_PATTERN = re.compile(r"^ev_[a-f0-9]{12}$")
 _RESEARCH_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_.-]*$")
 _DECISION_COMPONENT_PATH_PATTERN = re.compile(
-    r"^(?:executive_summary|thesis|risks\.\d+|invalidation_conditions\.\d+|"
+    r"^(?:executive_summary|thesis|catalysts\.\d+|risks\.\d+|"
+    r"invalidation_conditions\.\d+|"
     r"scenarios\.(?:base|bull|bear)\.(?:outcome|core_assumptions\.\d+)|"
     r"risk_review_adjustments\.\d+\.explanation)$"
 )
@@ -205,8 +206,21 @@ class NumericCalculationStatus(str, Enum):
 
 class NumericDisplayStatus(str, Enum):
     MATCHED = "matched"
+    APPROXIMATELY_MATCHED = "approximately_matched"
     MISMATCHED = "mismatched"
     NOT_CHECKED = "not_checked"
+
+
+class NumericDisplayScale(str, Enum):
+    """Deterministic scale applied only when comparing reader-facing values."""
+
+    BASE = "base"
+    THOUSAND = "thousand"
+    TEN_THOUSAND = "ten_thousand"
+    MILLION = "million"
+    HUNDRED_MILLION = "hundred_million"
+    BILLION = "billion"
+    TRILLION = "trillion"
 
 
 class NumericAuditPhase(str, Enum):
@@ -280,10 +294,13 @@ class NumericRequirementCheck(FrozenModel):
     stated_value: int | float
     fraction_digits: int = Field(ge=0, le=8)
     unit: str = Field(min_length=1, max_length=32)
+    display_scale: NumericDisplayScale = NumericDisplayScale.BASE
     formula: str = Field(min_length=1)
     inputs: dict[str, int | float] = Field(min_length=1)
     input_evidence_refs: tuple[str, ...] = Field(min_length=1)
     canonical_result: int | float | None = None
+    comparison_result: int | float | None = None
+    comparison_difference: int | float | None = None
     rounded_stated_value: int | float | None = None
     rounded_canonical_result: int | float | None = None
     calculation_status: NumericCalculationStatus
@@ -321,7 +338,12 @@ class NumericRequirementCheck(FrozenModel):
     @model_validator(mode="after")
     def validate_status_fields(self) -> NumericRequirementCheck:
         if self.calculation_status is NumericCalculationStatus.VERIFIED:
-            if self.calculation_id is None or self.canonical_result is None:
+            if (
+                self.calculation_id is None
+                or self.canonical_result is None
+                or self.comparison_result is None
+                or self.comparison_difference is None
+            ):
                 raise ValueError("verified calculations require an ID and result")
             if self.display_status is NumericDisplayStatus.NOT_CHECKED:
                 raise ValueError("verified calculations require a display comparison")
@@ -1718,7 +1740,7 @@ class RecentInstrument(FrozenModel):
 class RunExport(FrozenModel):
     """Versioned, self-contained durable run export."""
 
-    schema_version: Literal["7"] = "7"
+    schema_version: Literal["8"] = "8"
     run: RunView
     result: AnalysisResult
     evidence: EvidenceBundle | None = None

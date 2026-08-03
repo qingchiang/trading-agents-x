@@ -713,7 +713,7 @@
         "description": "One readable decision component that relies on a calculation.",
         "properties": {
           "component_path": {
-            "pattern": "^(?:executive_summary|thesis|risks\\.\\d+|invalidation_conditions\\.\\d+|scenarios\\.(?:base|bull|bear)\\.(?:outcome|core_assumptions\\.\\d+)|risk_review_adjustments\\.\\d+\\.explanation)$",
+            "pattern": "^(?:executive_summary|thesis|catalysts\\.\\d+|risks\\.\\d+|invalidation_conditions\\.\\d+|scenarios\\.(?:base|bull|bear)\\.(?:outcome|core_assumptions\\.\\d+)|risk_review_adjustments\\.\\d+\\.explanation)$",
             "title": "Component Path",
             "type": "string"
           },
@@ -2134,9 +2134,24 @@
         "title": "NumericCalculationStatus",
         "type": "string"
       },
+      "NumericDisplayScale": {
+        "description": "Deterministic scale applied only when comparing reader-facing values.",
+        "enum": [
+          "base",
+          "thousand",
+          "ten_thousand",
+          "million",
+          "hundred_million",
+          "billion",
+          "trillion"
+        ],
+        "title": "NumericDisplayScale",
+        "type": "string"
+      },
       "NumericDisplayStatus": {
         "enum": [
           "matched",
+          "approximately_matched",
           "mismatched",
           "not_checked"
         ],
@@ -2176,10 +2191,42 @@
             ],
             "title": "Canonical Result"
           },
+          "comparison_difference": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparison Difference"
+          },
+          "comparison_result": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparison Result"
+          },
           "component_path": {
-            "pattern": "^(?:executive_summary|thesis|risks\\.\\d+|invalidation_conditions\\.\\d+|scenarios\\.(?:base|bull|bear)\\.(?:outcome|core_assumptions\\.\\d+)|risk_review_adjustments\\.\\d+\\.explanation)$",
+            "pattern": "^(?:executive_summary|thesis|catalysts\\.\\d+|risks\\.\\d+|invalidation_conditions\\.\\d+|scenarios\\.(?:base|bull|bear)\\.(?:outcome|core_assumptions\\.\\d+)|risk_review_adjustments\\.\\d+\\.explanation)$",
             "title": "Component Path",
             "type": "string"
+          },
+          "display_scale": {
+            "$ref": "#/components/schemas/NumericDisplayScale",
+            "default": "base"
           },
           "display_status": {
             "$ref": "#/components/schemas/NumericDisplayStatus"

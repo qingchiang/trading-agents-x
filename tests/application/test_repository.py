@@ -739,6 +739,8 @@ def test_complete_persists_result_and_resolved_memory(
                 inputs={"close_price": 4000.0, "eps": 87.35},
                 input_evidence_refs=(evidence_item.ref,),
                 canonical_result=45.79278763594734,
+                comparison_result=45.79278763594734,
+                comparison_difference=45.79278763594734 - 45.8,
                 rounded_stated_value=45.8,
                 rounded_canonical_result=45.8,
                 calculation_status=NumericCalculationStatus.VERIFIED,
