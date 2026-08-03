@@ -90,6 +90,13 @@ def verify(wheel: Path) -> None:
         metadata = BytesParser().parsebytes(archive.read(metadata_name))
         if metadata["License-Expression"] != "Apache-2.0":
             raise ValueError("wheel License-Expression must be Apache-2.0")
+        extras = {
+            extra.casefold() for extra in metadata.get_all("Provides-Extra", [])
+        }
+        if "dev" in extras:
+            raise ValueError("wheel must not publish the local dev dependency group")
+        if "bedrock" not in extras:
+            raise ValueError("wheel is missing the optional bedrock extra")
         requirements = {
             requirement.split(";", 1)[0]
             .split("[", 1)[0]

@@ -37,6 +37,10 @@ version numbers.
 
 ### Changed
 
+- **Locked uv workflow.** Source installs, development, CI, and Docker now use
+  uv 0.12.1 or newer with a PEP 735 development group. Docker installs exact
+  runtime dependencies from `uv.lock` while retaining the project wheel as its
+  deployment boundary; a fresh pip wheel install remains a compatibility gate.
 - **Independent product architecture.** Normal development no longer merges
   upstream. The remote and attribution remain for read-only monitoring and
   selectively audited security/correctness fixes.

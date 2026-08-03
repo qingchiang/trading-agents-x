@@ -9,25 +9,34 @@ COPY frontend/ ./
 RUN npm run build
 
 
+FROM ghcr.io/astral-sh/uv:0.12.1 AS uv
+
+
 FROM python:3.12-slim AS python-builder
 
-ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
     PYTHONDONTWRITEBYTECODE=1
 
 WORKDIR /src
-COPY pyproject.toml README.md LICENSE NOTICE ./
+COPY --from=uv /uv /uvx /bin/
+COPY pyproject.toml uv.lock README.md LICENSE NOTICE ./
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-dev --no-install-project
+
 COPY cli ./cli
 COPY tradingagents ./tradingagents
 COPY --from=frontend-builder /src/tradingagents/web/static ./tradingagents/web/static
 
-RUN --mount=type=cache,target=/root/.cache/pip \
-    python -m pip wheel \
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv build --wheel --out-dir /wheels \
+ && uv pip install \
+      --python /opt/venv/bin/python \
       --no-deps \
-      --wheel-dir /wheels \
-      . \
- && python -m venv /opt/venv \
- && /opt/venv/bin/pip install \
-      /wheels/trading_agents_x-*.whl
+      /wheels/trading_agents_x-*.whl \
+ && uv pip check --python /opt/venv/bin/python
 
 
 FROM python:3.12-slim AS runtime

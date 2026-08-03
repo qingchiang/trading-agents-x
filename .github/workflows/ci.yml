@@ -25,12 +25,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install with development extras
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.12.1"
+          enable-cache: true
+      - name: Sync locked development environment
+        run: uv sync --locked
       - name: Run Python suite
-        run: pytest -q
+        run: uv run --locked pytest -q
 
   frontend:
     name: React, OpenAPI, and browser contracts
@@ -40,6 +42,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.12.1"
+          enable-cache: true
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -47,13 +53,12 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Install application and frontend
         run: |
-          python -m pip install --upgrade pip
-          pip install -e .
+          uv sync --locked --no-dev
           npm ci --prefix frontend
       - name: Check generated API contract
         run: |
-          python scripts/export_openapi.py --check
-          python scripts/generate_typescript_api.py --check
+          uv run --locked --no-dev python scripts/export_openapi.py --check
+          uv run --locked --no-dev python scripts/generate_typescript_api.py --check
       - name: Test, typecheck, and build frontend
         run: |
           npm test --prefix frontend
@@ -77,10 +82,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install ruff
-        run: pip install "ruff>=0.15"
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.12.1"
+          enable-cache: true
+      - name: Sync locked development environment
+        run: uv sync --locked
       - name: Lint repository
-        run: ruff check .
+        run: uv run --locked ruff check .
 
   wheel:
     name: wheel and fresh-install contract
@@ -90,10 +99,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.12.1"
+          enable-cache: true
       - name: Build wheel
-        run: |
-          python -m pip install --upgrade pip
-          pip wheel --no-deps --wheel-dir wheelhouse .
+        run: uv build --wheel --out-dir wheelhouse
       - name: Inspect wheel contents and metadata
         run: python scripts/verify_wheel.py wheelhouse/trading_agents_x-*.whl
       - name: Fresh install and runtime smoke

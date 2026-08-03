@@ -36,17 +36,22 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Amazon Bedrock support (AWS SigV4 auth + boto3). Optional so the core install
+# stays lean: uv sync --locked --no-dev --extra bedrock.
+bedrock = [
+    "langchain-aws>=1.5.0",
+]
+
+[dependency-groups]
 dev = [
     "httpx2>=2.0",
     "ruff>=0.15",
     "pytest>=8.0",
     "pytest-subtests>=0.13",
 ]
-# Amazon Bedrock support (AWS SigV4 auth + boto3). Optional so the core install
-# stays lean: pip install "trading-agents-x[bedrock]".
-bedrock = [
-    "langchain-aws>=1.5.0",
-]
+
+[tool.uv]
+required-version = ">=0.12.1"
 
 [project.scripts]
 tradingagents = "cli.main:app"

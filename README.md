@@ -69,15 +69,15 @@ Markdown is rendered without raw HTML and sanitized before display.
 
 ## Quick start
 
-Python 3.10–3.13 is supported. Node.js is needed only when developing the
-frontend; release wheels already include the compiled Web assets.
+Python 3.10–3.13 and uv 0.12.1 or newer are supported. Node.js is needed only
+when developing the frontend; release wheels already include the compiled Web
+assets.
 
 ```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
 git clone https://github.com/qingchiang/trading-agents-x.git
 cd trading-agents-x
-python -m venv .venv
-source .venv/bin/activate
-pip install .
+uv sync --locked --no-dev
 cp .env.example .env
 ```
 
@@ -85,7 +85,7 @@ Configure one LLM provider in `.env`, then start the local Web and worker
 together:
 
 ```bash
-tradingagents start
+uv run --locked --no-dev tradingagents start
 ```
 
 The command keeps both child processes separate, prefixes their merged output
@@ -97,8 +97,8 @@ logs are wanted. The underlying commands remain available for independent
 process management:
 
 ```bash
-tradingagents serve
-tradingagents worker
+uv run --locked --no-dev tradingagents serve
+uv run --locked --no-dev tradingagents worker
 ```
 
 Open <http://127.0.0.1:8000>. The Web process accepts and displays work; the
@@ -107,7 +107,7 @@ single-concurrency worker claims queued runs and settles eligible outcomes.
 For one synchronous run without the Web UI:
 
 ```bash
-tradingagents run 7203.T \
+uv run --locked --no-dev tradingagents run 7203.T \
   --date 2026-07-24 \
   --profile standard \
   --output-language ja
@@ -330,9 +330,9 @@ for a long-horizon thesis or graph quality.
 ## Development and release gates
 
 ```bash
-pip install -e ".[dev]"
-pytest -q
-ruff check .
+uv sync --locked
+uv run --locked pytest -q
+uv run --locked ruff check .
 
 npm ci --prefix frontend
 npm test --prefix frontend
@@ -340,9 +340,9 @@ npm run typecheck --prefix frontend
 npm run build --prefix frontend
 ```
 
-CI covers Python 3.10–3.13, Ruff, frontend unit tests, Playwright workflows,
-OpenAPI/type drift, wheel contents and fresh installation, and Docker Web/worker
-smoke.
+CI pins uv 0.12.1 and covers Python 3.10–3.13, Ruff, frontend unit tests,
+Playwright workflows, OpenAPI/type drift, wheel contents and a fresh pip
+installation of that wheel, and Docker Web/worker smoke.
 
 The offline suite validates application, graph, Evidence, provenance, and
 point-in-time contracts without network or LLM calls. Passing it does not prove

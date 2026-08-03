@@ -25,7 +25,8 @@ def _bedrock_class():
     except ImportError as exc:
         raise ImportError(
             "AWS Bedrock support requires the optional 'langchain-aws' dependency. "
-            'Install it with: pip install "tradingagents[bedrock]"'
+            "Install it from the source checkout with: "
+            "uv sync --locked --no-dev --extra bedrock"
         ) from exc
 
     class NormalizedChatBedrockConverse(ChatBedrockConverse):
