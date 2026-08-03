@@ -40,10 +40,18 @@ REMOVED_DIRECT_DEPENDENCIES = (
 )
 
 
+def _find_module_spec(module_name: str):
+    """Resolve nested modules without asking importlib to load a missing parent."""
+    parent_name, separator, _ = module_name.rpartition(".")
+    if separator and _find_module_spec(parent_name) is None:
+        return None
+    return find_spec(module_name)
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize("module_name", REMOVED_RUNTIME_MODULES)
 def test_legacy_runtime_module_is_not_shipped(module_name):
-    assert find_spec(module_name) is None
+    assert _find_module_spec(module_name) is None
 
 
 @pytest.mark.unit
