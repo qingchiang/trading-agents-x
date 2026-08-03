@@ -9,21 +9,26 @@ are useful across tasks.
 1. Inspect the current implementation and tests; documentation describes
    invariants, but the code remains authoritative for exact interfaces.
 2. Read the relevant parts of [`docs/architecture.md`](docs/architecture.md)
-   before changing the agent graph, data routing, point-in-time handling, or
-   market adapters.
-3. Preserve established data-adapter signatures unless the task explicitly
-   requires an interface change. Public application contracts are the typed
-   objects exported from `tradingagents`.
+   when a change touches a durable subsystem boundary: public contracts,
+   lifecycle or persistence, the graph or Evidence model, data routing,
+   point-in-time handling, market adapters, or security boundaries. Localized
+   changes outside those boundaries do not require reloading the architecture
+   document.
+3. Keep the typed objects exported from `tradingagents` stable as the public
+   application contracts. Internal graph, service, repository, and adapter
+   interfaces may evolve with the independent product architecture, provided
+   the same change updates their callers, tests, migrations, and documentation
+   where applicable.
 
 ## Commands
 
 ```bash
-pip install -e ".[dev]"   # CI-compatible development install
+uv sync --locked
 
-pytest -q
-pytest tests/test_market_routing.py
-pytest tests/test_x.py::Cls::test_y
-ruff check .
+uv run --locked pytest -q
+uv run --locked pytest tests/test_market_routing.py
+uv run --locked pytest tests/test_x.py::Cls::test_y
+uv run --locked ruff check .
 
 npm ci --prefix frontend
 npm test --prefix frontend
@@ -32,17 +37,20 @@ npm run build --prefix frontend
 
 # Opt-in network contracts; default pytest and CI skip these.
 RUN_LIVE_DATA_TESTS=1 PYTHON_DOTENV_DISABLED=1 \
-  uv run --extra dev pytest -q -m live_data
+  uv run --locked pytest -q -m live_data
 
-tradingagents run NVDA --date 2026-07-24
-tradingagents serve
-tradingagents worker
+uv run --locked --no-dev tradingagents run NVDA --date 2026-07-24
+uv run --locked --no-dev tradingagents serve
+uv run --locked --no-dev tradingagents worker
 ```
 
-CI (`.github/workflows/ci.yml`) runs pytest on Python 3.10-3.13, repo-wide Ruff,
-frontend unit/browser/type/build checks, OpenAPI/type drift checks, wheel and
-fresh-install validation, and Docker Web/worker smoke. Pytest markers are
-`unit`, `integration`, `live_data`, and `smoke`.
+CI (`.github/workflows/ci.yml`) uses uv and `uv.lock` for pytest on Python
+3.10-3.13, repo-wide Ruff, frontend unit/browser/type/build checks,
+OpenAPI/type drift checks, wheel validation, and Docker Web/worker smoke. A
+fresh standard venv installs the final wheel with pip as the only project
+installation path that does not use uv, preserving the downstream wheel
+consumer contract. Pytest markers are `unit`, `integration`, `live_data`, and
+`smoke`.
 
 ## Sandboxed environments
 
@@ -52,7 +60,6 @@ is read-only, redirect only that tool's cache to a writable temporary path:
 
 ```bash
 export UV_CACHE_DIR="${TMPDIR:-/tmp}/trading-agents-x-uv-cache"
-export PIP_CACHE_DIR="${TMPDIR:-/tmp}/trading-agents-x-pip-cache"
 ```
 
 Keep these caches outside the repository so they do not dirty the worktree. Do
@@ -101,9 +108,12 @@ silently changing package sources.
 
 ## Dependencies and package data
 
-`pyproject.toml` uses PEP 621 extras. Runtime imports belong in
-`[project.dependencies]`; test and development tools belong in
-`[project.optional-dependencies].dev`.
+Runtime imports belong in `[project.dependencies]`, user-facing optional
+features belong in PEP 621 `[project.optional-dependencies]`, and test or
+development tools belong in the PEP 735 `[dependency-groups].dev` group. Add
+them with `uv add <package>`, `uv add --optional <extra> <package>`, or
+`uv add --dev <package>` respectively, and commit the resulting `uv.lock`
+change.
 
 Register non-code runtime files in `[tool.setuptools.package-data]` and load
 them with `importlib.resources`. An editable install seeing a local file does

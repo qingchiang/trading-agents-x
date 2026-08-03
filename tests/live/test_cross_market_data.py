@@ -2,7 +2,7 @@
 
 Run explicitly with::
 
-    RUN_LIVE_DATA_TESTS=1 PYTHON_DOTENV_DISABLED=1 uv run --extra dev pytest -q -m live_data
+    RUN_LIVE_DATA_TESTS=1 PYTHON_DOTENV_DISABLED=1 uv run --locked pytest -q -m live_data
 
 These checks intentionally assert schema, date boundaries, source audit, and
 broad numeric sanity—not exact market values, titles, or result counts. They are

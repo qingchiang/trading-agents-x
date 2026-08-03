@@ -51,15 +51,15 @@ compatibility レベルです。範囲と認定方針は
 
 ## クイックスタート
 
-Python 3.10–3.13 をサポートします。Node.js が必要なのはフロントエンド開発時
-だけで、リリース wheel にはビルド済み Web assets が含まれます。
+Python 3.10–3.13 と uv 0.12.1 以降をサポートします。Node.js が必要なのは
+フロントエンド開発時だけで、リリース wheel にはビルド済み Web assets が
+含まれます。
 
 ```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
 git clone https://github.com/qingchiang/trading-agents-x.git
 cd trading-agents-x
-python -m venv .venv
-source .venv/bin/activate
-pip install .
+uv sync --locked --no-dev
 cp .env.example .env
 ```
 
@@ -67,7 +67,7 @@ cp .env.example .env
 まとめて起動します。
 
 ```bash
-tradingagents start
+uv run --locked --no-dev tradingagents start
 ```
 
 両方は独立した子プロセスのまま動作し、統合出力には `[web]` と
@@ -78,8 +78,8 @@ tradingagents start
 個別のプロセス管理が必要な場合は従来のコマンドも使用できます。
 
 ```bash
-tradingagents serve
-tradingagents worker
+uv run --locked --no-dev tradingagents serve
+uv run --locked --no-dev tradingagents worker
 ```
 
 ブラウザで <http://127.0.0.1:8000> を開きます。Web は run の受付・表示を
@@ -89,7 +89,7 @@ tradingagents worker
 Web を使わない同期実行:
 
 ```bash
-tradingagents run 7203.T \
+uv run --locked --no-dev tradingagents run 7203.T \
   --date 2026-07-24 \
   --profile standard \
   --output-language ja
@@ -261,9 +261,9 @@ ticker と benchmark に 6 個の共通 completed close が揃うと、worker �
 ## 開発・リリースゲート
 
 ```bash
-pip install -e ".[dev]"
-pytest -q
-ruff check .
+uv sync --locked
+uv run --locked pytest -q
+uv run --locked ruff check .
 
 npm ci --prefix frontend
 npm test --prefix frontend
@@ -271,9 +271,9 @@ npm run typecheck --prefix frontend
 npm run build --prefix frontend
 ```
 
-CI は Python 3.10–3.13、Ruff、frontend unit test、Playwright、
-OpenAPI/TypeScript drift、wheel/fresh install、Docker Web+worker smoke を
-検証します。
+CI は uv 0.12.1 を固定し、Python 3.10–3.13、Ruff、frontend unit test、
+Playwright、OpenAPI/TypeScript drift、wheel 内容とその pip fresh install、
+Docker Web+worker smoke を検証します。
 
 offline test は application、graph、Evidence、provenance、PIT の契約を
 network や LLM call なしで検証します。通過しても model research quality、

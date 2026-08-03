@@ -43,22 +43,21 @@ Markdown 禁用原始 HTML，并在显示前清洗。
 
 ## 快速开始
 
-支持 Python 3.10–3.13。只有开发前端时才需要 Node.js；发布 wheel 已携带
-编译后的 Web 静态资源。
+支持 Python 3.10–3.13 和 uv 0.12.1 或更高版本。只有开发前端时才需要
+Node.js；发布 wheel 已携带编译后的 Web 静态资源。
 
 ```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
 git clone https://github.com/qingchiang/trading-agents-x.git
 cd trading-agents-x
-python -m venv .venv
-source .venv/bin/activate
-pip install .
+uv sync --locked --no-dev
 cp .env.example .env
 ```
 
 在 `.env` 中配置一个 LLM provider，然后一键启动本地 Web 和 worker：
 
 ```bash
-tradingagents start
+uv run --locked --no-dev tradingagents start
 ```
 
 该命令仍将两者作为独立子进程运行，合并输出会带有 `[web]` 和 `[worker]`
@@ -68,8 +67,8 @@ worker 从 checkpoint 恢复。仅在需要轮转落盘日志时传入 `--log-di
 需要交给其他进程管理器时，仍可分别启动：
 
 ```bash
-tradingagents serve
-tradingagents worker
+uv run --locked --no-dev tradingagents serve
+uv run --locked --no-dev tradingagents worker
 ```
 
 浏览器打开 <http://127.0.0.1:8000>。Web 负责接收和展示任务；默认单并发
@@ -78,7 +77,7 @@ worker 领取队列任务，并在后台结算满足条件的 outcome。
 不使用 Web 时也可以同步运行：
 
 ```bash
-tradingagents run 7203.T \
+uv run --locked --no-dev tradingagents run 7203.T \
   --date 2026-07-24 \
   --profile standard \
   --output-language ja
@@ -238,9 +237,9 @@ graph 质量的唯一真值。
 ## 开发与验收
 
 ```bash
-pip install -e ".[dev]"
-pytest -q
-ruff check .
+uv sync --locked
+uv run --locked pytest -q
+uv run --locked ruff check .
 
 npm ci --prefix frontend
 npm test --prefix frontend
@@ -248,8 +247,9 @@ npm run typecheck --prefix frontend
 npm run build --prefix frontend
 ```
 
-CI 覆盖 Python 3.10–3.13、Ruff、前端单测、Playwright、OpenAPI/TS 类型
-漂移、wheel/fresh-install 以及 Docker Web+worker smoke。
+CI 固定使用 uv 0.12.1，覆盖 Python 3.10–3.13、Ruff、前端单测、
+Playwright、OpenAPI/TS 类型漂移、wheel 内容及其全新 pip 安装，以及 Docker
+Web+worker smoke。
 
 离线测试验证 application、graph、Evidence、provenance 与 PIT 契约，无需网络
 或 LLM 调用；通过这些测试不等于证明模型研究质量、延迟或 token 消耗得到改善。
