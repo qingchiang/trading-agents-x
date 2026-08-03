@@ -579,7 +579,11 @@ test("restores deliberation and resolves evidence references across run views", 
   expect(screen.getByText("Technical support")).toBeVisible();
   expect(screen.getByText("Analyst target range")).toBeVisible();
   expect(screen.getByText("Analyst consensus")).toBeVisible();
-  fireEvent.click(screen.getByText("Audited decision calculations"));
+  const auditSummaries = screen.getAllByText(
+    "Decision-critical calculation audit",
+  );
+  expect(auditSummaries).toHaveLength(1);
+  fireEvent.click(auditSummaries[0]);
   expect(screen.getByText("calc_market_reference")).toBeVisible();
   expect(screen.getByText("Thesis: Observed market anchor")).toBeVisible();
   const referenceTable = screen.getByRole("table", {
@@ -703,7 +707,9 @@ test("keeps a degraded numeric audit compact and opens run warnings on demand", 
   ).toBeVisible();
   expect(screen.getByText("Optional numeric conclusions were omitted.")).not.toBeVisible();
 
-  const appendixSummary = screen.getByText("Unverified numeric drafts");
+  const appendixSummary = screen.getByText(
+    "Decision-critical calculation audit",
+  );
   const appendix = appendixSummary.closest("details");
   expect(appendix).not.toHaveAttribute("open");
   fireEvent.click(appendixSummary);
@@ -744,7 +750,9 @@ test("shows decision audit gaps without an empty candidate viewer", async () => 
     </Router>,
   );
 
-  const summary = await screen.findByText("Unverified derived values");
+  const summary = await screen.findByText(
+    "Decision-critical calculation audit",
+  );
   fireEvent.click(summary);
   expect(screen.getByText("Decision claim · Forward PE")).toBeVisible();
   expect(

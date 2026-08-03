@@ -2,47 +2,58 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type {
+  CalculationRecord,
   DecisionNumericAuditAppendix,
   NumericAuditOmission,
   NumericRequirementCheck,
   NumericAuditSnapshot,
 } from "../api/client";
+import type { EvidenceReferenceIndex } from "../evidence";
 import { formatDecisionNumber } from "../numericDisplay";
+import EvidenceLinks from "./EvidenceLinks";
 
 export default function NumericAuditAppendixView({
   appendix,
+  calculationRecords,
+  calculationUses,
+  evidenceIndex,
+  onEvidence,
 }: {
-  appendix: DecisionNumericAuditAppendix;
+  appendix?: DecisionNumericAuditAppendix | null;
+  calculationRecords: CalculationRecord[];
+  calculationUses: Map<string, string[]>;
+  evidenceIndex: EvidenceReferenceIndex;
+  onEvidence: (ref: string) => void;
 }) {
   const { t, i18n } = useTranslation();
-  const defaultPhase = appendix.snapshots.some((item) => item.phase === "repair")
+  const snapshots = appendix?.snapshots ?? [];
+  const defaultPhase = snapshots.some((item) => item.phase === "repair")
     ? "repair"
-    : appendix.snapshots.at(-1)?.phase;
+    : snapshots.at(-1)?.phase;
   const [phase, setPhase] = useState(defaultPhase);
-  const omissions = appendix.omitted_components ?? [];
-  const checks = appendix.requirement_checks ?? [];
+  const omissions = appendix?.omitted_components ?? [];
+  const checks = appendix?.requirement_checks ?? [];
   const snapshot = useMemo(
     () =>
-      appendix.snapshots.find((item) => item.phase === phase) ??
-      appendix.snapshots.at(-1),
-    [appendix.snapshots, phase],
+      snapshots.find((item) => item.phase === phase) ?? snapshots.at(-1),
+    [snapshots, phase],
   );
-  const hasSnapshots = appendix.snapshots.length > 0;
+  const hasSnapshots = snapshots.length > 0;
+  const checkedCalculationIds = new Set(
+    checks.flatMap((check) =>
+      check.calculation_id ? [check.calculation_id] : [],
+    ),
+  );
+  const otherCalculations = calculationRecords.filter(
+    (calculation) => !checkedCalculationIds.has(calculation.id),
+  );
 
   return (
     <details className="numeric-audit-appendix">
       <summary>
-        <span>
-          {t(
-            checks.length > 0
-              ? "decisionRequirementAudit"
-              : hasSnapshots
-                ? "unverifiedNumericDrafts"
-                : "numericAuditGaps",
-          )}
-        </span>
-        <span className={`numeric-audit-status status-${appendix.status}`}>
-          {t(`numericAppendixStatus.${appendix.status}`)}
+        <span>{t("decisionRequirementAudit")}</span>
+        <span className={`numeric-audit-status status-${appendix?.status ?? "complete"}`}>
+          {t(`numericAppendixStatus.${appendix?.status ?? "complete"}`)}
         </span>
       </summary>
       <div className="numeric-audit-appendix-body">
@@ -52,7 +63,9 @@ export default function NumericAuditAppendixView({
               ? "numericRequirementBoundary"
               : hasSnapshots
                 ? "unverifiedNumericBoundary"
-                : "numericAuditGapBoundary",
+                : omissions.length > 0
+                  ? "numericAuditGapBoundary"
+                  : "formalCalculationBoundary",
           )}
         </p>
 
@@ -62,6 +75,16 @@ export default function NumericAuditAppendixView({
           <p className="numeric-requirement-empty">
             {t("numericRequirementNotRecorded")}
           </p>
+        )}
+
+        {otherCalculations.length > 0 && (
+          <OtherCalculations
+            calculations={otherCalculations}
+            calculationUses={calculationUses}
+            evidenceIndex={evidenceIndex}
+            onEvidence={onEvidence}
+            language={i18n.language}
+          />
         )}
 
         {omissions.length > 0 && (
@@ -79,9 +102,9 @@ export default function NumericAuditAppendixView({
           </section>
         )}
 
-        {appendix.snapshots.length > 1 && (
+        {snapshots.length > 1 && (
           <div className="numeric-snapshot-tabs" role="tablist">
-            {[...appendix.snapshots].reverse().map((item) => (
+            {[...snapshots].reverse().map((item) => (
               <button
                 type="button"
                 role="tab"
@@ -99,6 +122,68 @@ export default function NumericAuditAppendixView({
         {snapshot && <NumericSnapshotView snapshot={snapshot} />}
       </div>
     </details>
+  );
+}
+
+function OtherCalculations({
+  calculations,
+  calculationUses,
+  evidenceIndex,
+  onEvidence,
+  language,
+}: {
+  calculations: CalculationRecord[];
+  calculationUses: Map<string, string[]>;
+  evidenceIndex: EvidenceReferenceIndex;
+  onEvidence: (ref: string) => void;
+  language: string;
+}) {
+  const { t } = useTranslation();
+  return (
+    <section className="numeric-other-calculations">
+      <h3>{t("otherVerifiedCalculations")}</h3>
+      <div className="calculation-record-list">
+        {calculations.map((calculation) => (
+          <article key={calculation.id}>
+            <header>
+              <div>
+                <strong>
+                  {calculationUses.get(calculation.id)?.join(" · ") ??
+                    t("otherVerifiedCalculations")}
+                </strong>
+                <small>{calculation.id}</small>
+              </div>
+              <span title={String(calculation.result)}>
+                {formatDecisionNumber(
+                  calculation.result,
+                  calculation.unit,
+                  language,
+                )}{" "}
+                {calculation.unit}
+              </span>
+            </header>
+            <code>{calculation.formula}</code>
+            <small>{calculation.as_of_date}</small>
+            <dl>
+              {Object.entries(calculation.inputs).map(([name, value]) => (
+                <div key={name}>
+                  <dt>{name}</dt>
+                  <dd title={String(value)}>
+                    {formatDecisionNumber(value, undefined, language)}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+            <EvidenceLinks
+              refs={calculation.input_evidence_refs}
+              evidenceIndex={evidenceIndex}
+              onEvidence={onEvidence}
+              compact
+            />
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -137,9 +222,9 @@ function RequirementChecks({
               <div>
                 <dt>{t("canonicalResult")}</dt>
                 <dd>
-                  {check.canonical_result == null
+                  {check.comparison_result == null
                     ? "—"
-                    : `${formatDecisionNumber(check.canonical_result, check.unit, language)} ${check.unit}`}
+                    : `${formatDecisionNumber(check.comparison_result, check.unit, language)} ${check.unit}`}
                 </dd>
               </div>
               <div>
@@ -166,6 +251,9 @@ function RequirementChecks({
               <dl>
                 <div><dt>{t("rawStatedValue")}</dt><dd><code>{check.stated_value}</code></dd></div>
                 <div><dt>{t("rawCanonicalResult")}</dt><dd><code>{check.canonical_result ?? "—"}</code></dd></div>
+                <div><dt>{t("comparisonResult")}</dt><dd><code>{check.comparison_result ?? "—"}</code></dd></div>
+                <div><dt>{t("comparisonDifference")}</dt><dd><code>{check.comparison_difference ?? "—"}</code></dd></div>
+                <div><dt>{t("displayScale")}</dt><dd><code>{check.display_scale}</code></dd></div>
                 <div><dt>{t("formula")}</dt><dd><code>{check.formula}</code></dd></div>
                 <div><dt>{t("inputs")}</dt><dd><code>{JSON.stringify(check.inputs)}</code></dd></div>
                 <div><dt>{t("evidence")}</dt><dd><code>{check.input_evidence_refs.join(", ")}</code></dd></div>

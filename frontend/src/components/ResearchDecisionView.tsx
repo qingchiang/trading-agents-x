@@ -442,58 +442,16 @@ export function ResearchDecisionContent({
         </section>
       )}
 
-      {(decision.calculation_records ?? []).length > 0 && (
-        <section className="decision-section">
-          <details className="calculation-records">
-            <summary>{t("decisionCalculations")}</summary>
-            <div className="calculation-record-list">
-              {(decision.calculation_records ?? []).map((calculation) => (
-                <article key={calculation.id}>
-                  <header>
-                    <div>
-                      <strong>
-                        {calculationUses.get(calculation.id)?.join(" · ") ??
-                          t("decisionCalculations")}
-                      </strong>
-                      <small>{calculation.id}</small>
-                    </div>
-                    <span title={String(calculation.result)}>
-                      {formatDecisionNumber(
-                        calculation.result,
-                        calculation.unit,
-                        numberLanguage,
-                      )}{" "}
-                      {calculation.unit}
-                    </span>
-                  </header>
-                  <code>{calculation.formula}</code>
-                  <small>{calculation.as_of_date}</small>
-                  <dl>
-                    {Object.entries(calculation.inputs).map(([name, value]) => (
-                      <div key={name}>
-                        <dt>{name}</dt>
-                        <dd title={String(value)}>
-                          {formatDecisionNumber(value, undefined, numberLanguage)}
-                        </dd>
-                      </div>
-                    ))}
-                  </dl>
-                  <EvidenceLinks
-                    refs={visibleRefs(calculation.input_evidence_refs)}
-                    evidenceIndex={evidenceIndex}
-                    onEvidence={onEvidence}
-                    compact
-                  />
-                </article>
-              ))}
-            </div>
-          </details>
-        </section>
-      )}
-
-      {!embedded && numericAudit && (
+      {!embedded &&
+        (numericAudit || (decision.calculation_records ?? []).length > 0) && (
         <section className="decision-section numeric-audit-section">
-          <NumericAuditAppendixView appendix={numericAudit} />
+          <NumericAuditAppendixView
+            appendix={numericAudit}
+            calculationRecords={decision.calculation_records ?? []}
+            calculationUses={calculationUses}
+            evidenceIndex={evidenceIndex}
+            onEvidence={onEvidence}
+          />
         </section>
       )}
 

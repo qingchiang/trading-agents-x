@@ -302,8 +302,6 @@ const en = {
     derivedValue: "Derived value details",
     formula: "Formula",
     inputs: "Inputs",
-    decisionCalculations: "Audited decision calculations",
-    calculationUnlinked: "Unlinked calculation",
     calculationUseScenario: "{{scenario}} scenario",
     calculationUseMarketReference: "Market reference: {{label}}",
     calculationUseDecisionClaim: "Decision claim",
@@ -335,8 +333,11 @@ const en = {
     numericAuditGaps: "Unverified derived values",
     decisionRequirementAudit: "Decision-critical calculation audit",
     decisionRequirementComparisons: "Requirement comparisons",
+    otherVerifiedCalculations: "Other verified calculations",
     numericRequirementBoundary:
       "Calculations and decision-text display values are audited separately. A display mismatch does not invalidate an otherwise verified calculation.",
+    formalCalculationBoundary:
+      "These formal calculations support valuation, scenario ranges, or market references and passed numeric validation.",
     numericRequirementNotRecorded:
       "This run did not record requirement comparison details.",
     statedValue: "Structured display value",
@@ -345,6 +346,9 @@ const en = {
     roundedComparison: "Rounded display / result",
     rawStatedValue: "Raw display value",
     rawCanonicalResult: "Raw canonical result",
+    comparisonResult: "Scale-adjusted comparison result",
+    comparisonDifference: "Comparison difference",
+    displayScale: "Display scale",
     fullCalculationAudit: "Formula, inputs, and Evidence",
     numericDisplayMismatchExplanation:
       "The calculation is valid, but the decision text or display scale does not match.",
@@ -777,8 +781,6 @@ const zhCN = {
     derivedValue: "推导值详情",
     formula: "公式",
     inputs: "输入值",
-    decisionCalculations: "决策关键计算审计",
-    calculationUnlinked: "未关联计算",
     calculationUseScenario: "{{scenario}}情景",
     calculationUseMarketReference: "市场参考：{{label}}",
     calculationUseDecisionClaim: "决策结论",
@@ -810,8 +812,11 @@ const zhCN = {
     numericAuditGaps: "未验证派生值",
     decisionRequirementAudit: "决策关键计算审计",
     decisionRequirementComparisons: "Requirement 对照",
+    otherVerifiedCalculations: "其他已验证计算",
     numericRequirementBoundary:
       "计算有效性与正文显示值分别审计；显示不一致不会使已经验证的计算失效。",
+    formalCalculationBoundary:
+      "以下正式计算用于估值、情景区间或市场参考位置，并已通过数值校验。",
     numericRequirementNotRecorded: "该运行未记录 Requirement 比较详情。",
     statedValue: "结构化显示值",
     canonicalResult: "Canonical 计算结果",
@@ -819,6 +824,9 @@ const zhCN = {
     roundedComparison: "舍入后显示值 / 计算结果",
     rawStatedValue: "完整显示值",
     rawCanonicalResult: "完整 Canonical 结果",
+    comparisonResult: "显示尺度换算后的比较结果",
+    comparisonDifference: "比较差值",
+    displayScale: "显示尺度",
     fullCalculationAudit: "公式、输入值与 Evidence",
     numericDisplayMismatchExplanation:
       "计算有效，但正文数值或显示尺度未对齐。",
@@ -1256,8 +1264,6 @@ const ja = {
     derivedValue: "導出値の詳細",
     formula: "式",
     inputs: "入力値",
-    decisionCalculations: "意思決定に関する計算監査",
-    calculationUnlinked: "未関連の計算",
     calculationUseScenario: "{{scenario}}シナリオ",
     calculationUseMarketReference: "市場参考：{{label}}",
     calculationUseDecisionClaim: "意思決定上の主張",
@@ -1289,8 +1295,11 @@ const ja = {
     numericAuditGaps: "未検証の導出値",
     decisionRequirementAudit: "意思決定上の重要計算監査",
     decisionRequirementComparisons: "Requirement 比較",
+    otherVerifiedCalculations: "その他の検証済み計算",
     numericRequirementBoundary:
       "計算の妥当性と本文の表示値は別々に監査します。表示不一致だけでは、検証済み計算を無効にしません。",
+    formalCalculationBoundary:
+      "以下の正式な計算は、バリュエーション、シナリオレンジ、または市場参考水準に使用され、数値検証に合格しています。",
     numericRequirementNotRecorded:
       "この実行では Requirement の比較詳細を記録していません。",
     statedValue: "構造化表示値",
@@ -1299,6 +1308,9 @@ const ja = {
     roundedComparison: "丸め後の表示値 / 計算結果",
     rawStatedValue: "完全な表示値",
     rawCanonicalResult: "完全な Canonical 結果",
+    comparisonResult: "表示スケール換算後の比較結果",
+    comparisonDifference: "比較差分",
+    displayScale: "表示スケール",
     fullCalculationAudit: "式、入力値、Evidence",
     numericDisplayMismatchExplanation:
       "計算は有効ですが、本文の数値または表示スケールが一致していません。",
