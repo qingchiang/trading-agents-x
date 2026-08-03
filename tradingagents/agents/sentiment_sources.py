@@ -10,6 +10,7 @@ from tradingagents.agents.utils.agent_states import (
     PrefetchedEvidenceBlock,
     prefetched_evidence_block,
 )
+from tradingagents.application.evidence_workset import StructuredNumericFact
 from tradingagents.dataflows.market_context import market_suffix_of
 from tradingagents.dataflows.market_signals import FetchedSentimentSignal
 from tradingagents.provenance import ProvenanceRecord, extract_provenance
@@ -89,11 +90,13 @@ def _source_input(
     records: tuple[ProvenanceRecord, ...],
     temporal_scope: Literal["point_in_time", "live_only"],
     applicable: bool,
+    structured_numeric_facts: tuple[StructuredNumericFact, ...] = (),
 ) -> tuple[SentimentSourceInput, PrefetchedEvidenceBlock]:
     block = prefetched_evidence_block(
         body,
         records,
         temporal_scope=temporal_scope,
+        structured_numeric_facts=structured_numeric_facts,
     )
     timing = " ".join(record.timing.casefold() for record in records)
     lowered = body.strip().casefold()
@@ -225,6 +228,7 @@ def prepare_sentiment_sources(
         records: tuple[ProvenanceRecord, ...],
         temporal_scope: Literal["point_in_time", "live_only"],
         applicable: bool,
+        structured_numeric_facts: tuple[StructuredNumericFact, ...] = (),
     ) -> None:
         source, block = _source_input(
             source_id=source_id,
@@ -233,6 +237,7 @@ def prepare_sentiment_sources(
             records=records,
             temporal_scope=temporal_scope,
             applicable=applicable,
+            structured_numeric_facts=structured_numeric_facts,
         )
         sources.append(source)
         evidence_blocks.append(block)
@@ -308,6 +313,7 @@ def prepare_sentiment_sources(
                 "live_only" if spec.live_only else "point_in_time"
             ),
             applicable=not (spec.live_only and not live_run),
+            structured_numeric_facts=result.structured_numeric_facts,
         )
 
     source_ids = [source.source_id for source in sources]

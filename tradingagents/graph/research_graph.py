@@ -1649,6 +1649,9 @@ def _collect_evidence(
                     "dataset_id": artifact.get("dataset_id"),
                     "analytical_views": artifact.get("analytical_views", {}),
                     "column_measurements": artifact.get("column_measurements", {}),
+                    "structured_numeric_facts": artifact.get(
+                        "structured_numeric_facts", []
+                    ),
                 },
             )
             continue
@@ -1703,6 +1706,11 @@ def _collect_evidence(
             records,
             block.get("content"),
             block.get("temporal_scope"),
+            {
+                "structured_numeric_facts": block.get(
+                    "structured_numeric_facts", []
+                )
+            },
         )
 
     for content, scope in content_order:

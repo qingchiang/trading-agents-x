@@ -39,8 +39,14 @@ class AnalystRatingsBlockTests(unittest.TestCase):
         self.assertIn("Requested analysis date: 2026-06-26", out)
         self.assertIn("Retrieved at:", out)
         self.assertIn("Not point-in-time historical data", out)
-        self.assertIn("| target_mean_price | 5323.078 | currency | JPY |", out)
-        self.assertIn("| analyst_count | 16.0 | count | analysts |", out)
+        with mock.patch.object(ys, "is_near_live", return_value=True), \
+                mock.patch.object(ys, "get_analyst_ratings", return_value=_FULL):
+            _body, facts = ys.get_analyst_ratings_payload("7011.T", _LIVE)
+        by_key = {fact["key"]: fact for fact in facts}
+        self.assertEqual(by_key["target_mean_price"]["value"], 5323.078)
+        self.assertEqual(by_key["target_mean_price"]["unit"], "JPY")
+        self.assertEqual(by_key["analyst_count"]["unit"], "analysts")
+        self.assertIsNone(by_key["target_mean_price"]["effective_date"])
 
     def test_non_jp_ticker_returns_empty(self):
         # yfinance-sourced but injected as a JP fill; a US name uses StockTwits/Reddit.

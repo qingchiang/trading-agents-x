@@ -44,6 +44,14 @@ def test_research_signal_is_publication_date_bounded(monkeypatch):
 
     assert "2026-01-10" in result
     assert "upgrade" in result
+    _body, facts = cn_sentiment.get_research_signal_payload(
+        "000001.SZ", "2026-01-10"
+    )
+    assert [(fact["key"], fact["value"], fact["unit"]) for fact in facts] == [
+        ("target_low_1", 10.0, "CNY"),
+        ("target_high_1", 12.0, "CNY"),
+    ]
+    assert {fact["effective_date"] for fact in facts} == {"2026-01-10"}
 
 
 @pytest.mark.unit

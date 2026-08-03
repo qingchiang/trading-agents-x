@@ -15,7 +15,9 @@ raise.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
+
+from tradingagents.application.evidence_workset import StructuredNumericFact
 
 from ..lookahead import is_near_live
 from ..measurement import instrument_currency
@@ -30,8 +32,11 @@ logger = logging.getLogger(__name__)
 _MEAN_SCALE = "1=Strong Buy … 3=Hold … 5=Strong Sell"
 
 
-def get_analyst_ratings_block(ticker: str, curr_date: str) -> str:
-    """Return a live-only analyst-consensus rating block for a ``.T`` ticker, else "".
+def get_analyst_ratings_payload(
+    ticker: str,
+    curr_date: str,
+) -> tuple[str, tuple[StructuredNumericFact, ...]]:
+    """Return readable consensus plus producer-owned numeric facts.
 
     Empty for non-Japanese tickers (yfinance-sourced but injected as a JP fill;
     another market supplies its own) and empty outside the market-local near-live
@@ -40,14 +45,14 @@ def get_analyst_ratings_block(ticker: str, curr_date: str) -> str:
     sentiment prefetch contract).
     """
     if not is_tokyo_ticker(ticker):
-        return ""
+        return "", ()
     if not is_near_live(curr_date, ticker):
-        return ""
+        return "", ()
     try:
         ratings = get_analyst_ratings(ticker)
     except Exception as exc:  # defensive: the getter already degrades to {}
         logger.warning("Analyst-ratings fetch failed for %s: %s", ticker, exc)
-        return ""
+        return "", ()
 
     key = ratings.get("recommendationKey")
     mean = _num(ratings.get("recommendationMean"))
@@ -93,24 +98,35 @@ def get_analyst_ratings_block(ticker: str, curr_date: str) -> str:
             numeric_rows.append(("retrieval_time_price", current, "currency", currency))
 
     if not lines:
-        return ""
+        return "", ()
     # Data + legend only; the prompt wrapper owns the section framing and the
     # sentiment rules own how to weight it (kept out of here so they don't drift).
-    retrieved_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    numeric_table = ""
-    if numeric_rows:
-        numeric_table = (
-            "\n\n| Metric | Value | Measurement | Unit |\n|---|---:|---|---|\n"
-            + "\n".join(
-                f"| {name} | {value} | {measurement} | {unit or '—'} |"
-                for name, value, measurement, unit in numeric_rows
-            )
+    retrieved = datetime.now(timezone.utc)
+    retrieved_at = retrieved.isoformat(timespec="seconds")
+    facts = tuple(
+        StructuredNumericFact(
+            key=name,
+            label=name.replace("_", " "),
+            value=value,
+            measurement_kind=measurement,
+            unit=unit,
+            # Live-only values are dated from the Evidence origin's retrieved_at
+            # under the market-local near-live rule, never promoted to PIT facts.
+            effective_date=None,
         )
-    return (
+        for name, value, measurement, unit in numeric_rows
+    )
+    body = (
         "yfinance analyst consensus (sell-side; LIVE snapshot)\n"
         f"Requested analysis date: {curr_date}\n"
         f"Retrieved at: {retrieved_at}\n"
         "Not point-in-time historical data; price comparisons use the retrieval-time price.\n\n"
         + "\n".join(lines)
-        + numeric_table
     )
+    return body, facts
+
+
+def get_analyst_ratings_block(ticker: str, curr_date: str) -> str:
+    """Return the readable analyst-consensus block for direct callers."""
+
+    return get_analyst_ratings_payload(ticker, curr_date)[0]

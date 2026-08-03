@@ -97,6 +97,9 @@ def extract_evidence_tables(
         if not group.content:
             continue
         source = group.canonical
+        structured = _structured_numeric_facts_table(source, group.refs)
+        if structured is not None:
+            tables[structured.id] = structured
         purpose = (
             f"Deterministically parsed from the complete {source.evidence_type} source payload."
         )
@@ -126,6 +129,80 @@ def extract_evidence_tables(
                 _merge_evidence_tables(existing, table) if existing is not None else table
             )
     return tuple(tables.values())
+
+
+def _structured_numeric_facts_table(
+    item: EvidenceItem,
+    evidence_refs: tuple[str, ...],
+) -> EvidenceTable | None:
+    """Build a fact table from producer metadata without parsing narrative text."""
+
+    raw_facts = item.provenance.get("structured_numeric_facts")
+    if not isinstance(raw_facts, list):
+        return None
+    rows: list[EvidenceTableRow] = []
+    for index, fact in enumerate(raw_facts, start=1):
+        if not isinstance(fact, dict):
+            continue
+        key = fact.get("key")
+        label = fact.get("label")
+        value = fact.get("value")
+        if (
+            not isinstance(key, str)
+            or not re.fullmatch(r"[a-z][a-z0-9_]*", key)
+            or not isinstance(label, str)
+            or not label.strip()
+            or isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+        ):
+            continue
+        raw_kind = fact.get("measurement_kind")
+        kind = (
+            _measurement_kind(raw_kind)
+            if isinstance(raw_kind, str)
+            else MeasurementKind.UNKNOWN
+        )
+        raw_unit = fact.get("unit")
+        unit = raw_unit.strip() if isinstance(raw_unit, str) and raw_unit.strip() else None
+        raw_date = fact.get("effective_date")
+        effective_date = raw_date if isinstance(raw_date, str) and _is_date(raw_date) else None
+        rows.append(
+            EvidenceTableRow(
+                id=f"row_{index:04d}_{key}",
+                cells={
+                    "metric": EvidenceTableCell(raw_value=label.strip()),
+                    "value": EvidenceTableCell(
+                        raw_value=value,
+                        measurement_kind=kind,
+                        unit=unit,
+                    ),
+                    "effective_date": EvidenceTableCell(raw_value=effective_date),
+                },
+            )
+        )
+    if not rows:
+        return None
+    return EvidenceTable.create(
+        title=f"Structured numeric facts · {item.evidence_type}",
+        purpose="Producer-owned scalar facts retained without narrative parsing.",
+        columns=(
+            EvidenceTableColumn(key="metric", label="Metric"),
+            EvidenceTableColumn(
+                key="value",
+                label="Value",
+                data_type=TableDataType.NUMBER,
+            ),
+            EvidenceTableColumn(
+                key="effective_date",
+                label="Effective date",
+                data_type=TableDataType.DATE,
+            ),
+        ),
+        rows=tuple(rows),
+        evidence_refs=evidence_refs,
+        source_format="structured",
+    )
 
 
 def _merge_evidence_tables(

@@ -307,7 +307,7 @@ fallback
 provenance
 ```
 
-`EvidenceBundle(version="6")` deduplicates items, validates unique references,
+`EvidenceBundle(version="8")` deduplicates items, validates unique references,
 rejects effective dates after the analysis cutoff, interprets `available_at`
 in the instrument's market timezone, and seals both evidence items and
 deterministic raw `EvidenceTable` objects with a digest.
@@ -326,6 +326,14 @@ into a user report. Analysts receive a compact catalog, deterministic
 analytical views, table summaries/resampling, and source passages that do not
 duplicate a large fact table. Read-only local lookups operate on the sealed
 artifacts without recontacting the provider.
+
+Data adapters may attach small producer-owned structured numeric facts (for
+example analyst target prices and consensus EPS) beside readable source prose.
+Evidence sealing converts those facts into `source_format=structured` tables,
+so Final numeric audit does not scrape narrative text for a number, unit, or
+observation date. Calculation inputs may identify only the Evidence refs that
+establish their dates; explanatory background refs remain auditable without
+advancing or blocking the calculation date.
 
 ### Markdown-first deliberation
 

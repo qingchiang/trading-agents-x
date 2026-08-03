@@ -298,6 +298,7 @@ class NumericRequirementCheck(FrozenModel):
     formula: str = Field(min_length=1)
     inputs: dict[str, int | float] = Field(min_length=1)
     input_evidence_refs: tuple[str, ...] = Field(min_length=1)
+    date_evidence_refs: tuple[str, ...] = ()
     canonical_result: int | float | None = None
     comparison_result: int | float | None = None
     comparison_difference: int | float | None = None
@@ -326,6 +327,17 @@ class NumericRequirementCheck(FrozenModel):
     @classmethod
     def validate_input_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return _unique_evidence_refs(value)
+
+    @field_validator("date_evidence_refs")
+    @classmethod
+    def validate_date_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _unique_evidence_refs(value)
+
+    @model_validator(mode="after")
+    def validate_date_ref_subset(self) -> NumericRequirementCheck:
+        if not set(self.date_evidence_refs).issubset(self.input_evidence_refs):
+            raise ValueError("calculation date refs must belong to input evidence refs")
+        return self
 
     @field_validator("issue_codes")
     @classmethod
@@ -1185,6 +1197,7 @@ class CalculationRecord(FrozenModel):
     formula: str = Field(min_length=1)
     inputs: dict[str, int | float] = Field(min_length=1)
     input_evidence_refs: tuple[str, ...] = Field(min_length=1)
+    date_evidence_refs: tuple[str, ...] = ()
     result: int | float
     unit: str = Field(min_length=1, max_length=32)
     as_of_date: date
@@ -1211,6 +1224,17 @@ class CalculationRecord(FrozenModel):
     @classmethod
     def validate_input_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return _unique_evidence_refs(value)
+
+    @field_validator("date_evidence_refs")
+    @classmethod
+    def validate_date_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _unique_evidence_refs(value)
+
+    @model_validator(mode="after")
+    def validate_date_ref_subset(self) -> CalculationRecord:
+        if not set(self.date_evidence_refs).issubset(self.input_evidence_refs):
+            raise ValueError("calculation date refs must belong to input evidence refs")
+        return self
 
 
 class ResearchDecision(FrozenModel):
@@ -1740,7 +1764,7 @@ class RecentInstrument(FrozenModel):
 class RunExport(FrozenModel):
     """Versioned, self-contained durable run export."""
 
-    schema_version: Literal["8"] = "8"
+    schema_version: Literal["9"] = "9"
     run: RunView
     result: AnalysisResult
     evidence: EvidenceBundle | None = None

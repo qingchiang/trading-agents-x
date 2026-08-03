@@ -2,10 +2,11 @@
 
 from collections.abc import Iterable
 from dataclasses import asdict
-from typing import Annotated, TypedDict
+from typing import Annotated, NotRequired, TypedDict
 
 from langgraph.graph import MessagesState
 
+from tradingagents.application.evidence_workset import StructuredNumericFact
 from tradingagents.provenance import (
     ProvenanceRecord,
     strip_provenance_markers,
@@ -19,6 +20,7 @@ class PrefetchedEvidenceBlock(TypedDict):
     content: str | None
     records: list[dict[str, str | None]]
     temporal_scope: str
+    structured_numeric_facts: NotRequired[list[StructuredNumericFact]]
 
 
 class AgentState(MessagesState):
@@ -46,6 +48,7 @@ def prefetched_evidence_block(
     records: Iterable[ProvenanceRecord],
     *,
     temporal_scope: str | None = None,
+    structured_numeric_facts: Iterable[StructuredNumericFact] = (),
 ) -> PrefetchedEvidenceBlock:
     """Serialize one prefetch response independently from report rendering."""
 
@@ -69,7 +72,7 @@ def prefetched_evidence_block(
         or (content.startswith("<") and content.endswith(">"))
     ):
         content = None
-    return {
+    block: PrefetchedEvidenceBlock = {
         "content": content,
         "records": [asdict(record) for record in records],
         "temporal_scope": (
@@ -79,6 +82,10 @@ def prefetched_evidence_block(
             else temporal_scope_from_records(records)
         ),
     }
+    facts = list(structured_numeric_facts)
+    if facts:
+        block["structured_numeric_facts"] = facts
+    return block
 
 
 def missing_evidence_blocks(

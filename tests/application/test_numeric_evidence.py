@@ -55,6 +55,42 @@ def test_numeric_catalog_indexes_exact_item_scalar_with_locator() -> None:
     }
 
 
+def test_numeric_catalog_indexes_producer_owned_structured_facts() -> None:
+    item = EvidenceItem.create(
+        source="yfinance analyst consensus",
+        evidence_type="analyst consensus",
+        requested_date=date(2026, 8, 1),
+        content="Readable consensus narrative without a machine-readable table.",
+        provenance={
+            "structured_numeric_facts": [
+                {
+                    "key": "target_mean_price",
+                    "label": "target mean price",
+                    "value": 6129,
+                    "measurement_kind": "currency",
+                    "unit": "JPY",
+                    "effective_date": "2026-08-01",
+                }
+            ]
+        },
+    )
+    table = extract_evidence_tables((item,))[0]
+    bundle = EvidenceBundle(
+        instrument="6501.T",
+        analysis_date=date(2026, 8, 1),
+        items=(item,),
+        tables=(table,),
+    )
+
+    assert table.source_format == "structured"
+    entry = build_numeric_value_catalog(bundle)[0]
+    assert entry.value == 6129
+    assert entry.measurement_kind is MeasurementKind.CURRENCY
+    assert entry.unit == "JPY"
+    assert entry.observed_date == date(2026, 8, 1)
+    assert entry.locator.table_id == table.id
+
+
 def test_numeric_catalog_limits_large_series_to_latest_and_extrema_rows() -> None:
     ref = "ev_0123456789ab"
     columns = (

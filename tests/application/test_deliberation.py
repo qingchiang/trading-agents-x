@@ -146,6 +146,7 @@ def _numeric_draft_from_decision(payload: dict[str, Any]) -> DecisionNumericDraf
                     "as_of_date",
                     "temporal_basis",
                     "decision_uses",
+                    "date_evidence_refs",
                 }
             }
             | {
@@ -799,6 +800,81 @@ def test_final_decision_accepts_reproducible_critical_calculation() -> None:
 
     assert result.value.calculation_records[0].result == 100
     assert result.value.numeric_audit_status is NumericAuditStatus.COMPLETE
+
+
+def test_calculation_date_refs_ignore_undated_background_evidence() -> None:
+    dated = EvidenceItem.create(
+        source="statement",
+        evidence_type="dated scalar",
+        requested_date=date(2026, 8, 1),
+        effective_date=date(2026, 7, 31),
+        value=10,
+    )
+    background = EvidenceItem.create(
+        source="news",
+        evidence_type="undated background",
+        requested_date=date(2026, 8, 1),
+        content="Context only.",
+    )
+    bundle = EvidenceBundle(
+        instrument="6501.T",
+        analysis_date=date(2026, 8, 1),
+        items=(dated, background),
+    )
+    requirement = DecisionNumericRequirementDraft(
+        id="req_dated",
+        component_path="thesis",
+        label="Dated calculation",
+        stated_value=20,
+        fraction_digits=0,
+        formula="value * multiplier",
+        inputs=(
+            CalculationInputDraft(
+                name="value",
+                value=10,
+                date_evidence_refs=(dated.ref,),
+            ),
+            CalculationInputDraft(name="multiplier", value=2),
+        ),
+        input_evidence_refs=(dated.ref, background.ref),
+        unit="JPY",
+        display_scale=NumericDisplayScale.BASE,
+        limitations=("Background does not establish the input date.",),
+    )
+    draft = DecisionNumericDraft(
+        requested=True,
+        calculation_records=(
+            CalculationRecordDraft(
+                id="calc_dated",
+                formula="value * multiplier",
+                inputs=(
+                    CalculationInputDraft(
+                        name="value",
+                        value=10,
+                        date_evidence_refs=(dated.ref,),
+                    ),
+                    CalculationInputDraft(name="multiplier", value=2),
+                ),
+                input_evidence_refs=(dated.ref, background.ref),
+                unit="JPY",
+                limitations=("Background does not establish the input date.",),
+                requirement_ids=(requirement.id,),
+            ),
+        ),
+    )
+
+    assembly = _assemble_numeric_draft(
+        draft,
+        bundle=bundle,
+        allowed_evidence_refs={dated.ref, background.ref},
+        value_catalog={},
+        salvage=False,
+        node="committee.final.serialize.numeric",
+        requirements=(requirement,),
+    )
+
+    assert assembly.calculation_records[0].as_of_date == date(2026, 7, 31)
+    assert assembly.calculation_records[0].date_evidence_refs == (dated.ref,)
 
 
 def test_final_decision_accepts_observed_reference_without_calculation() -> None:

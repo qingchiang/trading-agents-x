@@ -126,6 +126,7 @@ class CalculationInputDraft(BaseModel):
 
     name: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_]*$")
     value: int | float
+    date_evidence_refs: tuple[str, ...] = ()
 
 
 class CalculationRecordDraft(BaseModel):
@@ -1490,8 +1491,16 @@ def invoke_research_decision(
                 fraction_digits=1,
                 formula="(target_price - close_price) / close_price",
                 inputs=(
-                    CalculationInputDraft(name="target_price", value=145.5),
-                    CalculationInputDraft(name="close_price", value=100),
+                    CalculationInputDraft(
+                        name="target_price",
+                        value=145.5,
+                        date_evidence_refs=(first_ref,),
+                    ),
+                    CalculationInputDraft(
+                        name="close_price",
+                        value=100,
+                        date_evidence_refs=(first_ref,),
+                    ),
                 ),
                 input_evidence_refs=(first_ref,),
                 unit="%",
@@ -1525,8 +1534,10 @@ def invoke_research_decision(
                 "numeric_requirement_candidates and set "
                 "numeric_requirements_declared accordingly; "
                 "directly observed Evidence values need no requirement. Candidate "
-                "inputs must be an array of {name, value} objects, never a dynamic "
-                "mapping, and limitations must be an array of strings. Every "
+                "inputs must be an array of {name, value, date_evidence_refs} objects, "
+                "never a dynamic mapping. Each observed input lists only the Evidence "
+                "refs that establish its date; pure constants use an empty list. "
+                "Limitations must be an array of strings. Every "
                 "component_path must identify one exact core field such as risks.0 "
                 "or catalysts.0 or scenarios.base.core_assumptions.2; omit an uncertain annotation "
                 "instead of using a coarse path such as risks or scenarios. "
@@ -1547,7 +1558,9 @@ def invoke_research_decision(
             "numeric_requirement_candidates. These annotations do not replace "
             "the strict qualitative fields. Candidate inputs are arrays of named "
             "values, limitations are string arrays, and component paths point to "
-            "specific indexed core fields. Omit a candidate when its exact core "
+            "specific indexed core fields. Each formula input supplies "
+            "date_evidence_refs for the Evidence that dates that input; explanatory "
+            "background refs do not belong there. Omit a candidate when its exact core "
             "location cannot be identified. Audit decision-critical derived values "
             "in catalysts, but do not annotate unresolved questions. Use paired "
             "range_low/range_high requirements with one display_group_id for a "
@@ -1884,7 +1897,11 @@ def _invoke_decision_numeric(
             id="calc_valuation_low",
             formula="earnings * multiple",
             inputs=(
-                CalculationInputDraft(name="earnings", value=10),
+                CalculationInputDraft(
+                    name="earnings",
+                    value=10,
+                    date_evidence_refs=(allowed_evidence_refs[0],),
+                ),
                 CalculationInputDraft(name="multiple", value=10),
             ),
             input_evidence_refs=(allowed_evidence_refs[0],),
@@ -1895,7 +1912,11 @@ def _invoke_decision_numeric(
             id="calc_valuation_high",
             formula="earnings * multiple",
             inputs=(
-                CalculationInputDraft(name="earnings", value=11),
+                CalculationInputDraft(
+                    name="earnings",
+                    value=11,
+                    date_evidence_refs=(allowed_evidence_refs[0],),
+                ),
                 CalculationInputDraft(name="multiple", value=10),
             ),
             input_evidence_refs=(allowed_evidence_refs[0],),
@@ -1978,7 +1999,9 @@ def _invoke_decision_numeric(
             "decision core. Every item in DECISION NUMERIC REQUIREMENTS must be "
             "covered by a calculation whose requirement_ids includes that item's ID. "
             "Copy its formula, named inputs, Evidence refs, unit, and limitations "
-            "without changing them. When requirements are present, requested must be "
+            "without changing them, including every input's date_evidence_refs. "
+            "Those refs date the calculation; explanatory Evidence must not be added. "
+            "When requirements are present, requested must be "
             f"true. {percentage_rules} {display_scale_rules} "
             f"{reference_label_rules} {language_rules}\n"
             "VALID OBSERVED VALUE REFS:\n"
@@ -2371,6 +2394,7 @@ def _requirement_check(
         formula=requirement.formula,
         inputs=requirement_input_mapping(requirement),
         input_evidence_refs=requirement.input_evidence_refs,
+        date_evidence_refs=_calculation_date_refs(requirement.inputs),
         canonical_result=canonical_result,
         comparison_result=comparison_result,
         comparison_difference=comparison_difference,
@@ -2436,6 +2460,14 @@ def _assemble_numeric_draft(
                 allowed_evidence_refs,
                 required=True,
             )
+            date_evidence_refs = _calculation_date_refs(item.inputs)
+            require_valid_refs(
+                date_evidence_refs,
+                allowed_evidence_refs,
+                required=False,
+            )
+            if not set(date_evidence_refs).issubset(item.input_evidence_refs):
+                raise OutputValidationError(f"{prefix}.date_refs.not_input_refs")
             inputs = item.input_mapping()
             raw_calculated = _evaluate_formula(
                 item.formula,
@@ -2448,7 +2480,7 @@ def _assemble_numeric_draft(
                 issue_prefix=prefix,
             )
             resolved_date = _latest_evidence_date(
-                item.input_evidence_refs,
+                date_evidence_refs or item.input_evidence_refs,
                 evidence_items=evidence_items,
                 bundle=bundle,
                 issue_prefix=prefix,
@@ -2458,6 +2490,7 @@ def _assemble_numeric_draft(
                 formula=item.formula,
                 inputs=inputs,
                 input_evidence_refs=item.input_evidence_refs,
+                date_evidence_refs=date_evidence_refs or item.input_evidence_refs,
                 result=calculated,
                 unit=item.unit,
                 as_of_date=resolved_date.value,
@@ -2520,6 +2553,10 @@ def _assemble_numeric_draft(
                 mismatch = "formula_mismatch"
             elif item.input_mapping() != requirement_input_mapping(requirement):
                 mismatch = "inputs_mismatch"
+            elif _calculation_date_refs(item.inputs) != _calculation_date_refs(
+                requirement.inputs
+            ):
+                mismatch = "date_evidence_mismatch"
             elif set(item.input_evidence_refs) != set(requirement.input_evidence_refs):
                 mismatch = "evidence_mismatch"
             elif item.unit != requirement.unit:
@@ -2920,7 +2957,7 @@ def _assemble_numeric_draft(
                 measurement_kind = _measurement_from_unit(calculation.unit)
                 unit = calculation.unit
                 evidence_refs = calculation.input_evidence_refs
-                date_evidence_refs = calculation.input_evidence_refs
+                date_evidence_refs = calculation.date_evidence_refs
                 source_locator = None
                 calculation_ids = (item.calculation_id,)
                 temporal_basis = calculation.temporal_basis
@@ -3202,7 +3239,7 @@ def _assemble_range_endpoint(
         value=float(calculation.result),
         basis=MarketReferenceBasis.DERIVED,
         evidence_refs=calculation.input_evidence_refs,
-        date_evidence_refs=calculation.input_evidence_refs,
+        date_evidence_refs=calculation.date_evidence_refs,
         calculation_id=calculation.id,
         as_of_date=calculation.as_of_date,
         temporal_basis=calculation.temporal_basis,
@@ -3481,6 +3518,20 @@ def requirement_input_mapping(
     requirement: DecisionNumericRequirementDraft,
 ) -> dict[str, int | float]:
     return {item.name: item.value for item in requirement.inputs}
+
+
+def _calculation_date_refs(
+    inputs: tuple[CalculationInputDraft, ...],
+) -> tuple[str, ...]:
+    """Return only Evidence refs that date required formula inputs."""
+
+    return tuple(
+        dict.fromkeys(
+            evidence_ref
+            for item in inputs
+            for evidence_ref in item.date_evidence_refs
+        )
+    )
 
 
 def _formula_identity(formula: str) -> str | None:

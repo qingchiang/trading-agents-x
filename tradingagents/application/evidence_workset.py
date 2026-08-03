@@ -34,6 +34,18 @@ class EvidenceToolArtifact(TypedDict):
     temporal_scope: str
     analytical_views: dict[str, Any]
     column_measurements: NotRequired[dict[str, dict[str, str | None]]]
+    structured_numeric_facts: NotRequired[list[dict[str, Any]]]
+
+
+class StructuredNumericFact(TypedDict):
+    """One producer-owned scalar carried outside model-visible prose."""
+
+    key: str
+    label: str
+    value: int | float
+    measurement_kind: str
+    unit: str | None
+    effective_date: str | None
 
 
 _OHLCV_REQUIRED = {"date", "close"}

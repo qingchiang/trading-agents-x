@@ -11,6 +11,8 @@ from threading import Lock
 import pandas as pd
 import requests
 
+from tradingagents.application.evidence_workset import StructuredNumericFact
+from tradingagents.dataflows.measurement import instrument_currency
 from tradingagents.provenance import ProvenanceRecord, attach_provenance
 from tradingagents.version import BROWSER_USER_AGENT
 
@@ -528,8 +530,11 @@ def _executive_events(records: list[dict], start, end) -> list[tuple]:
     return events
 
 
-def get_research_signal(ticker: str, curr_date: str) -> str:
-    """Return recent ratings and target ranges known by the analysis date."""
+def get_research_signal_payload(
+    ticker: str,
+    curr_date: str,
+) -> tuple[str, tuple[StructuredNumericFact, ...]]:
+    """Return dated sell-side prose plus exact target-price facts."""
     end = datetime.strptime(curr_date, "%Y-%m-%d").date()
     start = end - timedelta(days=89)
     requested = f"{start} to {end}"
@@ -603,9 +608,12 @@ def get_research_signal(ticker: str, curr_date: str) -> str:
         body = f"<Sina/Eastmoney research: no usable coverage in {start} to {end}>"
         if notes:
             body += "\n" + "\n".join(notes)
-        return attach_provenance(body, *provenance)
+        return attach_provenance(body, *provenance), ()
     lines = []
-    for row in sorted(rows, key=lambda item: item["published"], reverse=True)[:8]:
+    facts: list[StructuredNumericFact] = []
+    currency = instrument_currency(ticker)
+    selected = sorted(rows, key=lambda item: item["published"], reverse=True)[:8]
+    for index, row in enumerate(selected, start=1):
         target = f"{_display(row['target_low'])}–{_display(row['target_high'])}"
         detail = (
             f"- {row['published']}: {row['institution']}; rating={row['rating']}; "
@@ -616,13 +624,33 @@ def get_research_signal(ticker: str, curr_date: str) -> str:
         if row.get("title"):
             detail += f"; {row['title']}"
         lines.append(detail)
+        for bound in ("low", "high"):
+            parsed = pd.to_numeric(row.get(f"target_{bound}"), errors="coerce")
+            if pd.isna(parsed):
+                continue
+            facts.append(
+                StructuredNumericFact(
+                    key=f"target_{bound}_{index}",
+                    label=f"{row['institution']} target {bound}",
+                    value=float(parsed),
+                    measurement_kind="currency",
+                    unit=currency,
+                    effective_date=str(row["published"]),
+                )
+            )
     if notes:
         lines.extend(notes)
     return attach_provenance(
         f"Sell-side rating and target changes ({source}; publication-date filtered):\n"
         + "\n".join(lines),
         *provenance,
-    )
+    ), tuple(facts)
+
+
+def get_research_signal(ticker: str, curr_date: str) -> str:
+    """Return recent ratings and target ranges known by the analysis date."""
+
+    return get_research_signal_payload(ticker, curr_date)[0]
 
 
 _IMPORTANT_TERMS = (

@@ -410,6 +410,14 @@
             "title": "As Of Date",
             "type": "string"
           },
+          "date_evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Date Evidence Refs",
+            "type": "array"
+          },
           "decision_uses": {
             "default": [],
             "items": {
@@ -2223,6 +2231,14 @@
             "pattern": "^(?:executive_summary|thesis|catalysts\\.\\d+|risks\\.\\d+|invalidation_conditions\\.\\d+|scenarios\\.(?:base|bull|bear)\\.(?:outcome|core_assumptions\\.\\d+)|risk_review_adjustments\\.\\d+\\.explanation)$",
             "title": "Component Path",
             "type": "string"
+          },
+          "date_evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Date Evidence Refs",
+            "type": "array"
           },
           "display_scale": {
             "$ref": "#/components/schemas/NumericDisplayScale",

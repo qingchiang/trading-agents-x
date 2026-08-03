@@ -56,6 +56,7 @@ export interface components {
     };
     CalculationRecord: {
       as_of_date: string;
+      date_evidence_refs?: string[];
       decision_uses?: components["schemas"]["DecisionCalculationUse"][];
       formula: string;
       id: string;
@@ -311,6 +312,7 @@ export interface components {
       comparison_difference?: number | null;
       comparison_result?: number | null;
       component_path: string;
+      date_evidence_refs?: string[];
       display_scale?: components["schemas"]["NumericDisplayScale"];
       display_status: components["schemas"]["NumericDisplayStatus"];
       formula: string;
