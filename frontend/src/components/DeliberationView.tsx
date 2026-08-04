@@ -319,7 +319,7 @@ function DeliberationNavigation({
   const jump = (id: string) => {
     const target = document.getElementById(id);
     if (!target) return;
-    target.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    target.scrollIntoView?.({ behavior: "auto", block: "start" });
     target.focus({ preventScroll: true });
     setActive(id);
   };

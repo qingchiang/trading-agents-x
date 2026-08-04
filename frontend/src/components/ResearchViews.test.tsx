@@ -440,6 +440,14 @@ test("organizes shallow Markdown deliberation by role and issue", () => {
   ]) {
     expect(within(navigation).getByRole("button", { name: label })).toBeVisible();
   }
+  const judgeStage = document.getElementById("deliberation-judge-1");
+  expect(judgeStage).not.toBeNull();
+  const scrollIntoView = vi.fn();
+  judgeStage!.scrollIntoView = scrollIntoView;
   fireEvent.click(within(navigation).getByRole("button", { name: "Judge draft" }));
+  expect(scrollIntoView).toHaveBeenCalledWith({
+    behavior: "auto",
+    block: "start",
+  });
   expect(document.activeElement).toHaveAttribute("id", "deliberation-judge-1");
 });
