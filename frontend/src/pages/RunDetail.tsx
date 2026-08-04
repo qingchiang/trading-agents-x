@@ -629,7 +629,7 @@ function DeliberationPanel({
   );
   return (
     <article
-      className="panel audit-panel"
+      className="panel audit-panel reader-panel"
       id="run-view-deliberation"
       role="tabpanel"
     >
@@ -983,7 +983,7 @@ function ReportsPanel({
   const { t } = useTranslation();
   return (
     <article
-      className="panel audit-panel report-panel"
+      className="panel audit-panel report-panel reader-panel"
       id="run-view-reports"
       role="tabpanel"
     >
@@ -1090,11 +1090,14 @@ function ReportMetadata({
         }}
       >
         <strong>{t("auditDetails")}</strong>
-        <span>
-          {t("auditSummary", {
-            warnings: warnings.length,
-            evidence: groups.length,
-          })}
+        <span className="details-summary-meta">
+          <span>
+            {t("auditSummary", {
+              warnings: warnings.length,
+              evidence: groups.length,
+            })}
+          </span>
+          <span className="details-chevron" aria-hidden="true" />
         </span>
       </summary>
       <div className="audit-details-body">

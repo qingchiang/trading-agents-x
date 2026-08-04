@@ -52,8 +52,13 @@ export default function NumericAuditAppendixView({
     <details className="numeric-audit-appendix">
       <summary>
         <span>{t("decisionRequirementAudit")}</span>
-        <span className={`numeric-audit-status status-${appendix?.status ?? "complete"}`}>
-          {t(`numericAppendixStatus.${appendix?.status ?? "complete"}`)}
+        <span className="details-summary-meta">
+          <span
+            className={`numeric-audit-status status-${appendix?.status ?? "complete"}`}
+          >
+            {t(`numericAppendixStatus.${appendix?.status ?? "complete"}`)}
+          </span>
+          <span className="details-chevron" aria-hidden="true" />
         </span>
       </summary>
       <div className="numeric-audit-appendix-body">

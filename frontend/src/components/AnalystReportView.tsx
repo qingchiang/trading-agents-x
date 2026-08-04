@@ -9,6 +9,7 @@ import { useTranslation } from "react-i18next";
 
 import type { AnalystReport } from "../api/client";
 import type { EvidenceReferenceIndex } from "../evidence";
+import FloatingSectionNavigation from "./FloatingSectionNavigation";
 import Markdown from "./Markdown";
 
 export default function AnalystReportView({
@@ -129,7 +130,9 @@ function ReportSectionNavigation({
         const candidate = document.getElementById(headingDomId(section.anchor));
         const heading =
           candidate && container.contains(candidate) ? candidate : null;
-        if (heading && heading.offsetTop <= threshold) next = section.anchor;
+        if (heading && headingScrollTop(container, heading) <= threshold) {
+          next = section.anchor;
+        }
       }
       setActive(next);
     };
@@ -145,39 +148,31 @@ function ReportSectionNavigation({
     const heading =
       container && candidate && container.contains(candidate) ? candidate : null;
     if (!container || !heading) return;
-    container.scrollTop = Math.max(heading.offsetTop - 16, 0);
+    container.scrollTop = Math.max(headingScrollTop(container, heading) - 16, 0);
     heading.focus({ preventScroll: true });
     setActive(anchor);
   };
 
   return (
-    <>
-      <nav className="report-section-nav" aria-label={t("reportNavigation")}>
-        <strong>{t("onThisReport")}</strong>
-        {sections.map((section) => (
-          <button
-            type="button"
-            className={active === section.anchor ? "active" : ""}
-            aria-current={active === section.anchor ? "location" : undefined}
-            onClick={() => jump(section.anchor)}
-            key={section.id}
-          >
-            {section.title}
-          </button>
-        ))}
-      </nav>
-      <label className="report-section-select">
-        <span>{t("jumpToSection")}</span>
-        <select value={active} onChange={(event) => jump(event.target.value)}>
-          {sections.map((section) => (
-            <option value={section.anchor} key={section.id}>
-              {section.title}
-            </option>
-          ))}
-        </select>
-      </label>
-    </>
+    <FloatingSectionNavigation
+      entries={sections.map((section) => ({
+        id: section.anchor,
+        label: section.title,
+      }))}
+      active={active}
+      title={t("onThisReport")}
+      ariaLabel={t("reportNavigation")}
+      selectLabel={t("jumpToSection")}
+      storageKey="tradingagents-toc:reports"
+      onSelect={jump}
+    />
   );
+}
+
+function headingScrollTop(container: HTMLElement, heading: HTMLElement): number {
+  const containerTop = container.getBoundingClientRect().top;
+  const headingTop = heading.getBoundingClientRect().top;
+  return container.scrollTop + headingTop - containerTop;
 }
 
 function headingDomId(anchor: string): string {

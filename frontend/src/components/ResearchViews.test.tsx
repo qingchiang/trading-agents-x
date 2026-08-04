@@ -93,6 +93,7 @@ const report: AnalystReport = {
 };
 
 beforeEach(async () => {
+  sessionStorage.clear();
   await i18n.changeLanguage("en");
 });
 
@@ -116,6 +117,22 @@ test("renders natural Markdown tables and unobtrusive evidence footnotes", () =>
     "id",
     "user-content-market-view",
   );
+  const reportScroller = document.querySelector<HTMLElement>(".analyst-report");
+  const reportHeading = screen.getByRole("heading", { name: "Market view" });
+  expect(reportScroller).not.toBeNull();
+  reportScroller!.scrollTop = 40;
+  vi.spyOn(reportScroller!, "getBoundingClientRect").mockReturnValue({
+    top: 100,
+  } as DOMRect);
+  vi.spyOn(reportHeading, "getBoundingClientRect").mockReturnValue({
+    top: 260,
+  } as DOMRect);
+  fireEvent.click(
+    within(
+      screen.getByRole("navigation", { name: "Report section navigation" }),
+    ).getByRole("button", { name: "Market view" }),
+  );
+  expect(reportScroller!.scrollTop).toBe(184);
   expect(screen.queryByText(evidenceRef)).not.toBeInTheDocument();
   const footnote = screen.getByRole("button", {
     name: `Open evidence ${evidenceRef}`,
@@ -123,6 +140,16 @@ test("renders natural Markdown tables and unobtrusive evidence footnotes", () =>
   expect(footnote).toHaveTextContent("[E01]");
   fireEvent.click(footnote);
   expect(onEvidence).toHaveBeenCalledWith(evidenceRef);
+
+  fireEvent.click(screen.getByRole("button", { name: "Close navigation" }));
+  expect(
+    screen.queryByRole("navigation", { name: "Report section navigation" }),
+  ).not.toBeInTheDocument();
+  expect(sessionStorage.getItem("tradingagents-toc:reports")).toBe("closed");
+  fireEvent.click(screen.getByRole("button", { name: "Open navigation" }));
+  expect(
+    screen.getByRole("navigation", { name: "Report section navigation" }),
+  ).toBeVisible();
 });
 
 test("keeps a readable report when automated audit extraction is incomplete", () => {
@@ -222,7 +249,7 @@ test("uses generic valuation units and omits unknown unit placeholders", () => {
     risk_review_adjustments: [],
   };
 
-  render(
+  const { container } = render(
     <ResearchDecisionView
       decision={decision}
       evidenceIndex={evidenceIndex}
@@ -233,6 +260,14 @@ test("uses generic valuation units and omits unknown unit placeholders", () => {
   expect(screen.getByRole("heading", { name: "40–50 x" })).toBeVisible();
   expect(screen.getByText("7.25")).toBeVisible();
   expect(screen.queryByText("Unit unspecified")).not.toBeInTheDocument();
+  const horizon = container.querySelector(".decision-horizon-summary");
+  const evidenceLinks = container.querySelector(".evidence-ref-group");
+  expect(horizon).not.toBeNull();
+  expect(evidenceLinks).not.toBeNull();
+  expect(
+    horizon!.compareDocumentPosition(evidenceLinks!) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).not.toBe(0);
 });
 
 test("organizes shallow Markdown deliberation by role and issue", () => {

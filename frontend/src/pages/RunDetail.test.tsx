@@ -569,6 +569,8 @@ test("restores deliberation and resolves evidence references across run views", 
     screen.queryByRole("heading", { name: "Data Provenance" }),
   ).not.toBeInTheDocument();
   expect(screen.getByText("Audit details")).toBeVisible();
+  const reportAuditSummary = screen.getByText("Audit details").closest("summary");
+  expect(reportAuditSummary?.querySelector(".details-chevron")).not.toBeNull();
   expect(
     await screen.findByText("Historical source was partial."),
   ).not.toBeVisible();
@@ -591,6 +593,9 @@ test("restores deliberation and resolves evidence references across run views", 
     "Decision-critical calculation audit",
   );
   expect(auditSummaries).toHaveLength(1);
+  expect(
+    auditSummaries[0].closest("summary")?.querySelector(".details-chevron"),
+  ).not.toBeNull();
   fireEvent.click(auditSummaries[0]);
   expect(screen.getByText("calc_market_reference")).toBeVisible();
   expect(screen.getByText("Thesis: Observed market anchor")).toBeVisible();

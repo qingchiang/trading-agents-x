@@ -54,6 +54,16 @@ def _seed_memory(
         ),
         time_horizon=time_horizon,
     )
+    decision = decision.model_copy(
+        update={
+            "scenarios": tuple(
+                scenario.model_copy(
+                    update={"outcome": f"{ticker} {scenario.outcome}"}
+                )
+                for scenario in decision.scenarios
+            )
+        }
+    )
     run, _ = repository.create_run(request, {"fixture": True})
     repository.claim_run(run.id, "fixture-worker", 30)
     evidence = EvidenceBundle(
@@ -404,7 +414,7 @@ def test_memory_entries_support_fuzzy_filters_and_full_field_search(
         "power supply",
         "backlog contracts",
         "three-year compound",
-        "fixture bull scenario outcome",
+        "nvda fixture bull scenario outcome",
     ):
         assert [
             entry["ticker"]
