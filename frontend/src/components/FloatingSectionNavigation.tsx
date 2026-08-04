@@ -106,7 +106,6 @@ export default function FloatingSectionNavigation({
               onClick={toggle}
             >
               <span aria-hidden="true">☰</span>
-              <span>{title}</span>
             </button>
           )}
         </div>

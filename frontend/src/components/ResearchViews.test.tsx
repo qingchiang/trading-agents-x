@@ -146,7 +146,12 @@ test("renders natural Markdown tables and unobtrusive evidence footnotes", () =>
     screen.queryByRole("navigation", { name: "Report section navigation" }),
   ).not.toBeInTheDocument();
   expect(sessionStorage.getItem("tradingagents-toc:reports")).toBe("closed");
-  fireEvent.click(screen.getByRole("button", { name: "Open navigation" }));
+  const openNavigation = screen.getByRole("button", {
+    name: "Open navigation",
+  });
+  expect(openNavigation).toHaveTextContent("☰");
+  expect(openNavigation).not.toHaveTextContent("On this report");
+  fireEvent.click(openNavigation);
   expect(
     screen.getByRole("navigation", { name: "Report section navigation" }),
   ).toBeVisible();

@@ -45,7 +45,7 @@
 }
 
 .floating-section-navigation.collapsed {
-  width: 44px;
+  width: 34px;
 }
 
 .floating-section-navigation nav,
@@ -133,18 +133,15 @@
 
 .floating-navigation-trigger {
   display: grid;
-  gap: 6px;
-  width: 44px;
-  padding: 10px 7px;
-  justify-items: center;
-  font-size: 10px;
-  line-height: 1.15;
-  writing-mode: vertical-rl;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  place-items: center;
 }
 
-.floating-navigation-trigger > span:first-child {
-  font-size: 15px;
-  writing-mode: horizontal-tb;
+.floating-navigation-trigger > span {
+  font-size: 14px;
+  line-height: 1;
 }
 
 .floating-section-select {

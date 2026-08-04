@@ -665,12 +665,21 @@ test("runs, templates, trash, and restores local research", async ({
   await expect(
     page.getByRole("navigation", { name: "Report section navigation" }),
   ).toBeHidden();
+  const compactNavigation = page.getByRole("button", {
+    name: "Open navigation",
+  });
+  await expect(compactNavigation).toHaveText("☰");
+  expect(
+    await compactNavigation.evaluate(
+      (element) => element.getBoundingClientRect().width,
+    ),
+  ).toBeLessThanOrEqual(36);
   expect(
     await reportScroller.evaluate(
       (element) => element.getBoundingClientRect().width,
     ),
   ).toBe(expandedReportWidth);
-  await page.getByRole("button", { name: "Open navigation" }).click();
+  await compactNavigation.click();
   await page
     .getByRole("navigation", { name: "Report section navigation" })
     .getByRole("button", { name: "Risk lens" })
