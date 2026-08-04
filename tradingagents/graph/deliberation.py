@@ -676,6 +676,7 @@ class DecisionNumericDraft(BaseModel):
 class ResearchDecisionOutput:
     value: ResearchDecision
     generation_method: ArtifactGenerationMethod
+    numeric_generation_method: ArtifactGenerationMethod
     warnings: tuple[ResearchWarning, ...] = ()
     numeric_audit: DecisionNumericAuditAppendix | None = None
 
@@ -1653,6 +1654,7 @@ def invoke_research_decision(
     return ResearchDecisionOutput(
         value=decision,
         generation_method=core.generation_method,
+        numeric_generation_method=numeric.generation_method,
         warnings=numeric.warnings,
         numeric_audit=numeric.audit,
     )
@@ -1665,6 +1667,7 @@ class _NumericDecisionAssembly:
     market_reference_levels: tuple[MarketReferenceLevel, ...]
     calculation_records: tuple[CalculationRecord, ...]
     status: NumericAuditStatus
+    generation_method: ArtifactGenerationMethod = ArtifactGenerationMethod.TOOL_CALL
     warnings: tuple[ResearchWarning, ...] = ()
     issues: tuple[str, ...] = ()
     repair_issues: tuple[str, ...] = ()
@@ -2048,6 +2051,11 @@ def _invoke_decision_numeric(
             allowed_evidence_refs=allowed_evidence_refs,
         )
     except StructuredOutputError as exc:
+        attempted_method = (
+            exc.failures[-1].method
+            if exc.failures
+            else _configured_generation_method(llm)
+        )
         draft = _numeric_candidate(exc.candidate)
         if draft is None:
             omissions = _requirement_omissions(
@@ -2069,6 +2077,7 @@ def _invoke_decision_numeric(
             return _emit_numeric_normalization_event(
                 replace(
                     empty,
+                    generation_method=attempted_method,
                     audit=_numeric_audit_appendix(
                         status=NumericAuditAppendixStatus.INCOMPLETE,
                         failures=exc.failures,
@@ -2119,6 +2128,7 @@ def _invoke_decision_numeric(
         return _emit_numeric_normalization_event(
             replace(
                 assembly,
+                generation_method=attempted_method,
                 audit=_numeric_audit_appendix(
                     status=(
                         NumericAuditAppendixStatus.PARTIAL
@@ -2142,6 +2152,10 @@ def _invoke_decision_numeric(
         node=node,
         requirements=requirements,
     )
+    assembly = replace(
+        assembly,
+        generation_method=output.generation_method,
+    )
     if output.failed_attempts:
         return _emit_numeric_normalization_event(
             replace(
@@ -2161,6 +2175,12 @@ def _invoke_decision_numeric(
         event_writer=event_writer,
         node=node,
     )
+
+
+def _configured_generation_method(llm: Any) -> ArtifactGenerationMethod:
+    if getattr(llm, "preferred_structured_output_method", None) == "json_mode":
+        return ArtifactGenerationMethod.JSON_MODE
+    return ArtifactGenerationMethod.TOOL_CALL
 
 
 def _numeric_candidate(candidate: dict[str, Any] | None) -> DecisionNumericDraft | None:

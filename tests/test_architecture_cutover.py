@@ -59,6 +59,7 @@ def test_public_api_exposes_typed_application_contract():
     assert tradingagents.__all__ == [
         "AnalysisRequest",
         "AnalysisResult",
+        "ArtifactGenerationObservation",
         "ResearchDecision",
         "RunProfile",
         "TradingAgents",

@@ -13,7 +13,10 @@ from tests.factories import research_decision
 from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
+    ArtifactGenerationMethod,
+    ArtifactGenerationObservation,
     EvidenceBundle,
+    ResearchArtifactDraft,
     RunStatus,
 )
 from tradingagents.application.database import create_sqlite_engine
@@ -22,6 +25,21 @@ from tradingagents.persistence import (
     IncompatibleDatabaseError,
     upgrade_database,
 )
+
+
+def _alembic_config(app_settings) -> Config:
+    migration_root = resources.files("tradingagents.persistence").joinpath(
+        "alembic"
+    )
+    with resources.as_file(migration_root) as script_location:
+        config = Config()
+        config.set_main_option("script_location", str(script_location))
+        config.set_main_option(
+            "sqlalchemy.url",
+            f"sqlite+pysqlite:///{app_settings.database_path}",
+        )
+        config.attributes["busy_timeout_ms"] = app_settings.busy_timeout_ms
+        return config
 
 
 def test_upgrade_persists_revision_and_is_idempotent(app_settings):
@@ -67,7 +85,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     finally:
         engine.dispose()
 
-    assert revision == "0002_remove_legacy_imports"
+    assert revision == "0003_artifact_generation_observations"
     assert {
         "id",
         "run_id",
@@ -78,6 +96,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
         "schema_version",
         "prompt_version",
         "generation_method",
+        "generation_observations_json",
         "content_type",
         "content_json",
         "content_hash",
@@ -173,18 +192,7 @@ def test_v8_upgrade_preserves_research_data_and_downgrade_recreates_empty_table(
     finally:
         engine.dispose()
 
-    migration_root = resources.files("tradingagents.persistence").joinpath(
-        "alembic"
-    )
-    with resources.as_file(migration_root) as script_location:
-        config = Config()
-        config.set_main_option("script_location", str(script_location))
-        config.set_main_option(
-            "sqlalchemy.url",
-            f"sqlite+pysqlite:///{app_settings.database_path}",
-        )
-        config.attributes["busy_timeout_ms"] = app_settings.busy_timeout_ms
-        command.downgrade(config, "0001_research_contract_v8")
+    command.downgrade(_alembic_config(app_settings), "0001_research_contract_v8")
 
     engine = create_sqlite_engine(app_settings.database_path)
     try:
@@ -204,6 +212,78 @@ def test_v8_upgrade_preserves_research_data_and_downgrade_recreates_empty_table(
             assert connection.scalar(text("SELECT count(*) FROM runs")) == 1
     finally:
         engine.dispose()
+
+
+def test_artifact_observation_migration_preserves_existing_rows(app_settings) -> None:
+    upgrade_database(app_settings)
+    repository = RunRepository(app_settings)
+    request = AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
+    run, _ = repository.create_run(request, {"fixture": True})
+    repository.claim_run(run.id, "fixture-worker", 30)
+    original, _ = repository.append_artifact(
+        run.id,
+        ResearchArtifactDraft(
+            node="analyst.market",
+            stage="analyst",
+            role="market",
+            generation_method=ArtifactGenerationMethod.TOOL_CALL,
+            content=research_decision(evidence_refs=()),
+        ),
+    )
+    repository.engine.dispose()
+
+    config = _alembic_config(app_settings)
+    command.downgrade(config, "0002_remove_legacy_imports")
+    engine = create_sqlite_engine(app_settings.database_path)
+    try:
+        assert "generation_observations_json" not in {
+            column["name"] for column in inspect(engine).get_columns("run_artifacts")
+        }
+        with engine.connect() as connection:
+            assert connection.scalar(text("SELECT count(*) FROM run_artifacts")) == 1
+    finally:
+        engine.dispose()
+
+    command.upgrade(config, "0003_artifact_generation_observations")
+    repository = RunRepository(app_settings)
+    try:
+        restored = repository.list_artifacts(run.id)
+        assert [item.id for item in restored] == [original.id]
+        assert restored[0].generation_observations == ()
+        observed, _ = repository.append_artifact(
+            run.id,
+            ResearchArtifactDraft(
+                node="analyst.news",
+                stage="analyst",
+                role="news",
+                generation_method=ArtifactGenerationMethod.JSON_MODE,
+                generation_observations=(
+                    ArtifactGenerationObservation(
+                        node="analyst.news.serialize",
+                        task_kind="semantic_structured",
+                        client_role="quick_reasoning",
+                        generation_method=ArtifactGenerationMethod.JSON_MODE,
+                    ),
+                ),
+                content=research_decision(evidence_refs=()),
+            ),
+        )
+        assert repository.list_artifacts(run.id)[1] == observed
+    finally:
+        repository.engine.dispose()
+
+    command.downgrade(config, "0002_remove_legacy_imports")
+    engine = create_sqlite_engine(app_settings.database_path)
+    try:
+        inspector = inspect(engine)
+        assert "generation_observations_json" not in {
+            column["name"] for column in inspector.get_columns("run_artifacts")
+        }
+        with engine.connect() as connection:
+            assert connection.scalar(text("SELECT count(*) FROM run_artifacts")) == 2
+    finally:
+        engine.dispose()
+    command.upgrade(config, "0003_artifact_generation_observations")
 
 
 def test_unreleased_revision_requires_explicit_database_reset(

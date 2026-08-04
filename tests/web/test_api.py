@@ -16,6 +16,7 @@ from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
     ArtifactGenerationMethod,
+    ArtifactGenerationObservation,
     EvidenceBundle,
     EvidenceItem,
     ResearchArtifactDraft,
@@ -428,6 +429,14 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
             stage="decision",
             role="final_committee",
             generation_method=ArtifactGenerationMethod.TOOL_CALL,
+            generation_observations=(
+                ArtifactGenerationObservation(
+                    node="committee.final.serialize.numeric",
+                    task_kind="semantic_structured",
+                    client_role="deep_reasoning",
+                    generation_method=ArtifactGenerationMethod.JSON_MODE,
+                ),
+            ),
             content=decision,
         ),
     )
@@ -529,6 +538,17 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
         item for item in artifacts.json() if item["id"] == review.id
     )
     assert review_payload["generation_method"] == "tool_call"
+    decision_payload = next(
+        item for item in artifacts.json() if item["role"] == "final_committee"
+    )
+    assert decision_payload["generation_observations"] == [
+        {
+            "node": "committee.final.serialize.numeric",
+            "task_kind": "semantic_structured",
+            "client_role": "deep_reasoning",
+            "generation_method": "json_mode",
+        }
+    ]
     assert "diagnostics" not in review_payload
     assert "Fixture case statement" in review_payload["content"]["markdown"]
     assert empty_attempt.json() == []

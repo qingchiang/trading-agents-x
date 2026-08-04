@@ -4,6 +4,7 @@ import warnings
 from .application.contracts import (
     AnalysisRequest,
     AnalysisResult,
+    ArtifactGenerationObservation,
     ResearchDecision,
     RunProfile,
 )
@@ -13,6 +14,7 @@ from .version import __version__
 __all__ = [
     "AnalysisRequest",
     "AnalysisResult",
+    "ArtifactGenerationObservation",
     "ResearchDecision",
     "RunProfile",
     "TradingAgents",

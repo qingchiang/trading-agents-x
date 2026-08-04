@@ -1471,6 +1471,20 @@ ResearchArtifactContent = (
 )
 
 
+class ArtifactGenerationObservation(FrozenModel):
+    """One structured-generation path used to produce an artifact component."""
+
+    node: str = Field(min_length=1, max_length=160)
+    task_kind: Literal["semantic_structured", "schema_serialization"]
+    client_role: Literal[
+        "quick_reasoning",
+        "deep_reasoning",
+        "quick_serializer",
+        "deep_serializer",
+    ]
+    generation_method: ArtifactGenerationMethod
+
+
 def _artifact_content_type(content: ResearchArtifactContent) -> str:
     if isinstance(content, AnalystReport):
         return "analyst_report"
@@ -1514,6 +1528,7 @@ class ResearchArtifactDraft(FrozenModel):
         pattern=r"^[a-z0-9][a-z0-9_.-]*$",
     )
     generation_method: ArtifactGenerationMethod
+    generation_observations: tuple[ArtifactGenerationObservation, ...] = ()
     content: ResearchArtifactContent
 
     @property
@@ -1556,6 +1571,7 @@ class ResearchArtifact(FrozenModel):
         pattern=r"^[a-z0-9][a-z0-9_.-]*$",
     )
     generation_method: ArtifactGenerationMethod
+    generation_observations: tuple[ArtifactGenerationObservation, ...] = ()
     content: ResearchArtifactContent
     created_at: datetime
 

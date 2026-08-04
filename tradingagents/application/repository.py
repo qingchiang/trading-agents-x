@@ -21,6 +21,7 @@ from .contracts import (
     AnalysisResult,
     AnalystReport,
     ArtifactGenerationMethod,
+    ArtifactGenerationObservation,
     DebateAgenda,
     DecisionBrief,
     DecisionNumericAuditAppendix,
@@ -946,6 +947,10 @@ class RunRepository:
                     schema_version=draft.schema_version,
                     prompt_version=draft.prompt_version,
                     generation_method=draft.generation_method.value,
+                    generation_observations_json=[
+                        item.model_dump(mode="json")
+                        for item in draft.generation_observations
+                    ],
                     content_type=draft.content_type,
                     content_json=draft.content.model_dump(mode="json"),
                     content_hash=draft.content_hash,
@@ -965,6 +970,10 @@ class RunRepository:
                 "schema_version": draft.schema_version,
                 "prompt_version": draft.prompt_version,
                 "generation_method": draft.generation_method.value,
+                "generation_observations": [
+                    item.model_dump(mode="json")
+                    for item in draft.generation_observations
+                ],
                 "content_type": draft.content_type,
             }
             connection.execute(
@@ -990,6 +999,7 @@ class RunRepository:
             schema_version=draft.schema_version,
             prompt_version=draft.prompt_version,
             generation_method=draft.generation_method,
+            generation_observations=draft.generation_observations,
             content=draft.content,
             created_at=_aware(now),
         )
@@ -1421,6 +1431,10 @@ class RunRepository:
         generation_method = ArtifactGenerationMethod(
             record["generation_method"]
         )
+        generation_observations = tuple(
+            ArtifactGenerationObservation.model_validate(item)
+            for item in (record["generation_observations_json"] or ())
+        )
         content = model.model_validate(record["content_json"])
         return ResearchArtifact(
             id=record["id"],
@@ -1432,6 +1446,7 @@ class RunRepository:
             schema_version=record["schema_version"],
             prompt_version=record["prompt_version"],
             generation_method=generation_method,
+            generation_observations=generation_observations,
             content=content,
             created_at=_aware(record["created_at"]),
         )
