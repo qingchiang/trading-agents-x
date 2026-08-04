@@ -18,6 +18,8 @@ function makeRun(
     id,
     source_run_id: options.sourceRunId ?? null,
     instrument_name: options.instrumentName ?? null,
+    instrument_local_name: null,
+    research_rating: status === "succeeded" ? "Hold" : null,
     trashed_at: options.trashedAt ?? null,
     status,
     request: {
@@ -416,9 +418,11 @@ test("runs, templates, trash, and restores local research", async ({
             run_id: report.id,
             ticker: report.request.ticker,
             instrument_name: report.instrument_name,
+            instrument_local_name: report.instrument_local_name,
             market: "America/New_York",
             asset_type: "stock",
             analysis_date: "2026-07-24",
+            profile: report.request.profile,
             decision: result(report.id).decision,
             outcome: {
               status: "resolved",

@@ -3,6 +3,7 @@ import type { components } from "./types.generated";
 export type AnalysisRequest = components["schemas"]["AnalysisRequest"];
 export type RunCreateRequest = components["schemas"]["RunCreateRequest"];
 export type RunView = components["schemas"]["RunView"];
+export type RunSummaryView = components["schemas"]["RunSummaryView"];
 export type RunPage = components["schemas"]["RunPage"];
 export type RunBatchResult = components["schemas"]["RunBatchResult"];
 export type RunDetail = components["schemas"]["RunDetail"];

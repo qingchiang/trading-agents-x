@@ -36,7 +36,10 @@ export function RecentInstrumentDatalist({
         <option
           key={instrument.ticker}
           value={instrument.ticker}
-          label={instrument.instrument_name ?? instrument.ticker}
+          label={instrumentLabel(
+            instrument.instrument_local_name,
+            instrument.instrument_name,
+          ) ?? instrument.ticker}
         />
       ))}
     </datalist>
@@ -46,16 +49,68 @@ export function RecentInstrumentDatalist({
 export function InstrumentIdentity({
   ticker,
   instrumentName,
+  instrumentLocalName,
+  prominent = false,
 }: {
   ticker: string;
   instrumentName?: string | null;
+  instrumentLocalName?: string | null;
+  prominent?: boolean;
 }) {
+  const names = distinctNames(instrumentLocalName, instrumentName);
+  if (prominent) {
+    return (
+      <div className="instrument-identity prominent">
+        <h1 className="ticker">{ticker}</h1>
+        <InstrumentNames names={names} />
+      </div>
+    );
+  }
   return (
     <span className="instrument-identity">
       <strong className="ticker">{ticker}</strong>
-      {instrumentName && (
-        <span className="instrument-name">{instrumentName}</span>
-      )}
+      <InstrumentNames names={names} />
     </span>
   );
+}
+
+function InstrumentNames({ names }: { names: string[] }) {
+  if (names.length === 0) return null;
+  return (
+    <span className="instrument-name">
+      {names.map((name, index) => (
+        <span key={name}>
+          {index > 0 && <i aria-hidden="true"> · </i>}
+          <span>{name}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function instrumentLabel(
+  localName?: string | null,
+  generalName?: string | null,
+): string | null {
+  const names = distinctNames(localName, generalName);
+  return names.length ? names.join(" · ") : null;
+}
+
+function distinctNames(
+  localName?: string | null,
+  generalName?: string | null,
+): string[] {
+  const values = [localName, generalName]
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value));
+  const seen = new Set<string>();
+  return values.filter((value) => {
+    const key = value
+      .normalize("NFKC")
+      .toLocaleLowerCase()
+      .replace(/[\s\p{P}\p{S}]+/gu, "");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }

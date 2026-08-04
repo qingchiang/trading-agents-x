@@ -16,6 +16,7 @@ import {
 } from "../api/client";
 import ConfirmDialog from "../components/ConfirmDialog";
 import { InstrumentIdentity } from "../components/Instruments";
+import ResearchRatingBadge from "../components/ResearchRatingBadge";
 import StatusBadge from "../components/StatusBadge";
 import { Link, useLocation, useNavigate } from "../router";
 import { formatUtcDate, trashDeadline } from "../trash";
@@ -308,6 +309,7 @@ export default function Runs() {
                     />
                   </th>
                   <th>{t("ticker")}</th>
+                  <th>{t("researchRating")}</th>
                   <th>{t("profile")}</th>
                   <th>{t("analysisDate")}</th>
                   <th>{t("status")}</th>
@@ -343,7 +345,11 @@ export default function Runs() {
                         <InstrumentIdentity
                           ticker={run.request.ticker}
                           instrumentName={run.instrument_name}
+                          instrumentLocalName={run.instrument_local_name}
                         />
+                      </td>
+                      <td>
+                        <ResearchRatingBadge rating={run.research_rating} />
                       </td>
                       <td className="capitalize">{run.request.profile}</td>
                       <td>{run.request.analysis_date}</td>

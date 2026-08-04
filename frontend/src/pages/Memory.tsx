@@ -144,9 +144,19 @@ export default function Memory() {
                   <InstrumentIdentity
                     ticker={entry.ticker}
                     instrumentName={entry.instrument_name}
+                    instrumentLocalName={entry.instrument_local_name}
                   />
                 </Link>
-                <span>{entry.analysis_date} · {entry.market || "—"}</span>
+                <div className="memory-run-context">
+                  <span>{entry.analysis_date}</span>
+                  <span>{entry.market || "—"}</span>
+                  <span
+                    className="memory-profile"
+                    title={t(profileDescriptionKey(entry.profile))}
+                  >
+                    {t(entry.profile)}
+                  </span>
+                </div>
               </div>
               <div className="memory-actions">
                 <StatusBadge status={entry.outcome.status} />
@@ -165,23 +175,48 @@ export default function Memory() {
             </div>
             <details className="memory-decision-details">
               <summary>{t("decisionDetails")}</summary>
-              <div className="memory-decision-grid">
-                <MemoryDecisionList
-                  title={t("catalysts")}
-                  items={entry.decision.catalysts ?? []}
-                  emptyLabel={t("noCatalystsIdentified")}
-                />
-                <MemoryDecisionList
-                  title={t("risks")}
-                  items={entry.decision.risks ?? []}
-                />
-                <MemoryDecisionList
-                  title={t("invalidation")}
-                  items={entry.decision.invalidation_conditions ?? []}
-                />
-                <div className="memory-decision-field">
-                  <strong>{t("horizon")}</strong>
-                  <Markdown>{entry.decision.time_horizon || "—"}</Markdown>
+              <div className="memory-decision-details-body">
+                <section className="memory-scenarios">
+                  <h3>{t("scenarios")}</h3>
+                  <div className="memory-scenario-grid">
+                    {entry.decision.scenarios.map((scenario) => (
+                      <article
+                        className={`memory-scenario scenario-${scenario.kind}`}
+                        key={scenario.kind}
+                      >
+                        <strong>{t(scenarioLabelKey(scenario.kind))}</strong>
+                        <Markdown>{scenario.outcome}</Markdown>
+                        <MemoryDecisionList
+                          title={t("coreAssumptions")}
+                          items={scenario.core_assumptions}
+                        />
+                      </article>
+                    ))}
+                  </div>
+                </section>
+                <div className="memory-decision-grid">
+                  <MemoryDecisionList
+                    title={t("catalysts")}
+                    items={entry.decision.catalysts ?? []}
+                    emptyLabel={t("noCatalystsIdentified")}
+                  />
+                  <MemoryDecisionList
+                    title={t("risks")}
+                    items={entry.decision.risks ?? []}
+                  />
+                  <MemoryDecisionList
+                    title={t("invalidation")}
+                    items={entry.decision.invalidation_conditions ?? []}
+                  />
+                  <div className="memory-decision-field">
+                    <strong>{t("horizon")}</strong>
+                    <Markdown>{entry.decision.time_horizon || "—"}</Markdown>
+                  </div>
+                  <MemoryDecisionList
+                    title={t("unresolvedQuestions")}
+                    items={entry.decision.unresolved_questions ?? []}
+                    emptyLabel={t("noneRecorded")}
+                  />
                 </div>
               </div>
             </details>
@@ -249,4 +284,22 @@ function percent(value: number | null) {
 
 function runDecisionPath(runId: string): string {
   return `/runs/${encodeURIComponent(runId)}?view=decision`;
+}
+
+function profileDescriptionKey(profile: MemoryEntry["profile"]): string {
+  return {
+    fast: "profileFastDesc",
+    standard: "profileStandardDesc",
+    deep: "profileDeepDesc",
+  }[profile];
+}
+
+function scenarioLabelKey(
+  kind: MemoryEntry["decision"]["scenarios"][number]["kind"],
+): string {
+  return {
+    base: "baseScenario",
+    bull: "bullScenario",
+    bear: "bearScenario",
+  }[kind];
 }

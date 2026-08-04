@@ -17,9 +17,11 @@ const entry = {
   run_id: "legacy-run",
   ticker: "7203.T",
   instrument_name: "Toyota Motor Corporation",
+  instrument_local_name: "トヨタ自動車",
   market: "Asia/Tokyo",
   asset_type: "stock",
   analysis_date: "2026-07-24",
+  profile: "standard",
   decision: {
     rating: "Hold",
     confidence: 0.6,
@@ -29,7 +31,7 @@ const entry = {
     catalysts: ["**Volume growth** accelerates."],
     risks: ["Input costs remain elevated."],
     invalidation_conditions: ["Demand falls below the base case."],
-    unresolved_questions: [],
+    unresolved_questions: ["Will pricing remain durable?"],
     time_horizon: "6-12 months",
     scenarios: (["base", "bull", "bear"] as const).map((kind) => ({
       kind,
@@ -77,6 +79,11 @@ test("renders imported thesis and reflection as sanitized Markdown", async () =>
   expect(container.querySelector("script")).toBeNull();
   expect(container.textContent).not.toContain("<script>");
   expect(screen.getByText("Toyota Motor Corporation")).toBeVisible();
+  expect(screen.getByText("トヨタ自動車")).toBeVisible();
+  expect(screen.getByText("Standard")).toHaveAttribute(
+    "title",
+    "Bull / bear → judge → risk",
+  );
 });
 
 test("uses recent ticker suggestions and stable autocomplete fields", async () => {
@@ -84,6 +91,7 @@ test("uses recent ticker suggestions and stable autocomplete fields", async () =
     {
       ticker: "7203.T",
       instrument_name: "Toyota Motor Corporation",
+      instrument_local_name: "トヨタ自動車",
       last_used_at: "2026-07-28T00:00:00Z",
     },
   ]);
@@ -99,7 +107,7 @@ test("uses recent ticker suggestions and stable autocomplete fields", async () =
       document.querySelector(
         'datalist#recent-instruments option[value="7203.T"]',
       ),
-    ).toHaveAttribute("label", "Toyota Motor Corporation"),
+    ).toHaveAttribute("label", "トヨタ自動車 · Toyota Motor Corporation"),
   );
 });
 
@@ -162,6 +170,10 @@ test("expands the full decision and navigates to its run conclusion", async () =
   expect(screen.getByText("Input costs remain elevated.")).toBeVisible();
   expect(screen.getByText("Demand falls below the base case.")).toBeVisible();
   expect(screen.getByText("6-12 months")).toBeVisible();
+  expect(screen.getByText("Imported base outcome.")).toBeVisible();
+  expect(screen.getByText("Imported bull outcome.")).toBeVisible();
+  expect(screen.getByText("Imported bear outcome.")).toBeVisible();
+  expect(screen.getByText("Will pricing remain durable?")).toBeVisible();
 
   expect(
     screen.getByRole("link", {

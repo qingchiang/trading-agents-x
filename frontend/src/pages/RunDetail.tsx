@@ -16,6 +16,7 @@ import {
 import AnalystReportView from "../components/AnalystReportView";
 import DeliberationView from "../components/DeliberationView";
 import EvidenceTableView from "../components/EvidenceTableView";
+import { InstrumentIdentity } from "../components/Instruments";
 import Markdown from "../components/Markdown";
 import ResearchDecisionView from "../components/ResearchDecisionView";
 import RunMetricsPanel from "../components/RunMetricsPanel";
@@ -364,10 +365,12 @@ export default function RunDetail() {
             ← {t("dashboard")}
           </Link>
           <div className="run-title">
-            <h1>{run.request.ticker}</h1>
-            {run.instrument_name && (
-              <span className="run-instrument-name">{run.instrument_name}</span>
-            )}
+            <InstrumentIdentity
+              ticker={run.request.ticker}
+              instrumentName={run.instrument_name}
+              instrumentLocalName={run.instrument_local_name}
+              prominent
+            />
             <StatusBadge status={run.status} />
           </div>
           <p className="subtitle">
