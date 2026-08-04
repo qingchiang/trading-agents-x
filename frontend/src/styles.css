@@ -1658,23 +1658,75 @@ label small {
   border-top: 1px solid var(--line-soft);
 }
 
-.role-metrics-heading {
+.metric-section-summary {
   display: flex;
   gap: 12px;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   padding: 14px 20px;
   color: var(--muted);
+  font-size: 14px;
+  font-weight: 750;
+  cursor: pointer;
+  list-style: none;
 }
 
-.role-metrics-heading span {
+.metric-section-summary::-webkit-details-marker,
+.role-metric-group > summary::-webkit-details-marker {
+  display: none;
+}
+
+.metric-section-summary::marker,
+.role-metric-group > summary::marker {
+  content: "";
+}
+
+.metric-summary-title {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.metric-summary-description {
   color: var(--muted-2);
   font-size: 12px;
+  font-weight: 400;
   text-align: right;
 }
 
+.metric-count {
+  min-width: 24px;
+  padding: 2px 7px;
+  color: var(--blue-dark);
+  font-size: 12px;
+  text-align: center;
+  background: var(--blue-soft);
+  border-radius: 999px;
+}
+
+.metric-disclosure-arrow {
+  display: inline-block;
+  color: var(--muted-2);
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1;
+  transition: transform 140ms ease;
+}
+
+.role-metrics[open] > summary .metric-disclosure-arrow,
+.context-metrics[open] > summary .metric-disclosure-arrow,
+.attempt-metrics[open] > summary .metric-disclosure-arrow,
+.role-metric-group[open] > summary .metric-disclosure-arrow {
+  transform: rotate(90deg);
+}
+
+.role-metrics[open] > summary {
+  border-bottom: 1px solid var(--line-soft);
+}
+
 .role-metric-group {
-  border-top: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
 }
 
 .role-metric-group > summary {
@@ -1683,58 +1735,31 @@ label small {
   gap: 14px;
   align-items: center;
   padding: 14px 20px;
-  color: var(--muted-2);
-  font-size: 12px;
+  color: #4e596b;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
   cursor: pointer;
+  list-style: none;
 }
 
 .role-metric-group > summary span:not(:first-child) {
+  color: #4e596b;
+  font-weight: 400;
   text-align: right;
 }
 
 .role-metric-group > summary .role-metric-name {
-  color: var(--ink);
+  display: inline-flex;
+  gap: 9px;
+  align-items: center;
+  color: #4e596b;
   font-size: 14px;
-  font-weight: 750;
+  font-weight: 500;
 }
 
 .role-metric-group[open] > summary {
   background: var(--surface-soft);
   border-bottom: 1px solid var(--line-soft);
-}
-
-.role-metric-totals {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  border-bottom: 1px solid var(--line-soft);
-}
-
-.role-metric-totals > div {
-  padding: 12px 20px;
-  border-right: 1px solid var(--line-soft);
-}
-
-.role-metric-totals > div:last-child {
-  border-right: 0;
-}
-
-.role-metric-totals span,
-.role-metric-totals strong {
-  display: block;
-}
-
-.role-metric-totals span {
-  color: var(--muted-2);
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-.role-metric-totals strong {
-  margin-top: 5px;
-  color: var(--ink);
-  font-size: 14px;
 }
 
 .role-metric-group td,
@@ -1743,10 +1768,14 @@ label small {
   white-space: nowrap;
 }
 
-.role-metric-group td:nth-child(n + 7),
-.role-metric-group th:nth-child(n + 7) {
+.role-metric-group td:nth-child(n + 7) {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+.role-metric-group thead tr:first-child th:nth-child(n + 7),
+.role-metric-group thead tr:nth-child(2) th {
+  text-align: center;
 }
 
 .node-metrics > summary {
@@ -1760,7 +1789,8 @@ label small {
   cursor: pointer;
 }
 
-.node-metrics > summary span {
+.node-metrics > summary > span:not(.metric-summary-title):not(.metric-summary-description),
+.node-metrics > summary .metric-count {
   min-width: 24px;
   padding: 2px 7px;
   color: var(--blue-dark);
@@ -2437,14 +2467,15 @@ label small {
     border-bottom: 1px solid var(--line-soft);
   }
 
-  .role-metrics-heading {
+  .metric-section-summary {
     display: block;
   }
 
-  .role-metrics-heading span {
+  .metric-summary-description {
     display: block;
     margin-top: 6px;
     text-align: left;
+    white-space: normal;
   }
 
   .role-metric-group > summary {
@@ -2453,10 +2484,6 @@ label small {
 
   .role-metric-group > summary span:not(:first-child) {
     text-align: left;
-  }
-
-  .role-metric-totals {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .filter-bar {

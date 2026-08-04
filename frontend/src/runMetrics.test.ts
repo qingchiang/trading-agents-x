@@ -9,6 +9,7 @@ import {
   buildRoleMetricGroups,
   metricPhase,
   nodeOutputStatus,
+  tokenDetailCoverage,
 } from "./runMetrics";
 
 function event(
@@ -131,4 +132,9 @@ test("applies failed, degraded, audit, recovery, and retry priority", () => {
       event(2, node, "node.output_failed"),
     ]),
   ).toBe("failed");
+});
+
+test("formats token detail coverage without a meaningless zero denominator", () => {
+  expect(tokenDetailCoverage(7, 10)).toBe("7/10");
+  expect(tokenDetailCoverage(0, 0)).toBe("—");
 });

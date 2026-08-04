@@ -10,6 +10,7 @@ import type {
 import {
   buildRoleMetricGroups,
   contextMetricRows,
+  tokenDetailCoverage,
   type MetricPhase,
   type OutputStatus,
 } from "../runMetrics";
@@ -53,8 +54,12 @@ export default function RunMetricsPanel({
           value={metrics?.reasoning_output_tokens ?? 0}
         />
         <Metric
-          label={t("detailedUsageCoverage")}
-          value={`${metrics?.detailed_usage_calls ?? 0}/${metrics?.llm_calls ?? 0}`}
+          label={t("tokenDetailCoverage")}
+          value={tokenDetailCoverage(
+            metrics?.detailed_usage_calls ?? 0,
+            metrics?.llm_calls ?? 0,
+          )}
+          help={t("tokenDetailCoverageDescription")}
         />
         <Metric
           label={t("cumulativeActiveTime")}
@@ -63,83 +68,146 @@ export default function RunMetricsPanel({
       </div>
 
       {groups.length > 0 && (
-        <section className="role-metrics" aria-label={t("roleMetrics")}>
-          <div className="role-metrics-heading">
-            <strong>{t("roleMetrics")}</strong>
-            <span>{t("roleMetricsTimelineOrder")}</span>
-          </div>
-          {groups.map((group) => (
-            <details className="role-metric-group" key={group.id}>
-              <summary>
-                <span className="role-metric-name">{t(group.labelKey)}</span>
-                <span>{t(outputStatusKey(group.outputStatus))}</span>
-                <span>{t("callsCompact", { count: group.llmCalls })}</span>
-                <span>{t("tokensCompact", { count: group.inputTokens + group.outputTokens })}</span>
-                <span>{t("reasoningCompact", { count: group.reasoningOutputTokens })}</span>
-                <span>{group.activeTime.toFixed(1)}s</span>
-              </summary>
-              <div className="role-metric-totals">
-                <Metric label={t("toolCalls")} value={group.toolCalls} />
-                <Metric label={t("cacheHitInputTokens")} value={group.cacheHitInputTokens} />
-                <Metric label={t("cacheMissInputTokens")} value={group.cacheMissInputTokens} />
-                <Metric label={t("detailedUsageCalls")} value={group.detailedUsageCalls} />
-              </div>
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>{t("node")}</th>
-                      <th>{t("responsibility")}</th>
-                      <th>{t("structuredTask")}</th>
-                      <th>{t("clientRole")}</th>
-                      <th>{t("generationMethod")}</th>
-                      <th>{t("outputStatus")}</th>
-                      <th>{t("llmCalls")}</th>
-                      <th>{t("tokens")}</th>
-                      <th>{t("cacheUsage")}</th>
-                      <th>{t("reasoningOutputTokens")}</th>
-                      <th>{t("cumulativeActiveTime")}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {group.nodes.map((row) => {
-                      const observation = row.observations.at(-1);
-                      return (
-                        <tr key={row.node}>
-                          <td><code>{row.node}</code></td>
-                          <td title={t(phaseDescriptionKey(row.phase))}>
-                            {t(phaseLabelKey(row.phase))}
-                          </td>
-                          <td>
-                            {observation ? t(`taskKind.${observation.task_kind}`) : t("notRecorded")}
-                          </td>
-                          <td>
-                            {observation ? t(`clientRoleName.${observation.client_role}`) : t("notRecorded")}
-                          </td>
-                          <td>
-                            {observation?.generation_method ?? t("notRecorded")}
-                          </td>
-                          <td>{t(outputStatusKey(row.outputStatus))}</td>
-                          <td>{row.llmCalls.toLocaleString()}</td>
-                          <td>{(row.inputTokens + row.outputTokens).toLocaleString()}</td>
-                          <td>{`${row.cacheHitInputTokens.toLocaleString()} / ${row.cacheMissInputTokens.toLocaleString()}`}</td>
-                          <td>{row.reasoningOutputTokens.toLocaleString()}</td>
-                          <td>{row.activeTime.toFixed(1)}s</td>
-                        </tr>
-                      );
+        <details className="role-metrics" aria-label={t("roleMetrics")}>
+          <summary className="metric-section-summary">
+            <span className="metric-summary-title">
+              <span className="metric-disclosure-arrow" aria-hidden="true">›</span>
+              {t("roleMetrics")}
+              <span className="metric-count">{groups.length}</span>
+            </span>
+            <span className="metric-summary-description">
+              {t("roleMetricsTimelineOrder")}
+            </span>
+          </summary>
+          <div className="role-metric-list">
+            {groups.map((group) => (
+              <details
+                aria-label={t(group.labelKey)}
+                className="role-metric-group"
+                key={group.id}
+              >
+                <summary>
+                  <span className="role-metric-name">
+                    <span
+                      className="metric-disclosure-arrow"
+                      aria-hidden="true"
+                    >
+                      ›
+                    </span>
+                    {t(group.labelKey)}
+                  </span>
+                  <span>{t(outputStatusKey(group.outputStatus))}</span>
+                  <span>{t("llmCallsCompact", { count: group.llmCalls })}</span>
+                  <span>
+                    {t("inputCompact", {
+                      count: group.inputTokens.toLocaleString(),
                     })}
-                  </tbody>
-                </table>
-              </div>
-            </details>
-          ))}
-        </section>
+                  </span>
+                  <span>
+                    {t("outputCompact", {
+                      count: group.outputTokens.toLocaleString(),
+                    })}
+                  </span>
+                  <span>{group.activeTime.toFixed(1)}s</span>
+                </summary>
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th rowSpan={2}>{t("node")}</th>
+                        <th rowSpan={2}>{t("responsibility")}</th>
+                        <th rowSpan={2}>{t("structuredTask")}</th>
+                        <th rowSpan={2}>{t("clientRole")}</th>
+                        <th rowSpan={2}>{t("generationMethod")}</th>
+                        <th rowSpan={2}>{t("outputStatus")}</th>
+                        <th colSpan={2}>{t("calls")}</th>
+                        <th colSpan={3}>{t("inputBreakdown")}</th>
+                        <th colSpan={2}>{t("outputBreakdown")}</th>
+                        <th
+                          rowSpan={2}
+                          title={t("tokenDetailCoverageDescription")}
+                        >
+                          {t("tokenDetailCoverage")}
+                        </th>
+                        <th rowSpan={2}>{t("cumulativeActiveTime")}</th>
+                      </tr>
+                      <tr>
+                        <th>{t("llm")}</th>
+                        <th>{t("tools")}</th>
+                        <th>{t("total")}</th>
+                        <th>{t("cacheHit")}</th>
+                        <th>{t("cacheMiss")}</th>
+                        <th>{t("total")}</th>
+                        <th>{t("reasoningIncluded")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {group.nodes.map((row) => {
+                        const observation = row.observations.at(-1);
+                        return (
+                          <tr key={row.node}>
+                            <td><code>{row.node}</code></td>
+                            <td title={t(phaseDescriptionKey(row.phase))}>
+                              {t(phaseLabelKey(row.phase))}
+                            </td>
+                            <td>
+                              {observation
+                                ? t(`taskKind.${observation.task_kind}`)
+                                : t("notRecorded")}
+                            </td>
+                            <td>
+                              {observation
+                                ? t(`clientRoleName.${observation.client_role}`)
+                                : t("notRecorded")}
+                            </td>
+                            <td>
+                              {observation?.generation_method ??
+                                t("notRecorded")}
+                            </td>
+                            <td>{t(outputStatusKey(row.outputStatus))}</td>
+                            <td>{row.llmCalls.toLocaleString()}</td>
+                            <td>{row.toolCalls.toLocaleString()}</td>
+                            <td>{row.inputTokens.toLocaleString()}</td>
+                            <td>{row.cacheHitInputTokens.toLocaleString()}</td>
+                            <td>{row.cacheMissInputTokens.toLocaleString()}</td>
+                            <td>{row.outputTokens.toLocaleString()}</td>
+                            <td>{row.reasoningOutputTokens.toLocaleString()}</td>
+                            <td title={t("tokenDetailCoverageDescription")}>
+                              {tokenDetailCoverage(
+                                row.detailedUsageCalls,
+                                row.llmCalls,
+                              )}
+                            </td>
+                            <td>{row.activeTime.toFixed(1)}s</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            ))}
+          </div>
+        </details>
       )}
 
       {contexts.length > 0 && (
-        <details className="node-metrics context-metrics">
-          <summary>{t("contextMetrics")} <span>{contexts.length}</span></summary>
-          <p className="metrics-observation-note">{t("contextMetricsDescription")}</p>
+        <details
+          className="node-metrics context-metrics"
+          aria-label={t("contextMetrics")}
+        >
+          <summary className="metric-section-summary">
+            <span className="metric-summary-title">
+              <span className="metric-disclosure-arrow" aria-hidden="true">
+                ›
+              </span>
+              {t("contextMetrics")}
+              <span className="metric-count">{contexts.length}</span>
+            </span>
+            <span className="metric-summary-description">
+              {t("contextMetricsDescription")}
+            </span>
+          </summary>
           <div className="table-wrap">
             <table>
               <thead>
@@ -167,8 +235,19 @@ export default function RunMetricsPanel({
         </details>
       )}
 
-      <details className="node-metrics attempt-metrics">
-        <summary>{t("attemptMetrics")} <span>{attempts.length}</span></summary>
+      <details
+        className="node-metrics attempt-metrics"
+        aria-label={t("attemptMetrics")}
+      >
+        <summary className="metric-section-summary">
+          <span className="metric-summary-title">
+            <span className="metric-disclosure-arrow" aria-hidden="true">
+              ›
+            </span>
+            {t("attemptMetrics")}
+            <span className="metric-count">{attempts.length}</span>
+          </span>
+        </summary>
         {attempts.length === 0 ? (
           <p className="metrics-empty">{t("noAttemptMetrics")}</p>
         ) : (
@@ -210,9 +289,17 @@ export default function RunMetricsPanel({
   );
 }
 
-function Metric({ label, value }: { label: string; value: number | string }) {
+function Metric({
+  label,
+  value,
+  help,
+}: {
+  label: string;
+  value: number | string;
+  help?: string;
+}) {
   return (
-    <div>
+    <div title={help}>
       <span>{label}</span>
       <strong>{typeof value === "number" ? value.toLocaleString() : value}</strong>
     </div>

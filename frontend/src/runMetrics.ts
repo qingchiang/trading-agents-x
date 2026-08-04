@@ -212,6 +212,13 @@ export function contextMetricRows(events: RunEvent[]): ContextMetricRow[] {
     .sort((left, right) => left.sequence - right.sequence);
 }
 
+export function tokenDetailCoverage(
+  detailedUsageCalls: number,
+  llmCalls: number,
+): string {
+  return llmCalls === 0 ? "—" : `${detailedUsageCalls}/${llmCalls}`;
+}
+
 function metricRole(node: string): { id: string; labelKey: string } {
   const analyst = /^analyst\.([^.]+)/.exec(node)?.[1];
   if (analyst) {
