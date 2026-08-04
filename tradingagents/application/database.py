@@ -137,6 +137,9 @@ class RunArtifactRecord(Base):
     generation_method: Mapped[str] = mapped_column(
         String(40), nullable=False
     )
+    generation_observations_json: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        JSON, nullable=True
+    )
     content_type: Mapped[str] = mapped_column(String(40), nullable=False)
     content_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)

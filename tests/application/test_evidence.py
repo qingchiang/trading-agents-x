@@ -21,6 +21,7 @@ from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
     ArtifactGenerationMethod,
+    ArtifactGenerationObservation,
     AuditedRangeEndpoint,
     CalculationRecord,
     DecisionBrief,
@@ -609,6 +610,14 @@ def test_failed_run_export_preserves_non_final_decision_brief() -> None:
                 schema_version="2",
                 prompt_version="final-committee-brief-v1",
                 generation_method=ArtifactGenerationMethod.MARKDOWN_AUDITED,
+                generation_observations=(
+                    ArtifactGenerationObservation(
+                        node="committee.final.reason",
+                        task_kind="semantic_structured",
+                        client_role="deep_reasoning",
+                        generation_method=ArtifactGenerationMethod.JSON_MODE,
+                    ),
+                ),
                 content=DecisionBrief(
                     markdown=f"# Draft\n\nNon-final synthesis.[^{item.ref}]",
                     evidence_refs=(item.ref,),
@@ -624,6 +633,10 @@ def test_failed_run_export_preserves_non_final_decision_brief() -> None:
     assert "Decision Synthesis Brief" in markdown
     assert "Non-final reasoning draft" in markdown
     assert "Non-final synthesis.[E01]" in markdown
+    assert (
+        "Generation path: `committee.final.reason` · `semantic_structured` · "
+        "`deep_reasoning` · `json_mode`"
+    ) in markdown
     assert "No final decision was recorded." in markdown
 
 

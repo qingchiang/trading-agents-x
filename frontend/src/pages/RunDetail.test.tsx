@@ -401,6 +401,14 @@ const artifacts = [
     round: 0,
     schema_version: "1",
     generation_method: "tool_call",
+    generation_observations: [
+      {
+        node: "committee.final.serialize",
+        task_kind: "schema_serialization",
+        client_role: "deep_serializer",
+        generation_method: "tool_call",
+      },
+    ],
     created_at: "2026-07-24T00:00:40Z",
     content: {
       role: "bull",
@@ -919,7 +927,15 @@ test("labels runs that have no recorded artifacts", async () => {
   ).toBeVisible();
 });
 
-test("shows a collapsed per-node metrics table", async () => {
+test("groups metrics by role and expands phase observations", async () => {
+  const detailWithLargeRoleTotals = structuredClone(detail);
+  const roleNodes = detailWithLargeRoleTotals.run.metrics!.node_metrics!;
+  roleNodes["committee.final.reason"].input_tokens = 13_003;
+  roleNodes["committee.final.reason"].output_tokens = 5_000;
+  roleNodes["committee.final.serialize"].input_tokens = 14_303;
+  roleNodes["committee.final.serialize"].output_tokens = 7_345;
+  vi.mocked(api.run).mockResolvedValue(detailWithLargeRoleTotals);
+
   render(
     <Router initialPath="/runs/run-1">
       <RunDetail />
@@ -927,12 +943,36 @@ test("shows a collapsed per-node metrics table", async () => {
   );
 
   expect(await screen.findByRole("heading", { name: "NVDA" })).toBeVisible();
-  const summary = screen.getByText("Per-node metrics", { exact: false });
+  const roleMetricsTitle = screen.getByText("Metrics by role");
+  const roleMetrics = roleMetricsTitle.closest("details");
+  expect(roleMetrics).not.toHaveAttribute("open");
+
+  fireEvent.click(roleMetricsTitle);
+
+  expect(roleMetrics).toHaveAttribute("open");
+  const coverageMetric = screen.getByText("Token detail coverage", {
+    selector: ".metrics-strip span",
+  }).parentElement;
+  expect(coverageMetric).toHaveTextContent("1/4");
+  expect(coverageMetric).toHaveAttribute(
+    "title",
+    expect.stringContaining("cache or reasoning-token details"),
+  );
+  const summary = within(roleMetrics!).getByText("Final committee");
   const details = summary.closest("details");
+  const roleSummary = summary.closest("summary");
   expect(details).not.toHaveAttribute("open");
+  expect(roleSummary).toHaveTextContent("2 LLM calls");
+  expect(roleSummary).toHaveTextContent("27,306 input tokens");
+  expect(roleSummary).toHaveTextContent("12,345 output tokens");
+  expect(roleSummary).not.toHaveTextContent("Reasoning");
+  expect(roleSummary).not.toHaveTextContent("39,651 tokens");
+  expect(summary.closest("strong")).toBeNull();
+  expect(
+    roleSummary!.querySelector(".metric-disclosure-arrow"),
+  ).toHaveTextContent("›");
 
   fireEvent.click(summary);
-
   expect(details).toHaveAttribute("open");
   act(() => {
     FakeEventSource.instance.emit("phase.started", {
@@ -957,14 +997,26 @@ test("shows a collapsed per-node metrics table", async () => {
   const committee = within(details!)
     .getByText("committee.final.reason")
     .closest("tr");
-  const analyst = within(details!)
+  const analystDetails = within(roleMetrics!)
+    .getByText("Market")
+    .closest("details");
+  fireEvent.click(within(analystDetails!).getByText("Market"));
+  const analyst = within(analystDetails!)
     .getByText("analyst.market.collect")
     .closest("tr");
-  expect(committee).toHaveTextContent("200");
+  expect(committee).toHaveTextContent("13,003");
+  expect(committee).toHaveTextContent("5,000");
+  expect(committee).toHaveTextContent("0/1");
   expect(committee).toHaveTextContent("2.5s");
   expect(analyst).toHaveTextContent("300");
+  expect(analyst).toHaveTextContent("100");
+  expect(analyst).toHaveTextContent("1/1");
+  expect(analyst).toHaveTextContent("Not recorded");
+  expect(details).toHaveTextContent("Schema serialization");
+  expect(details).toHaveTextContent("Deep serializer");
+  expect(details).toHaveTextContent("tool_call");
   expect(
-    committee!.compareDocumentPosition(analyst!) &
+    details!.compareDocumentPosition(analystDetails!) &
       Node.DOCUMENT_POSITION_FOLLOWING,
   ).not.toBe(0);
 
@@ -999,13 +1051,28 @@ test("shows a collapsed per-node metrics table", async () => {
   });
   fireEvent.click(contextSummary);
   const contextDetails = contextSummary.closest("details");
+  const contextHeader = contextSummary.closest("summary");
+  expect(contextHeader).toHaveTextContent(
+    "Deterministic role contexts in timeline order; preparing them does not call a model.",
+  );
+  expect(
+    contextDetails!.querySelector(".metrics-observation-note"),
+  ).toBeNull();
   expect(contextDetails).toHaveTextContent("committee.final.context");
   expect(contextDetails).toHaveTextContent("12,345");
   expect(contextDetails).toHaveTextContent("43");
 
   const attemptSummary = screen.getByText("Attempt metrics", { exact: false });
+  const attemptDetails = attemptSummary.closest("details");
+  expect(
+    attemptSummary
+      .closest("summary")!
+      .querySelector(".metric-disclosure-arrow"),
+  ).toHaveTextContent("›");
+  expect(attemptDetails).not.toHaveAttribute("open");
   fireEvent.click(attemptSummary);
-  const attemptRow = within(attemptSummary.closest("details")!).getByText(
+  expect(attemptDetails).toHaveAttribute("open");
+  const attemptRow = within(attemptDetails!).getByText(
     "Succeeded",
   ).closest("tr");
   expect(attemptRow).toHaveTextContent("Succeeded");

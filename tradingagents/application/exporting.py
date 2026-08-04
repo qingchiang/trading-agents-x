@@ -148,6 +148,7 @@ _EN_LABELS = {
     "schema": "Schema",
     "prompt": "Prompt",
     "generation": "Generation",
+    "generation_observation": "Generation path",
     "created": "Created",
     "round": "Round",
     "source": "source",
@@ -351,6 +352,7 @@ _ZH_LABELS = {
     "schema": "结构版本",
     "prompt": "提示词版本",
     "generation": "生成方式",
+    "generation_observation": "生成路径",
     "created": "创建时间",
     "round": "轮次",
     "source": "来源",
@@ -536,6 +538,7 @@ _JA_LABELS = {
     "schema": "スキーマ",
     "prompt": "プロンプト版",
     "generation": "生成方式",
+    "generation_observation": "生成経路",
     "created": "作成日時",
     "round": "ラウンド",
     "source": "情報源",
@@ -702,6 +705,14 @@ def render_run_export_markdown(run_export: RunExport) -> str:
                 f"- {labels['generation']}: `{artifact.generation_method.value}`",
                 f"- {labels['created']}: `{artifact.created_at.isoformat()}`",
             ]
+        )
+        sections.extend(
+            "- "
+            f"{labels['generation_observation']}: "
+            f"`{observation.node}` · `{observation.task_kind}` · "
+            f"`{observation.client_role}` · "
+            f"`{observation.generation_method.value}`"
+            for observation in artifact.generation_observations
         )
         human_text = _render_export_markdown(
             _artifact_human_text(artifact.content, labels),

@@ -20,6 +20,7 @@ from tradingagents.application.contracts import (
     AnalystClaimType,
     AnalystReport,
     ArtifactGenerationMethod,
+    ArtifactGenerationObservation,
     ClaimImportance,
     DebateAgenda,
     DebateImportance,
@@ -405,6 +406,14 @@ def test_artifacts_are_typed_retained_and_idempotent_across_retries(
         stage="analyst",
         role="market",
         generation_method=ArtifactGenerationMethod.TOOL_CALL,
+        generation_observations=(
+            ArtifactGenerationObservation(
+                node="analyst.market.serialize",
+                task_kind="schema_serialization",
+                client_role="quick_serializer",
+                generation_method=ArtifactGenerationMethod.TOOL_CALL,
+            ),
+        ),
         content=report,
     )
 
@@ -430,6 +439,7 @@ def test_artifacts_are_typed_retained_and_idempotent_across_retries(
 
     assert first == duplicate == retried
     assert first.attempt == 1
+    assert first.generation_observations == draft.generation_observations
     assert duplicate_event is None
     assert retried_event is None
     assert first_event is not None
@@ -449,6 +459,14 @@ def test_artifacts_are_typed_retained_and_idempotent_across_retries(
             "schema_version": "2",
         "prompt_version": "research-v1",
         "generation_method": "tool_call",
+        "generation_observations": [
+            {
+                "node": "analyst.market.serialize",
+                "task_kind": "schema_serialization",
+                "client_role": "quick_serializer",
+                "generation_method": "tool_call",
+            }
+        ],
         "content_type": "analyst_report",
     }
     assert "Fixture narrative" not in str(events[0].payload)

@@ -988,6 +988,7 @@ def test_numeric_serializer_can_use_separate_json_mode_reasoning_client() -> Non
     )
 
     assert result.value.rating is decision.rating
+    assert result.numeric_generation_method is ArtifactGenerationMethod.JSON_MODE
     assert len(core_llm.prompts) == 1
     assert len(numeric_llm.prompts) == 1
     assert "Return exactly one JSON object" not in core_llm.prompts[0]
@@ -1088,6 +1089,10 @@ def test_numeric_serializer_repairs_seven_invalid_input_names() -> None:
     assert result.value.numeric_audit_status is NumericAuditStatus.NOT_APPLICABLE
     assert result.numeric_audit is not None
     assert result.numeric_audit.status is NumericAuditAppendixStatus.RECOVERED
+    assert (
+        result.numeric_generation_method
+        is ArtifactGenerationMethod.TOOL_CALL_RECOVERED
+    )
     assert [item.phase.value for item in result.numeric_audit.snapshots] == ["initial"]
     assert result.numeric_audit.snapshots[0].candidate == invalid_numeric
     assert [event["event_type"] for event in events] == [
@@ -3246,6 +3251,10 @@ def test_identical_failed_numeric_repair_is_degraded_not_recovered() -> None:
     assert result.value.numeric_audit_status is NumericAuditStatus.INCOMPLETE
     assert result.numeric_audit is not None
     assert result.numeric_audit.status is NumericAuditAppendixStatus.INCOMPLETE
+    assert (
+        result.numeric_generation_method
+        is ArtifactGenerationMethod.TOOL_CALL_RECOVERED
+    )
     assert len(result.numeric_audit.snapshots) == 2
     assert (
         result.numeric_audit.snapshots[0].candidate_digest

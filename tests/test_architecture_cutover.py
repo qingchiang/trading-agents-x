@@ -59,6 +59,7 @@ def test_public_api_exposes_typed_application_contract():
     assert tradingagents.__all__ == [
         "AnalysisRequest",
         "AnalysisResult",
+        "ArtifactGenerationObservation",
         "ResearchDecision",
         "RunProfile",
         "TradingAgents",
@@ -89,3 +90,12 @@ def test_unused_dependency_is_not_declared(dependency):
     ).read_text(encoding="utf-8")
     runtime_dependencies = pyproject.split("dependencies = [", 1)[1].split("]", 1)[0]
     assert f'"{dependency}>=' not in runtime_dependencies
+
+
+@pytest.mark.unit
+def test_ci_builds_wheel_from_an_isolated_sdist():
+    workflow = (
+        Path(__file__).resolve().parents[1] / ".github/workflows/ci.yml"
+    ).read_text(encoding="utf-8")
+    assert "uv build --out-dir wheelhouse" in workflow
+    assert "uv build --wheel" not in workflow

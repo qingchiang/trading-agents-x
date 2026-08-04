@@ -35,6 +35,12 @@ npm test --prefix frontend
 npm run typecheck --prefix frontend
 npm run build --prefix frontend
 
+# Omit --wheel: uv then builds the wheel from an isolated sdist instead of
+# reusing a potentially stale in-tree build/ directory.
+uv build --out-dir wheelhouse
+uv run --locked --no-dev python scripts/verify_wheel.py \
+  wheelhouse/trading_agents_x-*.whl
+
 # Opt-in network contracts; default pytest and CI skip these.
 RUN_LIVE_DATA_TESTS=1 PYTHON_DOTENV_DISABLED=1 \
   uv run --locked pytest -q -m live_data
@@ -118,6 +124,11 @@ change.
 Register non-code runtime files in `[tool.setuptools.package-data]` and load
 them with `importlib.resources`. An editable install seeing a local file does
 not prove that the wheel contains it.
+
+Build release wheels through an sdist with `uv build --out-dir <empty-dir>`.
+Do not use `uv build --wheel` directly from the source tree: setuptools can
+reuse an ignored incremental `build/` directory and retain package data that
+has since been deleted or renamed.
 
 ## Documentation scope
 

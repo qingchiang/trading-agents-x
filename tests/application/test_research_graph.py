@@ -354,6 +354,7 @@ def test_profiles_share_contract_but_use_distinct_topologies(
     quick = _FakeLLM()
     deep = _FakeLLM()
     events: list[dict[str, Any]] = []
+    artifacts: list[ResearchArtifactDraft] = []
     graph = ResearchGraph(
         quick_llm=quick,
         deep_llm=deep,
@@ -363,7 +364,7 @@ def test_profiles_share_contract_but_use_distinct_topologies(
     )
 
     execution = graph.execute(
-        _context(app_settings, profile),
+        _context(app_settings, profile, artifact_writer=artifacts.append),
         checkpoint_thread_id=f"profile:{profile.value}",
         on_event=events.append,
     )
@@ -394,6 +395,13 @@ def test_profiles_share_contract_but_use_distinct_topologies(
         node.endswith(".prepare")
         for node in graph.metrics.snapshot().node_metrics
     )
+    if profile is not RunProfile.FAST:
+        agenda = next(
+            artifact for artifact in artifacts if artifact.stage == "agenda"
+        )
+        assert agenda.generation_observations[0].client_role == (
+            "deep_reasoning" if profile is RunProfile.DEEP else "quick_reasoning"
+        )
     if profile is RunProfile.STANDARD:
         node_metrics = graph.metrics.snapshot().node_metrics
         assert {
@@ -823,6 +831,36 @@ def test_graph_emits_only_typed_visible_research_artifacts(
         ("news", "analyst-news-v6-sealed-context"),
     }
     assert all(artifact.prompt_version != "research-v1" for artifact in artifacts)
+    agenda = next(artifact for artifact in artifacts if artifact.stage == "agenda")
+    assert [
+        observation.model_dump(mode="json")
+        for observation in agenda.generation_observations
+    ] == [
+        {
+            "node": "debate.agenda.serialize",
+            "task_kind": "semantic_structured",
+            "client_role": "quick_reasoning",
+            "generation_method": "tool_call",
+        }
+    ]
+    final = next(artifact for artifact in artifacts if artifact.stage == "decision")
+    assert [
+        observation.model_dump(mode="json")
+        for observation in final.generation_observations
+    ] == [
+        {
+            "node": "committee.final.serialize.core",
+            "task_kind": "schema_serialization",
+            "client_role": "deep_serializer",
+            "generation_method": "tool_call",
+        },
+        {
+            "node": "committee.final.serialize.numeric",
+            "task_kind": "semantic_structured",
+            "client_role": "deep_reasoning",
+            "generation_method": "tool_call",
+        },
+    ]
     brief = next(
         artifact.content
         for artifact in artifacts

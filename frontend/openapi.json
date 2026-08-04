@@ -325,6 +325,47 @@
         "title": "ArtifactGenerationMethod",
         "type": "string"
       },
+      "ArtifactGenerationObservation": {
+        "additionalProperties": false,
+        "description": "One structured-generation path used to produce an artifact component.",
+        "properties": {
+          "client_role": {
+            "enum": [
+              "quick_reasoning",
+              "deep_reasoning",
+              "quick_serializer",
+              "deep_serializer"
+            ],
+            "title": "Client Role",
+            "type": "string"
+          },
+          "generation_method": {
+            "$ref": "#/components/schemas/ArtifactGenerationMethod"
+          },
+          "node": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Node",
+            "type": "string"
+          },
+          "task_kind": {
+            "enum": [
+              "semantic_structured",
+              "schema_serialization"
+            ],
+            "title": "Task Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node",
+          "task_kind",
+          "client_role",
+          "generation_method"
+        ],
+        "title": "ArtifactGenerationObservation",
+        "type": "object"
+      },
       "AssetType": {
         "enum": [
           "stock",
@@ -2682,6 +2723,14 @@
           },
           "generation_method": {
             "$ref": "#/components/schemas/ArtifactGenerationMethod"
+          },
+          "generation_observations": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ArtifactGenerationObservation"
+            },
+            "title": "Generation Observations",
+            "type": "array"
           },
           "id": {
             "maxLength": 64,

@@ -451,6 +451,7 @@ def test_service_commits_artifact_and_event_before_callback(
         "schema_version",
         "prompt_version",
         "generation_method",
+        "generation_observations",
         "content_type",
     }
 

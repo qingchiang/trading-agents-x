@@ -50,6 +50,7 @@ from tradingagents.agents.utils.technical_indicators_tools import (
 from tradingagents.application.contracts import (
     AnalystReport,
     ArtifactGenerationMethod,
+    ArtifactGenerationObservation,
     DecisionBrief,
     DecisionNumericAuditAppendix,
     EvidenceBundle,
@@ -828,6 +829,18 @@ class ResearchGraph:
                 role="moderator",
                 content=agenda,
                 generation_method=output.generation_method,
+                generation_observations=(
+                    ArtifactGenerationObservation(
+                        node=f"{node}.serialize",
+                        task_kind="semantic_structured",
+                        client_role=(
+                            "deep_reasoning"
+                            if self._deliberation_model_tier() == "deep"
+                            else "quick_reasoning"
+                        ),
+                        generation_method=output.generation_method,
+                    ),
+                ),
                 prompt_version="debate-agenda-v9-thinking-json",
             )
             self._finish_node(
@@ -1305,6 +1318,20 @@ class ResearchGraph:
                 role="final_committee",
                 content=decision,
                 generation_method=output.generation_method,
+                generation_observations=(
+                    ArtifactGenerationObservation(
+                        node=f"{node}.core",
+                        task_kind="schema_serialization",
+                        client_role="deep_serializer",
+                        generation_method=output.generation_method,
+                    ),
+                    ArtifactGenerationObservation(
+                        node=f"{node}.numeric",
+                        task_kind="semantic_structured",
+                        client_role="deep_reasoning",
+                        generation_method=output.numeric_generation_method,
+                    ),
+                ),
                 prompt_version="final-committee-v12-thinking-numeric",
             )
             self._finish_node(
@@ -1419,6 +1446,7 @@ class ResearchGraph:
         role: str,
         content: ResearchArtifactContent,
         generation_method: ArtifactGenerationMethod,
+        generation_observations: tuple[ArtifactGenerationObservation, ...] = (),
         round: int = 0,
         prompt_version: str = "research-v1",
     ) -> None:
@@ -1430,6 +1458,7 @@ class ResearchGraph:
                 round=round,
                 prompt_version=prompt_version,
                 generation_method=generation_method,
+                generation_observations=generation_observations,
                 content=content,
             )
         )

@@ -43,6 +43,12 @@ export interface components {
       warnings?: components["schemas"]["ResearchWarning"][];
     };
     ArtifactGenerationMethod: "tool_call" | "tool_call_recovered" | "json_mode" | "raw_json_recovered" | "json_mode_recovered" | "sectioned_recovery" | "markdown_audited" | "markdown_audit_incomplete";
+    ArtifactGenerationObservation: {
+      client_role: "quick_reasoning" | "deep_reasoning" | "quick_serializer" | "deep_serializer";
+      generation_method: components["schemas"]["ArtifactGenerationMethod"];
+      node: string;
+      task_kind: "semantic_structured" | "schema_serialization";
+    };
     AssetType: "stock" | "crypto";
     AuditedRangeEndpoint: {
       as_of_date: string;
@@ -375,6 +381,7 @@ export interface components {
       content: components["schemas"]["AnalystReport"] | components["schemas"]["DecisionBrief"] | components["schemas"]["ResearchCase"] | components["schemas"]["DebateAgenda"] | components["schemas"]["RebuttalReview"] | components["schemas"]["JudgeDraft"] | components["schemas"]["RiskReview"] | components["schemas"]["ResearchDecision"];
       created_at: string;
       generation_method: components["schemas"]["ArtifactGenerationMethod"];
+      generation_observations?: components["schemas"]["ArtifactGenerationObservation"][];
       id: string;
       prompt_version?: string;
       role: string;

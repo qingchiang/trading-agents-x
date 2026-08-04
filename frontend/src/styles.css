@@ -1654,6 +1654,130 @@ label small {
   border-top: 1px solid var(--line-soft);
 }
 
+.role-metrics {
+  border-top: 1px solid var(--line-soft);
+}
+
+.metric-section-summary {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 750;
+  cursor: pointer;
+  list-style: none;
+}
+
+.metric-section-summary::-webkit-details-marker,
+.role-metric-group > summary::-webkit-details-marker {
+  display: none;
+}
+
+.metric-section-summary::marker,
+.role-metric-group > summary::marker {
+  content: "";
+}
+
+.metric-summary-title {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.metric-summary-description {
+  color: var(--muted-2);
+  font-size: 12px;
+  font-weight: 400;
+  text-align: right;
+}
+
+.metric-count {
+  min-width: 24px;
+  padding: 2px 7px;
+  color: var(--blue-dark);
+  font-size: 12px;
+  text-align: center;
+  background: var(--blue-soft);
+  border-radius: 999px;
+}
+
+.metric-disclosure-arrow {
+  display: inline-block;
+  color: var(--muted-2);
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1;
+  transition: transform 140ms ease;
+}
+
+.role-metrics[open] > summary .metric-disclosure-arrow,
+.context-metrics[open] > summary .metric-disclosure-arrow,
+.attempt-metrics[open] > summary .metric-disclosure-arrow,
+.role-metric-group[open] > summary .metric-disclosure-arrow {
+  transform: rotate(90deg);
+}
+
+.role-metrics[open] > summary {
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.role-metric-group {
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.role-metric-group > summary {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.6fr) repeat(5, minmax(90px, 1fr));
+  gap: 14px;
+  align-items: center;
+  padding: 14px 20px;
+  color: #4e596b;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  list-style: none;
+}
+
+.role-metric-group > summary span:not(:first-child) {
+  color: #4e596b;
+  font-weight: 400;
+  text-align: right;
+}
+
+.role-metric-group > summary .role-metric-name {
+  display: inline-flex;
+  gap: 9px;
+  align-items: center;
+  color: #4e596b;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.role-metric-group[open] > summary {
+  background: var(--surface-soft);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.role-metric-group td,
+.role-metric-group th {
+  padding: 12px 16px;
+  white-space: nowrap;
+}
+
+.role-metric-group td:nth-child(n + 7) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.role-metric-group thead tr:first-child th:nth-child(n + 7),
+.role-metric-group thead tr:nth-child(2) th {
+  text-align: center;
+}
+
 .node-metrics > summary {
   display: flex;
   gap: 10px;
@@ -1665,7 +1789,8 @@ label small {
   cursor: pointer;
 }
 
-.node-metrics > summary span {
+.node-metrics > summary > span:not(.metric-summary-title):not(.metric-summary-description),
+.node-metrics > summary .metric-count {
   min-width: 24px;
   padding: 2px 7px;
   color: var(--blue-dark);
@@ -2340,6 +2465,25 @@ label small {
 
   .metrics-strip > div {
     border-bottom: 1px solid var(--line-soft);
+  }
+
+  .metric-section-summary {
+    display: block;
+  }
+
+  .metric-summary-description {
+    display: block;
+    margin-top: 6px;
+    text-align: left;
+    white-space: normal;
+  }
+
+  .role-metric-group > summary {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .role-metric-group > summary span:not(:first-child) {
+    text-align: left;
   }
 
   .filter-bar {
