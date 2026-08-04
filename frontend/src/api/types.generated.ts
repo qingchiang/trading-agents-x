@@ -22,6 +22,7 @@ export interface components {
       decision: components["schemas"]["ResearchDecision"] | null;
       evidence?: components["schemas"]["EvidenceBundle"] | null;
       instrument: string;
+      instrument_local_name?: string | null;
       instrument_name?: string | null;
       metrics?: components["schemas"]["RunMetrics"];
       numeric_audit?: components["schemas"]["DecisionNumericAuditAppendix"] | null;
@@ -256,9 +257,11 @@ export interface components {
       analysis_date: string;
       asset_type: string;
       decision: components["schemas"]["ResearchDecision"];
+      instrument_local_name?: string | null;
       instrument_name?: string | null;
       market: string | null;
       outcome: components["schemas"]["MemoryOutcome"];
+      profile: components["schemas"]["RunProfile"];
       reflection: string | null;
       run_id: string;
       ticker: string;
@@ -364,6 +367,7 @@ export interface components {
       round: number;
     };
     RecentInstrument: {
+      instrument_local_name?: string | null;
       instrument_name?: string | null;
       last_used_at: string;
       ticker: string;
@@ -500,13 +504,33 @@ export interface components {
       wall_time_seconds?: number;
     };
     RunPage: {
-      items: components["schemas"]["RunView"][];
+      items: components["schemas"]["RunSummaryView"][];
       limit: number;
       offset: number;
       total: number;
     };
     RunProfile: "fast" | "standard" | "deep";
     RunStatus: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+    RunSummaryView: {
+      attempt: number;
+      cancel_requested: boolean;
+      config_snapshot: Record<string, unknown>;
+      created_at: string;
+      error_code?: string | null;
+      error_message?: string | null;
+      finished_at?: string | null;
+      id: string;
+      instrument_local_name?: string | null;
+      instrument_name?: string | null;
+      metrics?: components["schemas"]["RunMetrics"];
+      request: components["schemas"]["AnalysisRequest"];
+      research_rating?: components["schemas"]["ResearchRating"] | null;
+      source_run_id?: string | null;
+      started_at?: string | null;
+      status: components["schemas"]["RunStatus"];
+      trashed_at?: string | null;
+      updated_at: string;
+    };
     RunTrashState: "active" | "trashed" | "all";
     RunView: {
       attempt: number;
@@ -517,6 +541,7 @@ export interface components {
       error_message?: string | null;
       finished_at?: string | null;
       id: string;
+      instrument_local_name?: string | null;
       instrument_name?: string | null;
       metrics?: components["schemas"]["RunMetrics"];
       request: components["schemas"]["AnalysisRequest"];

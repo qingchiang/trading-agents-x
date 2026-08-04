@@ -38,6 +38,7 @@ from .contracts import (
     ResearchArtifactDraft,
     ResearchCase,
     ResearchDecision,
+    ResearchRating,
     ResearchWarning,
     RiskReview,
     RunAttemptView,
@@ -45,6 +46,7 @@ from .contracts import (
     RunMetrics,
     RunPage,
     RunStatus,
+    RunSummaryView,
     RunTrashState,
     RunView,
     StructuredRecoveryNotice,
@@ -314,10 +316,17 @@ class RunRepository:
                         query,
                         autoescape=True,
                     ),
+                    func.lower(
+                        func.coalesce(RunRecord.instrument_local_name, "")
+                    ).contains(
+                        query,
+                        autoescape=True,
+                    ),
                 )
             )
         stmt = (
-            select(RunRecord)
+            select(RunRecord, DecisionRecord.rating)
+            .outerjoin(DecisionRecord, DecisionRecord.run_id == RunRecord.id)
             .where(*filters)
             .order_by(RunRecord.created_at.desc())
             .offset(offset)
@@ -327,7 +336,8 @@ class RunRepository:
         with self.sessions() as session:
             return RunPage(
                 items=tuple(
-                    self._view(record) for record in session.scalars(stmt)
+                    self._summary(record, rating)
+                    for record, rating in session.execute(stmt)
                 ),
                 total=int(session.scalar(count_stmt) or 0),
                 limit=limit,
@@ -420,6 +430,29 @@ class RunRepository:
             record.updated_at = _utc_naive()
         return self.get_run(run_id)
 
+    def set_instrument_local_name(
+        self,
+        run_id: str,
+        instrument_local_name: str | None,
+    ) -> RunView:
+        """Persist one cutoff-safe market-local display name when available."""
+        normalized = (
+            instrument_local_name.strip()[:300]
+            if isinstance(instrument_local_name, str)
+            and instrument_local_name.strip()
+            else None
+        )
+        if normalized is None:
+            return self.get_run(run_id)
+        with self.sessions.begin() as session:
+            record = session.get(RunRecord, run_id)
+            if record is None:
+                raise RunNotFoundError(run_id)
+            if record.instrument_local_name is None:
+                record.instrument_local_name = normalized
+                record.updated_at = _utc_naive()
+        return self.get_run(run_id)
+
     def recent_instruments(self, *, limit: int = 20) -> tuple[RecentInstrument, ...]:
         """Return the latest non-trashed use of each canonical ticker."""
         limit = min(max(1, limit), 100)
@@ -431,6 +464,7 @@ class RunRepository:
             select(
                 ticker.label("ticker"),
                 RunRecord.instrument_name.label("instrument_name"),
+                RunRecord.instrument_local_name.label("instrument_local_name"),
                 RunRecord.created_at.label("last_used_at"),
                 func.row_number()
                 .over(
@@ -452,6 +486,7 @@ class RunRepository:
             select(
                 ranked.c.ticker,
                 ranked.c.instrument_name,
+                ranked.c.instrument_local_name,
                 ranked.c.last_used_at,
             )
             .where(ranked.c.ticker_rank == 1)
@@ -463,6 +498,7 @@ class RunRepository:
                 RecentInstrument(
                     ticker=str(row.ticker),
                     instrument_name=row.instrument_name,
+                    instrument_local_name=row.instrument_local_name,
                     last_used_at=_aware(row.last_used_at),
                 )
                 for row in connection.execute(stmt)
@@ -1369,6 +1405,7 @@ class RunRepository:
             status=view.status,
             instrument=view.request.ticker,
             instrument_name=view.instrument_name,
+            instrument_local_name=view.instrument_local_name,
             reports=reports,
             decision=decision,
             numeric_audit=numeric_audit,
@@ -1677,6 +1714,8 @@ class RunRepository:
                 OutcomeRecord,
                 ReflectionRecord,
                 RunRecord.instrument_name,
+                RunRecord.instrument_local_name,
+                RunRecord.request_json,
             )
             .join(OutcomeRecord, OutcomeRecord.decision_id == DecisionRecord.id)
             .join(RunRecord, RunRecord.id == DecisionRecord.run_id)
@@ -1713,6 +1752,8 @@ class RunRepository:
                 "$.risks",
                 "$.invalidation_conditions",
                 "$.time_horizon",
+                "$.scenarios",
+                "$.unresolved_questions",
             )
             stmt = stmt.where(
                 or_(
@@ -1726,6 +1767,12 @@ class RunRepository:
                     ),
                     func.lower(
                         func.coalesce(RunRecord.instrument_name, "")
+                    ).contains(
+                        query,
+                        autoescape=True,
+                    ),
+                    func.lower(
+                        func.coalesce(RunRecord.instrument_local_name, "")
                     ).contains(
                         query,
                         autoescape=True,
@@ -1767,9 +1814,11 @@ class RunRepository:
                     "run_id": decision.run_id,
                     "ticker": decision.ticker,
                     "instrument_name": instrument_name,
+                    "instrument_local_name": instrument_local_name,
                     "market": decision.market,
                     "asset_type": decision.asset_type,
                     "analysis_date": decision.analysis_date.isoformat(),
+                    "profile": AnalysisRequest.model_validate(request_json).profile,
                     "decision": decision.decision_json,
                     "outcome": {
                         "status": outcome.status,
@@ -1790,9 +1839,14 @@ class RunRepository:
                     },
                     "reflection": reflection.text if reflection else None,
                 }
-                for decision, outcome, reflection, instrument_name in session.execute(
-                    stmt
-                )
+                for (
+                    decision,
+                    outcome,
+                    reflection,
+                    instrument_name,
+                    instrument_local_name,
+                    request_json,
+                ) in session.execute(stmt)
             ]
 
     def backup(self, destination: Path) -> Path:
@@ -1853,6 +1907,7 @@ class RunRepository:
             id=record.id,
             source_run_id=record.source_run_id,
             instrument_name=record.instrument_name,
+            instrument_local_name=record.instrument_local_name,
             status=RunStatus(record.status),
             request=AnalysisRequest.model_validate(record.request_json),
             config_snapshot=record.config_json,
@@ -1866,4 +1921,15 @@ class RunRepository:
             finished_at=_aware(record.finished_at),
             trashed_at=_aware(record.trashed_at),
             updated_at=_aware(record.updated_at),
+        )
+
+    @classmethod
+    def _summary(
+        cls,
+        record: RunRecord,
+        rating: str | None,
+    ) -> RunSummaryView:
+        return RunSummaryView(
+            **cls._view(record).model_dump(),
+            research_rating=ResearchRating(rating) if rating else None,
         )

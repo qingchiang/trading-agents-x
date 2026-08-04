@@ -38,6 +38,7 @@ from .exporting import (
     render_run_export_markdown,
     render_run_export_package,
 )
+from .instrument_names import resolve_local_instrument_name
 from .llms import RunLLMs, create_run_llms
 from .metrics import MetricsCallback
 from .repository import RunRepository, RunView
@@ -80,6 +81,9 @@ class AnalysisService:
         ),
         graph_factory: Callable[..., ResearchGraph] = ResearchGraph,
         identity_resolver: Callable[..., dict[str, str]] = resolve_instrument_identity,
+        local_name_resolver: Callable[[str, str, dict[str, Any]], str | None] = (
+            resolve_local_instrument_name
+        ),
     ):
         self.settings = settings
         if repository is None:
@@ -88,6 +92,7 @@ class AnalysisService:
         self.llm_factory = llm_factory
         self.graph_factory = graph_factory
         self.identity_resolver = identity_resolver
+        self.local_name_resolver = local_name_resolver
 
     def enqueue(
         self,
@@ -160,6 +165,7 @@ class AnalysisService:
         )
         metrics = MetricsCallback()
         instrument_name = run.instrument_name
+        instrument_local_name = run.instrument_local_name
 
         with self._heartbeat(run.id, worker_id):
             try:
@@ -183,6 +189,26 @@ class AnalysisService:
                             run.id,
                             resolved_name,
                         )
+                    if instrument_local_name is None:
+                        try:
+                            resolved_local_name = self.local_name_resolver(
+                                run.request.ticker,
+                                run.request.analysis_date.isoformat(),
+                                dataflow_config,
+                            )
+                        except Exception as exc:
+                            logger.warning(
+                                "local instrument name resolution failed for run %s: %s",
+                                run.id,
+                                type(exc).__name__,
+                            )
+                        else:
+                            if resolved_local_name is not None:
+                                instrument_local_name = resolved_local_name
+                                self.repository.set_instrument_local_name(
+                                    run.id,
+                                    resolved_local_name,
+                                )
                     instrument_context = build_instrument_context(
                         run.request.ticker,
                         run.request.asset_type.value,
@@ -279,6 +305,7 @@ class AnalysisService:
                         execution,
                         metrics,
                         instrument_name=instrument_name,
+                        instrument_local_name=instrument_local_name,
                     )
                     benchmark = self._benchmark(
                         run.request.ticker,
@@ -320,6 +347,7 @@ class AnalysisService:
                     status=RunStatus.CANCELLED,
                     instrument=run.request.ticker,
                     instrument_name=instrument_name,
+                    instrument_local_name=instrument_local_name,
                     reports={},
                     decision=None,
                     metrics=aggregate_metrics,
@@ -449,6 +477,7 @@ class AnalysisService:
         metrics: MetricsCallback,
         *,
         instrument_name: str | None,
+        instrument_local_name: str | None,
     ) -> AnalysisResult:
         warnings = tuple(
             dict.fromkeys(
@@ -467,6 +496,7 @@ class AnalysisService:
             status=RunStatus.SUCCEEDED,
             instrument=execution.evidence.instrument,
             instrument_name=instrument_name,
+            instrument_local_name=instrument_local_name,
             reports=execution.reports,
             decision=execution.decision,
             numeric_audit=execution.numeric_audit,

@@ -288,6 +288,7 @@ def _service(
         llm_factory=lambda *_args, **_kwargs: (object(), object()),
         graph_factory=graph_factory,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
+        local_name_resolver=lambda _ticker, _date, _config: None,
     )
 
 
@@ -372,6 +373,41 @@ def test_service_persists_preferred_instrument_display_name(
     assert result.instrument_name == expected
     assert repository.get_run(result.run_id).instrument_name == expected
     assert repository.get_result(result.run_id).instrument_name == expected
+
+
+def test_service_persists_cutoff_safe_local_name_once(
+    app_settings,
+    repository,
+) -> None:
+    observed: list[tuple[str, str]] = []
+
+    def local_name(ticker, analysis_date, _config):
+        observed.append((ticker, analysis_date))
+        return "トヨタ自動車"
+
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_Graph,
+        identity_resolver=lambda _ticker, _date: {
+            "company_name": "Toyota Motor Corporation"
+        },
+        local_name_resolver=local_name,
+    )
+
+    result = service.run(
+        AnalysisRequest(
+            ticker="7203.T",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+
+    assert result.instrument_local_name == "トヨタ自動車"
+    assert repository.get_run(result.run_id).instrument_local_name == "トヨタ自動車"
+    assert repository.get_result(result.run_id).instrument_local_name == "トヨタ自動車"
+    assert observed == [("7203.T", "2026-07-24")]
 
 
 def test_instrument_identity_failure_does_not_fail_research_run(

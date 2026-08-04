@@ -43,7 +43,7 @@ def _master_records(code: str, as_of_date: str | None = None) -> list[dict]:
     )
 
 
-def get_company_name(ticker: str) -> str | None:
+def get_company_name(ticker: str, curr_date: str | None = None) -> str | None:
     """Return the Japanese short company name for a Tokyo ticker, or None.
 
     ``9984.T`` → ``ソフトバンクグループ``. Returns None when J-Quants has no master
@@ -51,7 +51,7 @@ def get_company_name(ticker: str) -> str | None:
     """
     code = to_jquants_code(ticker)
     try:
-        records = _master_records(code)
+        records = _master_records(code, curr_date)
     except Exception as exc:  # never let name resolution abort a news fetch
         logger.warning("Company-name lookup failed for %s: %s", ticker, exc)
         return None

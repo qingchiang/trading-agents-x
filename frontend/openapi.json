@@ -152,6 +152,17 @@
             "title": "Instrument",
             "type": "string"
           },
+          "instrument_local_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Local Name"
+          },
           "instrument_name": {
             "anyOf": [
               {
@@ -1794,6 +1805,17 @@
           "decision": {
             "$ref": "#/components/schemas/ResearchDecision"
           },
+          "instrument_local_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Local Name"
+          },
           "instrument_name": {
             "anyOf": [
               {
@@ -1818,6 +1840,9 @@
           },
           "outcome": {
             "$ref": "#/components/schemas/MemoryOutcome"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/RunProfile"
           },
           "reflection": {
             "anyOf": [
@@ -1845,6 +1870,7 @@
           "market",
           "asset_type",
           "analysis_date",
+          "profile",
           "decision",
           "outcome",
           "reflection"
@@ -2597,6 +2623,17 @@
       "RecentInstrument": {
         "additionalProperties": false,
         "properties": {
+          "instrument_local_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Local Name"
+          },
           "instrument_name": {
             "anyOf": [
               {
@@ -3571,7 +3608,7 @@
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/RunView"
+              "$ref": "#/components/schemas/RunSummaryView"
             },
             "title": "Items",
             "type": "array"
@@ -3621,6 +3658,160 @@
         ],
         "title": "RunStatus",
         "type": "string"
+      },
+      "RunSummaryView": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "cancel_requested": {
+            "title": "Cancel Requested",
+            "type": "boolean"
+          },
+          "config_snapshot": {
+            "additionalProperties": true,
+            "title": "Config Snapshot",
+            "type": "object"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "instrument_local_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Local Name"
+          },
+          "instrument_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Name"
+          },
+          "metrics": {
+            "$ref": "#/components/schemas/RunMetrics"
+          },
+          "request": {
+            "$ref": "#/components/schemas/AnalysisRequest"
+          },
+          "research_rating": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchRating"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Run Id"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          },
+          "trashed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trashed At"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "request",
+          "config_snapshot",
+          "attempt",
+          "cancel_requested",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "RunSummaryView",
+        "type": "object"
       },
       "RunTrashState": {
         "enum": [
@@ -3689,6 +3880,17 @@
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "instrument_local_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Local Name"
           },
           "instrument_name": {
             "anyOf": [
