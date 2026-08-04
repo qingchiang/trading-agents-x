@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -13,9 +13,13 @@ from tests.factories import research_decision
 from tradingagents.application.contracts import (
     EvidenceBundle,
     EvidenceItem,
+    EvidenceOrigin,
+    EvidenceQuality,
+    EvidenceTemporalScope,
     NumericAuditStatus,
     NumericDisplayScale,
     NumericDisplayStatus,
+    NumericTemporalBasis,
 )
 from tradingagents.application.evidence import extract_evidence_tables
 from tradingagents.graph.deliberation import (
@@ -77,11 +81,13 @@ def _core_payload(ref: str) -> dict[str, Any]:
 def test_fixture_manifest_covers_every_authorized_live_sample() -> None:
     payload = _payload()
     represented = {case["instrument"] for case in payload["comparison_cases"]}
-    represented.add(payload["unicode_operand_case"]["instrument"])
+    represented.update(
+        case["instrument"] for case in payload["operand_normalization_cases"]
+    )
     represented.add(payload["derived_range_case"]["instrument"])
     represented.update(case["instrument"] for case in payload["catalog_cases"])
 
-    assert payload["schema_version"] == "1"
+    assert payload["schema_version"] == "2"
     assert represented == set(payload["covered_instruments"])
     assert represented == {
         "4568.T",
@@ -95,6 +101,7 @@ def test_fixture_manifest_covers_every_authorized_live_sample() -> None:
         "GOOG",
         "600176.SS",
         "601208.SS",
+        "600309.SS",
     }
 
 
@@ -149,8 +156,14 @@ def test_live_numeric_comparison_regressions(case: dict[str, Any]) -> None:
     assert result.status is NumericAuditStatus(case["expected_numeric_status"])
 
 
-def test_live_unicode_operand_regression_is_deterministically_normalized() -> None:
-    case = _payload()["unicode_operand_case"]
+@pytest.mark.parametrize(
+    "case",
+    _payload()["operand_normalization_cases"],
+    ids=lambda case: case["id"],
+)
+def test_live_operand_regressions_are_deterministically_normalized(
+    case: dict[str, Any],
+) -> None:
     bundle = _bundle(case["instrument"])
     ref = bundle.items[0].ref
     envelope = ResearchDecisionCoreEnvelope.model_validate(
@@ -184,6 +197,96 @@ def test_live_unicode_operand_regression_is_deterministically_normalized() -> No
     requirement = preflight.requirements[0]
     assert requirement.formula == case["expected_formula"]
     assert [item.name for item in requirement.inputs] == case["expected_input_names"]
+
+
+def test_cn_profile_retrieval_time_dates_forward_income_calculation() -> None:
+    analysis_date = date(2026, 8, 5)
+    retrieved_at = datetime(2026, 8, 5, 6, tzinfo=timezone.utc)
+    profile_origin = EvidenceOrigin(
+        source="AkShare / CNINFO company profile",
+        evidence_type="company profile",
+        requested=analysis_date.isoformat(),
+        effective="current reference",
+        timing="live-only current company reference; not historical PIT",
+        retrieved_at=retrieved_at.isoformat(),
+        quality=EvidenceQuality.LOW,
+        temporal_scope=EvidenceTemporalScope.LIVE_ONLY,
+    )
+    profile = EvidenceItem.create(
+        source="AkShare / CNINFO company profile",
+        evidence_type="company profile",
+        requested_date=analysis_date,
+        value=31.3047,
+        unit="shares",
+        quality=EvidenceQuality.LOW,
+        origins=(profile_origin,),
+    )
+    forecast = EvidenceItem.create(
+        source="yfinance current valuation snapshot",
+        evidence_type="analyst consensus",
+        requested_date=analysis_date,
+        effective_date=analysis_date,
+        value=7.27,
+        unit="CNY",
+    )
+    bundle = EvidenceBundle(
+        instrument="600309.SS",
+        analysis_date=analysis_date,
+        items=(forecast, profile),
+        sealed_at=retrieved_at + timedelta(minutes=1),
+    )
+    inputs = (
+        CalculationInputDraft(
+            name="forward_eps",
+            value=7.27,
+            date_evidence_refs=(forecast.ref,),
+        ),
+        CalculationInputDraft(
+            name="share_count",
+            value=31.3047,
+            date_evidence_refs=(profile.ref,),
+        ),
+    )
+    requirement = DecisionNumericRequirementDraft(
+        id="req_forward_implied_income",
+        component_path="thesis",
+        label="Forward implied net income",
+        stated_value=227.6,
+        fraction_digits=1,
+        formula="forward_eps * share_count",
+        inputs=inputs,
+        input_evidence_refs=(forecast.ref, profile.ref),
+        unit="CNY",
+        display_scale=NumericDisplayScale.BASE,
+        limitations=("Deidentified live regression.",),
+    )
+    calculation = CalculationRecordDraft(
+        id="calc_forward_implied_income",
+        formula=requirement.formula,
+        inputs=inputs,
+        input_evidence_refs=requirement.input_evidence_refs,
+        unit=requirement.unit,
+        limitations=requirement.limitations,
+        requirement_ids=(requirement.id,),
+    )
+
+    result = _assemble_numeric_draft(
+        DecisionNumericDraft(requested=True, calculation_records=(calculation,)),
+        bundle=bundle,
+        allowed_evidence_refs={forecast.ref, profile.ref},
+        value_catalog=build_numeric_value_catalog(bundle),
+        salvage=False,
+        node="committee.final.serialize.numeric",
+        requirements=(requirement,),
+    )
+
+    assert result.status is NumericAuditStatus.COMPLETE
+    assert result.repair_issues == ()
+    assert result.calculation_records[0].as_of_date == analysis_date
+    assert (
+        result.calculation_records[0].temporal_basis
+        is NumericTemporalBasis.LIVE_SNAPSHOT
+    )
 
 
 def test_live_derived_range_regression_keeps_independent_endpoints() -> None:

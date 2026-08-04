@@ -1,6 +1,6 @@
 {
-  "schema_version": "1",
-  "source": "Deidentified minimal cases from the 2026-08-03 live regression set.",
+  "schema_version": "2",
+  "source": "Deidentified minimal cases from live numeric regressions through 2026-08-05.",
   "covered_instruments": [
     "4568.T",
     "6501.T",
@@ -12,7 +12,8 @@
     "002028.SZ",
     "GOOG",
     "600176.SS",
-    "601208.SS"
+    "601208.SS",
+    "600309.SS"
   ],
   "comparison_cases": [
     {
@@ -211,23 +212,59 @@
       "expected_numeric_status": "complete"
     }
   ],
-  "unicode_operand_case": {
-    "id": "600487_unicode_operands",
-    "instrument": "600487.SS",
-    "component_path": "thesis",
-    "label": "Profit growth",
-    "stated_value": 25.0,
-    "fraction_digits": 1,
-    "formula": "(本期利润 - 上期利润) / 上期利润",
-    "inputs": [
-      {"name": "本期利润", "value": 125},
-      {"name": "上期利润", "value": 100}
-    ],
-    "unit": "%",
-    "display_scale": "base",
-    "expected_formula": "(v1 - v2) / v2",
-    "expected_input_names": ["v1", "v2"]
-  },
+  "operand_normalization_cases": [
+    {
+      "id": "600487_unicode_operands",
+      "instrument": "600487.SS",
+      "component_path": "thesis",
+      "label": "Profit growth",
+      "stated_value": 25.0,
+      "fraction_digits": 1,
+      "formula": "(本期利润 - 上期利润) / 上期利润",
+      "inputs": [
+        {"name": "本期利润", "value": 125},
+        {"name": "上期利润", "value": 100}
+      ],
+      "unit": "%",
+      "display_scale": "base",
+      "expected_formula": "(v1 - v2) / v2",
+      "expected_input_names": ["v1", "v2"]
+    },
+    {
+      "id": "600309_forward_income_base",
+      "instrument": "600309.SS",
+      "component_path": "thesis",
+      "label": "Forward income multiple",
+      "stated_value": 1.5,
+      "fraction_digits": 1,
+      "formula": "forward_implied_NI / 2021_NI",
+      "inputs": [
+        {"name": "forward_implied_NI", "value": 150},
+        {"name": "2021_NI", "value": 100}
+      ],
+      "unit": "x",
+      "display_scale": "base",
+      "expected_formula": "v1 / v2",
+      "expected_input_names": ["v1", "v2"]
+    },
+    {
+      "id": "600309_historical_pe",
+      "instrument": "600309.SS",
+      "component_path": "risks.0",
+      "label": "Historical earnings multiple",
+      "stated_value": 10.0,
+      "fraction_digits": 1,
+      "formula": "close / 2021_EPS",
+      "inputs": [
+        {"name": "close", "value": 20},
+        {"name": "2021_EPS", "value": 2}
+      ],
+      "unit": "x",
+      "display_scale": "base",
+      "expected_formula": "v1 / v2",
+      "expected_input_names": ["v1", "v2"]
+    }
+  ],
   "derived_range_case": {
     "id": "8058_two_endpoint_range",
     "instrument": "8058.T",

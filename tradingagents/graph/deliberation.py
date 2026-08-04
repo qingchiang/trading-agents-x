@@ -338,7 +338,7 @@ def _numeric_requirement_validation_issues(
 
 
 def _normalize_numeric_requirement_candidate(candidate: Any) -> Any:
-    """Canonicalize unambiguous Unicode operands before soft schema validation."""
+    """Canonicalize unambiguous non-ASCII-safe operands before validation."""
 
     if isinstance(candidate, BaseModel):
         return candidate
@@ -357,35 +357,52 @@ def _normalize_numeric_requirement_candidate(candidate: Any) -> Any:
     if all(re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name) for name in names):
         return candidate
     normalized_names = [unicodedata.normalize("NFKC", name) for name in names]
-    if len(set(normalized_names)) != len(normalized_names) or any(
-        not name.isidentifier() for name in normalized_names
+    normalized_formula = unicodedata.normalize("NFKC", formula)
+    if len(set(normalized_names)) != len(normalized_names):
+        return candidate
+    digit_prefixed_identifier = re.compile(
+        r"^(?=[0-9A-Za-z_]*[A-Za-z_])[0-9][0-9A-Za-z_]*$"
+    )
+    if any(
+        not name.isidentifier() and not digit_prefixed_identifier.fullmatch(name)
+        for name in normalized_names
     ):
-        return candidate
-    try:
-        tree = ast.parse(formula, mode="eval")
-    except SyntaxError:
-        return candidate
-    referenced_names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
-    if referenced_names != set(normalized_names):
         return candidate
     replacements = {
         name: f"v{index}" for index, name in enumerate(normalized_names, start=1)
     }
+    operand_pattern = re.compile(
+        r"(?<!\w)(?:"
+        + "|".join(
+            re.escape(name)
+            for name in sorted(normalized_names, key=len, reverse=True)
+        )
+        + r")(?!\w)"
+    )
+    matched_names: set[str] = set()
 
-    class _OperandRenamer(ast.NodeTransformer):
-        def visit_Name(self, node: ast.Name) -> ast.Name:  # noqa: N802
-            replacement = replacements.get(node.id)
-            return ast.copy_location(ast.Name(id=replacement, ctx=node.ctx), node)
+    def replace_operand(match: re.Match[str]) -> str:
+        name = match.group(0)
+        matched_names.add(name)
+        return replacements[name]
 
-    rewritten = _OperandRenamer().visit(tree)
-    ast.fix_missing_locations(rewritten)
+    rewritten_formula = operand_pattern.sub(replace_operand, normalized_formula)
+    if matched_names != set(normalized_names):
+        return candidate
+    try:
+        tree = ast.parse(rewritten_formula, mode="eval")
+    except SyntaxError:
+        return candidate
+    referenced_names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+    if referenced_names != set(replacements.values()):
+        return candidate
     normalized_inputs = [
         {**dict(item), "name": replacements[name]}
         for item, name in zip(raw_inputs, normalized_names, strict=True)
     ]
     return {
         **dict(candidate),
-        "formula": ast.unparse(rewritten),
+        "formula": ast.unparse(tree),
         "inputs": normalized_inputs,
     }
 
@@ -470,6 +487,19 @@ def _preflight_numeric_requirements(
             )
         except OutputValidationError:
             issue = f"{prefix}.invalid_evidence"
+            issues.append(issue)
+            omissions.append(
+                NumericAuditOmission(
+                    component_path=requirement.component_path,
+                    component_type=NumericAuditComponentType.DECISION_CLAIM,
+                    reference_label=requirement.label,
+                    issue_codes=(issue,),
+                )
+            )
+            continue
+        date_evidence_refs = set(_calculation_date_refs(requirement.inputs))
+        if not date_evidence_refs.issubset(requirement.input_evidence_refs):
+            issue = f"{prefix}.date_refs.not_input_refs"
             issues.append(issue)
             omissions.append(
                 NumericAuditOmission(
@@ -2404,6 +2434,30 @@ def _requirement_check(
     rounded_canonical_result: int | float | None = None,
     issue_codes: tuple[str, ...] = (),
 ) -> NumericRequirementCheck:
+    input_evidence_refs = requirement.input_evidence_refs
+    input_evidence_ref_set = set(input_evidence_refs)
+    date_evidence_refs = _calculation_date_refs(requirement.inputs)
+    invalid_date_refs = not set(date_evidence_refs).issubset(input_evidence_ref_set)
+    if invalid_date_refs:
+        date_evidence_refs = tuple(
+            ref for ref in date_evidence_refs if ref in input_evidence_ref_set
+        )
+        calculation_status = NumericCalculationStatus.INVALID
+        display_status = NumericDisplayStatus.NOT_CHECKED
+        calculation_id = None
+        canonical_result = None
+        comparison_result = None
+        comparison_difference = None
+        rounded_stated_value = None
+        rounded_canonical_result = None
+        issue_codes = tuple(
+            dict.fromkeys(
+                (
+                    *issue_codes,
+                    f"numeric.requirement.{requirement.id}.date_refs.not_input_refs",
+                )
+            )
+        )
     return NumericRequirementCheck(
         requirement_id=requirement.id,
         calculation_id=calculation_id,
@@ -2415,8 +2469,8 @@ def _requirement_check(
         display_scale=requirement.display_scale,
         formula=requirement.formula,
         inputs=requirement_input_mapping(requirement),
-        input_evidence_refs=requirement.input_evidence_refs,
-        date_evidence_refs=_calculation_date_refs(requirement.inputs),
+        input_evidence_refs=input_evidence_refs,
+        date_evidence_refs=date_evidence_refs,
         canonical_result=canonical_result,
         comparison_result=comparison_result,
         comparison_difference=comparison_difference,

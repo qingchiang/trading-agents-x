@@ -60,6 +60,7 @@ from tradingagents.graph.deliberation import (
     _canonicalize_calculation_result,
     _emit_numeric_normalization_event,
     _evaluate_formula,
+    _normalize_numeric_requirement_candidate,
     _numeric_audit_snapshot,
     _numeric_example_pair,
     _preflight_numeric_requirements,
@@ -1327,6 +1328,223 @@ def test_numeric_requirement_preflight_canonicalizes_unicode_operands() -> None:
     assert preflight.issues == ()
     assert [item.name for item in preflight.requirements[0].inputs] == ["v1", "v2"]
     assert preflight.requirements[0].formula == "(v1 - v2) / v2"
+
+
+@pytest.mark.parametrize(
+    ("names", "formula"),
+    (
+        (("value", "2021"), "value / 2021"),
+        (("value", "prior-year"), "value / prior-year"),
+        (("Ａ", "A"), "Ａ / A"),
+        (("value", "2021_NI"), "value / other_value"),
+    ),
+)
+def test_numeric_requirement_preflight_does_not_guess_ambiguous_operands(
+    names: tuple[str, str],
+    formula: str,
+) -> None:
+    state = _state()
+    ref = state["evidence_bundle"]["items"][0]["ref"]
+    core = _core_draft_from_decision(
+        research_decision(evidence_refs=(ref,)).model_dump(mode="json")
+    )
+    envelope = ResearchDecisionCoreEnvelope.model_validate(
+        {
+            **core.model_dump(mode="json"),
+            "numeric_requirements_declared": True,
+            "numeric_requirement_candidates": [
+                {
+                    "id": "req_ambiguous",
+                    "component_path": "thesis",
+                    "label": "Ambiguous operands",
+                    "stated_value": 1.0,
+                    "fraction_digits": 1,
+                    "formula": formula,
+                    "inputs": [
+                        {"name": names[0], "value": 2},
+                        {"name": names[1], "value": 2},
+                    ],
+                    "input_evidence_refs": [ref],
+                    "unit": "x",
+                    "display_scale": "base",
+                    "limitations": ["Fixture limitation."],
+                }
+            ],
+        }
+    )
+
+    preflight = _preflight_numeric_requirements(
+        envelope,
+        valid_evidence_refs={ref},
+    )
+
+    assert preflight.requirements == ()
+    assert any(issue.endswith(".name.pattern") for issue in preflight.issues)
+
+
+def test_numeric_requirement_normalization_matches_overlapping_tokens_exactly() -> None:
+    normalized = _normalize_numeric_requirement_candidate(
+        {
+            "formula": "2021_NI_adjusted - 2021_NI",
+            "inputs": [
+                {"name": "2021_NI_adjusted", "value": 120},
+                {"name": "2021_NI", "value": 100},
+            ],
+        }
+    )
+
+    assert normalized["formula"] == "v1 - v2"
+    assert [item["name"] for item in normalized["inputs"]] == ["v1", "v2"]
+
+
+def test_4483_requirement_date_ref_mismatch_preserves_qualitative_decision() -> None:
+    state = _state()
+    bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
+    first_ref = bundle.items[0].ref
+    other = EvidenceItem.create(
+        source="fixture.other",
+        evidence_type="market snapshot",
+        requested_date=bundle.analysis_date,
+        effective_date=bundle.analysis_date,
+        value=2,
+        unit="USD",
+    )
+    bundle = EvidenceBundle(
+        instrument=bundle.instrument,
+        analysis_date=bundle.analysis_date,
+        items=(*bundle.items, other),
+        sealed_at=bundle.sealed_at,
+    )
+    state["evidence_bundle"] = bundle.model_dump(mode="json")
+    core = _core_draft_from_decision(
+        research_decision(evidence_refs=(first_ref,)).model_dump(mode="json")
+    )
+    envelope = ResearchDecisionCoreEnvelope.model_validate(
+        {
+            **core.model_dump(mode="json"),
+            "numeric_requirements_declared": True,
+            "numeric_requirement_candidates": [
+                {
+                    "id": "req_invalid_date_ref",
+                    "component_path": "thesis",
+                    "label": "Invalid date ref",
+                    "stated_value": 50.0,
+                    "fraction_digits": 1,
+                    "formula": "value / divisor",
+                    "inputs": [
+                        {
+                            "name": "value",
+                            "value": 100,
+                            "date_evidence_refs": [other.ref],
+                        },
+                        {"name": "divisor", "value": 2},
+                    ],
+                    "input_evidence_refs": [first_ref],
+                    "unit": "x",
+                    "display_scale": "base",
+                    "limitations": ["Fixture limitation."],
+                }
+            ],
+        }
+    )
+    llm = _SequenceLLM(
+        {
+            "ResearchDecisionCoreEnvelope": [envelope],
+            "DecisionNumericDraft": [DecisionNumericDraft(requested=False)],
+        }
+    )
+
+    result = invoke_research_decision(
+        llm,
+        prompt="Form the final decision.",
+        state=state,
+        node="committee.final",
+        require_risk_adjustments=False,
+    )
+
+    assert result.value.thesis == core.thesis
+    assert result.value.numeric_audit_status is NumericAuditStatus.PARTIAL
+    assert result.numeric_audit is not None
+    assert result.numeric_audit.omitted_components[0].issue_codes == (
+        "numeric.requirement_candidate.0.date_refs.not_input_refs",
+    )
+    assert [schema for schema, _prompt in llm.prompts].count(
+        "DecisionNumericDraft"
+    ) == 1
+    assert all(
+        warning.code != "decision.numeric_repair_noop" for warning in result.warnings
+    )
+
+
+def test_4483_salvage_contains_invalid_date_ref_relationship() -> None:
+    state = _state()
+    bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
+    first_ref = bundle.items[0].ref
+    other = EvidenceItem.create(
+        source="fixture.other",
+        evidence_type="market snapshot",
+        requested_date=bundle.analysis_date,
+        effective_date=bundle.analysis_date,
+        value=2,
+        unit="USD",
+    )
+    bundle = EvidenceBundle(
+        instrument=bundle.instrument,
+        analysis_date=bundle.analysis_date,
+        items=(*bundle.items, other),
+        sealed_at=bundle.sealed_at,
+    )
+    requirement = DecisionNumericRequirementDraft(
+        id="req_invalid_date_ref",
+        component_path="thesis",
+        label="Invalid date ref",
+        stated_value=50,
+        fraction_digits=1,
+        formula="value / divisor",
+        inputs=(
+            CalculationInputDraft(
+                name="value",
+                value=100,
+                date_evidence_refs=(other.ref,),
+            ),
+            CalculationInputDraft(name="divisor", value=2),
+        ),
+        input_evidence_refs=(first_ref,),
+        unit="x",
+        display_scale=NumericDisplayScale.BASE,
+        limitations=("Fixture limitation.",),
+    )
+    calculation = CalculationRecordDraft(
+        id="calc_invalid_date_ref",
+        formula=requirement.formula,
+        inputs=requirement.inputs,
+        input_evidence_refs=requirement.input_evidence_refs,
+        unit=requirement.unit,
+        limitations=requirement.limitations,
+        requirement_ids=(requirement.id,),
+    )
+
+    assembly = _assemble_numeric_draft(
+        DecisionNumericDraft(
+            requested=True,
+            calculation_records=(calculation,),
+        ),
+        bundle=bundle,
+        allowed_evidence_refs={first_ref, other.ref},
+        value_catalog=build_numeric_value_catalog(bundle),
+        salvage=True,
+        node="committee.final.serialize.numeric",
+        requirements=(requirement,),
+    )
+
+    check = assembly.requirement_checks[0]
+    assert assembly.status is NumericAuditStatus.PARTIAL
+    assert check.calculation_status is NumericCalculationStatus.INVALID
+    assert check.display_status is NumericDisplayStatus.NOT_CHECKED
+    assert check.date_evidence_refs == ()
+    assert "numeric.requirement.req_invalid_date_ref.date_refs.not_input_refs" in (
+        check.issue_codes
+    )
 
 
 def test_numeric_requirement_range_group_requires_low_and_high() -> None:
