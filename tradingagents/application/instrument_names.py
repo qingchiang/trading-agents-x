@@ -1,4 +1,4 @@
-"""Best-effort market-local instrument names with cutoff-safe routing."""
+"""Best-effort market-local instrument names from current metadata sources."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ import pandas as pd
 
 from tradingagents.dataflows.cn.company import get_company_profile
 from tradingagents.dataflows.jp.company_info import get_company_name
-from tradingagents.dataflows.lookahead import is_near_live
 from tradingagents.dataflows.symbol_utils import match_exchange_suffix
 
 _JP_NAME_VENDORS = frozenset(
@@ -24,7 +23,8 @@ def resolve_local_instrument_name(
     analysis_date: str,
     config: dict[str, Any],
 ) -> str | None:
-    """Resolve a configured market-local name without leaking current history."""
+    """Resolve a configured market-local name as current display metadata."""
+    del analysis_date  # Names intentionally follow live metadata semantics.
     routes = config.get("data_vendors_by_market", {})
     if not isinstance(routes, dict):
         return None
@@ -34,12 +34,8 @@ def resolve_local_instrument_name(
         return None
     vendors = _configured_vendors(route)
     if suffix == ".T" and vendors & _JP_NAME_VENDORS:
-        return _clean_name(get_company_name(ticker, analysis_date))
-    if (
-        suffix in {".SS", ".SZ"}
-        and vendors & _CN_NAME_VENDORS
-        and is_near_live(analysis_date, ticker)
-    ):
+        return _clean_name(get_company_name(ticker))
+    if suffix in {".SS", ".SZ"} and vendors & _CN_NAME_VENDORS:
         profile = get_company_profile(ticker)
         if profile.empty:
             return None
