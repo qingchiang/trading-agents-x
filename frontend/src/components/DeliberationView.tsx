@@ -12,6 +12,9 @@ import type {
   RiskReview,
 } from "../api/client";
 import type { EvidenceReferenceIndex } from "../evidence";
+import FloatingSectionNavigation, {
+  type SectionNavigationEntry,
+} from "./FloatingSectionNavigation";
 import Markdown from "./Markdown";
 import { ResearchDecisionContent } from "./ResearchDecisionView";
 
@@ -281,10 +284,7 @@ export default function DeliberationView({
   );
 }
 
-type DeliberationNavigationEntry = {
-  id: string;
-  label: string;
-};
+type DeliberationNavigationEntry = SectionNavigationEntry;
 
 function DeliberationNavigation({
   entries,
@@ -319,41 +319,22 @@ function DeliberationNavigation({
   const jump = (id: string) => {
     const target = document.getElementById(id);
     if (!target) return;
-    target.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    target.scrollIntoView?.({ behavior: "auto", block: "start" });
     target.focus({ preventScroll: true });
     setActive(id);
   };
 
   return (
-    <>
-      <nav
-        className="deliberation-stage-nav"
-        aria-label={t("deliberationNavigation")}
-      >
-        <strong>{t("researchStages")}</strong>
-        {entries.map((entry) => (
-          <button
-            type="button"
-            className={active === entry.id ? "active" : ""}
-            aria-current={active === entry.id ? "step" : undefined}
-            onClick={() => jump(entry.id)}
-            key={entry.id}
-          >
-            {entry.label}
-          </button>
-        ))}
-      </nav>
-      <label className="deliberation-stage-select">
-        <span>{t("jumpToStage")}</span>
-        <select value={active} onChange={(event) => jump(event.target.value)}>
-          {entries.map((entry) => (
-            <option value={entry.id} key={entry.id}>
-              {entry.label}
-            </option>
-          ))}
-        </select>
-      </label>
-    </>
+    <FloatingSectionNavigation
+      entries={entries}
+      active={active}
+      title={t("researchStages")}
+      ariaLabel={t("deliberationNavigation")}
+      selectLabel={t("jumpToStage")}
+      storageKey="tradingagents-toc:deliberation"
+      ariaCurrent="step"
+      onSelect={jump}
+    />
   );
 }
 

@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { api, type Health, type RunView } from "../api/client";
+import { api, type Health, type RunSummaryView } from "../api/client";
 import { InstrumentIdentity } from "../components/Instruments";
+import ResearchRatingBadge from "../components/ResearchRatingBadge";
 import StatusBadge from "../components/StatusBadge";
 import { Link } from "../router";
 
 export default function Dashboard() {
   const { t } = useTranslation();
   const [health, setHealth] = useState<Health | null>(null);
-  const [runs, setRuns] = useState<RunView[]>([]);
+  const [runs, setRuns] = useState<RunSummaryView[]>([]);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -102,6 +103,7 @@ export default function Dashboard() {
               <thead>
                 <tr>
                   <th>{t("ticker")}</th>
+                  <th>{t("researchRating")}</th>
                   <th>{t("profile")}</th>
                   <th>{t("analysisDate")}</th>
                   <th>{t("status")}</th>
@@ -116,7 +118,11 @@ export default function Dashboard() {
                       <InstrumentIdentity
                         ticker={run.request.ticker}
                         instrumentName={run.instrument_name}
+                        instrumentLocalName={run.instrument_local_name}
                       />
+                    </td>
+                    <td>
+                      <ResearchRatingBadge rating={run.research_rating} />
                     </td>
                     <td className="capitalize">{run.request.profile}</td>
                     <td>{run.request.analysis_date}</td>

@@ -43,6 +43,9 @@ class RunRecord(Base):
     instrument_name: Mapped[str | None] = mapped_column(
         String(300), nullable=True
     )
+    instrument_local_name: Mapped[str | None] = mapped_column(
+        String(300), nullable=True
+    )
     request_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     config_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     version: Mapped[str] = mapped_column(String(40), nullable=False)

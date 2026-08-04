@@ -335,7 +335,9 @@ def test_trash_restore_filters_are_atomic_and_idempotent(
     assert changed_again == 0
     assert trashed[0].trashed_at is not None
     assert repeated[0].trashed_at == trashed[0].trashed_at
-    assert repository.list_runs().items == (repository.get_run(queued.id),)
+    active_page = repository.list_runs()
+    assert [item.id for item in active_page.items] == [queued.id]
+    assert active_page.items[0].research_rating is None
     trashed_page = repository.list_runs(
         trash_state=RunTrashState.TRASHED,
         q="nv",
@@ -369,6 +371,7 @@ def test_recent_instruments_are_deduplicated_and_exclude_trashed_runs(
     repository.set_instrument_name(older.id, "NVIDIA Corporation")
     repository.set_instrument_name(trashed.id, "Apple")
     repository.set_instrument_name(latest.id, "NVIDIA")
+    repository.set_instrument_local_name(latest.id, "英伟达")
     with repository.sessions.begin() as session:
         session.get(RunRecord, older.id).created_at = datetime(2026, 7, 1)
         session.get(RunRecord, trashed.id).created_at = datetime(2026, 7, 2)
@@ -381,6 +384,7 @@ def test_recent_instruments_are_deduplicated_and_exclude_trashed_runs(
     assert [(item.ticker, item.instrument_name) for item in recent] == [
         ("NVDA", "NVIDIA")
     ]
+    assert recent[0].instrument_local_name == "英伟达"
     assert recent[0].last_used_at == datetime(
         2026,
         7,
@@ -388,6 +392,7 @@ def test_recent_instruments_are_deduplicated_and_exclude_trashed_runs(
         tzinfo=timezone.utc,
     )
     assert repository.list_runs(q="nvidia").total == 2
+    assert repository.list_runs(q="英伟达").total == 1
 
 
 def test_artifacts_are_typed_retained_and_idempotent_across_retries(

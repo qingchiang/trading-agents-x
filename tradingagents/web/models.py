@@ -13,6 +13,7 @@ from tradingagents.application.contracts import (
     EvidenceSealView,
     ResearchDecision,
     RunAttemptView,
+    RunProfile,
     RunView,
 )
 
@@ -148,9 +149,11 @@ class MemoryEntry(ApiModel):
     run_id: str
     ticker: str
     instrument_name: str | None = None
+    instrument_local_name: str | None = None
     market: str | None
     asset_type: str
     analysis_date: str
+    profile: RunProfile
     decision: ResearchDecision
     outcome: MemoryOutcome
     reflection: str | None

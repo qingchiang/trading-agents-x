@@ -28,6 +28,8 @@ beforeEach(async () => {
         id: "run-1",
         source_run_id: null,
         instrument_name: "Toyota Motor Corporation",
+        instrument_local_name: "トヨタ自動車",
+        research_rating: "Hold",
         trashed_at: null,
         status: "succeeded",
         request: {
@@ -64,7 +66,7 @@ beforeEach(async () => {
   } as RunPage);
 });
 
-test("shows ticker and instrument name with a run-management entry point", async () => {
+test("shows local identity and final rating with a run-management entry point", async () => {
   render(
     <Router initialPath="/">
       <Dashboard />
@@ -72,7 +74,9 @@ test("shows ticker and instrument name with a run-management entry point", async
   );
 
   expect(await screen.findByText("Toyota Motor Corporation")).toBeVisible();
+  expect(screen.getByText("トヨタ自動車")).toBeVisible();
   expect(screen.getByText("7203.T")).toBeVisible();
+  expect(screen.getByText("Hold")).toHaveClass("research-rating-badge");
   expect(screen.getByRole("link", { name: "Manage runs" })).toHaveAttribute(
     "href",
     "/runs",

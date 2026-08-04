@@ -18,6 +18,8 @@ function makeRun(
     id,
     source_run_id: options.sourceRunId ?? null,
     instrument_name: options.instrumentName ?? null,
+    instrument_local_name: null,
+    research_rating: status === "succeeded" ? "Hold" : null,
     trashed_at: options.trashedAt ?? null,
     status,
     request: {
@@ -64,12 +66,21 @@ function result(id: string) {
         analyst: "market",
         markdown:
           "# Market report\n\nMarket evidence is balanced.[^ev_0123456789ab]\n\n" +
-          "| Signal | Reading |\n|---|---:|\n| Close | 100 USD |",
+          "| Signal | Reading |\n|---|---:|\n| Close | 100 USD |\n\n" +
+          "Supporting market context remains evidence-bound.\n\n".repeat(60) +
+          "## Risk lens\n\nDemand sensitivity remains material.\n\n" +
+          "Supporting risk context remains evidence-bound.\n\n".repeat(30),
         report_sections: [
           {
             id: "market.market-report",
             title: "Market report",
             anchor: "market-report",
+            source_refs: ["ev_0123456789ab"],
+          },
+          {
+            id: "market.risk-lens",
+            title: "Risk lens",
+            anchor: "risk-lens",
             source_refs: ["ev_0123456789ab"],
           },
         ],
@@ -416,9 +427,11 @@ test("runs, templates, trash, and restores local research", async ({
             run_id: report.id,
             ticker: report.request.ticker,
             instrument_name: report.instrument_name,
+            instrument_local_name: report.instrument_local_name,
             market: "America/New_York",
             asset_type: "stock",
             analysis_date: "2026-07-24",
+            profile: report.request.profile,
             decision: result(report.id).decision,
             outcome: {
               status: "resolved",
@@ -600,7 +613,7 @@ test("runs, templates, trash, and restores local research", async ({
   await page.goto("/memory");
   await expect(page.getByText("NVIDIA Corporation")).toBeVisible();
   await page.getByText("Decision details").click();
-  await expect(page.getByText("Demand improves")).toBeVisible();
+  await expect(page.getByText("Demand improves").first()).toBeVisible();
   await page
     .getByRole("link", { name: "Open research decision", exact: true })
     .click();
@@ -644,6 +657,45 @@ test("runs, templates, trash, and restores local research", async ({
   await expect(
     page.getByRole("navigation", { name: "Report section navigation" }),
   ).toBeVisible();
+  const reportScroller = page.locator(".report-panel .analyst-report");
+  const expandedReportWidth = await reportScroller.evaluate(
+    (element) => element.getBoundingClientRect().width,
+  );
+  await page.getByRole("button", { name: "Close navigation" }).click();
+  await expect(
+    page.getByRole("navigation", { name: "Report section navigation" }),
+  ).toBeHidden();
+  const compactNavigation = page.getByRole("button", {
+    name: "Open navigation",
+  });
+  await expect(compactNavigation).toHaveText("☰");
+  expect(
+    await compactNavigation.evaluate(
+      (element) => element.getBoundingClientRect().width,
+    ),
+  ).toBeLessThanOrEqual(36);
+  expect(
+    await reportScroller.evaluate(
+      (element) => element.getBoundingClientRect().width,
+    ),
+  ).toBe(expandedReportWidth);
+  await compactNavigation.click();
+  await page
+    .getByRole("navigation", { name: "Report section navigation" })
+    .getByRole("button", { name: "Risk lens" })
+    .click();
+  const riskOffset = await page
+    .getByRole("heading", { name: "Risk lens" })
+    .evaluate((heading) => {
+      const scroller = heading.closest(".analyst-report");
+      if (!scroller) throw new Error("report scroller not found");
+      return (
+        heading.getBoundingClientRect().top -
+        scroller.getBoundingClientRect().top
+      );
+    });
+  expect(riskOffset).toBeGreaterThanOrEqual(12);
+  expect(riskOffset).toBeLessThanOrEqual(24);
   const reportMaxHeight = await page
     .locator(".report-panel .analyst-report")
     .evaluate((element) =>

@@ -217,10 +217,13 @@ trashed before deletion, removes its checkpoint and owned application rows,
 and detaches any child reruns. Concurrent Web/worker checks are therefore
 idempotent. `TRADINGAGENTS_TRASH_RETENTION_DAYS=0` disables permanent cleanup.
 
-`runs.instrument_name` stores the identity resolver's preferred display value
-(`short_name`, then `company_name`, `long_name`, or `name`). Resolution failure
-does not fail research. The recent-instruments API deduplicates non-trashed
-runs by ticker and never derives names from LLM output.
+`runs.instrument_name` stores the identity resolver's preferred general display
+value (`short_name`, then `company_name`, `long_name`, or `name`). The optional
+`instrument_local_name` stores a configured market source's local-language name
+using the same run-time metadata-snapshot semantics. Neither name represents
+the issuer name as of the analysis date. Resolution failure does not fail
+research. The recent-instruments API deduplicates non-trashed runs by ticker and
+never derives names from LLM output.
 
 ### Database
 

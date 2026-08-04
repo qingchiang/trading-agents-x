@@ -1708,6 +1708,7 @@ class AnalysisResult(FrozenModel):
     status: RunStatus
     instrument: str
     instrument_name: str | None = None
+    instrument_local_name: str | None = None
     reports: dict[str, AnalystReport | str]
     decision: ResearchDecision | None
     numeric_audit: DecisionNumericAuditAppendix | None = None
@@ -1745,6 +1746,7 @@ class RunView(FrozenModel):
     id: str
     source_run_id: str | None = None
     instrument_name: str | None = None
+    instrument_local_name: str | None = None
     status: RunStatus
     request: AnalysisRequest
     config_snapshot: dict[str, Any]
@@ -1772,8 +1774,12 @@ class RunAttemptView(FrozenModel):
     error_code: str | None = None
 
 
+class RunSummaryView(RunView):
+    research_rating: ResearchRating | None = None
+
+
 class RunPage(FrozenModel):
-    items: tuple[RunView, ...]
+    items: tuple[RunSummaryView, ...]
     total: int = Field(ge=0)
     limit: int = Field(ge=1, le=200)
     offset: int = Field(ge=0)
@@ -1782,6 +1788,7 @@ class RunPage(FrozenModel):
 class RecentInstrument(FrozenModel):
     ticker: str
     instrument_name: str | None = None
+    instrument_local_name: str | None = None
     last_used_at: datetime
 
 

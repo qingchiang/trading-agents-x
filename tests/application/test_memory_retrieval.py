@@ -11,6 +11,7 @@ from tradingagents.application.contracts import (
     AnalysisResult,
     EvidenceBundle,
     ResearchRating,
+    RunProfile,
     RunStatus,
 )
 from tradingagents.application.database import (
@@ -52,6 +53,16 @@ def _seed_memory(
             or ("Legacy fixture invalidation was not recorded.",)
         ),
         time_horizon=time_horizon,
+    )
+    decision = decision.model_copy(
+        update={
+            "scenarios": tuple(
+                scenario.model_copy(
+                    update={"outcome": f"{ticker} {scenario.outcome}"}
+                )
+                for scenario in decision.scenarios
+            )
+        }
     )
     run, _ = repository.create_run(request, {"fixture": True})
     repository.claim_run(run.id, "fixture-worker", 30)
@@ -351,6 +362,7 @@ def test_memory_entries_support_fuzzy_filters_and_full_field_search(
         time_horizon="Three-year compound horizon",
     )
     repository.set_instrument_name(nvda_run_id, "NVIDIA")
+    repository.set_instrument_local_name(nvda_run_id, "英伟达")
     _seed_memory(
         repository,
         ticker="AAPL",
@@ -388,6 +400,10 @@ def test_memory_entries_support_fuzzy_filters_and_full_field_search(
     by_name = repository.memory_entries(q="nvidia")
     assert [entry["ticker"] for entry in by_name] == ["NVDA"]
     assert by_name[0]["instrument_name"] == "NVIDIA"
+    assert by_name[0]["instrument_local_name"] == "英伟达"
+    assert by_name[0]["profile"] is RunProfile.STANDARD
+    run_page = repository.list_runs(q="英伟达")
+    assert run_page.items[0].research_rating is ResearchRating.OVERWEIGHT
     assert [
         entry["ticker"]
         for entry in repository.memory_entries(q="valuation LESSON")
@@ -398,6 +414,7 @@ def test_memory_entries_support_fuzzy_filters_and_full_field_search(
         "power supply",
         "backlog contracts",
         "three-year compound",
+        "nvda fixture bull scenario outcome",
     ):
         assert [
             entry["ticker"]

@@ -105,6 +105,15 @@ export function ResearchDecisionContent({
           >
             {decision.thesis}
           </Markdown>
+          <div className="decision-horizon-summary">
+            <strong>{t("horizon")}</strong>
+            <Markdown
+              evidenceAliases={evidenceIndex.aliases}
+              onEvidence={onEvidence}
+            >
+              {decision.time_horizon}
+            </Markdown>
+          </div>
           <EvidenceLinks
             refs={visibleRefs(decision.evidence_refs ?? [])}
             evidenceIndex={evidenceIndex}
@@ -455,10 +464,6 @@ export function ResearchDecisionContent({
         </section>
       )}
 
-      <footer className="decision-horizon">
-        <strong>{t("horizon")}</strong>
-        <span>{decision.time_horizon}</span>
-      </footer>
     </div>
   );
 }

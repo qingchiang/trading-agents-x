@@ -85,7 +85,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     finally:
         engine.dispose()
 
-    assert revision == "0003_artifact_generation_observations"
+    assert revision == "0004_instrument_local_name"
     assert {
         "id",
         "run_id",
@@ -121,6 +121,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     assert "reports" not in table_names
     assert "legacy_imports" not in table_names
     assert "trashed_at" in run_columns
+    assert "instrument_local_name" in run_columns
     assert "ix_runs_trash" in run_indexes
     assert "next_check_at" in outcome_columns
     assert "ix_outcomes_due" in outcome_indexes
@@ -131,6 +132,15 @@ def test_v8_upgrade_preserves_research_data_and_downgrade_recreates_empty_table(
     app_settings,
 ) -> None:
     upgrade_database(app_settings, revision="0001_research_contract_v8")
+    # The current ORM includes later nullable fields. Temporarily add that field
+    # only while using the current repository to seed an otherwise-v1 database,
+    # then remove it before exercising the real migration chain.
+    seed_engine = create_sqlite_engine(app_settings.database_path)
+    with seed_engine.begin() as connection:
+        connection.exec_driver_sql(
+            "ALTER TABLE runs ADD COLUMN instrument_local_name VARCHAR(300)"
+        )
+    seed_engine.dispose()
     repository = RunRepository(app_settings)
     request = AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
     run, _ = repository.create_run(request, {"fixture": True})
@@ -173,6 +183,13 @@ def test_v8_upgrade_preserves_research_data_and_downgrade_recreates_empty_table(
             ("/archive/memory.md", "a" * 64, "imported", run.id),
         )
     repository.engine.dispose()
+
+    seed_engine = create_sqlite_engine(app_settings.database_path)
+    with seed_engine.begin() as connection:
+        connection.exec_driver_sql(
+            "ALTER TABLE runs DROP COLUMN instrument_local_name"
+        )
+    seed_engine.dispose()
 
     upgrade_database(app_settings)
 

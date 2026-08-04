@@ -10,7 +10,7 @@ import {
   api,
   type Capabilities,
   type RunPage,
-  type RunView,
+  type RunSummaryView,
 } from "../api/client";
 import i18n from "../i18n";
 import { Router, useLocation } from "../router";
@@ -28,14 +28,16 @@ vi.mock("../api/client", () => ({
 function run(
   id: string,
   ticker: string,
-  status: RunView["status"],
+  status: RunSummaryView["status"],
   trashedAt: string | null = null,
-): RunView {
+): RunSummaryView {
   return {
     id,
     source_run_id: null,
     instrument_name:
       ticker === "NVDA" ? "NVIDIA Corporation" : "Apple Inc.",
+    instrument_local_name: ticker === "NVDA" ? "英伟达" : null,
+    research_rating: status === "succeeded" ? "Overweight" : null,
     trashed_at: trashedAt,
     status,
     request: {
@@ -75,7 +77,7 @@ const capabilities = {
   defaults: { trash_retention_days: 30 },
 } as Capabilities;
 
-function page(items: RunView[], offset = 0, total = items.length): RunPage {
+function page(items: RunSummaryView[], offset = 0, total = items.length): RunPage {
   return { items, limit: 20, offset, total };
 }
 
@@ -118,6 +120,9 @@ test("filters and atomically trashes eligible runs with instrument names", async
   );
 
   expect(await screen.findByText("NVIDIA Corporation")).toBeVisible();
+  expect(screen.getByText("英伟达")).toBeVisible();
+  expect(screen.getByText("Overweight")).toHaveClass("research-rating-badge");
+  expect(screen.getByText("—")).toHaveClass("research-rating-badge");
   expect(screen.getByLabelText("Select run AAPL")).toBeDisabled();
   fireEvent.click(screen.getByLabelText("Select run NVDA"));
   fireEvent.click(

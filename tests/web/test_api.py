@@ -288,6 +288,7 @@ async def test_recent_instruments_exclude_trashed_runs_and_include_names(
         await web_client.post("/api/v1/runs", json=_payload("AAPL"))
     ).json()
     web_repository.set_instrument_name(active["id"], "NVIDIA")
+    web_repository.set_instrument_local_name(active["id"], "英伟达")
     web_repository.set_instrument_name(trashed["id"], "Apple")
     await web_client.post(f"/api/v1/runs/{trashed['id']}/cancel")
     await web_client.post(
@@ -303,6 +304,7 @@ async def test_recent_instruments_exclude_trashed_runs_and_include_names(
     assert response.status_code == 200
     assert response.json()[0]["ticker"] == "NVDA"
     assert response.json()[0]["instrument_name"] == "NVIDIA"
+    assert response.json()[0]["instrument_local_name"] == "英伟达"
 
 
 @pytest.mark.anyio
