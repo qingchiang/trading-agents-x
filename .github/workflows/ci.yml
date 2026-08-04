@@ -104,7 +104,9 @@ jobs:
           version: "0.12.1"
           enable-cache: true
       - name: Build wheel
-        run: uv build --wheel --out-dir wheelhouse
+        # Build the wheel from an sdist so an incremental in-tree build/
+        # directory cannot leak deleted package data into the wheel.
+        run: uv build --out-dir wheelhouse
       - name: Inspect wheel contents and metadata
         run: python scripts/verify_wheel.py wheelhouse/trading_agents_x-*.whl
       - name: Fresh install and runtime smoke
