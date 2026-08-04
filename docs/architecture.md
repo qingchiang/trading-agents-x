@@ -231,7 +231,7 @@ Alembic manages application tables:
 | `runs` | request, redacted settings snapshot, status, lease, error, metrics |
 | `run_attempts` | attempt state, checkpoint thread, lease and resume count |
 | `run_events` | per-run monotonic sequence, attempt, node, sanitized payload |
-| `run_artifacts` | versioned analyst, deliberation, and decision-stage artifacts |
+| `run_artifacts` | versioned analyst, deliberation, and decision-stage artifacts, including component generation observations |
 | `run_evidence` | independently sealed EvidenceBundle and digest |
 | `decisions` | typed final decision, numeric audit appendix, market identity |
 | `outcomes` | benchmark, five-interval dates, raw return, alpha |
@@ -385,7 +385,7 @@ open, and a judge fallback leaves rating/confidence unknown while marking every
 issue unresolved. Graph routing depends on stable issue IDs and dispositions,
 not on parsing prose. The Final Committee uses a reasoning pass to form the
 synthesis brief, a strict serializer for the qualitative decision core, and a
-small serializer for the optional numeric appendix. Only derived,
+reasoning-client structured generation pass for the optional numeric appendix. Only derived,
 decision-critical valuation, scenario, or market-reference arithmetic uses
 `CalculationRecord`; directly observed market references remain evidence-backed
 observations. A numeric appendix gets one bounded repair. If it still cannot be
@@ -395,8 +395,15 @@ strict qualitative conclusion. Failed initial and repair candidates are kept
 only as a size-bounded, recursively redacted numeric audit appendix; raw
 provider messages, prompts, and hidden reasoning are never persisted.
 
-Every artifact records its prompt version and structured generation method. No
-artifact stores hidden reasoning traces or raw provider conversations.
+Every artifact records its prompt version and top-level structured generation
+method. Agenda's top-level method describes Agenda generation; Final's
+top-level method continues to describe the qualitative core. Component-level
+`generation_observations` identify the logical client role, semantic-structured
+or schema-serialization task, node, and final method for Agenda, Final core,
+and Final numeric generation. These logical roles remain explicit even when a
+provider reuses the same physical client. Historical artifacts without these
+observations remain valid and are displayed as not recorded. No artifact stores
+hidden reasoning traces or raw provider conversations.
 
 Adapters may still encode transport provenance in versioned markers. Analyst
 nodes extract those markers from tool messages into typed evidence and remove
@@ -450,12 +457,17 @@ responsibility rather than separate public graph nodes:
 | `collect` (or the base `analyst.<role>` node) | Deterministic data/tool collection; normally no LLM call |
 | `context` | Deterministic role-context assembly; no provider call |
 | `report`, `write`, `reason` | Reasoning-model report, deliberation Markdown, or final synthesis brief |
-| `audit` | Non-thinking extraction of a small report/deliberation audit envelope |
-| `serialize` | Non-thinking mapping of the final synthesis to the strict decision contract |
+| `audit` | Schema-focused extraction of a small report/deliberation audit envelope |
+| `debate.agenda.serialize`, `committee.final.serialize.numeric` | Semantic structured generation by the selected reasoning client |
+| `committee.final.serialize.core` and other `serialize` phases | Schema serialization by a schema-focused client |
+| other suffixes | Workflow or system activity outside the standard phases |
 
 Per-phase wall time surrounds the actual operation, so LLM calls, tool calls,
-tokens, and elapsed time belong to the same phase. Run Detail orders these rows
-by their first persisted timeline event, not by duration.
+tokens, and active time belong to the same phase. Run Detail groups phases by
+research role in first-persisted-event order and exposes raw nodes on expansion.
+The displayed role time is cumulative phase activity, not total elapsed time for
+the parallel graph. Prepared contexts and attempt metrics remain separate
+collapsible views.
 
 ## Decision memory and outcomes
 

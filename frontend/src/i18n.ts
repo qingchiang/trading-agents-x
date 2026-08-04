@@ -181,9 +181,13 @@ const en = {
     detailedUsageCalls: "Detailed calls",
     detailedUsageCoverage: "Usage detail coverage",
     wallTime: "Wall time",
-    nodeMetrics: "Per-node metrics",
-    nodeMetricsTimelineOrder:
-      "Phases are ordered by their first persisted timeline event.",
+    cumulativeActiveTime: "Cumulative active time",
+    roleMetrics: "Metrics by role",
+    roleMetricsTimelineOrder:
+      "Roles and phases follow their first persisted timeline event. Active time is summed across phases, not graph elapsed time.",
+    callsCompact: "{{count}} calls",
+    tokensCompact: "{{count}} tokens",
+    reasoningCompact: "{{count}} reasoning",
     contextMetrics: "Prepared contexts",
     contextMetricsDescription:
       "Deterministic role contexts in timeline order; preparing them does not call a model.",
@@ -196,7 +200,32 @@ const en = {
     outputStatusRetry: "Retry requested",
     outputStatusRecovered: "Recovered",
     outputStatusAuditIncomplete: "Audit incomplete",
+    outputStatusDegraded: "Degraded",
     outputStatusFailed: "Failed",
+    responsibility: "Responsibility / phase",
+    structuredTask: "Structured task",
+    clientRole: "Client role",
+    tokens: "Tokens",
+    cacheUsage: "Cache hit / miss",
+    notRecorded: "Not recorded",
+    debateModerator: "Debate moderator",
+    bullRebuttal: "Bull rebuttal",
+    bearRebuttal: "Bear rebuttal",
+    riskLensAggressive: "Aggressive risk lens",
+    riskLensNeutral: "Neutral risk lens",
+    riskLensConservative: "Conservative risk lens",
+    workflowSystem: "Workflow / system",
+    unknownAnalyst: "Other analyst",
+    taskKind: {
+      semantic_structured: "Semantic structured",
+      schema_serialization: "Schema serialization",
+    },
+    clientRoleName: {
+      quick_reasoning: "Quick reasoning",
+      deep_reasoning: "Deep reasoning",
+      quick_serializer: "Quick serializer",
+      deep_serializer: "Deep serializer",
+    },
     phase: "Phase",
     phaseCollect: "Collect",
     phaseCollectDescription:
@@ -204,17 +233,20 @@ const en = {
     phaseContext: "Context",
     phaseContextDescription:
       "Deterministically assembles the compact role context without a provider call.",
-    phaseWrite: "Write / reason",
-    phaseWriteDescription:
+    phaseReasonWrite: "Write / reason",
+    phaseReasonWriteDescription:
       "A reasoning model writes the report, deliberation narrative, or decision synthesis brief.",
     phaseAudit: "Audit",
     phaseAuditDescription:
-      "A non-thinking serializer extracts and validates the small report or deliberation audit envelope.",
-    phaseSerialize: "Serialize",
-    phaseSerializeDescription:
-      "A non-thinking serializer maps the final synthesis brief to the strict decision contract.",
-    phaseOther: "Other",
-    phaseOtherDescription:
+      "A serializer extracts and validates the small report or deliberation audit envelope.",
+    phaseSemanticStructured: "Semantic structured",
+    phaseSemanticStructuredDescription:
+      "A reasoning client produces structured semantic content, including the debate agenda and final numeric appendix.",
+    phaseSchemaSerialization: "Schema serialization",
+    phaseSchemaSerializationDescription:
+      "A serializer maps generated content to a strict application schema, including the final decision core.",
+    phaseWorkflowOther: "Workflow / other",
+    phaseWorkflowOtherDescription:
       "A graph phase that does not use one of the standard research phase suffixes.",
     attemptMetrics: "Attempt metrics",
     noAttemptMetrics: "No attempt metrics were recorded.",
@@ -667,8 +699,13 @@ const zhCN = {
     detailedUsageCalls: "明细调用数",
     detailedUsageCoverage: "用量明细覆盖",
     wallTime: "耗时",
-    nodeMetrics: "节点指标",
-    nodeMetricsTimelineOrder: "各阶段按首次持久化到时间线的事件顺序显示。",
+    cumulativeActiveTime: "累计活动时间",
+    roleMetrics: "按角色汇总指标",
+    roleMetricsTimelineOrder:
+      "角色和阶段按首次持久化事件排序；活动时间为各 phase 累计值，不等于并行 Graph 的总耗时。",
+    callsCompact: "{{count}} 次调用",
+    tokensCompact: "{{count}} Token",
+    reasoningCompact: "{{count}} 推理 Token",
     contextMetrics: "上下文规模",
     contextMetricsDescription:
       "按时间线展示确定性组装的角色上下文；该阶段不调用模型。",
@@ -681,7 +718,32 @@ const zhCN = {
     outputStatusRetry: "已触发修复",
     outputStatusRecovered: "修复成功",
     outputStatusAuditIncomplete: "审计不完整",
+    outputStatusDegraded: "已降级",
     outputStatusFailed: "失败",
+    responsibility: "职责 / 阶段",
+    structuredTask: "结构化任务",
+    clientRole: "客户端角色",
+    tokens: "Token",
+    cacheUsage: "缓存命中 / 未命中",
+    notRecorded: "未记录",
+    debateModerator: "辩论主持",
+    bullRebuttal: "多方反驳",
+    bearRebuttal: "空方反驳",
+    riskLensAggressive: "激进风险视角",
+    riskLensNeutral: "中性风险视角",
+    riskLensConservative: "保守风险视角",
+    workflowSystem: "工作流 / 系统",
+    unknownAnalyst: "其他分析角色",
+    taskKind: {
+      semantic_structured: "语义结构化生成",
+      schema_serialization: "Schema 序列化",
+    },
+    clientRoleName: {
+      quick_reasoning: "快速推理客户端",
+      deep_reasoning: "深度推理客户端",
+      quick_serializer: "快速序列化客户端",
+      deep_serializer: "深度序列化客户端",
+    },
     phase: "阶段",
     phaseCollect: "数据收集",
     phaseCollectDescription:
@@ -689,17 +751,20 @@ const zhCN = {
     phaseContext: "上下文组装",
     phaseContextDescription:
       "确定性组装紧凑的角色上下文，不产生供应商模型调用。",
-    phaseWrite: "写作 / 推理",
-    phaseWriteDescription:
+    phaseReasonWrite: "写作 / 推理",
+    phaseReasonWriteDescription:
       "推理模型撰写分析报告、研究过程正文或最终结论合成稿。",
     phaseAudit: "审计提取",
     phaseAuditDescription:
-      "关闭 thinking 的序列化模型提取并校验轻量的报告或研究过程审计字段。",
-    phaseSerialize: "严格序列化",
-    phaseSerializeDescription:
-      "关闭 thinking 的序列化模型将最终合成稿映射为严格的研究结论契约。",
-    phaseOther: "其他",
-    phaseOtherDescription: "未使用标准研究阶段后缀的 Graph 阶段。",
+      "序列化客户端提取并校验轻量的报告或研究过程审计字段。",
+    phaseSemanticStructured: "语义结构化生成",
+    phaseSemanticStructuredDescription:
+      "推理客户端生成具有业务语义的结构化内容，包括辩论议程和最终数值附录。",
+    phaseSchemaSerialization: "Schema 序列化",
+    phaseSchemaSerializationDescription:
+      "序列化客户端将生成内容映射为严格的应用契约，包括最终结论 core。",
+    phaseWorkflowOther: "工作流 / 其他",
+    phaseWorkflowOtherDescription: "未使用标准研究阶段后缀的 Graph 阶段。",
     attemptMetrics: "分次尝试指标",
     noAttemptMetrics: "尚未记录分次尝试指标。",
     resumeCount: "恢复次数",
@@ -1143,9 +1208,13 @@ const ja = {
     detailedUsageCalls: "詳細取得呼び出し",
     detailedUsageCoverage: "使用量詳細カバレッジ",
     wallTime: "所要時間",
-    nodeMetrics: "ノード別指標",
-    nodeMetricsTimelineOrder:
-      "各フェーズは、最初に永続化されたタイムラインイベントの順に表示されます。",
+    cumulativeActiveTime: "累積アクティブ時間",
+    roleMetrics: "ロール別指標",
+    roleMetricsTimelineOrder:
+      "ロールとフェーズは最初の永続化イベント順です。アクティブ時間はフェーズの合計であり、並列グラフの経過時間ではありません。",
+    callsCompact: "{{count}} 呼び出し",
+    tokensCompact: "{{count}} トークン",
+    reasoningCompact: "推論 {{count}}",
     contextMetrics: "コンテキスト規模",
     contextMetricsDescription:
       "決定論的に組み立てたロール別コンテキストを時系列で表示します。この段階ではモデルを呼び出しません。",
@@ -1158,7 +1227,32 @@ const ja = {
     outputStatusRetry: "修復を開始",
     outputStatusRecovered: "修復済み",
     outputStatusAuditIncomplete: "監査不完全",
+    outputStatusDegraded: "縮退",
     outputStatusFailed: "失敗",
+    responsibility: "責務 / フェーズ",
+    structuredTask: "構造化タスク",
+    clientRole: "クライアント役割",
+    tokens: "トークン",
+    cacheUsage: "キャッシュヒット / ミス",
+    notRecorded: "記録なし",
+    debateModerator: "討論モデレーター",
+    bullRebuttal: "強気反論",
+    bearRebuttal: "弱気反論",
+    riskLensAggressive: "積極的リスク視点",
+    riskLensNeutral: "中立リスク視点",
+    riskLensConservative: "保守的リスク視点",
+    workflowSystem: "ワークフロー / システム",
+    unknownAnalyst: "その他のアナリスト",
+    taskKind: {
+      semantic_structured: "意味構造化生成",
+      schema_serialization: "スキーマ直列化",
+    },
+    clientRoleName: {
+      quick_reasoning: "高速推論クライアント",
+      deep_reasoning: "詳細推論クライアント",
+      quick_serializer: "高速シリアライザー",
+      deep_serializer: "詳細シリアライザー",
+    },
     phase: "フェーズ",
     phaseCollect: "データ収集",
     phaseCollectDescription:
@@ -1166,17 +1260,20 @@ const ja = {
     phaseContext: "コンテキスト構築",
     phaseContextDescription:
       "コンパクトなロール別コンテキストを決定論的に構築し、プロバイダーを呼び出しません。",
-    phaseWrite: "執筆 / 推論",
-    phaseWriteDescription:
+    phaseReasonWrite: "執筆 / 推論",
+    phaseReasonWriteDescription:
       "推論モデルがレポート、検討本文、または最終判断の統合草稿を作成します。",
     phaseAudit: "監査抽出",
     phaseAuditDescription:
-      "thinking を無効にしたシリアライザーが、レポートや検討過程の小さな監査情報を抽出・検証します。",
-    phaseSerialize: "厳格な直列化",
-    phaseSerializeDescription:
-      "thinking を無効にしたシリアライザーが最終草稿を厳格な判断契約へ変換します。",
-    phaseOther: "その他",
-    phaseOtherDescription:
+      "シリアライザーが、レポートや検討過程の小さな監査情報を抽出・検証します。",
+    phaseSemanticStructured: "意味構造化生成",
+    phaseSemanticStructuredDescription:
+      "推論クライアントが、討論アジェンダや最終数値付録など意味を持つ構造化内容を生成します。",
+    phaseSchemaSerialization: "スキーマ直列化",
+    phaseSchemaSerializationDescription:
+      "シリアライザーが生成内容を、最終判断 core を含む厳格なアプリケーション契約へ変換します。",
+    phaseWorkflowOther: "ワークフロー / その他",
+    phaseWorkflowOtherDescription:
       "標準のリサーチフェーズ接尾辞を使用しない Graph フェーズです。",
     attemptMetrics: "試行別指標",
     noAttemptMetrics: "試行別指標は記録されていません。",

@@ -401,6 +401,14 @@ const artifacts = [
     round: 0,
     schema_version: "1",
     generation_method: "tool_call",
+    generation_observations: [
+      {
+        node: "committee.final.serialize",
+        task_kind: "schema_serialization",
+        client_role: "deep_serializer",
+        generation_method: "tool_call",
+      },
+    ],
     created_at: "2026-07-24T00:00:40Z",
     content: {
       role: "bull",
@@ -919,7 +927,7 @@ test("labels runs that have no recorded artifacts", async () => {
   ).toBeVisible();
 });
 
-test("shows a collapsed per-node metrics table", async () => {
+test("groups metrics by role and expands phase observations", async () => {
   render(
     <Router initialPath="/runs/run-1">
       <RunDetail />
@@ -927,7 +935,8 @@ test("shows a collapsed per-node metrics table", async () => {
   );
 
   expect(await screen.findByRole("heading", { name: "NVDA" })).toBeVisible();
-  const summary = screen.getByText("Per-node metrics", { exact: false });
+  const roleMetrics = screen.getByRole("region", { name: "Metrics by role" });
+  const summary = within(roleMetrics).getByText("Final committee");
   const details = summary.closest("details");
   expect(details).not.toHaveAttribute("open");
 
@@ -957,14 +966,22 @@ test("shows a collapsed per-node metrics table", async () => {
   const committee = within(details!)
     .getByText("committee.final.reason")
     .closest("tr");
-  const analyst = within(details!)
+  const analystDetails = within(roleMetrics)
+    .getByText("Market")
+    .closest("details");
+  fireEvent.click(within(analystDetails!).getByText("Market"));
+  const analyst = within(analystDetails!)
     .getByText("analyst.market.collect")
     .closest("tr");
-  expect(committee).toHaveTextContent("200");
+  expect(committee).toHaveTextContent("300");
   expect(committee).toHaveTextContent("2.5s");
-  expect(analyst).toHaveTextContent("300");
+  expect(analyst).toHaveTextContent("400");
+  expect(analyst).toHaveTextContent("Not recorded");
+  expect(details).toHaveTextContent("Schema serialization");
+  expect(details).toHaveTextContent("Deep serializer");
+  expect(details).toHaveTextContent("tool_call");
   expect(
-    committee!.compareDocumentPosition(analyst!) &
+    details!.compareDocumentPosition(analystDetails!) &
       Node.DOCUMENT_POSITION_FOLLOWING,
   ).not.toBe(0);
 
