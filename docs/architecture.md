@@ -128,7 +128,10 @@ with a digit, the application performs boundary-aware token replacement and
 rewrites the formula AST and operands to stable `v1`, `v2`, and later names
 before validation. Pure numeric or punctuation-bearing names, collisions, and
 incomplete mappings remain invalid; the application never guesses an ambiguous
-mapping. A displayed derived range declares separate
+mapping. Each observed formula input binds its value and date to Evidence; the
+union of input date refs must be a subset of the calculation's input Evidence
+refs. Unknown date refs and valid date refs omitted from that input set remain
+distinct audit failures. A displayed derived range declares separate
 low and high requirements, so one scalar requirement cannot validate two
 different calculations.
 

@@ -1229,9 +1229,15 @@ class ResearchGraph:
                         "thesis, risks, invalidation, scenarios, or risk-review "
                         "adjustments, state its formula, named numeric inputs, input "
                         "Evidence refs, displayed value and precision, unit, and the "
-                        "decision field that uses it. Write 'none' when no such "
-                        "derived number exists. Directly observed Evidence values do "
-                        "not belong in this checklist.\n\n"
+                        "decision field that uses it. For every named input, state "
+                        "its exact value, the Evidence refs that support that value, "
+                        "and the Evidence refs that establish its date. Mark pure "
+                        "constants as constants without date Evidence. The row-level "
+                        "Evidence refs must include every input Evidence ref. Before finishing "
+                        "each row, verify that every numeric value used by the formula "
+                        "has an explicit input Evidence binding. Write 'none' when no "
+                        "such derived number exists. Directly observed Evidence values "
+                        "do not belong in this checklist.\n\n"
                         "PERCENTAGE CALCULATION CONTRACT:\n"
                         + percentage_guidance
                         + "\n\nSCENARIO ASSUMPTION READABILITY:\n"
@@ -1257,7 +1263,7 @@ class ResearchGraph:
                 role="final_committee",
                 content=brief,
                 generation_method=ArtifactGenerationMethod.MARKDOWN_AUDITED,
-                prompt_version="final-committee-brief-v2-percentage-contract",
+                prompt_version="final-committee-brief-v3-input-evidence-binding",
             )
             self._finish_node(
                 runtime,
@@ -1332,7 +1338,7 @@ class ResearchGraph:
                         generation_method=output.numeric_generation_method,
                     ),
                 ),
-                prompt_version="final-committee-v12-thinking-numeric",
+                prompt_version="final-committee-v13-input-evidence-binding",
             )
             self._finish_node(
                 runtime,

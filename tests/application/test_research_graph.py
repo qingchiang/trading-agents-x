@@ -429,6 +429,12 @@ def test_profiles_share_contract_but_use_distinct_topologies(
         assert "Analyst EPS consensus rises to JPY 185-195 per share" in final_reasoning_prompt
         assert "PERCENTAGE CALCULATION CONTRACT:" in final_reasoning_prompt
         assert "formulas must return a fractional ratio" in final_reasoning_prompt
+        assert "For every named input, state its exact value" in final_reasoning_prompt
+        assert "Evidence refs that establish its date" in final_reasoning_prompt
+        assert "Mark pure constants as constants without date Evidence" in (
+            final_reasoning_prompt
+        )
+        assert "every numeric value used by the formula" in final_reasoning_prompt
         agenda_prompt = next(
             prompt for schema, prompt in quick.calls if schema == "DebateAgenda"
         )

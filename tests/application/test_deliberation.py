@@ -1230,6 +1230,9 @@ def test_invalid_numeric_requirement_candidate_does_not_repair_core() -> None:
     assert [schema for schema, _prompt in llm.prompts].count(
         "ResearchDecisionCoreEnvelope"
     ) == 1
+    assert [schema for schema, _prompt in llm.prompts].count(
+        "DecisionNumericDraft"
+    ) == 1
 
 
 def test_numeric_requirement_preflight_reports_safe_field_paths() -> None:
@@ -1474,6 +1477,111 @@ def test_4483_requirement_date_ref_mismatch_preserves_qualitative_decision() -> 
     assert all(
         warning.code != "decision.numeric_repair_noop" for warning in result.warnings
     )
+    core_prompt = next(
+        prompt
+        for schema, prompt in llm.prompts
+        if schema == "ResearchDecisionCoreEnvelope"
+    )
+    assert "union of inputs[*].date_evidence_refs must be a subset" in core_prompt
+    example_json = core_prompt.split("VALID EXAMPLE:\n", 1)[1].split(
+        "\n\nALLOWED EVIDENCE REFS:", 1
+    )[0]
+    example = json.loads(example_json)
+    example_requirement = example["numeric_requirement_candidates"][0]
+    assert example_requirement["inputs"][0]["date_evidence_refs"] == [first_ref]
+    assert example_requirement["inputs"][1]["date_evidence_refs"] == [other.ref]
+    assert example_requirement["input_evidence_refs"] == [first_ref, other.ref]
+
+
+def test_numeric_requirement_preflight_distinguishes_invalid_and_unbound_date_refs(
+) -> None:
+    state = _state()
+    bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
+    first_ref = bundle.items[0].ref
+    other = EvidenceItem.create(
+        source="fixture.other",
+        evidence_type="market snapshot",
+        requested_date=bundle.analysis_date,
+        effective_date=bundle.analysis_date,
+        value=2,
+        unit="USD",
+    )
+    bundle = EvidenceBundle(
+        instrument=bundle.instrument,
+        analysis_date=bundle.analysis_date,
+        items=(*bundle.items, other),
+        sealed_at=bundle.sealed_at,
+    )
+    state["evidence_bundle"] = bundle.model_dump(mode="json")
+    core = _core_draft_from_decision(
+        research_decision(evidence_refs=(first_ref,)).model_dump(mode="json")
+    )
+    unknown_ref = "ev_ffffffffffff"
+    candidates = []
+    for identifier, date_refs in (
+        ("req_invalid_only", [unknown_ref]),
+        ("req_invalid_and_unbound", [unknown_ref, other.ref]),
+    ):
+        candidates.append(
+            {
+                "id": identifier,
+                "component_path": "thesis",
+                "label": identifier,
+                "stated_value": 50.0,
+                "fraction_digits": 1,
+                "formula": "value / divisor",
+                "inputs": [
+                    {
+                        "name": "value",
+                        "value": 100,
+                        "date_evidence_refs": date_refs,
+                    },
+                    {"name": "divisor", "value": 2},
+                ],
+                "input_evidence_refs": [first_ref],
+                "unit": "x",
+                "display_scale": "base",
+                "limitations": ["Fixture limitation."],
+            }
+        )
+    envelope = ResearchDecisionCoreEnvelope.model_validate(
+        {
+            **core.model_dump(mode="json"),
+            "numeric_requirements_declared": True,
+            "numeric_requirement_candidates": candidates,
+        }
+    )
+    llm = _SequenceLLM(
+        {
+            "ResearchDecisionCoreEnvelope": [envelope],
+            "DecisionNumericDraft": [DecisionNumericDraft(requested=False)],
+        }
+    )
+
+    result = invoke_research_decision(
+        llm,
+        prompt="Form the final decision.",
+        state=state,
+        node="committee.final",
+        require_risk_adjustments=False,
+    )
+
+    assert result.value.thesis == core.thesis
+    assert result.value.numeric_audit_status is NumericAuditStatus.PARTIAL
+    assert result.numeric_audit is not None
+    assert result.numeric_audit.omitted_components[0].issue_codes == (
+        "numeric.requirement_candidate.0.date_refs.invalid_evidence",
+    )
+    assert result.numeric_audit.omitted_components[1].issue_codes == (
+        "numeric.requirement_candidate.1.date_refs.invalid_evidence",
+        "numeric.requirement_candidate.1.date_refs.not_input_refs",
+    )
+    assert [schema for schema, _prompt in llm.prompts].count(
+        "ResearchDecisionCoreEnvelope"
+    ) == 1
+    assert [schema for schema, _prompt in llm.prompts].count(
+        "DecisionNumericDraft"
+    ) == 1
 
 
 def test_4483_salvage_contains_invalid_date_ref_relationship() -> None:
@@ -2428,6 +2536,10 @@ def test_final_serializers_preserve_output_language_in_primary_and_repair(
     assert all(
         "formulas must return a fractional ratio" in prompt
         for _schema, prompt in llm.prompts
+    )
+    assert all(
+        "union of inputs[*].date_evidence_refs must be a subset" in prompt
+        for _schema, prompt in llm.prompts[:2]
     )
 
 

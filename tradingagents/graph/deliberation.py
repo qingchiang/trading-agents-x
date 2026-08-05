@@ -498,15 +498,21 @@ def _preflight_numeric_requirements(
             )
             continue
         date_evidence_refs = set(_calculation_date_refs(requirement.inputs))
-        if not date_evidence_refs.issubset(requirement.input_evidence_refs):
-            issue = f"{prefix}.date_refs.not_input_refs"
-            issues.append(issue)
+        date_ref_issues: list[str] = []
+        invalid_date_refs = date_evidence_refs - valid_evidence_refs
+        if invalid_date_refs:
+            date_ref_issues.append(f"{prefix}.date_refs.invalid_evidence")
+        valid_date_refs = date_evidence_refs & valid_evidence_refs
+        if not valid_date_refs.issubset(requirement.input_evidence_refs):
+            date_ref_issues.append(f"{prefix}.date_refs.not_input_refs")
+        if date_ref_issues:
+            issues.extend(date_ref_issues)
             omissions.append(
                 NumericAuditOmission(
                     component_path=requirement.component_path,
                     component_type=NumericAuditComponentType.DECISION_CLAIM,
                     reference_label=requirement.label,
-                    issue_codes=(issue,),
+                    issue_codes=tuple(date_ref_issues),
                 )
             )
             continue
@@ -1418,6 +1424,8 @@ def invoke_research_decision(
     valid_refs = tuple(item.ref for item in bundle.items)
     valid_memory_refs = tuple(memory.refs if memory is not None else ())
     first_ref = valid_refs[0]
+    second_ref = valid_refs[1] if len(valid_refs) > 1 else first_ref
+    example_input_refs = tuple(dict.fromkeys((first_ref, second_ref)))
     risk_roles = tuple(state.get("risk_reviews", {}))
     resolved_language = output_language or str(
         state.get("output_language") or ReportLanguage.ENGLISH.prompt_label
@@ -1532,10 +1540,10 @@ def invoke_research_decision(
                     CalculationInputDraft(
                         name="close_price",
                         value=100,
-                        date_evidence_refs=(first_ref,),
+                        date_evidence_refs=(second_ref,),
                     ),
                 ),
-                input_evidence_refs=(first_ref,),
+                input_evidence_refs=example_input_refs,
                 unit="%",
                 display_scale=NumericDisplayScale.BASE,
                 limitations=(example_text["valuation_limitation"],),
@@ -1570,6 +1578,9 @@ def invoke_research_decision(
                 "inputs must be an array of {name, value, date_evidence_refs} objects, "
                 "never a dynamic mapping. Each observed input lists only the Evidence "
                 "refs that establish its date; pure constants use an empty list. "
+                "The union of inputs[*].date_evidence_refs must be a subset of the "
+                "requirement's input_evidence_refs. Never place an Evidence ref only "
+                "in date_evidence_refs. "
                 "Limitations must be an array of strings. Every "
                 "component_path must identify one exact core field such as risks.0 "
                 "or catalysts.0 or scenarios.base.core_assumptions.2; omit an uncertain annotation "
@@ -1593,8 +1604,11 @@ def invoke_research_decision(
             "values, limitations are string arrays, and component paths point to "
             "specific indexed core fields. Each formula input supplies "
             "date_evidence_refs for the Evidence that dates that input; explanatory "
-            "background refs do not belong there. Omit a candidate when its exact core "
-            "location cannot be identified. Audit decision-critical derived values "
+            "background refs do not belong there. The union of "
+            "inputs[*].date_evidence_refs must be a subset of the requirement's "
+            "input_evidence_refs; never place an Evidence ref only in "
+            "date_evidence_refs. Omit a candidate when its exact core location cannot "
+            "be identified. Audit decision-critical derived values "
             "in catalysts, but do not annotate unresolved questions. Use paired "
             "range_low/range_high requirements with one display_group_id for a "
             "derived range. "
