@@ -18,7 +18,7 @@ from ..errors import NoMarketDataError
 from ..lookahead import is_near_live
 from ..y_finance import get_fundamentals as get_yfinance_fundamentals
 from .common import canonical_a_share
-from .company import classify_entity, get_company_profile
+from .company import classify_entity, get_company_profile_snapshot
 from .sina_finance import (
     fetch_finance_records,
     filter_visible_records,
@@ -185,6 +185,7 @@ def get_fundamentals(ticker: str, curr_date: str | None = None) -> str:
     validate_analysis_date(curr_date)
     canonical, _code, _exchange = canonical_a_share(ticker)
     profile_issue: str | None = None
+    profile_retrieved_at: str | None = None
     abstract_issue: str | None = None
     if curr_date is not None and not is_near_live(curr_date, ticker):
         profile = pd.DataFrame()
@@ -193,7 +194,9 @@ def get_fundamentals(ticker: str, curr_date: str | None = None) -> str:
         )
     else:
         try:
-            profile = get_company_profile(ticker)
+            profile_snapshot = get_company_profile_snapshot(ticker)
+            profile = profile_snapshot.frame
+            profile_retrieved_at = profile_snapshot.retrieved_at
             if profile.empty:
                 profile_issue = "no company profile returned"
         except Exception as exc:  # noqa: BLE001 - partial assembler result is useful
@@ -250,6 +253,7 @@ def get_fundamentals(ticker: str, curr_date: str | None = None) -> str:
                 and profile_issue.startswith("live-only")
                 else f"live-only retrieval unavailable: {profile_issue or 'no data'}"
             ),
+            retrieved_at=profile_retrieved_at,
         )
     else:
         profile_body = (
@@ -262,6 +266,7 @@ def get_fundamentals(ticker: str, curr_date: str | None = None) -> str:
             requested=requested,
             effective="current reference",
             timing="live-only current company reference; not historical PIT",
+            retrieved_at=profile_retrieved_at,
         )
     profile_block = attach_evidence_span(
         attach_provenance(profile_body, profile_record),

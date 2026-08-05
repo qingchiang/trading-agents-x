@@ -54,6 +54,7 @@ const eventNames = [
   "node.numeric_audit_retry",
   "node.numeric_audit_recovered",
   "node.numeric_audit_degraded",
+  "decision.numeric_display_scale_normalized",
   "decision.numeric_singleton_promoted",
   "decision.numeric_range_reordered",
   "artifact.created",

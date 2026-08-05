@@ -187,7 +187,13 @@ class DecisionNumericRequirementDraft(BaseModel):
     inputs: tuple[CalculationInputDraft, ...] = Field(min_length=1)
     input_evidence_refs: tuple[str, ...] = Field(min_length=1)
     unit: str = Field(min_length=1, max_length=32)
-    display_scale: NumericDisplayScale
+    display_scale: NumericDisplayScale = Field(
+        description=(
+            "Reader-facing scale for the formula result only; never inherit an "
+            "input's measurement scale. Dimensionless %, percent, pct, pp, "
+            "percentage points, bps, basis points, x, and 倍 results use base."
+        )
+    )
     display_role: Literal["scalar", "range_low", "range_high"] = "scalar"
     display_group_id: str | None = Field(
         default=None,
@@ -281,6 +287,7 @@ class _NumericRequirementPreflight:
     requirements: tuple[DecisionNumericRequirementDraft, ...]
     issues: tuple[str, ...]
     omissions: tuple[NumericAuditOmission, ...]
+    normalized_display_scales: int = 0
 
 
 _NUMERIC_REQUIREMENT_ERROR_REASONS = {
@@ -338,7 +345,7 @@ def _numeric_requirement_validation_issues(
 
 
 def _normalize_numeric_requirement_candidate(candidate: Any) -> Any:
-    """Canonicalize unambiguous Unicode operands before soft schema validation."""
+    """Canonicalize unambiguous non-ASCII-safe operands before validation."""
 
     if isinstance(candidate, BaseModel):
         return candidate
@@ -357,35 +364,52 @@ def _normalize_numeric_requirement_candidate(candidate: Any) -> Any:
     if all(re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name) for name in names):
         return candidate
     normalized_names = [unicodedata.normalize("NFKC", name) for name in names]
-    if len(set(normalized_names)) != len(normalized_names) or any(
-        not name.isidentifier() for name in normalized_names
+    normalized_formula = unicodedata.normalize("NFKC", formula)
+    if len(set(normalized_names)) != len(normalized_names):
+        return candidate
+    digit_prefixed_identifier = re.compile(
+        r"^(?=[0-9A-Za-z_]*[A-Za-z_])[0-9][0-9A-Za-z_]*$"
+    )
+    if any(
+        not name.isidentifier() and not digit_prefixed_identifier.fullmatch(name)
+        for name in normalized_names
     ):
-        return candidate
-    try:
-        tree = ast.parse(formula, mode="eval")
-    except SyntaxError:
-        return candidate
-    referenced_names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
-    if referenced_names != set(normalized_names):
         return candidate
     replacements = {
         name: f"v{index}" for index, name in enumerate(normalized_names, start=1)
     }
+    operand_pattern = re.compile(
+        r"(?<!\w)(?:"
+        + "|".join(
+            re.escape(name)
+            for name in sorted(normalized_names, key=len, reverse=True)
+        )
+        + r")(?!\w)"
+    )
+    matched_names: set[str] = set()
 
-    class _OperandRenamer(ast.NodeTransformer):
-        def visit_Name(self, node: ast.Name) -> ast.Name:  # noqa: N802
-            replacement = replacements.get(node.id)
-            return ast.copy_location(ast.Name(id=replacement, ctx=node.ctx), node)
+    def replace_operand(match: re.Match[str]) -> str:
+        name = match.group(0)
+        matched_names.add(name)
+        return replacements[name]
 
-    rewritten = _OperandRenamer().visit(tree)
-    ast.fix_missing_locations(rewritten)
+    rewritten_formula = operand_pattern.sub(replace_operand, normalized_formula)
+    if matched_names != set(normalized_names):
+        return candidate
+    try:
+        tree = ast.parse(rewritten_formula, mode="eval")
+    except SyntaxError:
+        return candidate
+    referenced_names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+    if referenced_names != set(replacements.values()):
+        return candidate
     normalized_inputs = [
         {**dict(item), "name": replacements[name]}
         for item, name in zip(raw_inputs, normalized_names, strict=True)
     ]
     return {
         **dict(candidate),
-        "formula": ast.unparse(rewritten),
+        "formula": ast.unparse(tree),
         "inputs": normalized_inputs,
     }
 
@@ -399,6 +423,7 @@ def _preflight_numeric_requirements(
     issues: list[str] = []
     omissions: list[NumericAuditOmission] = []
     seen_ids: set[str] = set()
+    normalized_display_scale_ids: set[str] = set()
     core = envelope.qualitative_core()
     for index, candidate in enumerate(envelope.numeric_requirement_candidates):
         candidate = _normalize_numeric_requirement_candidate(candidate)
@@ -438,6 +463,15 @@ def _preflight_numeric_requirements(
                 )
             )
             continue
+        normalized_display_scale = False
+        if (
+            _requires_base_display_scale(requirement.unit)
+            and requirement.display_scale is not NumericDisplayScale.BASE
+        ):
+            requirement = requirement.model_copy(
+                update={"display_scale": NumericDisplayScale.BASE}
+            )
+            normalized_display_scale = True
         if requirement.id in seen_ids:
             issue = f"{prefix}.duplicate_id"
             issues.append(issue)
@@ -480,7 +514,28 @@ def _preflight_numeric_requirements(
                 )
             )
             continue
+        date_evidence_refs = set(_calculation_date_refs(requirement.inputs))
+        date_ref_issues: list[str] = []
+        invalid_date_refs = date_evidence_refs - valid_evidence_refs
+        if invalid_date_refs:
+            date_ref_issues.append(f"{prefix}.date_refs.invalid_evidence")
+        valid_date_refs = date_evidence_refs & valid_evidence_refs
+        if not valid_date_refs.issubset(requirement.input_evidence_refs):
+            date_ref_issues.append(f"{prefix}.date_refs.not_input_refs")
+        if date_ref_issues:
+            issues.extend(date_ref_issues)
+            omissions.append(
+                NumericAuditOmission(
+                    component_path=requirement.component_path,
+                    component_type=NumericAuditComponentType.DECISION_CLAIM,
+                    reference_label=requirement.label,
+                    issue_codes=tuple(date_ref_issues),
+                )
+            )
+            continue
         seen_ids.add(requirement.id)
+        if normalized_display_scale:
+            normalized_display_scale_ids.add(requirement.id)
         requirements.append(requirement)
     grouped = {
         group_id: tuple(item for item in requirements if item.display_group_id == group_id)
@@ -531,6 +586,9 @@ def _preflight_numeric_requirements(
         requirements=tuple(requirements),
         issues=tuple(issues),
         omissions=tuple(omissions),
+        normalized_display_scales=sum(
+            item.id in normalized_display_scale_ids for item in requirements
+        ),
     )
 
 
@@ -1052,11 +1110,16 @@ def decision_display_scale_guidance() -> str:
 
     return (
         "Every numeric requirement must declare display_scale separately from its "
-        "canonical unit. Formula inputs and results stay in base units. Use base, "
-        "thousand, ten_thousand, million, hundred_million, billion, or trillion. "
-        "For example, raw result 80,598,000,000 with unit=USD and "
+        "canonical unit. Display scale describes only the formula result and must "
+        "never be inherited from an input's measurement scale. Use base, thousand, "
+        "ten_thousand, million, hundred_million, billion, or trillion. Results with "
+        "unit %, percent, pct, pp, percentage points, bps, basis points, x, or 倍 "
+        "are dimensionless and must use display_scale=base. For example, a growth "
+        "formula using net-income inputs 332,129 and 245,447 that are each measured "
+        "in million JPY still has unit=% and display_scale=base, not million. For an "
+        "amount example, raw result 80,598,000,000 with unit=USD and "
         "display_scale=hundred_million compares with stated_value=805.98. Do not "
-        "encode scale in unit strings such as billion USD, 亿美元, or 百万日元."
+        "encode result scale in unit strings such as billion USD, 亿美元, or 百万日元."
     )
 
 
@@ -1388,6 +1451,8 @@ def invoke_research_decision(
     valid_refs = tuple(item.ref for item in bundle.items)
     valid_memory_refs = tuple(memory.refs if memory is not None else ())
     first_ref = valid_refs[0]
+    second_ref = valid_refs[1] if len(valid_refs) > 1 else first_ref
+    example_input_refs = tuple(dict.fromkeys((first_ref, second_ref)))
     risk_roles = tuple(state.get("risk_reviews", {}))
     resolved_language = output_language or str(
         state.get("output_language") or ReportLanguage.ENGLISH.prompt_label
@@ -1502,10 +1567,10 @@ def invoke_research_decision(
                     CalculationInputDraft(
                         name="close_price",
                         value=100,
-                        date_evidence_refs=(first_ref,),
+                        date_evidence_refs=(second_ref,),
                     ),
                 ),
-                input_evidence_refs=(first_ref,),
+                input_evidence_refs=example_input_refs,
                 unit="%",
                 display_scale=NumericDisplayScale.BASE,
                 limitations=(example_text["valuation_limitation"],),
@@ -1540,6 +1605,9 @@ def invoke_research_decision(
                 "inputs must be an array of {name, value, date_evidence_refs} objects, "
                 "never a dynamic mapping. Each observed input lists only the Evidence "
                 "refs that establish its date; pure constants use an empty list. "
+                "The union of inputs[*].date_evidence_refs must be a subset of the "
+                "requirement's input_evidence_refs. Never place an Evidence ref only "
+                "in date_evidence_refs. "
                 "Limitations must be an array of strings. Every "
                 "component_path must identify one exact core field such as risks.0 "
                 "or catalysts.0 or scenarios.base.core_assumptions.2; omit an uncertain annotation "
@@ -1563,8 +1631,11 @@ def invoke_research_decision(
             "values, limitations are string arrays, and component paths point to "
             "specific indexed core fields. Each formula input supplies "
             "date_evidence_refs for the Evidence that dates that input; explanatory "
-            "background refs do not belong there. Omit a candidate when its exact core "
-            "location cannot be identified. Audit decision-critical derived values "
+            "background refs do not belong there. The union of "
+            "inputs[*].date_evidence_refs must be a subset of the requirement's "
+            "input_evidence_refs; never place an Evidence ref only in "
+            "date_evidence_refs. Omit a candidate when its exact core location cannot "
+            "be identified. Audit decision-critical derived values "
             "in catalysts, but do not annotate unresolved questions. Use paired "
             "range_low/range_high requirements with one display_group_id for a "
             "derived range. "
@@ -1587,6 +1658,16 @@ def invoke_research_decision(
         valid_evidence_refs=set(valid_refs),
     )
     numeric_node = f"{node}.numeric"
+    if event_writer is not None and requirement_preflight.normalized_display_scales:
+        event_writer(
+            {
+                "event_type": "decision.numeric_display_scale_normalized",
+                "node": numeric_node,
+                "payload": {
+                    "count": requirement_preflight.normalized_display_scales,
+                },
+            }
+        )
     numeric_phase = (
         metrics.phase(numeric_node, event_writer=event_writer)
         if metrics is not None
@@ -2404,6 +2485,30 @@ def _requirement_check(
     rounded_canonical_result: int | float | None = None,
     issue_codes: tuple[str, ...] = (),
 ) -> NumericRequirementCheck:
+    input_evidence_refs = requirement.input_evidence_refs
+    input_evidence_ref_set = set(input_evidence_refs)
+    date_evidence_refs = _calculation_date_refs(requirement.inputs)
+    invalid_date_refs = not set(date_evidence_refs).issubset(input_evidence_ref_set)
+    if invalid_date_refs:
+        date_evidence_refs = tuple(
+            ref for ref in date_evidence_refs if ref in input_evidence_ref_set
+        )
+        calculation_status = NumericCalculationStatus.INVALID
+        display_status = NumericDisplayStatus.NOT_CHECKED
+        calculation_id = None
+        canonical_result = None
+        comparison_result = None
+        comparison_difference = None
+        rounded_stated_value = None
+        rounded_canonical_result = None
+        issue_codes = tuple(
+            dict.fromkeys(
+                (
+                    *issue_codes,
+                    f"numeric.requirement.{requirement.id}.date_refs.not_input_refs",
+                )
+            )
+        )
     return NumericRequirementCheck(
         requirement_id=requirement.id,
         calculation_id=calculation_id,
@@ -2415,8 +2520,8 @@ def _requirement_check(
         display_scale=requirement.display_scale,
         formula=requirement.formula,
         inputs=requirement_input_mapping(requirement),
-        input_evidence_refs=requirement.input_evidence_refs,
-        date_evidence_refs=_calculation_date_refs(requirement.inputs),
+        input_evidence_refs=input_evidence_refs,
+        date_evidence_refs=date_evidence_refs,
         canonical_result=canonical_result,
         comparison_result=comparison_result,
         comparison_difference=comparison_difference,
@@ -3631,6 +3736,13 @@ def _evaluate_formula(
 _PERCENT_CALCULATION_UNITS = {"%", "PCT", "PERCENT"}
 _PERCENTAGE_POINT_CALCULATION_UNITS = {"PP", "PERCENTAGE POINTS"}
 _BASIS_POINT_CALCULATION_UNITS = {"BPS", "BASIS POINTS"}
+_DIMENSIONLESS_BASE_DISPLAY_UNITS = {
+    *_PERCENT_CALCULATION_UNITS,
+    *_PERCENTAGE_POINT_CALCULATION_UNITS,
+    *_BASIS_POINT_CALCULATION_UNITS,
+    "X",
+    "倍",
+}
 
 _DISPLAY_SCALE_FACTORS = {
     NumericDisplayScale.BASE: Decimal("1"),
@@ -3649,6 +3761,10 @@ def _is_ratio_scaled_calculation_unit(unit: str) -> bool:
         | _PERCENTAGE_POINT_CALCULATION_UNITS
         | _BASIS_POINT_CALCULATION_UNITS
     )
+
+
+def _requires_base_display_scale(unit: str) -> bool:
+    return unit.strip().upper() in _DIMENSIONLESS_BASE_DISPLAY_UNITS
 
 
 def _display_values_approximately_match(

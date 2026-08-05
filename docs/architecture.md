@@ -121,11 +121,21 @@ canonical result and the deterministically scaled reader-facing value.
 Reader-facing values that differ by no more than one declared last-place unit
 and one percent relative error are retained as `approximately_matched`; this
 does not weaken formula, unit, sign, Evidence, or PIT validation and does not
-degrade an otherwise complete numeric audit.
+degrade an otherwise complete numeric audit. Display scale describes only the
+formula result and is never inherited from an input's source measurement scale.
+The application deterministically normalizes percentage, percentage-point,
+basis-point, and multiple results to `base`; compact amount scales remain
+explicit serializer declarations.
 Serializer-facing operands remain ASCII identifiers. If a provider returns an
-otherwise unambiguous Unicode identifier, the application rewrites the formula
-AST and operands to stable `v1`, `v2`, and later names before validation; it
-never guesses an ambiguous mapping. A displayed derived range declares separate
+otherwise unambiguous Unicode identifier or an identifier-like token beginning
+with a digit, the application performs boundary-aware token replacement and
+rewrites the formula AST and operands to stable `v1`, `v2`, and later names
+before validation. Pure numeric or punctuation-bearing names, collisions, and
+incomplete mappings remain invalid; the application never guesses an ambiguous
+mapping. Each observed formula input binds its value and date to Evidence; the
+union of input date refs must be a subset of the calculation's input Evidence
+refs. Unknown date refs and valid date refs omitted from that input set remain
+distinct audit failures. A displayed derived range declares separate
 low and high requirements, so one scalar requirement cannot validate two
 different calculations.
 
@@ -520,7 +530,9 @@ from runtime context rather than an LLM-provided argument.
 Sources truncate observations to the cutoff. A disclosure/update source uses
 the conservative visibility boundary. Live-only values are withheld from
 historical runs; absence remains unknown rather than becoming a neutral or
-bearish signal.
+bearish signal. When a live-only response is cached, its producer-owned
+retrieval timestamp is cached with the payload and reused by consumers; cache
+hits are never restamped at assembly time.
 
 ### Vendor chains and assemblers
 

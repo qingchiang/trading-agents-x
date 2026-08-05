@@ -9,6 +9,8 @@ from tradingagents.dataflows.cn import cn_fundamentals, company
 from tradingagents.dataflows.errors import NoMarketDataError
 from tradingagents.provenance import extract_evidence_spans, extract_provenance
 
+_PROFILE_RETRIEVED_AT = "2026-07-19T02:03:04+00:00"
+
 
 def _abstract(*, bank: bool = False) -> pd.DataFrame:
     data = {
@@ -35,7 +37,14 @@ def _install_sources(monkeypatch, *, bank=False):
             "主营业务": ["存贷款" if bank else "生产销售"],
         }
     )
-    monkeypatch.setattr(cn_fundamentals, "get_company_profile", lambda *_args: profile)
+    monkeypatch.setattr(
+        cn_fundamentals,
+        "get_company_profile_snapshot",
+        lambda *_args: company.CompanyProfileSnapshot(
+            frame=profile,
+            retrieved_at=_PROFILE_RETRIEVED_AT,
+        ),
+    )
     monkeypatch.setattr(
         cn_fundamentals,
         "fetch_finance_records",
@@ -49,7 +58,7 @@ def test_historical_analysis_never_queries_current_yfinance(monkeypatch):
     current = mock.Mock(side_effect=AssertionError("current snapshot queried"))
     profile = mock.Mock(side_effect=AssertionError("current profile queried"))
     monkeypatch.setattr(cn_fundamentals, "get_yfinance_fundamentals", current)
-    monkeypatch.setattr(cn_fundamentals, "get_company_profile", profile)
+    monkeypatch.setattr(cn_fundamentals, "get_company_profile_snapshot", profile)
 
     output = cn_fundamentals.get_fundamentals("600519.SS", "2026-04-01")
 
@@ -84,6 +93,12 @@ def test_live_analysis_adds_separate_yfinance_valuation_provenance(monkeypatch):
     records = extract_provenance(output)
     assert len(records) == 3
     assert len({record.source for record in records}) == 3
+    profile_record = next(
+        record
+        for record in records
+        if record.source == "AkShare / CNINFO company profile"
+    )
+    assert profile_record.retrieved_at == _PROFILE_RETRIEVED_AT
     spans = extract_evidence_spans(output)
     assert {span.temporal_scope for span in spans} == {
         "point_in_time",
@@ -123,7 +138,7 @@ def test_metric_matching_never_substitutes_growth_rate_for_amount():
 def test_profile_failure_still_returns_disclosure_abstract(monkeypatch):
     monkeypatch.setattr(
         cn_fundamentals,
-        "get_company_profile",
+        "get_company_profile_snapshot",
         mock.Mock(side_effect=RuntimeError("profile down")),
     )
     monkeypatch.setattr(
@@ -146,7 +161,14 @@ def test_profile_failure_still_returns_disclosure_abstract(monkeypatch):
 
 @pytest.mark.unit
 def test_both_china_sources_unavailable_raises_for_router_fallback(monkeypatch):
-    monkeypatch.setattr(cn_fundamentals, "get_company_profile", lambda *_args: pd.DataFrame())
+    monkeypatch.setattr(
+        cn_fundamentals,
+        "get_company_profile_snapshot",
+        lambda *_args: company.CompanyProfileSnapshot(
+            frame=pd.DataFrame(),
+            retrieved_at=_PROFILE_RETRIEVED_AT,
+        ),
+    )
     monkeypatch.setattr(
         cn_fundamentals,
         "fetch_finance_records",
@@ -167,7 +189,7 @@ def test_both_china_sources_unavailable_raises_for_router_fallback(monkeypatch):
 def test_invalid_date_is_rejected_before_any_fundamental_source(monkeypatch):
     profile = mock.Mock(side_effect=AssertionError("profile was queried"))
     abstract = mock.Mock(side_effect=AssertionError("abstract was queried"))
-    monkeypatch.setattr(cn_fundamentals, "get_company_profile", profile)
+    monkeypatch.setattr(cn_fundamentals, "get_company_profile_snapshot", profile)
     monkeypatch.setattr(cn_fundamentals, "fetch_finance_records", abstract)
 
     with pytest.raises(ValueError, match="expected YYYY-MM-DD"):
@@ -177,7 +199,9 @@ def test_invalid_date_is_rejected_before_any_fundamental_source(monkeypatch):
 
 
 @pytest.mark.unit
-def test_cninfo_profile_transport_is_bounded_and_returns_defensive_copy(monkeypatch):
+def test_cninfo_profile_transport_caches_snapshot_and_returns_defensive_copy(
+    monkeypatch,
+):
     company.clear_cache()
     values = {
         key: value
@@ -192,12 +216,16 @@ def test_cninfo_profile_transport_is_bounded_and_returns_defensive_copy(monkeypa
     monkeypatch.setattr(company, "_cninfo_headers", lambda: {"Accept-Enckey": "signed"})
     monkeypatch.setattr(company.requests, "post", post)
 
-    first = company.get_company_profile("600519.SS")
-    first.iloc[0, 0] = 999
-    second = company.get_company_profile("600519.SS")
+    first = company.get_company_profile_snapshot("600519.SS")
+    first.frame.iloc[0, 0] = 999
+    second = company.get_company_profile_snapshot("600519.SS")
+    compatible_frame = company.get_company_profile("600519.SS")
 
-    assert second.iloc[0]["公司名称"] == 0
-    assert second.shape == (1, 26)
+    assert second.frame.iloc[0]["公司名称"] == 0
+    assert second.frame.shape == (1, 26)
+    assert compatible_frame.iloc[0]["公司名称"] == 0
+    assert first.retrieved_at == second.retrieved_at
+    assert second.retrieved_at.endswith("+00:00")
     assert post.call_count == 1
     assert post.call_args.kwargs["timeout"] == company.REQUEST_TIMEOUT
     assert post.call_args.kwargs["params"] == {"scode": "600519"}

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from functools import lru_cache
 
 import pandas as pd
@@ -61,6 +63,14 @@ _FINANCIAL_TOKENS = (
 )
 
 
+@dataclass(frozen=True)
+class CompanyProfileSnapshot:
+    """One successful CNINFO response and its producer-owned retrieval time."""
+
+    frame: pd.DataFrame
+    retrieved_at: str
+
+
 def clear_cache() -> None:
     """Clear the successful company-profile cache (primarily for tests)."""
     _profile_by_code.cache_clear()
@@ -95,7 +105,7 @@ def _cninfo_headers() -> dict[str, str]:
 
 
 @lru_cache(maxsize=128)
-def _profile_by_code(code: str) -> pd.DataFrame:
+def _profile_by_code(code: str) -> CompanyProfileSnapshot:
     headers = _cninfo_headers()
 
     def request_profile():
@@ -112,6 +122,7 @@ def _profile_by_code(code: str) -> pd.DataFrame:
         request_profile,
         label="AkShare/CNINFO stock_profile_cninfo",
     )
+    retrieved_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     try:
         count = int(payload.get("count", 0))
         records = payload.get("records") or []
@@ -120,7 +131,10 @@ def _profile_by_code(code: str) -> pd.DataFrame:
             f"CNINFO company-profile response has an invalid envelope: {exc}"
         ) from exc
     if count == 0:
-        return pd.DataFrame(columns=_PROFILE_COLUMNS)
+        return CompanyProfileSnapshot(
+            frame=pd.DataFrame(columns=_PROFILE_COLUMNS),
+            retrieved_at=retrieved_at,
+        )
     if count != 1 or not records or not isinstance(records[0], dict):
         raise AkShareSchemaError(
             f"CNINFO company-profile response expected one record, got count={count}."
@@ -133,13 +147,25 @@ def _profile_by_code(code: str) -> pd.DataFrame:
             f"missing required key(s) {missing_keys}."
         )
     values = [record[key] for key, _label in _PROFILE_FIELD_MAP]
-    return pd.DataFrame([values], columns=_PROFILE_COLUMNS)
+    return CompanyProfileSnapshot(
+        frame=pd.DataFrame([values], columns=_PROFILE_COLUMNS),
+        retrieved_at=retrieved_at,
+    )
+
+
+def get_company_profile_snapshot(symbol: str) -> CompanyProfileSnapshot:
+    """Return a defensive profile copy with the original retrieval time."""
+    _canonical, code, _exchange = canonical_a_share(symbol)
+    snapshot = _profile_by_code(code)
+    return CompanyProfileSnapshot(
+        frame=snapshot.frame.copy(),
+        retrieved_at=snapshot.retrieved_at,
+    )
 
 
 def get_company_profile(symbol: str) -> pd.DataFrame:
     """Return a defensive copy of the CNINFO company profile for an A-share."""
-    _canonical, code, _exchange = canonical_a_share(symbol)
-    return _profile_by_code(code).copy()
+    return get_company_profile_snapshot(symbol).frame
 
 
 def classify_entity(
