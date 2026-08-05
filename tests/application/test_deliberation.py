@@ -338,6 +338,9 @@ def test_core_envelope_exposes_soft_numeric_requirement_schema() -> None:
     assert "catalysts\\.\\d+" in component_pattern
     assert "unresolved_questions" not in component_pattern
     assert "scenarios\\.(?:base|bull|bear)" in component_pattern
+    display_scale_description = candidate["properties"]["display_scale"]["description"]
+    assert "formula result only" in display_scale_description
+    assert "Dimensionless" in display_scale_description
 
 
 class _MarkdownLLM:
@@ -2068,6 +2071,282 @@ def test_decision_requirement_compares_canonical_amount_at_display_scale() -> No
     assert result.requirement_checks[0].display_status is NumericDisplayStatus.MATCHED
 
 
+@pytest.mark.parametrize(
+    "unit",
+    (
+        "%",
+        " percent ",
+        "Pct",
+        "PP",
+        "percentage points",
+        "bps",
+        "Basis Points",
+        "x",
+        "倍",
+    ),
+)
+def test_dimensionless_requirement_display_scale_is_normalized_to_base(
+    unit: str,
+) -> None:
+    state = _state()
+    ref = state["evidence_bundle"]["items"][0]["ref"]
+    core = _core_draft_from_decision(
+        research_decision(evidence_refs=(ref,)).model_dump(mode="json")
+    )
+    requirement = DecisionNumericRequirementDraft(
+        id="req_dimensionless_scale",
+        component_path="thesis",
+        label="Dimensionless result",
+        stated_value=2,
+        fraction_digits=1,
+        formula="numerator / denominator",
+        inputs=(
+            CalculationInputDraft(name="numerator", value=2_000_000),
+            CalculationInputDraft(name="denominator", value=1_000_000),
+        ),
+        input_evidence_refs=(ref,),
+        unit=unit,
+        display_scale=NumericDisplayScale.MILLION,
+        limitations=("Fixture limitation.",),
+    )
+
+    preflight = _preflight_numeric_requirements(
+        _core_envelope(core, requirements=(requirement,)),
+        valid_evidence_refs={ref},
+    )
+
+    assert preflight.issues == ()
+    assert preflight.omissions == ()
+    assert preflight.normalized_display_scales == 1
+    assert preflight.requirements[0].display_scale is NumericDisplayScale.BASE
+
+
+@pytest.mark.parametrize(
+    ("unit", "display_scale"),
+    (
+        ("JPY", NumericDisplayScale.MILLION),
+        ("USD", NumericDisplayScale.HUNDRED_MILLION),
+        ("CNY", NumericDisplayScale.MILLION),
+    ),
+)
+def test_amount_requirement_display_scale_is_preserved(
+    unit: str,
+    display_scale: NumericDisplayScale,
+) -> None:
+    state = _state()
+    ref = state["evidence_bundle"]["items"][0]["ref"]
+    core = _core_draft_from_decision(
+        research_decision(evidence_refs=(ref,)).model_dump(mode="json")
+    )
+    requirement = DecisionNumericRequirementDraft(
+        id="req_amount_scale",
+        component_path="thesis",
+        label="Amount result",
+        stated_value=2,
+        fraction_digits=1,
+        formula="first + second",
+        inputs=(
+            CalculationInputDraft(name="first", value=1_000_000),
+            CalculationInputDraft(name="second", value=1_000_000),
+        ),
+        input_evidence_refs=(ref,),
+        unit=unit,
+        display_scale=display_scale,
+        limitations=("Fixture limitation.",),
+    )
+
+    preflight = _preflight_numeric_requirements(
+        _core_envelope(core, requirements=(requirement,)),
+        valid_evidence_refs={ref},
+    )
+
+    assert preflight.normalized_display_scales == 0
+    assert preflight.requirements[0].display_scale is display_scale
+
+
+def test_display_scale_normalization_count_excludes_omitted_requirements() -> None:
+    state = _state()
+    ref = state["evidence_bundle"]["items"][0]["ref"]
+    core = _core_draft_from_decision(
+        research_decision(evidence_refs=(ref,)).model_dump(mode="json")
+    )
+    valid = DecisionNumericRequirementDraft(
+        id="req_valid_ratio",
+        component_path="thesis",
+        label="Valid ratio",
+        stated_value=2,
+        fraction_digits=1,
+        formula="numerator / denominator",
+        inputs=(
+            CalculationInputDraft(name="numerator", value=2_000_000),
+            CalculationInputDraft(name="denominator", value=1_000_000),
+        ),
+        input_evidence_refs=(ref,),
+        unit="x",
+        display_scale=NumericDisplayScale.MILLION,
+        limitations=("Fixture limitation.",),
+    )
+    omitted = valid.model_copy(
+        update={
+            "id": "req_omitted_ratio",
+            "component_path": "risks.99",
+            "label": "Omitted ratio",
+        }
+    )
+
+    preflight = _preflight_numeric_requirements(
+        _core_envelope(core, requirements=(valid, omitted)),
+        valid_evidence_refs={ref},
+    )
+
+    assert [item.id for item in preflight.requirements] == [valid.id]
+    assert preflight.normalized_display_scales == 1
+    assert preflight.omissions[0].issue_codes == (
+        "numeric.requirement_candidate.1.unknown_component",
+    )
+
+
+def test_display_scale_normalization_count_excludes_omitted_duplicate() -> None:
+    state = _state()
+    ref = state["evidence_bundle"]["items"][0]["ref"]
+    core = _core_draft_from_decision(
+        research_decision(evidence_refs=(ref,)).model_dump(mode="json")
+    )
+    retained = DecisionNumericRequirementDraft(
+        id="req_duplicate_ratio",
+        component_path="thesis",
+        label="Retained ratio",
+        stated_value=2,
+        fraction_digits=1,
+        formula="numerator / denominator",
+        inputs=(
+            CalculationInputDraft(name="numerator", value=2_000_000),
+            CalculationInputDraft(name="denominator", value=1_000_000),
+        ),
+        input_evidence_refs=(ref,),
+        unit="x",
+        display_scale=NumericDisplayScale.BASE,
+        limitations=("Fixture limitation.",),
+    )
+    omitted_duplicate = retained.model_copy(
+        update={
+            "label": "Omitted duplicate ratio",
+            "display_scale": NumericDisplayScale.MILLION,
+        }
+    )
+
+    preflight = _preflight_numeric_requirements(
+        _core_envelope(core, requirements=(retained, omitted_duplicate)),
+        valid_evidence_refs={ref},
+    )
+
+    assert [item.id for item in preflight.requirements] == [retained.id]
+    assert preflight.normalized_display_scales == 0
+    assert preflight.omissions[0].issue_codes == (
+        "numeric.requirement_candidate.1.duplicate_id",
+    )
+
+
+def test_7011_dimensionless_scales_normalize_without_numeric_retry() -> None:
+    state = _state()
+    ref = state["evidence_bundle"]["items"][0]["ref"]
+    core = _core_draft_from_decision(
+        research_decision(evidence_refs=(ref,)).model_dump(mode="json")
+    )
+    requirements = (
+        DecisionNumericRequirementDraft(
+            id="req_fy2026_net_income_growth",
+            component_path="executive_summary",
+            label="FY2026 net income growth",
+            stated_value=35.3,
+            fraction_digits=1,
+            formula=(
+                "(fy2026_net_income - fy2025_net_income) / fy2025_net_income"
+            ),
+            inputs=(
+                CalculationInputDraft(name="fy2026_net_income", value=332_129),
+                CalculationInputDraft(name="fy2025_net_income", value=245_447),
+            ),
+            input_evidence_refs=(ref,),
+            unit="%",
+            display_scale=NumericDisplayScale.MILLION,
+            limitations=("Inputs are reported in million JPY.",),
+        ),
+        DecisionNumericRequirementDraft(
+            id="req_fy2026_ocf_net_income_ratio",
+            component_path="thesis",
+            label="FY2026 operating cash flow to net income",
+            stated_value=2.84,
+            fraction_digits=2,
+            formula="fy2026_ocf / fy2026_net_income",
+            inputs=(
+                CalculationInputDraft(name="fy2026_ocf", value=942_619),
+                CalculationInputDraft(name="fy2026_net_income", value=332_129),
+            ),
+            input_evidence_refs=(ref,),
+            unit="倍",
+            display_scale=NumericDisplayScale.MILLION,
+            limitations=("Inputs are reported in million JPY.",),
+        ),
+    )
+    numeric = DecisionNumericDraft(
+        requested=True,
+        calculation_records=tuple(
+            CalculationRecordDraft(
+                id=f"calc_{requirement.id.removeprefix('req_')}",
+                formula=requirement.formula,
+                inputs=requirement.inputs,
+                input_evidence_refs=requirement.input_evidence_refs,
+                unit=requirement.unit,
+                limitations=requirement.limitations,
+                requirement_ids=(requirement.id,),
+            )
+            for requirement in requirements
+        ),
+    )
+    llm = _SequenceLLM(
+        {
+            "ResearchDecisionCoreEnvelope": [
+                _core_envelope(core, requirements=requirements)
+            ],
+            "DecisionNumericDraft": [numeric],
+        }
+    )
+    events: list[dict[str, Any]] = []
+
+    result = invoke_research_decision(
+        llm,
+        prompt="Form the final decision.",
+        state=state,
+        node="committee.final",
+        require_risk_adjustments=False,
+        event_writer=events.append,
+    )
+
+    assert result.value.numeric_audit_status is NumericAuditStatus.COMPLETE
+    assert result.numeric_audit is not None
+    assert result.numeric_audit.status is NumericAuditAppendixStatus.COMPLETE
+    assert all(
+        check.calculation_status is NumericCalculationStatus.VERIFIED
+        and check.display_status is NumericDisplayStatus.MATCHED
+        and check.display_scale is NumericDisplayScale.BASE
+        for check in result.numeric_audit.requirement_checks
+    )
+    assert events == [
+        {
+            "event_type": "decision.numeric_display_scale_normalized",
+            "node": "committee.final.numeric",
+            "payload": {"count": 2},
+        }
+    ]
+    assert [schema for schema, _prompt in llm.prompts].count(
+        "ResearchDecisionCoreEnvelope"
+    ) == 1
+    assert [schema for schema, _prompt in llm.prompts].count(
+        "DecisionNumericDraft"
+    ) == 1
+
+
 def test_9984_percentage_requirements_complete_without_numeric_repair() -> None:
     payload = _numeric_9984_payload()
     state = _state()
@@ -2540,6 +2819,14 @@ def test_final_serializers_preserve_output_language_in_primary_and_repair(
     assert all(
         "union of inputs[*].date_evidence_refs must be a subset" in prompt
         for _schema, prompt in llm.prompts[:2]
+    )
+    assert all(
+        "must never be inherited from an input's measurement scale" in prompt
+        for _schema, prompt in llm.prompts
+    )
+    assert all(
+        "display_scale=base, not million" in prompt
+        for _schema, prompt in llm.prompts
     )
 
 

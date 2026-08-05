@@ -413,6 +413,13 @@ def test_profiles_share_contract_but_use_distinct_topologies(
             } <= set(node_metrics)
         assert not any(node.endswith(".prepare") for node in node_metrics)
         assert "case.bull" not in node_metrics
+        decision_artifact = next(
+            artifact for artifact in artifacts if artifact.stage == "decision"
+        )
+        assert (
+            decision_artifact.prompt_version
+            == "final-committee-v14-dimensionless-display-scale"
+        )
         final_prompt = next(
             prompt
             for schema, prompt in deep.calls

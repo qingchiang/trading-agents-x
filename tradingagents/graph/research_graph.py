@@ -1338,7 +1338,7 @@ class ResearchGraph:
                         generation_method=output.numeric_generation_method,
                     ),
                 ),
-                prompt_version="final-committee-v13-input-evidence-binding",
+                prompt_version="final-committee-v14-dimensionless-display-scale",
             )
             self._finish_node(
                 runtime,

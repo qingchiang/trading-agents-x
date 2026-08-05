@@ -187,7 +187,13 @@ class DecisionNumericRequirementDraft(BaseModel):
     inputs: tuple[CalculationInputDraft, ...] = Field(min_length=1)
     input_evidence_refs: tuple[str, ...] = Field(min_length=1)
     unit: str = Field(min_length=1, max_length=32)
-    display_scale: NumericDisplayScale
+    display_scale: NumericDisplayScale = Field(
+        description=(
+            "Reader-facing scale for the formula result only; never inherit an "
+            "input's measurement scale. Dimensionless %, percent, pct, pp, "
+            "percentage points, bps, basis points, x, and 倍 results use base."
+        )
+    )
     display_role: Literal["scalar", "range_low", "range_high"] = "scalar"
     display_group_id: str | None = Field(
         default=None,
@@ -281,6 +287,7 @@ class _NumericRequirementPreflight:
     requirements: tuple[DecisionNumericRequirementDraft, ...]
     issues: tuple[str, ...]
     omissions: tuple[NumericAuditOmission, ...]
+    normalized_display_scales: int = 0
 
 
 _NUMERIC_REQUIREMENT_ERROR_REASONS = {
@@ -416,6 +423,7 @@ def _preflight_numeric_requirements(
     issues: list[str] = []
     omissions: list[NumericAuditOmission] = []
     seen_ids: set[str] = set()
+    normalized_display_scale_ids: set[str] = set()
     core = envelope.qualitative_core()
     for index, candidate in enumerate(envelope.numeric_requirement_candidates):
         candidate = _normalize_numeric_requirement_candidate(candidate)
@@ -455,6 +463,15 @@ def _preflight_numeric_requirements(
                 )
             )
             continue
+        normalized_display_scale = False
+        if (
+            _requires_base_display_scale(requirement.unit)
+            and requirement.display_scale is not NumericDisplayScale.BASE
+        ):
+            requirement = requirement.model_copy(
+                update={"display_scale": NumericDisplayScale.BASE}
+            )
+            normalized_display_scale = True
         if requirement.id in seen_ids:
             issue = f"{prefix}.duplicate_id"
             issues.append(issue)
@@ -517,6 +534,8 @@ def _preflight_numeric_requirements(
             )
             continue
         seen_ids.add(requirement.id)
+        if normalized_display_scale:
+            normalized_display_scale_ids.add(requirement.id)
         requirements.append(requirement)
     grouped = {
         group_id: tuple(item for item in requirements if item.display_group_id == group_id)
@@ -567,6 +586,9 @@ def _preflight_numeric_requirements(
         requirements=tuple(requirements),
         issues=tuple(issues),
         omissions=tuple(omissions),
+        normalized_display_scales=sum(
+            item.id in normalized_display_scale_ids for item in requirements
+        ),
     )
 
 
@@ -1088,11 +1110,16 @@ def decision_display_scale_guidance() -> str:
 
     return (
         "Every numeric requirement must declare display_scale separately from its "
-        "canonical unit. Formula inputs and results stay in base units. Use base, "
-        "thousand, ten_thousand, million, hundred_million, billion, or trillion. "
-        "For example, raw result 80,598,000,000 with unit=USD and "
+        "canonical unit. Display scale describes only the formula result and must "
+        "never be inherited from an input's measurement scale. Use base, thousand, "
+        "ten_thousand, million, hundred_million, billion, or trillion. Results with "
+        "unit %, percent, pct, pp, percentage points, bps, basis points, x, or 倍 "
+        "are dimensionless and must use display_scale=base. For example, a growth "
+        "formula using net-income inputs 332,129 and 245,447 that are each measured "
+        "in million JPY still has unit=% and display_scale=base, not million. For an "
+        "amount example, raw result 80,598,000,000 with unit=USD and "
         "display_scale=hundred_million compares with stated_value=805.98. Do not "
-        "encode scale in unit strings such as billion USD, 亿美元, or 百万日元."
+        "encode result scale in unit strings such as billion USD, 亿美元, or 百万日元."
     )
 
 
@@ -1631,6 +1658,16 @@ def invoke_research_decision(
         valid_evidence_refs=set(valid_refs),
     )
     numeric_node = f"{node}.numeric"
+    if event_writer is not None and requirement_preflight.normalized_display_scales:
+        event_writer(
+            {
+                "event_type": "decision.numeric_display_scale_normalized",
+                "node": numeric_node,
+                "payload": {
+                    "count": requirement_preflight.normalized_display_scales,
+                },
+            }
+        )
     numeric_phase = (
         metrics.phase(numeric_node, event_writer=event_writer)
         if metrics is not None
@@ -3699,6 +3736,13 @@ def _evaluate_formula(
 _PERCENT_CALCULATION_UNITS = {"%", "PCT", "PERCENT"}
 _PERCENTAGE_POINT_CALCULATION_UNITS = {"PP", "PERCENTAGE POINTS"}
 _BASIS_POINT_CALCULATION_UNITS = {"BPS", "BASIS POINTS"}
+_DIMENSIONLESS_BASE_DISPLAY_UNITS = {
+    *_PERCENT_CALCULATION_UNITS,
+    *_PERCENTAGE_POINT_CALCULATION_UNITS,
+    *_BASIS_POINT_CALCULATION_UNITS,
+    "X",
+    "倍",
+}
 
 _DISPLAY_SCALE_FACTORS = {
     NumericDisplayScale.BASE: Decimal("1"),
@@ -3717,6 +3761,10 @@ def _is_ratio_scaled_calculation_unit(unit: str) -> bool:
         | _PERCENTAGE_POINT_CALCULATION_UNITS
         | _BASIS_POINT_CALCULATION_UNITS
     )
+
+
+def _requires_base_display_scale(unit: str) -> bool:
+    return unit.strip().upper() in _DIMENSIONLESS_BASE_DISPLAY_UNITS
 
 
 def _display_values_approximately_match(

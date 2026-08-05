@@ -465,6 +465,11 @@ test("restores deliberation and resolves evidence references across run views", 
   );
 
   expect(await screen.findByRole("heading", { name: "NVDA" })).toBeVisible();
+  expect(
+    FakeEventSource.instance.listeners.has(
+      "decision.numeric_display_scale_normalized",
+    ),
+  ).toBe(true);
   expect(screen.getByText("Run warnings")).toBeVisible();
   expect(
     screen.getByText("One run-level fixture warning."),

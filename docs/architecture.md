@@ -121,7 +121,11 @@ canonical result and the deterministically scaled reader-facing value.
 Reader-facing values that differ by no more than one declared last-place unit
 and one percent relative error are retained as `approximately_matched`; this
 does not weaken formula, unit, sign, Evidence, or PIT validation and does not
-degrade an otherwise complete numeric audit.
+degrade an otherwise complete numeric audit. Display scale describes only the
+formula result and is never inherited from an input's source measurement scale.
+The application deterministically normalizes percentage, percentage-point,
+basis-point, and multiple results to `base`; compact amount scales remain
+explicit serializer declarations.
 Serializer-facing operands remain ASCII identifiers. If a provider returns an
 otherwise unambiguous Unicode identifier or an identifier-like token beginning
 with a digit, the application performs boundary-aware token replacement and
