@@ -69,7 +69,7 @@ _ALIASES = {
 # Yahoo symbols may contain letters, digits, and these structural characters.
 _YAHOO_SAFE = re.compile(r"^[A-Za-z0-9._\-\^=]+$")
 _US_EQUITY_SYMBOL = re.compile(r"^[A-Z][A-Z0-9]{0,4}(?:[.-][A-Z])?$")
-_SUFFIXED_EQUITY_BASE = re.compile(r"^[A-Z0-9]{1,12}$")
+_JAPAN_EQUITY_SYMBOL = re.compile(r"^[A-Z0-9]{4}\.T$")
 
 
 # Stablecoin quote codes are not ISO currencies, so combine them with the
@@ -227,13 +227,16 @@ def unsupported_crypto_base(raw: str) -> str | None:
 
 
 def is_supported_equity_symbol(symbol: str) -> bool:
-    """Return whether a canonical symbol has a supported listed-equity shape."""
+    """Return whether a canonical symbol is in a supported equity market."""
     if _US_EQUITY_SYMBOL.fullmatch(symbol):
         return True
-    suffix = match_exchange_suffix(symbol, _MARKET_TIMEZONES_BY_SUFFIX)
-    if not suffix:
+    if _JAPAN_EQUITY_SYMBOL.fullmatch(symbol):
+        return True
+    match = re.fullmatch(r"(\d{6})(\.SS|\.SZ)", symbol)
+    if match is None or symbol in _MAINLAND_MARKET_BENCHMARKS:
         return False
-    return _SUFFIXED_EQUITY_BASE.fullmatch(symbol[: -len(suffix)]) is not None
+    code, suffix = match.groups()
+    return infer_mainland_equity_suffix(code) == suffix
 
 
 def normalize_symbol(raw: str) -> str:

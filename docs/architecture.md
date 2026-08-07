@@ -522,10 +522,10 @@ Yahoo-compatible symbols before routing. It covers broker aliases, common
 forex forms, bare A-share codes, and `CODE.SH` → `CODE.SS`.
 Ambiguous or unsupported mainland symbols fail loudly.
 Known Crypto symbols are rejected by the public request contract before data
-routing or research execution begins. Explicit Forex, future, and index
-symbols and other shapes outside the supported listed-equity contract are also
-rejected even though low-level vendor normalization helpers remain available to
-shared dataflow code.
+routing or research execution begins. The same positive product boundary
+accepts only US, Japanese, and mainland-China A-share equity shapes. Forex,
+future, index, and other exchange suffixes remain available to low-level vendor
+normalization where needed but cannot create a research run.
 
 The analysis cutoff uses the instrument market's timezone, never the host's
 calendar or an unconditional UTC date. Historical tools receive that cutoff

@@ -144,10 +144,10 @@ def test_memory_context_uses_deterministic_same_and_cross_ticker_limits(
     )
     _seed_memory(
         repository,
-        ticker="0700.HK",
+        ticker="600519.SS",
         analysis_date=date(2026, 5, 1),
-        reflection="hong-kong-reflection",
-        thesis="hong-kong-decision",
+        reflection="china-reflection",
+        thesis="china-decision",
     )
     _seed_memory(
         repository,
@@ -183,7 +183,7 @@ def test_memory_context_uses_deterministic_same_and_cross_ticker_limits(
     assert "same-reflection-1" not in prompt
     assert "cross-decision-4" not in prompt
     assert "japan-reflection" not in prompt
-    assert "hong-kong-reflection" not in prompt
+    assert "china-reflection" not in prompt
     assert "pending-reflection" not in prompt
 
 

@@ -44,7 +44,7 @@ def test_normalize_symbol_does_not_route_crypto_aliases(
 
 @pytest.mark.parametrize(
     "value",
-    ["AAPL", "BRK-B", "TOTDY", "0700.HK", "7203.T", "600519"],
+    ["AAPL", "BRK-B", "TOTDY", "7203.T", "130A.T", "600519", "000001"],
 )
 def test_request_accepts_supported_symbols(value: str) -> None:
     request = AnalysisRequest(ticker=value, analysis_date="2026-07-24")
@@ -57,6 +57,17 @@ def test_request_accepts_supported_symbols(value: str) -> None:
     ["GC=F", "XAUUSD", "EURUSD", "EURUSD=X", "^GSPC", "SPX500"],
 )
 def test_request_rejects_explicit_non_equity_symbols(value: str) -> None:
+    with pytest.raises(ValidationError, match="Only listed equity instruments"):
+        AnalysisRequest(ticker=value, analysis_date="2026-07-24")
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["0700.HK", "CNC.TO", "BHP.AX", "AAPL.SS", "000001.SS", "399001.SZ"],
+)
+def test_request_rejects_symbols_outside_supported_equity_markets(
+    value: str,
+) -> None:
     with pytest.raises(ValidationError, match="Only listed equity instruments"):
         AnalysisRequest(ticker=value, analysis_date="2026-07-24")
 
