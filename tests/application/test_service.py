@@ -385,6 +385,184 @@ def test_successful_explicit_full_analysis_creates_primary_research_chain(
         )
 
 
+def test_full_update_is_idempotent_for_current_head_and_advances_atomically(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(app_settings, repository)
+    service.run_initial_chain(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+    request = AnalysisRequest(
+        ticker="6501.T",
+        analysis_date="2026-07-25",
+        analysts=("market",),
+    )
+
+    first = service.enqueue_chain_update(
+        chain.id,
+        chain.current_revision_id,
+        request,
+    )
+    duplicate = service.enqueue_chain_update(
+        chain.id,
+        chain.current_revision_id,
+        request,
+    )
+    assert duplicate.id == first.id
+    assert duplicate.update_intent_id == first.update_intent_id
+    assert duplicate.research_execution_strategy == "full"
+
+    claimed = repository.claim_run(first.id, "worker", 30)
+    result = service.execute_claimed(claimed, worker_id="worker")
+
+    advanced = repository.get_research_chain(chain.id)
+    assert result.status is RunStatus.SUCCEEDED
+    assert advanced.current_revision_id != chain.current_revision_id
+    assert [item.sequence for item in advanced.revisions] == [1, 2]
+    assert advanced.current_revision.predecessor_revision_id == chain.current_revision_id
+    assert advanced.current_revision.producing_run_id == first.id
+    assert advanced.current_revision.delta.claims
+
+
+def test_concurrent_full_update_submissions_resolve_to_one_execution(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(app_settings, repository)
+    service.run_initial_chain(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+    request = AnalysisRequest(
+        ticker="6501.T",
+        analysis_date="2026-07-25",
+        analysts=("market",),
+    )
+    barrier = Barrier(2)
+
+    def submit():
+        barrier.wait()
+        return service.enqueue_chain_update(
+            chain.id,
+            chain.current_revision_id,
+            request,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        submissions = tuple(executor.map(lambda _index: submit(), range(2)))
+
+    assert len({item.id for item in submissions}) == 1
+    assert len({item.update_intent_id for item in submissions}) == 1
+
+
+@pytest.mark.parametrize("cutoff", ["2026-07-23", "2026-07-24"])
+def test_full_update_rejects_non_later_cutoff(
+    app_settings,
+    repository,
+    cutoff,
+) -> None:
+    service = _service(app_settings, repository)
+    service.run_initial_chain(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+
+    with pytest.raises(ValueError, match="strictly later"):
+        service.enqueue_chain_update(
+            chain.id,
+            chain.current_revision_id,
+            AnalysisRequest(
+                ticker="6501.T",
+                analysis_date=cutoff,
+                analysts=("market",),
+            ),
+        )
+
+
+def test_failed_full_update_retries_the_same_intent_without_advancing_head(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(app_settings, repository)
+    service.run_initial_chain(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+    queued = service.enqueue_chain_update(
+        chain.id,
+        chain.current_revision_id,
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-25",
+            analysts=("market",),
+        ),
+    )
+    _Graph.error = RuntimeError("transient failure")
+    claimed = repository.claim_run(queued.id, "worker", 30)
+    with pytest.raises(RuntimeError, match="transient failure"):
+        service.execute_claimed(claimed, worker_id="worker")
+
+    assert repository.get_research_chain(chain.id).current_revision_id == chain.current_revision_id
+    intent_id = repository.get_run(queued.id).update_intent_id
+    retried = service.retry(queued.id)
+    assert retried.id == queued.id
+    assert retried.update_intent_id == intent_id
+    assert retried.attempt == 2
+
+    _Graph.error = None
+    claimed = repository.claim_run(queued.id, "worker", 30)
+    service.execute_claimed(claimed, worker_id="worker")
+    assert repository.get_research_chain(chain.id).current_revision_id != chain.current_revision_id
+
+
+def test_cancelled_and_trashed_full_update_leaves_head_unchanged(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(app_settings, repository)
+    service.run_initial_chain(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+    queued = service.enqueue_chain_update(
+        chain.id,
+        chain.current_revision_id,
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-25",
+            analysts=("market",),
+        ),
+    )
+
+    service.cancel(queued.id)
+    repository.trash_runs((queued.id,))
+
+    assert repository.get_research_chain(chain.id).current_revision_id == chain.current_revision_id
+    assert len(repository.get_research_chain(chain.id).revisions) == 1
+
+
 def test_failed_explicit_full_analysis_creates_no_chain_or_revision(
     app_settings,
     repository,
@@ -452,9 +630,7 @@ def test_revision_owns_state_and_evidence_after_producing_run_is_purged(
     )
 
     repository.trash_runs((first.run_id,))
-    repository.purge_expired_trash(
-        cutoff=datetime.now(timezone.utc) + timedelta(days=1)
-    )
+    repository.purge_expired_trash(cutoff=datetime.now(timezone.utc) + timedelta(days=1))
 
     revision = repository.get_research_revision(revision_id)
     assert revision.producing_run_id is None
@@ -522,9 +698,7 @@ def test_service_persists_cutoff_safe_local_name_once(
         repository=repository,
         llm_factory=lambda *_args, **_kwargs: (object(), object()),
         graph_factory=_Graph,
-        identity_resolver=lambda _ticker, _date: {
-            "company_name": "Toyota Motor Corporation"
-        },
+        identity_resolver=lambda _ticker, _date: {"company_name": "Toyota Motor Corporation"},
         local_name_resolver=local_name,
     )
 
@@ -882,9 +1056,7 @@ def test_retry_resumes_real_langgraph_checkpoint_and_success_cleans_it(
     artifacts = repository.list_artifacts(queued.id)
     assert len(artifacts) == 1
     assert artifacts[0].attempt == 1
-    assert "run.resumed" in {
-        event.event_type for event in repository.list_events(queued.id)
-    }
+    assert "run.resumed" in {event.event_type for event in repository.list_events(queued.id)}
     with SqliteSaver.from_conn_string(str(app_settings.database_path)) as saver:
         saver.setup()
         assert saver.get_tuple(checkpoint_config) is None
@@ -916,9 +1088,7 @@ def test_cooperative_cancel_deletes_real_pending_checkpoint(
     assert result.status is RunStatus.CANCELLED
     with SqliteSaver.from_conn_string(str(app_settings.database_path)) as saver:
         saver.setup()
-        assert (
-            saver.get_tuple({"configurable": {"thread_id": checkpoint_thread}}) is None
-        )
+        assert saver.get_tuple({"configurable": {"thread_id": checkpoint_thread}}) is None
 
 
 @pytest.mark.parametrize("format", ("markdown", "json", "package"))
@@ -972,9 +1142,7 @@ def test_service_export_reads_the_durable_result(
             assert "Fixture thesis" in report
             run_payload = json.loads(archive.read("run.json"))
             assert run_payload["attempts"][0]["status"] == "succeeded"
-            assert run_payload["result"]["recoveries"][0]["node"] == (
-                "debate.agenda.serialize"
-            )
+            assert run_payload["result"]["recoveries"][0]["node"] == ("debate.agenda.serialize")
             assert "## Structured Recoveries" in report
         return
     assert isinstance(body, str)
@@ -987,9 +1155,7 @@ def test_service_export_reads_the_durable_result(
         assert payload["attempts"][0]["status"] == "succeeded"
         assert payload["attempts"][0]["metrics"] == payload["run"]["metrics"]
         assert payload["result"]["evidence"] == payload["evidence"]
-        assert payload["result"]["recoveries"][0]["initial_reason_code"] == (
-            "non_json_response"
-        )
+        assert payload["result"]["recoveries"][0]["initial_reason_code"] == ("non_json_response")
         assert payload["evidence"]["items"][0]["source"] == "fixture"
         assert payload["artifacts"][0]["stage"] == "analyst"
         content = payload["artifacts"][0]["content"]

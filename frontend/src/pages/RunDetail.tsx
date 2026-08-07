@@ -35,7 +35,6 @@ import {
 } from "../router";
 import { formatUtcDate, trashDeadline } from "../trash";
 
-const terminal = new Set(["succeeded", "failed", "cancelled"]);
 const reportOrder = ["fundamentals", "market", "news", "social"] as const;
 const timelineOrderStorageKey = "tradingagents-timeline-order";
 const eventNames = [
@@ -403,14 +402,6 @@ export default function RunDetail() {
             <button className="button primary" onClick={() => void restore()}>
               {t("restore")}
             </button>
-          )}
-          {terminal.has(run.status) && (
-            <Link
-              className="button"
-              to={`/runs/new?from_run=${encodeURIComponent(runId)}`}
-            >
-              {t("newFromRun")}
-            </Link>
           )}
           <a
             className="button primary"

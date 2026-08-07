@@ -1,13 +1,16 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, type ResearchChain } from "../api/client";
-import { Link, useParams } from "../router";
+import { Link, useNavigate, useParams } from "../router";
 
 export default function ResearchChainDetail() {
   const { t } = useTranslation();
   const { chainId = "" } = useParams();
+  const navigate = useNavigate();
   const [chain, setChain] = useState<ResearchChain | null>(null);
   const [error, setError] = useState("");
+  const [updateCutoff, setUpdateCutoff] = useState("");
+  const [updating, setUpdating] = useState(false);
 
   useEffect(() => {
     void api.researchChain(chainId).then(setChain).catch((cause) => {
@@ -19,6 +22,7 @@ export default function ResearchChainDetail() {
   const revision = chain.current_revision;
   if (!revision) return <div className="alert">{t("error")}</div>;
   const state = revision.current_state;
+  const nextCutoff = updateCutoff || dayAfter(revision.cutoff);
   const evidenceByRef = new Map(
     revision.evidence_snapshot.bundle.items.map((item) => [item.ref, item]),
   );
@@ -37,8 +41,41 @@ export default function ResearchChainDetail() {
           </p>
         </div>
         <div className="action-row">
+          <form
+            className="action-row"
+            onSubmit={(event) => {
+              event.preventDefault();
+              setUpdating(true);
+              setError("");
+              void api
+                .updateResearchChain(
+                  chain.id,
+                  {
+                    baseline_revision_id: revision.id,
+                    analysis_date: nextCutoff,
+                  },
+                  createIdempotencyKey(),
+                )
+                .then((run) => navigate(`/runs/${run.id}`))
+                .catch((cause) => {
+                  setError(cause instanceof Error ? cause.message : t("error"));
+                  setUpdating(false);
+                });
+            }}
+          >
+            <input
+              aria-label={t("updateCutoff")}
+              type="date"
+              min={dayAfter(revision.cutoff)}
+              value={nextCutoff}
+              onChange={(event) => setUpdateCutoff(event.target.value)}
+            />
+            <button className="button primary" disabled={updating}>
+              {updating ? t("loading") : t("updateResearch")}
+            </button>
+          </form>
           <a
-            className="button primary"
+            className="button"
             href={`/api/v1/research-revisions/${revision.id}/export?format=package`}
           >
             {t("exportPackage")}
@@ -111,10 +148,34 @@ export default function ResearchChainDetail() {
             </li>
           ))}
         </ol>
+        <h3>{t("stateDelta")}</h3>
+        <ul>
+          {(revision.delta?.claims ?? []).map((item) => (
+            <li key={`claim-${item.object_id}`}>
+              <code>{item.object_id}</code> · {item.change} · {item.identity_disposition}
+            </li>
+          ))}
+          {(revision.delta?.questions ?? []).map((item) => (
+            <li key={`question-${item.object_id}`}>
+              <code>{item.object_id}</code> · {item.change} · {item.identity_disposition}
+            </li>
+          ))}
+        </ul>
         <p>
           {t("llmCalls")}: {(revision.metrics?.llm_calls ?? 0).toLocaleString()} · {t("toolCalls")}: {(revision.metrics?.tool_calls ?? 0).toLocaleString()} · {t("inputTokens")}: {(revision.metrics?.input_tokens ?? 0).toLocaleString()} · {t("outputTokens")}: {(revision.metrics?.output_tokens ?? 0).toLocaleString()} · {t("cumulativeActiveTime")}: {(revision.metrics?.wall_time_seconds ?? 0).toFixed(1)}s
         </p>
       </article>
     </section>
   );
+}
+
+function dayAfter(value: string) {
+  const date = new Date(`${value}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}
+
+function createIdempotencyKey() {
+  return globalThis.crypto?.randomUUID?.() ??
+    `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }

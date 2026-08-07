@@ -44,9 +44,11 @@ from .llms import RunLLMs, create_run_llms
 from .metrics import MetricsCallback
 from .repository import RunRepository, RunView
 from .research import (
+    ResearchRevision,
     ResearchRevisionDraft,
     RevisionExport,
     assemble_full_revision,
+    assemble_full_update,
     render_revision_export_markdown,
     render_revision_export_package,
 )
@@ -84,9 +86,7 @@ class AnalysisService:
         settings: AppSettings,
         *,
         repository: RunRepository | None = None,
-        llm_factory: Callable[..., RunLLMs | tuple[Any, Any]] = (
-            create_run_llms
-        ),
+        llm_factory: Callable[..., RunLLMs | tuple[Any, Any]] = (create_run_llms),
         graph_factory: Callable[..., ResearchGraph] = ResearchGraph,
         identity_resolver: Callable[..., dict[str, str]] = resolve_instrument_identity,
         local_name_resolver: Callable[[str, str, dict[str, Any]], str | None] = (
@@ -95,6 +95,9 @@ class AnalysisService:
         state_assembler: Callable[
             [AnalysisRequest, GraphExecution], ResearchRevisionDraft
         ] = assemble_full_revision,
+        revision_comparator: Callable[
+            [str, ResearchRevision, ResearchRevisionDraft], ResearchRevisionDraft
+        ] = assemble_full_update,
     ):
         self.settings = settings
         if repository is None:
@@ -105,6 +108,7 @@ class AnalysisService:
         self.identity_resolver = identity_resolver
         self.local_name_resolver = local_name_resolver
         self.state_assembler = state_assembler
+        self.revision_comparator = revision_comparator
 
     def enqueue(
         self,
@@ -150,6 +154,38 @@ class AnalysisService:
             idempotency_key=idempotency_key,
             research_chain_requested=True,
         )
+
+    def enqueue_chain_update(
+        self,
+        chain_id: str,
+        baseline_revision_id: str,
+        request: AnalysisRequest,
+        *,
+        idempotency_key: str | None = None,
+    ) -> RunView:
+        run_settings = self.settings.resolve_run(request)
+        request = self.settings.materialize_request(request, run_settings=run_settings)
+        view, created = self.repository.create_chain_update(
+            chain_id,
+            baseline_revision_id,
+            request,
+            run_settings.snapshot(),
+            idempotency_key=idempotency_key,
+        )
+        if created:
+            self.repository.append_event(
+                view.id,
+                "run.queued",
+                payload={
+                    "profile": request.profile.value,
+                    "ticker": request.ticker,
+                    "update_intent_id": view.update_intent_id,
+                    "research_chain_id": chain_id,
+                    "baseline_revision_id": baseline_revision_id,
+                    "execution_strategy": "full",
+                },
+            )
+        return view
 
     def run(
         self,
@@ -292,9 +328,7 @@ class AnalysisService:
                     dataflow_config=dataflow_config,
                     memory=memory,
                     instrument_context=instrument_context,
-                    cancel_requested=lambda: self.repository.cancel_requested(
-                        run.id
-                    ),
+                    cancel_requested=lambda: self.repository.cancel_requested(run.id),
                     shutdown_requested=shutdown_requested or (lambda: False),
                     artifact_writer=lambda artifact: self._persist_artifact(
                         run.id,
@@ -307,17 +341,11 @@ class AnalysisService:
                         on_event,
                     ),
                 )
-                with SqliteSaver.from_conn_string(
-                    str(self.settings.database_path)
-                ) as saver:
+                with SqliteSaver.from_conn_string(str(self.settings.database_path)) as saver:
                     saver.conn.execute("PRAGMA journal_mode=WAL")
-                    saver.conn.execute(
-                        f"PRAGMA busy_timeout={self.settings.busy_timeout_ms}"
-                    )
+                    saver.conn.execute(f"PRAGMA busy_timeout={self.settings.busy_timeout_ms}")
                     saver.setup()
-                    checkpoint_config = {
-                        "configurable": {"thread_id": checkpoint_thread}
-                    }
+                    checkpoint_config = {"configurable": {"thread_id": checkpoint_thread}}
                     resume = saver.get_tuple(checkpoint_config) is not None
                     if resume:
                         self._emit(
@@ -332,9 +360,7 @@ class AnalysisService:
                             checkpointer=saver,
                             checkpoint_thread_id=checkpoint_thread,
                             resume=resume,
-                            on_event=lambda raw: self._persist_graph_event(
-                                run.id, raw, on_event
-                            ),
+                            on_event=lambda raw: self._persist_graph_event(run.id, raw, on_event),
                         )
                     # Production graphs seal before deliberation. This
                     # idempotent application boundary also protects custom
@@ -356,11 +382,18 @@ class AnalysisService:
                         run.request.ticker,
                         dataflow_config,
                     )
-                    revision_draft = (
-                        self.state_assembler(run.request, execution)
-                        if run.research_chain_requested
-                        else None
-                    )
+                    revision_draft = None
+                    if run.research_chain_requested or run.research_chain_id:
+                        revision_draft = self.state_assembler(run.request, execution)
+                    if run.research_chain_id and revision_draft is not None:
+                        if run.baseline_revision_id is None:
+                            raise ValueError("Research Chain update has no baseline")
+                        baseline = self.repository.get_research_revision(run.baseline_revision_id)
+                        revision_draft = self.revision_comparator(
+                            baseline.id,
+                            baseline,
+                            revision_draft,
+                        )
                     aggregate_metrics = self.repository.complete(
                         run.id,
                         result,
@@ -368,9 +401,7 @@ class AnalysisService:
                         benchmark=benchmark,
                         revision_draft=revision_draft,
                     )
-                    result = result.model_copy(
-                        update={"metrics": aggregate_metrics}
-                    )
+                    result = result.model_copy(update={"metrics": aggregate_metrics})
                     saver.delete_thread(checkpoint_thread)
                 self._emit(
                     run.id,
@@ -388,9 +419,7 @@ class AnalysisService:
                 self._emit(
                     run.id,
                     "run.cancelled",
-                    payload={
-                        "metrics": aggregate_metrics.model_dump(mode="json")
-                    },
+                    payload={"metrics": aggregate_metrics.model_dump(mode="json")},
                     on_event=on_event,
                 )
                 return AnalysisResult(
@@ -431,8 +460,7 @@ class AnalysisService:
                     )
                 except Exception as persistence_exc:
                     logger.error(
-                        "failed to persist terminal state for run %s "
-                        "(analysis=%s persistence=%s)",
+                        "failed to persist terminal state for run %s (analysis=%s persistence=%s)",
                         run.id,
                         type(exc).__name__,
                         type(persistence_exc).__name__,
@@ -444,17 +472,14 @@ class AnalysisService:
                         "run.failed",
                         payload={
                             "error_code": type(exc).__name__,
-                            "message": (
-                                "Analysis failed; inspect the server log."
-                            ),
+                            "message": ("Analysis failed; inspect the server log."),
                             "metrics": aggregate_metrics.model_dump(mode="json"),
                         },
                         on_event=on_event,
                     )
                 except Exception as event_exc:
                     logger.error(
-                        "failed to persist failure event for run %s "
-                        "(analysis=%s event=%s)",
+                        "failed to persist failure event for run %s (analysis=%s event=%s)",
                         run.id,
                         type(exc).__name__,
                         type(event_exc).__name__,
@@ -465,11 +490,7 @@ class AnalysisService:
         view = self.repository.request_cancel(run_id)
         self.repository.append_event(
             run_id,
-            (
-                "run.cancelled"
-                if view.status is RunStatus.CANCELLED
-                else "run.cancel_requested"
-            ),
+            ("run.cancelled" if view.status is RunStatus.CANCELLED else "run.cancel_requested"),
             payload={},
         )
         return view
@@ -646,12 +667,8 @@ class AnalysisService:
         return event
 
     def _clear_checkpoint(self, checkpoint_thread: str) -> None:
-        with SqliteSaver.from_conn_string(
-            str(self.settings.database_path)
-        ) as saver:
-            saver.conn.execute(
-                f"PRAGMA busy_timeout={self.settings.busy_timeout_ms}"
-            )
+        with SqliteSaver.from_conn_string(str(self.settings.database_path)) as saver:
+            saver.conn.execute(f"PRAGMA busy_timeout={self.settings.busy_timeout_ms}")
             saver.setup()
             saver.delete_thread(checkpoint_thread)
 

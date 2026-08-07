@@ -133,9 +133,7 @@ async def test_initial_research_chain_creation_read_and_export_surfaces(
     detail = await web_client.get(f"/api/v1/research-chains/{chain['id']}")
     revision_id = chain["current_revision_id"]
     revision = await web_client.get(f"/api/v1/research-revisions/{revision_id}")
-    exported = await web_client.get(
-        f"/api/v1/research-revisions/{revision_id}/export?format=json"
-    )
+    exported = await web_client.get(f"/api/v1/research-revisions/{revision_id}/export?format=json")
 
     assert chains.status_code == 200
     assert detail.json()["current_revision"]["current_state"]["language"] == "ja"
@@ -143,6 +141,26 @@ async def test_initial_research_chain_creation_read_and_export_surfaces(
     assert exported.status_code == 200
     assert exported.json()["revision"]["evidence_snapshot"]["bundle"]["items"]
     assert exported.json()["linked_reports"]["market"].startswith("# Overview")
+
+    update = await web_client.post(
+        f"/api/v1/research-chains/{chain['id']}/updates",
+        json={
+            "baseline_revision_id": revision_id,
+            "analysis_date": "2026-07-25",
+        },
+        headers={"Idempotency-Key": "full-update"},
+    )
+    duplicate = await web_client.post(
+        f"/api/v1/research-chains/{chain['id']}/updates",
+        json={
+            "baseline_revision_id": revision_id,
+            "analysis_date": "2026-07-25",
+        },
+        headers={"Idempotency-Key": "full-update"},
+    )
+    assert update.status_code == 202
+    assert duplicate.json()["id"] == update.json()["id"]
+    assert update.json()["research_execution_strategy"] == "full"
 
 
 @pytest.mark.anyio
@@ -303,9 +321,7 @@ async def test_sse_replays_committed_events_after_last_event_id(
     web_client: httpx.AsyncClient,
     web_service,
 ) -> None:
-    queued = web_service.enqueue(
-        AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
-    )
+    queued = web_service.enqueue(AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24"))
     web_service.cancel(queued.id)
 
     response = await web_client.get(
@@ -324,9 +340,7 @@ async def test_sse_rejects_invalid_replay_cursor(
     web_client: httpx.AsyncClient,
     web_service,
 ) -> None:
-    queued = web_service.enqueue(
-        AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
-    )
+    queued = web_service.enqueue(AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24"))
 
     response = await web_client.get(
         f"/api/v1/runs/{queued.id}/events",
@@ -355,6 +369,7 @@ async def test_openapi_contains_versioned_run_center_contract(
         "/api/v1/instruments/recent",
         "/api/v1/research-chains",
         "/api/v1/research-chains/{chain_id}",
+        "/api/v1/research-chains/{chain_id}/updates",
         "/api/v1/research-revisions/{revision_id}",
         "/api/v1/research-revisions/{revision_id}/export",
         "/api/v1/memory",
@@ -363,14 +378,8 @@ async def test_openapi_contains_versioned_run_center_contract(
         "/api/v1/health",
     } <= set(paths)
     assert "/api/v1/runs/{run_id}/rerun" not in paths
-    assert (
-        "provenance"
-        not in schema["components"]["schemas"]["AnalysisRequest"]["properties"]
-    )
-    assert (
-        "provenance"
-        not in schema["components"]["schemas"]["CapabilityDefaults"]["properties"]
-    )
+    assert "provenance" not in schema["components"]["schemas"]["AnalysisRequest"]["properties"]
+    assert "provenance" not in schema["components"]["schemas"]["CapabilityDefaults"]["properties"]
     assert schema["components"]["schemas"]["AssetType"]["enum"] == ["stock"]
 
 
@@ -552,9 +561,7 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
         payload={"method": "tool_call_recovered"},
     )
     partial_detail = await web_client.get(f"/api/v1/runs/{queued.id}")
-    partial_export = await web_client.get(
-        f"/api/v1/runs/{queued.id}/export?format=json"
-    )
+    partial_export = await web_client.get(f"/api/v1/runs/{queued.id}/export?format=json")
 
     assert partial_detail.status_code == 200
     assert partial_export.status_code == 200
@@ -568,9 +575,7 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
         "news",
         "social",
     ]
-    assert partial_detail.json()["result"]["recoveries"][0]["node"] == (
-        "debate.agenda.serialize"
-    )
+    assert partial_detail.json()["result"]["recoveries"][0]["node"] == ("debate.agenda.serialize")
     assert partial_export.json()["result"]["recoveries"][0]["retry_count"] == 1
     assert partial_export.json()["result"]["decision"]["thesis"] == ("Fixture thesis.")
     assert partial_export.json()["evidence"]["digest"] == evidence.digest
@@ -591,9 +596,7 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
 
     detail = await web_client.get(f"/api/v1/runs/{queued.id}")
     artifacts = await web_client.get(f"/api/v1/runs/{queued.id}/artifacts")
-    empty_attempt = await web_client.get(
-        f"/api/v1/runs/{queued.id}/artifacts?attempt=2"
-    )
+    empty_attempt = await web_client.get(f"/api/v1/runs/{queued.id}/artifacts?attempt=2")
     package = await web_client.get(f"/api/v1/runs/{queued.id}/export?format=package")
     evidence_response = await web_client.get(f"/api/v1/runs/{queued.id}/evidence")
 
@@ -616,9 +619,7 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
     assert "Fixture report." in artifacts.json()[0]["content"]["markdown"]
     review_payload = next(item for item in artifacts.json() if item["id"] == review.id)
     assert review_payload["generation_method"] == "tool_call"
-    decision_payload = next(
-        item for item in artifacts.json() if item["role"] == "final_committee"
-    )
+    decision_payload = next(item for item in artifacts.json() if item["role"] == "final_committee")
     assert decision_payload["generation_observations"] == [
         {
             "node": "committee.final.serialize.numeric",
@@ -632,9 +633,7 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
     assert empty_attempt.json() == []
     assert package.status_code == 200
     assert package.headers["content-type"] == "application/zip"
-    assert package.headers["content-disposition"].endswith(
-        f'tradingagents-{queued.id}.zip"'
-    )
+    assert package.headers["content-disposition"].endswith(f'tradingagents-{queued.id}.zip"')
     with zipfile.ZipFile(io.BytesIO(package.content)) as archive:
         assert {
             "report.md",

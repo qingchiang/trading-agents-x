@@ -24,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select
 
 from tradingagents.application.contracts import (
+    AnalysisRequest,
     EvidenceBundle,
     RecentInstrument,
     ResearchArtifact,
@@ -45,6 +46,7 @@ from tradingagents.application.repository import (
     EvidenceConflictError,
     EvidenceNotSealedError,
     IdempotencyConflictError,
+    InvalidResearchBaselineError,
     InvalidRunTransitionError,
     ResearchChainNotFoundError,
     ResearchRevisionNotFoundError,
@@ -66,6 +68,7 @@ from .models import (
     LoginRequest,
     MemoryEntry,
     ProviderModelCatalog,
+    ResearchChainUpdateRequest,
     RunBatchRequest,
     RunBatchResult,
     RunCreateRequest,
@@ -149,6 +152,13 @@ def create_app(
     ):
         return _error(404, "research_revision_not_found", str(exc))
 
+    @app.exception_handler(InvalidResearchBaselineError)
+    async def invalid_research_baseline(
+        _request: Request,
+        exc: InvalidResearchBaselineError,
+    ):
+        return _error(409, "invalid_research_baseline", str(exc))
+
     @app.exception_handler(EvidenceNotSealedError)
     async def evidence_not_sealed(
         _request: Request,
@@ -215,9 +225,7 @@ def create_app(
             return await call_next(request)
         if not auth.validate(request.cookies.get(COOKIE_NAME)):
             return _error(401, "authentication_required", "LAN session required")
-        if request.method not in {"GET", "HEAD", "OPTIONS"} and not auth.same_origin(
-            request
-        ):
+        if request.method not in {"GET", "HEAD", "OPTIONS"} and not auth.same_origin(request):
             return _error(403, "origin_mismatch", "Request origin is not allowed")
         return await call_next(request)
 
@@ -276,6 +284,36 @@ def create_app(
             )
         return service.enqueue_initial_chain(
             request.analysis_request(),
+            idempotency_key=idempotency_key,
+        )
+
+    @app.post(
+        f"{API_PREFIX}/research-chains/{{chain_id}}/updates",
+        response_model=RunView,
+        status_code=202,
+    )
+    def update_research_chain(
+        chain_id: str,
+        request: ResearchChainUpdateRequest,
+        idempotency_key: Annotated[
+            str | None,
+            Header(alias="Idempotency-Key", max_length=200),
+        ] = None,
+    ):
+        chain = repository.get_research_chain(chain_id)
+        baseline = chain.current_revision
+        if baseline is None:
+            raise InvalidResearchBaselineError("Research Chain has no Eligible Baseline")
+        analysts = tuple(item.domain for item in baseline.coverage.domains)
+        return service.enqueue_chain_update(
+            chain_id,
+            request.baseline_revision_id,
+            AnalysisRequest(
+                ticker=chain.instrument,
+                analysis_date=request.analysis_date,
+                analysts=analysts,
+                output_language=baseline.current_state.language,
+            ),
             idempotency_key=idempotency_key,
         )
 
@@ -419,11 +457,7 @@ def create_app(
                     for event in events:
                         cursor = event.sequence
                         data = event.model_dump_json()
-                        yield (
-                            f"id: {event.sequence}\n"
-                            f"event: {event.event_type}\n"
-                            f"data: {data}\n\n"
-                        )
+                        yield (f"id: {event.sequence}\nevent: {event.event_type}\ndata: {data}\n\n")
                 else:
                     idle_ticks += 1
                     view = repository.get_run(run_id)
@@ -517,9 +551,7 @@ def create_app(
                 "deep_model": defaults.deep_model,
                 "quick_reasoning_effort": defaults.quick_reasoning_effort,
                 "deep_reasoning_effort": defaults.deep_reasoning_effort,
-                "output_language": report_language_value(
-                    defaults.output_language
-                ),
+                "output_language": report_language_value(defaults.output_language),
                 "lan_enabled": settings.lan_enabled,
                 "trash_retention_days": settings.trash_retention_days,
             },
@@ -566,13 +598,11 @@ def create_app(
                         .select_from(OutcomeRecord)
                         .join(
                             DecisionRecord,
-                            OutcomeRecord.decision_id
-                            == DecisionRecord.id,
+                            OutcomeRecord.decision_id == DecisionRecord.id,
                         )
                         .join(
                             RunRecord,
-                            RunRecord.id
-                            == DecisionRecord.run_id,
+                            RunRecord.id == DecisionRecord.run_id,
                         )
                         .where(
                             OutcomeRecord.status == "pending",

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { api, type ResearchChain } from "../api/client";
 import i18n from "../i18n";
@@ -6,7 +6,7 @@ import { Router } from "../router";
 import ResearchChainDetail from "./ResearchChainDetail";
 
 vi.mock("../api/client", () => ({
-  api: { researchChain: vi.fn() },
+  api: { researchChain: vi.fn(), updateResearchChain: vi.fn() },
 }));
 
 const chain = {
@@ -93,4 +93,21 @@ test("reads the complete current thesis, coverage, evidence, reports, and metric
     "/runs/run-1",
   );
   expect(screen.getByText(/Input tokens: 1,200/)).toBeVisible();
+});
+
+test("queues a Full update from the displayed current head", async () => {
+  vi.mocked(api.updateResearchChain).mockResolvedValue({ id: "run-2" } as never);
+  render(
+    <Router initialPath="/research/chain-1">
+      <ResearchChainDetail />
+    </Router>,
+  );
+
+  fireEvent.click(await screen.findByRole("button", { name: "Update with Full Analysis" }));
+
+  await waitFor(() => expect(api.updateResearchChain).toHaveBeenCalled());
+  expect(vi.mocked(api.updateResearchChain).mock.calls[0].slice(0, 2)).toEqual([
+    "chain-1",
+    { baseline_revision_id: "revision-1", analysis_date: "2026-07-25" },
+  ]);
 });

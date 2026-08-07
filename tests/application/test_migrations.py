@@ -28,9 +28,7 @@ from tradingagents.persistence import (
 
 
 def _alembic_config(app_settings) -> Config:
-    migration_root = resources.files("tradingagents.persistence").joinpath(
-        "alembic"
-    )
+    migration_root = resources.files("tradingagents.persistence").joinpath("alembic")
     with resources.as_file(migration_root) as script_location:
         config = Config()
         config.set_main_option("script_location", str(script_location))
@@ -52,40 +50,24 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     )
     try:
         with engine.connect() as connection:
-            revision = connection.scalar(
-                text("SELECT version_num FROM alembic_version")
-            )
+            revision = connection.scalar(text("SELECT version_num FROM alembic_version"))
         inspector = inspect(engine)
-        artifact_columns = {
-            column["name"] for column in inspector.get_columns("run_artifacts")
-        }
-        outcome_columns = {
-            column["name"] for column in inspector.get_columns("outcomes")
-        }
-        outcome_indexes = {
-            index["name"] for index in inspector.get_indexes("outcomes")
-        }
-        run_columns = {
-            column["name"] for column in inspector.get_columns("runs")
-        }
-        run_indexes = {
-            index["name"] for index in inspector.get_indexes("runs")
-        }
+        artifact_columns = {column["name"] for column in inspector.get_columns("run_artifacts")}
+        outcome_columns = {column["name"] for column in inspector.get_columns("outcomes")}
+        outcome_indexes = {index["name"] for index in inspector.get_indexes("outcomes")}
+        run_columns = {column["name"] for column in inspector.get_columns("runs")}
+        run_indexes = {index["name"] for index in inspector.get_indexes("runs")}
         artifact_uniques = {
             tuple(constraint["column_names"])
             for constraint in inspector.get_unique_constraints("run_artifacts")
         }
-        evidence_columns = {
-            column["name"] for column in inspector.get_columns("run_evidence")
-        }
-        decision_columns = {
-            column["name"] for column in inspector.get_columns("decisions")
-        }
+        evidence_columns = {column["name"] for column in inspector.get_columns("run_evidence")}
+        decision_columns = {column["name"] for column in inspector.get_columns("decisions")}
         table_names = set(inspector.get_table_names())
     finally:
         engine.dispose()
 
-    assert revision == "0005_research_chains"
+    assert revision == "0006_full_chain_updates"
     assert {
         "id",
         "run_id",
@@ -123,6 +105,10 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     assert "trashed_at" in run_columns
     assert "instrument_local_name" in run_columns
     assert "research_chain_requested" in run_columns
+    assert "update_intent_id" in run_columns
+    assert "research_chain_id" in run_columns
+    assert "baseline_revision_id" in run_columns
+    assert "research_execution_strategy" in run_columns
     assert "research_chains" in table_names
     assert "research_revisions" in table_names
     assert "ix_runs_trash" in run_indexes
@@ -140,12 +126,15 @@ def test_v8_upgrade_preserves_research_data_and_downgrade_recreates_empty_table(
     # remove them before exercising the real migration chain.
     seed_engine = create_sqlite_engine(app_settings.database_path)
     with seed_engine.begin() as connection:
+        connection.exec_driver_sql("ALTER TABLE runs ADD COLUMN instrument_local_name VARCHAR(300)")
         connection.exec_driver_sql(
-            "ALTER TABLE runs ADD COLUMN instrument_local_name VARCHAR(300)"
+            "ALTER TABLE runs ADD COLUMN research_chain_requested BOOLEAN NOT NULL DEFAULT 0"
         )
+        connection.exec_driver_sql("ALTER TABLE runs ADD COLUMN update_intent_id VARCHAR(36)")
+        connection.exec_driver_sql("ALTER TABLE runs ADD COLUMN research_chain_id VARCHAR(36)")
+        connection.exec_driver_sql("ALTER TABLE runs ADD COLUMN baseline_revision_id VARCHAR(36)")
         connection.exec_driver_sql(
-            "ALTER TABLE runs ADD COLUMN research_chain_requested "
-            "BOOLEAN NOT NULL DEFAULT 0"
+            "ALTER TABLE runs ADD COLUMN research_execution_strategy VARCHAR(20)"
         )
     seed_engine.dispose()
     repository = RunRepository(app_settings)
@@ -171,9 +160,7 @@ def test_v8_upgrade_preserves_research_data_and_downgrade_recreates_empty_table(
         evidence=evidence,
         benchmark="SPY",
     )
-    outcome_id = repository.pending_outcomes(
-        due_at=datetime(2100, 1, 1)
-    )[0]["outcome_id"]
+    outcome_id = repository.pending_outcomes(due_at=datetime(2100, 1, 1))[0]["outcome_id"]
     repository.resolve_outcome(
         outcome_id,
         observation_start=date(2026, 7, 25),
@@ -193,12 +180,12 @@ def test_v8_upgrade_preserves_research_data_and_downgrade_recreates_empty_table(
 
     seed_engine = create_sqlite_engine(app_settings.database_path)
     with seed_engine.begin() as connection:
-        connection.exec_driver_sql(
-            "ALTER TABLE runs DROP COLUMN instrument_local_name"
-        )
-        connection.exec_driver_sql(
-            "ALTER TABLE runs DROP COLUMN research_chain_requested"
-        )
+        connection.exec_driver_sql("ALTER TABLE runs DROP COLUMN instrument_local_name")
+        connection.exec_driver_sql("ALTER TABLE runs DROP COLUMN research_chain_requested")
+        connection.exec_driver_sql("ALTER TABLE runs DROP COLUMN update_intent_id")
+        connection.exec_driver_sql("ALTER TABLE runs DROP COLUMN research_chain_id")
+        connection.exec_driver_sql("ALTER TABLE runs DROP COLUMN baseline_revision_id")
+        connection.exec_driver_sql("ALTER TABLE runs DROP COLUMN research_execution_strategy")
     seed_engine.dispose()
 
     upgrade_database(app_settings)
@@ -318,13 +305,8 @@ def test_unreleased_revision_requires_explicit_database_reset(
 ) -> None:
     app_settings.prepare_filesystem()
     with sqlite3.connect(app_settings.database_path) as connection:
-        connection.execute(
-            "CREATE TABLE alembic_version "
-            "(version_num VARCHAR(32) NOT NULL)"
-        )
-        connection.execute(
-            "INSERT INTO alembic_version VALUES ('0003_trash_lifecycle')"
-        )
+        connection.execute("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")
+        connection.execute("INSERT INTO alembic_version VALUES ('0003_trash_lifecycle')")
 
     with pytest.raises(
         IncompatibleDatabaseError,

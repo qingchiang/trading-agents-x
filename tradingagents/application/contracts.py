@@ -314,10 +314,7 @@ class NumericRequirementCheck(FrozenModel):
         cls,
         value: dict[str, int | float],
     ) -> dict[str, int | float]:
-        if any(
-            not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", key)
-            for key in value
-        ):
+        if any(not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", key) for key in value):
             raise ValueError("calculation input names must be identifiers")
         if any(isinstance(item, bool) for item in value.values()):
             raise ValueError("calculation inputs must be numeric")
@@ -350,10 +347,7 @@ class NumericRequirementCheck(FrozenModel):
     @model_validator(mode="after")
     def validate_status_fields(self) -> NumericRequirementCheck:
         if self.calculation_status is NumericCalculationStatus.VERIFIED:
-            if (
-                self.calculation_id is None
-                or self.canonical_result is None
-            ):
+            if self.calculation_id is None or self.canonical_result is None:
                 raise ValueError("verified calculations require an ID and result")
             comparison_fields = (
                 self.comparison_result,
@@ -362,15 +356,10 @@ class NumericRequirementCheck(FrozenModel):
             if any(item is not None for item in comparison_fields) and any(
                 item is None for item in comparison_fields
             ):
-                raise ValueError(
-                    "display comparison fields must be all present or all absent"
-                )
+                raise ValueError("display comparison fields must be all present or all absent")
             if self.display_status is NumericDisplayStatus.NOT_CHECKED:
                 raise ValueError("verified calculations require a display comparison")
-            if (
-                self.rounded_stated_value is None
-                or self.rounded_canonical_result is None
-            ):
+            if self.rounded_stated_value is None or self.rounded_canonical_result is None:
                 raise ValueError("checked displays require both rounded values")
         elif self.display_status is not NumericDisplayStatus.NOT_CHECKED:
             raise ValueError("invalid or missing calculations cannot compare display")
@@ -746,6 +735,7 @@ class ReportSection(FrozenModel):
     def validate_source_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return _unique_evidence_refs(value)
 
+
 class KeyClaim(FrozenModel):
     """A decision-relevant assertion extracted from a readable report."""
 
@@ -841,23 +831,12 @@ class AnalystReport(FrozenModel):
             raise ValueError("analyst section IDs must be unique")
         if any(claim.section_id not in set(section_ids) for claim in self.key_claims):
             raise ValueError("key claims must identify an existing report section")
-        used_refs = {
-            ref
-            for claim in self.key_claims
-            for ref in claim.evidence_refs
-        }
-        used_refs.update(
-            ref
-            for section in self.report_sections
-            for ref in section.source_refs
-        )
+        used_refs = {ref for claim in self.key_claims for ref in claim.evidence_refs}
+        used_refs.update(ref for section in self.report_sections for ref in section.source_refs)
         if not used_refs.issubset(self.source_refs):
             raise ValueError("report source refs must include claim and section refs")
         if self.audit_status is ReportAuditStatus.COMPLETE:
-            if not any(
-                claim.importance is ClaimImportance.PRIMARY
-                for claim in self.key_claims
-            ):
+            if not any(claim.importance is ClaimImportance.PRIMARY for claim in self.key_claims):
                 raise ValueError("complete report audit requires a primary claim")
             if any(not claim.evidence_refs for claim in self.key_claims):
                 raise ValueError("complete report audit requires cited claims")
@@ -987,9 +966,7 @@ class EvidenceValueLocator(FrozenModel):
         if any(part is not None for part in table_parts) and not all(
             part is not None for part in table_parts
         ):
-            raise ValueError(
-                "table-backed evidence values require table_id, row_id, and column"
-            )
+            raise ValueError("table-backed evidence values require table_id, row_id, and column")
         return self
 
 
@@ -1033,9 +1010,7 @@ class AuditedRangeEndpoint(FrozenModel):
                 raise ValueError("observed endpoint refs must include its locator ref")
         elif self.basis is MarketReferenceBasis.INTERPRETED:
             if self.source_locator is not None or self.calculation_id:
-                raise ValueError(
-                    "interpreted endpoint must not claim a locator or calculation"
-                )
+                raise ValueError("interpreted endpoint must not claim a locator or calculation")
         elif self.basis is MarketReferenceBasis.DERIVED:
             if not self.calculation_id:
                 raise ValueError("derived endpoint requires a calculation")
@@ -1077,6 +1052,7 @@ class ResearchScenario(FrozenModel):
         value: tuple[str, ...],
     ) -> tuple[str, ...]:
         return _unique_evidence_refs(value)
+
 
 class ValuationAssessment(FrozenModel):
     method: str = Field(min_length=1)
@@ -1147,9 +1123,7 @@ class MarketReferenceLevel(FrozenModel):
     @model_validator(mode="after")
     def validate_basis(self) -> MarketReferenceLevel:
         if not set(self.date_evidence_refs).issubset(self.evidence_refs):
-            raise ValueError(
-                "date evidence refs must be included in market reference refs"
-            )
+            raise ValueError("date evidence refs must be included in market reference refs")
         if self.basis is MarketReferenceBasis.OBSERVED:
             if self.source_locator is None:
                 raise ValueError("observed market reference requires an Evidence locator")
@@ -1219,10 +1193,7 @@ class CalculationRecord(FrozenModel):
         cls,
         value: dict[str, int | float],
     ) -> dict[str, int | float]:
-        if any(
-            not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", key)
-            for key in value
-        ):
+        if any(not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", key) for key in value):
             raise ValueError("calculation input names must be identifiers")
         if any(isinstance(item, bool) for item in value.values()):
             raise ValueError("calculation inputs must be numeric")
@@ -1290,9 +1261,7 @@ class ResearchDecision(FrozenModel):
         for level in value.get("market_reference_levels") or ():
             merged.extend(_field_value(level, "evidence_refs") or ())
         for calculation in value.get("calculation_records") or ():
-            merged.extend(
-                _field_value(calculation, "input_evidence_refs") or ()
-            )
+            merged.extend(_field_value(calculation, "input_evidence_refs") or ())
         for adjustment in value.get("risk_review_adjustments") or ():
             merged.extend(_field_value(adjustment, "evidence_refs") or ())
         return {**value, "evidence_refs": tuple(dict.fromkeys(merged))}
@@ -1744,6 +1713,10 @@ class RunView(FrozenModel):
     instrument_name: str | None = None
     instrument_local_name: str | None = None
     research_chain_requested: bool = False
+    update_intent_id: str | None = None
+    research_chain_id: str | None = None
+    baseline_revision_id: str | None = None
+    research_execution_strategy: Literal["full", "incremental"] | None = None
     status: RunStatus
     request: AnalysisRequest
     config_snapshot: dict[str, Any]

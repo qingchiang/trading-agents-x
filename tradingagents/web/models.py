@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -42,9 +42,12 @@ class RunCreateRequest(AnalysisRequest):
         return value.strip() if isinstance(value, str) else value
 
     def analysis_request(self) -> AnalysisRequest:
-        return AnalysisRequest.model_validate(
-            self.model_dump(exclude={"source_run_id"})
-        )
+        return AnalysisRequest.model_validate(self.model_dump(exclude={"source_run_id"}))
+
+
+class ResearchChainUpdateRequest(ApiModel):
+    baseline_revision_id: str = Field(min_length=1, max_length=36)
+    analysis_date: date
 
 
 class RunBatchRequest(ApiModel):

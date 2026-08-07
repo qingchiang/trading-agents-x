@@ -103,6 +103,32 @@ class ResearchRevisionOutcome(str, Enum):
     NO_MATERIAL_CHANGE = "no_material_change"
 
 
+class ClaimChange(str, Enum):
+    INTRODUCED = "introduced"
+    REAFFIRMED = "reaffirmed"
+    STRENGTHENED = "strengthened"
+    WEAKENED = "weakened"
+    INVALIDATED = "invalidated"
+    RETIRED = "retired"
+    SUPERSEDED = "superseded"
+
+
+class QuestionChange(str, Enum):
+    INTRODUCED = "introduced"
+    REAFFIRMED = "reaffirmed"
+    ANSWERED = "answered"
+    REOPENED = "reopened"
+    SUPERSEDED = "superseded"
+    RETIRED = "retired"
+
+
+class IdentityDisposition(str, Enum):
+    EXACT_MATCH = "exact_match"
+    NEW = "new"
+    AMBIGUOUS_NEW = "ambiguous_new"
+    CONSERVATIVE_RETIREMENT = "conservative_retirement"
+
+
 class ResearchClaim(ResearchModel):
     id: str = Field(pattern=_CLAIM_ID)
     statement: str = Field(min_length=1)
@@ -194,9 +220,7 @@ class CurrentResearchState(ResearchModel):
         question_ids = tuple(question.id for question in self.questions)
         if len(question_ids) != len(set(question_ids)):
             raise ValueError("Research Question IDs must be unique")
-        active_ids = {
-            claim.id for claim in self.claims if claim.standing is ClaimStanding.ACTIVE
-        }
+        active_ids = {claim.id for claim in self.claims if claim.standing is ClaimStanding.ACTIVE}
         if not set(self.opinion.primary_claim_ids).issubset(active_ids):
             raise ValueError("opinion primary claims must be active")
         kinds = tuple(scenario.kind for scenario in self.scenarios)
@@ -207,9 +231,7 @@ class CurrentResearchState(ResearchModel):
         if len({scenario.horizon for scenario in self.scenarios}) != 1:
             raise ValueError("scenarios must share horizon")
         linked_ids = {
-            claim_id
-            for scenario in self.scenarios
-            for claim_id in scenario.assumption_claim_ids
+            claim_id for scenario in self.scenarios for claim_id in scenario.assumption_claim_ids
         }
         for factor in (*self.risks, *self.catalysts, *self.invalidation_conditions):
             linked_ids.update(factor.claim_ids)
@@ -217,9 +239,7 @@ class CurrentResearchState(ResearchModel):
             raise ValueError("state relationships must use active Claim IDs")
         linked_refs = set(self.opinion.evidence_refs)
         linked_refs.update(ref for claim in self.claims for ref in claim.evidence_refs)
-        linked_refs.update(
-            ref for scenario in self.scenarios for ref in scenario.evidence_refs
-        )
+        linked_refs.update(ref for scenario in self.scenarios for ref in scenario.evidence_refs)
         linked_refs.update(
             ref
             for factor in (*self.risks, *self.catalysts, *self.invalidation_conditions)
@@ -282,17 +302,52 @@ class EffectiveEvidenceSnapshot(ResearchModel):
         if {item.evidence_ref for item in self.lineage} != refs:
             raise ValueError("Evidence lineage must cover the complete bundle")
         if any(
-            item.lineage == "inherited" and not item.source_revision_id
-            for item in self.lineage
+            item.lineage == "inherited" and not item.source_revision_id for item in self.lineage
         ):
             raise ValueError("inherited Evidence requires a source Revision")
         return self
+
+
+class ClaimRevisionDelta(ResearchModel):
+    object_id: str = Field(pattern=_CLAIM_ID)
+    previous_object_id: str | None = Field(default=None, pattern=_CLAIM_ID)
+    change: ClaimChange
+    identity_disposition: IdentityDisposition
+
+
+class QuestionRevisionDelta(ResearchModel):
+    object_id: str = Field(pattern=_QUESTION_ID)
+    previous_object_id: str | None = Field(default=None, pattern=_QUESTION_ID)
+    change: QuestionChange
+    identity_disposition: IdentityDisposition
+
+
+class RevisionDelta(ResearchModel):
+    schema_version: Literal["1"] = "1"
+    opinion_changed: bool
+    claims: tuple[ClaimRevisionDelta, ...]
+    questions: tuple[QuestionRevisionDelta, ...]
+    changed_sections: tuple[
+        Literal[
+            "opinion",
+            "claims",
+            "questions",
+            "scenarios",
+            "risks",
+            "catalysts",
+            "invalidation_conditions",
+        ],
+        ...,
+    ] = ()
+    inherited_evidence_refs: tuple[str, ...] = ()
+    new_evidence_refs: tuple[str, ...] = ()
 
 
 class ResearchRevisionDraft(ResearchModel):
     cutoff: date
     execution_strategy: ResearchExecutionStrategy
     outcome: ResearchRevisionOutcome
+    delta: RevisionDelta
     current_state: CurrentResearchState
     coverage: CoverageAttestation
     update_summary: UpdateSummary
@@ -308,17 +363,13 @@ class ResearchRevisionDraft(ResearchModel):
             raise ValueError("Coverage must attest every Research Claim exactly once")
         question_ids = {question.id for question in self.current_state.questions}
         covered_question_ids = tuple(item.object_id for item in self.coverage.questions)
-        if question_ids != set(covered_question_ids) or len(
-            covered_question_ids
-        ) != len(set(covered_question_ids)):
-            raise ValueError(
-                "Coverage must attest every Research Question exactly once"
-            )
+        if question_ids != set(covered_question_ids) or len(covered_question_ids) != len(
+            set(covered_question_ids)
+        ):
+            raise ValueError("Coverage must attest every Research Question exactly once")
         snapshot_refs = {item.ref for item in self.evidence_snapshot.bundle.items}
         if not set(self.current_state.evidence_refs).issubset(snapshot_refs):
-            raise ValueError(
-                "Current Research State uses Evidence outside its snapshot"
-            )
+            raise ValueError("Current Research State uses Evidence outside its snapshot")
         return self
 
 
@@ -403,21 +454,15 @@ def render_revision_export_markdown(export: RevisionExport) -> str:
     lines.extend(["", "## Coverage", ""])
     for domain in revision.coverage.domains:
         limitation = "; ".join(domain.limitations) or "none"
-        lines.append(
-            f"- {domain.domain}: {domain.status.value}; limitations: {limitation}"
-        )
+        lines.append(f"- {domain.domain}: {domain.status.value}; limitations: {limitation}")
     lines.extend(["", "### Claim Coverage", ""])
     for item in revision.coverage.claims:
         limitation = "; ".join(item.limitations) or "none"
-        lines.append(
-            f"- `{item.object_id}`: {item.status.value}; limitations: {limitation}"
-        )
+        lines.append(f"- `{item.object_id}`: {item.status.value}; limitations: {limitation}")
     lines.extend(["", "### Question Coverage", ""])
     for item in revision.coverage.questions:
         limitation = "; ".join(item.limitations) or "none"
-        lines.append(
-            f"- `{item.object_id}`: {item.status.value}; limitations: {limitation}"
-        )
+        lines.append(f"- `{item.object_id}`: {item.status.value}; limitations: {limitation}")
     lines.extend(["", "## Effective Evidence Snapshot", ""])
     lineage = {item.evidence_ref: item for item in revision.evidence_snapshot.lineage}
     for evidence_item in revision.evidence_snapshot.bundle.items:
@@ -505,6 +550,322 @@ def _new_question_id() -> str:
     return f"question_{uuid4().hex}"
 
 
+def _identity_text(value: str) -> str:
+    return " ".join(value.split()).casefold()
+
+
+def _claim_identity(claim: ResearchClaim) -> tuple[str, EpistemicKind, DecisionRole]:
+    return (_identity_text(claim.statement), claim.epistemic_kind, claim.decision_role)
+
+
+def _question_identity(question: ResearchQuestion) -> str:
+    return _identity_text(question.question)
+
+
+def _unique_identity_matches(current, candidate, key):
+    current_by_key: dict[object, list[object]] = {}
+    candidate_by_key: dict[object, list[object]] = {}
+    for item in current:
+        current_by_key.setdefault(key(item), []).append(item)
+    for item in candidate:
+        candidate_by_key.setdefault(key(item), []).append(item)
+    matches = {}
+    ambiguous = set()
+    for identity, candidate_items in candidate_by_key.items():
+        current_items = current_by_key.get(identity, [])
+        if len(candidate_items) == len(current_items) == 1:
+            matches[candidate_items[0].id] = current_items[0]
+        elif current_items:
+            ambiguous.update(item.id for item in candidate_items)
+    return matches, ambiguous
+
+
+def assemble_full_update(
+    baseline_revision_id: str,
+    baseline: ResearchRevisionDraft,
+    candidate: ResearchRevisionDraft,
+) -> ResearchRevisionDraft:
+    """Compare an independently assembled Full result with an Eligible Baseline."""
+    if candidate.current_state.instrument != baseline.current_state.instrument:
+        raise ValueError("update Instrument must match the Eligible Baseline")
+    if candidate.cutoff <= baseline.cutoff:
+        raise ValueError("update cutoff must be strictly later than the Eligible Baseline")
+
+    claim_matches, ambiguous_claims = _unique_identity_matches(
+        baseline.current_state.claims,
+        candidate.current_state.claims,
+        _claim_identity,
+    )
+    question_matches, ambiguous_questions = _unique_identity_matches(
+        baseline.current_state.questions,
+        candidate.current_state.questions,
+        _question_identity,
+    )
+    claim_ids = {candidate_id: previous.id for candidate_id, previous in claim_matches.items()}
+    question_ids = {
+        candidate_id: previous.id for candidate_id, previous in question_matches.items()
+    }
+
+    claims = tuple(
+        claim.model_copy(update={"id": claim_ids.get(claim.id, claim.id)})
+        for claim in candidate.current_state.claims
+    )
+    questions = tuple(
+        question.model_copy(update={"id": question_ids.get(question.id, question.id)})
+        for question in candidate.current_state.questions
+    )
+    retained_claim_ids = {claim.id for claim in claims}
+    retained_question_ids = {question.id for question in questions}
+    retired_claims = tuple(
+        claim.model_copy(update={"standing": ClaimStanding.RETIRED})
+        for claim in baseline.current_state.claims
+        if claim.id not in retained_claim_ids
+    )
+    retired_questions = tuple(
+        question.model_copy(update={"status": QuestionStatus.RETIRED})
+        for question in baseline.current_state.questions
+        if question.id not in retained_question_ids
+    )
+
+    def remap_claim_ids(values: tuple[str, ...]) -> tuple[str, ...]:
+        return tuple(claim_ids.get(value, value) for value in values)
+
+    opinion = candidate.current_state.opinion.model_copy(
+        update={
+            "primary_claim_ids": remap_claim_ids(candidate.current_state.opinion.primary_claim_ids)
+        }
+    )
+    scenarios = tuple(
+        item.model_copy(update={"assumption_claim_ids": remap_claim_ids(item.assumption_claim_ids)})
+        for item in candidate.current_state.scenarios
+    )
+
+    def remap_factors(values: tuple[ResearchFactor, ...]) -> tuple[ResearchFactor, ...]:
+        return tuple(
+            item.model_copy(update={"claim_ids": remap_claim_ids(item.claim_ids)})
+            for item in values
+        )
+
+    baseline_bundle = baseline.evidence_snapshot.bundle
+    candidate_bundle = candidate.evidence_snapshot.bundle
+    new_refs = {item.ref for item in candidate_bundle.items}
+    combined_items = tuple(
+        {item.ref: item for item in (*baseline_bundle.items, *candidate_bundle.items)}.values()
+    )
+    combined_tables = tuple(
+        {item.id: item for item in (*baseline_bundle.tables, *candidate_bundle.tables)}.values()
+    )
+    combined_bundle = EvidenceBundle(
+        instrument=candidate_bundle.instrument,
+        analysis_date=candidate_bundle.analysis_date,
+        items=combined_items,
+        tables=combined_tables,
+        sealed_at=candidate_bundle.sealed_at,
+    )
+    inherited_refs = tuple(item.ref for item in baseline_bundle.items if item.ref not in new_refs)
+    state = candidate.current_state.model_copy(
+        update={
+            "opinion": opinion,
+            "claims": (*claims, *retired_claims),
+            "questions": (*questions, *retired_questions),
+            "scenarios": scenarios,
+            "risks": remap_factors(candidate.current_state.risks),
+            "catalysts": remap_factors(candidate.current_state.catalysts),
+            "invalidation_conditions": remap_factors(
+                candidate.current_state.invalidation_conditions
+            ),
+            "evidence_refs": tuple(item.ref for item in combined_items),
+        }
+    )
+
+    confidence_rank = {
+        ClaimConfidence.LOW: 0,
+        ClaimConfidence.INDETERMINATE: 1,
+        ClaimConfidence.MEDIUM: 2,
+        ClaimConfidence.HIGH: 3,
+    }
+    claim_delta: list[ClaimRevisionDelta] = []
+    for original in candidate.current_state.claims:
+        previous = claim_matches.get(original.id)
+        if previous is None:
+            claim_delta.append(
+                ClaimRevisionDelta(
+                    object_id=original.id,
+                    change=ClaimChange.INTRODUCED,
+                    identity_disposition=(
+                        IdentityDisposition.AMBIGUOUS_NEW
+                        if original.id in ambiguous_claims
+                        else IdentityDisposition.NEW
+                    ),
+                )
+            )
+            continue
+        current = next(item for item in claims if item.id == previous.id)
+        if current.standing is ClaimStanding.INVALIDATED:
+            change = ClaimChange.INVALIDATED
+        elif confidence_rank[current.confidence] > confidence_rank[previous.confidence]:
+            change = ClaimChange.STRENGTHENED
+        elif confidence_rank[current.confidence] < confidence_rank[previous.confidence]:
+            change = ClaimChange.WEAKENED
+        else:
+            change = ClaimChange.REAFFIRMED
+        claim_delta.append(
+            ClaimRevisionDelta(
+                object_id=current.id,
+                previous_object_id=previous.id,
+                change=change,
+                identity_disposition=IdentityDisposition.EXACT_MATCH,
+            )
+        )
+    claim_delta.extend(
+        ClaimRevisionDelta(
+            object_id=claim.id,
+            previous_object_id=claim.id,
+            change=ClaimChange.RETIRED,
+            identity_disposition=IdentityDisposition.CONSERVATIVE_RETIREMENT,
+        )
+        for claim in retired_claims
+    )
+
+    question_delta: list[QuestionRevisionDelta] = []
+    for original in candidate.current_state.questions:
+        previous = question_matches.get(original.id)
+        question_delta.append(
+            QuestionRevisionDelta(
+                object_id=question_ids.get(original.id, original.id),
+                previous_object_id=previous.id if previous is not None else None,
+                change=(
+                    QuestionChange.REAFFIRMED if previous is not None else QuestionChange.INTRODUCED
+                ),
+                identity_disposition=(
+                    IdentityDisposition.EXACT_MATCH
+                    if previous is not None
+                    else (
+                        IdentityDisposition.AMBIGUOUS_NEW
+                        if original.id in ambiguous_questions
+                        else IdentityDisposition.NEW
+                    )
+                ),
+            )
+        )
+    question_delta.extend(
+        QuestionRevisionDelta(
+            object_id=question.id,
+            previous_object_id=question.id,
+            change=QuestionChange.RETIRED,
+            identity_disposition=IdentityDisposition.CONSERVATIVE_RETIREMENT,
+        )
+        for question in retired_questions
+    )
+
+    coverage_claims = tuple(
+        item.model_copy(update={"object_id": claim_ids.get(item.object_id, item.object_id)})
+        for item in candidate.coverage.claims
+    ) + tuple(
+        ResearchObjectCoverage(
+            object_id=claim.id,
+            status=CoverageStatus.LIMITED,
+            evidence_refs=claim.evidence_refs,
+            limitations=("The independent Full Analysis did not reproduce this Claim.",),
+        )
+        for claim in retired_claims
+    )
+    coverage_questions = tuple(
+        item.model_copy(update={"object_id": question_ids.get(item.object_id, item.object_id)})
+        for item in candidate.coverage.questions
+    ) + tuple(
+        ResearchObjectCoverage(
+            object_id=question.id,
+            status=CoverageStatus.LIMITED,
+            evidence_refs=question.evidence_refs,
+            limitations=("The independent Full Analysis did not reproduce this Question.",),
+        )
+        for question in retired_questions
+    )
+    opinion_changed = opinion.model_dump(
+        exclude={"evidence_refs"}
+    ) != baseline.current_state.opinion.model_dump(exclude={"evidence_refs"})
+
+    def semantic_scenarios(values: tuple[ResearchScenarioState, ...]):
+        return tuple(item.model_dump(exclude={"cutoff", "evidence_refs"}) for item in values)
+
+    def semantic_factors(values: tuple[ResearchFactor, ...]):
+        return tuple(item.model_dump(exclude={"evidence_refs"}) for item in values)
+
+    changed_sections: list[str] = []
+    if opinion_changed:
+        changed_sections.append("opinion")
+    if any(item.change is not ClaimChange.REAFFIRMED for item in claim_delta):
+        changed_sections.append("claims")
+    if any(item.change is not QuestionChange.REAFFIRMED for item in question_delta):
+        changed_sections.append("questions")
+    if semantic_scenarios(scenarios) != semantic_scenarios(baseline.current_state.scenarios):
+        changed_sections.append("scenarios")
+    for section, current_values, baseline_values in (
+        ("risks", state.risks, baseline.current_state.risks),
+        ("catalysts", state.catalysts, baseline.current_state.catalysts),
+        (
+            "invalidation_conditions",
+            state.invalidation_conditions,
+            baseline.current_state.invalidation_conditions,
+        ),
+    ):
+        if semantic_factors(current_values) != semantic_factors(baseline_values):
+            changed_sections.append(section)
+    material = bool(changed_sections)
+    delta = RevisionDelta(
+        opinion_changed=opinion_changed,
+        claims=tuple(claim_delta),
+        questions=tuple(question_delta),
+        changed_sections=tuple(changed_sections),
+        inherited_evidence_refs=inherited_refs,
+        new_evidence_refs=tuple(item.ref for item in candidate_bundle.items),
+    )
+    summaries = {
+        "en": "Full Analysis completed and was compared with the Eligible Baseline.",
+        "zh-CN": "完整分析已完成，并与合格基线进行了比较。",
+        "ja": "フル分析を完了し、適格なベースラインと比較しました。",
+    }
+    updated = candidate.model_copy(
+        update={
+            "execution_strategy": ResearchExecutionStrategy.FULL,
+            "outcome": (
+                ResearchRevisionOutcome.MATERIAL_CHANGE
+                if material
+                else ResearchRevisionOutcome.NO_MATERIAL_CHANGE
+            ),
+            "delta": delta,
+            "current_state": state,
+            "coverage": candidate.coverage.model_copy(
+                update={
+                    "claims": coverage_claims,
+                    "questions": coverage_questions,
+                }
+            ),
+            "update_summary": candidate.update_summary.model_copy(
+                update={
+                    "summary": summaries.get(
+                        candidate.current_state.language,
+                        candidate.update_summary.summary,
+                    )
+                }
+            ),
+            "evidence_snapshot": EffectiveEvidenceSnapshot(
+                bundle=combined_bundle,
+                lineage=tuple(
+                    EvidenceSnapshotItem(
+                        evidence_ref=item.ref,
+                        lineage="new" if item.ref in new_refs else "inherited",
+                        source_revision_id=(None if item.ref in new_refs else baseline_revision_id),
+                    )
+                    for item in combined_items
+                ),
+            ),
+        }
+    )
+    return ResearchRevisionDraft.model_validate(updated.model_dump(mode="python"))
+
+
 def assemble_full_revision(
     request: AnalysisRequest,
     execution: FullResearchExecution,
@@ -545,9 +906,7 @@ def assemble_full_revision(
                     confidence=_claim_confidence(candidate.confidence),
                     evidence_refs=refs,
                     observed_at=(
-                        max(observed_dates)
-                        if kind is EpistemicKind.OBSERVATION
-                        else None
+                        max(observed_dates) if kind is EpistemicKind.OBSERVATION else None
                     ),
                     falsifier=(
                         None
@@ -579,9 +938,7 @@ def assemble_full_revision(
         )
     primary_claim_ids = tuple(claim.id for claim in claims)
 
-    def factors(
-        statements: tuple[str, ...], role: DecisionRole
-    ) -> tuple[ResearchFactor, ...]:
+    def factors(statements: tuple[str, ...], role: DecisionRole) -> tuple[ResearchFactor, ...]:
         output: list[ResearchFactor] = []
         for statement in statements:
             claim = ResearchClaim(
@@ -613,9 +970,7 @@ def assemble_full_revision(
     invalidations = factors(decision.invalidation_conditions, DecisionRole.INVALIDATION)
     scenarios: list[ResearchScenarioState] = []
     for scenario in decision.scenarios:
-        scenario_refs = tuple(
-            ref for ref in scenario.evidence_refs if ref in allowed_refs
-        )
+        scenario_refs = tuple(ref for ref in scenario.evidence_refs if ref in allowed_refs)
         if not scenario_refs:
             raise ValueError("Research Scenarios require explicit Evidence refs")
         assumption_ids = []
@@ -682,9 +1037,7 @@ def assemble_full_revision(
         domains.append(
             ResearchDomainCoverage(
                 domain=analyst,
-                status=(
-                    CoverageStatus.COMPLETE if complete else CoverageStatus.LIMITED
-                ),
+                status=(CoverageStatus.COMPLETE if complete else CoverageStatus.LIMITED),
                 evidence_refs=(
                     tuple(ref for ref in report.source_refs if ref in allowed_refs)
                     if report is not None
@@ -714,9 +1067,7 @@ def assemble_full_revision(
         claim_coverage.append(
             ResearchObjectCoverage(
                 object_id=claim.id,
-                status=(
-                    CoverageStatus.COMPLETE if complete else CoverageStatus.LIMITED
-                ),
+                status=(CoverageStatus.COMPLETE if complete else CoverageStatus.LIMITED),
                 evidence_refs=claim.evidence_refs,
                 limitations=claim_limitations,
             )
@@ -740,6 +1091,26 @@ def assemble_full_revision(
         cutoff=request.analysis_date,
         execution_strategy=ResearchExecutionStrategy.FULL,
         outcome=ResearchRevisionOutcome.MATERIAL_CHANGE,
+        delta=RevisionDelta(
+            opinion_changed=True,
+            claims=tuple(
+                ClaimRevisionDelta(
+                    object_id=claim.id,
+                    change=ClaimChange.INTRODUCED,
+                    identity_disposition=IdentityDisposition.NEW,
+                )
+                for claim in claims
+            ),
+            questions=tuple(
+                QuestionRevisionDelta(
+                    object_id=question.id,
+                    change=QuestionChange.INTRODUCED,
+                    identity_disposition=IdentityDisposition.NEW,
+                )
+                for question in questions
+            ),
+            new_evidence_refs=evidence_refs,
+        ),
         current_state=state,
         coverage=CoverageAttestation(
             claims=tuple(claim_coverage),
@@ -756,8 +1127,7 @@ def assemble_full_revision(
         evidence_snapshot=EffectiveEvidenceSnapshot(
             bundle=evidence,
             lineage=tuple(
-                EvidenceSnapshotItem(evidence_ref=ref, lineage="new")
-                for ref in evidence_refs
+                EvidenceSnapshotItem(evidence_ref=ref, lineage="new") for ref in evidence_refs
             ),
         ),
     )

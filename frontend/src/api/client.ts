@@ -47,6 +47,8 @@ export type StructuredRecoveryNotice =
 export type RecentInstrument = components["schemas"]["RecentInstrument"];
 export type ResearchChain = components["schemas"]["ResearchChain"];
 export type ResearchRevision = components["schemas"]["ResearchRevision"];
+export type ResearchChainUpdateRequest =
+  components["schemas"]["ResearchChainUpdateRequest"];
 
 export class ApiError extends Error {
   constructor(
@@ -139,6 +141,16 @@ export const api = {
     ),
   researchChain: (id: string) =>
     request<ResearchChain>(`/api/v1/research-chains/${id}`),
+  updateResearchChain: (
+    id: string,
+    payload: ResearchChainUpdateRequest,
+    idempotencyKey: string,
+  ) =>
+    request<RunView>(`/api/v1/research-chains/${id}/updates`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify(payload),
+    }),
   action: (id: string, action: "cancel" | "retry") =>
     request<RunView>(`/api/v1/runs/${id}/${action}`, { method: "POST" }),
   memory: (query = "") =>

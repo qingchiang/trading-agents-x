@@ -92,8 +92,15 @@ export interface components {
       quick_reasoning_effort: string | null;
       trash_retention_days: number;
     };
+    ClaimChange: "introduced" | "reaffirmed" | "strengthened" | "weakened" | "invalidated" | "retired" | "superseded";
     ClaimConfidence: "low" | "medium" | "high" | "indeterminate";
     ClaimImportance: "primary" | "supporting";
+    ClaimRevisionDelta: {
+      change: components["schemas"]["ClaimChange"];
+      identity_disposition: components["schemas"]["IdentityDisposition"];
+      object_id: string;
+      previous_object_id?: string | null;
+    };
     ClaimStanding: "active" | "invalidated" | "retired";
     CoverageAttestation: {
       claims: components["schemas"]["ResearchObjectCoverage"][];
@@ -252,6 +259,7 @@ export interface components {
       status: "ok" | "degraded";
       version: string;
     };
+    IdentityDisposition: "exact_match" | "new" | "ambiguous_new" | "conservative_retirement";
     IssueDisposition: {
       issue_id: string;
       status: "upheld" | "rejected" | "unresolved";
@@ -392,6 +400,13 @@ export interface components {
       stale: boolean;
       warning?: components["schemas"]["ModelDiscoveryWarningView"] | null;
     };
+    QuestionChange: "introduced" | "reaffirmed" | "answered" | "reopened" | "superseded" | "retired";
+    QuestionRevisionDelta: {
+      change: components["schemas"]["QuestionChange"];
+      identity_disposition: components["schemas"]["IdentityDisposition"];
+      object_id: string;
+      previous_object_id?: string | null;
+    };
     QuestionStatus: "open" | "answered" | "superseded" | "retired";
     QueueHealth: {
       pending_outcomes: number;
@@ -446,6 +461,10 @@ export interface components {
       is_primary: boolean;
       revisions?: components["schemas"]["ResearchRevision"][];
       updated_at: string;
+    };
+    ResearchChainUpdateRequest: {
+      analysis_date: string;
+      baseline_revision_id: string;
     };
     ResearchClaim: {
       confidence: components["schemas"]["ClaimConfidence"];
@@ -516,6 +535,7 @@ export interface components {
       created_at: string;
       current_state: components["schemas"]["CurrentResearchState"];
       cutoff: string;
+      delta: components["schemas"]["RevisionDelta"];
       evidence_snapshot: components["schemas"]["EffectiveEvidenceSnapshot"];
       execution_strategy: components["schemas"]["ResearchExecutionStrategy"];
       id: string;
@@ -549,6 +569,15 @@ export interface components {
       evidence_ref?: string | null;
       message: string;
       source?: string | null;
+    };
+    RevisionDelta: {
+      changed_sections?: ("opinion" | "claims" | "questions" | "scenarios" | "risks" | "catalysts" | "invalidation_conditions")[];
+      claims: components["schemas"]["ClaimRevisionDelta"][];
+      inherited_evidence_refs?: string[];
+      new_evidence_refs?: string[];
+      opinion_changed: boolean;
+      questions: components["schemas"]["QuestionRevisionDelta"][];
+      schema_version?: string;
     };
     RiskReview: {
       challenged_issue_ids?: string[];
@@ -631,6 +660,7 @@ export interface components {
     RunStatus: "queued" | "running" | "succeeded" | "failed" | "cancelled";
     RunSummaryView: {
       attempt: number;
+      baseline_revision_id?: string | null;
       cancel_requested: boolean;
       config_snapshot: Record<string, unknown>;
       created_at: string;
@@ -642,17 +672,21 @@ export interface components {
       instrument_name?: string | null;
       metrics?: components["schemas"]["RunMetrics"];
       request: components["schemas"]["AnalysisRequest"];
+      research_chain_id?: string | null;
       research_chain_requested?: boolean;
+      research_execution_strategy?: "full" | "incremental" | null;
       research_rating?: components["schemas"]["ResearchRating"] | null;
       source_run_id?: string | null;
       started_at?: string | null;
       status: components["schemas"]["RunStatus"];
       trashed_at?: string | null;
+      update_intent_id?: string | null;
       updated_at: string;
     };
     RunTrashState: "active" | "trashed" | "all";
     RunView: {
       attempt: number;
+      baseline_revision_id?: string | null;
       cancel_requested: boolean;
       config_snapshot: Record<string, unknown>;
       created_at: string;
@@ -664,11 +698,14 @@ export interface components {
       instrument_name?: string | null;
       metrics?: components["schemas"]["RunMetrics"];
       request: components["schemas"]["AnalysisRequest"];
+      research_chain_id?: string | null;
       research_chain_requested?: boolean;
+      research_execution_strategy?: "full" | "incremental" | null;
       source_run_id?: string | null;
       started_at?: string | null;
       status: components["schemas"]["RunStatus"];
       trashed_at?: string | null;
+      update_intent_id?: string | null;
       updated_at: string;
     };
     ScenarioLikelihood: "low" | "medium" | "high" | "indeterminate";

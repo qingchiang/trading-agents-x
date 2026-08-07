@@ -24,6 +24,7 @@ from tradingagents.application.research import (
     ResearchScenarioState,
     ScenarioLikelihood,
     assemble_full_revision,
+    assemble_full_update,
 )
 
 REF = "ev_0123456789ab"
@@ -171,3 +172,62 @@ def test_full_state_assembly_rejects_missing_explicit_claim_evidence():
             ),
             execution,
         )
+
+
+def test_full_update_preserves_only_unambiguous_longitudinal_identities():
+    request = AnalysisRequest(
+        ticker="6501.T",
+        analysis_date=date(2026, 7, 25),
+        analysts=("market",),
+    )
+    baseline = assemble_full_revision(
+        request.model_copy(update={"analysis_date": CUTOFF}),
+        _execution("6501.T"),
+    )
+    candidate = assemble_full_revision(request, _execution("6501.T"))
+
+    updated = assemble_full_update("revision-1", baseline, candidate)
+
+    assert updated.current_state.claims[0].id == baseline.current_state.claims[0].id
+    assert updated.delta.claims[0].change.value == "reaffirmed"
+    assert {item.lineage for item in updated.evidence_snapshot.lineage} == {"new"}
+    assert updated.execution_strategy.value == "full"
+
+
+def test_full_update_does_not_reassign_ambiguous_claim_identity():
+    baseline = assemble_full_revision(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date=CUTOFF,
+            analysts=("market",),
+        ),
+        _execution("6501.T"),
+    )
+    duplicate = baseline.current_state.claims[0].model_copy(
+        update={"id": "claim_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+    )
+    duplicate_coverage = baseline.coverage.claims[0].model_copy(update={"object_id": duplicate.id})
+    baseline = baseline.model_copy(
+        update={
+            "current_state": baseline.current_state.model_copy(
+                update={"claims": (*baseline.current_state.claims, duplicate)}
+            ),
+            "coverage": baseline.coverage.model_copy(
+                update={"claims": (*baseline.coverage.claims, duplicate_coverage)}
+            ),
+        }
+    )
+    candidate = assemble_full_revision(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date=date(2026, 7, 25),
+            analysts=("market",),
+        ),
+        _execution("6501.T"),
+    )
+    candidate_id = candidate.current_state.claims[0].id
+
+    updated = assemble_full_update("revision-1", baseline, candidate)
+
+    assert updated.current_state.claims[0].id == candidate_id
+    assert updated.delta.claims[0].identity_disposition.value == "ambiguous_new"

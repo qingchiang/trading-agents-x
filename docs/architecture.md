@@ -200,8 +200,9 @@ interrupt forces termination.
 
 - `retry` is valid for a failed run, increments its attempt, and reuses the
   compatible checkpoint thread.
-- a terminal run can seed an editable New Run form; submitting it creates a
-  linked run with a new ID and fresh data/evidence snapshot.
+- `source_run_id` remains a legacy template relation for compatible API
+  callers, but it is not exposed in the primary reader flow and is never used
+  as Research Chain lineage or an Eligible Baseline;
 - a queued cancellation becomes terminal immediately;
 - a running cancellation is checked cooperatively at graph-node boundaries;
 - supervisor shutdown returns a running claim to the queue at the next node
@@ -234,6 +235,31 @@ link uses `ON DELETE SET NULL`, so trash expiry can remove the execution audit
 without deleting or weakening the immutable research state. The API, Web
 reader, and Revision exports read the Revision directly rather than replaying
 the producing run.
+
+### Full Research Chain updates
+
+In `off` mode a manual update targets exactly the current Revision of one
+Research Chain and requires a strictly later cutoff. The application records
+one Update Intent on the existing run execution boundary. Duplicate
+submissions for the same head and request resolve to the same run, while
+retries add an attempt to that execution. A partial unique constraint prevents
+concurrent queued or running updates for one chain.
+
+The ResearchGraph receives only the new `AnalysisRequest` and runs the existing
+Full Analysis pipeline without Prior Research. After it completes, the
+application compares the independently assembled state with the Eligible
+Baseline. Exact, unique Claim and Question matches retain their
+application-assigned identities. Ambiguous matches create new identities and
+record a conservative disposition; they never silently reassign an old
+identity. The immutable Revision stores a typed delta, complete Current
+Research State, Coverage Attestation, Update Summary, Effective Evidence
+Snapshot with inherited/new lineage, Full artifacts, and metrics.
+
+The repository commits the successful execution, new Revision, and changed
+chain head in one SQLite transaction after rechecking the baseline. Failure,
+cancellation, invalid state, or a stale baseline therefore leaves the prior
+head unchanged. Historical runs and decision-memory rows are never inferred
+into Research Chains.
 
 ### Trash lifecycle
 

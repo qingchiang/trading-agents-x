@@ -78,6 +78,7 @@ from .research import (
     ResearchRevision,
     ResearchRevisionDraft,
     ResearchRevisionOutcome,
+    RevisionDelta,
     UpdateSummary,
 )
 from .settings import AppSettings
@@ -185,6 +186,10 @@ class ResearchRevisionNotFoundError(LookupError):
     pass
 
 
+class InvalidResearchBaselineError(ValueError):
+    """Raised when an update does not target the current Eligible Baseline."""
+
+
 class RunRepository:
     def __init__(self, settings: AppSettings):
         self.settings = settings
@@ -193,9 +198,7 @@ class RunRepository:
             settings.database_path,
             busy_timeout_ms=settings.busy_timeout_ms,
         )
-        self.sessions = sessionmaker(
-            self.engine, expire_on_commit=False, class_=Session
-        )
+        self.sessions = sessionmaker(self.engine, expire_on_commit=False, class_=Session)
 
     def create_schema(self) -> None:
         """Create the current schema for tests; production entry points run Alembic."""
@@ -217,20 +220,16 @@ class RunRepository:
                 session.connection().exec_driver_sql("BEGIN IMMEDIATE")
                 if idempotency_key:
                     existing = session.scalar(
-                        select(RunRecord).where(
-                            RunRecord.idempotency_key == idempotency_key
-                        )
+                        select(RunRecord).where(RunRecord.idempotency_key == idempotency_key)
                     )
                     if existing is not None:
                         if (
                             existing.request_json != request_json
                             or existing.source_run_id != source_run_id
-                            or existing.research_chain_requested
-                            != research_chain_requested
+                            or existing.research_chain_requested != research_chain_requested
                         ):
                             raise IdempotencyConflictError(
-                                "idempotency key was already used for a "
-                                "different request"
+                                "idempotency key was already used for a different request"
                             )
                         return self._view(existing), False
                 if source_run_id is not None:
@@ -273,9 +272,7 @@ class RunRepository:
                 raise
             with self.sessions() as session:
                 existing = session.scalar(
-                    select(RunRecord).where(
-                        RunRecord.idempotency_key == idempotency_key
-                    )
+                    select(RunRecord).where(RunRecord.idempotency_key == idempotency_key)
                 )
                 if existing is None:
                     raise
@@ -288,6 +285,100 @@ class RunRepository:
                         "idempotency key was already used for a different request"
                     ) from exc
                 return self._view(existing), False
+        return self.get_run(run_id), True
+
+    def create_chain_update(
+        self,
+        chain_id: str,
+        baseline_revision_id: str,
+        request: AnalysisRequest,
+        config_snapshot: dict[str, Any],
+        *,
+        idempotency_key: str | None = None,
+    ) -> tuple[RunView, bool]:
+        """Atomically create or resolve one Full update for the current head."""
+        now = _utc_naive()
+        request_json = request.model_dump(mode="json")
+        with self.sessions.begin() as session:
+            session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            chain = session.get(ResearchChainRecord, chain_id)
+            if chain is None:
+                raise ResearchChainNotFoundError(chain_id)
+            baseline = session.get(ResearchRevisionRecord, baseline_revision_id)
+            if (
+                baseline is None
+                or baseline.chain_id != chain.id
+                or chain.current_revision_id != baseline.id
+            ):
+                raise InvalidResearchBaselineError(
+                    "update must target the current head of the same Research Chain"
+                )
+            if request.ticker != chain.instrument:
+                raise InvalidResearchBaselineError(
+                    "update Instrument must match the Research Chain"
+                )
+            if request.analysis_date <= baseline.cutoff:
+                raise InvalidResearchBaselineError(
+                    "update cutoff must be strictly later than the Eligible Baseline"
+                )
+            existing_exact = session.scalar(
+                select(RunRecord)
+                .where(
+                    RunRecord.research_chain_id == chain.id,
+                    RunRecord.baseline_revision_id == baseline.id,
+                    RunRecord.request_json == request_json,
+                )
+                .order_by(RunRecord.created_at)
+            )
+            if existing_exact is not None:
+                return self._view(existing_exact), False
+            active = session.scalar(
+                select(RunRecord).where(
+                    RunRecord.research_chain_id == chain.id,
+                    RunRecord.status.in_((RunStatus.QUEUED.value, RunStatus.RUNNING.value)),
+                )
+            )
+            if active is not None:
+                raise InvalidResearchBaselineError(
+                    "a queued or running update already exists for this Research Chain"
+                )
+            if idempotency_key:
+                reused = session.scalar(
+                    select(RunRecord).where(RunRecord.idempotency_key == idempotency_key)
+                )
+                if reused is not None:
+                    raise IdempotencyConflictError(
+                        "idempotency key was already used for a different request"
+                    )
+            run_id = str(uuid4())
+            record = RunRecord(
+                id=run_id,
+                idempotency_key=idempotency_key,
+                status=RunStatus.QUEUED.value,
+                research_chain_requested=False,
+                update_intent_id=str(uuid4()),
+                research_chain_id=chain.id,
+                baseline_revision_id=baseline.id,
+                research_execution_strategy=ResearchExecutionStrategy.FULL.value,
+                request_json=request_json,
+                config_json=_sanitize_payload(config_snapshot),
+                version=__version__,
+                current_attempt=1,
+                cancel_requested=False,
+                metrics_json=RunMetrics().model_dump(mode="json"),
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(record)
+            session.add(
+                RunAttemptRecord(
+                    run_id=run_id,
+                    attempt=1,
+                    status=RunStatus.QUEUED.value,
+                    checkpoint_thread_id=self.checkpoint_thread_id(run_id, 1),
+                    metrics_json=RunMetrics().model_dump(mode="json"),
+                )
+            )
         return self.get_run(run_id), True
 
     @staticmethod
@@ -338,15 +429,11 @@ class RunRepository:
                         query,
                         autoescape=True,
                     ),
-                    func.lower(
-                        func.coalesce(RunRecord.instrument_name, "")
-                    ).contains(
+                    func.lower(func.coalesce(RunRecord.instrument_name, "")).contains(
                         query,
                         autoescape=True,
                     ),
-                    func.lower(
-                        func.coalesce(RunRecord.instrument_local_name, "")
-                    ).contains(
+                    func.lower(func.coalesce(RunRecord.instrument_local_name, "")).contains(
                         query,
                         autoescape=True,
                     ),
@@ -364,8 +451,7 @@ class RunRepository:
         with self.sessions() as session:
             return RunPage(
                 items=tuple(
-                    self._summary(record, rating)
-                    for record, rating in session.execute(stmt)
+                    self._summary(record, rating) for record, rating in session.execute(stmt)
                 ),
                 total=int(session.scalar(count_stmt) or 0),
                 limit=limit,
@@ -381,9 +467,7 @@ class RunRepository:
         with self.sessions.begin() as session:
             records = {
                 record.id: record
-                for record in session.scalars(
-                    select(RunRecord).where(RunRecord.id.in_(run_ids))
-                )
+                for record in session.scalars(select(RunRecord).where(RunRecord.id.in_(run_ids)))
             }
             missing = [run_id for run_id in run_ids if run_id not in records]
             if missing:
@@ -391,13 +475,11 @@ class RunRepository:
             invalid = [
                 record.id
                 for record in records.values()
-                if record.trashed_at is None
-                and record.status not in _TERMINAL_STATUSES
+                if record.trashed_at is None and record.status not in _TERMINAL_STATUSES
             ]
             if invalid:
                 raise InvalidRunTransitionError(
-                    "only terminal runs can be trashed: "
-                    + ", ".join(invalid)
+                    "only terminal runs can be trashed: " + ", ".join(invalid)
                 )
             changed = 0
             for run_id in run_ids:
@@ -419,9 +501,7 @@ class RunRepository:
         with self.sessions.begin() as session:
             records = {
                 record.id: record
-                for record in session.scalars(
-                    select(RunRecord).where(RunRecord.id.in_(run_ids))
-                )
+                for record in session.scalars(select(RunRecord).where(RunRecord.id.in_(run_ids)))
             }
             missing = [run_id for run_id in run_ids if run_id not in records]
             if missing:
@@ -466,8 +546,7 @@ class RunRepository:
         """Persist one cutoff-safe market-local display name when available."""
         normalized = (
             instrument_local_name.strip()[:300]
-            if isinstance(instrument_local_name, str)
-            and instrument_local_name.strip()
+            if isinstance(instrument_local_name, str) and instrument_local_name.strip()
             else None
         )
         if normalized is None:
@@ -601,34 +680,38 @@ class RunRepository:
         expires = now + timedelta(seconds=lease_seconds)
         with self.engine.connect() as connection:
             connection.exec_driver_sql("BEGIN IMMEDIATE")
-            candidate = connection.execute(
-                select(
-                    RunRecord.id,
-                    RunRecord.status,
-                    RunRecord.current_attempt,
-                    RunAttemptRecord.started_at.label("attempt_started_at"),
-                )
-                .join(
-                    RunAttemptRecord,
-                    and_(
-                        RunAttemptRecord.run_id == RunRecord.id,
-                        RunAttemptRecord.attempt == RunRecord.current_attempt,
-                    ),
-                )
-                .where(
-                    RunRecord.trashed_at.is_(None),
-                    or_(
-                        RunRecord.status == RunStatus.QUEUED.value,
+            candidate = (
+                connection.execute(
+                    select(
+                        RunRecord.id,
+                        RunRecord.status,
+                        RunRecord.current_attempt,
+                        RunAttemptRecord.started_at.label("attempt_started_at"),
+                    )
+                    .join(
+                        RunAttemptRecord,
                         and_(
-                            RunRecord.status == RunStatus.RUNNING.value,
-                            RunRecord.lease_expires_at < now,
-                            RunRecord.cancel_requested.is_(False),
+                            RunAttemptRecord.run_id == RunRecord.id,
+                            RunAttemptRecord.attempt == RunRecord.current_attempt,
                         ),
                     )
+                    .where(
+                        RunRecord.trashed_at.is_(None),
+                        or_(
+                            RunRecord.status == RunStatus.QUEUED.value,
+                            and_(
+                                RunRecord.status == RunStatus.RUNNING.value,
+                                RunRecord.lease_expires_at < now,
+                                RunRecord.cancel_requested.is_(False),
+                            ),
+                        ),
+                    )
+                    .order_by(RunRecord.created_at)
+                    .limit(1)
                 )
-                .order_by(RunRecord.created_at)
-                .limit(1)
-            ).mappings().first()
+                .mappings()
+                .first()
+            )
             if candidate is None:
                 connection.commit()
                 return None
@@ -663,9 +746,7 @@ class RunRepository:
             connection.commit()
         return self.get_run(candidate["id"])
 
-    def claim_run(
-        self, run_id: str, worker_id: str, lease_seconds: int
-    ) -> RunView:
+    def claim_run(self, run_id: str, worker_id: str, lease_seconds: int) -> RunView:
         """Claim a specific queued run for the synchronous Python API."""
         now = _utc_naive()
         expires = now + timedelta(seconds=lease_seconds)
@@ -674,13 +755,9 @@ class RunRepository:
             if record is None:
                 raise RunNotFoundError(run_id)
             if record.trashed_at is not None:
-                raise InvalidRunTransitionError(
-                    f"run {run_id} is trashed"
-                )
+                raise InvalidRunTransitionError(f"run {run_id} is trashed")
             if record.status != RunStatus.QUEUED.value:
-                raise InvalidRunTransitionError(
-                    f"run {run_id} is {record.status}, expected queued"
-                )
+                raise InvalidRunTransitionError(f"run {run_id} is {record.status}, expected queued")
             record.status = RunStatus.RUNNING.value
             record.lease_owner = worker_id
             record.lease_expires_at = expires
@@ -738,13 +815,8 @@ class RunRepository:
             record = session.get(RunRecord, run_id)
             if record is None:
                 raise RunNotFoundError(run_id)
-            if (
-                record.status != RunStatus.RUNNING.value
-                or record.lease_owner != worker_id
-            ):
-                raise InvalidRunTransitionError(
-                    f"run {run_id} is not claimed by {worker_id}"
-                )
+            if record.status != RunStatus.RUNNING.value or record.lease_owner != worker_id:
+                raise InvalidRunTransitionError(f"run {run_id} is not claimed by {worker_id}")
             record.status = RunStatus.QUEUED.value
             record.lease_owner = None
             record.lease_expires_at = None
@@ -763,9 +835,7 @@ class RunRepository:
             if record is None:
                 raise RunNotFoundError(run_id)
             if record.trashed_at is not None:
-                raise InvalidRunTransitionError(
-                    f"run {run_id} is trashed"
-                )
+                raise InvalidRunTransitionError(f"run {run_id} is trashed")
             if record.status == RunStatus.QUEUED.value:
                 record.status = RunStatus.CANCELLED.value
                 record.cancel_requested = True
@@ -786,9 +856,7 @@ class RunRepository:
 
     def cancel_requested(self, run_id: str) -> bool:
         with self.sessions() as session:
-            value = session.scalar(
-                select(RunRecord.cancel_requested).where(RunRecord.id == run_id)
-            )
+            value = session.scalar(select(RunRecord.cancel_requested).where(RunRecord.id == run_id))
             if value is None:
                 raise RunNotFoundError(run_id)
             return bool(value)
@@ -800,9 +868,7 @@ class RunRepository:
             if record is None:
                 raise RunNotFoundError(run_id)
             if record.trashed_at is not None:
-                raise InvalidRunTransitionError(
-                    f"run {run_id} is trashed"
-                )
+                raise InvalidRunTransitionError(f"run {run_id} is trashed")
             if record.status != RunStatus.FAILED.value:
                 raise InvalidRunTransitionError(
                     f"only failed runs can be retried, got {record.status}"
@@ -856,12 +922,11 @@ class RunRepository:
             if row is None:
                 connection.rollback()
                 raise RunNotFoundError(run_id)
-            sequence = (
-                connection.execute(
-                    select(func.coalesce(func.max(RunEventRecord.sequence), 0) + 1)
-                    .where(RunEventRecord.run_id == run_id)
-                ).scalar_one()
-            )
+            sequence = connection.execute(
+                select(func.coalesce(func.max(RunEventRecord.sequence), 0) + 1).where(
+                    RunEventRecord.run_id == run_id
+                )
+            ).scalar_one()
             connection.execute(
                 RunEventRecord.__table__.insert().values(
                     run_id=run_id,
@@ -992,9 +1057,7 @@ class RunRepository:
             if existing is not None:
                 if existing["content_hash"] != draft.content_hash:
                     connection.rollback()
-                    raise ArtifactConflictError(
-                        "artifact identity replayed with different content"
-                    )
+                    raise ArtifactConflictError("artifact identity replayed with different content")
                 connection.commit()
                 return self._artifact(existing), None
 
@@ -1012,8 +1075,7 @@ class RunRepository:
                     prompt_version=draft.prompt_version,
                     generation_method=draft.generation_method.value,
                     generation_observations_json=[
-                        item.model_dump(mode="json")
-                        for item in draft.generation_observations
+                        item.model_dump(mode="json") for item in draft.generation_observations
                     ],
                     content_type=draft.content_type,
                     content_json=draft.content.model_dump(mode="json"),
@@ -1022,8 +1084,9 @@ class RunRepository:
                 )
             )
             sequence = connection.execute(
-                select(func.coalesce(func.max(RunEventRecord.sequence), 0) + 1)
-                .where(RunEventRecord.run_id == run_id)
+                select(func.coalesce(func.max(RunEventRecord.sequence), 0) + 1).where(
+                    RunEventRecord.run_id == run_id
+                )
             ).scalar_one()
             payload = {
                 "artifact_id": artifact_id,
@@ -1035,8 +1098,7 @@ class RunRepository:
                 "prompt_version": draft.prompt_version,
                 "generation_method": draft.generation_method.value,
                 "generation_observations": [
-                    item.model_dump(mode="json")
-                    for item in draft.generation_observations
+                    item.model_dump(mode="json") for item in draft.generation_observations
                 ],
                 "content_type": draft.content_type,
             }
@@ -1121,18 +1183,12 @@ class RunRepository:
                 connection.rollback()
                 raise InvalidRunTransitionError(run_row.status)
             existing = (
-                connection.execute(
-                    select(table).where(table.c.run_id == run_id)
-                )
-                .mappings()
-                .first()
+                connection.execute(select(table).where(table.c.run_id == run_id)).mappings().first()
             )
             if existing is not None:
                 if existing["digest"] != digest:
                     connection.rollback()
-                    raise EvidenceConflictError(
-                        "evidence seal replayed with a different digest"
-                    )
+                    raise EvidenceConflictError("evidence seal replayed with a different digest")
                 connection.commit()
                 return self._evidence_view(existing), None
 
@@ -1149,8 +1205,9 @@ class RunRepository:
                 )
             )
             sequence = connection.execute(
-                select(func.coalesce(func.max(RunEventRecord.sequence), 0) + 1)
-                .where(RunEventRecord.run_id == run_id)
+                select(func.coalesce(func.max(RunEventRecord.sequence), 0) + 1).where(
+                    RunEventRecord.run_id == run_id
+                )
             ).scalar_one()
             payload = {
                 "attempt": attempt,
@@ -1194,17 +1251,13 @@ class RunRepository:
     def evidence_status(self, run_id: str) -> EvidenceSealView:
         with self.engine.connect() as connection:
             run_exists = connection.scalar(
-                select(func.count())
-                .select_from(RunRecord)
-                .where(RunRecord.id == run_id)
+                select(func.count()).select_from(RunRecord).where(RunRecord.id == run_id)
             )
             if not run_exists:
                 raise RunNotFoundError(run_id)
             record = (
                 connection.execute(
-                    select(RunEvidenceRecord.__table__).where(
-                        RunEvidenceRecord.run_id == run_id
-                    )
+                    select(RunEvidenceRecord.__table__).where(RunEvidenceRecord.run_id == run_id)
                 )
                 .mappings()
                 .first()
@@ -1246,9 +1299,7 @@ class RunRepository:
             if sealed is None:
                 raise EvidenceNotSealedError(run_id)
             if sealed.digest != evidence.digest:
-                raise EvidenceConflictError(
-                    "completed result does not match the sealed evidence"
-                )
+                raise EvidenceConflictError("completed result does not match the sealed evidence")
             if result.decision is not None:
                 request = AnalysisRequest.model_validate(record.request_json)
                 market = self.market_bucket(request.ticker)
@@ -1299,10 +1350,18 @@ class RunRepository:
             aggregate = self._merge_metrics(record, attempt, result.metrics)
             if record.research_chain_requested:
                 if revision_draft is None:
-                    raise ValueError(
-                        "explicit Research Chain execution requires a Revision draft"
-                    )
+                    raise ValueError("explicit Research Chain execution requires a Revision draft")
                 self._create_initial_revision(
+                    session,
+                    record=record,
+                    draft=revision_draft,
+                    metrics=aggregate,
+                    created_at=now,
+                )
+            elif record.research_chain_id is not None:
+                if revision_draft is None:
+                    raise ValueError("Research Chain update requires a Revision draft")
+                self._advance_research_chain(
                     session,
                     record=record,
                     draft=revision_draft,
@@ -1380,8 +1439,7 @@ class RunRepository:
             {
                 artifact.role: artifact.content
                 for artifact in artifacts
-                if artifact.stage == "analyst"
-                and isinstance(artifact.content, AnalystReport)
+                if artifact.stage == "analyst" and isinstance(artifact.content, AnalystReport)
             }
         )
         decision = (
@@ -1398,16 +1456,12 @@ class RunRepository:
             )
         )
         numeric_audit = (
-            DecisionNumericAuditAppendix.model_validate(
-                decision_record.numeric_audit_json
-            )
+            DecisionNumericAuditAppendix.model_validate(decision_record.numeric_audit_json)
             if decision_record and decision_record.numeric_audit_json
             else None
         )
         evidence = (
-            EvidenceBundle.model_validate(evidence_record.bundle_json)
-            if evidence_record
-            else None
+            EvidenceBundle.model_validate(evidence_record.bundle_json) if evidence_record else None
         )
         warnings = tuple(
             dict.fromkeys(
@@ -1422,12 +1476,9 @@ class RunRepository:
                         (
                             ResearchWarning(
                                 code=(
-                                    "decision.numeric_audit_"
-                                    f"{decision.numeric_audit_status.value}"
+                                    f"decision.numeric_audit_{decision.numeric_audit_status.value}"
                                 ),
-                                message=(
-                                    _numeric_audit_warning_message(numeric_audit)
-                                ),
+                                message=(_numeric_audit_warning_message(numeric_audit)),
                                 source="committee.final.serialize.numeric",
                             ),
                         )
@@ -1484,9 +1535,7 @@ class RunRepository:
     def _run_exists(self, run_id: str) -> bool:
         with self.engine.connect() as connection:
             return (
-                connection.execute(
-                    select(RunRecord.id).where(RunRecord.id == run_id)
-                ).first()
+                connection.execute(select(RunRecord.id).where(RunRecord.id == run_id)).first()
                 is not None
             )
 
@@ -1504,12 +1553,8 @@ class RunRepository:
         }
         model = content_models.get(record["content_type"])
         if model is None:
-            raise ValueError(
-                f"unsupported research artifact type: {record['content_type']}"
-            )
-        generation_method = ArtifactGenerationMethod(
-            record["generation_method"]
-        )
+            raise ValueError(f"unsupported research artifact type: {record['content_type']}")
+        generation_method = ArtifactGenerationMethod(record["generation_method"])
         generation_observations = tuple(
             ArtifactGenerationObservation.model_validate(item)
             for item in (record["generation_observations_json"] or ())
@@ -1589,9 +1634,7 @@ class RunRepository:
         if checked_at.tzinfo is not None:
             checked_at = checked_at.astimezone(timezone.utc).replace(tzinfo=None)
         if next_check_at.tzinfo is not None:
-            next_check_at = next_check_at.astimezone(timezone.utc).replace(
-                tzinfo=None
-            )
+            next_check_at = next_check_at.astimezone(timezone.utc).replace(tzinfo=None)
         with self.sessions.begin() as session:
             outcome = session.get(OutcomeRecord, outcome_id)
             if outcome is None:
@@ -1687,9 +1730,7 @@ class RunRepository:
             if not reflection:
                 continue
             try:
-                decision = ResearchDecision.model_validate(
-                    decision_record.decision_json
-                )
+                decision = ResearchDecision.model_validate(decision_record.decision_json)
                 outcome = MemoryOutcome(
                     benchmark=outcome_record.benchmark,
                     observation_start=outcome_record.observation_start,
@@ -1700,10 +1741,7 @@ class RunRepository:
                 )
             except ValueError:
                 continue
-            if (
-                decision_record.ticker.casefold() == ticker_key
-                and len(same) < max(0, same_limit)
-            ):
+            if decision_record.ticker.casefold() == ticker_key and len(same) < max(0, same_limit):
                 same.append(
                     MemoryRecord(
                         ref=f"memory:{decision_record.run_id}",
@@ -1807,21 +1845,15 @@ class RunRepository:
                         query,
                         autoescape=True,
                     ),
-                    func.lower(
-                        func.coalesce(RunRecord.instrument_name, "")
-                    ).contains(
+                    func.lower(func.coalesce(RunRecord.instrument_name, "")).contains(
                         query,
                         autoescape=True,
                     ),
-                    func.lower(
-                        func.coalesce(RunRecord.instrument_local_name, "")
-                    ).contains(
+                    func.lower(func.coalesce(RunRecord.instrument_local_name, "")).contains(
                         query,
                         autoescape=True,
                     ),
-                    func.lower(
-                        func.coalesce(DecisionRecord.market, "")
-                    ).contains(
+                    func.lower(func.coalesce(DecisionRecord.market, "")).contains(
                         query,
                         autoescape=True,
                     ),
@@ -1840,9 +1872,7 @@ class RunRepository:
                         )
                         for path in decision_fields
                     ),
-                    func.lower(
-                        func.coalesce(ReflectionRecord.text, "")
-                    ).contains(
+                    func.lower(func.coalesce(ReflectionRecord.text, "")).contains(
                         query,
                         autoescape=True,
                     ),
@@ -1871,9 +1901,7 @@ class RunRepository:
                             else None
                         ),
                         "observation_end": (
-                            outcome.observation_end.isoformat()
-                            if outcome.observation_end
-                            else None
+                            outcome.observation_end.isoformat() if outcome.observation_end else None
                         ),
                         "holding_intervals": outcome.holding_intervals,
                         "raw_return": outcome.raw_return,
@@ -1982,6 +2010,7 @@ class RunRepository:
                 outcome=draft.outcome.value,
                 language=draft.current_state.language,
                 current_state_json=draft.current_state.model_dump(mode="json"),
+                delta_json=draft.delta.model_dump(mode="json"),
                 coverage_json=draft.coverage.model_dump(mode="json"),
                 update_summary_json=draft.update_summary.model_dump(mode="json"),
                 evidence_snapshot_json=draft.evidence_snapshot.model_dump(mode="json"),
@@ -1990,6 +2019,59 @@ class RunRepository:
             )
         )
         chain.current_revision_id = revision_id
+
+    @staticmethod
+    def _advance_research_chain(
+        session: Session,
+        *,
+        record: RunRecord,
+        draft: ResearchRevisionDraft,
+        metrics: RunMetrics,
+        created_at: datetime,
+    ) -> None:
+        chain = session.get(ResearchChainRecord, record.research_chain_id)
+        baseline = session.get(ResearchRevisionRecord, record.baseline_revision_id)
+        if (
+            chain is None
+            or baseline is None
+            or baseline.chain_id != chain.id
+            or chain.current_revision_id != baseline.id
+        ):
+            raise InvalidResearchBaselineError(
+                "Eligible Baseline is no longer the current Research Chain head"
+            )
+        request = AnalysisRequest.model_validate(record.request_json)
+        if request.ticker != chain.instrument or draft.current_state.instrument != chain.instrument:
+            raise InvalidResearchBaselineError(
+                "completed update Instrument does not match the Research Chain"
+            )
+        if draft.cutoff <= baseline.cutoff:
+            raise InvalidResearchBaselineError(
+                "completed update cutoff must be strictly later than the Eligible Baseline"
+            )
+        revision_id = str(uuid4())
+        session.add(
+            ResearchRevisionRecord(
+                id=revision_id,
+                chain_id=chain.id,
+                sequence=baseline.sequence + 1,
+                predecessor_revision_id=baseline.id,
+                producing_run_id=record.id,
+                cutoff=draft.cutoff,
+                execution_strategy=draft.execution_strategy.value,
+                outcome=draft.outcome.value,
+                language=draft.current_state.language,
+                current_state_json=draft.current_state.model_dump(mode="json"),
+                delta_json=draft.delta.model_dump(mode="json"),
+                coverage_json=draft.coverage.model_dump(mode="json"),
+                update_summary_json=draft.update_summary.model_dump(mode="json"),
+                evidence_snapshot_json=draft.evidence_snapshot.model_dump(mode="json"),
+                metrics_json=metrics.model_dump(mode="json"),
+                created_at=created_at,
+            )
+        )
+        chain.current_revision_id = revision_id
+        chain.updated_at = created_at
 
     @classmethod
     def _research_chain(
@@ -2033,9 +2115,8 @@ class RunRepository:
             cutoff=record.cutoff,
             execution_strategy=ResearchExecutionStrategy(record.execution_strategy),
             outcome=ResearchRevisionOutcome(record.outcome),
-            current_state=CurrentResearchState.model_validate(
-                record.current_state_json
-            ),
+            current_state=CurrentResearchState.model_validate(record.current_state_json),
+            delta=RevisionDelta.model_validate(record.delta_json),
             coverage=CoverageAttestation.model_validate(record.coverage_json),
             update_summary=UpdateSummary.model_validate(record.update_summary_json),
             evidence_snapshot=EffectiveEvidenceSnapshot.model_validate(
@@ -2089,6 +2170,10 @@ class RunRepository:
             instrument_name=record.instrument_name,
             instrument_local_name=record.instrument_local_name,
             research_chain_requested=record.research_chain_requested,
+            update_intent_id=record.update_intent_id,
+            research_chain_id=record.research_chain_id,
+            baseline_revision_id=record.baseline_revision_id,
+            research_execution_strategy=record.research_execution_strategy,
             status=RunStatus(record.status),
             request=AnalysisRequest.model_validate(record.request_json),
             config_snapshot=record.config_json,

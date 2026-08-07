@@ -667,6 +667,19 @@
         "title": "CapabilityDefaults",
         "type": "object"
       },
+      "ClaimChange": {
+        "enum": [
+          "introduced",
+          "reaffirmed",
+          "strengthened",
+          "weakened",
+          "invalidated",
+          "retired",
+          "superseded"
+        ],
+        "title": "ClaimChange",
+        "type": "string"
+      },
       "ClaimConfidence": {
         "enum": [
           "low",
@@ -684,6 +697,41 @@
         ],
         "title": "ClaimImportance",
         "type": "string"
+      },
+      "ClaimRevisionDelta": {
+        "additionalProperties": false,
+        "properties": {
+          "change": {
+            "$ref": "#/components/schemas/ClaimChange"
+          },
+          "identity_disposition": {
+            "$ref": "#/components/schemas/IdentityDisposition"
+          },
+          "object_id": {
+            "pattern": "^claim_[a-f0-9]{32}$",
+            "title": "Object Id",
+            "type": "string"
+          },
+          "previous_object_id": {
+            "anyOf": [
+              {
+                "pattern": "^claim_[a-f0-9]{32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Object Id"
+          }
+        },
+        "required": [
+          "object_id",
+          "change",
+          "identity_disposition"
+        ],
+        "title": "ClaimRevisionDelta",
+        "type": "object"
       },
       "ClaimStanding": {
         "enum": [
@@ -1793,6 +1841,16 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "IdentityDisposition": {
+        "enum": [
+          "exact_match",
+          "new",
+          "ambiguous_new",
+          "conservative_retirement"
+        ],
+        "title": "IdentityDisposition",
+        "type": "string"
+      },
       "IssueDisposition": {
         "additionalProperties": false,
         "description": "A judge routing result without duplicating the readable rationale.",
@@ -2816,6 +2874,53 @@
         "title": "ProviderModelCatalog",
         "type": "object"
       },
+      "QuestionChange": {
+        "enum": [
+          "introduced",
+          "reaffirmed",
+          "answered",
+          "reopened",
+          "superseded",
+          "retired"
+        ],
+        "title": "QuestionChange",
+        "type": "string"
+      },
+      "QuestionRevisionDelta": {
+        "additionalProperties": false,
+        "properties": {
+          "change": {
+            "$ref": "#/components/schemas/QuestionChange"
+          },
+          "identity_disposition": {
+            "$ref": "#/components/schemas/IdentityDisposition"
+          },
+          "object_id": {
+            "pattern": "^question_[a-f0-9]{32}$",
+            "title": "Object Id",
+            "type": "string"
+          },
+          "previous_object_id": {
+            "anyOf": [
+              {
+                "pattern": "^question_[a-f0-9]{32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Object Id"
+          }
+        },
+        "required": [
+          "object_id",
+          "change",
+          "identity_disposition"
+        ],
+        "title": "QuestionRevisionDelta",
+        "type": "object"
+      },
       "QuestionStatus": {
         "enum": [
           "open",
@@ -3189,6 +3294,28 @@
           "updated_at"
         ],
         "title": "ResearchChain",
+        "type": "object"
+      },
+      "ResearchChainUpdateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "analysis_date": {
+            "format": "date",
+            "title": "Analysis Date",
+            "type": "string"
+          },
+          "baseline_revision_id": {
+            "maxLength": 36,
+            "minLength": 1,
+            "title": "Baseline Revision Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "baseline_revision_id",
+          "analysis_date"
+        ],
+        "title": "ResearchChainUpdateRequest",
         "type": "object"
       },
       "ResearchClaim": {
@@ -3631,6 +3758,9 @@
             "title": "Cutoff",
             "type": "string"
           },
+          "delta": {
+            "$ref": "#/components/schemas/RevisionDelta"
+          },
           "evidence_snapshot": {
             "$ref": "#/components/schemas/EffectiveEvidenceSnapshot"
           },
@@ -3682,6 +3812,7 @@
           "cutoff",
           "execution_strategy",
           "outcome",
+          "delta",
           "current_state",
           "coverage",
           "update_summary",
@@ -3853,6 +3984,75 @@
           "message"
         ],
         "title": "ResearchWarning",
+        "type": "object"
+      },
+      "RevisionDelta": {
+        "additionalProperties": false,
+        "properties": {
+          "changed_sections": {
+            "default": [],
+            "items": {
+              "enum": [
+                "opinion",
+                "claims",
+                "questions",
+                "scenarios",
+                "risks",
+                "catalysts",
+                "invalidation_conditions"
+              ],
+              "type": "string"
+            },
+            "title": "Changed Sections",
+            "type": "array"
+          },
+          "claims": {
+            "items": {
+              "$ref": "#/components/schemas/ClaimRevisionDelta"
+            },
+            "title": "Claims",
+            "type": "array"
+          },
+          "inherited_evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Inherited Evidence Refs",
+            "type": "array"
+          },
+          "new_evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "New Evidence Refs",
+            "type": "array"
+          },
+          "opinion_changed": {
+            "title": "Opinion Changed",
+            "type": "boolean"
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/QuestionRevisionDelta"
+            },
+            "title": "Questions",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "1",
+            "default": "1",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "opinion_changed",
+          "claims",
+          "questions"
+        ],
+        "title": "RevisionDelta",
         "type": "object"
       },
       "RiskReview": {
@@ -4413,6 +4613,17 @@
             "title": "Attempt",
             "type": "integer"
           },
+          "baseline_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Revision Id"
+          },
           "cancel_requested": {
             "title": "Cancel Requested",
             "type": "boolean"
@@ -4493,10 +4704,36 @@
           "request": {
             "$ref": "#/components/schemas/AnalysisRequest"
           },
+          "research_chain_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Research Chain Id"
+          },
           "research_chain_requested": {
             "default": false,
             "title": "Research Chain Requested",
             "type": "boolean"
+          },
+          "research_execution_strategy": {
+            "anyOf": [
+              {
+                "enum": [
+                  "full",
+                  "incremental"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Research Execution Strategy"
           },
           "research_rating": {
             "anyOf": [
@@ -4546,6 +4783,17 @@
             ],
             "title": "Trashed At"
           },
+          "update_intent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Update Intent Id"
+          },
           "updated_at": {
             "format": "date-time",
             "title": "Updated At",
@@ -4580,6 +4828,17 @@
           "attempt": {
             "title": "Attempt",
             "type": "integer"
+          },
+          "baseline_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Revision Id"
           },
           "cancel_requested": {
             "title": "Cancel Requested",
@@ -4661,10 +4920,36 @@
           "request": {
             "$ref": "#/components/schemas/AnalysisRequest"
           },
+          "research_chain_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Research Chain Id"
+          },
           "research_chain_requested": {
             "default": false,
             "title": "Research Chain Requested",
             "type": "boolean"
+          },
+          "research_execution_strategy": {
+            "anyOf": [
+              {
+                "enum": [
+                  "full",
+                  "incremental"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Research Execution Strategy"
           },
           "source_run_id": {
             "anyOf": [
@@ -4703,6 +4988,17 @@
               }
             ],
             "title": "Trashed At"
+          },
+          "update_intent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Update Intent Id"
           },
           "updated_at": {
             "format": "date-time",
@@ -5450,6 +5746,72 @@
           }
         },
         "summary": "Get Research Chain"
+      }
+    },
+    "/api/v1/research-chains/{chain_id}/updates": {
+      "post": {
+        "operationId": "update_research_chain_api_v1_research_chains__chain_id__updates_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chain_id",
+            "required": true,
+            "schema": {
+              "title": "Chain Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResearchChainUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Research Chain"
       }
     },
     "/api/v1/research-revisions/{revision_id}": {
