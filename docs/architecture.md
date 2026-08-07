@@ -172,7 +172,9 @@ settings must remain isolated even if worker concurrency changes in the future.
 4. retrieves deterministic decision memory;
 5. builds per-run LLM clients and `RunContext`;
 6. executes or resumes the graph;
-7. persists events, reports, evidence, decision, metrics, and warnings;
+7. persists events, reports, evidence, decision, metrics, and warnings and,
+   for an explicitly requested initial chain, atomically commits its first
+   Research Revision;
 8. cleans up or retains checkpoints according to terminal state;
 9. creates a pending outcome for background settlement.
 
@@ -209,6 +211,29 @@ interrupt forces termination.
 
 Successful and cancelled runs delete their checkpoint thread. Failed runs keep
 it for retry or later trash cleanup.
+
+### Initial Research Chains
+
+A user may explicitly request that a Full Analysis establish longitudinal
+research. The run remains the Research Execution and uses the unchanged Full
+ResearchGraph inputs. After the graph succeeds, the application performs
+Research State Assembly from the sealed Evidence, reports, and final decision.
+It assigns opaque Claim and Question identities and validates a complete,
+versioned Current Research State, Coverage Attestation, Update Summary, and
+Effective Evidence Snapshot.
+
+The repository commits the successful run, a new linear Research Chain, and
+its immutable first Research Revision in one SQLite transaction. The first
+chain for a normalized Instrument becomes Primary; later alternative chains
+do not replace it automatically. Failed or cancelled executions create no
+chain or Revision. Ordinary Full Analysis runs remain independent unless the
+user selected the chain-creation workflow explicitly.
+
+Each Revision owns its complete state and Evidence snapshot. Its producing-run
+link uses `ON DELETE SET NULL`, so trash expiry can remove the execution audit
+without deleting or weakening the immutable research state. The API, Web
+reader, and Revision exports read the Revision directly rather than replaying
+the producing run.
 
 ### Trash lifecycle
 
@@ -247,6 +272,8 @@ Alembic manages application tables:
 | `run_artifacts` | versioned analyst, deliberation, and decision-stage artifacts, including component generation observations |
 | `run_evidence` | independently sealed EvidenceBundle and digest |
 | `decisions` | typed final decision, numeric audit appendix, market identity |
+| `research_chains` | one Instrument's linear lineage, Primary designation, and current head |
+| `research_revisions` | immutable complete state, coverage, summary, Evidence snapshot, producing execution, and metrics |
 | `outcomes` | benchmark, five-interval dates, raw return, alpha |
 | `reflections` | outcome-aware research reflection |
 

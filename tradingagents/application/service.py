@@ -28,6 +28,7 @@ from tradingagents.persistence import upgrade_database
 from .contracts import (
     AnalysisRequest,
     AnalysisResult,
+    AnalystReport,
     EvidenceBundle,
     ResearchArtifactDraft,
     RunEvent,
@@ -42,6 +43,13 @@ from .instrument_names import resolve_local_instrument_name
 from .llms import RunLLMs, create_run_llms
 from .metrics import MetricsCallback
 from .repository import RunRepository, RunView
+from .research import (
+    ResearchRevisionDraft,
+    RevisionExport,
+    assemble_full_revision,
+    render_revision_export_markdown,
+    render_revision_export_package,
+)
 from .runtime import RunCancelled, RunContext, WorkerShutdown
 from .settings import AppSettings, RunSettings
 
@@ -84,6 +92,9 @@ class AnalysisService:
         local_name_resolver: Callable[[str, str, dict[str, Any]], str | None] = (
             resolve_local_instrument_name
         ),
+        state_assembler: Callable[
+            [AnalysisRequest, GraphExecution], ResearchRevisionDraft
+        ] = assemble_full_revision,
     ):
         self.settings = settings
         if repository is None:
@@ -93,6 +104,7 @@ class AnalysisService:
         self.graph_factory = graph_factory
         self.identity_resolver = identity_resolver
         self.local_name_resolver = local_name_resolver
+        self.state_assembler = state_assembler
 
     def enqueue(
         self,
@@ -100,6 +112,7 @@ class AnalysisService:
         *,
         idempotency_key: str | None = None,
         source_run_id: str | None = None,
+        research_chain_requested: bool = False,
     ) -> RunView:
         run_settings = self.settings.resolve_run(request)
         request = self.settings.materialize_request(
@@ -111,6 +124,7 @@ class AnalysisService:
             run_settings.snapshot(),
             idempotency_key=idempotency_key,
             source_run_id=source_run_id,
+            research_chain_requested=research_chain_requested,
         )
         if created:
             self.repository.append_event(
@@ -120,9 +134,22 @@ class AnalysisService:
                     "profile": request.profile.value,
                     "ticker": request.ticker,
                     "source_run_id": source_run_id,
+                    "research_chain_requested": research_chain_requested,
                 },
             )
         return view
+
+    def enqueue_initial_chain(
+        self,
+        request: AnalysisRequest,
+        *,
+        idempotency_key: str | None = None,
+    ) -> RunView:
+        return self.enqueue(
+            request,
+            idempotency_key=idempotency_key,
+            research_chain_requested=True,
+        )
 
     def run(
         self,
@@ -131,6 +158,25 @@ class AnalysisService:
         on_event: EventHandler | None = None,
     ) -> AnalysisResult:
         view = self.enqueue(request)
+        worker_id = f"python:{uuid4()}"
+        claimed = self.repository.claim_run(
+            view.id,
+            worker_id,
+            self.settings.lease_seconds,
+        )
+        return self.execute_claimed(
+            claimed,
+            worker_id=worker_id,
+            on_event=on_event,
+        )
+
+    def run_initial_chain(
+        self,
+        request: AnalysisRequest,
+        *,
+        on_event: EventHandler | None = None,
+    ) -> AnalysisResult:
+        view = self.enqueue_initial_chain(request)
         worker_id = f"python:{uuid4()}"
         claimed = self.repository.claim_run(
             view.id,
@@ -310,11 +356,17 @@ class AnalysisService:
                         run.request.ticker,
                         dataflow_config,
                     )
+                    revision_draft = (
+                        self.state_assembler(run.request, execution)
+                        if run.research_chain_requested
+                        else None
+                    )
                     aggregate_metrics = self.repository.complete(
                         run.id,
                         result,
                         evidence=execution.evidence,
                         benchmark=benchmark,
+                        revision_draft=revision_draft,
                     )
                     result = result.model_copy(
                         update={"metrics": aggregate_metrics}
@@ -468,6 +520,38 @@ class AnalysisService:
 
     def backup_database(self, destination: Path) -> Path:
         return self.repository.backup(destination)
+
+    def get_revision_export(self, revision_id: str) -> RevisionExport:
+        revision = self.repository.get_research_revision(revision_id)
+        chain = self.repository.get_research_chain(revision.chain_id)
+        linked_reports: dict[str, str] = {}
+        if revision.producing_run_id is not None:
+            result = self.repository.get_result(revision.producing_run_id)
+            linked_reports = {
+                role: report.markdown
+                for role, report in result.reports.items()
+                if isinstance(report, AnalystReport)
+            }
+        return RevisionExport(
+            chain=chain,
+            revision=revision,
+            linked_reports=linked_reports,
+        )
+
+    def export_revision(
+        self,
+        revision_id: str,
+        *,
+        format: str = "markdown",
+    ) -> tuple[str, str | bytes]:
+        export = self.get_revision_export(revision_id)
+        if format == "json":
+            return "application/json", export.model_dump_json(indent=2)
+        if format == "package":
+            return "application/zip", render_revision_export_package(export)
+        if format != "markdown":
+            raise ValueError("format must be 'markdown', 'json', or 'package'")
+        return "text/markdown; charset=utf-8", render_revision_export_markdown(export)
 
     def _result(
         self,

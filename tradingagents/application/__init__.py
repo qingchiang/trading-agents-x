@@ -65,6 +65,21 @@ from .contracts import (
     TableDataType,
     ValuationAssessment,
 )
+from .research import (
+    ClaimConfidence,
+    CoverageAttestation,
+    CurrentResearchState,
+    DecisionConfidence,
+    EffectiveEvidenceSnapshot,
+    ResearchChain,
+    ResearchClaim,
+    ResearchObjectCoverage,
+    ResearchQuestion,
+    ResearchRevision,
+    ResearchRevisionDraft,
+    ScenarioLikelihood,
+    UpdateSummary,
+)
 from .settings import AppSettings, RunSettings
 
 __all__ = [
@@ -133,4 +148,17 @@ __all__ = [
     "ScenarioReferenceRange",
     "ScenarioReferenceCategory",
     "StructuredRecoveryNotice",
+    "ClaimConfidence",
+    "CoverageAttestation",
+    "CurrentResearchState",
+    "DecisionConfidence",
+    "EffectiveEvidenceSnapshot",
+    "ResearchChain",
+    "ResearchClaim",
+    "ResearchQuestion",
+    "ResearchObjectCoverage",
+    "ResearchRevision",
+    "ResearchRevisionDraft",
+    "ScenarioLikelihood",
+    "UpdateSummary",
 ]

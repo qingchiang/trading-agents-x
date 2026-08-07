@@ -5,7 +5,7 @@ import json
 import operator
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from threading import Barrier, Lock
 from typing import Annotated
 from uuid import uuid4
@@ -15,6 +15,8 @@ from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, LLMResult
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
+from sqlalchemy import text
+from sqlalchemy.exc import DatabaseError
 from typing_extensions import TypedDict
 
 from tests.factories import analyst_report, research_decision
@@ -330,6 +332,136 @@ def test_service_persists_events_before_callback_and_result(
     assert events[2].payload["api_key"] == "[REDACTED]"
 
 
+def test_successful_explicit_full_analysis_creates_primary_research_chain(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(app_settings, repository)
+    request = AnalysisRequest(
+        ticker="6501.T",
+        analysis_date="2026-07-24",
+        analysts=("market",),
+        output_language="ja",
+    )
+
+    result = service.run_initial_chain(request)
+
+    chains = repository.list_research_chains(instrument="6501.T")
+    assert len(chains) == 1
+    chain = repository.get_research_chain(chains[0].id)
+    assert chain.is_primary is True
+    assert chain.instrument == "6501.T"
+    assert len(chain.revisions) == 1
+    revision = chain.current_revision
+    assert revision is not None
+    assert revision.producing_run_id == result.run_id
+    assert revision.cutoff == date(2026, 7, 24)
+    assert revision.execution_strategy.value == "full"
+    assert revision.current_state.language == "ja"
+    assert revision.evidence_snapshot.bundle.digest == result.evidence.digest
+    assert revision.metrics == result.metrics
+    assert revision.coverage.claims
+    assert all(item.object_id for item in revision.coverage.claims)
+    media_type, markdown = service.export_revision(
+        revision.id,
+        format="markdown",
+    )
+    assert media_type.startswith("text/markdown")
+    assert "## Scenarios" in markdown
+    assert "## Risks" in markdown
+    assert "## Invalidation Conditions" in markdown
+    assert "Fixture evidence." in markdown
+    assert "## Execution Metrics" in markdown
+    with (
+        pytest.raises(DatabaseError, match="immutable"),
+        repository.engine.begin() as connection,
+    ):
+        connection.execute(
+            text(
+                "UPDATE research_revisions SET outcome = "
+                "'no_material_change' WHERE id = :revision_id"
+            ),
+            {"revision_id": revision.id},
+        )
+
+
+def test_failed_explicit_full_analysis_creates_no_chain_or_revision(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(app_settings, repository)
+    _Graph.error = RuntimeError("full analysis failed")
+
+    with pytest.raises(RuntimeError, match="full analysis failed"):
+        service.run_initial_chain(
+            AnalysisRequest(
+                ticker="6501.T",
+                analysis_date="2026-07-24",
+                analysts=("market",),
+            )
+        )
+
+    assert repository.list_research_chains(instrument="6501.T") == ()
+
+
+def test_cancelled_explicit_full_analysis_creates_no_chain_or_revision(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(app_settings, repository)
+    _Graph.error = RunCancelled()
+
+    result = service.run_initial_chain(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+
+    assert result.status is RunStatus.CANCELLED
+    assert repository.list_research_chains(instrument="6501.T") == ()
+
+
+def test_revision_owns_state_and_evidence_after_producing_run_is_purged(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(app_settings, repository)
+    first = service.run_initial_chain(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+    service.run_initial_chain(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-25",
+            analysts=("market",),
+        )
+    )
+    chains = repository.list_research_chains(instrument="6501.T")
+    assert len(chains) == 2
+    assert sum(chain.is_primary for chain in chains) == 1
+    revision_id = next(
+        chain.current_revision_id
+        for chain in chains
+        if chain.current_revision.producing_run_id == first.run_id
+    )
+
+    repository.trash_runs((first.run_id,))
+    repository.purge_expired_trash(
+        cutoff=datetime.now(timezone.utc) + timedelta(days=1)
+    )
+
+    revision = repository.get_research_revision(revision_id)
+    assert revision.producing_run_id is None
+    assert revision.current_state.opinion.thesis == "Fixture thesis."
+    assert revision.evidence_snapshot.bundle.items[0].content == "Fixture evidence."
+
+
 @pytest.mark.parametrize(
     ("identity", "expected"),
     [
@@ -457,9 +589,7 @@ def test_service_commits_artifact_and_event_before_callback(
         if event.event_type != "artifact.created":
             return
         artifacts = repository.list_artifacts(event.run_id)
-        assert [artifact.id for artifact in artifacts] == [
-            event.payload["artifact_id"]
-        ]
+        assert [artifact.id for artifact in artifacts] == [event.payload["artifact_id"]]
         persisted = repository.list_events(
             event.run_id,
             after_sequence=event.sequence - 1,
@@ -550,9 +680,7 @@ def test_concurrent_runs_do_not_cross_provider_configuration(
     claimed = []
     for index, request in enumerate(requests):
         queued = service.enqueue(request)
-        claimed.append(
-            repository.claim_run(queued.id, f"worker-{index}", 30)
-        )
+        claimed.append(repository.claim_run(queued.id, f"worker-{index}", 30))
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = list(
@@ -623,10 +751,7 @@ def test_failure_persists_observed_metrics_and_emits_the_aggregate(
     assert failed.metrics.llm_calls == 1
     assert failed.metrics.input_tokens == 250
     assert failed.metrics.output_tokens == 25
-    assert (
-        failed.metrics.node_metrics["analyst.market.serialize.core"].llm_calls
-        == 1
-    )
+    assert failed.metrics.node_metrics["analyst.market.serialize.core"].llm_calls == 1
     assert event.event_type == "run.failed"
     assert event.payload["metrics"]["input_tokens"] == 250
 
@@ -708,9 +833,7 @@ def test_queued_cancel_is_terminal_and_emits_event(
     repository,
 ) -> None:
     service = _service(app_settings, repository)
-    queued = service.enqueue(
-        AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
-    )
+    queued = service.enqueue(AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24"))
 
     cancelled = service.cancel(queued.id)
 
@@ -744,9 +867,7 @@ def test_retry_resumes_real_langgraph_checkpoint_and_success_cleans_it(
 
     with SqliteSaver.from_conn_string(str(app_settings.database_path)) as saver:
         saver.setup()
-        checkpoint_config = {
-            "configurable": {"thread_id": checkpoint_thread}
-        }
+        checkpoint_config = {"configurable": {"thread_id": checkpoint_thread}}
         assert saver.get_tuple(checkpoint_config) is not None
 
     retried = service.retry(queued.id)
@@ -795,9 +916,9 @@ def test_cooperative_cancel_deletes_real_pending_checkpoint(
     assert result.status is RunStatus.CANCELLED
     with SqliteSaver.from_conn_string(str(app_settings.database_path)) as saver:
         saver.setup()
-        assert saver.get_tuple(
-            {"configurable": {"thread_id": checkpoint_thread}}
-        ) is None
+        assert (
+            saver.get_tuple({"configurable": {"thread_id": checkpoint_thread}}) is None
+        )
 
 
 @pytest.mark.parametrize("format", ("markdown", "json", "package"))

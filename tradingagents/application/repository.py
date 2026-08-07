@@ -56,6 +56,8 @@ from .database import (
     DecisionRecord,
     OutcomeRecord,
     ReflectionRecord,
+    ResearchChainRecord,
+    ResearchRevisionRecord,
     RunArtifactRecord,
     RunAttemptRecord,
     RunEventRecord,
@@ -67,6 +69,17 @@ from .metrics import merge_run_metrics
 from .outcome_schedule import earliest_outcome_check_at
 from .recoveries import rebuild_structured_recoveries
 from .reporting import order_reports
+from .research import (
+    CoverageAttestation,
+    CurrentResearchState,
+    EffectiveEvidenceSnapshot,
+    ResearchChain,
+    ResearchExecutionStrategy,
+    ResearchRevision,
+    ResearchRevisionDraft,
+    ResearchRevisionOutcome,
+    UpdateSummary,
+)
 from .settings import AppSettings
 
 _SECRET_RE = re.compile(
@@ -91,6 +104,8 @@ def _numeric_audit_warning_message(
         "Optional numeric components were omitted because their audit failed"
         f"{omitted}. The qualitative decision remains audited."
     )
+
+
 _SAFE_METRIC_KEYS = {
     "llm_calls",
     "tool_calls",
@@ -162,6 +177,14 @@ class EvidenceNotSealedError(RuntimeError):
     pass
 
 
+class ResearchChainNotFoundError(LookupError):
+    pass
+
+
+class ResearchRevisionNotFoundError(LookupError):
+    pass
+
+
 class RunRepository:
     def __init__(self, settings: AppSettings):
         self.settings = settings
@@ -185,6 +208,7 @@ class RunRepository:
         *,
         idempotency_key: str | None = None,
         source_run_id: str | None = None,
+        research_chain_requested: bool = False,
     ) -> tuple[RunView, bool]:
         now = _utc_naive()
         request_json = request.model_dump(mode="json")
@@ -201,6 +225,8 @@ class RunRepository:
                         if (
                             existing.request_json != request_json
                             or existing.source_run_id != source_run_id
+                            or existing.research_chain_requested
+                            != research_chain_requested
                         ):
                             raise IdempotencyConflictError(
                                 "idempotency key was already used for a "
@@ -221,6 +247,7 @@ class RunRepository:
                     id=run_id,
                     source_run_id=source_run_id,
                     idempotency_key=idempotency_key,
+                    research_chain_requested=research_chain_requested,
                     status=RunStatus.QUEUED.value,
                     request_json=request_json,
                     config_json=_sanitize_payload(config_snapshot),
@@ -255,6 +282,7 @@ class RunRepository:
                 if (
                     existing.request_json != request_json
                     or existing.source_run_id != source_run_id
+                    or existing.research_chain_requested != research_chain_requested
                 ):
                     raise IdempotencyConflictError(
                         "idempotency key was already used for a different request"
@@ -1203,9 +1231,12 @@ class RunRepository:
         *,
         evidence: EvidenceBundle,
         benchmark: str,
+        revision_draft: ResearchRevisionDraft | None = None,
     ) -> RunMetrics:
         now = _utc_naive()
         with self.sessions.begin() as session:
+            if revision_draft is not None:
+                session.connection().exec_driver_sql("BEGIN IMMEDIATE")
             record = session.get(RunRecord, run_id)
             if record is None:
                 raise RunNotFoundError(run_id)
@@ -1266,6 +1297,20 @@ class RunRepository:
             attempt.lease_owner = None
             attempt.lease_expires_at = None
             aggregate = self._merge_metrics(record, attempt, result.metrics)
+            if record.research_chain_requested:
+                if revision_draft is None:
+                    raise ValueError(
+                        "explicit Research Chain execution requires a Revision draft"
+                    )
+                self._create_initial_revision(
+                    session,
+                    record=record,
+                    draft=revision_draft,
+                    metrics=aggregate,
+                    created_at=now,
+                )
+            elif revision_draft is not None:
+                raise ValueError("ordinary runs cannot create a Research Revision")
         return aggregate
 
     def fail(
@@ -1860,6 +1905,146 @@ class RunRepository:
             source.close()
         return destination
 
+    def list_research_chains(
+        self,
+        *,
+        instrument: str | None = None,
+    ) -> tuple[ResearchChain, ...]:
+        stmt = select(ResearchChainRecord)
+        if instrument is not None:
+            stmt = stmt.where(ResearchChainRecord.instrument == instrument)
+        stmt = stmt.order_by(
+            ResearchChainRecord.is_primary.desc(),
+            ResearchChainRecord.created_at,
+        )
+        with self.sessions() as session:
+            records = tuple(session.scalars(stmt))
+            return tuple(self._research_chain(session, record) for record in records)
+
+    def get_research_chain(self, chain_id: str) -> ResearchChain:
+        with self.sessions() as session:
+            record = session.get(ResearchChainRecord, chain_id)
+            if record is None:
+                raise ResearchChainNotFoundError(chain_id)
+            return self._research_chain(session, record)
+
+    def get_research_revision(self, revision_id: str) -> ResearchRevision:
+        with self.sessions() as session:
+            record = session.get(ResearchRevisionRecord, revision_id)
+            if record is None:
+                raise ResearchRevisionNotFoundError(revision_id)
+            return self._research_revision(record)
+
+    @staticmethod
+    def _create_initial_revision(
+        session: Session,
+        *,
+        record: RunRecord,
+        draft: ResearchRevisionDraft,
+        metrics: RunMetrics,
+        created_at: datetime,
+    ) -> None:
+        existing = session.scalar(
+            select(ResearchRevisionRecord).where(
+                ResearchRevisionRecord.producing_run_id == record.id
+            )
+        )
+        if existing is not None:
+            return
+        request = AnalysisRequest.model_validate(record.request_json)
+        has_primary = session.scalar(
+            select(ResearchChainRecord.id).where(
+                ResearchChainRecord.instrument == request.ticker,
+                ResearchChainRecord.is_primary.is_(True),
+            )
+        )
+        chain_id = str(uuid4())
+        revision_id = str(uuid4())
+        chain = ResearchChainRecord(
+            id=chain_id,
+            instrument=request.ticker,
+            is_primary=has_primary is None,
+            current_revision_id=None,
+            created_at=created_at,
+            updated_at=created_at,
+        )
+        session.add(chain)
+        session.flush()
+        session.add(
+            ResearchRevisionRecord(
+                id=revision_id,
+                chain_id=chain_id,
+                sequence=1,
+                predecessor_revision_id=None,
+                producing_run_id=record.id,
+                cutoff=draft.cutoff,
+                execution_strategy=draft.execution_strategy.value,
+                outcome=draft.outcome.value,
+                language=draft.current_state.language,
+                current_state_json=draft.current_state.model_dump(mode="json"),
+                coverage_json=draft.coverage.model_dump(mode="json"),
+                update_summary_json=draft.update_summary.model_dump(mode="json"),
+                evidence_snapshot_json=draft.evidence_snapshot.model_dump(mode="json"),
+                metrics_json=metrics.model_dump(mode="json"),
+                created_at=created_at,
+            )
+        )
+        chain.current_revision_id = revision_id
+
+    @classmethod
+    def _research_chain(
+        cls,
+        session: Session,
+        record: ResearchChainRecord,
+    ) -> ResearchChain:
+        revisions = tuple(
+            cls._research_revision(item)
+            for item in session.scalars(
+                select(ResearchRevisionRecord)
+                .where(ResearchRevisionRecord.chain_id == record.id)
+                .order_by(ResearchRevisionRecord.sequence)
+            )
+        )
+        current = next(
+            (item for item in revisions if item.id == record.current_revision_id),
+            None,
+        )
+        if current is None:
+            raise ValueError(f"Research Chain {record.id} has no current Revision")
+        return ResearchChain(
+            id=record.id,
+            instrument=record.instrument,
+            is_primary=record.is_primary,
+            current_revision_id=current.id,
+            current_revision=current,
+            revisions=revisions,
+            created_at=_aware(record.created_at),
+            updated_at=_aware(record.updated_at),
+        )
+
+    @staticmethod
+    def _research_revision(record: ResearchRevisionRecord) -> ResearchRevision:
+        return ResearchRevision(
+            id=record.id,
+            chain_id=record.chain_id,
+            sequence=record.sequence,
+            predecessor_revision_id=record.predecessor_revision_id,
+            producing_run_id=record.producing_run_id,
+            cutoff=record.cutoff,
+            execution_strategy=ResearchExecutionStrategy(record.execution_strategy),
+            outcome=ResearchRevisionOutcome(record.outcome),
+            current_state=CurrentResearchState.model_validate(
+                record.current_state_json
+            ),
+            coverage=CoverageAttestation.model_validate(record.coverage_json),
+            update_summary=UpdateSummary.model_validate(record.update_summary_json),
+            evidence_snapshot=EffectiveEvidenceSnapshot.model_validate(
+                record.evidence_snapshot_json
+            ),
+            metrics=RunMetrics.model_validate(record.metrics_json),
+            created_at=_aware(record.created_at),
+        )
+
     @staticmethod
     def market_bucket(ticker: str) -> str | None:
         try:
@@ -1903,6 +2088,7 @@ class RunRepository:
             source_run_id=record.source_run_id,
             instrument_name=record.instrument_name,
             instrument_local_name=record.instrument_local_name,
+            research_chain_requested=record.research_chain_requested,
             status=RunStatus(record.status),
             request=AnalysisRequest.model_validate(record.request_json),
             config_snapshot=record.config_json,

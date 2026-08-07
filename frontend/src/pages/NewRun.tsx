@@ -45,6 +45,7 @@ export default function NewRun() {
   const [quickReasoning, setQuickReasoning] = useState("provider_default");
   const [deepReasoning, setDeepReasoning] = useState("provider_default");
   const [outputLanguage, setOutputLanguage] = useState("en");
+  const [startChain, setStartChain] = useState(false);
   const [sourceRunId, setSourceRunId] = useState("");
   const [templateWarning, setTemplateWarning] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -56,6 +57,7 @@ export default function NewRun() {
     let active = true;
     setTemplateWarning("");
     setSourceRunId("");
+    setStartChain(false);
     const bootstrap = async () => {
       try {
         const data = await api.capabilities();
@@ -317,14 +319,19 @@ export default function NewRun() {
       source_run_id: sourceRunId || null,
     };
     try {
-      const fingerprint = JSON.stringify(payload);
+      const fingerprint = JSON.stringify({ payload, startChain });
       if (submission.current?.fingerprint !== fingerprint) {
         submission.current = {
           fingerprint,
           key: createIdempotencyKey(),
         };
       }
-      const run = await api.createRun(payload, submission.current.key);
+      const run = startChain
+        ? await api.createResearchChain(
+            { ...payload, source_run_id: null },
+            submission.current.key,
+          )
+        : await api.createRun(payload, submission.current.key);
       navigate(`/runs/${run.id}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t("error"));
@@ -560,6 +567,24 @@ export default function NewRun() {
             )}
           </div>
         </article>
+        <article className="panel form-section">
+          <span className="step">04</span>
+          <div className="form-section-body">
+            <h2>{t("researchLineage")}</h2>
+            <label className="check-card">
+              <input
+                type="checkbox"
+                checked={startChain}
+                disabled={Boolean(sourceRunId)}
+                onChange={(event) => setStartChain(event.target.checked)}
+              />
+              <span>
+                <strong>{t("startResearchChain")}</strong>
+                <small>{t("startResearchChainHint")}</small>
+              </span>
+            </label>
+          </div>
+        </article>
         {error && <div className="alert">{error}</div>}
         <div className="form-actions">
           <button
@@ -573,7 +598,9 @@ export default function NewRun() {
               !deepModel
             }
           >
-            {submitting ? t("loading") : t("startResearch")} →
+            {submitting
+              ? t("loading")
+              : t(startChain ? "startResearchChainAction" : "startResearch")} →
           </button>
         </div>
       </form>

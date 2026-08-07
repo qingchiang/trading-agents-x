@@ -45,6 +45,8 @@ export type RunAttemptView = components["schemas"]["RunAttemptView"];
 export type StructuredRecoveryNotice =
   components["schemas"]["StructuredRecoveryNotice"];
 export type RecentInstrument = components["schemas"]["RecentInstrument"];
+export type ResearchChain = components["schemas"]["ResearchChain"];
+export type ResearchRevision = components["schemas"]["ResearchRevision"];
 
 export class ApiError extends Error {
   constructor(
@@ -120,6 +122,23 @@ export const api = {
       headers: { "Idempotency-Key": idempotencyKey },
       body: JSON.stringify(payload),
     }),
+  createResearchChain: (
+    payload: RunCreateRequest,
+    idempotencyKey: string,
+  ) =>
+    request<RunView>("/api/v1/research-chains", {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify(payload),
+    }),
+  researchChains: (instrument = "") =>
+    request<ResearchChain[]>(
+      `/api/v1/research-chains${
+        instrument ? `?instrument=${encodeURIComponent(instrument)}` : ""
+      }`,
+    ),
+  researchChain: (id: string) =>
+    request<ResearchChain>(`/api/v1/research-chains/${id}`),
   action: (id: string, action: "cancel" | "retry") =>
     request<RunView>(`/api/v1/runs/${id}/${action}`, { method: "POST" }),
   memory: (query = "") =>

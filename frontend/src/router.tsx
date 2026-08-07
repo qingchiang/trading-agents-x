@@ -75,8 +75,12 @@ export function useLocation() {
 
 export function useParams() {
   const pathname = usePathname();
-  const match = /^\/runs\/([^/]+)\/?$/.exec(pathname);
-  return { runId: match ? decodeURIComponent(match[1]) : undefined };
+  const runMatch = /^\/runs\/([^/]+)\/?$/.exec(pathname);
+  const chainMatch = /^\/research\/([^/]+)\/?$/.exec(pathname);
+  return {
+    runId: runMatch ? decodeURIComponent(runMatch[1]) : undefined,
+    chainId: chainMatch ? decodeURIComponent(chainMatch[1]) : undefined,
+  };
 }
 
 type LinkProps = Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href"> & {

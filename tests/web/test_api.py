@@ -22,7 +22,9 @@ from tradingagents.application.contracts import (
     ResearchArtifactDraft,
     RunStatus,
 )
+from tradingagents.application.service import AnalysisService
 from tradingagents.application.settings import AppSettings
+from tradingagents.graph.research_graph import GraphExecution
 from tradingagents.version import __version__
 from tradingagents.web import create_app
 
@@ -35,6 +37,41 @@ def _payload(ticker: str = "NVDA") -> dict:
         "analysts": ["market", "news"],
         "output_language": "en",
     }
+
+
+class _FullResearchGraph:
+    def __init__(self, **_kwargs):
+        pass
+
+    def execute(self, context, **_kwargs):
+        item = EvidenceItem.create(
+            source="fixture",
+            evidence_type="fixture",
+            requested_date=date(2026, 7, 24),
+            effective_date=date(2026, 7, 24),
+            content="Evidence for the initial chain.",
+        )
+        evidence = EvidenceBundle(
+            instrument=context.request.ticker,
+            analysis_date=date(2026, 7, 24),
+            items=(item,),
+        )
+        report = analyst_report(evidence_ref=item.ref)
+        context.artifact_writer(
+            ResearchArtifactDraft(
+                node="analyst.market",
+                stage="analyst",
+                role="market",
+                generation_method=ArtifactGenerationMethod.TOOL_CALL,
+                content=report,
+            )
+        )
+        return GraphExecution(
+            state={},
+            evidence=evidence,
+            reports={"market": report},
+            decision=research_decision(evidence_refs=(item.ref,)),
+        )
 
 
 @pytest.mark.anyio
@@ -62,6 +99,50 @@ async def test_run_creation_is_idempotent_and_conflicts_are_explicit(
     assert repeated.json()["id"] == first.json()["id"]
     assert conflict.status_code == 409
     assert conflict.json()["error"]["code"] == "idempotency_conflict"
+
+
+@pytest.mark.anyio
+async def test_initial_research_chain_creation_read_and_export_surfaces(
+    web_client: httpx.AsyncClient,
+    web_settings,
+    web_repository,
+) -> None:
+    queued = await web_client.post(
+        "/api/v1/research-chains",
+        json={**_payload("6501.T"), "analysts": ["market"], "output_language": "ja"},
+        headers={"Idempotency-Key": "initial-chain"},
+    )
+    assert queued.status_code == 202
+    assert queued.json()["research_chain_requested"] is True
+
+    service = AnalysisService(
+        web_settings,
+        repository=web_repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_FullResearchGraph,
+        identity_resolver=lambda ticker, _date: {"company_name": ticker},
+        local_name_resolver=lambda _ticker, _date, _config: None,
+    )
+    claimed = web_repository.claim_run(
+        queued.json()["id"], "test-worker", web_settings.lease_seconds
+    )
+    service.execute_claimed(claimed, worker_id="test-worker")
+
+    chains = await web_client.get("/api/v1/research-chains?instrument=6501.T")
+    chain = chains.json()[0]
+    detail = await web_client.get(f"/api/v1/research-chains/{chain['id']}")
+    revision_id = chain["current_revision_id"]
+    revision = await web_client.get(f"/api/v1/research-revisions/{revision_id}")
+    exported = await web_client.get(
+        f"/api/v1/research-revisions/{revision_id}/export?format=json"
+    )
+
+    assert chains.status_code == 200
+    assert detail.json()["current_revision"]["current_state"]["language"] == "ja"
+    assert revision.json()["producing_run_id"] == queued.json()["id"]
+    assert exported.status_code == 200
+    assert exported.json()["revision"]["evidence_snapshot"]["bundle"]["items"]
+    assert exported.json()["linked_reports"]["market"].startswith("# Overview")
 
 
 @pytest.mark.anyio
@@ -94,22 +175,16 @@ async def test_run_lifecycle_routes_and_filters(
     run_id = created["id"]
 
     detail = await web_client.get(f"/api/v1/runs/{run_id}")
-    pending_evidence = await web_client.get(
-        f"/api/v1/runs/{run_id}/evidence"
-    )
+    pending_evidence = await web_client.get(f"/api/v1/runs/{run_id}/evidence")
     queued = await web_client.get("/api/v1/runs?status=queued")
     cancelled = await web_client.post(f"/api/v1/runs/{run_id}/cancel")
     trashed = await web_client.post(
         "/api/v1/runs/trash",
         json={"run_ids": [run_id]},
     )
-    trashed_page = await web_client.get(
-        "/api/v1/runs?trash_state=trashed&q=nv"
-    )
+    trashed_page = await web_client.get("/api/v1/runs?trash_state=trashed&q=nv")
     trashed_detail = await web_client.get(f"/api/v1/runs/{run_id}")
-    trashed_export = await web_client.get(
-        f"/api/v1/runs/{run_id}/export?format=json"
-    )
+    trashed_export = await web_client.get(f"/api/v1/runs/{run_id}/export?format=json")
     restored = await web_client.post(
         "/api/v1/runs/restore",
         json={"run_ids": [run_id]},
@@ -167,12 +242,8 @@ async def test_run_lifecycle_routes_and_filters(
 async def test_trash_batch_validation_is_atomic_and_idempotent(
     web_client: httpx.AsyncClient,
 ) -> None:
-    terminal = (
-        await web_client.post("/api/v1/runs", json=_payload("NVDA"))
-    ).json()
-    queued = (
-        await web_client.post("/api/v1/runs", json=_payload("AAPL"))
-    ).json()
+    terminal = (await web_client.post("/api/v1/runs", json=_payload("NVDA"))).json()
+    queued = (await web_client.post("/api/v1/runs", json=_payload("AAPL"))).json()
     await web_client.post(f"/api/v1/runs/{terminal['id']}/cancel")
 
     invalid = await web_client.post(
@@ -207,9 +278,7 @@ async def test_trash_batch_validation_is_atomic_and_idempotent(
 async def test_research_template_source_must_exist_and_be_terminal(
     web_client: httpx.AsyncClient,
 ) -> None:
-    queued = (
-        await web_client.post("/api/v1/runs", json=_payload("NVDA"))
-    ).json()
+    queued = (await web_client.post("/api/v1/runs", json=_payload("NVDA"))).json()
 
     active_source = await web_client.post(
         "/api/v1/runs",
@@ -284,18 +353,24 @@ async def test_openapi_contains_versioned_run_center_contract(
         "/api/v1/runs/{run_id}/retry",
         "/api/v1/runs/{run_id}/export",
         "/api/v1/instruments/recent",
+        "/api/v1/research-chains",
+        "/api/v1/research-chains/{chain_id}",
+        "/api/v1/research-revisions/{revision_id}",
+        "/api/v1/research-revisions/{revision_id}/export",
         "/api/v1/memory",
         "/api/v1/capabilities",
         "/api/v1/providers/{provider}/models",
         "/api/v1/health",
     } <= set(paths)
     assert "/api/v1/runs/{run_id}/rerun" not in paths
-    assert "provenance" not in schema["components"]["schemas"][
-        "AnalysisRequest"
-    ]["properties"]
-    assert "provenance" not in schema["components"]["schemas"][
-        "CapabilityDefaults"
-    ]["properties"]
+    assert (
+        "provenance"
+        not in schema["components"]["schemas"]["AnalysisRequest"]["properties"]
+    )
+    assert (
+        "provenance"
+        not in schema["components"]["schemas"]["CapabilityDefaults"]["properties"]
+    )
     assert schema["components"]["schemas"]["AssetType"]["enum"] == ["stock"]
 
 
@@ -304,12 +379,8 @@ async def test_recent_instruments_exclude_trashed_runs_and_include_names(
     web_client: httpx.AsyncClient,
     web_repository,
 ) -> None:
-    active = (
-        await web_client.post("/api/v1/runs", json=_payload("NVDA"))
-    ).json()
-    trashed = (
-        await web_client.post("/api/v1/runs", json=_payload("AAPL"))
-    ).json()
+    active = (await web_client.post("/api/v1/runs", json=_payload("NVDA"))).json()
+    trashed = (await web_client.post("/api/v1/runs", json=_payload("AAPL"))).json()
     web_repository.set_instrument_name(active["id"], "NVIDIA")
     web_repository.set_instrument_local_name(active["id"], "英伟达")
     web_repository.set_instrument_name(trashed["id"], "Apple")
@@ -489,12 +560,8 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
     assert partial_export.status_code == 200
     assert partial_detail.json()["run"]["status"] == "running"
     assert partial_detail.json()["result"]["status"] == "running"
-    assert partial_detail.json()["result"]["decision"]["thesis"] == (
-        "Fixture thesis."
-    )
-    assert partial_detail.json()["result"]["evidence"]["digest"] == (
-        evidence.digest
-    )
+    assert partial_detail.json()["result"]["decision"]["thesis"] == ("Fixture thesis.")
+    assert partial_detail.json()["result"]["evidence"]["digest"] == (evidence.digest)
     assert list(partial_detail.json()["result"]["reports"]) == [
         "fundamentals",
         "market",
@@ -505,9 +572,7 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
         "debate.agenda.serialize"
     )
     assert partial_export.json()["result"]["recoveries"][0]["retry_count"] == 1
-    assert partial_export.json()["result"]["decision"]["thesis"] == (
-        "Fixture thesis."
-    )
+    assert partial_export.json()["result"]["decision"]["thesis"] == ("Fixture thesis.")
     assert partial_export.json()["evidence"]["digest"] == evidence.digest
 
     web_repository.complete(
@@ -525,18 +590,12 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
     )
 
     detail = await web_client.get(f"/api/v1/runs/{queued.id}")
-    artifacts = await web_client.get(
-        f"/api/v1/runs/{queued.id}/artifacts"
-    )
+    artifacts = await web_client.get(f"/api/v1/runs/{queued.id}/artifacts")
     empty_attempt = await web_client.get(
         f"/api/v1/runs/{queued.id}/artifacts?attempt=2"
     )
-    package = await web_client.get(
-        f"/api/v1/runs/{queued.id}/export?format=package"
-    )
-    evidence_response = await web_client.get(
-        f"/api/v1/runs/{queued.id}/evidence"
-    )
+    package = await web_client.get(f"/api/v1/runs/{queued.id}/export?format=package")
+    evidence_response = await web_client.get(f"/api/v1/runs/{queued.id}/evidence")
 
     assert detail.status_code == 200
     assert list(detail.json()["result"]["reports"]) == [
@@ -546,22 +605,16 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
         "social",
     ]
     assert detail.json()["result"]["evidence"]["digest"] == evidence.digest
-    assert detail.json()["result"]["evidence"]["items"][0]["ref"] == (
-        evidence_item.ref
-    )
+    assert detail.json()["result"]["evidence"]["items"][0]["ref"] == (evidence_item.ref)
     assert detail.json()["evidence_status"]["status"] == "sealed"
     assert evidence_response.status_code == 200
     assert evidence_response.json()["digest"] == evidence.digest
     assert detail.json()["attempts"][0]["status"] == "succeeded"
-    assert detail.json()["attempts"][0]["metrics"] == (
-        detail.json()["run"]["metrics"]
-    )
+    assert detail.json()["attempts"][0]["metrics"] == (detail.json()["run"]["metrics"])
     assert artifacts.status_code == 200
     assert artifact.id in {item["id"] for item in artifacts.json()}
     assert "Fixture report." in artifacts.json()[0]["content"]["markdown"]
-    review_payload = next(
-        item for item in artifacts.json() if item["id"] == review.id
-    )
+    review_payload = next(item for item in artifacts.json() if item["id"] == review.id)
     assert review_payload["generation_method"] == "tool_call"
     decision_payload = next(
         item for item in artifacts.json() if item["role"] == "final_committee"
@@ -601,11 +654,15 @@ async def test_capabilities_expose_effective_non_sensitive_run_defaults(
     assert response.status_code == 200
     payload = response.json()
     assert payload["output_languages"] == ["en", "zh-CN", "ja"]
-    assert payload["defaults"] | {
-        "output_language": "en",
-        "quick_reasoning_effort": None,
-        "deep_reasoning_effort": None,
-    } == payload["defaults"]
+    assert (
+        payload["defaults"]
+        | {
+            "output_language": "en",
+            "quick_reasoning_effort": None,
+            "deep_reasoning_effort": None,
+        }
+        == payload["defaults"]
+    )
     assert payload["providers"]["openai"]["label"] == "OpenAI"
     assert payload["providers"]["openai"]["api_key_required"] is True
     assert payload["providers"]["openai"]["configured"] is True
@@ -640,21 +697,13 @@ async def test_capabilities_and_runs_preserve_custom_output_language(
                 "analysis_date": "2026-07-24",
             },
         )
-        detail = await client.get(
-            f"/api/v1/runs/{created.json()['id']}"
-        )
+        detail = await client.get(f"/api/v1/runs/{created.json()['id']}")
 
     assert capabilities.status_code == 200
     assert capabilities.json()["defaults"]["output_language"] == custom_language
     assert created.status_code == 202
-    assert (
-        detail.json()["run"]["request"]["output_language"]
-        == custom_language
-    )
-    assert (
-        detail.json()["run"]["config_snapshot"]["output_language"]
-        == custom_language
-    )
+    assert detail.json()["run"]["request"]["output_language"] == custom_language
+    assert detail.json()["run"]["config_snapshot"]["output_language"] == custom_language
 
 
 @pytest.mark.anyio
@@ -682,9 +731,7 @@ async def test_health_reports_database_and_queue_status(
     web_client: httpx.AsyncClient,
     web_service,
 ) -> None:
-    web_service.enqueue(
-        AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
-    )
+    web_service.enqueue(AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24"))
 
     response = await web_client.get("/api/v1/health")
 

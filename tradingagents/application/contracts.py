@@ -1743,6 +1743,7 @@ class RunView(FrozenModel):
     source_run_id: str | None = None
     instrument_name: str | None = None
     instrument_local_name: str | None = None
+    research_chain_requested: bool = False
     status: RunStatus
     request: AnalysisRequest
     config_snapshot: dict[str, Any]

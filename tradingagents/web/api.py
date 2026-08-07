@@ -46,8 +46,11 @@ from tradingagents.application.repository import (
     EvidenceNotSealedError,
     IdempotencyConflictError,
     InvalidRunTransitionError,
+    ResearchChainNotFoundError,
+    ResearchRevisionNotFoundError,
     RunNotFoundError,
 )
+from tradingagents.application.research import ResearchChain, ResearchRevision
 from tradingagents.application.service import AnalysisService
 from tradingagents.application.settings import AppSettings
 from tradingagents.llm_clients.model_discovery import (
@@ -131,6 +134,20 @@ def create_app(
         exc: IdempotencyConflictError,
     ):
         return _error(409, "idempotency_conflict", str(exc))
+
+    @app.exception_handler(ResearchChainNotFoundError)
+    async def research_chain_not_found(
+        _request: Request,
+        exc: ResearchChainNotFoundError,
+    ):
+        return _error(404, "research_chain_not_found", str(exc))
+
+    @app.exception_handler(ResearchRevisionNotFoundError)
+    async def research_revision_not_found(
+        _request: Request,
+        exc: ResearchRevisionNotFoundError,
+    ):
+        return _error(404, "research_revision_not_found", str(exc))
 
     @app.exception_handler(EvidenceNotSealedError)
     async def evidence_not_sealed(
@@ -239,6 +256,59 @@ def create_app(
             idempotency_key=idempotency_key,
             source_run_id=request.source_run_id,
         )
+
+    @app.post(
+        f"{API_PREFIX}/research-chains",
+        response_model=RunView,
+        status_code=202,
+    )
+    def create_research_chain(
+        request: RunCreateRequest,
+        idempotency_key: Annotated[
+            str | None,
+            Header(alias="Idempotency-Key", max_length=200),
+        ] = None,
+    ):
+        if request.source_run_id is not None:
+            raise HTTPException(
+                status_code=422,
+                detail="A Research Chain must start from a new Full Analysis.",
+            )
+        return service.enqueue_initial_chain(
+            request.analysis_request(),
+            idempotency_key=idempotency_key,
+        )
+
+    @app.get(
+        f"{API_PREFIX}/research-chains",
+        response_model=list[ResearchChain],
+    )
+    def list_research_chains(
+        instrument: Annotated[str | None, Query(max_length=64)] = None,
+    ):
+        return repository.list_research_chains(instrument=instrument)
+
+    @app.get(
+        f"{API_PREFIX}/research-chains/{{chain_id}}",
+        response_model=ResearchChain,
+    )
+    def get_research_chain(chain_id: str):
+        return repository.get_research_chain(chain_id)
+
+    @app.get(
+        f"{API_PREFIX}/research-revisions/{{revision_id}}",
+        response_model=ResearchRevision,
+    )
+    def get_research_revision(revision_id: str):
+        return repository.get_research_revision(revision_id)
+
+    @app.get(f"{API_PREFIX}/research-revisions/{{revision_id}}/export")
+    def export_research_revision(
+        revision_id: str,
+        format: Literal["package", "markdown", "json"] = "package",
+    ):
+        media_type, content = service.export_revision(revision_id, format=format)
+        return Response(content=content, media_type=media_type)
 
     @app.get(f"{API_PREFIX}/runs", response_model=RunPage)
     def list_runs(

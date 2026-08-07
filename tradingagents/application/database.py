@@ -20,6 +20,7 @@ from sqlalchemy import (
     UniqueConstraint,
     create_engine,
     event,
+    text,
 )
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -45,6 +46,9 @@ class RunRecord(Base):
     )
     instrument_local_name: Mapped[str | None] = mapped_column(
         String(300), nullable=True
+    )
+    research_chain_requested: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
     )
     request_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     config_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
@@ -73,6 +77,59 @@ class RunRecord(Base):
     __table_args__ = (
         Index("ix_runs_claim", "status", "lease_expires_at", "created_at"),
         Index("ix_runs_trash", "trashed_at", "created_at"),
+    )
+
+
+class ResearchChainRecord(Base):
+    __tablename__ = "research_chains"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    instrument: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    current_revision_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+    __table_args__ = (
+        Index(
+            "uq_research_chains_primary_instrument",
+            "instrument",
+            unique=True,
+            sqlite_where=text("is_primary = 1"),
+        ),
+    )
+
+
+class ResearchRevisionRecord(Base):
+    __tablename__ = "research_revisions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    chain_id: Mapped[str] = mapped_column(
+        ForeignKey("research_chains.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    predecessor_revision_id: Mapped[str | None] = mapped_column(
+        ForeignKey("research_revisions.id", ondelete="RESTRICT"), nullable=True
+    )
+    producing_run_id: Mapped[str | None] = mapped_column(
+        ForeignKey("runs.id", ondelete="SET NULL"), nullable=True, unique=True
+    )
+    cutoff: Mapped[date] = mapped_column(Date, nullable=False)
+    execution_strategy: Mapped[str] = mapped_column(String(20), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(30), nullable=False)
+    language: Mapped[str] = mapped_column(String(40), nullable=False)
+    current_state_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    coverage_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    update_summary_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    evidence_snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    metrics_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("chain_id", "sequence"),
+        Index("ix_research_revisions_chain_order", "chain_id", "sequence"),
     )
 
 
