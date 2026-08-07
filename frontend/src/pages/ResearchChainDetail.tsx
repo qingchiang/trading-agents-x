@@ -26,6 +26,9 @@ export default function ResearchChainDetail() {
   const evidenceByRef = new Map(
     revision.evidence_snapshot.bundle.items.map((item) => [item.ref, item]),
   );
+  const sourceLineageByVersion = new Map(
+    (revision.evidence_snapshot.source_record_lineage ?? []).map((item) => [item.version_id, item]),
+  );
 
   return (
     <section>
@@ -127,13 +130,46 @@ export default function ResearchChainDetail() {
         <h3>{t("domainCoverage")}</h3>
         <ul>
           {(revision.coverage.domains ?? []).map((item) => (
-            <li key={item.domain}>
-              <strong>{item.domain}</strong> · {item.status}
+            <li key={`${item.domain}-${item.source ?? ""}`}>
+              <strong>{item.domain}</strong>{item.source ? ` / ${item.source}` : ""} · {item.status}
+              {item.requirement ? ` · ${item.requirement}` : ""}
               {(item.limitations ?? []).length > 0 && (
                 <ul>{(item.limitations ?? []).map((value) => <li key={value}>{value}</li>)}</ul>
               )}
             </li>
           ))}
+        </ul>
+        <p>
+          <strong>
+            {t(revision.coverage.supports_no_material_change === false
+              ? "quietReassessmentBlocked"
+              : "quietReassessmentSupported")}
+          </strong>
+        </p>
+        <h3>{t("sourceWatermarks")}</h3>
+        <ul>
+          {(revision.evidence_snapshot.source_watermarks ?? []).map((item) => (
+            <li key={item.source}>
+              <strong>{item.source}</strong> · {item.scanned_start} – {item.scanned_end} · {item.status}
+              {item.baseline_cutoff ? ` · ${t("baseline")}: ${item.baseline_cutoff}` : ""}
+              {item.overlap_start ? ` · ${t("overlapStart")}: ${item.overlap_start}` : ""}
+              {(item.limitations ?? []).length > 0 && (
+                <ul>{(item.limitations ?? []).map((value) => <li key={value}>{value}</li>)}</ul>
+              )}
+            </li>
+          ))}
+        </ul>
+        <h3>{t("sourceRecordVersions")}</h3>
+        <ul>
+          {(revision.evidence_snapshot.source_records ?? []).map((item) => {
+            const lineage = sourceLineageByVersion.get(item.version_id);
+            return (
+              <li key={item.version_id}>
+                <strong>{item.title}</strong> · <code>{item.version_id}</code> · {item.status} · {lineage?.lineage}
+                <small> {item.source} / {item.record_id} · {item.available_at}</small>
+              </li>
+            );
+          })}
         </ul>
         <h3>{t("claimCoverage")}</h3>
         <ul>

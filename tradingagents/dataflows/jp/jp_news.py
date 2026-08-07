@@ -31,7 +31,16 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from tradingagents.provenance import ProvenanceRecord, attach_provenance
+from tradingagents.provenance import (
+    ProvenanceRecord,
+    SourceWatermark,
+    attach_provenance,
+    attach_source_observations,
+    attach_source_watermarks,
+    extract_source_observations,
+    extract_source_watermarks,
+    strip_source_metadata_markers,
+)
 
 from ..config import get_config
 from ..errors import NoMarketDataError
@@ -51,6 +60,7 @@ _NOTE_PREFIX = "<"
 # The free TDnet search exposes the disclosure date plus the preceding 30
 # calendar dates. Other JP feeds may receive the full 90-date graph window.
 _TDNET_MAX_LOOKBACK_DAYS = 30
+_EDINET_OVERLAP_DAYS = 89
 
 _ITEM_START_RE = re.compile(r"(?m)^### ")
 _TIER_PREFIX_RE = re.compile(r"^\[(?:direct|candidate|context)\]\s*", re.I)
@@ -161,11 +171,21 @@ def _safe_feed(source: str, fetch, ticker: str, start_date: str, end_date: str) 
 def _tdnet_start_date(start_date: str, end_date: str) -> str:
     """Clamp a requested range to TDnet's 31-inclusive-calendar-date limit."""
     try:
+        datetime.strptime(start_date, "%Y-%m-%d")
+        end = datetime.strptime(end_date, "%Y-%m-%d")
+    except (TypeError, ValueError):
+        return start_date
+    return (end - timedelta(days=_TDNET_MAX_LOOKBACK_DAYS)).strftime("%Y-%m-%d")
+
+
+def _edinet_start_date(start_date: str, end_date: str) -> str:
+    """Always inspect EDINET's full bounded overlap for late corrections."""
+    try:
         start = datetime.strptime(start_date, "%Y-%m-%d")
         end = datetime.strptime(end_date, "%Y-%m-%d")
     except (TypeError, ValueError):
         return start_date
-    return max(start, end - timedelta(days=_TDNET_MAX_LOOKBACK_DAYS)).strftime("%Y-%m-%d")
+    return min(start, end - timedelta(days=_EDINET_OVERLAP_DAYS)).strftime("%Y-%m-%d")
 
 
 def get_news(ticker: str, start_date: str, end_date: str) -> str:
@@ -180,7 +200,7 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
     # Sub-feeds in output order (statutory → timely → media); resolved here (not
     # module scope) so tests patching these names take effect.
     feed_requests = (
-        ("EDINET", _edinet_news, start_date, end_date),
+        ("EDINET", _edinet_news, _edinet_start_date(start_date, end_date), end_date),
         ("TDnet", _tdnet_news, _tdnet_start_date(start_date, end_date), end_date),
         ("Google News", _google_news, start_date, end_date),
     )
@@ -192,6 +212,17 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
             feed_requests,
         )
     rendered = list(rendered)
+    source_observations = tuple(
+        observation
+        for block in rendered
+        for observation in extract_source_observations(block)
+    )
+    source_watermarks = tuple(
+        watermark
+        for block in rendered
+        for watermark in extract_source_watermarks(block)
+    )
+    rendered = [strip_source_metadata_markers(block) for block in rendered]
     data_blocks = [block for block in rendered if block.startswith(_DATA_PREFIX)]
     limit = max(1, int(get_config()["news_article_limit"]))
     blocks, merged_counts = _merge_blocks(data_blocks, limit)
@@ -225,6 +256,24 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
             timing=timing,
         )
         records.append(record)
+        if not any(item.source == source for item in source_watermarks):
+            returned = counts.returned if block.startswith(_DATA_PREFIX) else 0
+            source_watermarks = (
+                *source_watermarks,
+                SourceWatermark(
+                    source=source,
+                    scanned_start=effective_start,
+                    scanned_end=effective_end,
+                    status="unavailable" if block.startswith(_NOTE_PREFIX) else "complete",
+                    limitations=(
+                        (f"{source} collection was unavailable.",)
+                        if block.startswith(_NOTE_PREFIX)
+                        else ()
+                    ),
+                    returned_records=returned,
+                    reported_records=returned,
+                ),
+            )
         if block.startswith(_NOTE_PREFIX):
             notes.append((block, record))
 
@@ -241,4 +290,6 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
             "### Source availability notes\n"
             + "\n".join(note for note, _record in notes)
         )
-    return attach_provenance("\n\n".join(blocks), *records)
+    result = attach_provenance("\n\n".join(blocks), *records)
+    result = attach_source_observations(result, *source_observations)
+    return attach_source_watermarks(result, *source_watermarks)

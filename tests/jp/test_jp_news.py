@@ -7,7 +7,15 @@ import pytest
 
 from tradingagents.dataflows.errors import NoMarketDataError, VendorNotConfiguredError
 from tradingagents.dataflows.jp import jp_news
-from tradingagents.provenance import extract_provenance
+from tradingagents.provenance import (
+    SourceObservation,
+    SourceWatermark,
+    attach_source_observations,
+    attach_source_watermarks,
+    extract_provenance,
+    extract_source_observations,
+    extract_source_watermarks,
+)
 
 _EDINET_DATA = "## 4568.T EDINET disclosures, from a to b:\n\n### 有価証券報告書"
 _TDNET_DATA = "## 4568.T timely disclosures (TDnet 適時開示), from a to b:\n\n### 自己株式の取得"
@@ -92,6 +100,76 @@ class JpNewsAssemblerTests(unittest.TestCase):
         )
         self.assertNotIn("truncated_by_global_cap", out)
 
+    def test_machine_lineage_survives_deduplication_and_global_cap(self):
+        edinet = attach_source_watermarks(
+            attach_source_observations(
+                _block("EDINET", ["Duplicate"]),
+                SourceObservation(
+                    source="EDINET",
+                    record_id="S100A",
+                    version_id="edinet:S100A",
+                    status="published",
+                    published_at="2026-07-10 15:00",
+                    available_at="2026-07-10T15:00:00+09:00",
+                    title="Duplicate",
+                ),
+            ),
+            SourceWatermark(
+                source="EDINET",
+                scanned_start="2026-07-01",
+                scanned_end="2026-07-10",
+                status="complete",
+                returned_records=1,
+                reported_records=1,
+            ),
+        )
+        tdnet = attach_source_watermarks(
+            attach_source_observations(
+                _block("TDnet", ["Duplicate", "Capped"]),
+                SourceObservation(
+                    source="TDnet",
+                    record_id="1401",
+                    version_id="tdnet:v1",
+                    status="published",
+                    published_at="2026-07-10 16:00",
+                    available_at="2026-07-10T16:00:00+09:00",
+                    title="Duplicate",
+                ),
+                SourceObservation(
+                    source="TDnet",
+                    record_id="1402",
+                    version_id="tdnet:v2",
+                    status="published",
+                    published_at="2026-07-10 17:00",
+                    available_at="2026-07-10T17:00:00+09:00",
+                    title="Capped",
+                ),
+            ),
+            SourceWatermark(
+                source="TDnet",
+                scanned_start="2026-07-01",
+                scanned_end="2026-07-10",
+                status="limited",
+                limitations=("archive limited",),
+                returned_records=2,
+                reported_records=2,
+            ),
+        )
+
+        with mock.patch.object(jp_news, "get_config", return_value={"news_article_limit": 1}):
+            out = _run(edinet, _MEDIA_EMPTY, tdnet=tdnet)
+
+        assert {item.version_id for item in extract_source_observations(out)} == {
+            "edinet:S100A",
+            "tdnet:v1",
+            "tdnet:v2",
+        }
+        assert {item.source for item in extract_source_watermarks(out)} == {
+            "EDINET",
+            "TDnet",
+            "Google News",
+        }
+
     def test_configured_limit_is_applied_after_cross_source_merge(self):
         with mock.patch.object(jp_news, "get_config", return_value={"news_article_limit": 2}):
             out = _run(
@@ -146,6 +224,18 @@ class JpNewsAssemblerTests(unittest.TestCase):
         edinet.assert_called_once_with("4568.T", "2026-04-19", "2026-07-17")
         tdnet.assert_called_once_with("4568.T", "2026-06-17", "2026-07-17")
         media.assert_called_once_with("4568.T", "2026-04-19", "2026-07-17")
+
+    def test_recent_window_uses_source_specific_disclosure_overlap(self):
+        with (
+            mock.patch.object(jp_news, "_edinet_news", return_value=_EDINET_DATA) as edinet,
+            mock.patch.object(jp_news, "_tdnet_news", return_value=_TDNET_DATA) as tdnet,
+            mock.patch.object(jp_news, "_google_news", return_value=_MEDIA_DATA) as media,
+        ):
+            jp_news.get_news("4568.T", "2026-07-03", "2026-07-17")
+
+        edinet.assert_called_once_with("4568.T", "2026-04-19", "2026-07-17")
+        tdnet.assert_called_once_with("4568.T", "2026-06-17", "2026-07-17")
+        media.assert_called_once_with("4568.T", "2026-07-03", "2026-07-17")
 
     def test_both_empty_raises_no_market_data(self):
         with self.assertRaises(NoMarketDataError):

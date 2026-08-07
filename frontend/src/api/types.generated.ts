@@ -108,7 +108,9 @@ export interface components {
       limitations?: string[];
       questions: components["schemas"]["ResearchObjectCoverage"][];
       schema_version?: string;
+      supports_no_material_change?: boolean;
     };
+    CoverageRequirement: "required" | "advisory";
     CoverageStatus: "complete" | "limited" | "unavailable";
     CurrentResearchState: {
       catalysts?: components["schemas"]["ResearchFactor"][];
@@ -163,6 +165,9 @@ export interface components {
       bundle: components["schemas"]["EvidenceBundle"];
       lineage: components["schemas"]["EvidenceSnapshotItem"][];
       schema_version?: string;
+      source_record_lineage?: components["schemas"]["SourceRecordSnapshotItem"][];
+      source_records?: components["schemas"]["SourceRecordVersion"][];
+      source_watermarks?: components["schemas"]["SourceWatermarkSnapshot"][];
     };
     EpistemicKind: "observation" | "inference" | "forecast";
     EvidenceBundle: {
@@ -475,6 +480,7 @@ export interface components {
       falsifier?: string | null;
       id: string;
       observed_at?: string | null;
+      required_sources?: string[];
       standing?: components["schemas"]["ClaimStanding"];
       statement: string;
     };
@@ -501,6 +507,8 @@ export interface components {
       domain: string;
       evidence_refs?: string[];
       limitations?: string[];
+      requirement?: components["schemas"]["CoverageRequirement"];
+      source?: string | null;
       status: components["schemas"]["CoverageStatus"];
     };
     ResearchExecutionStrategy: "full" | "incremental";
@@ -526,6 +534,7 @@ export interface components {
       evidence_refs?: string[];
       id: string;
       question: string;
+      required_sources?: string[];
       status?: components["schemas"]["QuestionStatus"];
     };
     ResearchRating: "Buy" | "Overweight" | "Hold" | "Underweight" | "Sell";
@@ -719,6 +728,37 @@ export interface components {
       low: components["schemas"]["AuditedRangeEndpoint"];
       measurement_kind?: components["schemas"]["MeasurementKind"];
       unit?: string | null;
+    };
+    SourceRecordSnapshotItem: {
+      lineage: "new" | "inherited";
+      observed_in_execution: boolean;
+      source_revision_id?: string | null;
+      version_id: string;
+    };
+    SourceRecordStatus: "published" | "corrected" | "withdrawn" | "replaced";
+    SourceRecordVersion: {
+      available_at: string;
+      evidence_ref: string;
+      fallback?: boolean;
+      published_at: string;
+      record_id: string;
+      replaces_version_id?: string | null;
+      source: string;
+      status: components["schemas"]["SourceRecordStatus"];
+      title: string;
+      url?: string | null;
+      version_id: string;
+    };
+    SourceWatermarkSnapshot: {
+      baseline_cutoff?: string | null;
+      limitations?: string[];
+      overlap_start?: string | null;
+      reported_records?: number | null;
+      returned_records?: number;
+      scanned_end: string;
+      scanned_start: string;
+      source: string;
+      status: components["schemas"]["CoverageStatus"];
     };
     StructuredRecoveryNotice: {
       attempt: number;

@@ -50,6 +50,30 @@ class _FullResearchGraph:
             requested_date=date(2026, 7, 24),
             effective_date=date(2026, 7, 24),
             content="Evidence for the initial chain.",
+            provenance={
+                "source_records": [
+                    {
+                        "source": "EDINET",
+                        "record_id": "S100ROOT",
+                        "version_id": "edinet:S100ROOT",
+                        "status": "published",
+                        "published_at": "2026-07-23 15:00",
+                        "available_at": "2026-07-23T15:00:00+09:00",
+                        "title": "有価証券報告書",
+                    }
+                ],
+                "source_watermarks": [
+                    {
+                        "source": "TDnet",
+                        "scanned_start": "2026-06-24",
+                        "scanned_end": "2026-07-24",
+                        "status": "limited",
+                        "limitations": ["rolling archive limited"],
+                        "returned_records": 2,
+                        "reported_records": 5,
+                    }
+                ],
+            },
         )
         evidence = EvidenceBundle(
             instrument=context.request.ticker,
@@ -137,9 +161,19 @@ async def test_initial_research_chain_creation_read_and_export_surfaces(
 
     assert chains.status_code == 200
     assert detail.json()["current_revision"]["current_state"]["language"] == "ja"
+    assert detail.json()["current_revision"]["coverage"]["supports_no_material_change"] is False
     assert revision.json()["producing_run_id"] == queued.json()["id"]
+    assert revision.json()["evidence_snapshot"]["source_records"][0]["version_id"] == (
+        "edinet:S100ROOT"
+    )
+    assert revision.json()["evidence_snapshot"]["source_watermarks"][0]["status"] == (
+        "limited"
+    )
+    persisted = web_repository.get_research_revision(revision_id)
+    assert persisted.evidence_snapshot.source_records[0].record_id == "S100ROOT"
     assert exported.status_code == 200
     assert exported.json()["revision"]["evidence_snapshot"]["bundle"]["items"]
+    assert exported.json()["revision"]["evidence_snapshot"]["source_records"]
     assert exported.json()["linked_reports"]["market"].startswith("# Overview")
 
     update = await web_client.post(

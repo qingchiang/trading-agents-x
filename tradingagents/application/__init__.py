@@ -70,6 +70,7 @@ from .research import (
     ClaimConfidence,
     ClaimRevisionDelta,
     CoverageAttestation,
+    CoverageRequirement,
     CurrentResearchState,
     DecisionConfidence,
     EffectiveEvidenceSnapshot,
@@ -84,6 +85,10 @@ from .research import (
     ResearchRevisionDraft,
     RevisionDelta,
     ScenarioLikelihood,
+    SourceRecordSnapshotItem,
+    SourceRecordStatus,
+    SourceRecordVersion,
+    SourceWatermarkSnapshot,
     UpdateSummary,
 )
 from .settings import AppSettings, RunSettings
@@ -158,6 +163,7 @@ __all__ = [
     "ClaimChange",
     "ClaimRevisionDelta",
     "CoverageAttestation",
+    "CoverageRequirement",
     "CurrentResearchState",
     "DecisionConfidence",
     "EffectiveEvidenceSnapshot",
@@ -172,5 +178,9 @@ __all__ = [
     "ResearchRevisionDraft",
     "RevisionDelta",
     "ScenarioLikelihood",
+    "SourceRecordSnapshotItem",
+    "SourceRecordStatus",
+    "SourceRecordVersion",
+    "SourceWatermarkSnapshot",
     "UpdateSummary",
 ]

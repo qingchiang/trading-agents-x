@@ -32,6 +32,16 @@ _SPAN_MARKER_RE = re.compile(
     rf"<!--\s*/?{re.escape(_SPAN_PREFIX)}(?:\s+\{{.*?\}})?\s*-->",
     re.DOTALL,
 )
+_SOURCE_RECORD_PREFIX = "tradingagents-source-record:v1"
+_SOURCE_RECORD_RE = re.compile(
+    rf"<!--\s*{re.escape(_SOURCE_RECORD_PREFIX)}\s+(\{{.*?\}})\s*-->",
+    re.DOTALL,
+)
+_SOURCE_WATERMARK_PREFIX = "tradingagents-source-watermark:v1"
+_SOURCE_WATERMARK_RE = re.compile(
+    rf"<!--\s*{re.escape(_SOURCE_WATERMARK_PREFIX)}\s+(\{{.*?\}})\s*-->",
+    re.DOTALL,
+)
 
 TemporalScopeName = Literal["point_in_time", "live_only", "unknown"]
 
@@ -67,6 +77,34 @@ class EvidenceSpan:
     temporal_scope: TemporalScopeName
 
 
+@dataclass(frozen=True)
+class SourceObservation:
+    """One immutable observed version of a stable source-native record."""
+
+    source: str
+    record_id: str
+    version_id: str
+    status: str
+    published_at: str
+    available_at: str
+    title: str
+    url: str | None = None
+    replaces_version_id: str | None = None
+
+
+@dataclass(frozen=True)
+class SourceWatermark:
+    """A source-specific collection boundary and its explicit limitations."""
+
+    source: str
+    scanned_start: str
+    scanned_end: str
+    status: str
+    limitations: tuple[str, ...] = ()
+    returned_records: int = 0
+    reported_records: int | None = None
+
+
 def provenance_marker(record: ProvenanceRecord) -> str:
     """Serialize public provenance fields into a versioned HTML comment."""
     payload = {key: value for key, value in asdict(record).items() if value is not None}
@@ -88,6 +126,52 @@ def attach_provenance(text: str, *records: ProvenanceRecord) -> str:
     if not markers:
         return text
     return "\n".join([*markers, text]) if text else "\n".join(markers)
+
+
+def _attach_machine_records(text: str, prefix: str, records: Iterable[object]) -> str:
+    markers = [
+        f"<!-- {prefix} "
+        f"{json.dumps(asdict(record), ensure_ascii=False, separators=(',', ':'))} -->"
+        for record in records
+    ]
+    return "\n".join([text, *markers]) if markers else text
+
+
+def attach_source_observations(text: str, *records: SourceObservation) -> str:
+    """Append structured Source Record observations outside human-visible prose."""
+    return _attach_machine_records(text, _SOURCE_RECORD_PREFIX, records)
+
+
+def attach_source_watermarks(text: str, *records: SourceWatermark) -> str:
+    """Append structured source coverage boundaries outside human-visible prose."""
+    return _attach_machine_records(text, _SOURCE_WATERMARK_PREFIX, records)
+
+
+def _extract_machine_records(text: str, pattern: re.Pattern[str], model):
+    records = []
+    seen = set()
+    if not isinstance(text, str):
+        return records
+    for raw in pattern.findall(text):
+        try:
+            payload = json.loads(raw)
+            if model is SourceWatermark:
+                payload["limitations"] = tuple(payload.get("limitations") or ())
+            record = model(**payload)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if record not in seen:
+            records.append(record)
+            seen.add(record)
+    return records
+
+
+def extract_source_observations(text: str) -> list[SourceObservation]:
+    return _extract_machine_records(text, _SOURCE_RECORD_RE, SourceObservation)
+
+
+def extract_source_watermarks(text: str) -> list[SourceWatermark]:
+    return _extract_machine_records(text, _SOURCE_WATERMARK_RE, SourceWatermark)
 
 
 def attach_evidence_span(
@@ -212,7 +296,15 @@ def strip_provenance_markers(text: str) -> str:
     """Remove machine metadata while preserving the human-readable vendor body."""
     if not isinstance(text, str):
         return text
-    return _SPAN_MARKER_RE.sub("", _MARKER_RE.sub("", text)).lstrip("\n")
+    value = strip_source_metadata_markers(text)
+    return _SPAN_MARKER_RE.sub("", _MARKER_RE.sub("", value)).lstrip("\n")
+
+
+def strip_source_metadata_markers(text: str) -> str:
+    """Remove Source Record and Watermark markers while retaining provenance."""
+    if not isinstance(text, str):
+        return text
+    return _SOURCE_WATERMARK_RE.sub("", _SOURCE_RECORD_RE.sub("", text)).rstrip()
 
 
 def extract_provenance(value: str | Iterable[BaseMessage]) -> list[ProvenanceRecord]:

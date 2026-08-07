@@ -304,7 +304,9 @@ def create_app(
         baseline = chain.current_revision
         if baseline is None:
             raise InvalidResearchBaselineError("Research Chain has no Eligible Baseline")
-        analysts = tuple(item.domain for item in baseline.coverage.domains)
+        analysts = tuple(
+            item.domain for item in baseline.coverage.domains if item.source is None
+        )
         return service.enqueue_chain_update(
             chain_id,
             request.baseline_revision_id,

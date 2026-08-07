@@ -236,6 +236,15 @@ without deleting or weakening the immutable research state. The API, Web
 reader, and Revision exports read the Revision directly rather than replaying
 the producing run.
 
+For Japanese disclosures, the Effective Evidence Snapshot also carries stable
+EDINET/TDnet Source Record identities, immutable observed Source Record Version
+identities, per-version new/inherited lineage, and source-specific Watermarks.
+Version identity is independent of the requested analysis date, so overlapping
+collection can re-observe and deduplicate a version while retaining superseded,
+corrected, withdrawn, or replaced versions. Watermarks record the interval
+actually scanned plus archive, truncation, and availability limitations; they
+are not inferred from an empty result.
+
 ### Full Research Chain updates
 
 In `off` mode a manual update targets exactly the current Revision of one
@@ -254,6 +263,15 @@ record a conservative disposition; they never silently reassign an old
 identity. The immutable Revision stores a typed delta, complete Current
 Research State, Coverage Attestation, Update Summary, Effective Evidence
 Snapshot with inherited/new lineage, Full artifacts, and metrics.
+
+Coverage Attestation distinguishes Required and Advisory source domains.
+EDINET and TDnet company disclosures are Required for Japanese disclosure
+coverage. Google News is Advisory unless an active Claim or open Question
+explicitly names it as Required. Limited or unavailable Required coverage, and
+observed official correction or withdrawal states, are represented as blocking
+a quiet reassessment; live-only Required coverage cannot establish No Material
+Change. Full Analysis exposes the limitation rather than interpreting missing
+coverage as no news.
 
 The repository commits the successful execution, new Revision, and changed
 chain head in one SQLite transaction after rechecking the baseline. Failure,
@@ -380,6 +398,14 @@ quality
 fallback
 provenance
 ```
+
+Japanese disclosure producers additionally attach machine-readable Source
+Record observations and Source Watermarks outside human-visible Markdown.
+Evidence sealing validates and stores those structures in provenance before
+Revision assembly. EDINET uses its document and parent-document identities;
+TDnet uses the official PDF record identity and a deterministic observed-version
+digest. Both retain timezone-aware availability and actual-source/fallback
+association through the Evidence item that carried the observation.
 
 `EvidenceBundle(version="8")` deduplicates items, validates unique references,
 rejects effective dates after the analysis cutoff, interprets `available_at`

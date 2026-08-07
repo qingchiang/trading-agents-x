@@ -780,6 +780,11 @@
             "default": "1",
             "title": "Schema Version",
             "type": "string"
+          },
+          "supports_no_material_change": {
+            "default": true,
+            "title": "Supports No Material Change",
+            "type": "boolean"
           }
         },
         "required": [
@@ -789,6 +794,14 @@
         ],
         "title": "CoverageAttestation",
         "type": "object"
+      },
+      "CoverageRequirement": {
+        "enum": [
+          "required",
+          "advisory"
+        ],
+        "title": "CoverageRequirement",
+        "type": "string"
       },
       "CoverageStatus": {
         "enum": [
@@ -1141,6 +1154,30 @@
             "default": "1",
             "title": "Schema Version",
             "type": "string"
+          },
+          "source_record_lineage": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SourceRecordSnapshotItem"
+            },
+            "title": "Source Record Lineage",
+            "type": "array"
+          },
+          "source_records": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SourceRecordVersion"
+            },
+            "title": "Source Records",
+            "type": "array"
+          },
+          "source_watermarks": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SourceWatermarkSnapshot"
+            },
+            "title": "Source Watermarks",
+            "type": "array"
           }
         },
         "required": [
@@ -3376,6 +3413,14 @@
             ],
             "title": "Observed At"
           },
+          "required_sources": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Sources",
+            "type": "array"
+          },
           "standing": {
             "$ref": "#/components/schemas/ClaimStanding",
             "default": "active"
@@ -3564,6 +3609,21 @@
             "title": "Limitations",
             "type": "array"
           },
+          "requirement": {
+            "$ref": "#/components/schemas/CoverageRequirement",
+            "default": "required"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
           "status": {
             "$ref": "#/components/schemas/CoverageStatus"
           }
@@ -3711,6 +3771,14 @@
             "minLength": 1,
             "title": "Question",
             "type": "string"
+          },
+          "required_sources": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Sources",
+            "type": "array"
           },
           "status": {
             "$ref": "#/components/schemas/QuestionStatus",
@@ -5100,6 +5168,219 @@
           "limitations"
         ],
         "title": "ScenarioReferenceRange",
+        "type": "object"
+      },
+      "SourceRecordSnapshotItem": {
+        "additionalProperties": false,
+        "properties": {
+          "lineage": {
+            "enum": [
+              "new",
+              "inherited"
+            ],
+            "title": "Lineage",
+            "type": "string"
+          },
+          "observed_in_execution": {
+            "title": "Observed In Execution",
+            "type": "boolean"
+          },
+          "source_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Revision Id"
+          },
+          "version_id": {
+            "minLength": 1,
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version_id",
+          "lineage",
+          "observed_in_execution"
+        ],
+        "title": "SourceRecordSnapshotItem",
+        "type": "object"
+      },
+      "SourceRecordStatus": {
+        "enum": [
+          "published",
+          "corrected",
+          "withdrawn",
+          "replaced"
+        ],
+        "title": "SourceRecordStatus",
+        "type": "string"
+      },
+      "SourceRecordVersion": {
+        "additionalProperties": false,
+        "properties": {
+          "available_at": {
+            "format": "date-time",
+            "title": "Available At",
+            "type": "string"
+          },
+          "evidence_ref": {
+            "pattern": "^ev_[a-f0-9]{12}$",
+            "title": "Evidence Ref",
+            "type": "string"
+          },
+          "fallback": {
+            "default": false,
+            "title": "Fallback",
+            "type": "boolean"
+          },
+          "published_at": {
+            "minLength": 1,
+            "title": "Published At",
+            "type": "string"
+          },
+          "record_id": {
+            "minLength": 1,
+            "title": "Record Id",
+            "type": "string"
+          },
+          "replaces_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replaces Version Id"
+          },
+          "source": {
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SourceRecordStatus"
+          },
+          "title": {
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "version_id": {
+            "minLength": 1,
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "record_id",
+          "version_id",
+          "status",
+          "published_at",
+          "available_at",
+          "title",
+          "evidence_ref"
+        ],
+        "title": "SourceRecordVersion",
+        "type": "object"
+      },
+      "SourceWatermarkSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "baseline_cutoff": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Cutoff"
+          },
+          "limitations": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "overlap_start": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overlap Start"
+          },
+          "reported_records": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reported Records"
+          },
+          "returned_records": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Returned Records",
+            "type": "integer"
+          },
+          "scanned_end": {
+            "format": "date",
+            "title": "Scanned End",
+            "type": "string"
+          },
+          "scanned_start": {
+            "format": "date",
+            "title": "Scanned Start",
+            "type": "string"
+          },
+          "source": {
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CoverageStatus"
+          }
+        },
+        "required": [
+          "source",
+          "scanned_start",
+          "scanned_end",
+          "status"
+        ],
+        "title": "SourceWatermarkSnapshot",
         "type": "object"
       },
       "StructuredRecoveryNotice": {

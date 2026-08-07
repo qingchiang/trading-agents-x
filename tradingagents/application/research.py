@@ -12,6 +12,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from tradingagents.dataflows.symbol_utils import market_timezone
+
 from .contracts import (
     AnalysisRequest,
     AnalystReport,
@@ -93,6 +95,18 @@ class CoverageStatus(str, Enum):
     UNAVAILABLE = "unavailable"
 
 
+class CoverageRequirement(str, Enum):
+    REQUIRED = "required"
+    ADVISORY = "advisory"
+
+
+class SourceRecordStatus(str, Enum):
+    PUBLISHED = "published"
+    CORRECTED = "corrected"
+    WITHDRAWN = "withdrawn"
+    REPLACED = "replaced"
+
+
 class ResearchExecutionStrategy(str, Enum):
     FULL = "full"
     INCREMENTAL = "incremental"
@@ -140,6 +154,7 @@ class ResearchClaim(ResearchModel):
     observed_at: date | None = None
     falsifier: str | None = Field(default=None, min_length=1)
     evidence_relationship: Literal["direct", "decision_envelope"] = "direct"
+    required_sources: tuple[str, ...] = ()
 
     @field_validator("evidence_refs")
     @classmethod
@@ -166,6 +181,7 @@ class ResearchQuestion(ResearchModel):
     question: str = Field(min_length=1)
     status: QuestionStatus = QuestionStatus.OPEN
     evidence_refs: tuple[str, ...] = ()
+    required_sources: tuple[str, ...] = ()
 
 
 class ResearchOpinion(ResearchModel):
@@ -255,6 +271,8 @@ class ResearchDomainCoverage(ResearchModel):
     status: CoverageStatus
     evidence_refs: tuple[str, ...] = ()
     limitations: tuple[str, ...] = ()
+    requirement: CoverageRequirement = CoverageRequirement.REQUIRED
+    source: str | None = None
 
 
 class ResearchObjectCoverage(ResearchModel):
@@ -270,6 +288,7 @@ class CoverageAttestation(ResearchModel):
     questions: tuple[ResearchObjectCoverage, ...]
     domains: tuple[ResearchDomainCoverage, ...] = Field(min_length=1)
     limitations: tuple[str, ...] = ()
+    supports_no_material_change: bool = True
 
 
 class UpdateSummary(ResearchModel):
@@ -296,10 +315,63 @@ class EvidenceSnapshotItem(ResearchModel):
     source_revision_id: str | None = None
 
 
+class SourceRecordVersion(ResearchModel):
+    source: str = Field(min_length=1)
+    record_id: str = Field(min_length=1)
+    version_id: str = Field(min_length=1)
+    status: SourceRecordStatus
+    published_at: str = Field(min_length=1)
+    available_at: datetime
+    title: str = Field(min_length=1)
+    url: str | None = None
+    replaces_version_id: str | None = None
+    evidence_ref: str = Field(pattern=_EVIDENCE_REF)
+    fallback: bool = False
+
+    @field_validator("available_at")
+    @classmethod
+    def require_timezone(cls, value: datetime) -> datetime:
+        if value.utcoffset() is None:
+            raise ValueError("Source Record Version available_at requires timezone")
+        return value
+
+
+class SourceRecordSnapshotItem(ResearchModel):
+    version_id: str = Field(min_length=1)
+    lineage: Literal["new", "inherited"]
+    observed_in_execution: bool
+    source_revision_id: str | None = None
+
+
+class SourceWatermarkSnapshot(ResearchModel):
+    source: str = Field(min_length=1)
+    scanned_start: date
+    scanned_end: date
+    status: CoverageStatus
+    limitations: tuple[str, ...] = ()
+    returned_records: int = Field(default=0, ge=0)
+    reported_records: int | None = Field(default=None, ge=0)
+    baseline_cutoff: date | None = None
+    overlap_start: date | None = None
+
+    @model_validator(mode="after")
+    def validate_window(self) -> SourceWatermarkSnapshot:
+        if self.scanned_start > self.scanned_end:
+            raise ValueError("Source Watermark start must not follow end")
+        if self.overlap_start is not None and not (
+            self.scanned_start <= self.overlap_start <= self.scanned_end
+        ):
+            raise ValueError("Source Watermark overlap must be inside scanned interval")
+        return self
+
+
 class EffectiveEvidenceSnapshot(ResearchModel):
     schema_version: Literal["1"] = "1"
     bundle: EvidenceBundle
     lineage: tuple[EvidenceSnapshotItem, ...]
+    source_records: tuple[SourceRecordVersion, ...] = ()
+    source_record_lineage: tuple[SourceRecordSnapshotItem, ...] = ()
+    source_watermarks: tuple[SourceWatermarkSnapshot, ...] = ()
 
     @model_validator(mode="after")
     def validate_lineage(self) -> EffectiveEvidenceSnapshot:
@@ -310,6 +382,17 @@ class EffectiveEvidenceSnapshot(ResearchModel):
             item.lineage == "inherited" and not item.source_revision_id for item in self.lineage
         ):
             raise ValueError("inherited Evidence requires a source Revision")
+        version_ids = tuple(item.version_id for item in self.source_records)
+        if len(version_ids) != len(set(version_ids)):
+            raise ValueError("Source Record Version identities must be unique")
+        lineage_ids = tuple(item.version_id for item in self.source_record_lineage)
+        if set(version_ids) != set(lineage_ids) or len(lineage_ids) != len(set(lineage_ids)):
+            raise ValueError("Source Record lineage must cover every version exactly once")
+        if any(
+            item.lineage == "inherited" and not item.source_revision_id
+            for item in self.source_record_lineage
+        ):
+            raise ValueError("inherited Source Record Versions require a source Revision")
         return self
 
 
@@ -468,6 +551,33 @@ def render_revision_export_markdown(export: RevisionExport) -> str:
     for item in revision.coverage.questions:
         limitation = "; ".join(item.limitations) or "none"
         lines.append(f"- `{item.object_id}`: {item.status.value}; limitations: {limitation}")
+    lines.extend(["", "## Source Watermarks", ""])
+    for watermark in revision.evidence_snapshot.source_watermarks:
+        limitation = "; ".join(watermark.limitations) or "none"
+        overlap = (
+            f"; baseline: {watermark.baseline_cutoff}; overlap starts: {watermark.overlap_start}"
+            if watermark.baseline_cutoff is not None
+            else ""
+        )
+        lines.append(
+            f"- {watermark.source}: {watermark.scanned_start} to {watermark.scanned_end}; "
+            f"status: {watermark.status.value}; returned/reported: "
+            f"{watermark.returned_records}/{watermark.reported_records}; "
+            f"limitations: {limitation}{overlap}"
+        )
+    lines.extend(["", "## Source Record Versions", ""])
+    source_lineage = {
+        item.version_id: item
+        for item in revision.evidence_snapshot.source_record_lineage
+    }
+    for record in revision.evidence_snapshot.source_records:
+        item = source_lineage[record.version_id]
+        lines.append(
+            f"- `{record.version_id}` ({record.source} `{record.record_id}`): "
+            f"{record.status.value}; {item.lineage}; observed now: "
+            f"{str(item.observed_in_execution).lower()}; available: "
+            f"{record.available_at.isoformat()}; {record.title}"
+        )
     lines.extend(["", "## Effective Evidence Snapshot", ""])
     lineage = {item.evidence_ref: item for item in revision.evidence_snapshot.lineage}
     for evidence_item in revision.evidence_snapshot.bundle.items:
@@ -585,6 +695,108 @@ def _unique_identity_matches(current, candidate, key):
     return matches, ambiguous
 
 
+def _source_metadata(
+    bundle: EvidenceBundle,
+) -> tuple[tuple[SourceRecordVersion, ...], tuple[SourceWatermarkSnapshot, ...]]:
+    records: dict[str, SourceRecordVersion] = {}
+    watermarks: dict[str, SourceWatermarkSnapshot] = {}
+    status_rank = {
+        CoverageStatus.COMPLETE: 0,
+        CoverageStatus.LIMITED: 1,
+        CoverageStatus.UNAVAILABLE: 2,
+    }
+    cutoff_timezone = market_timezone(bundle.instrument)
+    for evidence in bundle.items:
+        for raw in evidence.provenance.get("source_records", ()):
+            record = SourceRecordVersion.model_validate(
+                {
+                    **raw,
+                    "evidence_ref": evidence.ref,
+                    "fallback": evidence.fallback,
+                }
+            )
+            if record.available_at.astimezone(cutoff_timezone).date() > bundle.analysis_date:
+                raise ValueError("Source Record Version is available after the analysis cutoff")
+            existing = records.get(record.version_id)
+            if existing is not None and existing != record:
+                raise ValueError("Source Record Version identity has conflicting observations")
+            records[record.version_id] = record
+        for raw in evidence.provenance.get("source_watermarks", ()):
+            watermark = SourceWatermarkSnapshot.model_validate(raw)
+            existing = watermarks.get(watermark.source)
+            if existing is None:
+                watermarks[watermark.source] = watermark
+                continue
+            worse = max((existing, watermark), key=lambda item: status_rank[item.status])
+            reported_values = tuple(
+                value
+                for value in (existing.reported_records, watermark.reported_records)
+                if value is not None
+            )
+            watermarks[watermark.source] = SourceWatermarkSnapshot(
+                source=watermark.source,
+                scanned_start=min(existing.scanned_start, watermark.scanned_start),
+                scanned_end=max(existing.scanned_end, watermark.scanned_end),
+                status=worse.status,
+                limitations=tuple(
+                    dict.fromkeys((*existing.limitations, *watermark.limitations))
+                ),
+                returned_records=max(existing.returned_records, watermark.returned_records),
+                reported_records=max(reported_values) if reported_values else None,
+            )
+    return tuple(records.values()), tuple(watermarks.values())
+
+
+def _source_coverage(
+    state: CurrentResearchState,
+    records: tuple[SourceRecordVersion, ...],
+    watermarks: tuple[SourceWatermarkSnapshot, ...],
+) -> tuple[tuple[ResearchDomainCoverage, ...], bool]:
+    explicitly_required = {
+        source
+        for claim in state.claims
+        if claim.standing is ClaimStanding.ACTIVE
+        for source in claim.required_sources
+    }
+    explicitly_required.update(
+        source
+        for question in state.questions
+        if question.status is QuestionStatus.OPEN
+        for source in question.required_sources
+    )
+    refs_by_source: dict[str, list[str]] = {}
+    for record in records:
+        refs_by_source.setdefault(record.source, []).append(record.evidence_ref)
+    domains = []
+    supports_quiet = True
+    for watermark in watermarks:
+        advisory = watermark.source == "Google News" and watermark.source not in explicitly_required
+        requirement = (
+            CoverageRequirement.ADVISORY if advisory else CoverageRequirement.REQUIRED
+        )
+        if requirement is CoverageRequirement.REQUIRED and watermark.status is not CoverageStatus.COMPLETE:
+            supports_quiet = False
+        domains.append(
+            ResearchDomainCoverage(
+                domain=(
+                    "media_news" if watermark.source == "Google News" else "company_disclosures"
+                ),
+                source=watermark.source,
+                requirement=requirement,
+                status=watermark.status,
+                evidence_refs=tuple(dict.fromkeys(refs_by_source.get(watermark.source, ()))),
+                limitations=watermark.limitations,
+            )
+        )
+    if any(
+        record.status is not SourceRecordStatus.PUBLISHED
+        and record.source in {"EDINET", "TDnet"}
+        for record in records
+    ):
+        supports_quiet = False
+    return tuple(domains), supports_quiet
+
+
 def assemble_full_update(
     baseline_revision_id: str,
     baseline: ResearchRevisionDraft,
@@ -612,11 +824,29 @@ def assemble_full_update(
     }
 
     claims = tuple(
-        claim.model_copy(update={"id": claim_ids.get(claim.id, claim.id)})
+        claim.model_copy(
+            update={
+                "id": claim_ids.get(claim.id, claim.id),
+                "required_sources": (
+                    claim_matches[claim.id].required_sources
+                    if claim.id in claim_matches
+                    else claim.required_sources
+                ),
+            }
+        )
         for claim in candidate.current_state.claims
     )
     questions = tuple(
-        question.model_copy(update={"id": question_ids.get(question.id, question.id)})
+        question.model_copy(
+            update={
+                "id": question_ids.get(question.id, question.id),
+                "required_sources": (
+                    question_matches[question.id].required_sources
+                    if question.id in question_matches
+                    else question.required_sources
+                ),
+            }
+        )
         for question in candidate.current_state.questions
     )
     retained_claim_ids = {claim.id for claim in claims}
@@ -667,6 +897,50 @@ def assemble_full_update(
         tables=combined_tables,
         sealed_at=candidate_bundle.sealed_at,
     )
+    baseline_versions = {
+        item.version_id: item for item in baseline.evidence_snapshot.source_records
+    }
+    candidate_versions = {
+        item.version_id: item for item in candidate.evidence_snapshot.source_records
+    }
+    combined_versions = tuple((baseline_versions | candidate_versions).values())
+    current_version_ids = set(candidate_versions)
+    source_record_lineage = tuple(
+        SourceRecordSnapshotItem(
+            version_id=item.version_id,
+            lineage="inherited" if item.version_id in baseline_versions else "new",
+            observed_in_execution=item.version_id in current_version_ids,
+            source_revision_id=(
+                baseline_revision_id if item.version_id in baseline_versions else None
+            ),
+        )
+        for item in combined_versions
+    )
+    source_watermarks = []
+    for item in candidate.evidence_snapshot.source_watermarks:
+        covers_baseline = item.scanned_start <= baseline.cutoff <= item.scanned_end
+        overlap_limitation = (
+            ()
+            if covers_baseline
+            else ("Collection window did not overlap the Eligible Baseline cutoff.",)
+        )
+        source_watermarks.append(
+            item.model_copy(
+                update={
+                    "baseline_cutoff": baseline.cutoff,
+                    "overlap_start": item.scanned_start if covers_baseline else None,
+                    "status": (
+                        CoverageStatus.LIMITED
+                        if overlap_limitation and item.status is CoverageStatus.COMPLETE
+                        else item.status
+                    ),
+                    "limitations": tuple(
+                        dict.fromkeys((*item.limitations, *overlap_limitation))
+                    ),
+                }
+            )
+        )
+    source_watermarks = tuple(source_watermarks)
     inherited_refs = tuple(item.ref for item in baseline_bundle.items if item.ref not in new_refs)
     state = candidate.current_state.model_copy(
         update={
@@ -682,6 +956,12 @@ def assemble_full_update(
             "evidence_refs": tuple(item.ref for item in combined_items),
         }
     )
+    source_domains, supports_quiet = _source_coverage(
+        state, combined_versions, source_watermarks
+    )
+    coverage_domains = tuple(
+        item for item in candidate.coverage.domains if item.source is None
+    ) + source_domains
 
     confidence_rank = {
         ClaimConfidence.LOW: 0,
@@ -878,6 +1158,16 @@ def assemble_full_update(
                 update={
                     "claims": coverage_claims,
                     "questions": coverage_questions,
+                    "domains": coverage_domains,
+                    "limitations": tuple(
+                        dict.fromkeys(
+                            (
+                                *candidate.coverage.limitations,
+                                *(value for item in source_domains for value in item.limitations),
+                            )
+                        )
+                    ),
+                    "supports_no_material_change": supports_quiet,
                 }
             ),
             "update_summary": candidate.update_summary.model_copy(
@@ -888,6 +1178,14 @@ def assemble_full_update(
                     "execution_strategy": ResearchExecutionStrategy.FULL,
                     "outcome": outcome,
                     "new_evidence_refs": tuple(item.ref for item in candidate_bundle.items),
+                    "limitations": tuple(
+                        dict.fromkeys(
+                            (
+                                *candidate.update_summary.limitations,
+                                *(value for item in source_domains for value in item.limitations),
+                            )
+                        )
+                    ),
                 }
             ),
             "evidence_snapshot": EffectiveEvidenceSnapshot(
@@ -900,6 +1198,9 @@ def assemble_full_update(
                     )
                     for item in combined_items
                 ),
+                source_records=combined_versions,
+                source_record_lineage=source_record_lineage,
+                source_watermarks=source_watermarks,
             ),
         }
     )
@@ -1064,6 +1365,10 @@ def assemble_full_revision(
         invalidation_conditions=invalidations,
         evidence_refs=evidence_refs,
     )
+    source_records, source_watermarks = _source_metadata(evidence)
+    source_domains, supports_quiet = _source_coverage(
+        state, source_records, source_watermarks
+    )
     domains: list[ResearchDomainCoverage] = []
     limitations: list[str] = []
     for analyst in request.analysts:
@@ -1086,6 +1391,9 @@ def assemble_full_revision(
                 limitations=domain_limitations,
             )
         )
+    domains.extend(source_domains)
+    for domain in source_domains:
+        limitations.extend(domain.limitations)
     complete_domain_refs = {
         ref
         for domain in domains
@@ -1157,6 +1465,7 @@ def assemble_full_revision(
             questions=question_coverage,
             domains=tuple(domains),
             limitations=tuple(dict.fromkeys(limitations)),
+            supports_no_material_change=supports_quiet,
         ),
         update_summary=UpdateSummary(
             language=language,
@@ -1173,5 +1482,15 @@ def assemble_full_revision(
             lineage=tuple(
                 EvidenceSnapshotItem(evidence_ref=ref, lineage="new") for ref in evidence_refs
             ),
+            source_records=source_records,
+            source_record_lineage=tuple(
+                SourceRecordSnapshotItem(
+                    version_id=record.version_id,
+                    lineage="new",
+                    observed_in_execution=True,
+                )
+                for record in source_records
+            ),
+            source_watermarks=source_watermarks,
         ),
     )

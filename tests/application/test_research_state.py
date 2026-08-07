@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from tests.application.test_service import _execution
 from tradingagents.application.contracts import (
     AnalysisRequest,
+    EvidenceBundle,
     ReportLanguage,
     ResearchRating,
     ResearchScenarioKind,
@@ -15,19 +16,24 @@ from tradingagents.application.contracts import (
 from tradingagents.application.research import (
     ClaimConfidence,
     ClaimStanding,
+    CoverageRequirement,
     CurrentResearchState,
     DecisionConfidence,
     DecisionRole,
     EpistemicKind,
     QuestionStatus,
+    ResearchChain,
     ResearchClaim,
     ResearchObjectCoverage,
     ResearchOpinion,
     ResearchQuestion,
+    ResearchRevision,
     ResearchScenarioState,
+    RevisionExport,
     ScenarioLikelihood,
     assemble_full_revision,
     assemble_full_update,
+    render_revision_export_markdown,
 )
 
 REF = "ev_0123456789ab"
@@ -195,6 +201,194 @@ def test_full_update_preserves_only_unambiguous_longitudinal_identities():
     assert updated.delta.claims[0].change.value == "reaffirmed"
     assert {item.lineage for item in updated.evidence_snapshot.lineage} == {"new"}
     assert updated.execution_strategy.value == "full"
+
+
+def _with_disclosure_metadata(execution, *, records, watermarks):
+    evidence = execution.evidence.items[0].model_copy(
+        update={
+            "provenance": {
+                "source_records": records,
+                "source_watermarks": watermarks,
+            }
+        }
+    )
+    return execution.__class__(
+        state=execution.state,
+        evidence=EvidenceBundle(
+            instrument=execution.evidence.instrument,
+            analysis_date=execution.evidence.analysis_date,
+            items=(evidence,),
+        ),
+        reports=execution.reports,
+        decision=execution.decision,
+    )
+
+
+def _source_record(version_id: str, *, status="published", replaces=None):
+    return {
+        "source": "EDINET",
+        "record_id": "S100ROOT",
+        "version_id": version_id,
+        "status": status,
+        "published_at": "2026-07-23 15:00",
+        "available_at": "2026-07-23T15:00:00+09:00",
+        "title": "訂正有価証券報告書" if status == "corrected" else "有価証券報告書",
+        "replaces_version_id": replaces,
+    }
+
+
+def _watermark(source: str, *, status="complete", limitations=()):
+    return {
+        "source": source,
+        "scanned_start": "2026-07-01",
+        "scanned_end": "2026-07-24",
+        "status": status,
+        "limitations": limitations,
+        "returned_records": 1,
+        "reported_records": 1,
+    }
+
+
+def test_revision_snapshot_retains_disclosure_versions_and_source_coverage():
+    execution = _with_disclosure_metadata(
+        _execution("6501.T"),
+        records=[_source_record("edinet:S100ROOT")],
+        watermarks=[
+            _watermark("EDINET"),
+            _watermark("TDnet", status="limited", limitations=("archive limited",)),
+            _watermark("Google News"),
+        ],
+    )
+
+    draft = assemble_full_revision(
+        AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
+        execution,
+    )
+
+    assert draft.evidence_snapshot.source_records[0].version_id == "edinet:S100ROOT"
+    assert draft.evidence_snapshot.source_record_lineage[0].lineage == "new"
+    sources = {item.source: item for item in draft.coverage.domains if item.source}
+    assert sources["TDnet"].status.value == "limited"
+    assert sources["TDnet"].requirement is CoverageRequirement.REQUIRED
+    assert sources["Google News"].requirement is CoverageRequirement.ADVISORY
+    assert draft.coverage.supports_no_material_change is False
+
+
+def test_full_update_preserves_corrected_versions_with_overlap_lineage():
+    baseline_execution = _with_disclosure_metadata(
+        _execution("6501.T"),
+        records=[_source_record("edinet:S100ROOT")],
+        watermarks=[_watermark("EDINET")],
+    )
+    candidate_execution = _with_disclosure_metadata(
+        _execution("6501.T"),
+        records=[
+            _source_record("edinet:S100ROOT"),
+            _source_record(
+                "edinet:S100CORRECTION",
+                status="corrected",
+                replaces="edinet:S100ROOT",
+            ),
+        ],
+        watermarks=[_watermark("EDINET")],
+    )
+    baseline = assemble_full_revision(
+        AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
+        baseline_execution,
+    )
+    candidate = assemble_full_revision(
+        AnalysisRequest(
+            ticker="6501.T", analysis_date=date(2026, 7, 25), analysts=("market",)
+        ),
+        candidate_execution,
+    )
+
+    updated = assemble_full_update("revision-1", baseline, candidate)
+
+    assert {item.version_id for item in updated.evidence_snapshot.source_records} == {
+        "edinet:S100ROOT",
+        "edinet:S100CORRECTION",
+    }
+    lineage = {
+        item.version_id: item for item in updated.evidence_snapshot.source_record_lineage
+    }
+    assert lineage["edinet:S100ROOT"].lineage == "inherited"
+    assert lineage["edinet:S100ROOT"].observed_in_execution is True
+    assert lineage["edinet:S100CORRECTION"].lineage == "new"
+    watermark = updated.evidence_snapshot.source_watermarks[0]
+    assert watermark.baseline_cutoff == CUTOFF
+    assert watermark.overlap_start == date(2026, 7, 1)
+
+    revision = ResearchRevision(
+        **updated.model_dump(),
+        id="revision-2",
+        chain_id="chain-1",
+        sequence=2,
+        predecessor_revision_id="revision-1",
+        created_at="2026-07-25T00:00:00Z",
+    )
+    chain = ResearchChain(
+        id="chain-1",
+        instrument="6501.T",
+        is_primary=True,
+        current_revision_id=revision.id,
+        created_at="2026-07-24T00:00:00Z",
+        updated_at="2026-07-25T00:00:00Z",
+    )
+
+    exported = render_revision_export_markdown(
+        RevisionExport(chain=chain, revision=revision)
+    )
+
+    assert "## Source Watermarks" in exported
+    assert "EDINET: 2026-07-01 to 2026-07-24" in exported
+    assert "## Source Record Versions" in exported
+    assert "edinet:S100CORRECTION" in exported
+    assert "corrected" in exported
+
+
+def test_full_update_promotes_google_news_only_for_explicit_dependency():
+    baseline = assemble_full_revision(
+        AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
+        _with_disclosure_metadata(
+            _execution("6501.T"),
+            records=[],
+            watermarks=[_watermark("Google News")],
+        ),
+    )
+    required_claim = baseline.current_state.claims[0].model_copy(
+        update={"required_sources": ("Google News",)}
+    )
+    baseline = baseline.model_copy(
+        update={
+            "current_state": baseline.current_state.model_copy(
+                update={"claims": (required_claim,)}
+            )
+        }
+    )
+    candidate = assemble_full_revision(
+        AnalysisRequest(
+            ticker="6501.T", analysis_date=date(2026, 7, 25), analysts=("market",)
+        ),
+        _with_disclosure_metadata(
+            _execution("6501.T"),
+            records=[],
+            watermarks=[
+                _watermark(
+                    "Google News",
+                    status="unavailable",
+                    limitations=("live-only coverage unavailable",),
+                )
+            ],
+        ),
+    )
+
+    updated = assemble_full_update("revision-1", baseline, candidate)
+
+    google = next(item for item in updated.coverage.domains if item.source == "Google News")
+    assert google.requirement is CoverageRequirement.REQUIRED
+    assert google.status.value == "unavailable"
+    assert updated.coverage.supports_no_material_change is False
 
 
 def test_full_update_does_not_reassign_ambiguous_claim_identity():

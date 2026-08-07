@@ -52,6 +52,7 @@ const chain = {
     },
     coverage: {
       limitations: ["news archive limited"],
+      supports_no_material_change: false,
       domains: [{ domain: "market", status: "complete", limitations: [] }],
       claims: [{ object_id: "claim-1", status: "complete", limitations: [] }],
       questions: [{ object_id: "question-1", status: "limited", limitations: ["answer pending"] }],
@@ -68,6 +69,37 @@ const chain = {
         ],
       },
       lineage: [{ evidence_ref: "ev_0123456789ab", lineage: "new" }],
+      source_records: [
+        {
+          source: "EDINET",
+          record_id: "S100ROOT",
+          version_id: "edinet:S100CORRECTION",
+          status: "corrected",
+          published_at: "2026-07-23 15:00",
+          available_at: "2026-07-23T15:00:00+09:00",
+          title: "訂正有価証券報告書",
+          evidence_ref: "ev_0123456789ab",
+          replaces_version_id: "edinet:S100ROOT",
+        },
+      ],
+      source_record_lineage: [
+        {
+          version_id: "edinet:S100CORRECTION",
+          lineage: "new",
+          observed_in_execution: true,
+        },
+      ],
+      source_watermarks: [
+        {
+          source: "TDnet",
+          scanned_start: "2026-06-24",
+          scanned_end: "2026-07-24",
+          status: "limited",
+          limitations: ["rolling archive truncated the requested interval"],
+          returned_records: 2,
+          reported_records: 5,
+        },
+      ],
     },
   },
 } as unknown as ResearchChain;
@@ -94,6 +126,11 @@ test("reads the complete current thesis, coverage, evidence, reports, and metric
   expect(screen.getByText("answer pending")).toBeVisible();
   expect(screen.getByText("ev_0123456789ab")).toBeVisible();
   expect(screen.getByText("订单同比增长。")).toBeVisible();
+  expect(screen.getByText("訂正有価証券報告書")).toBeVisible();
+  expect(screen.getByText(/edinet:S100CORRECTION/)).toBeVisible();
+  expect(screen.getByText(/2026-06-24.*2026-07-24/)).toBeVisible();
+  expect(screen.getByText("rolling archive truncated the requested interval")).toBeVisible();
+  expect(screen.getByText("Quiet reassessment blocked")).toBeVisible();
   expect(screen.getByRole("link", { name: "Full analysis" })).toHaveAttribute(
     "href",
     "/runs/run-1",
