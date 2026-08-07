@@ -34,8 +34,8 @@ def _stocktwits_symbol(ticker: str) -> str:
     return ticker.strip().upper()
 
 
-def _market_datetime(created_at: str, ticker: str) -> datetime | None:
-    """Convert a StockTwits timestamp to the ticker's market timezone."""
+def _new_york_datetime(created_at: str) -> datetime | None:
+    """Convert a StockTwits timestamp to its supported US-feed timezone."""
     try:
         normalized = created_at[:-1] + "+00:00" if created_at.endswith("Z") else created_at
         created = datetime.fromisoformat(normalized)
@@ -47,10 +47,10 @@ def _market_datetime(created_at: str, ticker: str) -> datetime | None:
         return None
 
 
-def _in_window(created_at: str, ticker: str, start_date: str, end_date: str) -> bool:
+def _in_window(created_at: str, start_date: str, end_date: str) -> bool:
     """Whether a UTC StockTwits timestamp falls in the target market-date window."""
     try:
-        local = _market_datetime(created_at, ticker)
+        local = _new_york_datetime(created_at)
         if local is None:
             return False
         start = datetime.strptime(start_date, "%Y-%m-%d").date()
@@ -95,7 +95,7 @@ def fetch_stocktwits_messages(
         messages = [
             message
             for message in messages
-            if _in_window(str(message.get("created_at") or ""), ticker, start_date, end_date)
+            if _in_window(str(message.get("created_at") or ""), start_date, end_date)
         ]
         if not messages:
             return (
@@ -110,7 +110,7 @@ def fetch_stocktwits_messages(
         created = m.get("created_at", "")
         displayed_at = created
         if start_date:
-            local = _market_datetime(str(created), ticker)
+            local = _new_york_datetime(str(created))
             if local is not None:
                 displayed_at = local.strftime("%Y-%m-%d %H:%M:%S %Z")
         user = (m.get("user") or {}).get("username", "?")

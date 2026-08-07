@@ -8,7 +8,15 @@ from tradingagents.application.contracts import AnalysisRequest, AssetType
 
 @pytest.mark.parametrize(
     "ticker",
-    ["BTC-USD", "eth-usd", "BTCUSDT", "PEPE-USD", "BTC-JPY"],
+    [
+        "BTC-USD",
+        "eth-usd",
+        "BTCUSDT",
+        "PEPE-USD",
+        "BTC-JPY",
+        "DOGE-BTC",
+        "DOGEBTC",
+    ],
 )
 def test_request_rejects_crypto_pair_symbols(ticker: str) -> None:
     with pytest.raises(ValidationError, match="Crypto instruments are not supported"):

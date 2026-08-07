@@ -293,6 +293,27 @@ def test_run_rejects_crypto_instruments_before_starting_analysis(monkeypatch) ->
     assert "Traceback" not in result.output
 
 
+@pytest.mark.parametrize("ticker", ["EURUSD", "GC=F", "^GSPC"])
+def test_run_rejects_non_equity_instruments_before_starting_analysis(
+    monkeypatch,
+    ticker: str,
+) -> None:
+    monkeypatch.setattr(
+        cli,
+        "_application",
+        lambda: pytest.fail("application should not be created"),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["run", ticker, "--date", "2026-07-24"],
+    )
+
+    assert result.exit_code == 2
+    assert "Only listed equity instruments are supported" in result.output
+    assert "Traceback" not in result.output
+
+
 @pytest.mark.parametrize(
     ("arguments", "message"),
     [

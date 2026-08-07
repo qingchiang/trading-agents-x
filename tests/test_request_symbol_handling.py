@@ -44,12 +44,21 @@ def test_normalize_symbol_does_not_route_crypto_aliases(
 
 @pytest.mark.parametrize(
     "value",
-    ["GC=F", "EURUSD=X", "AAPL", "0700.HK", "^GSPC", "600519"],
+    ["AAPL", "0700.HK", "7203.T", "600519"],
 )
 def test_request_accepts_supported_symbols(value: str) -> None:
     request = AnalysisRequest(ticker=value, analysis_date="2026-07-24")
 
     assert request.ticker == normalize_symbol(value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["GC=F", "XAUUSD", "EURUSD", "EURUSD=X", "^GSPC", "SPX500"],
+)
+def test_request_rejects_explicit_non_equity_symbols(value: str) -> None:
+    with pytest.raises(ValidationError, match="Only listed equity instruments"):
+        AnalysisRequest(ticker=value, analysis_date="2026-07-24")
 
 
 @pytest.mark.parametrize("value", ["", "bad symbol!", "A" * 65])
@@ -71,7 +80,6 @@ def test_request_rejects_unsupported_china_symbols(value: str) -> None:
     ("raw", "expected"),
     [
         ("AAPL", AssetType.STOCK),
-        ("GC=F", AssetType.STOCK),
         ("600519.SS", AssetType.STOCK),
     ],
 )
@@ -83,8 +91,6 @@ def test_request_infers_asset_type(raw: str, expected: AssetType) -> None:
 
 def test_request_uses_the_data_layer_canonical_symbol() -> None:
     for raw in (
-        "XAUUSD",
-        "EURUSD",
         "600519",
         "600519.SH",
         "000001",

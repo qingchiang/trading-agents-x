@@ -313,8 +313,8 @@ Internally, instruments use canonical Yahoo-compatible symbols. Examples:
 | China A-shares | `600519.SS`, `000001.SZ` | Tencent/AkShare, CNINFO, Sina, Eastmoney and China macro sources |
 
 Bare mainland codes and `.SH` aliases are normalized before routing.
-Crypto, unsupported, or ambiguous symbols fail instead of silently taking the
-US route.
+Crypto, explicit non-equity, unsupported, or ambiguous symbols fail instead of
+silently taking the US route.
 
 Historical analysis uses the instrument market's local calendar. Evidence keeps
 its requested date, effective date, timezone-aware availability, actual source,

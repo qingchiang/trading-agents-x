@@ -225,7 +225,7 @@ Web 登录会将 token 换成签名的 `HttpOnly`、`SameSite=Strict` cookie，
 | 日本 | `7203.T` | J-Quants、EDINET、TDnet、日本新闻与宏观数据 |
 | 中国 A 股 | `600519.SS`, `000001.SZ` | Tencent/AkShare、CNINFO、Sina、Eastmoney 与中国宏观数据 |
 
-Crypto、其他不支持或存在歧义的标的会在数据路由前明确失败。
+Crypto、明确的非权益类、其他不支持或存在歧义的标的会在数据路由前明确失败。
 
 历史分析以标的所在市场的本地日期为准。Evidence 保留 requested/effective
 date、带时区的 available time、实际来源、质量、fallback 和 provenance；

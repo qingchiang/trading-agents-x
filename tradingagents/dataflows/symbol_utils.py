@@ -72,7 +72,22 @@ _YAHOO_SAFE = re.compile(r"^[A-Za-z0-9._\-\^=]+$")
 
 # Stablecoin quote codes are not ISO currencies, so combine them with the
 # currency set used to distinguish Crypto pairs from normalized Forex pairs.
-_UNSUPPORTED_CRYPTO_QUOTES = _FOREX_CURRENCIES | {"USDT", "USDC"}
+_COMMON_CRYPTO_TOKENS = {
+    "ADA",
+    "AVAX",
+    "BCH",
+    "BTC",
+    "DOGE",
+    "DOT",
+    "ETH",
+    "LINK",
+    "LTC",
+    "SOL",
+    "XRP",
+}
+_UNSUPPORTED_CRYPTO_QUOTES = (
+    _FOREX_CURRENCIES | _COMMON_CRYPTO_TOKENS | {"USDT", "USDC"}
+)
 
 # Mainland China A-share prefixes supported by the first China-market branch.
 # These are equity boards only: Shanghai main board / STAR Market and Shenzhen
@@ -207,6 +222,15 @@ def unsupported_crypto_base(raw: str) -> str | None:
             if base and base.isalnum() and base not in _FOREX_CURRENCIES:
                 return base
     return None
+
+
+def is_explicit_non_equity_symbol(symbol: str) -> bool:
+    """Return whether a canonical vendor symbol explicitly denotes non-equity."""
+    return (
+        symbol.startswith("^")
+        or symbol.endswith("=F")
+        or symbol.endswith("=X")
+    )
 
 
 def normalize_symbol(raw: str) -> str:

@@ -134,6 +134,8 @@ class TestUnsupportedCryptoBase(unittest.TestCase):
         self.assertEqual(unsupported_crypto_base("sol-usd"), "SOL")
         self.assertEqual(unsupported_crypto_base("PEPE-USD"), "PEPE")
         self.assertEqual(unsupported_crypto_base("BTC-JPY"), "BTC")
+        self.assertEqual(unsupported_crypto_base("DOGE-BTC"), "DOGE")
+        self.assertEqual(unsupported_crypto_base("DOGEBTC"), "DOGE")
 
     def test_non_crypto_returns_none(self):
         # Plain equities, class shares, and real tickers that alias elsewhere

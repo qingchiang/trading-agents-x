@@ -75,6 +75,18 @@ async def test_run_creation_rejects_crypto_instruments(
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("ticker", ["EURUSD", "GC=F", "^GSPC"])
+async def test_run_creation_rejects_non_equity_instruments(
+    web_client: httpx.AsyncClient,
+    ticker: str,
+) -> None:
+    response = await web_client.post("/api/v1/runs", json=_payload(ticker))
+
+    assert response.status_code == 422
+    assert "Only listed equity instruments are supported" in response.text
+
+
+@pytest.mark.anyio
 async def test_run_lifecycle_routes_and_filters(
     web_client: httpx.AsyncClient,
 ) -> None:

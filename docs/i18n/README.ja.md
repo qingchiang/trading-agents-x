@@ -248,7 +248,7 @@ Web login は token を署名済み `HttpOnly`、`SameSite=Strict` cookie に交
 | Japan | `7203.T` | J-Quants、EDINET、TDnet、日本の news/macro |
 | China A-share | `600519.SS`, `000001.SZ` | Tencent/AkShare、CNINFO、Sina、Eastmoney、中国 macro |
 
-Crypto、未対応、または曖昧な instrument は data routing 前に明示的に失敗します。
+Crypto、明示的な非株式、未対応、または曖昧な instrument は data routing 前に明示的に失敗します。
 
 historical analysis の cutoff は instrument market のローカル日付です。
 Evidence は requested/effective date、timezone 付き availability、実際の
