@@ -4252,7 +4252,17 @@
                   "incompatible_semantics",
                   "threshold_crossing",
                   "coverage_incomplete",
-                  "schema_invalid"
+                  "schema_invalid",
+                  "semantic_weakening",
+                  "semantic_contradiction",
+                  "semantic_answering",
+                  "semantic_reopening",
+                  "semantic_uncertainty",
+                  "potentially_material_novelty",
+                  "confidence_change",
+                  "ambiguous_identity",
+                  "semantic_output_invalid",
+                  "semantic_input_oversize"
                 ],
                 "type": "string"
               },
@@ -4278,6 +4288,16 @@
             "default": "shadow",
             "title": "Mode",
             "type": "string"
+          },
+          "semantic_assessment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchUpdateSemanticAssessment"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -4448,6 +4468,104 @@
           "lineage"
         ],
         "title": "ResearchUpdateEvidenceLineage",
+        "type": "object"
+      },
+      "ResearchUpdateSemanticAssessment": {
+        "additionalProperties": false,
+        "properties": {
+          "language": {
+            "title": "Language",
+            "type": "string"
+          },
+          "relationships": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchUpdateSemanticRelationship"
+            },
+            "title": "Relationships",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "1",
+            "default": "1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "language",
+          "summary",
+          "relationships"
+        ],
+        "title": "ResearchUpdateSemanticAssessment",
+        "type": "object"
+      },
+      "ResearchUpdateSemanticRelationship": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "relationship": {
+            "enum": [
+              "support",
+              "weakening",
+              "contradiction",
+              "answering",
+              "reopening",
+              "irrelevance",
+              "uncertainty",
+              "potentially_material_novelty"
+            ],
+            "title": "Relationship",
+            "type": "string"
+          },
+          "suggested_claim_confidence": {
+            "anyOf": [
+              {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high",
+                  "indeterminate"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggested Claim Confidence"
+          },
+          "suggested_claim_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Suggested Claim Ids",
+            "type": "array"
+          },
+          "suggested_question_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Suggested Question Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "evidence_refs",
+          "relationship"
+        ],
+        "title": "ResearchUpdateSemanticRelationship",
         "type": "object"
       },
       "ResearchWarning": {

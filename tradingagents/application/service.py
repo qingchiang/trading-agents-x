@@ -33,6 +33,7 @@ from .contracts import (
     ResearchArtifactDraft,
     ResearchUpdateAudit,
     ResearchUpdateCandidate,
+    ResearchUpdateSemanticAssessment,
     RunEvent,
     RunExport,
     RunStatus,
@@ -41,7 +42,7 @@ from .exporting import (
     render_run_export_markdown,
     render_run_export_package,
 )
-from .incremental import run_deterministic_incremental_gate
+from .incremental import assess_semantic_update, run_deterministic_incremental_gate
 from .instrument_names import resolve_local_instrument_name
 from .llms import RunLLMs, create_run_llms
 from .metrics import MetricsCallback, merge_run_metrics
@@ -316,6 +317,13 @@ class AnalysisService:
                     if bounded_snapshot is not None
                     else ()
                 ),
+                semantic_assessment=(
+                    ResearchUpdateSemanticAssessment.model_validate(
+                        result.semantic_assessment.model_dump(mode="json")
+                    )
+                    if result.semantic_assessment is not None
+                    else None
+                ),
                 escalation_reason=(
                     result.escalation_reason.value if result.escalation_reason is not None else None
                 ),
@@ -394,6 +402,29 @@ class AnalysisService:
                                 lambda: self.repository.cancel_requested(run.id),
                                 on_progress=persist_incremental_audit,
                             )
+                            if incremental_result.candidate is not None:
+                                semantic_metrics = MetricsCallback()
+                                semantic_llms = self.llm_factory(
+                                    run_settings,
+                                    callbacks=[semantic_metrics],
+                                )
+                                semantic_llm = (
+                                    semantic_llms.quick_serializer
+                                    if isinstance(semantic_llms, RunLLMs)
+                                    else semantic_llms[0]
+                                )
+                                incremental_result = assess_semantic_update(
+                                    baseline,
+                                    incremental_result,
+                                    semantic_llm,
+                                ).model_copy(
+                                    update={
+                                        "metrics": merge_run_metrics(
+                                            incremental_result.metrics,
+                                            semantic_metrics.snapshot(),
+                                        )
+                                    }
+                                )
                         else:
                             incremental_result = self.incremental_gate(
                                 baseline,
@@ -421,6 +452,11 @@ class AnalysisService:
                                 "candidate_update_summary": (
                                     update_audit.candidate.update_summary
                                     if update_audit.candidate is not None
+                                    else None
+                                ),
+                                "semantic_assessment": (
+                                    update_audit.semantic_assessment.model_dump(mode="json")
+                                    if update_audit.semantic_assessment is not None
                                     else None
                                 ),
                             },

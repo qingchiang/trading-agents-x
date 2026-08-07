@@ -148,6 +148,27 @@ class IncrementalEscalationReason(str, Enum):
     THRESHOLD_CROSSING = "threshold_crossing"
     COVERAGE_INCOMPLETE = "coverage_incomplete"
     SCHEMA_INVALID = "schema_invalid"
+    SEMANTIC_WEAKENING = "semantic_weakening"
+    SEMANTIC_CONTRADICTION = "semantic_contradiction"
+    SEMANTIC_ANSWERING = "semantic_answering"
+    SEMANTIC_REOPENING = "semantic_reopening"
+    SEMANTIC_UNCERTAINTY = "semantic_uncertainty"
+    POTENTIALLY_MATERIAL_NOVELTY = "potentially_material_novelty"
+    CONFIDENCE_CHANGE = "confidence_change"
+    AMBIGUOUS_IDENTITY = "ambiguous_identity"
+    SEMANTIC_OUTPUT_INVALID = "semantic_output_invalid"
+    SEMANTIC_INPUT_OVERSIZE = "semantic_input_oversize"
+
+
+class SemanticChangeRelationship(str, Enum):
+    SUPPORT = "support"
+    WEAKENING = "weakening"
+    CONTRADICTION = "contradiction"
+    ANSWERING = "answering"
+    REOPENING = "reopening"
+    IRRELEVANCE = "irrelevance"
+    UNCERTAINTY = "uncertainty"
+    POTENTIALLY_MATERIAL_NOVELTY = "potentially_material_novelty"
 
 
 class ClaimChange(str, Enum):
@@ -536,13 +557,46 @@ class ResearchRevisionDraft(ResearchModel):
         return self
 
 
+class SemanticEvidenceRelationship(ResearchModel):
+    """A model-suggested relationship resolved by application-owned identities."""
+
+    evidence_refs: tuple[str, ...] = Field(min_length=1)
+    relationship: SemanticChangeRelationship
+    suggested_claim_ids: tuple[str, ...] = ()
+    suggested_question_ids: tuple[str, ...] = ()
+    suggested_claim_confidence: ClaimConfidence | None = None
+
+    @field_validator("evidence_refs")
+    @classmethod
+    def validate_evidence_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        import re
+
+        refs = tuple(dict.fromkeys(value))
+        if any(not re.fullmatch(_EVIDENCE_REF, ref) for ref in refs):
+            raise ValueError("semantic relationships must use valid Evidence refs")
+        return refs
+
+
+class SemanticChangeAssessment(ResearchModel):
+    schema_version: Literal["1"] = "1"
+    language: str
+    summary: str = Field(min_length=1, max_length=2000)
+    relationships: tuple[SemanticEvidenceRelationship, ...] = Field(min_length=1)
+
+    @field_validator("language", mode="before")
+    @classmethod
+    def normalize_language(cls, value: ReportLanguage | str) -> str:
+        return report_language_value(value)
+
+
 class IncrementalGateResult(ResearchModel):
-    """Result of deterministic bounded work before any semantic model call."""
+    """Result of bounded deterministic and optional semantic assessment."""
 
     candidate: ResearchRevisionDraft | None = None
     escalation_reason: IncrementalEscalationReason | None = None
     coverage: CoverageAttestation | None = None
     evidence_snapshot: EffectiveEvidenceSnapshot | None = None
+    semantic_assessment: SemanticChangeAssessment | None = None
     metrics: RunMetrics = Field(default_factory=RunMetrics)
 
     @model_validator(mode="after")
@@ -735,6 +789,26 @@ def render_revision_export_markdown(export: RevisionExport) -> str:
                 f"{audit.full_metrics.wall_time_seconds:.3f}s",
             ]
         )
+        if audit.semantic_assessment is not None:
+            lines.extend(
+                [
+                    "",
+                    "### Semantic Change Assessment",
+                    "",
+                    f"- Language: {audit.semantic_assessment.language}",
+                    f"- Summary: {audit.semantic_assessment.summary}",
+                ]
+            )
+            for relationship in audit.semantic_assessment.relationships:
+                targets = (
+                    *relationship.suggested_claim_ids,
+                    *relationship.suggested_question_ids,
+                )
+                lines.append(
+                    f"- `{relationship.relationship}`; targets: "
+                    f"{', '.join(targets) or 'none'}; Evidence: "
+                    f"{', '.join(relationship.evidence_refs)}"
+                )
     lines.extend(["", "## Effective Evidence Snapshot", ""])
     lineage = {item.evidence_ref: item for item in revision.evidence_snapshot.lineage}
     for evidence_item in revision.evidence_snapshot.bundle.items:
@@ -1427,6 +1501,7 @@ def assess_deterministic_update(
                         identity_disposition=IdentityDisposition.EXACT_MATCH,
                     )
                     for item in baseline.current_state.claims
+                    if item.standing is ClaimStanding.ACTIVE
                 ),
                 questions=tuple(
                     QuestionRevisionDelta(
@@ -1436,6 +1511,7 @@ def assess_deterministic_update(
                         identity_disposition=IdentityDisposition.EXACT_MATCH,
                     )
                     for item in baseline.current_state.questions
+                    if item.status in {QuestionStatus.OPEN, QuestionStatus.ANSWERED}
                 ),
                 inherited_evidence_refs=tuple(
                     item.ref for item in baseline_bundle.items if item.ref not in new_refs

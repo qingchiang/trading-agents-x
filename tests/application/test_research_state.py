@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import Any
 
 import pytest
+from langchain_core.messages import AIMessage
 from pydantic import ValidationError
 
 from tests.application.test_service import _execution
@@ -16,6 +18,7 @@ from tradingagents.application.contracts import (
     ResearchRating,
     ResearchScenarioKind,
 )
+from tradingagents.application.incremental import assess_semantic_update
 from tradingagents.application.research import (
     ClaimConfidence,
     ClaimStanding,
@@ -38,6 +41,7 @@ from tradingagents.application.research import (
     ResearchScenarioState,
     RevisionExport,
     ScenarioLikelihood,
+    SemanticChangeRelationship,
     assemble_full_revision,
     assemble_full_update,
     assess_deterministic_update,
@@ -342,6 +346,448 @@ def test_deterministic_incremental_gates_propose_quiet_candidate():
         for item in result.candidate.coverage.domains
         if item.source == "Google News"
     } == {CoverageRequirement.ADVISORY}
+
+
+class _SemanticInvoker:
+    def __init__(self, owner: _SemanticLLM, response: Any):
+        self.owner = owner
+        self.response = response
+
+    def invoke(self, prompt: str, config: Any = None) -> Any:
+        del config
+        self.owner.prompts.append(prompt)
+        return self.response
+
+
+class _SemanticLLM:
+    preferred_structured_output_method = "function_calling"
+
+    def __init__(self, *responses: Any):
+        self.responses = list(responses)
+        self.prompts: list[str] = []
+
+    def with_structured_output(self, _schema: Any, **kwargs: Any) -> _SemanticInvoker:
+        assert kwargs["include_raw"] is True
+        response = self.responses.pop(0)
+        return _SemanticInvoker(self, response)
+
+
+def _semantic_response(
+    relationship: str,
+    *,
+    evidence_ref: str,
+    claim_ids: tuple[str, ...] = (),
+    question_ids: tuple[str, ...] = (),
+    confidence: str | None = None,
+    language: str = "en",
+) -> dict[str, Any]:
+    return {
+        "raw": AIMessage(content=""),
+        "parsed": {
+            "language": language,
+            "summary": "Bounded semantic assessment completed.",
+            "relationships": [
+                {
+                    "evidence_refs": (evidence_ref,),
+                    "relationship": relationship,
+                    "suggested_claim_ids": claim_ids,
+                    "suggested_question_ids": question_ids,
+                    "suggested_claim_confidence": confidence,
+                }
+            ],
+        },
+        "parsing_error": None,
+    }
+
+
+@pytest.mark.parametrize(
+    ("relationship", "escalates"),
+    [
+        ("support", False),
+        ("weakening", True),
+        ("contradiction", True),
+        ("answering", True),
+        ("reopening", True),
+        ("irrelevance", False),
+        ("uncertainty", True),
+        ("potentially_material_novelty", True),
+    ],
+)
+def test_semantic_change_assessment_supports_typed_relationships(
+    relationship,
+    escalates,
+):
+    baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    if relationship in {"answering", "reopening"}:
+        question = ResearchQuestion(
+            id="question_0123456789abcdef0123456789abcdef",
+            question="Will margin recovery persist?",
+            evidence_refs=(REF,),
+        )
+        baseline = baseline.model_copy(
+            update={
+                "current_state": baseline.current_state.model_copy(
+                    update={"questions": (question,)}
+                ),
+                "coverage": baseline.coverage.model_copy(
+                    update={
+                        "questions": (
+                            ResearchObjectCoverage(
+                                object_id=question.id,
+                                status=CoverageStatus.COMPLETE,
+                            ),
+                        )
+                    }
+                ),
+            }
+        )
+    request = AnalysisRequest(
+        ticker="6501.T",
+        analysis_date="2026-07-25",
+        analysts=("market",),
+    )
+    deterministic = assess_deterministic_update("revision-1", baseline, request, evidence)
+    claim_ids = (
+        (baseline.current_state.claims[0].id,)
+        if relationship
+        in {
+            "support",
+            "weakening",
+            "contradiction",
+        }
+        else ()
+    )
+    question_ids = (
+        (baseline.current_state.questions[0].id,)
+        if (baseline.current_state.questions and relationship in {"answering", "reopening"})
+        else ()
+    )
+    llm = _SemanticLLM(
+        _semantic_response(
+            relationship,
+            evidence_ref=deterministic.candidate.delta.new_evidence_refs[0],
+            claim_ids=claim_ids,
+            question_ids=question_ids,
+        )
+    )
+
+    result = assess_semantic_update(
+        baseline,
+        deterministic,
+        llm,
+    )
+
+    assert result.semantic_assessment is not None
+    assert result.semantic_assessment.relationships[0].relationship is SemanticChangeRelationship(
+        relationship
+    )
+    assert (result.escalation_reason is not None) is escalates
+    assert (result.candidate is not None) is not escalates
+
+
+def test_semantic_change_assessment_rejects_ambiguous_identity_and_confidence_change():
+    baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    request = AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",))
+    deterministic = assess_deterministic_update("revision-1", baseline, request, evidence)
+    claim_id = baseline.current_state.claims[0].id
+    changed_confidence = (
+        "low" if baseline.current_state.claims[0].confidence is ClaimConfidence.HIGH else "high"
+    )
+
+    ambiguous = assess_semantic_update(
+        baseline,
+        deterministic,
+        _SemanticLLM(
+            _semantic_response(
+                "support",
+                evidence_ref=deterministic.candidate.delta.new_evidence_refs[0],
+                claim_ids=(claim_id, "claim_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            )
+        ),
+    )
+    confidence = assess_semantic_update(
+        baseline,
+        deterministic,
+        _SemanticLLM(
+            _semantic_response(
+                "support",
+                evidence_ref=deterministic.candidate.delta.new_evidence_refs[0],
+                claim_ids=(claim_id,),
+                confidence=changed_confidence,
+            )
+        ),
+    )
+
+    assert ambiguous.escalation_reason is IncrementalEscalationReason.AMBIGUOUS_IDENTITY
+    assert confidence.escalation_reason is IncrementalEscalationReason.CONFIDENCE_CHANGE
+
+
+def test_semantic_change_assessment_rejects_cross_item_identity_ambiguity():
+    baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    second_claim = baseline.current_state.claims[0].model_copy(
+        update={
+            "id": "claim_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "statement": "A second valid Claim.",
+        }
+    )
+    baseline = baseline.model_copy(
+        update={
+            "current_state": baseline.current_state.model_copy(
+                update={"claims": (*baseline.current_state.claims, second_claim)}
+            ),
+            "coverage": baseline.coverage.model_copy(
+                update={
+                    "claims": (
+                        *baseline.coverage.claims,
+                        ResearchObjectCoverage(
+                            object_id=second_claim.id,
+                            status=CoverageStatus.COMPLETE,
+                        ),
+                    )
+                }
+            ),
+        }
+    )
+    request = AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",))
+    deterministic = assess_deterministic_update("revision-1", baseline, request, evidence)
+    new_ref = deterministic.candidate.delta.new_evidence_refs[0]
+    llm = _SemanticLLM(
+        {
+            "raw": AIMessage(content=""),
+            "parsed": {
+                "language": "en",
+                "summary": "One Evidence item was assigned twice.",
+                "relationships": [
+                    {
+                        "evidence_refs": [new_ref],
+                        "relationship": "support",
+                        "suggested_claim_ids": [baseline.current_state.claims[0].id],
+                    },
+                    {
+                        "evidence_refs": [new_ref],
+                        "relationship": "support",
+                        "suggested_claim_ids": [second_claim.id],
+                    },
+                ],
+            },
+            "parsing_error": None,
+        }
+    )
+
+    result = assess_semantic_update(baseline, deterministic, llm)
+
+    assert result.escalation_reason is IncrementalEscalationReason.AMBIGUOUS_IDENTITY
+
+
+def test_semantic_change_assessment_excludes_prior_research_disguised_as_evidence():
+    baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    prior_research = EvidenceItem.create(
+        source="Prior Research",
+        evidence_type="Research Artifact",
+        requested_date=CUTOFF,
+        effective_date=CUTOFF,
+        content="PRIVATE PRIOR CONCLUSION MUST NOT APPEAR",
+        provenance={"content_kind": "prior_research"},
+    )
+    claim = baseline.current_state.claims[0].model_copy(
+        update={"evidence_refs": (*baseline.current_state.claims[0].evidence_refs, prior_research.ref)}
+    )
+    claims = (claim, *baseline.current_state.claims[1:])
+    baseline_bundle = baseline.evidence_snapshot.bundle.model_copy(
+        update={"items": (*baseline.evidence_snapshot.bundle.items, prior_research)}
+    )
+    baseline = baseline.model_copy(
+        update={
+            "current_state": baseline.current_state.model_copy(
+                update={
+                    "claims": claims,
+                    "evidence_refs": (*baseline.current_state.evidence_refs, prior_research.ref),
+                }
+            ),
+            "evidence_snapshot": baseline.evidence_snapshot.model_copy(
+                update={
+                    "bundle": baseline_bundle,
+                    "lineage": (
+                        *baseline.evidence_snapshot.lineage,
+                        {
+                            "evidence_ref": prior_research.ref,
+                            "lineage": "new",
+                        },
+                    ),
+                }
+            ),
+        }
+    )
+    request = AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",))
+    deterministic = assess_deterministic_update("revision-1", baseline, request, evidence)
+    llm = _SemanticLLM(
+        _semantic_response(
+            "support",
+            evidence_ref=deterministic.candidate.delta.new_evidence_refs[0],
+            claim_ids=(claim.id,),
+        )
+    )
+
+    result = assess_semantic_update(baseline, deterministic, llm)
+
+    assert result.candidate is not None
+    assert prior_research.ref not in llm.prompts[0]
+    assert "PRIVATE PRIOR CONCLUSION" not in llm.prompts[0]
+
+
+def test_semantic_change_assessment_rejects_new_prior_research_without_model_call():
+    baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    disguised = EvidenceItem.create(
+        source="Prior Research",
+        evidence_type="Research Artifact",
+        requested_date=date(2026, 7, 25),
+        effective_date=date(2026, 7, 25),
+        content="PRIVATE NEW CONCLUSION MUST NOT APPEAR",
+        provenance={
+            **evidence.items[0].provenance,
+            "content_kind": "prior_research",
+        },
+    )
+    request = AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",))
+    deterministic = assess_deterministic_update(
+        "revision-1",
+        baseline,
+        request,
+        EvidenceBundle(
+            instrument="6501.T",
+            analysis_date=date(2026, 7, 25),
+            items=(disguised,),
+        ),
+    )
+    llm = _SemanticLLM()
+
+    result = assess_semantic_update(baseline, deterministic, llm)
+
+    assert result.escalation_reason is IncrementalEscalationReason.SCHEMA_INVALID
+    assert llm.prompts == []
+
+
+def test_quiet_candidate_reaffirms_only_relevant_research_objects():
+    baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    inactive = baseline.current_state.claims[0].model_copy(
+        update={
+            "id": "claim_cccccccccccccccccccccccccccccccc",
+            "standing": ClaimStanding.RETIRED,
+        }
+    )
+    retired_question = ResearchQuestion(
+        id="question_dddddddddddddddddddddddddddddddd",
+        question="A retired question?",
+        status=QuestionStatus.RETIRED,
+        evidence_refs=(REF,),
+    )
+    baseline = baseline.model_copy(
+        update={
+            "current_state": baseline.current_state.model_copy(
+                update={
+                    "claims": (*baseline.current_state.claims, inactive),
+                    "questions": (retired_question,),
+                }
+            ),
+            "coverage": baseline.coverage.model_copy(
+                update={
+                    "claims": (
+                        *baseline.coverage.claims,
+                        ResearchObjectCoverage(
+                            object_id=inactive.id,
+                            status=CoverageStatus.COMPLETE,
+                        ),
+                    ),
+                    "questions": (
+                        ResearchObjectCoverage(
+                            object_id=retired_question.id,
+                            status=CoverageStatus.COMPLETE,
+                        ),
+                    ),
+                }
+            ),
+        }
+    )
+    result = assess_deterministic_update(
+        "revision-1",
+        baseline,
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
+        evidence,
+    )
+
+    assert result.candidate is not None
+    assert {item.object_id for item in result.candidate.delta.claims} == {
+        item.id
+        for item in baseline.current_state.claims
+        if item.standing is ClaimStanding.ACTIVE
+    }
+    assert result.candidate.delta.questions == ()
+
+
+def test_semantic_change_assessment_repairs_once_then_escalates_invalid_output():
+    baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    request = AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",))
+    deterministic = assess_deterministic_update("revision-1", baseline, request, evidence)
+    claim_id = baseline.current_state.claims[0].id
+    invalid = {
+        "raw": AIMessage(content="{}"),
+        "parsed": None,
+        "parsing_error": ValueError("invalid"),
+    }
+    repaired_llm = _SemanticLLM(
+        invalid,
+        _semantic_response(
+            "support",
+            evidence_ref=deterministic.candidate.delta.new_evidence_refs[0],
+            claim_ids=(claim_id,),
+        ),
+    )
+
+    repaired = assess_semantic_update(baseline, deterministic, repaired_llm)
+    failed_llm = _SemanticLLM(invalid, invalid)
+    failed = assess_semantic_update(baseline, deterministic, failed_llm)
+
+    assert repaired.candidate is not None
+    assert len(repaired_llm.prompts) == 2
+    assert failed.escalation_reason is IncrementalEscalationReason.SEMANTIC_OUTPUT_INVALID
+    assert len(failed_llm.prompts) == 2
+
+
+def test_semantic_change_assessment_preserves_language_and_excludes_research_artifacts():
+    baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    baseline = baseline.model_copy(
+        update={
+            "current_state": baseline.current_state.model_copy(update={"language": "ja"}),
+            "update_summary": baseline.update_summary.model_copy(update={"language": "ja"}),
+        }
+    )
+    request = AnalysisRequest(
+        ticker="6501.T",
+        analysis_date="2026-07-25",
+        analysts=("market",),
+        output_language="ja",
+    )
+    deterministic = assess_deterministic_update("revision-1", baseline, request, evidence)
+    llm = _SemanticLLM(
+        _semantic_response(
+            "support",
+            evidence_ref=deterministic.candidate.delta.new_evidence_refs[0],
+            claim_ids=(baseline.current_state.claims[0].id,),
+            language="ja",
+        )
+    )
+
+    result = assess_semantic_update(baseline, deterministic, llm)
+
+    assert result.candidate is not None
+    assert result.candidate.update_summary.language == "ja"
+    assert result.semantic_assessment.language == "ja"
+    prompt = llm.prompts[0]
+    assert "Current Research State" in prompt
+    assert "new_evidence" in prompt
+    assert "old reports" not in prompt.casefold()
+    assert "deliberation" not in prompt.casefold()
+    assert "prior research" not in prompt.casefold()
 
 
 @pytest.mark.parametrize(

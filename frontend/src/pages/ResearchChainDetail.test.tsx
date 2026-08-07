@@ -45,6 +45,17 @@ const chain = {
       comparison: "disagreement",
       checked_windows: [{ source: "EDINET", scanned_start: "2026-07-01", scanned_end: "2026-07-25", status: "complete" }],
       evidence_lineage: [{ evidence_ref: "ev_0123456789ab", lineage: "new" }],
+      semantic_assessment: {
+        schema_version: "1",
+        language: "ja",
+        summary: "新しい証拠は既存の主張を支持します。",
+        relationships: [{
+          evidence_refs: ["ev_0123456789ab"],
+          relationship: "support",
+          suggested_claim_ids: ["claim-1"],
+          suggested_question_ids: [],
+        }],
+      },
       bounded_metrics: { llm_calls: 0, tool_calls: 3, input_tokens: 0, output_tokens: 0, wall_time_seconds: 0.4 },
       full_metrics: { llm_calls: 8, tool_calls: 12, input_tokens: 1200, output_tokens: 300, wall_time_seconds: 4.2 },
     },
@@ -187,6 +198,8 @@ test("reads the complete current thesis, coverage, evidence, reports, and metric
   expect(screen.getByText(/Bounded coverage attestation: true; company_disclosures \(complete\)/)).toBeVisible();
   expect(screen.getByText("Bounded archive constraint")).toBeVisible();
   expect(screen.getByText(/Bounded Evidence lineage: ev_0123456789ab \(new\)/)).toBeVisible();
+  expect(screen.getByText(/Semantic assessment: 新しい証拠は既存の主張を支持します。/)).toBeVisible();
+  expect(screen.getByText(/support.*claim-1/)).toBeVisible();
   expect(screen.getByText(/Bounded work: 0 LLM calls · 3 Tool calls/)).toBeVisible();
   expect(screen.getByText("rolling archive truncated the requested interval")).toBeVisible();
   expect(screen.getByText("market_boundary_crossing")).toBeVisible();

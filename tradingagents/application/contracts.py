@@ -1625,7 +1625,41 @@ ResearchUpdateEscalationReason = Literal[
     "threshold_crossing",
     "coverage_incomplete",
     "schema_invalid",
+    "semantic_weakening",
+    "semantic_contradiction",
+    "semantic_answering",
+    "semantic_reopening",
+    "semantic_uncertainty",
+    "potentially_material_novelty",
+    "confidence_change",
+    "ambiguous_identity",
+    "semantic_output_invalid",
+    "semantic_input_oversize",
 ]
+
+
+class ResearchUpdateSemanticRelationship(FrozenModel):
+    evidence_refs: tuple[str, ...]
+    relationship: Literal[
+        "support",
+        "weakening",
+        "contradiction",
+        "answering",
+        "reopening",
+        "irrelevance",
+        "uncertainty",
+        "potentially_material_novelty",
+    ]
+    suggested_claim_ids: tuple[str, ...] = ()
+    suggested_question_ids: tuple[str, ...] = ()
+    suggested_claim_confidence: Literal["low", "medium", "high", "indeterminate"] | None = None
+
+
+class ResearchUpdateSemanticAssessment(FrozenModel):
+    schema_version: Literal["1"] = "1"
+    language: str
+    summary: str
+    relationships: tuple[ResearchUpdateSemanticRelationship, ...]
 
 
 class ResearchUpdateCheckedWindow(FrozenModel):
@@ -1655,6 +1689,7 @@ class ResearchUpdateAudit(FrozenModel):
     coverage: dict[str, Any] | None = None
     checked_windows: tuple[ResearchUpdateCheckedWindow, ...] = ()
     evidence_lineage: tuple[ResearchUpdateEvidenceLineage, ...] = ()
+    semantic_assessment: ResearchUpdateSemanticAssessment | None = None
     authoritative_strategy: Literal["full"] = "full"
     escalation_reason: ResearchUpdateEscalationReason | None = None
     comparison: Literal["agreement", "disagreement", "not_applicable"]

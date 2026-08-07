@@ -30,6 +30,7 @@ from tradingagents.application.contracts import (
     RunMetrics,
     RunStatus,
 )
+from tradingagents.application.llms import RunLLMs
 from tradingagents.application.repository import RunRepository
 from tradingagents.application.research import (
     IncrementalEscalationReason,
@@ -107,6 +108,66 @@ class _Graph:
         if self.error is not None:
             raise self.error
         return _execution(context.request.ticker)
+
+
+class _SemanticServiceInvoker:
+    def __init__(self, schema, metrics):
+        self.schema = schema
+        self.metrics = metrics
+
+    def invoke(self, prompt, config=None):
+        payload = json.loads(prompt.split("BOUNDED INPUT:\n", 1)[1])
+        run_id = uuid4()
+        metadata = (config or {}).get("metadata", {})
+        self.metrics.on_llm_start({}, [prompt], run_id=run_id, metadata=metadata)
+        self.metrics.on_llm_end(
+            LLMResult(
+                generations=[
+                    [
+                        ChatGeneration(
+                            message=AIMessage(
+                                content="",
+                                usage_metadata={
+                                    "input_tokens": 80,
+                                    "output_tokens": 20,
+                                    "total_tokens": 100,
+                                },
+                            )
+                        )
+                    ]
+                ]
+            ),
+            run_id=run_id,
+        )
+        return {
+            "raw": AIMessage(content=""),
+            "parsed": self.schema.model_validate(
+                {
+                    "language": payload["output_language"],
+                    "summary": "既存の主張を再確認しました。",
+                    "relationships": [
+                        {
+                            "evidence_refs": [item["ref"]],
+                            "relationship": "support",
+                            "suggested_claim_ids": [payload["relevant_claim_ids"][0]],
+                        }
+                        for item in payload["new_evidence"]
+                    ],
+                }
+            ),
+            "parsing_error": None,
+        }
+
+
+class _SemanticServiceLLM:
+    preferred_structured_output_method = "function_calling"
+
+    def __init__(self, metrics):
+        self.metrics = metrics
+
+    def with_structured_output(self, schema, **kwargs):
+        assert kwargs["include_raw"] is True
+        return _SemanticServiceInvoker(schema, self.metrics)
 
 
 class _ArtifactGraph:
@@ -636,6 +697,105 @@ def test_default_shadow_collection_runs_before_any_full_llm_client(
     assert audit is not None
     assert audit.escalation_reason == "coverage_incomplete"
     assert audit.bounded_metrics.tool_calls == 1
+
+
+def test_default_shadow_semantic_assessment_is_audited_before_independent_full(
+    app_settings,
+    repository,
+    monkeypatch,
+) -> None:
+    initial = _service(app_settings, repository)
+    initial.run_initial_chain(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+            output_language="ja",
+        )
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+    payload = attach_source_watermarks(
+        "No deterministic material change was found.",
+        *(
+            SourceWatermark(
+                source=source,
+                scanned_start="2026-07-01",
+                scanned_end="2026-07-25",
+                status="complete",
+            )
+            for source in (
+                "EDINET",
+                "TDnet",
+                "Google News",
+                "J-Quants adjusted OHLCV",
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        "tradingagents.application.incremental.route_to_vendor",
+        lambda *_args, **_kwargs: payload,
+    )
+    llm_factory_calls = 0
+
+    def llm_factory(_settings, *, callbacks):
+        nonlocal llm_factory_calls
+        llm_factory_calls += 1
+        if llm_factory_calls == 1:
+            semantic = _SemanticServiceLLM(callbacks[0])
+            return RunLLMs(
+                quick=semantic,
+                deep=object(),
+                quick_serializer=semantic,
+                deep_serializer=object(),
+            )
+        return object(), object()
+
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=llm_factory,
+        graph_factory=_Graph,
+        identity_resolver=lambda ticker, _date: {"company_name": ticker},
+        local_name_resolver=lambda _ticker, _date, _config: None,
+    )
+    queued = service.enqueue_chain_update(
+        chain.id,
+        chain.current_revision_id,
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-25",
+            analysts=("market",),
+            output_language="ja",
+        ),
+    )
+    claimed = repository.claim_run(queued.id, "worker", 30)
+
+    result = service.execute_claimed(claimed, worker_id="worker")
+
+    audit = repository.get_run(queued.id).research_update_audit
+    revision = repository.get_research_chain(chain.id).current_revision
+    assert result.status is RunStatus.SUCCEEDED
+    assert llm_factory_calls == 2
+    assert audit is not None
+    assert audit.semantic_assessment is not None
+    assert audit.semantic_assessment.language == "ja"
+    assert audit.semantic_assessment.relationships[0].relationship == "support"
+    assert audit.candidate is not None
+    assert audit.candidate.update_summary["summary"] == "既存の主張を再確認しました。"
+    assert audit.bounded_metrics.llm_calls == 1
+    assert audit.bounded_metrics.tool_calls == 2
+    assert "research.incremental.semantic_assessment" in audit.bounded_metrics.node_metrics
+    assert revision.execution_strategy is ResearchExecutionStrategy.FULL
+    media_type, exported = service.export_revision(revision.id, format="markdown")
+    assert media_type.startswith("text/markdown")
+    assert "### Semantic Change Assessment" in exported
+    assert "既存の主張を再確認しました。" in exported
+    assessed = next(
+        event
+        for event in repository.list_events(queued.id)
+        if event.event_type == "research.incremental_assessed"
+    )
+    assert assessed.payload["semantic_assessment"]["language"] == "ja"
 
 
 def test_cancelled_bounded_shadow_work_retains_audit_without_advancing_head(

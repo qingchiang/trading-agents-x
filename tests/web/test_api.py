@@ -480,6 +480,21 @@ async def test_openapi_contains_versioned_run_center_contract(
     assert "provenance" not in schema["components"]["schemas"]["AnalysisRequest"]["properties"]
     assert "provenance" not in schema["components"]["schemas"]["CapabilityDefaults"]["properties"]
     assert schema["components"]["schemas"]["AssetType"]["enum"] == ["stock"]
+    audit = schema["components"]["schemas"]["ResearchUpdateAudit"]["properties"]
+    assert audit["semantic_assessment"]["anyOf"][0]["$ref"].endswith(
+        "/ResearchUpdateSemanticAssessment"
+    )
+    relationships = schema["components"]["schemas"]["ResearchUpdateSemanticRelationship"]
+    assert set(relationships["properties"]["relationship"]["enum"]) == {
+        "support",
+        "weakening",
+        "contradiction",
+        "answering",
+        "reopening",
+        "irrelevance",
+        "uncertainty",
+        "potentially_material_novelty",
+    }
 
 
 @pytest.mark.anyio

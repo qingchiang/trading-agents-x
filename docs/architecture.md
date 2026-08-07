@@ -336,13 +336,29 @@ Bounded partial results return through an explicit progress callback owned by
 `AnalysisService`; the service persists each completed checkpoint so later
 cancellation or failure does not erase already checked windows or metrics.
 
-When deterministic gates can propose No Material Change, Shadow mode persists
-the candidate and still runs independent Full Analysis. Only the Full result
-creates the authoritative Revision and advances the chain. Agreement or
+If deterministic gates leave new Evidence unclassified, `AnalysisService`
+creates a schema-focused quick client for one bounded semantic Change
+Assessment. Its input is limited to the Current Research State, applicable
+Claim and Question identifiers, materiality and coverage rules, necessary
+prior Evidence summaries, and the new Evidence. Research Artifacts and earlier
+research conclusions are not inputs. The typed result records support,
+weakening, contradiction, answering, reopening, irrelevance, uncertainty, or
+potentially material novelty. Application code resolves suggested identities;
+ambiguous targets never reuse a persistent ID. Weakening, contradiction,
+Question-state changes, novelty, ordinal Claim Confidence changes, and
+uncertainty produce stable Full-escalation reasons. Invalid structured output
+gets one repair attempt and then escalates fail-closed.
+
+When bounded gates can propose No Material Change, Shadow mode persists the
+candidate and its semantic assessment, then runs independent Full Analysis.
+Only the Full result creates the authoritative Revision and advances the
+chain. Agreement or
 disagreement is an experimental finding, not an execution failure. The run
 and Revision retain bounded checked windows, Coverage Attestation, candidate
-outcome, Evidence lineage, escalation reason, comparison, and separately
-attributed bounded/Full metrics; events expose the same phase transitions.
+outcome, semantic relationships, Evidence lineage, escalation reason,
+comparison, and separately attributed bounded/Full metrics; the API, reader,
+export, and events expose the same sanitized result without prompt text or
+private reasoning.
 Failed or cancelled Shadow executions retain their run audit but never create
 a Revision.
 

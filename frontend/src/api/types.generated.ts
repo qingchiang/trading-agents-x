@@ -602,10 +602,11 @@ export interface components {
       checked_windows?: components["schemas"]["ResearchUpdateCheckedWindow"][];
       comparison: "agreement" | "disagreement" | "not_applicable";
       coverage?: Record<string, unknown> | null;
-      escalation_reason?: "invalid_baseline" | "source_correction" | "source_withdrawal" | "source_replacement" | "source_version_change" | "incompatible_semantics" | "threshold_crossing" | "coverage_incomplete" | "schema_invalid" | null;
+      escalation_reason?: "invalid_baseline" | "source_correction" | "source_withdrawal" | "source_replacement" | "source_version_change" | "incompatible_semantics" | "threshold_crossing" | "coverage_incomplete" | "schema_invalid" | "semantic_weakening" | "semantic_contradiction" | "semantic_answering" | "semantic_reopening" | "semantic_uncertainty" | "potentially_material_novelty" | "confidence_change" | "ambiguous_identity" | "semantic_output_invalid" | "semantic_input_oversize" | null;
       evidence_lineage?: components["schemas"]["ResearchUpdateEvidenceLineage"][];
       full_metrics?: components["schemas"]["RunMetrics"];
       mode?: string;
+      semantic_assessment?: components["schemas"]["ResearchUpdateSemanticAssessment"] | null;
     };
     ResearchUpdateCandidate: {
       coverage: Record<string, unknown>;
@@ -629,6 +630,19 @@ export interface components {
       evidence_ref: string;
       lineage: "new" | "inherited";
       source_revision_id?: string | null;
+    };
+    ResearchUpdateSemanticAssessment: {
+      language: string;
+      relationships: components["schemas"]["ResearchUpdateSemanticRelationship"][];
+      schema_version?: string;
+      summary: string;
+    };
+    ResearchUpdateSemanticRelationship: {
+      evidence_refs: string[];
+      relationship: "support" | "weakening" | "contradiction" | "answering" | "reopening" | "irrelevance" | "uncertainty" | "potentially_material_novelty";
+      suggested_claim_confidence?: "low" | "medium" | "high" | "indeterminate" | null;
+      suggested_claim_ids?: string[];
+      suggested_question_ids?: string[];
     };
     ResearchWarning: {
       code?: string;

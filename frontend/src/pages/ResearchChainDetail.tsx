@@ -267,6 +267,21 @@ export default function ResearchChainDetail() {
                   : t("none")}
               </li>
               <li>
+                {t("semanticAssessment")}: {updateAudit.semantic_assessment?.summary ?? t("none")}
+                {(updateAudit.semantic_assessment?.relationships ?? []).length > 0 && (
+                  <ul>
+                    {(updateAudit.semantic_assessment?.relationships ?? []).map((item, index) => (
+                      <li key={`${item.relationship}-${index}`}>
+                        {item.relationship} · {[
+                          ...(item.suggested_claim_ids ?? []),
+                          ...(item.suggested_question_ids ?? []),
+                        ].join(", ") || t("none")} · {item.evidence_refs.join(", ")}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+              <li>
                 {t("boundedWork")}: {boundedMetrics.llm_calls} {t("llmCalls")} · {boundedMetrics.tool_calls} {t("toolCalls")} · {boundedMetrics.input_tokens}/{boundedMetrics.output_tokens} {t("inputOutputTokens")} · {boundedMetrics.wall_time_seconds.toFixed(1)}s
               </li>
               <li>
