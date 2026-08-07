@@ -5173,6 +5173,30 @@
       "UpdateSummary": {
         "additionalProperties": false,
         "properties": {
+          "analysis_cutoff": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysis Cutoff"
+          },
+          "baseline_cutoff": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Cutoff"
+          },
           "checked_domains": {
             "items": {
               "type": "string"
@@ -5180,6 +5204,16 @@
             "minItems": 1,
             "title": "Checked Domains",
             "type": "array"
+          },
+          "execution_strategy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchExecutionStrategy"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "language": {
             "title": "Language",
@@ -5192,6 +5226,24 @@
             },
             "title": "Limitations",
             "type": "array"
+          },
+          "new_evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "New Evidence Refs",
+            "type": "array"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchRevisionOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "schema_version": {
             "const": "1",

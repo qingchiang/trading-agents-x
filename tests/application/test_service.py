@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import operator
+import sqlite3
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
@@ -388,6 +389,7 @@ def test_successful_explicit_full_analysis_creates_primary_research_chain(
 def test_full_update_is_idempotent_for_current_head_and_advances_atomically(
     app_settings,
     repository,
+    tmp_path,
 ) -> None:
     service = _service(app_settings, repository)
     service.run_initial_chain(
@@ -428,6 +430,37 @@ def test_full_update_is_idempotent_for_current_head_and_advances_atomically(
     assert advanced.current_revision.predecessor_revision_id == chain.current_revision_id
     assert advanced.current_revision.producing_run_id == first.id
     assert advanced.current_revision.delta.claims
+    assert advanced.current_revision.update_summary.baseline_cutoff == date(2026, 7, 24)
+    assert advanced.current_revision.update_summary.analysis_cutoff == date(2026, 7, 25)
+    assert advanced.current_revision.update_summary.execution_strategy.value == "full"
+    assert advanced.current_revision.update_summary.outcome == advanced.current_revision.outcome
+    assert "Evidence items" in advanced.current_revision.update_summary.summary
+    completed_duplicate = service.enqueue_chain_update(
+        chain.id,
+        chain.current_revision_id,
+        request,
+    )
+    assert completed_duplicate.id == first.id
+    assert completed_duplicate.update_intent_id == first.update_intent_id
+    media_type, body = service.export_revision(
+        advanced.current_revision_id,
+        format="json",
+    )
+    assert media_type == "application/json"
+    assert json.loads(body)["revision"]["delta"]["claims"]
+
+    backup = service.backup_database(tmp_path / "full-update.db")
+    with sqlite3.connect(backup) as connection:
+        assert (
+            connection.execute(
+                "SELECT count(*) FROM research_revisions WHERE chain_id = ?",
+                (chain.id,),
+            ).fetchone()[0]
+            == 2
+        )
+        assert connection.execute(
+            "SELECT delta_json FROM research_revisions WHERE sequence = 2"
+        ).fetchone()[0]
 
 
 def test_concurrent_full_update_submissions_resolve_to_one_execution(

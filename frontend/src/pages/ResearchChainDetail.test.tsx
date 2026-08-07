@@ -50,7 +50,12 @@ const chain = {
       ],
       questions: [{ id: "question-1", question: "订单能否持续？" }],
     },
-    coverage: { limitations: ["news archive limited"] },
+    coverage: {
+      limitations: ["news archive limited"],
+      domains: [{ domain: "market", status: "complete", limitations: [] }],
+      claims: [{ object_id: "claim-1", status: "complete", limitations: [] }],
+      questions: [{ object_id: "question-1", status: "limited", limitations: ["answer pending"] }],
+    },
     evidence_snapshot: {
       bundle: {
         items: [
@@ -86,6 +91,7 @@ test("reads the complete current thesis, coverage, evidence, reports, and metric
   expect(screen.getByText("订单能否持续？")).toBeVisible();
   expect(screen.getByText("利润率再次下降。")).toBeVisible();
   expect(screen.getByText("news archive limited")).toBeVisible();
+  expect(screen.getByText("answer pending")).toBeVisible();
   expect(screen.getByText("ev_0123456789ab")).toBeVisible();
   expect(screen.getByText("订单同比增长。")).toBeVisible();
   expect(screen.getByRole("link", { name: "Full analysis" })).toHaveAttribute(
@@ -93,6 +99,13 @@ test("reads the complete current thesis, coverage, evidence, reports, and metric
     "/runs/run-1",
   );
   expect(screen.getByText(/Input tokens: 1,200/)).toBeVisible();
+  expect(screen.getByRole("link", { name: "Revision export" })).toHaveAttribute(
+    "href",
+    "/api/v1/research-revisions/revision-1/export?format=json",
+  );
+  expect(
+    screen.getByRole("link", { name: "Producing run and Full artifacts" }),
+  ).toHaveAttribute("href", "/runs/run-1");
 });
 
 test("queues a Full update from the displayed current head", async () => {

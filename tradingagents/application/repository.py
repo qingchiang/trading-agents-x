@@ -305,13 +305,9 @@ class RunRepository:
             if chain is None:
                 raise ResearchChainNotFoundError(chain_id)
             baseline = session.get(ResearchRevisionRecord, baseline_revision_id)
-            if (
-                baseline is None
-                or baseline.chain_id != chain.id
-                or chain.current_revision_id != baseline.id
-            ):
+            if baseline is None or baseline.chain_id != chain.id:
                 raise InvalidResearchBaselineError(
-                    "update must target the current head of the same Research Chain"
+                    "update baseline must belong to the same Research Chain"
                 )
             if request.ticker != chain.instrument:
                 raise InvalidResearchBaselineError(
@@ -332,6 +328,10 @@ class RunRepository:
             )
             if existing_exact is not None:
                 return self._view(existing_exact), False
+            if chain.current_revision_id != baseline.id:
+                raise InvalidResearchBaselineError(
+                    "update must target the current Research Chain head"
+                )
             active = session.scalar(
                 select(RunRecord).where(
                     RunRecord.research_chain_id == chain.id,
@@ -1999,22 +1999,14 @@ class RunRepository:
         session.add(chain)
         session.flush()
         session.add(
-            ResearchRevisionRecord(
-                id=revision_id,
+            RunRepository._revision_record(
+                revision_id=revision_id,
                 chain_id=chain_id,
                 sequence=1,
                 predecessor_revision_id=None,
                 producing_run_id=record.id,
-                cutoff=draft.cutoff,
-                execution_strategy=draft.execution_strategy.value,
-                outcome=draft.outcome.value,
-                language=draft.current_state.language,
-                current_state_json=draft.current_state.model_dump(mode="json"),
-                delta_json=draft.delta.model_dump(mode="json"),
-                coverage_json=draft.coverage.model_dump(mode="json"),
-                update_summary_json=draft.update_summary.model_dump(mode="json"),
-                evidence_snapshot_json=draft.evidence_snapshot.model_dump(mode="json"),
-                metrics_json=metrics.model_dump(mode="json"),
+                draft=draft,
+                metrics=metrics,
                 created_at=created_at,
             )
         )
@@ -2051,27 +2043,50 @@ class RunRepository:
             )
         revision_id = str(uuid4())
         session.add(
-            ResearchRevisionRecord(
-                id=revision_id,
+            RunRepository._revision_record(
+                revision_id=revision_id,
                 chain_id=chain.id,
                 sequence=baseline.sequence + 1,
                 predecessor_revision_id=baseline.id,
                 producing_run_id=record.id,
-                cutoff=draft.cutoff,
-                execution_strategy=draft.execution_strategy.value,
-                outcome=draft.outcome.value,
-                language=draft.current_state.language,
-                current_state_json=draft.current_state.model_dump(mode="json"),
-                delta_json=draft.delta.model_dump(mode="json"),
-                coverage_json=draft.coverage.model_dump(mode="json"),
-                update_summary_json=draft.update_summary.model_dump(mode="json"),
-                evidence_snapshot_json=draft.evidence_snapshot.model_dump(mode="json"),
-                metrics_json=metrics.model_dump(mode="json"),
+                draft=draft,
+                metrics=metrics,
                 created_at=created_at,
             )
         )
         chain.current_revision_id = revision_id
         chain.updated_at = created_at
+
+    @staticmethod
+    def _revision_record(
+        *,
+        revision_id: str,
+        chain_id: str,
+        sequence: int,
+        predecessor_revision_id: str | None,
+        producing_run_id: str,
+        draft: ResearchRevisionDraft,
+        metrics: RunMetrics,
+        created_at: datetime,
+    ) -> ResearchRevisionRecord:
+        return ResearchRevisionRecord(
+            id=revision_id,
+            chain_id=chain_id,
+            sequence=sequence,
+            predecessor_revision_id=predecessor_revision_id,
+            producing_run_id=producing_run_id,
+            cutoff=draft.cutoff,
+            execution_strategy=draft.execution_strategy.value,
+            outcome=draft.outcome.value,
+            language=draft.current_state.language,
+            current_state_json=draft.current_state.model_dump(mode="json"),
+            delta_json=draft.delta.model_dump(mode="json"),
+            coverage_json=draft.coverage.model_dump(mode="json"),
+            update_summary_json=draft.update_summary.model_dump(mode="json"),
+            evidence_snapshot_json=draft.evidence_snapshot.model_dump(mode="json"),
+            metrics_json=metrics.model_dump(mode="json"),
+            created_at=created_at,
+        )
 
     @classmethod
     def _research_chain(

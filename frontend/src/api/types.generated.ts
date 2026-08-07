@@ -731,9 +731,14 @@ export interface components {
     };
     TableDataType: "text" | "integer" | "number" | "percent" | "currency" | "date" | "datetime" | "boolean";
     UpdateSummary: {
+      analysis_cutoff?: string | null;
+      baseline_cutoff?: string | null;
       checked_domains: string[];
+      execution_strategy?: components["schemas"]["ResearchExecutionStrategy"] | null;
       language: string;
       limitations?: string[];
+      new_evidence_refs?: string[];
+      outcome?: components["schemas"]["ResearchRevisionOutcome"] | null;
       schema_version?: string;
       summary: string;
     };

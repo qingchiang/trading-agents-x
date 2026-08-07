@@ -278,6 +278,11 @@ class UpdateSummary(ResearchModel):
     summary: str = Field(min_length=1)
     checked_domains: tuple[str, ...] = Field(min_length=1)
     limitations: tuple[str, ...] = ()
+    baseline_cutoff: date | None = None
+    analysis_cutoff: date | None = None
+    execution_strategy: ResearchExecutionStrategy | None = None
+    outcome: ResearchRevisionOutcome | None = None
+    new_evidence_refs: tuple[str, ...] = ()
 
     @field_validator("language", mode="before")
     @classmethod
@@ -730,13 +735,23 @@ def assemble_full_update(
     question_delta: list[QuestionRevisionDelta] = []
     for original in candidate.current_state.questions:
         previous = question_matches.get(original.id)
+        if previous is None:
+            change = QuestionChange.INTRODUCED
+        elif previous.status is original.status:
+            change = QuestionChange.REAFFIRMED
+        elif original.status is QuestionStatus.ANSWERED:
+            change = QuestionChange.ANSWERED
+        elif original.status is QuestionStatus.OPEN:
+            change = QuestionChange.REOPENED
+        elif original.status is QuestionStatus.SUPERSEDED:
+            change = QuestionChange.SUPERSEDED
+        else:
+            change = QuestionChange.RETIRED
         question_delta.append(
             QuestionRevisionDelta(
                 object_id=question_ids.get(original.id, original.id),
                 previous_object_id=previous.id if previous is not None else None,
-                change=(
-                    QuestionChange.REAFFIRMED if previous is not None else QuestionChange.INTRODUCED
-                ),
+                change=change,
                 identity_disposition=(
                     IdentityDisposition.EXACT_MATCH
                     if previous is not None
@@ -821,19 +836,42 @@ def assemble_full_update(
         inherited_evidence_refs=inherited_refs,
         new_evidence_refs=tuple(item.ref for item in candidate_bundle.items),
     )
-    summaries = {
-        "en": "Full Analysis completed and was compared with the Eligible Baseline.",
-        "zh-CN": "完整分析已完成，并与合格基线进行了比较。",
-        "ja": "フル分析を完了し、適格なベースラインと比較しました。",
+    outcome = (
+        ResearchRevisionOutcome.MATERIAL_CHANGE
+        if material
+        else ResearchRevisionOutcome.NO_MATERIAL_CHANGE
+    )
+    summary_values = {
+        "baseline": baseline.cutoff.isoformat(),
+        "cutoff": candidate.cutoff.isoformat(),
+        "count": len(candidate_bundle.items),
+        "outcome": outcome.value,
     }
+    summaries = {
+        "en": (
+            "Full Analysis as of {cutoff} was compared with the {baseline} "
+            "Eligible Baseline; {count} Evidence items were newly observed. "
+            "Outcome: {outcome}."
+        ),
+        "zh-CN": (
+            "截至 {cutoff} 的完整分析已与 {baseline} 合格基线比较；"
+            "本次新观察到 {count} 条证据。结果：{outcome}。"
+        ),
+        "ja": (
+            "{cutoff} 時点のフル分析を {baseline} の適格ベースラインと比較し、"
+            "{count} 件の新規 Evidence を確認しました。結果: {outcome}。"
+        ),
+    }
+    summary_template = summaries.get(candidate.current_state.language)
+    update_summary_text = (
+        summary_template.format(**summary_values)
+        if summary_template is not None
+        else candidate.update_summary.summary
+    )
     updated = candidate.model_copy(
         update={
             "execution_strategy": ResearchExecutionStrategy.FULL,
-            "outcome": (
-                ResearchRevisionOutcome.MATERIAL_CHANGE
-                if material
-                else ResearchRevisionOutcome.NO_MATERIAL_CHANGE
-            ),
+            "outcome": outcome,
             "delta": delta,
             "current_state": state,
             "coverage": candidate.coverage.model_copy(
@@ -844,10 +882,12 @@ def assemble_full_update(
             ),
             "update_summary": candidate.update_summary.model_copy(
                 update={
-                    "summary": summaries.get(
-                        candidate.current_state.language,
-                        candidate.update_summary.summary,
-                    )
+                    "summary": update_summary_text,
+                    "baseline_cutoff": baseline.cutoff,
+                    "analysis_cutoff": candidate.cutoff,
+                    "execution_strategy": ResearchExecutionStrategy.FULL,
+                    "outcome": outcome,
+                    "new_evidence_refs": tuple(item.ref for item in candidate_bundle.items),
                 }
             ),
             "evidence_snapshot": EffectiveEvidenceSnapshot(
@@ -1123,6 +1163,10 @@ def assemble_full_revision(
             summary=summaries.get(language, decision.executive_summary),
             checked_domains=tuple(item.domain for item in domains),
             limitations=tuple(dict.fromkeys(limitations)),
+            analysis_cutoff=request.analysis_date,
+            execution_strategy=ResearchExecutionStrategy.FULL,
+            outcome=ResearchRevisionOutcome.MATERIAL_CHANGE,
+            new_evidence_refs=evidence_refs,
         ),
         evidence_snapshot=EffectiveEvidenceSnapshot(
             bundle=evidence,

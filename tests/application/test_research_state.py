@@ -19,8 +19,11 @@ from tradingagents.application.research import (
     DecisionConfidence,
     DecisionRole,
     EpistemicKind,
+    QuestionStatus,
     ResearchClaim,
+    ResearchObjectCoverage,
     ResearchOpinion,
+    ResearchQuestion,
     ResearchScenarioState,
     ScenarioLikelihood,
     assemble_full_revision,
@@ -231,3 +234,68 @@ def test_full_update_does_not_reassign_ambiguous_claim_identity():
 
     assert updated.current_state.claims[0].id == candidate_id
     assert updated.delta.claims[0].identity_disposition.value == "ambiguous_new"
+
+
+def test_full_update_records_answered_question_as_material_change():
+    baseline = assemble_full_revision(
+        AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
+        _execution("6501.T"),
+    )
+    baseline_question = ResearchQuestion(
+        id="question_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        question="Will orders remain durable?",
+        status=QuestionStatus.OPEN,
+    )
+    baseline = baseline.model_copy(
+        update={
+            "current_state": baseline.current_state.model_copy(
+                update={"questions": (baseline_question,)}
+            ),
+            "coverage": baseline.coverage.model_copy(
+                update={
+                    "questions": (
+                        ResearchObjectCoverage(
+                            object_id=baseline_question.id,
+                            status="limited",
+                        ),
+                    )
+                }
+            ),
+        }
+    )
+    candidate = assemble_full_revision(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date=date(2026, 7, 25),
+            analysts=("market",),
+        ),
+        _execution("6501.T"),
+    )
+    candidate_question = ResearchQuestion(
+        id="question_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        question=baseline_question.question,
+        status=QuestionStatus.ANSWERED,
+    )
+    candidate = candidate.model_copy(
+        update={
+            "current_state": candidate.current_state.model_copy(
+                update={"questions": (candidate_question,)}
+            ),
+            "coverage": candidate.coverage.model_copy(
+                update={
+                    "questions": (
+                        ResearchObjectCoverage(
+                            object_id=candidate_question.id,
+                            status="complete",
+                        ),
+                    )
+                }
+            ),
+        }
+    )
+
+    updated = assemble_full_update("revision-1", baseline, candidate)
+
+    assert updated.current_state.questions[0].id == baseline_question.id
+    assert updated.delta.questions[0].change.value == "answered"
+    assert updated.outcome.value == "material_change"

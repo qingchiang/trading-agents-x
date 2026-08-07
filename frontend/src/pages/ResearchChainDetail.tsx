@@ -124,6 +124,39 @@ export default function ResearchChainDetail() {
         ) : (
           <p>{t("noCoverageLimitations")}</p>
         )}
+        <h3>{t("domainCoverage")}</h3>
+        <ul>
+          {(revision.coverage.domains ?? []).map((item) => (
+            <li key={item.domain}>
+              <strong>{item.domain}</strong> · {item.status}
+              {(item.limitations ?? []).length > 0 && (
+                <ul>{(item.limitations ?? []).map((value) => <li key={value}>{value}</li>)}</ul>
+              )}
+            </li>
+          ))}
+        </ul>
+        <h3>{t("claimCoverage")}</h3>
+        <ul>
+          {(revision.coverage.claims ?? []).map((item) => (
+            <li key={item.object_id}>
+              <code>{item.object_id}</code> · {item.status}
+              {(item.limitations ?? []).length > 0 && (
+                <ul>{(item.limitations ?? []).map((value) => <li key={value}>{value}</li>)}</ul>
+              )}
+            </li>
+          ))}
+        </ul>
+        <h3>{t("questionCoverage")}</h3>
+        <ul>
+          {(revision.coverage.questions ?? []).map((item) => (
+            <li key={item.object_id}>
+              <code>{item.object_id}</code> · {item.status}
+              {(item.limitations ?? []).length > 0 && (
+                <ul>{(item.limitations ?? []).map((value) => <li key={value}>{value}</li>)}</ul>
+              )}
+            </li>
+          ))}
+        </ul>
         <h3>{t("evidence")}</h3>
         <ul>
           {revision.evidence_snapshot.lineage.map((item) => {
@@ -144,7 +177,18 @@ export default function ResearchChainDetail() {
         <ol>
           {(chain.revisions ?? []).map((item) => (
             <li key={item.id}>
-              {item.cutoff} · {item.execution_strategy} · {item.outcome}
+              {item.cutoff} · {item.execution_strategy} · {item.outcome}{" "}
+              <a href={`/api/v1/research-revisions/${item.id}/export?format=json`}>
+                {t("revisionExport")}
+              </a>
+              {item.producing_run_id && (
+                <>
+                  {" · "}
+                  <Link to={`/runs/${item.producing_run_id}`}>
+                    {t("producingRun")}
+                  </Link>
+                </>
+              )}
             </li>
           ))}
         </ol>
