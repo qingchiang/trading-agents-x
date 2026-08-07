@@ -13,6 +13,7 @@ from typing import Annotated, Any
 
 import typer
 import uvicorn
+from pydantic import ValidationError
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.table import Table
@@ -127,18 +128,22 @@ def run_command(
         if analysis_date
         else _market_local_date(ticker)
     )
-    request = AnalysisRequest(
-        ticker=ticker,
-        analysis_date=cutoff,
-        profile=profile,
-        analysts=selected,
-        llm_provider=provider,
-        quick_model=quick_model,
-        deep_model=deep_model,
-        quick_reasoning_effort=quick_reasoning,
-        deep_reasoning_effort=deep_reasoning,
-        output_language=output_language,
-    )
+    try:
+        request = AnalysisRequest(
+            ticker=ticker,
+            analysis_date=cutoff,
+            profile=profile,
+            analysts=selected,
+            llm_provider=provider,
+            quick_model=quick_model,
+            deep_model=deep_model,
+            quick_reasoning_effort=quick_reasoning,
+            deep_reasoning_effort=deep_reasoning,
+            output_language=output_language,
+        )
+    except ValidationError as exc:
+        message = exc.errors(include_url=False)[0]["msg"]
+        raise typer.BadParameter(message) from None
     application = _application()
     try:
         result = application.run(

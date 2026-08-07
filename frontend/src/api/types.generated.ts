@@ -50,7 +50,7 @@ export interface components {
       node: string;
       task_kind: "semantic_structured" | "schema_serialization";
     };
-    AssetType: "stock" | "crypto";
+    AssetType: "stock";
     AuditedRangeEndpoint: {
       as_of_date: string;
       basis: components["schemas"]["MarketReferenceBasis"];

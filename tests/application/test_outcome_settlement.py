@@ -61,19 +61,11 @@ def _pending_item():
 def test_earliest_check_uses_six_market_closes_and_local_timezone() -> None:
     stock_due = earliest_outcome_check_at(
         ticker="6501.T",
-        asset_type="stock",
-        analysis_date=date(2026, 7, 28),
-        holding_intervals=5,
-    )
-    crypto_due = earliest_outcome_check_at(
-        ticker="BTC-USD",
-        asset_type="crypto",
         analysis_date=date(2026, 7, 28),
         holding_intervals=5,
     )
 
     assert stock_due == datetime(2026, 8, 4, 15, tzinfo=timezone.utc)
-    assert crypto_due == datetime(2026, 8, 3, 0, tzinfo=timezone.utc)
 
 
 def test_pending_observation_is_deferred_for_24_hours(

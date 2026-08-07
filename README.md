@@ -161,7 +161,7 @@ flowchart LR
     SVC --> DB[("SQLite<br/>runs · evidence · artifacts · decisions · memory")]
     WORKER["Single worker"] --> DB
     WORKER --> GRAPH["Evidence-first LangGraph"]
-    GRAPH --> DATA["US · JP · CN · crypto dataflows"]
+    GRAPH --> DATA["US · JP · CN equity dataflows"]
     GRAPH --> DB
     WORKER --> OUTCOME["Five-interval outcome settlement"]
     OUTCOME --> DB
@@ -311,10 +311,10 @@ Internally, instruments use canonical Yahoo-compatible symbols. Examples:
 | US/default | `NVDA`, `SPY` | yfinance-based default route |
 | Japan | `7203.T` | J-Quants, EDINET, TDnet, Japanese news and macro sources |
 | China A-shares | `600519.SS`, `000001.SZ` | Tencent/AkShare, CNINFO, Sina, Eastmoney and China macro sources |
-| Crypto/FX | `BTC-USD`, `EURUSD=X` | compatible default route |
 
 Bare mainland codes and `.SH` aliases are normalized before routing.
-Unsupported or ambiguous symbols fail instead of silently taking the US route.
+Crypto, unsupported, or ambiguous symbols fail instead of silently taking the
+US route.
 
 Historical analysis uses the instrument market's local calendar. Evidence keeps
 its requested date, effective date, timezone-aware availability, actual source,

@@ -23,8 +23,6 @@ from zoneinfo import ZoneInfo
 
 from tradingagents.version import IDENTIFIED_USER_AGENT
 
-from .symbol_utils import crypto_base
-
 logger = logging.getLogger(__name__)
 
 _API = "https://api.stocktwits.com/api/2/streams/symbol/{ticker}.json"
@@ -32,14 +30,8 @@ _UA = IDENTIFIED_USER_AGENT
 
 
 def _stocktwits_symbol(ticker: str) -> str:
-    """Map a crypto pair to StockTwits' ``<BASE>.X`` convention.
-
-    StockTwits lists crypto as ``BTC.X`` (Yahoo's ``BTC-USD`` form 404s), so any
-    crypto symbol resolves to its base plus ``.X``; other symbols pass through
-    upper-cased.
-    """
-    base = crypto_base(ticker)
-    return f"{base}.X" if base else ticker.strip().upper()
+    """Return the supported equity symbol in StockTwits form."""
+    return ticker.strip().upper()
 
 
 def _market_datetime(created_at: str, ticker: str) -> datetime | None:
@@ -49,7 +41,7 @@ def _market_datetime(created_at: str, ticker: str) -> datetime | None:
         created = datetime.fromisoformat(normalized)
         if created.tzinfo is None:
             created = created.replace(tzinfo=timezone.utc)
-        market_tz = timezone.utc if crypto_base(ticker) else ZoneInfo("America/New_York")
+        market_tz = ZoneInfo("America/New_York")
         return created.astimezone(market_tz)
     except (TypeError, ValueError):
         return None

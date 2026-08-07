@@ -379,8 +379,7 @@
       },
       "AssetType": {
         "enum": [
-          "stock",
-          "crypto"
+          "stock"
         ],
         "title": "AssetType",
         "type": "string"

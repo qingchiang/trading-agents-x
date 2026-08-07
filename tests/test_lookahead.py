@@ -26,11 +26,6 @@ from tradingagents.dataflows.lookahead import is_near_live
             datetime(2026, 7, 29, 1, tzinfo=timezone.utc),
             date(2026, 7, 28),
         ),
-        (
-            "BTC-USD",
-            datetime(2026, 7, 28, 23, 30, tzinfo=timezone.utc),
-            date(2026, 7, 28),
-        ),
     ],
 )
 def test_near_live_uses_the_instrument_market_date(

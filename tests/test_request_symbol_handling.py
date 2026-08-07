@@ -12,11 +12,6 @@ from tradingagents.dataflows.symbol_utils import normalize_symbol
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
-        ("BTCUSD", "BTC-USD"),
-        ("BTCUSDT", "BTC-USD"),
-        ("BTC-USDT", "BTC-USD"),
-        ("BTC-USDC", "BTC-USD"),
-        ("ethusdt", "ETH-USD"),
         ("AAPL", "AAPL"),
         ("GC=F", "GC=F"),
         ("600519", "600519.SS"),
@@ -26,7 +21,24 @@ from tradingagents.dataflows.symbol_utils import normalize_symbol
         ("EURUSD", "EURUSD=X"),
     ],
 )
-def test_normalize_symbol_crypto_and_passthrough(raw: str, expected: str) -> None:
+def test_normalize_symbol_supported_aliases_and_passthrough(raw: str, expected: str) -> None:
+    assert normalize_symbol(raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("BTCUSD", "BTCUSD"),
+        ("BTCUSDT", "BTCUSDT"),
+        ("BTC-USDT", "BTC-USDT"),
+        ("BTC-USDC", "BTC-USDC"),
+        ("ethusdt", "ETHUSDT"),
+    ],
+)
+def test_normalize_symbol_does_not_route_crypto_aliases(
+    raw: str,
+    expected: str,
+) -> None:
     assert normalize_symbol(raw) == expected
 
 
@@ -58,10 +70,6 @@ def test_request_rejects_unsupported_china_symbols(value: str) -> None:
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
-        ("BTCUSD", AssetType.CRYPTO),
-        ("BTC-USDT", AssetType.CRYPTO),
-        ("BTC-USD", AssetType.CRYPTO),
-        ("ETHUSD", AssetType.CRYPTO),
         ("AAPL", AssetType.STOCK),
         ("GC=F", AssetType.STOCK),
         ("600519.SS", AssetType.STOCK),
@@ -76,8 +84,7 @@ def test_request_infers_asset_type(raw: str, expected: AssetType) -> None:
 def test_request_uses_the_data_layer_canonical_symbol() -> None:
     for raw in (
         "XAUUSD",
-        "BTCUSD",
-        "btc-usdt",
+        "EURUSD",
         "600519",
         "600519.SH",
         "000001",

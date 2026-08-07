@@ -211,7 +211,6 @@ class AnalysisService:
                                 )
                     instrument_context = build_instrument_context(
                         run.request.ticker,
-                        run.request.asset_type.value,
                         identity,
                     )
                     memory = self.repository.memory_context(

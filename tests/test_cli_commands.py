@@ -276,6 +276,23 @@ def test_run_reports_market_date_resolution_as_a_usage_error(monkeypatch) -> Non
     assert "Traceback" not in result.output
 
 
+def test_run_rejects_crypto_instruments_before_starting_analysis(monkeypatch) -> None:
+    monkeypatch.setattr(
+        cli,
+        "_application",
+        lambda: pytest.fail("application should not be created"),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["run", "BTC-USD", "--date", "2026-07-24"],
+    )
+
+    assert result.exit_code == 2
+    assert "Crypto instruments are not supported" in result.output
+    assert "Traceback" not in result.output
+
+
 @pytest.mark.parametrize(
     ("arguments", "message"),
     [

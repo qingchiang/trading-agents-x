@@ -1220,9 +1220,7 @@ class RunRepository:
                 )
             if result.decision is not None:
                 request = AnalysisRequest.model_validate(record.request_json)
-                market = self.market_bucket(
-                    request.ticker, request.asset_type.value
-                )
+                market = self.market_bucket(request.ticker)
                 decision = DecisionRecord(
                     run_id=run_id,
                     ticker=request.ticker,
@@ -1251,7 +1249,6 @@ class RunRepository:
                             now,
                             earliest_outcome_check_at(
                                 ticker=request.ticker,
-                                asset_type=request.asset_type.value,
                                 analysis_date=request.analysis_date,
                                 holding_intervals=5,
                             ).replace(tzinfo=None),
@@ -1609,7 +1606,7 @@ class RunRepository:
         same_limit: int = 5,
         cross_limit: int = 3,
     ) -> MemoryContext:
-        market = self.market_bucket(ticker, asset_type)
+        market = self.market_bucket(ticker)
         resolved = (
             select(
                 DecisionRecord,
@@ -1864,9 +1861,7 @@ class RunRepository:
         return destination
 
     @staticmethod
-    def market_bucket(ticker: str, asset_type: str) -> str | None:
-        if asset_type == "crypto":
-            return "CRYPTO"
+    def market_bucket(ticker: str) -> str | None:
         try:
             return str(market_timezone(ticker))
         except ValueError:

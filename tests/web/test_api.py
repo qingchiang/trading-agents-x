@@ -65,6 +65,16 @@ async def test_run_creation_is_idempotent_and_conflicts_are_explicit(
 
 
 @pytest.mark.anyio
+async def test_run_creation_rejects_crypto_instruments(
+    web_client: httpx.AsyncClient,
+) -> None:
+    response = await web_client.post("/api/v1/runs", json=_payload("BTC-USD"))
+
+    assert response.status_code == 422
+    assert "Crypto instruments are not supported" in response.text
+
+
+@pytest.mark.anyio
 async def test_run_lifecycle_routes_and_filters(
     web_client: httpx.AsyncClient,
 ) -> None:
@@ -274,6 +284,7 @@ async def test_openapi_contains_versioned_run_center_contract(
     assert "provenance" not in schema["components"]["schemas"][
         "CapabilityDefaults"
     ]["properties"]
+    assert schema["components"]["schemas"]["AssetType"]["enum"] == ["stock"]
 
 
 @pytest.mark.anyio

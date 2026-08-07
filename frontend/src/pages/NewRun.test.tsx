@@ -137,6 +137,7 @@ test("reuses the idempotency key when a browser submission is retried", async ()
   expect(secondKey).toBe(firstKey);
   expect(vi.mocked(api.createRun).mock.calls[1][0]).toMatchObject({
     ticker: "NVDA",
+    asset_type: "stock",
     quick_reasoning_effort: "low",
     deep_reasoning_effort: "high",
     output_language: "zh-CN",

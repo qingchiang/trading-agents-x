@@ -144,10 +144,10 @@ def test_memory_context_uses_deterministic_same_and_cross_ticker_limits(
     )
     _seed_memory(
         repository,
-        ticker="BTC-USD",
+        ticker="0700.HK",
         analysis_date=date(2026, 5, 1),
-        reflection="crypto-reflection",
-        thesis="crypto-decision",
+        reflection="hong-kong-reflection",
+        thesis="hong-kong-decision",
     )
     _seed_memory(
         repository,
@@ -183,7 +183,7 @@ def test_memory_context_uses_deterministic_same_and_cross_ticker_limits(
     assert "same-reflection-1" not in prompt
     assert "cross-decision-4" not in prompt
     assert "japan-reflection" not in prompt
-    assert "crypto-reflection" not in prompt
+    assert "hong-kong-reflection" not in prompt
     assert "pending-reflection" not in prompt
 
 
@@ -223,23 +223,20 @@ def test_china_cross_ticker_memory_shares_market_without_crossing_regions(
 
 
 @pytest.mark.parametrize(
-    ("ticker", "asset_type", "expected"),
+    ("ticker", "expected"),
     (
-        ("NVDA", "stock", "America/New_York"),
-        ("SPY", "stock", "America/New_York"),
-        ("7203.T", "stock", "Asia/Tokyo"),
-        ("600519.SS", "stock", "Asia/Shanghai"),
-        ("000001.SZ", "stock", "Asia/Shanghai"),
-        ("BTC-USD", "crypto", "CRYPTO"),
-        ("ETH-USD", "crypto", "CRYPTO"),
+        ("NVDA", "America/New_York"),
+        ("SPY", "America/New_York"),
+        ("7203.T", "Asia/Tokyo"),
+        ("600519.SS", "Asia/Shanghai"),
+        ("000001.SZ", "Asia/Shanghai"),
     ),
 )
 def test_memory_market_bucket(
     ticker,
-    asset_type,
     expected,
 ) -> None:
-    assert RunRepository.market_bucket(ticker, asset_type) == expected
+    assert RunRepository.market_bucket(ticker) == expected
 
 
 @pytest.mark.parametrize(
