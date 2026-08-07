@@ -747,6 +747,7 @@ class KeyClaim(FrozenModel):
     implication: str = Field(min_length=1)
     confidence: float = Field(ge=0.0, le=1.0)
     evidence_refs: tuple[str, ...] = ()
+    required_sources: tuple[str, ...] = Field(default=(), max_length=8)
 
     @field_validator("evidence_refs")
     @classmethod
@@ -758,6 +759,14 @@ class KeyClaim(FrozenModel):
         if any(not re.fullmatch(r"ev_[a-f0-9]{12}", ref) for ref in refs):
             raise ValueError("key claims must use valid evidence refs")
         return refs
+
+    @field_validator("required_sources")
+    @classmethod
+    def validate_required_sources(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        sources = tuple(dict.fromkeys(source.strip() for source in value))
+        if any(not source for source in sources):
+            raise ValueError("required source names must not be empty")
+        return sources
 
 
 class ResearchWarning(FrozenModel):
@@ -1216,6 +1225,19 @@ class CalculationRecord(FrozenModel):
         return self
 
 
+class ResearchQuestionSourceDependency(FrozenModel):
+    question: str = Field(min_length=1)
+    required_sources: tuple[str, ...] = Field(min_length=1, max_length=8)
+
+    @field_validator("required_sources")
+    @classmethod
+    def validate_required_sources(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        sources = tuple(dict.fromkeys(source.strip() for source in value))
+        if any(not source for source in sources):
+            raise ValueError("required source names must not be empty")
+        return sources
+
+
 class ResearchDecision(FrozenModel):
     """Research-only conclusion; deliberately excludes account-level advice."""
 
@@ -1229,6 +1251,7 @@ class ResearchDecision(FrozenModel):
     risks: tuple[str, ...] = Field(min_length=1)
     invalidation_conditions: tuple[str, ...] = Field(min_length=1)
     unresolved_questions: tuple[str, ...] = ()
+    question_source_dependencies: tuple[ResearchQuestionSourceDependency, ...] = ()
     time_horizon: str = Field(min_length=1)
     scenarios: tuple[ResearchScenario, ...] = Field(
         min_length=3,
@@ -1284,6 +1307,13 @@ class ResearchDecision(FrozenModel):
 
     @model_validator(mode="after")
     def validate_scenario_set(self) -> ResearchDecision:
+        dependency_questions = tuple(
+            item.question for item in self.question_source_dependencies
+        )
+        if len(dependency_questions) != len(set(dependency_questions)):
+            raise ValueError("question source dependencies must be unique")
+        if not set(dependency_questions).issubset(self.unresolved_questions):
+            raise ValueError("source dependencies must name unresolved questions")
         scenario_kinds = tuple(item.kind for item in self.scenarios)
         if len(set(scenario_kinds)) != len(scenario_kinds):
             raise PydanticCustomError(

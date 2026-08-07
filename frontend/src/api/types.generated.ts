@@ -282,6 +282,7 @@ export interface components {
       implication: string;
       importance: components["schemas"]["ClaimImportance"];
       kind: components["schemas"]["AnalystClaimType"];
+      required_sources?: string[];
       section_id: string;
       statement: string;
     };
@@ -494,6 +495,7 @@ export interface components {
       market_reference_levels?: components["schemas"]["MarketReferenceLevel"][];
       memory_refs?: string[];
       numeric_audit_status?: components["schemas"]["NumericAuditStatus"] | null;
+      question_source_dependencies?: components["schemas"]["ResearchQuestionSourceDependency"][];
       rating: components["schemas"]["ResearchRating"];
       risk_review_adjustments?: components["schemas"]["RiskReviewAdjustment"][];
       risks: string[];
@@ -537,6 +539,10 @@ export interface components {
       required_sources?: string[];
       status?: components["schemas"]["QuestionStatus"];
     };
+    ResearchQuestionSourceDependency: {
+      question: string;
+      required_sources: string[];
+    };
     ResearchRating: "Buy" | "Overweight" | "Hold" | "Underweight" | "Sell";
     ResearchRevision: {
       chain_id: string;
@@ -555,7 +561,7 @@ export interface components {
       sequence: number;
       update_summary: components["schemas"]["UpdateSummary"];
     };
-    ResearchRevisionOutcome: "material_change" | "no_material_change";
+    ResearchRevisionOutcome: "material_change" | "no_material_change" | "coverage_incomplete";
     ResearchScenario: {
       core_assumptions: string[];
       evidence_refs?: string[];
@@ -759,6 +765,7 @@ export interface components {
       scanned_start: string;
       source: string;
       status: components["schemas"]["CoverageStatus"];
+      temporal_scope?: "point_in_time" | "live_only" | "unknown";
     };
     StructuredRecoveryNotice: {
       attempt: number;

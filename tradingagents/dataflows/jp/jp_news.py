@@ -278,11 +278,15 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
             notes.append((block, record))
 
     if not blocks:
+        coverage_markers = attach_source_watermarks("", *source_watermarks).strip()
         raise NoMarketDataError(
             ticker,
             detail="no EDINET/TDnet disclosures or media news in the window",
             availability_notes=(
-                attach_provenance(note, record) for note, record in notes
+                *(
+                    attach_provenance(note, record) for note, record in notes
+                ),
+                *([coverage_markers] if coverage_markers else []),
             ),
         )
     if notes:

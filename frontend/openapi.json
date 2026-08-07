@@ -1996,6 +1996,15 @@
           "kind": {
             "$ref": "#/components/schemas/AnalystClaimType"
           },
+          "required_sources": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Required Sources",
+            "type": "array"
+          },
           "section_id": {
             "pattern": "^[a-z][a-z0-9_.-]*$",
             "title": "Section Id",
@@ -3515,6 +3524,14 @@
               }
             ]
           },
+          "question_source_dependencies": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchQuestionSourceDependency"
+            },
+            "title": "Question Source Dependencies",
+            "type": "array"
+          },
           "rating": {
             "$ref": "#/components/schemas/ResearchRating"
           },
@@ -3792,6 +3809,31 @@
         "title": "ResearchQuestion",
         "type": "object"
       },
+      "ResearchQuestionSourceDependency": {
+        "additionalProperties": false,
+        "properties": {
+          "question": {
+            "minLength": 1,
+            "title": "Question",
+            "type": "string"
+          },
+          "required_sources": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "minItems": 1,
+            "title": "Required Sources",
+            "type": "array"
+          }
+        },
+        "required": [
+          "question",
+          "required_sources"
+        ],
+        "title": "ResearchQuestionSourceDependency",
+        "type": "object"
+      },
       "ResearchRating": {
         "enum": [
           "Buy",
@@ -3896,7 +3938,8 @@
       "ResearchRevisionOutcome": {
         "enum": [
           "material_change",
-          "no_material_change"
+          "no_material_change",
+          "coverage_incomplete"
         ],
         "title": "ResearchRevisionOutcome",
         "type": "string"
@@ -5372,6 +5415,16 @@
           },
           "status": {
             "$ref": "#/components/schemas/CoverageStatus"
+          },
+          "temporal_scope": {
+            "default": "point_in_time",
+            "enum": [
+              "point_in_time",
+              "live_only",
+              "unknown"
+            ],
+            "title": "Temporal Scope",
+            "type": "string"
           }
         },
         "required": [

@@ -84,6 +84,7 @@ class AuditKeyClaimDraft(FrozenModel):
     implication: str = Field(min_length=1)
     confidence: float = Field(ge=0.0, le=1.0)
     evidence_refs: tuple[str, ...] = Field(min_length=1)
+    required_sources: tuple[str, ...] = Field(default=(), max_length=8)
 
     def to_public(self) -> KeyClaim:
         return KeyClaim.model_validate(self.model_dump(mode="json"))
@@ -496,6 +497,8 @@ Rules:
 - Select only decision-relevant primary and supporting claims.
 - Every claim must point to an existing section ID and at least one allowed
   evidence ref.
+- List a source in required_sources only when the claim explicitly depends on
+  that named source remaining available; otherwise leave it empty.
 - Section source refs are optional and should cover whole paragraphs or tables,
   not every sentence or cell.
 - Observation, inference, and forecast must remain distinct.

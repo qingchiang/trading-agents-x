@@ -12,6 +12,7 @@ import json
 import re
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
+from datetime import date, datetime
 from typing import Literal
 
 from langchain_core.messages import BaseMessage, ToolMessage
@@ -91,6 +92,15 @@ class SourceObservation:
     url: str | None = None
     replaces_version_id: str | None = None
 
+    def __post_init__(self) -> None:
+        if self.status not in {"published", "corrected", "withdrawn", "replaced"}:
+            raise ValueError("unsupported Source Record status")
+        available = datetime.fromisoformat(self.available_at)
+        if available.utcoffset() is None:
+            raise ValueError("Source Record available_at requires timezone")
+        if not all((self.source, self.record_id, self.version_id, self.title)):
+            raise ValueError("Source Record identity and title must not be empty")
+
 
 @dataclass(frozen=True)
 class SourceWatermark:
@@ -100,9 +110,24 @@ class SourceWatermark:
     scanned_start: str
     scanned_end: str
     status: str
+    temporal_scope: TemporalScopeName = "point_in_time"
     limitations: tuple[str, ...] = ()
     returned_records: int = 0
     reported_records: int | None = None
+
+    def __post_init__(self) -> None:
+        start = date.fromisoformat(self.scanned_start)
+        end = date.fromisoformat(self.scanned_end)
+        if start > end:
+            raise ValueError("Source Watermark start must not follow end")
+        if self.status not in {"complete", "limited", "unavailable"}:
+            raise ValueError("unsupported Source Watermark status")
+        if self.temporal_scope not in {"point_in_time", "live_only", "unknown"}:
+            raise ValueError("unsupported Source Watermark temporal scope")
+        if self.returned_records < 0 or (
+            self.reported_records is not None and self.reported_records < 0
+        ):
+            raise ValueError("Source Watermark record counts must be non-negative")
 
 
 def provenance_marker(record: ProvenanceRecord) -> str:

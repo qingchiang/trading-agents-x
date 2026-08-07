@@ -149,7 +149,7 @@ export default function ResearchChainDetail() {
         <h3>{t("sourceWatermarks")}</h3>
         <ul>
           {(revision.evidence_snapshot.source_watermarks ?? []).map((item) => (
-            <li key={item.source}>
+            <li key={`${item.source}-${item.scanned_start}-${item.scanned_end}`}>
               <strong>{item.source}</strong> · {item.scanned_start} – {item.scanned_end} · {item.status}
               {item.baseline_cutoff ? ` · ${t("baseline")}: ${item.baseline_cutoff}` : ""}
               {item.overlap_start ? ` · ${t("overlapStart")}: ${item.overlap_start}` : ""}

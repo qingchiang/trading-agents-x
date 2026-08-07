@@ -115,6 +115,7 @@ class ResearchExecutionStrategy(str, Enum):
 class ResearchRevisionOutcome(str, Enum):
     MATERIAL_CHANGE = "material_change"
     NO_MATERIAL_CHANGE = "no_material_change"
+    COVERAGE_INCOMPLETE = "coverage_incomplete"
 
 
 class ClaimChange(str, Enum):
@@ -348,6 +349,7 @@ class SourceWatermarkSnapshot(ResearchModel):
     scanned_start: date
     scanned_end: date
     status: CoverageStatus
+    temporal_scope: Literal["point_in_time", "live_only", "unknown"] = "point_in_time"
     limitations: tuple[str, ...] = ()
     returned_records: int = Field(default=0, ge=0)
     reported_records: int | None = Field(default=None, ge=0)
@@ -699,7 +701,7 @@ def _source_metadata(
     bundle: EvidenceBundle,
 ) -> tuple[tuple[SourceRecordVersion, ...], tuple[SourceWatermarkSnapshot, ...]]:
     records: dict[str, SourceRecordVersion] = {}
-    watermarks: dict[str, SourceWatermarkSnapshot] = {}
+    watermarks: dict[tuple[str, date, date], SourceWatermarkSnapshot] = {}
     status_rank = {
         CoverageStatus.COMPLETE: 0,
         CoverageStatus.LIMITED: 1,
@@ -723,9 +725,10 @@ def _source_metadata(
             records[record.version_id] = record
         for raw in evidence.provenance.get("source_watermarks", ()):
             watermark = SourceWatermarkSnapshot.model_validate(raw)
-            existing = watermarks.get(watermark.source)
+            key = (watermark.source, watermark.scanned_start, watermark.scanned_end)
+            existing = watermarks.get(key)
             if existing is None:
-                watermarks[watermark.source] = watermark
+                watermarks[key] = watermark
                 continue
             worse = max((existing, watermark), key=lambda item: status_rank[item.status])
             reported_values = tuple(
@@ -733,11 +736,16 @@ def _source_metadata(
                 for value in (existing.reported_records, watermark.reported_records)
                 if value is not None
             )
-            watermarks[watermark.source] = SourceWatermarkSnapshot(
+            watermarks[key] = SourceWatermarkSnapshot(
                 source=watermark.source,
-                scanned_start=min(existing.scanned_start, watermark.scanned_start),
-                scanned_end=max(existing.scanned_end, watermark.scanned_end),
+                scanned_start=watermark.scanned_start,
+                scanned_end=watermark.scanned_end,
                 status=worse.status,
+                temporal_scope=(
+                    existing.temporal_scope
+                    if existing.temporal_scope == watermark.temporal_scope
+                    else "unknown"
+                ),
                 limitations=tuple(
                     dict.fromkeys((*existing.limitations, *watermark.limitations))
                 ),
@@ -769,13 +777,38 @@ def _source_coverage(
         refs_by_source.setdefault(record.source, []).append(record.evidence_ref)
     domains = []
     supports_quiet = True
+    watermarks_by_source: dict[str, list[SourceWatermarkSnapshot]] = {}
     for watermark in watermarks:
+        watermarks_by_source.setdefault(watermark.source, []).append(watermark)
+    observed_sources = set(watermarks_by_source)
+    status_rank = {
+        CoverageStatus.COMPLETE: 0,
+        CoverageStatus.LIMITED: 1,
+        CoverageStatus.UNAVAILABLE: 2,
+    }
+    for source_watermarks in watermarks_by_source.values():
+        watermark = max(source_watermarks, key=lambda item: status_rank[item.status])
         advisory = watermark.source == "Google News" and watermark.source not in explicitly_required
         requirement = (
             CoverageRequirement.ADVISORY if advisory else CoverageRequirement.REQUIRED
         )
-        if requirement is CoverageRequirement.REQUIRED and watermark.status is not CoverageStatus.COMPLETE:
+        live_only_required = (
+            requirement is CoverageRequirement.REQUIRED
+            and any(item.temporal_scope != "point_in_time" for item in source_watermarks)
+        )
+        if requirement is CoverageRequirement.REQUIRED and (
+            watermark.status is not CoverageStatus.COMPLETE or live_only_required
+        ):
             supports_quiet = False
+        limitations = tuple(
+            dict.fromkeys(
+                value for item in source_watermarks for value in item.limitations
+            )
+        ) + (
+            ("Required source coverage is not point-in-time.",)
+            if live_only_required
+            else ()
+        )
         domains.append(
             ResearchDomainCoverage(
                 domain=(
@@ -783,9 +816,36 @@ def _source_coverage(
                 ),
                 source=watermark.source,
                 requirement=requirement,
-                status=watermark.status,
+                status=(CoverageStatus.LIMITED if live_only_required else watermark.status),
                 evidence_refs=tuple(dict.fromkeys(refs_by_source.get(watermark.source, ()))),
-                limitations=watermark.limitations,
+                limitations=limitations,
+            )
+        )
+    if state.instrument.endswith(".T"):
+        for source in ("EDINET", "TDnet"):
+            if source in observed_sources:
+                continue
+            supports_quiet = False
+            domains.append(
+                ResearchDomainCoverage(
+                    domain="company_disclosures",
+                    source=source,
+                    requirement=CoverageRequirement.REQUIRED,
+                    status=CoverageStatus.UNAVAILABLE,
+                    limitations=(f"{source} collection coverage was not recorded.",),
+                )
+            )
+    for source in sorted(explicitly_required - observed_sources):
+        if source in {"EDINET", "TDnet"} and state.instrument.endswith(".T"):
+            continue
+        supports_quiet = False
+        domains.append(
+            ResearchDomainCoverage(
+                domain="required_source",
+                source=source,
+                requirement=CoverageRequirement.REQUIRED,
+                status=CoverageStatus.UNAVAILABLE,
+                limitations=(f"Required {source} collection coverage was not recorded.",),
             )
         )
     if any(
@@ -1119,7 +1179,11 @@ def assemble_full_update(
     outcome = (
         ResearchRevisionOutcome.MATERIAL_CHANGE
         if material
-        else ResearchRevisionOutcome.NO_MATERIAL_CHANGE
+        else (
+            ResearchRevisionOutcome.NO_MATERIAL_CHANGE
+            if supports_quiet
+            else ResearchRevisionOutcome.COVERAGE_INCOMPLETE
+        )
     )
     summary_values = {
         "baseline": baseline.cutoff.isoformat(),
@@ -1232,6 +1296,14 @@ def assemble_full_revision(
             refs = tuple(ref for ref in candidate.evidence_refs if ref in allowed_refs)
             if not refs:
                 raise ValueError("Research Claims require explicit Evidence refs")
+            available_sources = {
+                source
+                for item in evidence.items
+                if item.ref in refs
+                for source in (item.source, *(origin.source for origin in item.origins))
+            }
+            if not set(candidate.required_sources).issubset(available_sources):
+                raise ValueError("Research Claim requires a source absent from cited Evidence")
             kind = EpistemicKind(candidate.kind.value)
             observed_dates = [
                 item.effective_date or item.requested_date
@@ -1246,6 +1318,7 @@ def assemble_full_revision(
                     decision_role=DecisionRole.THESIS,
                     confidence=_claim_confidence(candidate.confidence),
                     evidence_refs=refs,
+                    required_sources=candidate.required_sources,
                     observed_at=(
                         max(observed_dates) if kind is EpistemicKind.OBSERVATION else None
                     ),
@@ -1338,11 +1411,16 @@ def assemble_full_revision(
                 evidence_refs=scenario_refs,
             )
         )
+    question_dependencies = {
+        item.question: item.required_sources
+        for item in decision.question_source_dependencies
+    }
     questions = tuple(
         ResearchQuestion(
             id=_new_question_id(),
             question=question,
             status=QuestionStatus.OPEN,
+            required_sources=question_dependencies.get(question, ()),
         )
         for question in decision.unresolved_questions
     )

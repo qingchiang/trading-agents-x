@@ -9,7 +9,9 @@ from tests.application.test_service import _execution
 from tradingagents.application.contracts import (
     AnalysisRequest,
     EvidenceBundle,
+    EvidenceItem,
     ReportLanguage,
+    ResearchQuestionSourceDependency,
     ResearchRating,
     ResearchScenarioKind,
 )
@@ -153,6 +155,9 @@ def test_full_state_assembly_assigns_ids_and_preserves_selected_language():
     assert draft.evidence_snapshot.bundle.digest == execution.evidence.digest
     assert {item.lineage for item in draft.evidence_snapshot.lineage} == {"new"}
     assert draft.update_summary.language == "ja"
+    missing_sources = {item.source for item in draft.coverage.domains if item.source}
+    assert missing_sources == {"EDINET", "TDnet"}
+    assert draft.coverage.supports_no_material_change is False
 
 
 def test_full_state_assembly_rejects_missing_explicit_claim_evidence():
@@ -237,12 +242,19 @@ def _source_record(version_id: str, *, status="published", replaces=None):
     }
 
 
-def _watermark(source: str, *, status="complete", limitations=()):
+def _watermark(
+    source: str,
+    *,
+    status="complete",
+    limitations=(),
+    temporal_scope="point_in_time",
+):
     return {
         "source": source,
         "scanned_start": "2026-07-01",
         "scanned_end": "2026-07-24",
         "status": status,
+        "temporal_scope": temporal_scope,
         "limitations": limitations,
         "returned_records": 1,
         "reported_records": 1,
@@ -272,6 +284,60 @@ def test_revision_snapshot_retains_disclosure_versions_and_source_coverage():
     assert sources["TDnet"].requirement is CoverageRequirement.REQUIRED
     assert sources["Google News"].requirement is CoverageRequirement.ADVISORY
     assert draft.coverage.supports_no_material_change is False
+
+
+def test_revision_preserves_disjoint_source_watermark_intervals():
+    execution = _with_disclosure_metadata(
+        _execution("6501.T"),
+        records=[],
+        watermarks=[
+            {
+                **_watermark("EDINET"),
+                "scanned_start": "2026-07-01",
+                "scanned_end": "2026-07-05",
+            }
+        ],
+    )
+    second = EvidenceItem.create(
+        source="EDINET",
+        evidence_type="disclosure coverage",
+        requested_date=CUTOFF,
+        effective_date=CUTOFF,
+        content="Second scan.",
+        provenance={
+            "source_watermarks": [
+                {
+                    **_watermark("EDINET"),
+                    "scanned_start": "2026-07-20",
+                    "scanned_end": "2026-07-24",
+                }
+            ]
+        },
+    )
+    execution = execution.__class__(
+        state=execution.state,
+        evidence=EvidenceBundle(
+            instrument="6501.T",
+            analysis_date=CUTOFF,
+            items=(*execution.evidence.items, second),
+        ),
+        reports=execution.reports,
+        decision=execution.decision,
+    )
+
+    draft = assemble_full_revision(
+        AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
+        execution,
+    )
+
+    assert [
+        (item.scanned_start, item.scanned_end)
+        for item in draft.evidence_snapshot.source_watermarks
+        if item.source == "EDINET"
+    ] == [
+        (date(2026, 7, 1), date(2026, 7, 5)),
+        (date(2026, 7, 20), date(2026, 7, 24)),
+    ]
 
 
 def test_full_update_preserves_corrected_versions_with_overlap_lineage():
@@ -347,48 +413,148 @@ def test_full_update_preserves_corrected_versions_with_overlap_lineage():
     assert "corrected" in exported
 
 
-def test_full_update_promotes_google_news_only_for_explicit_dependency():
-    baseline = assemble_full_revision(
-        AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
-        _with_disclosure_metadata(
-            _execution("6501.T"),
-            records=[],
-            watermarks=[_watermark("Google News")],
+def test_full_analysis_promotes_google_news_only_for_explicit_dependency():
+    baseline_execution = _with_disclosure_metadata(
+        _execution("6501.T"),
+        records=[],
+        watermarks=[_watermark("Google News", temporal_scope="live_only")],
+    )
+    question = "Does media coverage resolve the open catalyst?"
+    baseline_execution = baseline_execution.__class__(
+        state=baseline_execution.state,
+        evidence=baseline_execution.evidence,
+        reports=baseline_execution.reports,
+        decision=baseline_execution.decision.model_copy(
+            update={
+                "unresolved_questions": (question,),
+                "question_source_dependencies": (
+                    ResearchQuestionSourceDependency(
+                        question=question,
+                        required_sources=("Google News",),
+                    ),
+                ),
+            }
         ),
     )
-    required_claim = baseline.current_state.claims[0].model_copy(
-        update={"required_sources": ("Google News",)}
+    baseline = assemble_full_revision(
+        AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
+        baseline_execution,
     )
-    baseline = baseline.model_copy(
+    google = next(item for item in baseline.coverage.domains if item.source == "Google News")
+    assert google.requirement is CoverageRequirement.REQUIRED
+    assert google.status.value == "limited"
+    assert "not point-in-time" in google.limitations[0]
+    assert baseline.coverage.supports_no_material_change is False
+
+
+def test_full_analysis_claim_can_explicitly_require_google_news():
+    execution = _with_disclosure_metadata(
+        _execution("6501.T"),
+        records=[],
+        watermarks=[_watermark("Google News")],
+    )
+    evidence = execution.evidence.items[0].model_copy(update={"source": "Google News"})
+    report = execution.reports["market"]
+    report = report.model_copy(
         update={
-            "current_state": baseline.current_state.model_copy(
-                update={"claims": (required_claim,)}
+            "key_claims": tuple(
+                item.model_copy(update={"required_sources": ("Google News",)})
+                for item in report.key_claims
             )
         }
     )
-    candidate = assemble_full_revision(
-        AnalysisRequest(
-            ticker="6501.T", analysis_date=date(2026, 7, 25), analysts=("market",)
+    execution = execution.__class__(
+        state=execution.state,
+        evidence=EvidenceBundle(
+            instrument="6501.T",
+            analysis_date=CUTOFF,
+            items=(evidence,),
         ),
-        _with_disclosure_metadata(
+        reports={"market": report},
+        decision=execution.decision,
+    )
+
+    draft = assemble_full_revision(
+        AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
+        execution,
+    )
+
+    assert draft.current_state.claims[0].required_sources == ("Google News",)
+    google = next(item for item in draft.coverage.domains if item.source == "Google News")
+    assert google.requirement is CoverageRequirement.REQUIRED
+
+
+def test_coverage_blocker_cannot_produce_no_material_change():
+    def single_claim(draft, cutoff):
+        claim = draft.current_state.claims[0]
+        state = draft.current_state.model_copy(
+            update={
+                "cutoff": cutoff,
+                "claims": (claim,),
+                "questions": (),
+                "scenarios": tuple(
+                    item.model_copy(
+                        update={
+                            "cutoff": cutoff,
+                            "assumption_claim_ids": (claim.id,),
+                        }
+                    )
+                    for item in draft.current_state.scenarios
+                ),
+                "opinion": draft.current_state.opinion.model_copy(
+                    update={"primary_claim_ids": (claim.id,)}
+                ),
+                "risks": (),
+                "catalysts": (),
+                "invalidation_conditions": (),
+            }
+        )
+        claim_coverage = next(
+            item for item in draft.coverage.claims if item.object_id == claim.id
+        )
+        return draft.model_copy(
+            update={
+                "cutoff": cutoff,
+                "current_state": state,
+                "coverage": draft.coverage.model_copy(
+                    update={"claims": (claim_coverage,), "questions": ()}
+                ),
+            }
+        )
+
+    baseline = single_claim(
+        assemble_full_revision(
+            AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
             _execution("6501.T"),
-            records=[],
-            watermarks=[
-                _watermark(
-                    "Google News",
-                    status="unavailable",
-                    limitations=("live-only coverage unavailable",),
-                )
-            ],
         ),
+        CUTOFF,
+    )
+    next_cutoff = date(2026, 7, 25)
+    candidate = single_claim(
+        assemble_full_revision(
+            AnalysisRequest(
+                ticker="6501.T", analysis_date=next_cutoff, analysts=("market",)
+            ),
+            _with_disclosure_metadata(
+                _execution("6501.T"),
+                records=[],
+                watermarks=[
+                    _watermark(
+                        "TDnet",
+                        status="limited",
+                        limitations=("archive limited",),
+                    )
+                ],
+            ),
+        ),
+        next_cutoff,
     )
 
     updated = assemble_full_update("revision-1", baseline, candidate)
 
-    google = next(item for item in updated.coverage.domains if item.source == "Google News")
-    assert google.requirement is CoverageRequirement.REQUIRED
-    assert google.status.value == "unavailable"
+    assert updated.delta.changed_sections == ()
     assert updated.coverage.supports_no_material_change is False
+    assert updated.outcome.value == "coverage_incomplete"
 
 
 def test_full_update_does_not_reassign_ambiguous_claim_identity():

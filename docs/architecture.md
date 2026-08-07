@@ -75,6 +75,7 @@ catalysts
 risks
 invalidation_conditions
 unresolved_questions
+question_source_dependencies[{question, required_sources}]
 time_horizon
 scenarios[base, bull, bear]
 valuation_assessment
@@ -270,8 +271,10 @@ coverage. Google News is Advisory unless an active Claim or open Question
 explicitly names it as Required. Limited or unavailable Required coverage, and
 observed official correction or withdrawal states, are represented as blocking
 a quiet reassessment; live-only Required coverage cannot establish No Material
-Change. Full Analysis exposes the limitation rather than interpreting missing
-coverage as no news.
+Change. A semantically unchanged Full update with one of these blockers records
+`coverage_incomplete`, not No Material Change or a fabricated Material Change.
+Full Analysis exposes the limitation rather than interpreting missing coverage
+as no news.
 
 The repository commits the successful execution, new Revision, and changed
 chain head in one SQLite transaction after rechecking the baseline. Failure,
@@ -368,7 +371,7 @@ markdown
 report_sections[{id, title, anchor, source_refs}]
 confidence
 key_claims[{id, section_id, kind, importance, statement, implication,
-            confidence, evidence_refs}]
+            confidence, evidence_refs, required_sources}]
 source_refs
 audit_status: complete | incomplete
 warnings

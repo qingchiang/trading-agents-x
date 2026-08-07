@@ -39,7 +39,7 @@ def _run(edinet, media, tdnet=_TDNET_EMPTY):
         mock.patch.object(jp_news, "_tdnet_news", **_spec(tdnet)),
         mock.patch.object(jp_news, "_google_news", **_spec(media)),
     ):
-        return jp_news.get_news("4568.T", "a", "b")
+        return jp_news.get_news("4568.T", "2026-07-03", "2026-07-17")
 
 
 def _block(source: str, titles: list[str]) -> str:
@@ -238,8 +238,16 @@ class JpNewsAssemblerTests(unittest.TestCase):
         media.assert_called_once_with("4568.T", "2026-07-03", "2026-07-17")
 
     def test_both_empty_raises_no_market_data(self):
-        with self.assertRaises(NoMarketDataError):
+        with self.assertRaises(NoMarketDataError) as context:
             _run(_EDINET_EMPTY, _MEDIA_EMPTY)
+        watermarks = extract_source_watermarks(
+            "\n".join(context.exception.availability_notes)
+        )
+        assert {item.source for item in watermarks} == {
+            "EDINET",
+            "TDnet",
+            "Google News",
+        }
 
     def test_edinet_error_and_empty_media_raises(self):
         with self.assertRaises(NoMarketDataError) as ctx:
