@@ -8,6 +8,19 @@ possible later enhancement for that detail.
 
 from __future__ import annotations
 
+import hashlib
+import json
+from collections import defaultdict
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+from tradingagents.provenance import (
+    SourceObservation,
+    SourceWatermark,
+    attach_source_observations,
+    attach_source_watermarks,
+)
+
 from ..symbol_utils import NoMarketDataError
 from .jquants_common import (
     from_jquants_code,
@@ -18,6 +31,32 @@ from .jquants_common import (
 
 # How many recent disclosed periods to show in each statement.
 _PERIOD_LIMIT = 4
+# A listed Japanese issuer normally reports at least semi-annually. A snapshot
+# older than this cannot prove that currently relevant fundamentals were
+# observed, so coverage must fail closed rather than imply "unchanged".
+_MAX_DISCLOSURE_AGE_DAYS = 180
+_TOKYO = ZoneInfo("Asia/Tokyo")
+_NUMERIC_FIELDS = (
+    "Sales",
+    "OP",
+    "OdP",
+    "NP",
+    "EPS",
+    "BPS",
+    "TA",
+    "Eq",
+    "CFO",
+    "CFI",
+    "CFF",
+    "CashEq",
+    "ShOutFY",
+    "TrShFY",
+    "DivAnn",
+    "PayoutRatioAnn",
+    "EqAR",
+    "FEPS",
+    "NxFEPS",
+)
 
 
 def _fmt(value) -> str:
@@ -101,7 +140,7 @@ def _fetch_summary(code: str) -> list[dict]:
     return memoized_fetch(_summary_cache, code, "/fins/summary", {"code": code}, "data")
 
 
-def _fetch_summary_periods(symbol: str, curr_date: str | None):
+def _visible_summary_records(symbol: str, curr_date: str | None):
     """Return ``(canonical, records)`` for ``symbol``, newest disclosure first.
 
     Filters out periods disclosed after ``curr_date`` to prevent look-ahead bias.
@@ -115,9 +154,11 @@ def _fetch_summary_periods(symbol: str, curr_date: str | None):
     if not records:
         raise NoMarketDataError(symbol, canonical, "no financial summary disclosed")
 
+    excluded_undated = False
     if curr_date:
         # Require a DiscDate <= curr_date: an undated row can't be confirmed to
         # predate curr_date, so excluding it keeps the look-ahead guard sound.
+        excluded_undated = any(not record.get("DiscDate") for record in records)
         records = [r for r in records if r.get("DiscDate") and r.get("DiscDate") <= curr_date]
         if not records:
             raise NoMarketDataError(
@@ -141,7 +182,193 @@ def _fetch_summary_periods(symbol: str, curr_date: str | None):
             reverse=True,
         )
     ]
+    return canonical, ordered, excluded_undated
+
+
+def _fetch_summary_periods(symbol: str, curr_date: str | None):
+    canonical, ordered, _excluded_undated = _visible_summary_records(symbol, curr_date)
     return canonical, _dedupe_periods(ordered)
+
+
+def _comparison_key(canonical: str, record: dict) -> str:
+    parts = (
+        canonical.removesuffix(".T"),
+        str(record.get("CurPerType") or "unknown"),
+        str(record.get("CurPerEn") or record.get("CurFYEn") or "unknown"),
+    )
+    return "jquants-fundamental:" + ":".join(parts)
+
+
+def _record_identity(canonical: str, record: dict) -> str:
+    return _comparison_key(canonical, record)
+
+
+def _native_record_identity(record: dict) -> str | None:
+    disclosure_number = record.get("DiscNo") or record.get("DisclosureNumber")
+    if disclosure_number:
+        return str(disclosure_number)
+    return None
+
+
+def _record_version(record: dict) -> str:
+    payload = json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return "jquants-fundamental:" + hashlib.sha256(payload.encode()).hexdigest()[:20]
+
+
+def _accounting_scope(record: dict) -> str:
+    return _reporting_basis(record).casefold().replace(", ", ":").replace(" ", "-")
+
+
+def _is_correction(record: dict) -> bool:
+    value = (
+        str(
+            record.get("CorrectionFlag")
+            or record.get("CorrectionFlg")
+            or record.get("IsCorrection")
+            or ""
+        )
+        .strip()
+        .casefold()
+    )
+    return value in {"1", "true", "yes", "y"}
+
+
+def _is_true(record: dict, *keys: str) -> bool:
+    return any(
+        str(record.get(key) or "").strip().casefold() in {"1", "true", "yes", "y"} for key in keys
+    )
+
+
+def _explicit_restatement(record: dict) -> bool:
+    return _is_true(record, "RetrospectiveRestatement", "RetroRest")
+
+
+def _explicit_accounting_change(record: dict) -> bool:
+    return _is_true(
+        record,
+        "SignificantChangesInTheScopeOfConsolidation",
+        "ChangesBasedOnRevisionsOfAccountingStandard",
+        "ChangesOtherThanOnesBasedOnRevisionsOfAccountingStandard",
+        "ChangesInAccountingEstimates",
+        "SigChgInScopeOfCons",
+        "ChgBasedRevOfAccStd",
+        "ChgOtherRevOfAccStd",
+        "ChgInAccEst",
+    )
+
+
+def _changed_numeric_values(previous: dict, current: dict) -> bool:
+    return any(previous.get(key) != current.get(key) for key in _NUMERIC_FIELDS)
+
+
+def _available_at(record: dict) -> str:
+    day = str(record.get("DiscDate") or "")
+    raw_time = str(record.get("DiscTime") or "15:30:00")
+    try:
+        return datetime.fromisoformat(f"{day}T{raw_time}").replace(tzinfo=_TOKYO).isoformat()
+    except ValueError:
+        return datetime.fromisoformat(f"{day}T23:59:59").replace(tzinfo=_TOKYO).isoformat()
+
+
+def _snapshot_metadata(
+    canonical: str,
+    records: list[dict],
+    curr_date: str | None,
+    *,
+    excluded_undated: bool = False,
+):
+    grouped: dict[str, list[dict]] = defaultdict(list)
+    dated_records = [record for record in records if record.get("DiscDate")]
+    for record in reversed(dated_records):
+        grouped[_comparison_key(canonical, record)].append(record)
+    observations = []
+    for comparison_key, versions in grouped.items():
+        previous = None
+        previous_version = None
+        for record in versions:
+            version_id = _record_version(record)
+            record_id = _record_identity(canonical, record)
+            scope = _accounting_scope(record)
+            correction = _is_correction(record)
+            if previous is None:
+                hint = "new_filing"
+            elif _accounting_scope(previous) != scope or _explicit_accounting_change(record):
+                hint = "accounting_scope_change"
+            elif _explicit_restatement(record):
+                hint = "restatement"
+            elif correction:
+                hint = "correction"
+            elif _changed_numeric_values(previous, record):
+                hint = "unclassifiable"
+            else:
+                hint = "unclassifiable"
+            observations.append(
+                SourceObservation(
+                    source="J-Quants fundamentals",
+                    record_id=record_id,
+                    version_id=version_id,
+                    status=(
+                        "corrected"
+                        if correction or hint in {"correction", "restatement"}
+                        else "published"
+                    ),
+                    published_at=(
+                        f"{record.get('DiscDate')} {record.get('DiscTime') or ''}".strip()
+                    ),
+                    available_at=_available_at(record),
+                    availability_basis="official disclosure date and time",
+                    title=(
+                        f"{record.get('CurPerType') or 'Financial summary'} "
+                        f"ending {record.get('CurPerEn') or record.get('CurFYEn') or '?'}"
+                    ),
+                    replaces_version_id=previous_version,
+                    record_kind="fundamental",
+                    native_record_id=_native_record_identity(record),
+                    comparison_key=comparison_key,
+                    change_hint=hint,
+                    accounting_scope=scope,
+                )
+            )
+            previous = record
+            previous_version = version_id
+    dates = [str(record["DiscDate"]) for record in dated_records]
+    scan_boundary = curr_date or datetime.now(_TOKYO).date().isoformat()
+    limitations = []
+    if len(dated_records) != len(records) or excluded_undated:
+        limitations.append("Rows without a disclosure date were excluded from the PIT snapshot.")
+    if dates:
+        newest_disclosure = datetime.strptime(max(dates), "%Y-%m-%d").date()
+        cutoff = datetime.strptime(scan_boundary, "%Y-%m-%d").date()
+        if cutoff - newest_disclosure > timedelta(days=_MAX_DISCLOSURE_AGE_DAYS):
+            limitations.append(
+                "Latest visible disclosure is older than 180 days at the analysis cutoff."
+            )
+    limitations = tuple(limitations)
+    watermark = SourceWatermark(
+        source="J-Quants fundamentals",
+        scanned_start=min(dates) if dates else scan_boundary,
+        scanned_end=scan_boundary,
+        status="limited" if limitations else "complete",
+        limitations=limitations,
+        returned_records=len(dated_records),
+        reported_records=len(records),
+    )
+    return tuple(observations), watermark
+
+
+def _fetch_summary_snapshot(symbol: str, curr_date: str | None):
+    canonical, records, excluded_undated = _visible_summary_records(symbol, curr_date)
+    observations, watermark = _snapshot_metadata(
+        canonical,
+        records,
+        curr_date,
+        excluded_undated=excluded_undated,
+    )
+    return canonical, _dedupe_periods(records), observations, watermark
+
+
+def _attach_snapshot_metadata(text: str, observations, watermark: SourceWatermark) -> str:
+    return attach_source_watermarks(attach_source_observations(text, *observations), watermark)
 
 
 def fetch_periods(ticker: str, curr_date: str | None = None):
@@ -179,47 +406,67 @@ def _render_periods(canonical, records, freq, title, field_specs) -> str:
 
 def get_fundamentals(ticker: str, curr_date: str | None = None) -> str:
     """Headline fundamentals overview from the latest disclosed period."""
-    canonical, records = _fetch_summary_periods(ticker, curr_date)
+    canonical, records, observations, watermark = _fetch_summary_snapshot(ticker, curr_date)
     r = records[0]
-    return "\n".join([
-        f"# Fundamentals overview for {canonical} (J-Quants summary)",
-        f"Latest disclosure: {r.get('DocType', '?')} — {_period_label(r)}",
-        f"Reporting basis: {_reporting_basis(r)}",
-        f"Net sales: {_fmt(r.get('Sales'))}",
-        f"Operating profit: {_fmt_field(r, 'OP')}    "
-        f"Ordinary profit: {_fmt_field(r, 'OdP')}",
-        f"Net profit: {_fmt(r.get('NP'))}",
-        f"EPS: {_fmt(r.get('EPS'))}    BPS: {_fmt(r.get('BPS'))}",
-        f"Total assets: {_fmt(r.get('TA'))}    Net assets: {_fmt(r.get('Eq'))}",
-        f"Cash flows — operating: {_fmt(r.get('CFO'))}, investing: {_fmt(r.get('CFI'))}, "
-        f"financing: {_fmt(r.get('CFF'))}",
-        f"Cash & equivalents (period end): {_fmt(r.get('CashEq'))}",
-    ])
+    body = "\n".join(
+        [
+            f"# Fundamentals overview for {canonical} (J-Quants summary)",
+            f"Latest disclosure: {r.get('DocType', '?')} — {_period_label(r)}",
+            f"Reporting basis: {_reporting_basis(r)}",
+            f"Net sales: {_fmt(r.get('Sales'))}",
+            f"Operating profit: {_fmt_field(r, 'OP')}    Ordinary profit: {_fmt_field(r, 'OdP')}",
+            f"Net profit: {_fmt(r.get('NP'))}",
+            f"EPS: {_fmt(r.get('EPS'))}    BPS: {_fmt(r.get('BPS'))}",
+            f"Total assets: {_fmt(r.get('TA'))}    Net assets: {_fmt(r.get('Eq'))}",
+            f"Cash flows — operating: {_fmt(r.get('CFO'))}, investing: {_fmt(r.get('CFI'))}, "
+            f"financing: {_fmt(r.get('CFF'))}",
+            f"Cash & equivalents (period end): {_fmt(r.get('CashEq'))}",
+        ]
+    )
+    return _attach_snapshot_metadata(body, observations, watermark)
 
 
 def get_balance_sheet(ticker: str, freq: str = "quarterly", curr_date: str | None = None) -> str:
     """Balance-sheet summary (total assets, derived liabilities, net assets)."""
-    canonical, records = _fetch_summary_periods(ticker, curr_date)
-    return _render_periods(
-        canonical, records, freq, "Balance sheet summary",
+    canonical, records, observations, watermark = _fetch_summary_snapshot(ticker, curr_date)
+    body = _render_periods(
+        canonical,
+        records,
+        freq,
+        "Balance sheet summary",
         [("TotalAssets", "TA"), ("TotalLiabilities", _liabilities), ("NetAssets", "Eq")],
     )
+    return _attach_snapshot_metadata(body, observations, watermark)
 
 
 def get_cashflow(ticker: str, freq: str = "quarterly", curr_date: str | None = None) -> str:
     """Cash-flow summary (operating/investing/financing + period-end cash)."""
-    canonical, records = _fetch_summary_periods(ticker, curr_date)
-    return _render_periods(
-        canonical, records, freq, "Cash flow summary",
+    canonical, records, observations, watermark = _fetch_summary_snapshot(ticker, curr_date)
+    body = _render_periods(
+        canonical,
+        records,
+        freq,
+        "Cash flow summary",
         [("Operating", "CFO"), ("Investing", "CFI"), ("Financing", "CFF"), ("CashEnd", "CashEq")],
     )
+    return _attach_snapshot_metadata(body, observations, watermark)
 
 
 def get_income_statement(ticker: str, freq: str = "quarterly", curr_date: str | None = None) -> str:
     """Income-statement summary (sales, operating/ordinary/net profit, EPS, BPS)."""
-    canonical, records = _fetch_summary_periods(ticker, curr_date)
-    return _render_periods(
-        canonical, records, freq, "Income statement summary",
-        [("NetSales", "Sales"), ("OperatingProfit", "OP"), ("OrdinaryProfit", "OdP"),
-         ("NetProfit", "NP"), ("EPS", "EPS"), ("BPS", "BPS")],
+    canonical, records, observations, watermark = _fetch_summary_snapshot(ticker, curr_date)
+    body = _render_periods(
+        canonical,
+        records,
+        freq,
+        "Income statement summary",
+        [
+            ("NetSales", "Sales"),
+            ("OperatingProfit", "OP"),
+            ("OrdinaryProfit", "OdP"),
+            ("NetProfit", "NP"),
+            ("EPS", "EPS"),
+            ("BPS", "BPS"),
+        ],
     )
+    return _attach_snapshot_metadata(body, observations, watermark)

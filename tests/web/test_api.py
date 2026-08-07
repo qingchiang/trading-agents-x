@@ -19,6 +19,7 @@ from tradingagents.application.contracts import (
     ArtifactGenerationObservation,
     EvidenceBundle,
     EvidenceItem,
+    MarketReferenceLevel,
     ResearchArtifactDraft,
     RunStatus,
 )
@@ -44,11 +45,13 @@ class _FullResearchGraph:
         pass
 
     def execute(self, context, **_kwargs):
+        cutoff = context.request.analysis_date
+        close = 95.0 if cutoff == date(2026, 7, 24) else 101.0
         item = EvidenceItem.create(
             source="fixture",
             evidence_type="fixture",
-            requested_date=date(2026, 7, 24),
-            effective_date=date(2026, 7, 24),
+            requested_date=cutoff,
+            effective_date=cutoff,
             content="Evidence for the initial chain.",
             provenance={
                 "source_records": [
@@ -60,6 +63,20 @@ class _FullResearchGraph:
                         "published_at": "2026-07-23 15:00",
                         "available_at": "2026-07-23T15:00:00+09:00",
                         "title": "有価証券報告書",
+                    },
+                    {
+                        "source": "J-Quants adjusted OHLCV",
+                        "record_id": "jquants-market:6501.T",
+                        "version_id": f"jquants-market:{close}",
+                        "status": "published",
+                        "published_at": f"{cutoff.isoformat()} 15:30",
+                        "available_at": f"{cutoff.isoformat()}T15:30:00+09:00",
+                        "title": f"Adjusted market history through {cutoff.isoformat()}",
+                        "record_kind": "market",
+                        "adjustment": "J-Quants adjusted OHLCV v2",
+                        "observation_value": close,
+                        "unit": "JPY",
+                        "precision": 2,
                     }
                 ],
                 "source_watermarks": [
@@ -71,13 +88,20 @@ class _FullResearchGraph:
                         "limitations": ["rolling archive limited"],
                         "returned_records": 2,
                         "reported_records": 5,
+                    },
+                    {
+                        "source": "J-Quants adjusted OHLCV",
+                        "scanned_start": "2025-06-01",
+                        "scanned_end": cutoff.isoformat(),
+                        "status": "complete",
+                        "returned_records": 250,
                     }
                 ],
             },
         )
         evidence = EvidenceBundle(
             instrument=context.request.ticker,
-            analysis_date=date(2026, 7, 24),
+            analysis_date=cutoff,
             items=(item,),
         )
         report = analyst_report(evidence_ref=item.ref)
@@ -94,7 +118,23 @@ class _FullResearchGraph:
             state={},
             evidence=evidence,
             reports={"market": report},
-            decision=research_decision(evidence_refs=(item.ref,)),
+            decision=research_decision(evidence_refs=(item.ref,)).model_copy(
+                update={
+                    "market_reference_levels": (
+                    MarketReferenceLevel(
+                        label="Thesis reference",
+                        value=100.0,
+                        measurement_kind="currency",
+                        unit="JPY",
+                        as_of_date=cutoff,
+                        interpretation="Crossing changes the thesis envelope.",
+                        evidence_refs=(item.ref,),
+                        date_evidence_refs=(item.ref,),
+                        basis="interpreted",
+                    ),
+                    )
+                }
+            ),
         )
 
 
@@ -195,6 +235,21 @@ async def test_initial_research_chain_creation_read_and_export_surfaces(
     assert update.status_code == 202
     assert duplicate.json()["id"] == update.json()["id"]
     assert update.json()["research_execution_strategy"] == "full"
+    update_claim = web_repository.claim_run(
+        update.json()["id"], "test-worker", web_settings.lease_seconds
+    )
+    service.execute_claimed(update_claim, worker_id="test-worker")
+    advanced = (await web_client.get(f"/api/v1/research-chains/{chain['id']}")).json()
+    current_id = advanced["current_revision_id"]
+    current = (await web_client.get(f"/api/v1/research-revisions/{current_id}")).json()
+    signal = current["delta"]["change_signals"][0]
+    assert signal["kind"] == "market_boundary_crossing"
+    assert signal["previous_value"] == 95.0
+    assert signal["current_value"] == 101.0
+    updated_export = await web_client.get(
+        f"/api/v1/research-revisions/{current_id}/export?format=json"
+    )
+    assert updated_export.json()["revision"]["delta"]["change_signals"] == [signal]
 
 
 @pytest.mark.anyio

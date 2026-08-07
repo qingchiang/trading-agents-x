@@ -861,6 +861,14 @@
             "title": "Language",
             "type": "string"
           },
+          "market_reference_levels": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/MarketReferenceLevel"
+            },
+            "title": "Market Reference Levels",
+            "type": "array"
+          },
           "opinion": {
             "$ref": "#/components/schemas/ResearchOpinion"
           },
@@ -3364,6 +3372,126 @@
         "title": "ResearchChainUpdateRequest",
         "type": "object"
       },
+      "ResearchChangeKind": {
+        "enum": [
+          "new_fundamental_filing",
+          "fundamental_correction",
+          "fundamental_restatement",
+          "accounting_scope_change",
+          "unclassifiable_fundamental_change",
+          "market_semantic_incompatibility",
+          "market_boundary_crossing",
+          "ordinary_market_move",
+          "unchanged_observation"
+        ],
+        "title": "ResearchChangeKind",
+        "type": "string"
+      },
+      "ResearchChangeSignal": {
+        "additionalProperties": false,
+        "properties": {
+          "boundary_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Boundary Label"
+          },
+          "boundary_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Boundary Value"
+          },
+          "current_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Value"
+          },
+          "current_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Version Id"
+          },
+          "detail": {
+            "minLength": 1,
+            "title": "Detail",
+            "type": "string"
+          },
+          "domain": {
+            "enum": [
+              "fundamentals",
+              "market"
+            ],
+            "title": "Domain",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ResearchChangeKind"
+          },
+          "previous_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Value"
+          },
+          "previous_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Version Id"
+          },
+          "record_id": {
+            "minLength": 1,
+            "title": "Record Id",
+            "type": "string"
+          },
+          "requires_full_analysis": {
+            "title": "Requires Full Analysis",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind",
+          "domain",
+          "record_id",
+          "requires_full_analysis",
+          "detail"
+        ],
+        "title": "ResearchChangeSignal",
+        "type": "object"
+      },
       "ResearchClaim": {
         "additionalProperties": false,
         "properties": {
@@ -4100,6 +4228,14 @@
       "RevisionDelta": {
         "additionalProperties": false,
         "properties": {
+          "change_signals": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchChangeSignal"
+            },
+            "title": "Change Signals",
+            "type": "array"
+          },
           "changed_sections": {
             "default": [],
             "items": {
@@ -5213,6 +5349,15 @@
         "title": "ScenarioReferenceRange",
         "type": "object"
       },
+      "SourceRecordKind": {
+        "enum": [
+          "disclosure",
+          "fundamental",
+          "market"
+        ],
+        "title": "SourceRecordKind",
+        "type": "string"
+      },
       "SourceRecordSnapshotItem": {
         "additionalProperties": false,
         "properties": {
@@ -5266,10 +5411,72 @@
       "SourceRecordVersion": {
         "additionalProperties": false,
         "properties": {
+          "accounting_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accounting Scope"
+          },
+          "adjustment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adjustment"
+          },
+          "availability_basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Availability Basis"
+          },
           "available_at": {
             "format": "date-time",
             "title": "Available At",
             "type": "string"
+          },
+          "change_hint": {
+            "anyOf": [
+              {
+                "enum": [
+                  "new_filing",
+                  "correction",
+                  "restatement",
+                  "accounting_scope_change",
+                  "unclassifiable"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Hint"
+          },
+          "comparison_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparison Key"
           },
           "evidence_ref": {
             "pattern": "^ev_[a-f0-9]{12}$",
@@ -5281,6 +5488,40 @@
             "title": "Fallback",
             "type": "boolean"
           },
+          "native_record_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Native Record Id"
+          },
+          "observation_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observation Value"
+          },
+          "precision": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Precision"
+          },
           "published_at": {
             "minLength": 1,
             "title": "Published At",
@@ -5290,6 +5531,10 @@
             "minLength": 1,
             "title": "Record Id",
             "type": "string"
+          },
+          "record_kind": {
+            "$ref": "#/components/schemas/SourceRecordKind",
+            "default": "disclosure"
           },
           "replaces_version_id": {
             "anyOf": [
@@ -5314,6 +5559,17 @@
             "minLength": 1,
             "title": "Title",
             "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
           },
           "url": {
             "anyOf": [

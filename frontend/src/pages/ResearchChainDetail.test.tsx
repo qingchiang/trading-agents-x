@@ -28,6 +28,25 @@ const chain = {
     created_at: "2026-07-24T00:00:00Z",
     metrics: { input_tokens: 1200, output_tokens: 300 },
     update_summary: { summary: "初回のフル分析を完了。" },
+    delta: {
+      claims: [],
+      questions: [],
+      change_signals: [
+        {
+          kind: "market_boundary_crossing",
+          domain: "market",
+          record_id: "jquants-market:6501.T",
+          previous_version_id: "market:v1",
+          current_version_id: "market:v2",
+          requires_full_analysis: true,
+          detail: "The observed market value crossed a thesis-relevant reference.",
+          boundary_label: "Thesis reference",
+          boundary_value: 100,
+          previous_value: 95,
+          current_value: 101,
+        },
+      ],
+    },
     current_state: {
       language: "ja",
       instrument: "6501.T",
@@ -77,9 +96,15 @@ const chain = {
           status: "corrected",
           published_at: "2026-07-23 15:00",
           available_at: "2026-07-23T15:00:00+09:00",
+          availability_basis: "source disclosure timestamp",
           title: "訂正有価証券報告書",
           evidence_ref: "ev_0123456789ab",
           replaces_version_id: "edinet:S100ROOT",
+          native_record_id: "S100CORRECTION",
+          adjustment: "J-Quants adjusted OHLCV v2",
+          unit: "JPY",
+          precision: 2,
+          fallback: true,
         },
       ],
       source_record_lineage: [
@@ -128,8 +153,16 @@ test("reads the complete current thesis, coverage, evidence, reports, and metric
   expect(screen.getByText("订单同比增长。")).toBeVisible();
   expect(screen.getByText("訂正有価証券報告書")).toBeVisible();
   expect(screen.getByText(/edinet:S100CORRECTION/)).toBeVisible();
+  expect(screen.getByText(/native S100CORRECTION/)).toBeVisible();
+  expect(screen.getByText(/source disclosure timestamp/)).toBeVisible();
+  expect(screen.getByText(/JPY\/2/)).toBeVisible();
+  expect(screen.getByText(/fallback true/)).toBeVisible();
   expect(screen.getByText(/2026-06-24.*2026-07-24/)).toBeVisible();
   expect(screen.getByText("rolling archive truncated the requested interval")).toBeVisible();
+  expect(screen.getByText("market_boundary_crossing")).toBeVisible();
+  expect(screen.getByText(/Thesis reference: 100/)).toBeVisible();
+  expect(screen.getByText(/95 → 101/)).toBeVisible();
+  expect(screen.getByText(/requires Full Analysis/)).toBeVisible();
   expect(screen.getByText("Quiet reassessment blocked")).toBeVisible();
   expect(screen.getByRole("link", { name: "Full analysis" })).toHaveAttribute(
     "href",

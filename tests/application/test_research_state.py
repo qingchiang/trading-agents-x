@@ -10,6 +10,7 @@ from tradingagents.application.contracts import (
     AnalysisRequest,
     EvidenceBundle,
     EvidenceItem,
+    MarketReferenceLevel,
     ReportLanguage,
     ResearchQuestionSourceDependency,
     ResearchRating,
@@ -26,6 +27,7 @@ from tradingagents.application.research import (
     EpistemicKind,
     QuestionStatus,
     ResearchChain,
+    ResearchChangeKind,
     ResearchClaim,
     ResearchObjectCoverage,
     ResearchOpinion,
@@ -158,7 +160,7 @@ def test_full_state_assembly_assigns_ids_and_preserves_selected_language():
     assert {item.lineage for item in draft.evidence_snapshot.lineage} == {"new"}
     assert draft.update_summary.language == "ja"
     missing_sources = {item.source for item in draft.coverage.domains if item.source}
-    assert missing_sources == {"EDINET", "TDnet"}
+    assert missing_sources == {"EDINET", "TDnet", "J-Quants adjusted OHLCV"}
     assert draft.coverage.supports_no_material_change is False
 
 
@@ -288,6 +290,46 @@ def test_revision_snapshot_retains_disclosure_versions_and_source_coverage():
     assert draft.coverage.supports_no_material_change is False
 
 
+def test_revision_deduplicates_one_source_version_observed_by_multiple_tools():
+    metadata = {
+        "source_records": [
+            {
+                **_source_record("jquants-fundamental:stable"),
+                "source": "J-Quants fundamentals",
+                "record_id": "jquants-fundamental:6501:202607240001",
+                "record_kind": "fundamental",
+                "comparison_key": "6501:FY:2026-03-31",
+            }
+        ],
+        "source_watermarks": [_watermark("J-Quants fundamentals")],
+    }
+    execution = _execution("6501.T")
+    first = execution.evidence.items[0].model_copy(update={"provenance": metadata})
+    second = EvidenceItem.create(
+        source="J-Quants fundamentals",
+        evidence_type="income statement",
+        requested_date=CUTOFF,
+        effective_date=CUTOFF,
+        content="The same official summary rendered as an income statement.",
+        provenance=metadata,
+    )
+    execution = execution.__class__(
+        state=execution.state,
+        evidence=EvidenceBundle(instrument="6501.T", analysis_date=CUTOFF, items=(first, second)),
+        reports=execution.reports,
+        decision=execution.decision,
+    )
+
+    draft = assemble_full_revision(
+        AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
+        execution,
+    )
+
+    assert [item.version_id for item in draft.evidence_snapshot.source_records] == [
+        "jquants-fundamental:stable"
+    ]
+
+
 def test_revision_preserves_disjoint_source_watermark_intervals():
     execution = _with_disclosure_metadata(
         _execution("6501.T"),
@@ -369,9 +411,7 @@ def test_full_update_preserves_corrected_versions_with_overlap_lineage():
         baseline_execution,
     )
     candidate = assemble_full_revision(
-        AnalysisRequest(
-            ticker="6501.T", analysis_date=date(2026, 7, 25), analysts=("market",)
-        ),
+        AnalysisRequest(ticker="6501.T", analysis_date=date(2026, 7, 25), analysts=("market",)),
         candidate_execution,
     )
 
@@ -381,9 +421,7 @@ def test_full_update_preserves_corrected_versions_with_overlap_lineage():
         "edinet:S100ROOT",
         "edinet:S100CORRECTION",
     }
-    lineage = {
-        item.version_id: item for item in updated.evidence_snapshot.source_record_lineage
-    }
+    lineage = {item.version_id: item for item in updated.evidence_snapshot.source_record_lineage}
     assert lineage["edinet:S100ROOT"].lineage == "inherited"
     assert lineage["edinet:S100ROOT"].observed_in_execution is True
     assert lineage["edinet:S100CORRECTION"].lineage == "new"
@@ -408,15 +446,301 @@ def test_full_update_preserves_corrected_versions_with_overlap_lineage():
         updated_at="2026-07-25T00:00:00Z",
     )
 
-    exported = render_revision_export_markdown(
-        RevisionExport(chain=chain, revision=revision)
-    )
+    exported = render_revision_export_markdown(RevisionExport(chain=chain, revision=revision))
 
     assert "## Source Watermarks" in exported
     assert "EDINET: 2026-07-01 to 2026-07-24" in exported
     assert "## Source Record Versions" in exported
     assert "edinet:S100CORRECTION" in exported
     assert "corrected" in exported
+
+
+def test_full_update_classifies_fundamental_restatement_and_scope_change():
+    base_record = {
+        **_source_record("jquants-fundamental:v1"),
+        "source": "J-Quants fundamentals",
+        "record_id": "jquants-fundamental:6501:FY:2026-03-31",
+        "record_kind": "fundamental",
+        "native_record_id": "202607240001",
+        "comparison_key": "6501:FY:2026-03-31",
+        "accounting_scope": "consolidated:ifrs",
+    }
+    changed_record = {
+        **base_record,
+        "version_id": "jquants-fundamental:v2",
+        "status": "corrected",
+        "change_hint": "restatement",
+        "replaces_version_id": "jquants-fundamental:v1",
+    }
+    scope_record = {
+        **changed_record,
+        "version_id": "jquants-fundamental:v3",
+        "accounting_scope": "non-consolidated:japanese-gaap",
+        "change_hint": "accounting_scope_change",
+        "replaces_version_id": "jquants-fundamental:v2",
+    }
+    new_filing = {
+        **base_record,
+        "record_id": "jquants-fundamental:6501:202607250001",
+        "version_id": "jquants-fundamental:new-period",
+        "comparison_key": "6501:1Q:2026-06-30",
+        "change_hint": "new_filing",
+        "replaces_version_id": None,
+    }
+    complete = [
+        _watermark("EDINET"),
+        _watermark("TDnet"),
+        _watermark("J-Quants fundamentals"),
+    ]
+    baseline = assemble_full_revision(
+        AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
+        _with_disclosure_metadata(_execution("6501.T"), records=[base_record], watermarks=complete),
+    )
+    candidate = assemble_full_revision(
+        AnalysisRequest(ticker="6501.T", analysis_date=date(2026, 7, 25), analysts=("market",)),
+        _with_disclosure_metadata(
+            _execution("6501.T"),
+            records=[changed_record, scope_record, new_filing],
+            watermarks=complete,
+        ),
+    )
+
+    updated = assemble_full_update("revision-1", baseline, candidate)
+
+    assert [item.kind for item in updated.delta.change_signals] == [
+        ResearchChangeKind.FUNDAMENTAL_RESTATEMENT,
+        ResearchChangeKind.ACCOUNTING_SCOPE_CHANGE,
+        ResearchChangeKind.NEW_FUNDAMENTAL_FILING,
+    ]
+    assert all(item.requires_full_analysis for item in updated.delta.change_signals)
+    revision = ResearchRevision(
+        **updated.model_dump(),
+        id="revision-fundamentals",
+        chain_id="chain-1",
+        sequence=2,
+        predecessor_revision_id="revision-1",
+        created_at="2026-07-25T00:00:00Z",
+    )
+    chain = ResearchChain(
+        id="chain-1",
+        instrument="6501.T",
+        is_primary=True,
+        current_revision_id=revision.id,
+        created_at="2026-07-24T00:00:00Z",
+        updated_at="2026-07-25T00:00:00Z",
+    )
+    exported = render_revision_export_markdown(RevisionExport(chain=chain, revision=revision))
+    assert "## Fundamental and Market Change Signals" in exported
+    assert "fundamental_restatement" in exported
+    assert "accounting_scope_change" in exported
+    assert "native record: 202607240001" in exported
+    assert "fallback: false" in exported
+
+
+@pytest.mark.parametrize(
+    ("candidate_updates", "expected"),
+    [
+        (
+            {"status": "corrected", "change_hint": "correction"},
+            ResearchChangeKind.FUNDAMENTAL_CORRECTION,
+        ),
+        (
+            {"status": "published", "change_hint": "unclassifiable"},
+            ResearchChangeKind.UNCLASSIFIABLE_FUNDAMENTAL_CHANGE,
+        ),
+    ],
+)
+def test_full_update_classifies_other_fundamental_snapshot_differences(
+    candidate_updates,
+    expected,
+):
+    baseline_record = {
+        **_source_record("fundamental:v1"),
+        "source": "J-Quants fundamentals",
+        "record_id": "jquants-disclosure:1",
+        "record_kind": "fundamental",
+        "comparison_key": "6501:FY:2026-03-31",
+        "accounting_scope": "consolidated:ifrs",
+    }
+    candidate_record = {
+        **baseline_record,
+        "version_id": "fundamental:v2",
+        "record_id": "jquants-disclosure:2",
+        "replaces_version_id": "fundamental:v1",
+        **candidate_updates,
+    }
+    watermarks = [
+        _watermark("EDINET"),
+        _watermark("TDnet"),
+        _watermark("J-Quants fundamentals"),
+    ]
+    baseline = assemble_full_revision(
+        AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("fundamentals",)),
+        _with_disclosure_metadata(
+            _execution("6501.T"), records=[baseline_record], watermarks=watermarks
+        ),
+    )
+    candidate = assemble_full_revision(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date=date(2026, 7, 25),
+            analysts=("fundamentals",),
+        ),
+        _with_disclosure_metadata(
+            _execution("6501.T"), records=[candidate_record], watermarks=watermarks
+        ),
+    )
+
+    updated = assemble_full_update("revision-1", baseline, candidate)
+
+    assert updated.delta.change_signals[0].kind is expected
+    assert updated.delta.change_signals[0].record_id == "jquants-disclosure:2"
+    assert updated.coverage.supports_no_material_change is False
+
+
+def test_full_update_fails_closed_for_market_semantic_incompatibility_and_records_unchanged():
+    def market_record(version: str, adjustment: str):
+        return {
+            **_source_record(version),
+            "source": "J-Quants adjusted OHLCV",
+            "record_id": "jquants-market:6501",
+            "record_kind": "market",
+            "adjustment": adjustment,
+            "observation_value": 95.0,
+            "unit": "JPY",
+        }
+
+    watermarks = [
+        _watermark("EDINET"),
+        _watermark("TDnet"),
+        _watermark("J-Quants adjusted OHLCV"),
+    ]
+
+    def draft(cutoff, record):
+        return assemble_full_revision(
+            AnalysisRequest(ticker="6501.T", analysis_date=cutoff, analysts=("market",)),
+            _with_disclosure_metadata(
+                _execution("6501.T"), records=[record], watermarks=watermarks
+            ),
+        )
+
+    baseline_record = market_record("market:v1", "J-Quants adjusted OHLCV v2")
+    baseline = draft(CUTOFF, baseline_record)
+    unchanged = assemble_full_update(
+        "revision-1", baseline, draft(date(2026, 7, 25), baseline_record)
+    )
+    incompatible = assemble_full_update(
+        "revision-1",
+        baseline,
+        draft(date(2026, 7, 25), market_record("market:v2", "raw OHLCV")),
+    )
+
+    assert unchanged.delta.change_signals[0].kind is ResearchChangeKind.UNCHANGED_OBSERVATION
+    assert unchanged.delta.change_signals[0].requires_full_analysis is False
+    assert incompatible.delta.change_signals[0].kind is (
+        ResearchChangeKind.MARKET_SEMANTIC_INCOMPATIBILITY
+    )
+    assert incompatible.coverage.supports_no_material_change is False
+
+
+def test_full_update_does_not_use_baseline_market_watermark_for_missing_current_scan():
+    market_record = {
+        **_source_record("market:v1"),
+        "source": "J-Quants adjusted OHLCV",
+        "record_id": "jquants-market:6501",
+        "record_kind": "market",
+        "adjustment": "J-Quants adjusted OHLCV v2",
+        "observation_value": 95.0,
+        "unit": "JPY",
+    }
+    baseline = assemble_full_revision(
+        AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
+        _with_disclosure_metadata(
+            _execution("6501.T"),
+            records=[market_record],
+            watermarks=[
+                _watermark("EDINET"),
+                _watermark("TDnet"),
+                _watermark("J-Quants adjusted OHLCV"),
+            ],
+        ),
+    )
+    candidate = assemble_full_revision(
+        AnalysisRequest(ticker="6501.T", analysis_date=date(2026, 7, 25), analysts=("market",)),
+        _with_disclosure_metadata(
+            _execution("6501.T"),
+            records=[],
+            watermarks=[_watermark("EDINET"), _watermark("TDnet")],
+        ),
+    )
+
+    updated = assemble_full_update("revision-1", baseline, candidate)
+
+    market = next(
+        item for item in updated.coverage.domains if item.source == "J-Quants adjusted OHLCV"
+    )
+    assert market.status is CoverageStatus.UNAVAILABLE
+    assert updated.coverage.supports_no_material_change is False
+    assert updated.outcome is not ResearchRevisionOutcome.NO_MATERIAL_CHANGE
+
+
+def test_full_update_distinguishes_market_movement_from_boundary_crossing():
+    def market_record(version: str, value: float):
+        return {
+            **_source_record(version),
+            "source": "J-Quants adjusted OHLCV",
+            "record_id": "jquants-market:6501",
+            "record_kind": "market",
+            "adjustment": "J-Quants adjusted OHLCV v2",
+            "observation_value": value,
+            "unit": "JPY",
+        }
+
+    complete = [_watermark("EDINET"), _watermark("TDnet"), _watermark("J-Quants adjusted OHLCV")]
+    baseline = assemble_full_revision(
+        AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
+        _with_disclosure_metadata(
+            _execution("6501.T"), records=[market_record("market:v1", 95.0)], watermarks=complete
+        ),
+    )
+    boundary = MarketReferenceLevel(
+        label="Thesis reference",
+        value=100.0,
+        measurement_kind="currency",
+        unit="JPY",
+        as_of_date=CUTOFF,
+        interpretation="Crossing changes the thesis envelope.",
+        evidence_refs=(REF,),
+        date_evidence_refs=(REF,),
+        basis="interpreted",
+    )
+    baseline = baseline.model_copy(
+        update={
+            "current_state": baseline.current_state.model_copy(
+                update={"market_reference_levels": (boundary,)}
+            )
+        }
+    )
+
+    def update(value: float):
+        candidate = assemble_full_revision(
+            AnalysisRequest(ticker="6501.T", analysis_date=date(2026, 7, 25), analysts=("market",)),
+            _with_disclosure_metadata(
+                _execution("6501.T"),
+                records=[market_record(f"market:{value}", value)],
+                watermarks=complete,
+            ),
+        )
+        return assemble_full_update("revision-1", baseline, candidate)
+
+    ordinary = update(99.0)
+    crossed = update(101.0)
+
+    assert ordinary.delta.change_signals[0].kind is ResearchChangeKind.ORDINARY_MARKET_MOVE
+    assert ordinary.delta.change_signals[0].requires_full_analysis is False
+    assert crossed.delta.change_signals[0].kind is ResearchChangeKind.MARKET_BOUNDARY_CROSSING
+    assert crossed.delta.change_signals[0].boundary_label == "Thesis reference"
+    assert crossed.delta.change_signals[0].requires_full_analysis is True
 
 
 def test_inherited_correction_does_not_permanently_block_quiet_reassessment():
@@ -444,9 +768,7 @@ def test_inherited_correction_does_not_permanently_block_quiet_reassessment():
                 "invalidation_conditions": (),
             }
         )
-        claim_coverage = next(
-            item for item in draft.coverage.claims if item.object_id == claim.id
-        )
+        claim_coverage = next(item for item in draft.coverage.claims if item.object_id == claim.id)
         return draft.model_copy(
             update={
                 "cutoff": cutoff,
@@ -464,13 +786,24 @@ def test_inherited_correction_does_not_permanently_block_quiet_reassessment():
             status="corrected",
             replaces="edinet:S100ROOT",
         ),
+        {
+            **_source_record("jquants-market:stable"),
+            "source": "J-Quants adjusted OHLCV",
+            "record_id": "jquants-market:6501",
+            "record_kind": "market",
+            "adjustment": "J-Quants adjusted OHLCV v2",
+            "observation_value": 100.0,
+            "unit": "JPY",
+        },
     ]
-    complete_watermarks = [_watermark("EDINET"), _watermark("TDnet")]
+    complete_watermarks = [
+        _watermark("EDINET"),
+        _watermark("TDnet"),
+        _watermark("J-Quants adjusted OHLCV"),
+    ]
     baseline = single_claim(
         assemble_full_revision(
-            AnalysisRequest(
-                ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)
-            ),
+            AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
             _with_disclosure_metadata(
                 _execution("6501.T"),
                 records=corrected_records,
@@ -482,9 +815,7 @@ def test_inherited_correction_does_not_permanently_block_quiet_reassessment():
     next_cutoff = date(2026, 7, 25)
     candidate = single_claim(
         assemble_full_revision(
-            AnalysisRequest(
-                ticker="6501.T", analysis_date=next_cutoff, analysts=("market",)
-            ),
+            AnalysisRequest(ticker="6501.T", analysis_date=next_cutoff, analysts=("market",)),
             _with_disclosure_metadata(
                 _execution("6501.T"),
                 records=corrected_records,
@@ -571,6 +902,33 @@ def test_full_analysis_claim_can_explicitly_require_google_news():
     assert google.requirement is CoverageRequirement.REQUIRED
 
 
+def test_social_and_broad_news_remain_advisory_without_research_dependency():
+    execution = _execution("6501.T")
+    report = execution.reports["market"]
+    execution = execution.__class__(
+        state=execution.state,
+        evidence=execution.evidence,
+        reports={"market": report, "social": report, "news": report},
+        decision=execution.decision,
+    )
+
+    draft = assemble_full_revision(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date=CUTOFF,
+            analysts=("market", "social", "news"),
+        ),
+        execution,
+    )
+
+    requirements = {
+        item.domain: item.requirement for item in draft.coverage.domains if item.source is None
+    }
+    assert requirements["market"] is CoverageRequirement.REQUIRED
+    assert requirements["social"] is CoverageRequirement.ADVISORY
+    assert requirements["news"] is CoverageRequirement.ADVISORY
+
+
 def test_coverage_blocker_cannot_produce_no_material_change():
     def single_claim(draft, cutoff):
         claim = draft.current_state.claims[0]
@@ -596,9 +954,7 @@ def test_coverage_blocker_cannot_produce_no_material_change():
                 "invalidation_conditions": (),
             }
         )
-        claim_coverage = next(
-            item for item in draft.coverage.claims if item.object_id == claim.id
-        )
+        claim_coverage = next(item for item in draft.coverage.claims if item.object_id == claim.id)
         return draft.model_copy(
             update={
                 "cutoff": cutoff,
@@ -619,9 +975,7 @@ def test_coverage_blocker_cannot_produce_no_material_change():
     next_cutoff = date(2026, 7, 25)
     candidate = single_claim(
         assemble_full_revision(
-            AnalysisRequest(
-                ticker="6501.T", analysis_date=next_cutoff, analysts=("market",)
-            ),
+            AnalysisRequest(ticker="6501.T", analysis_date=next_cutoff, analysts=("market",)),
             _with_disclosure_metadata(
                 _execution("6501.T"),
                 records=[],

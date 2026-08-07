@@ -4,9 +4,19 @@ yfinance path exactly."""
 
 from __future__ import annotations
 
-from datetime import datetime
+import hashlib
+import json
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from dateutil.relativedelta import relativedelta
+
+from tradingagents.provenance import (
+    SourceObservation,
+    SourceWatermark,
+    attach_source_observations,
+    attach_source_watermarks,
+)
 
 from ..market_data_validator import render_verified_market_snapshot
 from ..stockstats_utils import render_indicator_window
@@ -16,33 +26,92 @@ from .jquants_stock import _fetch_ohlcv_frame
 # the 200 SMA) have enough lookback. 200 trading days ~ 290 calendar days; pad
 # generously to cover holidays/weekends.
 _WARMUP_DAYS = 400
+_MIN_WARMUP_ROWS = 200
+_MIN_WARMUP_SPAN_DAYS = 280
+_TOKYO = ZoneInfo("Asia/Tokyo")
 
 
-def get_indicator(
-    symbol: str, indicator: str, curr_date: str, look_back_days: int
-) -> str:
+def get_indicator(symbol: str, indicator: str, curr_date: str, look_back_days: int) -> str:
     """Return a date->value window for ``indicator`` ending at ``curr_date``."""
     start = (
-        datetime.strptime(curr_date, "%Y-%m-%d")
-        - relativedelta(days=look_back_days + _WARMUP_DAYS)
+        datetime.strptime(curr_date, "%Y-%m-%d") - relativedelta(days=look_back_days + _WARMUP_DAYS)
     ).strftime("%Y-%m-%d")
     df = _fetch_ohlcv_frame(symbol, start, curr_date)
     return render_indicator_window(df, indicator, curr_date, look_back_days)
 
 
-def get_verified_market_snapshot(
-    symbol: str, curr_date: str, look_back_days: int = 30
-) -> str:
+def get_verified_market_snapshot(symbol: str, curr_date: str, look_back_days: int = 30) -> str:
     """Return a J-Quants-backed deterministic market snapshot."""
     start = (
-        datetime.strptime(curr_date, "%Y-%m-%d")
-        - relativedelta(days=look_back_days + _WARMUP_DAYS)
+        datetime.strptime(curr_date, "%Y-%m-%d") - relativedelta(days=look_back_days + _WARMUP_DAYS)
     ).strftime("%Y-%m-%d")
     df = _fetch_ohlcv_frame(symbol, start, curr_date)
-    return render_verified_market_snapshot(
+    adjustment = str(df.attrs.get("price_adjustment") or "unknown")
+    body = render_verified_market_snapshot(
         df,
         symbol,
         curr_date,
         look_back_days,
         source="J-Quants",
+        adjustment=adjustment,
     )
+    latest = df.iloc[-1]
+    latest_date = latest["Date"].strftime("%Y-%m-%d")
+    latest_close = float(latest["Close"])
+    digest_payload = [
+        {
+            "date": row["Date"].strftime("%Y-%m-%d"),
+            **{
+                column.casefold(): float(row[column])
+                for column in ("Open", "High", "Low", "Close", "Volume")
+            },
+        }
+        for _, row in df.iterrows()
+    ]
+    version_id = (
+        "jquants-market:"
+        + hashlib.sha256(json.dumps(digest_payload, separators=(",", ":")).encode()).hexdigest()[
+            :20
+        ]
+    )
+    observation = SourceObservation(
+        source="J-Quants adjusted OHLCV",
+        record_id=f"jquants-market:{symbol.upper()}",
+        version_id=version_id,
+        status="published",
+        published_at=latest_date,
+        available_at=datetime.fromisoformat(f"{latest_date}T23:59:59")
+        .replace(tzinfo=_TOKYO)
+        .isoformat(),
+        availability_basis="conservative market-date end; source has no intraday availability",
+        title=f"Adjusted market history through {latest_date}",
+        record_kind="market",
+        adjustment=adjustment,
+        observation_value=latest_close,
+        unit="JPY",
+        precision=2,
+    )
+    first_date = df.iloc[0]["Date"]
+    warmup_limitations = []
+    if len(df) < _MIN_WARMUP_ROWS:
+        warmup_limitations.append(
+            f"Only {len(df)} rows were available; 200-row indicator warm-up is incomplete."
+        )
+    if latest["Date"] - first_date < timedelta(days=_MIN_WARMUP_SPAN_DAYS):
+        warmup_limitations.append(
+            "Returned history spans fewer than 280 calendar days; warm-up may be truncated."
+        )
+    if adjustment != "J-Quants adjusted OHLCV v2":
+        warmup_limitations.append(
+            "One or more adjusted OHLCV fields were absent and used raw fallback values."
+        )
+    limitations = tuple(warmup_limitations)
+    watermark = SourceWatermark(
+        source="J-Quants adjusted OHLCV",
+        scanned_start=first_date.strftime("%Y-%m-%d"),
+        scanned_end=latest_date,
+        status="complete" if not limitations else "limited",
+        limitations=limitations,
+        returned_records=len(df),
+    )
+    return attach_source_watermarks(attach_source_observations(body, observation), watermark)

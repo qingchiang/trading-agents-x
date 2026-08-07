@@ -1,4 +1,5 @@
 """J-Quants /fins/summary -> the four fundamental tools. Network is mocked."""
+
 import copy
 import unittest
 from unittest import mock
@@ -10,18 +11,52 @@ from tradingagents.dataflows import interface
 from tradingagents.dataflows.config import bind_config
 from tradingagents.dataflows.errors import NoMarketDataError
 from tradingagents.dataflows.jp import jquants_fundamentals as jf
+from tradingagents.provenance import (
+    extract_source_observations,
+    extract_source_watermarks,
+)
 
 
-def _summary(disc_date, *, per_type="FY", per_end="2023-03-31", ta="1000", eq="400",
-             sales="500", op="80", odp="85", np_="60", eps="12.3", bps="250",
-             cfo="90", cfi="-30", cff="-20", casheq="200", disc_time="15:00:00",
-             doc_type=None):
+def _summary(
+    disc_date,
+    *,
+    per_type="FY",
+    per_end="2023-03-31",
+    ta="1000",
+    eq="400",
+    sales="500",
+    op="80",
+    odp="85",
+    np_="60",
+    eps="12.3",
+    bps="250",
+    cfo="90",
+    cfi="-30",
+    cff="-20",
+    casheq="200",
+    disc_time="15:00:00",
+    doc_type=None,
+):
     return {
-        "Code": "86970", "DiscDate": disc_date, "DiscTime": disc_time,
+        "Code": "86970",
+        "DiscDate": disc_date,
+        "DiscTime": disc_time,
         "DocType": doc_type or f"{per_type}FinancialStatements_Consolidated_IFRS",
-        "CurPerType": per_type, "CurPerEn": per_end, "CurFYEn": "2023-03-31",
-        "TA": ta, "Eq": eq, "Sales": sales, "OP": op, "OdP": odp, "NP": np_,
-        "EPS": eps, "BPS": bps, "CFO": cfo, "CFI": cfi, "CFF": cff, "CashEq": casheq,
+        "CurPerType": per_type,
+        "CurPerEn": per_end,
+        "CurFYEn": "2023-03-31",
+        "TA": ta,
+        "Eq": eq,
+        "Sales": sales,
+        "OP": op,
+        "OdP": odp,
+        "NP": np_,
+        "EPS": eps,
+        "BPS": bps,
+        "CFO": cfo,
+        "CFI": cfi,
+        "CFF": cff,
+        "CashEq": casheq,
     }
 
 
@@ -57,6 +92,18 @@ class FundamentalsTests(unittest.TestCase):
             out = jf.get_fundamentals("9984.T", curr_date="2023-12-31")
         self.assertIn("Net sales: 500", out)
         self.assertNotIn("999", out)
+        watermark = extract_source_watermarks(out)[0]
+        self.assertEqual(watermark.status, "limited")
+        self.assertIn("without a disclosure date", watermark.limitations[0])
+
+    def test_snapshot_marks_stale_latest_disclosure_limited(self):
+        with _patch([_summary("2022-05-10")]):
+            out = jf.get_fundamentals("9984.T", curr_date="2023-05-13")
+
+        watermark = extract_source_watermarks(out)[0]
+        assert watermark.status == "limited"
+        assert watermark.scanned_end == "2023-05-13"
+        assert any("older than 180 days" in item for item in watermark.limitations)
 
     def test_overview_uses_latest_disclosed_period(self):
         # Input ascending by date (as J-Quants returns); latest must win.
@@ -92,6 +139,39 @@ class FundamentalsTests(unittest.TestCase):
         self.assertIn("NetSales=500", out)
         self.assertNotIn("NetSales=400", out)
         self.assertEqual(out.count("FY end 2023-03-31"), 1)
+
+    def test_snapshot_metadata_retains_corrected_versions_for_the_complete_summary(self):
+        original = _summary("2023-05-12", sales="400")
+        original.update({"DiscNo": "202305120001", "CorrectionFlag": "0"})
+        correction = _summary("2023-05-12", sales="500", disc_time="16:00:00")
+        correction.update({"DiscNo": "202305120002", "CorrectionFlag": "1"})
+        restatement = _summary("2023-05-12", sales="450", disc_time="17:00:00")
+        restatement.update({"DiscNo": "202305120003", "RetrospectiveRestatement": "true"})
+
+        with _patch([original, correction, restatement]):
+            out = jf.get_fundamentals("9984.T", "2023-05-13")
+
+        observations = extract_source_observations(out)
+        assert len(observations) == 3
+        assert len({item.record_id for item in observations}) == 1
+        assert {item.native_record_id for item in observations} == {
+            "202305120001",
+            "202305120002",
+            "202305120003",
+        }
+        assert len({item.comparison_key for item in observations}) == 1
+        assert len({item.version_id for item in observations}) == 3
+        assert {item.status for item in observations} == {"published", "corrected"}
+        assert {item.change_hint for item in observations} == {
+            "new_filing",
+            "correction",
+            "restatement",
+        }
+        assert {item.record_kind for item in observations} == {"fundamental"}
+        watermark = extract_source_watermarks(out)[0]
+        assert watermark.source == "J-Quants fundamentals"
+        assert watermark.status == "complete"
+        assert watermark.returned_records == 3
 
     def test_dedupe_retains_distinct_doc_types_and_incomplete_keys(self):
         consolidated = _summary("2023-05-12", sales="500")
@@ -192,7 +272,12 @@ class FundamentalsRoutingTests(unittest.TestCase):
         bind_config(copy.deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
     def test_jquants_registered_for_all_fundamental_methods(self):
-        for method in ("get_fundamentals", "get_balance_sheet", "get_cashflow", "get_income_statement"):
+        for method in (
+            "get_fundamentals",
+            "get_balance_sheet",
+            "get_cashflow",
+            "get_income_statement",
+        ):
             self.assertIn("jquants", interface.VENDOR_METHODS[method])
 
     def test_tokyo_ticker_routes_fundamentals_to_jquants(self):

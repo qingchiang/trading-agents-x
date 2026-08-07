@@ -248,6 +248,21 @@ are not inferred from an empty result. Disjoint intervals remain separate and
 an unscanned gap downgrades Required coverage instead of being treated as one
 continuous scan.
 
+Japanese J-Quants fundamentals use a stable issuer/period Source Record identity,
+retain each upstream disclosure number as the version's native record identity,
+and carry an explicit accounting-period comparison key. These fields classify
+new filings, corrections, restatements, accounting-scope changes, and otherwise
+unclassifiable differences across snapshots without conflating logical identity
+with an individual upstream disclosure. A latest visible disclosure more than
+180 days before the analysis cutoff marks the snapshot limited. Adjusted
+market history records its provider, adjustment contract, latest observation,
+unit, precision, and the actual returned warm-up interval rather than the
+requested interval. The Current Research
+State retains audited market reference levels, and a Revision delta records
+ordinary movement separately from a deterministic crossing of one of those
+levels. Provider, adjustment, or unit drift is an incompatible market signal,
+not an unchanged observation.
+
 ### Full Research Chain updates
 
 In `off` mode a manual update targets exactly the current Revision of one
@@ -279,6 +294,12 @@ unchanged Full update with one of these blockers records
 `coverage_incomplete`, not No Material Change or a fabricated Material Change.
 Full Analysis exposes the limitation rather than interpreting missing coverage
 as no news.
+
+When their analyst domains are selected, J-Quants fundamental snapshots and
+adjusted market history are Required for Japanese coverage. Missing, stale,
+partial, incompatible, truncated, or insufficient-warm-up observations block a
+quiet reassessment. Social sentiment and broad media remain Advisory unless an
+active Claim or open Question promotes a named source to Required.
 
 The repository commits the successful execution, new Revision, and changed
 chain head in one SQLite transaction after rechecking the baseline. Failure,

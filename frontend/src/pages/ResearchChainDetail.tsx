@@ -166,7 +166,14 @@ export default function ResearchChainDetail() {
             return (
               <li key={item.version_id}>
                 <strong>{item.title}</strong> · <code>{item.version_id}</code> · {item.status} · {lineage?.lineage}
-                <small> {item.source} / {item.record_id} · {item.available_at}</small>
+                <small>
+                  {" "}{item.source} / {item.record_id} · {item.available_at}
+                  {item.availability_basis ? ` · ${item.availability_basis}` : ""}
+                  {item.native_record_id ? ` · native ${item.native_record_id}` : ""}
+                  {item.adjustment ? ` · ${item.adjustment}` : ""}
+                  {item.unit ? ` · ${item.unit}/${item.precision ?? "?"}` : ""}
+                  {` · fallback ${String(item.fallback ?? false)}`}
+                </small>
               </li>
             );
           })}
@@ -238,6 +245,20 @@ export default function ResearchChainDetail() {
           {(revision.delta?.questions ?? []).map((item) => (
             <li key={`question-${item.object_id}`}>
               <code>{item.object_id}</code> · {item.change} · {item.identity_disposition}
+            </li>
+          ))}
+        </ul>
+        <h3>{t("fundamentalMarketChanges")}</h3>
+        <ul>
+          {(revision.delta?.change_signals ?? []).map((item) => (
+            <li key={`${item.kind}-${item.record_id}-${item.current_version_id ?? "none"}`}>
+              <strong>{item.kind}</strong> · {item.domain} · <code>{item.record_id}</code>
+              {item.boundary_label ? ` · ${item.boundary_label}: ${item.boundary_value}` : ""}
+              {item.previous_value !== null && item.previous_value !== undefined
+                ? ` · ${item.previous_value} → ${item.current_value}`
+                : ""}
+              {item.requires_full_analysis ? ` · ${t("requiresFullAnalysis")}` : ""}
+              <p>{item.detail}</p>
             </li>
           ))}
         </ul>

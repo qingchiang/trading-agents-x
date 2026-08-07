@@ -18,6 +18,7 @@ from .contracts import (
     AnalysisRequest,
     AnalystReport,
     EvidenceBundle,
+    MarketReferenceLevel,
     ReportLanguage,
     ResearchDecision,
     ResearchRating,
@@ -105,6 +106,24 @@ class SourceRecordStatus(str, Enum):
     CORRECTED = "corrected"
     WITHDRAWN = "withdrawn"
     REPLACED = "replaced"
+
+
+class SourceRecordKind(str, Enum):
+    DISCLOSURE = "disclosure"
+    FUNDAMENTAL = "fundamental"
+    MARKET = "market"
+
+
+class ResearchChangeKind(str, Enum):
+    NEW_FUNDAMENTAL_FILING = "new_fundamental_filing"
+    FUNDAMENTAL_CORRECTION = "fundamental_correction"
+    FUNDAMENTAL_RESTATEMENT = "fundamental_restatement"
+    ACCOUNTING_SCOPE_CHANGE = "accounting_scope_change"
+    UNCLASSIFIABLE_FUNDAMENTAL_CHANGE = "unclassifiable_fundamental_change"
+    MARKET_SEMANTIC_INCOMPATIBILITY = "market_semantic_incompatibility"
+    MARKET_BOUNDARY_CROSSING = "market_boundary_crossing"
+    ORDINARY_MARKET_MOVE = "ordinary_market_move"
+    UNCHANGED_OBSERVATION = "unchanged_observation"
 
 
 class ResearchExecutionStrategy(str, Enum):
@@ -222,6 +241,7 @@ class CurrentResearchState(ResearchModel):
     risks: tuple[ResearchFactor, ...] = ()
     catalysts: tuple[ResearchFactor, ...] = ()
     invalidation_conditions: tuple[ResearchFactor, ...] = ()
+    market_reference_levels: tuple[MarketReferenceLevel, ...] = ()
     evidence_refs: tuple[str, ...] = Field(min_length=1)
 
     @field_validator("language", mode="before")
@@ -262,8 +282,13 @@ class CurrentResearchState(ResearchModel):
             for factor in (*self.risks, *self.catalysts, *self.invalidation_conditions)
             for ref in factor.evidence_refs
         )
+        linked_refs.update(
+            ref for level in self.market_reference_levels for ref in level.evidence_refs
+        )
         if not linked_refs.issubset(self.evidence_refs):
             raise ValueError("state relationships reference unknown Evidence")
+        if any(level.as_of_date > self.cutoff for level in self.market_reference_levels):
+            raise ValueError("market reference levels must not be after the state cutoff")
         return self
 
 
@@ -324,10 +349,26 @@ class SourceRecordVersion(ResearchModel):
     published_at: str = Field(min_length=1)
     available_at: datetime
     title: str = Field(min_length=1)
+    availability_basis: str | None = None
     url: str | None = None
     replaces_version_id: str | None = None
     evidence_ref: str = Field(pattern=_EVIDENCE_REF)
     fallback: bool = False
+    record_kind: SourceRecordKind = SourceRecordKind.DISCLOSURE
+    native_record_id: str | None = None
+    comparison_key: str | None = None
+    change_hint: Literal[
+        "new_filing",
+        "correction",
+        "restatement",
+        "accounting_scope_change",
+        "unclassifiable",
+    ] | None = None
+    accounting_scope: str | None = None
+    adjustment: str | None = None
+    observation_value: float | None = None
+    unit: str | None = None
+    precision: int | None = Field(default=None, ge=0)
 
     @field_validator("available_at")
     @classmethod
@@ -431,6 +472,21 @@ class RevisionDelta(ResearchModel):
     ] = ()
     inherited_evidence_refs: tuple[str, ...] = ()
     new_evidence_refs: tuple[str, ...] = ()
+    change_signals: tuple[ResearchChangeSignal, ...] = ()
+
+
+class ResearchChangeSignal(ResearchModel):
+    kind: ResearchChangeKind
+    domain: Literal["fundamentals", "market"]
+    record_id: str = Field(min_length=1)
+    previous_version_id: str | None = None
+    current_version_id: str | None = None
+    requires_full_analysis: bool
+    detail: str = Field(min_length=1)
+    boundary_label: str | None = None
+    boundary_value: float | None = None
+    previous_value: float | None = None
+    current_value: float | None = None
 
 
 class ResearchRevisionDraft(ResearchModel):
@@ -578,7 +634,29 @@ def render_revision_export_markdown(export: RevisionExport) -> str:
             f"- `{record.version_id}` ({record.source} `{record.record_id}`): "
             f"{record.status.value}; {item.lineage}; observed now: "
             f"{str(item.observed_in_execution).lower()}; available: "
-            f"{record.available_at.isoformat()}; {record.title}"
+            f"{record.available_at.isoformat()}"
+            f" ({record.availability_basis or 'source timestamp'}); native record: "
+            f"{record.native_record_id or 'not recorded'}; adjustment: "
+            f"{record.adjustment or 'not applicable'}; unit/precision: "
+            f"{record.unit or 'not recorded'}/{record.precision if record.precision is not None else 'not recorded'}; "
+            f"fallback: {str(record.fallback).lower()}; {record.title}"
+        )
+    lines.extend(["", "## Fundamental and Market Change Signals", ""])
+    for signal in revision.delta.change_signals:
+        values = (
+            f"; values: {signal.previous_value} -> {signal.current_value}"
+            if signal.previous_value is not None or signal.current_value is not None
+            else ""
+        )
+        boundary = (
+            f"; boundary: {signal.boundary_label} ({signal.boundary_value})"
+            if signal.boundary_label is not None
+            else ""
+        )
+        lines.append(
+            f"- `{signal.kind.value}` [{signal.domain}] `{signal.record_id}`; "
+            f"requires Full Analysis: {str(signal.requires_full_analysis).lower()}"
+            f"{values}{boundary}; {signal.detail}"
         )
     lines.extend(["", "## Effective Evidence Snapshot", ""])
     lineage = {item.evidence_ref: item for item in revision.evidence_snapshot.lineage}
@@ -720,8 +798,12 @@ def _source_metadata(
             if record.available_at.astimezone(cutoff_timezone).date() > bundle.analysis_date:
                 raise ValueError("Source Record Version is available after the analysis cutoff")
             existing = records.get(record.version_id)
-            if existing is not None and existing != record:
-                raise ValueError("Source Record Version identity has conflicting observations")
+            if existing is not None:
+                if existing.model_dump(exclude={"evidence_ref"}) != record.model_dump(
+                    exclude={"evidence_ref"}
+                ):
+                    raise ValueError("Source Record Version identity has conflicting observations")
+                record = existing
             records[record.version_id] = record
         for raw in evidence.provenance.get("source_watermarks", ()):
             watermark = SourceWatermarkSnapshot.model_validate(raw)
@@ -761,6 +843,7 @@ def _source_coverage(
     watermarks: tuple[SourceWatermarkSnapshot, ...],
     *,
     status_blocking_records: tuple[SourceRecordVersion, ...] | None = None,
+    required_data_domains: tuple[str, ...] = (),
 ) -> tuple[tuple[ResearchDomainCoverage, ...], bool]:
     explicitly_required = {
         source
@@ -827,11 +910,14 @@ def _source_coverage(
             if missing_interval
             else ()
         )
+        domain_name = {
+            "Google News": "media_news",
+            "J-Quants fundamentals": "fundamentals",
+            "J-Quants adjusted OHLCV": "market",
+        }.get(watermark.source, "company_disclosures")
         domains.append(
             ResearchDomainCoverage(
-                domain=(
-                    "media_news" if watermark.source == "Google News" else "company_disclosures"
-                ),
+                domain=domain_name,
                 source=watermark.source,
                 requirement=requirement,
                 status=(
@@ -852,6 +938,23 @@ def _source_coverage(
             domains.append(
                 ResearchDomainCoverage(
                     domain="company_disclosures",
+                    source=source,
+                    requirement=CoverageRequirement.REQUIRED,
+                    status=CoverageStatus.UNAVAILABLE,
+                    limitations=(f"{source} collection coverage was not recorded.",),
+                )
+            )
+        required_sources = {
+            "fundamentals": "J-Quants fundamentals",
+            "market": "J-Quants adjusted OHLCV",
+        }
+        for domain_name, source in required_sources.items():
+            if domain_name not in required_data_domains or source in observed_sources:
+                continue
+            supports_quiet = False
+            domains.append(
+                ResearchDomainCoverage(
+                    domain=domain_name,
                     source=source,
                     requirement=CoverageRequirement.REQUIRED,
                     status=CoverageStatus.UNAVAILABLE,
@@ -880,6 +983,162 @@ def _source_coverage(
     ):
         supports_quiet = False
     return tuple(domains), supports_quiet
+
+
+def _crossed(previous: float, current: float, boundary: float) -> bool:
+    return (previous < boundary <= current) or (previous > boundary >= current)
+
+
+def _change_signals(
+    baseline: ResearchRevisionDraft,
+    candidate_records: tuple[SourceRecordVersion, ...],
+) -> tuple[ResearchChangeSignal, ...]:
+    """Compare producer-owned snapshots without parsing analyst prose."""
+    baseline_by_record: dict[str, list[SourceRecordVersion]] = {}
+    for record in baseline.evidence_snapshot.source_records:
+        key = (
+            record.comparison_key
+            if record.record_kind is SourceRecordKind.FUNDAMENTAL
+            else record.record_id
+        )
+        baseline_by_record.setdefault(key or record.record_id, []).append(record)
+    candidate_by_record: dict[str, list[SourceRecordVersion]] = {}
+    for record in candidate_records:
+        if record.record_kind is not SourceRecordKind.DISCLOSURE:
+            key = (
+                record.comparison_key
+                if record.record_kind is SourceRecordKind.FUNDAMENTAL
+                else record.record_id
+            )
+            candidate_by_record.setdefault(key or record.record_id, []).append(record)
+
+    signals: list[ResearchChangeSignal] = []
+    for comparison_key, current_versions in candidate_by_record.items():
+        previous_versions = baseline_by_record.get(comparison_key, [])
+        previous_ids = {item.version_id for item in previous_versions}
+        new_versions = [item for item in current_versions if item.version_id not in previous_ids]
+        record_kind = current_versions[-1].record_kind
+        record_id = current_versions[-1].record_id
+        if not new_versions:
+            previous = previous_versions[-1] if previous_versions else None
+            current = current_versions[-1]
+            signals.append(
+                ResearchChangeSignal(
+                    kind=ResearchChangeKind.UNCHANGED_OBSERVATION,
+                    domain=(
+                        "fundamentals"
+                        if record_kind is SourceRecordKind.FUNDAMENTAL
+                        else "market"
+                    ),
+                    record_id=record_id,
+                    previous_version_id=previous.version_id if previous else None,
+                    current_version_id=current.version_id,
+                    requires_full_analysis=False,
+                    detail="The source-native version was re-observed without change.",
+                    previous_value=previous.observation_value if previous else None,
+                    current_value=current.observation_value,
+                )
+            )
+            continue
+
+        if record_kind is SourceRecordKind.FUNDAMENTAL:
+            known = {item.version_id: item for item in (*previous_versions, *current_versions)}
+            for current in new_versions:
+                previous = known.get(current.replaces_version_id or "")
+                if previous is None and previous_versions:
+                    previous = previous_versions[-1]
+                if previous is None:
+                    kind = ResearchChangeKind.NEW_FUNDAMENTAL_FILING
+                    detail = "A new official fundamental reporting period was observed."
+                elif current.change_hint == "accounting_scope_change" or (
+                    previous is not None
+                    and current.accounting_scope != previous.accounting_scope
+                ):
+                    kind = ResearchChangeKind.ACCOUNTING_SCOPE_CHANGE
+                    detail = "The accounting standard or consolidation scope changed."
+                elif current.change_hint == "restatement":
+                    kind = ResearchChangeKind.FUNDAMENTAL_RESTATEMENT
+                    detail = "Previously reported fundamental values were restated."
+                elif current.change_hint == "correction" or (
+                    current.status is SourceRecordStatus.CORRECTED
+                ):
+                    kind = ResearchChangeKind.FUNDAMENTAL_CORRECTION
+                    detail = "An official correction changed the observed version."
+                else:
+                    kind = ResearchChangeKind.UNCLASSIFIABLE_FUNDAMENTAL_CHANGE
+                    detail = "The fundamental snapshot changed without a safe classification."
+                signals.append(
+                    ResearchChangeSignal(
+                        kind=kind,
+                        domain="fundamentals",
+                        record_id=record_id,
+                        previous_version_id=previous.version_id if previous else None,
+                        current_version_id=current.version_id,
+                        requires_full_analysis=True,
+                        detail=detail,
+                    )
+                )
+            continue
+
+        previous = previous_versions[-1] if previous_versions else None
+        current = new_versions[-1]
+        incompatible = previous is None or any(
+            (
+                previous.source != current.source,
+                previous.adjustment != current.adjustment,
+                previous.unit != current.unit,
+            )
+        )
+        if incompatible:
+            signals.append(
+                ResearchChangeSignal(
+                    kind=ResearchChangeKind.MARKET_SEMANTIC_INCOMPATIBILITY,
+                    domain="market",
+                    record_id=record_id,
+                    previous_version_id=previous.version_id if previous else None,
+                    current_version_id=current.version_id,
+                    requires_full_analysis=True,
+                    detail="Provider, adjustment, or unit semantics are not baseline-compatible.",
+                    previous_value=previous.observation_value if previous else None,
+                    current_value=current.observation_value,
+                )
+            )
+            continue
+        crossing = next(
+            (
+                boundary
+                for boundary in baseline.current_state.market_reference_levels
+                if previous.observation_value is not None
+                and current.observation_value is not None
+                and boundary.unit == current.unit
+                and _crossed(previous.observation_value, current.observation_value, boundary.value)
+            ),
+            None,
+        )
+        signals.append(
+            ResearchChangeSignal(
+                kind=(
+                    ResearchChangeKind.MARKET_BOUNDARY_CROSSING
+                    if crossing is not None
+                    else ResearchChangeKind.ORDINARY_MARKET_MOVE
+                ),
+                domain="market",
+                record_id=record_id,
+                previous_version_id=previous.version_id,
+                current_version_id=current.version_id,
+                requires_full_analysis=crossing is not None,
+                detail=(
+                    "The observed market value crossed a thesis-relevant reference."
+                    if crossing is not None
+                    else "The market value changed without crossing a recorded boundary."
+                ),
+                boundary_label=crossing.label if crossing is not None else None,
+                boundary_value=crossing.value if crossing is not None else None,
+                previous_value=previous.observation_value,
+                current_value=current.observation_value,
+            )
+        )
+    return tuple(signals)
 
 
 def assemble_full_update(
@@ -1044,12 +1303,22 @@ def assemble_full_update(
     newly_observed_versions = tuple(
         item for version_id, item in candidate_versions.items() if version_id not in baseline_versions
     )
+    change_signals = _change_signals(baseline, candidate.evidence_snapshot.source_records)
     source_domains, supports_quiet = _source_coverage(
         state,
         combined_versions,
         source_watermarks,
         status_blocking_records=newly_observed_versions,
+        required_data_domains=tuple(
+            dict.fromkeys(
+                item.domain
+                for item in candidate.coverage.domains
+                if item.requirement is CoverageRequirement.REQUIRED
+            )
+        ),
     )
+    if any(item.requires_full_analysis for item in change_signals):
+        supports_quiet = False
     coverage_domains = tuple(
         item for item in candidate.coverage.domains if item.source is None
     ) + source_domains
@@ -1199,6 +1468,10 @@ def assemble_full_update(
         if semantic_factors(current_values) != semantic_factors(baseline_values):
             changed_sections.append(section)
     material = bool(changed_sections)
+    material = material or any(
+        item.kind is ResearchChangeKind.MARKET_BOUNDARY_CROSSING
+        for item in change_signals
+    )
     delta = RevisionDelta(
         opinion_changed=opinion_changed,
         claims=tuple(claim_delta),
@@ -1206,6 +1479,7 @@ def assemble_full_update(
         changed_sections=tuple(changed_sections),
         inherited_evidence_refs=inherited_refs,
         new_evidence_refs=tuple(item.ref for item in candidate_bundle.items),
+        change_signals=change_signals,
     )
     outcome = (
         ResearchRevisionOutcome.MATERIAL_CHANGE
@@ -1472,11 +1746,15 @@ def assemble_full_revision(
         risks=risks,
         catalysts=catalysts,
         invalidation_conditions=invalidations,
+        market_reference_levels=decision.market_reference_levels,
         evidence_refs=evidence_refs,
     )
     source_records, source_watermarks = _source_metadata(evidence)
     source_domains, supports_quiet = _source_coverage(
-        state, source_records, source_watermarks
+        state,
+        source_records,
+        source_watermarks,
+        required_data_domains=request.analysts,
     )
     domains: list[ResearchDomainCoverage] = []
     limitations: list[str] = []
@@ -1491,6 +1769,11 @@ def assemble_full_revision(
         domains.append(
             ResearchDomainCoverage(
                 domain=analyst,
+                requirement=(
+                    CoverageRequirement.ADVISORY
+                    if analyst in {"social", "news"}
+                    else CoverageRequirement.REQUIRED
+                ),
                 status=(CoverageStatus.COMPLETE if complete else CoverageStatus.LIMITED),
                 evidence_refs=(
                     tuple(ref for ref in report.source_refs if ref in allowed_refs)

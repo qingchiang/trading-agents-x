@@ -120,6 +120,7 @@ export interface components {
       instrument: string;
       invalidation_conditions?: components["schemas"]["ResearchFactor"][];
       language: string;
+      market_reference_levels?: components["schemas"]["MarketReferenceLevel"][];
       opinion: components["schemas"]["ResearchOpinion"];
       prompt_version?: string;
       questions?: components["schemas"]["ResearchQuestion"][];
@@ -472,6 +473,20 @@ export interface components {
       analysis_date: string;
       baseline_revision_id: string;
     };
+    ResearchChangeKind: "new_fundamental_filing" | "fundamental_correction" | "fundamental_restatement" | "accounting_scope_change" | "unclassifiable_fundamental_change" | "market_semantic_incompatibility" | "market_boundary_crossing" | "ordinary_market_move" | "unchanged_observation";
+    ResearchChangeSignal: {
+      boundary_label?: string | null;
+      boundary_value?: number | null;
+      current_value?: number | null;
+      current_version_id?: string | null;
+      detail: string;
+      domain: "fundamentals" | "market";
+      kind: components["schemas"]["ResearchChangeKind"];
+      previous_value?: number | null;
+      previous_version_id?: string | null;
+      record_id: string;
+      requires_full_analysis: boolean;
+    };
     ResearchClaim: {
       confidence: components["schemas"]["ClaimConfidence"];
       decision_role: components["schemas"]["DecisionRole"];
@@ -586,6 +601,7 @@ export interface components {
       source?: string | null;
     };
     RevisionDelta: {
+      change_signals?: components["schemas"]["ResearchChangeSignal"][];
       changed_sections?: ("opinion" | "claims" | "questions" | "scenarios" | "risks" | "catalysts" | "invalidation_conditions")[];
       claims: components["schemas"]["ClaimRevisionDelta"][];
       inherited_evidence_refs?: string[];
@@ -735,6 +751,7 @@ export interface components {
       measurement_kind?: components["schemas"]["MeasurementKind"];
       unit?: string | null;
     };
+    SourceRecordKind: "disclosure" | "fundamental" | "market";
     SourceRecordSnapshotItem: {
       lineage: "new" | "inherited";
       observed_in_execution: boolean;
@@ -743,15 +760,25 @@ export interface components {
     };
     SourceRecordStatus: "published" | "corrected" | "withdrawn" | "replaced";
     SourceRecordVersion: {
+      accounting_scope?: string | null;
+      adjustment?: string | null;
+      availability_basis?: string | null;
       available_at: string;
+      change_hint?: "new_filing" | "correction" | "restatement" | "accounting_scope_change" | "unclassifiable" | null;
+      comparison_key?: string | null;
       evidence_ref: string;
       fallback?: boolean;
+      native_record_id?: string | null;
+      observation_value?: number | null;
+      precision?: number | null;
       published_at: string;
       record_id: string;
+      record_kind?: components["schemas"]["SourceRecordKind"];
       replaces_version_id?: string | null;
       source: string;
       status: components["schemas"]["SourceRecordStatus"];
       title: string;
+      unit?: string | null;
       url?: string | null;
       version_id: string;
     };

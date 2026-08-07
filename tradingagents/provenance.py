@@ -80,7 +80,7 @@ class EvidenceSpan:
 
 @dataclass(frozen=True)
 class SourceObservation:
-    """One immutable observed version of a stable source-native record."""
+    """One immutable observed version of a stable record with optional native ID."""
 
     source: str
     record_id: str
@@ -89,8 +89,24 @@ class SourceObservation:
     published_at: str
     available_at: str
     title: str
+    availability_basis: str | None = None
     url: str | None = None
     replaces_version_id: str | None = None
+    record_kind: Literal["disclosure", "fundamental", "market"] = "disclosure"
+    native_record_id: str | None = None
+    comparison_key: str | None = None
+    change_hint: Literal[
+        "new_filing",
+        "correction",
+        "restatement",
+        "accounting_scope_change",
+        "unclassifiable",
+    ] | None = None
+    accounting_scope: str | None = None
+    adjustment: str | None = None
+    observation_value: float | None = None
+    unit: str | None = None
+    precision: int | None = None
 
     def __post_init__(self) -> None:
         if self.status not in {"published", "corrected", "withdrawn", "replaced"}:
@@ -100,6 +116,10 @@ class SourceObservation:
             raise ValueError("Source Record available_at requires timezone")
         if not all((self.source, self.record_id, self.version_id, self.title)):
             raise ValueError("Source Record identity and title must not be empty")
+        if self.record_kind not in {"disclosure", "fundamental", "market"}:
+            raise ValueError("unsupported Source Record kind")
+        if self.precision is not None and self.precision < 0:
+            raise ValueError("Source Record precision must be non-negative")
 
 
 @dataclass(frozen=True)

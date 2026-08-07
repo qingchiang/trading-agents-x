@@ -2,6 +2,7 @@
 
 All network calls are mocked — no credentials or connectivity needed.
 """
+
 import copy
 import os
 import unittest
@@ -28,6 +29,10 @@ from tradingagents.dataflows.jp.jquants_common import (
     to_jquants_code,
 )
 from tradingagents.dataflows.jp.jquants_stock import get_stock
+from tradingagents.provenance import (
+    extract_source_observations,
+    extract_source_watermarks,
+)
 
 
 class FakeResp:
@@ -49,14 +54,24 @@ def _quote(date, close, *, adjusted=True, **extra):
     adjusted close so tests can tell which one the parser picked."""
     row = {"Date": date, "Code": "99840"}
     if adjusted:
-        row.update({
-            "AdjO": close - 1, "AdjH": close + 1,
-            "AdjL": close - 2, "AdjC": close, "AdjVo": 1000,
-        })
-    row.update({
-        "O": close * 2 - 1, "H": close * 2 + 1, "L": close * 2 - 2,
-        "C": close * 2, "Vo": 2000,
-    })
+        row.update(
+            {
+                "AdjO": close - 1,
+                "AdjH": close + 1,
+                "AdjL": close - 2,
+                "AdjC": close,
+                "AdjVo": 1000,
+            }
+        )
+    row.update(
+        {
+            "O": close * 2 - 1,
+            "H": close * 2 + 1,
+            "L": close * 2 - 2,
+            "C": close * 2,
+            "Vo": 2000,
+        }
+    )
     row.update(extra)
     return row
 
@@ -140,12 +155,63 @@ class StockFetchTests(unittest.TestCase):
         self.assertIn("2026-06-23:", out)
         self.assertIn("RSI:", out)  # description appended
 
+    def test_verified_snapshot_records_adjusted_history_semantics_and_warmup(self):
+        from tradingagents.dataflows.jp.jquants_indicator import get_verified_market_snapshot
+
+        dates = pd.bdate_range(end="2026-06-23", periods=220)
+        records = [_quote(d.strftime("%Y-%m-%d"), 100.0 + i) for i, d in enumerate(dates)]
+        with self._patch_records(records):
+            out = get_verified_market_snapshot("9984.T", "2026-06-23", 30)
+
+        observation = extract_source_observations(out)[0]
+        assert observation.record_kind == "market"
+        assert observation.adjustment == "J-Quants adjusted OHLCV v2"
+        assert observation.observation_value == 319.0
+        watermark = extract_source_watermarks(out)[0]
+        assert watermark.source == "J-Quants adjusted OHLCV"
+        assert watermark.status == "complete"
+        assert watermark.returned_records == 220
+        assert watermark.scanned_start == dates[0].strftime("%Y-%m-%d")
+        assert watermark.scanned_end == dates[-1].strftime("%Y-%m-%d")
+
+    def test_verified_snapshot_watermark_uses_returned_dates_not_requested_window(self):
+        from tradingagents.dataflows.jp.jquants_indicator import get_verified_market_snapshot
+
+        dates = pd.bdate_range(end="2026-06-23", periods=220)
+        records = [_quote(d.strftime("%Y-%m-%d"), 100.0 + i) for i, d in enumerate(dates)]
+        with self._patch_records(records):
+            out = get_verified_market_snapshot("9984.T", "2026-06-23", 30)
+
+        watermark = extract_source_watermarks(out)[0]
+        assert watermark.status == "complete"
+        assert watermark.scanned_start == dates[0].strftime("%Y-%m-%d")
+        assert watermark.scanned_end == dates[-1].strftime("%Y-%m-%d")
+
+    def test_verified_snapshot_marks_short_or_raw_fallback_history_limited(self):
+        from tradingagents.dataflows.jp.jquants_indicator import get_verified_market_snapshot
+
+        dates = pd.bdate_range(end="2026-06-23", periods=60)
+        records = [
+            _quote(d.strftime("%Y-%m-%d"), 100.0 + i, adjusted=False) for i, d in enumerate(dates)
+        ]
+        with self._patch_records(records):
+            out = get_verified_market_snapshot("9984.T", "2026-06-23", 30)
+
+        observation = extract_source_observations(out)[0]
+        assert observation.adjustment == "mixed adjusted/raw J-Quants OHLCV v2"
+        watermark = extract_source_watermarks(out)[0]
+        assert watermark.status == "limited"
+        assert any("warm-up" in item for item in watermark.limitations)
+        assert any("raw fallback" in item for item in watermark.limitations)
+
 
 @pytest.mark.unit
 class AuthTests(unittest.TestCase):
     def test_missing_api_key_raises_not_configured(self):
-        with mock.patch.dict(os.environ, {}, clear=True), \
-                self.assertRaises(JQuantsNotConfiguredError):
+        with (
+            mock.patch.dict(os.environ, {}, clear=True),
+            self.assertRaises(JQuantsNotConfiguredError),
+        ):
             jquants_common.get_api_key()
 
     def test_typed_error_hierarchy(self):
@@ -159,21 +225,27 @@ class AuthTests(unittest.TestCase):
             captured["headers"] = headers
             return FakeResp(200, {"data": []})
 
-        with mock.patch.dict(os.environ, {"JQUANTS_API_KEY": "KEY123"}, clear=True), \
-                mock.patch.object(jquants_common.requests, "get", side_effect=fake_get):
+        with (
+            mock.patch.dict(os.environ, {"JQUANTS_API_KEY": "KEY123"}, clear=True),
+            mock.patch.object(jquants_common.requests, "get", side_effect=fake_get),
+        ):
             jquants_common._request("/equities/bars/daily", {})
         self.assertEqual(captured["headers"], {"x-api-key": "KEY123"})
 
     def test_rate_limit_surfaces_typed_error(self):
-        with mock.patch.dict(os.environ, {"JQUANTS_API_KEY": "KEY"}, clear=True), \
-                mock.patch.object(jquants_common.requests, "get", return_value=FakeResp(429)), \
-                self.assertRaises(JQuantsRateLimitError):
+        with (
+            mock.patch.dict(os.environ, {"JQUANTS_API_KEY": "KEY"}, clear=True),
+            mock.patch.object(jquants_common.requests, "get", return_value=FakeResp(429)),
+            self.assertRaises(JQuantsRateLimitError),
+        ):
             jquants_common._request("/equities/bars/daily", {})
 
     def test_unauthorized_surfaces_not_configured(self):
-        with mock.patch.dict(os.environ, {"JQUANTS_API_KEY": "BAD"}, clear=True), \
-                mock.patch.object(jquants_common.requests, "get", return_value=FakeResp(403)), \
-                self.assertRaises(JQuantsNotConfiguredError):
+        with (
+            mock.patch.dict(os.environ, {"JQUANTS_API_KEY": "BAD"}, clear=True),
+            mock.patch.object(jquants_common.requests, "get", return_value=FakeResp(403)),
+            self.assertRaises(JQuantsNotConfiguredError),
+        ):
             jquants_common._request("/equities/bars/daily", {})
 
     def test_unknown_endpoint_403_is_not_mislabelled_as_auth(self):
@@ -181,11 +253,16 @@ class AuthTests(unittest.TestCase):
         # endpoint doesn't exist. That's a wrong-path programming error, not a
         # key problem — it must NOT surface as JQuantsNotConfiguredError (which
         # the router would degrade as an unconfigured vendor).
-        body = ('{"message": "The requested endpoint does not exist. Please '
-                'check the URL, HTTP method, and API version"}')
-        with mock.patch.dict(os.environ, {"JQUANTS_API_KEY": "KEY"}, clear=True), \
-                mock.patch.object(jquants_common.requests, "get",
-                                  return_value=FakeResp(403, text=body)):
+        body = (
+            '{"message": "The requested endpoint does not exist. Please '
+            'check the URL, HTTP method, and API version"}'
+        )
+        with (
+            mock.patch.dict(os.environ, {"JQUANTS_API_KEY": "KEY"}, clear=True),
+            mock.patch.object(
+                jquants_common.requests, "get", return_value=FakeResp(403, text=body)
+            ),
+        ):
             with self.assertRaises(RuntimeError) as ctx:
                 jquants_common._request("/indices/topix", {})
             self.assertNotIsInstance(ctx.exception, JQuantsNotConfiguredError)
@@ -209,7 +286,9 @@ class RoutingTests(unittest.TestCase):
             {"get_stock_data": {"yfinance": yf, "jquants": sentinel}},
             clear=False,
         ):
-            result = interface.route_to_vendor("get_stock_data", "9984.T", "2026-06-20", "2026-06-23")
+            result = interface.route_to_vendor(
+                "get_stock_data", "9984.T", "2026-06-20", "2026-06-23"
+            )
         self.assertEqual(result, "JQ_DATA")
         yf.assert_not_called()
         sentinel.assert_called_once()
