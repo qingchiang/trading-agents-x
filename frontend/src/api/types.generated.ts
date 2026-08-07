@@ -573,6 +573,7 @@ export interface components {
       outcome: components["schemas"]["ResearchRevisionOutcome"];
       predecessor_revision_id?: string | null;
       producing_run_id?: string | null;
+      research_update_audit?: components["schemas"]["ResearchUpdateAudit"] | null;
       sequence: number;
       update_summary: components["schemas"]["UpdateSummary"];
     };
@@ -593,6 +594,41 @@ export interface components {
       kind: components["schemas"]["ResearchScenarioKind"];
       likelihood: components["schemas"]["ScenarioLikelihood"];
       outcome: string;
+    };
+    ResearchUpdateAudit: {
+      authoritative_strategy?: string;
+      bounded_metrics?: components["schemas"]["RunMetrics"];
+      candidate?: components["schemas"]["ResearchUpdateCandidate"] | null;
+      checked_windows?: components["schemas"]["ResearchUpdateCheckedWindow"][];
+      comparison: "agreement" | "disagreement" | "not_applicable";
+      coverage?: Record<string, unknown> | null;
+      escalation_reason?: "invalid_baseline" | "source_correction" | "source_withdrawal" | "source_replacement" | "source_version_change" | "incompatible_semantics" | "threshold_crossing" | "coverage_incomplete" | "schema_invalid" | null;
+      evidence_lineage?: components["schemas"]["ResearchUpdateEvidenceLineage"][];
+      full_metrics?: components["schemas"]["RunMetrics"];
+      mode?: string;
+    };
+    ResearchUpdateCandidate: {
+      coverage: Record<string, unknown>;
+      evidence_snapshot: Record<string, unknown>;
+      outcome: string;
+      update_summary: Record<string, unknown>;
+    };
+    ResearchUpdateCheckedWindow: {
+      baseline_cutoff?: string | null;
+      limitations?: string[];
+      overlap_start?: string | null;
+      reported_records?: number | null;
+      returned_records?: number;
+      scanned_end: string;
+      scanned_start: string;
+      source: string;
+      status: "complete" | "limited" | "unavailable";
+      temporal_scope?: "point_in_time" | "live_only" | "unknown";
+    };
+    ResearchUpdateEvidenceLineage: {
+      evidence_ref: string;
+      lineage: "new" | "inherited";
+      source_revision_id?: string | null;
     };
     ResearchWarning: {
       code?: string;
@@ -707,6 +743,7 @@ export interface components {
       research_chain_requested?: boolean;
       research_execution_strategy?: "full" | "incremental" | null;
       research_rating?: components["schemas"]["ResearchRating"] | null;
+      research_update_audit?: components["schemas"]["ResearchUpdateAudit"] | null;
       source_run_id?: string | null;
       started_at?: string | null;
       status: components["schemas"]["RunStatus"];
@@ -732,6 +769,7 @@ export interface components {
       research_chain_id?: string | null;
       research_chain_requested?: boolean;
       research_execution_strategy?: "full" | "incremental" | null;
+      research_update_audit?: components["schemas"]["ResearchUpdateAudit"] | null;
       source_run_id?: string | null;
       started_at?: string | null;
       status: components["schemas"]["RunStatus"];

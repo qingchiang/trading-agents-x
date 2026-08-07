@@ -25,6 +25,7 @@ from tradingagents.application.research import (
     DecisionConfidence,
     DecisionRole,
     EpistemicKind,
+    IncrementalEscalationReason,
     QuestionStatus,
     ResearchChain,
     ResearchChangeKind,
@@ -39,6 +40,7 @@ from tradingagents.application.research import (
     ScenarioLikelihood,
     assemble_full_revision,
     assemble_full_update,
+    assess_deterministic_update,
     render_revision_export_markdown,
 )
 
@@ -263,6 +265,228 @@ def _watermark(
         "returned_records": 1,
         "reported_records": 1,
     }
+
+
+def _incremental_baseline_and_evidence(
+    *,
+    candidate_records=None,
+    candidate_watermarks=None,
+):
+    market = {
+        **_source_record("market:v1"),
+        "source": "J-Quants adjusted OHLCV",
+        "record_id": "jquants-market:6501",
+        "record_kind": "market",
+        "adjustment": "split_adjusted",
+        "observation_value": 95.0,
+        "unit": "JPY",
+    }
+    watermarks = [
+        _watermark("EDINET"),
+        _watermark("TDnet"),
+        _watermark("J-Quants adjusted OHLCV"),
+        _watermark("Google News"),
+    ]
+    baseline = assemble_full_revision(
+        AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
+        _with_disclosure_metadata(
+            _execution("6501.T"),
+            records=[market],
+            watermarks=watermarks,
+        ),
+    )
+    item = EvidenceItem.create(
+        source="bounded fixture",
+        evidence_type="bounded update",
+        requested_date=date(2026, 7, 25),
+        effective_date=date(2026, 7, 25),
+        content="Bounded source observations.",
+        provenance={
+            "source_records": candidate_records if candidate_records is not None else [market],
+            "source_watermarks": (
+                candidate_watermarks
+                if candidate_watermarks is not None
+                else [{**item, "scanned_end": "2026-07-25"} for item in watermarks]
+            ),
+        },
+    )
+    evidence = EvidenceBundle(
+        instrument="6501.T",
+        analysis_date=date(2026, 7, 25),
+        items=(item,),
+    )
+    return baseline, evidence, market, watermarks
+
+
+def test_deterministic_incremental_gates_propose_quiet_candidate():
+    baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+
+    result = assess_deterministic_update(
+        "revision-1",
+        baseline,
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-25",
+            analysts=("market",),
+        ),
+        evidence,
+    )
+
+    assert result.escalation_reason is None
+    assert result.candidate is not None
+    assert result.candidate.outcome is ResearchRevisionOutcome.NO_MATERIAL_CHANGE
+    assert result.candidate.execution_strategy.value == "incremental"
+    assert result.candidate.coverage.supports_no_material_change is True
+    assert {
+        item.requirement
+        for item in result.candidate.coverage.domains
+        if item.source == "Google News"
+    } == {CoverageRequirement.ADVISORY}
+
+
+@pytest.mark.parametrize(
+    ("status", "reason"),
+    [
+        ("corrected", IncrementalEscalationReason.SOURCE_CORRECTION),
+        ("withdrawn", IncrementalEscalationReason.SOURCE_WITHDRAWAL),
+    ],
+)
+def test_deterministic_incremental_gates_escalate_disclosure_integrity_changes(
+    status,
+    reason,
+):
+    baseline, _evidence, market, watermarks = _incremental_baseline_and_evidence()
+    changed = _source_record(f"edinet:{status}", status=status)
+    _, evidence, _, _ = _incremental_baseline_and_evidence(
+        candidate_records=[market, changed],
+        candidate_watermarks=watermarks,
+    )
+
+    result = assess_deterministic_update(
+        "revision-1",
+        baseline,
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
+        evidence,
+    )
+
+    assert result.candidate is None
+    assert result.escalation_reason is reason
+
+
+def test_deterministic_incremental_gates_escalate_missing_required_coverage():
+    baseline, _evidence, market, watermarks = _incremental_baseline_and_evidence()
+    missing_tdnet = [item for item in watermarks if item["source"] != "TDnet"]
+    _, evidence, _, _ = _incremental_baseline_and_evidence(
+        candidate_records=[market],
+        candidate_watermarks=missing_tdnet,
+    )
+
+    result = assess_deterministic_update(
+        "revision-1",
+        baseline,
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
+        evidence,
+    )
+
+    assert result.escalation_reason is IncrementalEscalationReason.COVERAGE_INCOMPLETE
+
+
+def test_deterministic_incremental_gates_escalate_stale_required_window():
+    baseline, _evidence, market, watermarks = _incremental_baseline_and_evidence()
+    _, evidence, _, _ = _incremental_baseline_and_evidence(
+        candidate_records=[market],
+        candidate_watermarks=watermarks,
+    )
+
+    result = assess_deterministic_update(
+        "revision-1",
+        baseline,
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
+        evidence,
+    )
+
+    assert result.escalation_reason is IncrementalEscalationReason.COVERAGE_INCOMPLETE
+    assert result.coverage is not None
+    assert "update cutoff" in " ".join(result.coverage.limitations)
+
+
+def test_deterministic_incremental_gates_escalate_window_past_cutoff():
+    baseline, _evidence, market, watermarks = _incremental_baseline_and_evidence()
+    future_windows = [{**item, "scanned_end": "2026-07-26"} for item in watermarks]
+    _, evidence, _, _ = _incremental_baseline_and_evidence(
+        candidate_records=[market],
+        candidate_watermarks=future_windows,
+    )
+
+    result = assess_deterministic_update(
+        "revision-1",
+        baseline,
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
+        evidence,
+    )
+
+    assert result.escalation_reason is IncrementalEscalationReason.COVERAGE_INCOMPLETE
+    assert result.coverage is not None
+    assert "update cutoff" in " ".join(result.coverage.limitations)
+
+
+def test_deterministic_incremental_gates_escalate_incompatible_market_semantics():
+    baseline, _evidence, market, watermarks = _incremental_baseline_and_evidence()
+    changed = {
+        **market,
+        "version_id": "market:v2",
+        "adjustment": "raw",
+        "observation_value": 96.0,
+    }
+    _, evidence, _, _ = _incremental_baseline_and_evidence(
+        candidate_records=[changed],
+        candidate_watermarks=watermarks,
+    )
+
+    result = assess_deterministic_update(
+        "revision-1",
+        baseline,
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
+        evidence,
+    )
+
+    assert result.escalation_reason is IncrementalEscalationReason.INCOMPATIBLE_SEMANTICS
+
+
+def test_deterministic_incremental_gates_escalate_market_threshold_crossing():
+    baseline, _evidence, market, watermarks = _incremental_baseline_and_evidence()
+    boundary = MarketReferenceLevel(
+        label="Thesis reference",
+        value=100.0,
+        measurement_kind="currency",
+        unit="JPY",
+        as_of_date=CUTOFF,
+        interpretation="Crossing changes the thesis envelope.",
+        evidence_refs=(REF,),
+        date_evidence_refs=(REF,),
+        basis="interpreted",
+    )
+    baseline = baseline.model_copy(
+        update={
+            "current_state": baseline.current_state.model_copy(
+                update={"market_reference_levels": (boundary,)}
+            )
+        }
+    )
+    changed = {**market, "version_id": "market:v2", "observation_value": 101.0}
+    _, evidence, _, _ = _incremental_baseline_and_evidence(
+        candidate_records=[changed],
+        candidate_watermarks=watermarks,
+    )
+
+    result = assess_deterministic_update(
+        "revision-1",
+        baseline,
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
+        evidence,
+    )
+
+    assert result.escalation_reason is IncrementalEscalationReason.THRESHOLD_CROSSING
 
 
 def test_revision_snapshot_retains_disclosure_versions_and_source_coverage():

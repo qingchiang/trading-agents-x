@@ -39,6 +39,10 @@ flowchart TB
     WORKER["AnalysisWorker"] --> REPO
     WORKER --> SERVICE
     SERVICE --> GRAPH["ResearchGraph"]
+    SERVICE --> BOUNDED["Bounded update coordinator"]
+    BOUNDED -. "typed progress result" .-> SERVICE
+    BOUNDED --> DATA
+    BOUNDED -. "shared deterministic Evidence assembly" .-> GRAPH
     GRAPH --> DATA["Market dataflows"]
     GRAPH --> CHECKPOINT["LangGraph SQLite saver"]
     CHECKPOINT --> DB
@@ -307,6 +311,41 @@ cancellation, invalid state, or a stale baseline therefore leaves the prior
 head unchanged. Historical runs and decision-memory rows are never inferred
 into Research Chains.
 
+### Shadow incremental updates
+
+Manual Japanese Research Chain updates begin with a bounded, deterministic
+collection phase before any LLM client is created. The phase rechecks EDINET
+and TDnet with overlap, collects selected or thesis-required J-Quants
+fundamental and adjusted-market snapshots, and labels contextual sources
+Advisory. Required sources are derived from active Claims and open Questions;
+EDINET and TDnet remain Required for Japanese chains, and audited market
+reference levels require compatible adjusted-market coverage.
+
+Instrument/cutoff mismatches, incomplete or non-PIT Required coverage, newly
+observed corrections, withdrawals, replacements or source versions,
+fundamental changes, provider/adjustment/unit incompatibility, threshold
+crossings, and invalid schemas produce stable Full-escalation reasons. Once a
+gate escalates, no later incremental or semantic stage runs. Collection
+failure becomes unavailable coverage and continues fail-closed through the
+same update's existing Full Analysis rather than becoming a quiet result.
+The dotted bounded-to-graph edge is deliberately narrow: the coordinator
+reuses the pure `collect_evidence` assembler currently housed in the graph
+module, but never constructs or executes a graph, invokes a model, or writes
+durable state. `AnalysisService` remains the sole persistence coordinator.
+Bounded partial results return through an explicit progress callback owned by
+`AnalysisService`; the service persists each completed checkpoint so later
+cancellation or failure does not erase already checked windows or metrics.
+
+When deterministic gates can propose No Material Change, Shadow mode persists
+the candidate and still runs independent Full Analysis. Only the Full result
+creates the authoritative Revision and advances the chain. Agreement or
+disagreement is an experimental finding, not an execution failure. The run
+and Revision retain bounded checked windows, Coverage Attestation, candidate
+outcome, Evidence lineage, escalation reason, comparison, and separately
+attributed bounded/Full metrics; events expose the same phase transitions.
+Failed or cancelled Shadow executions retain their run audit but never create
+a Revision.
+
 ### Trash lifecycle
 
 Only terminal runs can be moved to Trash. A trashed run remains readable and
@@ -338,14 +377,14 @@ Alembic manages application tables:
 
 | Table | Responsibility |
 | --- | --- |
-| `runs` | request, redacted settings snapshot, status, lease, error, metrics |
+| `runs` | request, redacted settings snapshot, status, lease, error, metrics, and in-progress/terminal Shadow audit |
 | `run_attempts` | attempt state, checkpoint thread, lease and resume count |
 | `run_events` | per-run monotonic sequence, attempt, node, sanitized payload |
 | `run_artifacts` | versioned analyst, deliberation, and decision-stage artifacts, including component generation observations |
 | `run_evidence` | independently sealed EvidenceBundle and digest |
 | `decisions` | typed final decision, numeric audit appendix, market identity |
 | `research_chains` | one Instrument's linear lineage, Primary designation, and current head |
-| `research_revisions` | immutable complete state, coverage, summary, Evidence snapshot, producing execution, and metrics |
+| `research_revisions` | immutable complete state, coverage, summary, Evidence snapshot, producing execution, Shadow finding, and metrics |
 | `outcomes` | benchmark, five-interval dates, raw return, alpha |
 | `reflections` | outcome-aware research reflection |
 

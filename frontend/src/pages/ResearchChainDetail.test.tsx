@@ -27,6 +27,27 @@ const chain = {
     outcome: "material_change",
     created_at: "2026-07-24T00:00:00Z",
     metrics: { input_tokens: 1200, output_tokens: 300 },
+    research_update_audit: {
+      mode: "shadow",
+      candidate: {
+        outcome: "no_material_change",
+        coverage: {},
+        update_summary: { summary: "No bounded material change detected." },
+        evidence_snapshot: {},
+      },
+      coverage: {
+        supports_no_material_change: true,
+        limitations: ["Bounded archive constraint"],
+        domains: [{ domain: "company_disclosures", status: "complete" }],
+      },
+      authoritative_strategy: "full",
+      escalation_reason: null,
+      comparison: "disagreement",
+      checked_windows: [{ source: "EDINET", scanned_start: "2026-07-01", scanned_end: "2026-07-25", status: "complete" }],
+      evidence_lineage: [{ evidence_ref: "ev_0123456789ab", lineage: "new" }],
+      bounded_metrics: { llm_calls: 0, tool_calls: 3, input_tokens: 0, output_tokens: 0, wall_time_seconds: 0.4 },
+      full_metrics: { llm_calls: 8, tool_calls: 12, input_tokens: 1200, output_tokens: 300, wall_time_seconds: 4.2 },
+    },
     update_summary: { summary: "初回のフル分析を完了。" },
     delta: {
       claims: [],
@@ -158,6 +179,15 @@ test("reads the complete current thesis, coverage, evidence, reports, and metric
   expect(screen.getByText(/JPY\/2/)).toBeVisible();
   expect(screen.getByText(/fallback true/)).toBeVisible();
   expect(screen.getByText(/2026-06-24.*2026-07-24/)).toBeVisible();
+  expect(screen.getByText("Shadow update finding")).toBeVisible();
+  expect(screen.getByText(/Candidate outcome: no_material_change/)).toBeVisible();
+  expect(screen.getByText(/Shadow comparison: disagreement/)).toBeVisible();
+  expect(screen.getByText(/Bounded checked windows: EDINET 2026-07-01–2026-07-25/)).toBeVisible();
+  expect(screen.getByText(/Bounded update summary: No bounded material change detected/)).toBeVisible();
+  expect(screen.getByText(/Bounded coverage attestation: true; company_disclosures \(complete\)/)).toBeVisible();
+  expect(screen.getByText("Bounded archive constraint")).toBeVisible();
+  expect(screen.getByText(/Bounded Evidence lineage: ev_0123456789ab \(new\)/)).toBeVisible();
+  expect(screen.getByText(/Bounded work: 0 LLM calls · 3 Tool calls/)).toBeVisible();
   expect(screen.getByText("rolling archive truncated the requested interval")).toBeVisible();
   expect(screen.getByText("market_boundary_crossing")).toBeVisible();
   expect(screen.getByText(/Thesis reference: 100/)).toBeVisible();
@@ -178,7 +208,7 @@ test("reads the complete current thesis, coverage, evidence, reports, and metric
   ).toHaveAttribute("href", "/runs/run-1");
 });
 
-test("queues a Full update from the displayed current head", async () => {
+test("queues a Shadow update from the displayed current head", async () => {
   vi.mocked(api.updateResearchChain).mockResolvedValue({ id: "run-2" } as never);
   render(
     <Router initialPath="/research/chain-1">
@@ -186,7 +216,7 @@ test("queues a Full update from the displayed current head", async () => {
     </Router>,
   );
 
-  fireEvent.click(await screen.findByRole("button", { name: "Update with Full Analysis" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Update research (Shadow)" }));
 
   await waitFor(() => expect(api.updateResearchChain).toHaveBeenCalled());
   expect(vi.mocked(api.updateResearchChain).mock.calls[0].slice(0, 2)).toEqual([

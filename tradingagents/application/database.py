@@ -50,6 +50,9 @@ class RunRecord(Base):
         ForeignKey("research_revisions.id", ondelete="RESTRICT"), nullable=True
     )
     research_execution_strategy: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    research_update_audit_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True
+    )
     request_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     config_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     version: Mapped[str] = mapped_column(String(40), nullable=False)
@@ -127,6 +130,9 @@ class ResearchRevisionRecord(Base):
     coverage_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     update_summary_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     evidence_snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    research_update_audit_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True
+    )
     metrics_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 

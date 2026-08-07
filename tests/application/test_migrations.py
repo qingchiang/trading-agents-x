@@ -57,6 +57,9 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
         outcome_indexes = {index["name"] for index in inspector.get_indexes("outcomes")}
         run_columns = {column["name"] for column in inspector.get_columns("runs")}
         run_indexes = {index["name"] for index in inspector.get_indexes("runs")}
+        revision_columns = {
+            column["name"] for column in inspector.get_columns("research_revisions")
+        }
         artifact_uniques = {
             tuple(constraint["column_names"])
             for constraint in inspector.get_unique_constraints("run_artifacts")
@@ -67,7 +70,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     finally:
         engine.dispose()
 
-    assert revision == "0006_full_chain_updates"
+    assert revision == "0007_shadow_research_updates"
     assert {
         "id",
         "run_id",
@@ -109,6 +112,8 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     assert "research_chain_id" in run_columns
     assert "baseline_revision_id" in run_columns
     assert "research_execution_strategy" in run_columns
+    assert "research_update_audit_json" in run_columns
+    assert "research_update_audit_json" in revision_columns
     assert "research_chains" in table_names
     assert "research_revisions" in table_names
     assert "ix_runs_trash" in run_indexes
@@ -135,6 +140,9 @@ def test_v8_upgrade_preserves_research_data_and_downgrade_recreates_empty_table(
         connection.exec_driver_sql("ALTER TABLE runs ADD COLUMN baseline_revision_id VARCHAR(36)")
         connection.exec_driver_sql(
             "ALTER TABLE runs ADD COLUMN research_execution_strategy VARCHAR(20)"
+        )
+        connection.exec_driver_sql(
+            "ALTER TABLE runs ADD COLUMN research_update_audit_json JSON"
         )
     seed_engine.dispose()
     repository = RunRepository(app_settings)
@@ -186,6 +194,7 @@ def test_v8_upgrade_preserves_research_data_and_downgrade_recreates_empty_table(
         connection.exec_driver_sql("ALTER TABLE runs DROP COLUMN research_chain_id")
         connection.exec_driver_sql("ALTER TABLE runs DROP COLUMN baseline_revision_id")
         connection.exec_driver_sql("ALTER TABLE runs DROP COLUMN research_execution_strategy")
+        connection.exec_driver_sql("ALTER TABLE runs DROP COLUMN research_update_audit_json")
     seed_engine.dispose()
 
     upgrade_database(app_settings)

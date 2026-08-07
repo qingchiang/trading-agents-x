@@ -31,6 +31,8 @@ from .contracts import (
     AnalystReport,
     EvidenceBundle,
     ResearchArtifactDraft,
+    ResearchUpdateAudit,
+    ResearchUpdateCandidate,
     RunEvent,
     RunExport,
     RunStatus,
@@ -39,11 +41,13 @@ from .exporting import (
     render_run_export_markdown,
     render_run_export_package,
 )
+from .incremental import run_deterministic_incremental_gate
 from .instrument_names import resolve_local_instrument_name
 from .llms import RunLLMs, create_run_llms
-from .metrics import MetricsCallback
+from .metrics import MetricsCallback, merge_run_metrics
 from .repository import RunRepository, RunView
 from .research import (
+    IncrementalGateResult,
     ResearchRevision,
     ResearchRevisionDraft,
     RevisionExport,
@@ -58,6 +62,22 @@ from .settings import AppSettings, RunSettings
 logger = logging.getLogger(__name__)
 
 EventHandler = Callable[[RunEvent], None]
+
+
+def _segment_metrics(
+    incremental_result: IncrementalGateResult | None,
+    update_audit: ResearchUpdateAudit | None,
+    metrics: MetricsCallback,
+):
+    full_metrics = metrics.snapshot()
+    bounded_metrics = (
+        incremental_result.metrics
+        if incremental_result is not None
+        else update_audit.bounded_metrics
+        if update_audit is not None
+        else None
+    )
+    return merge_run_metrics(bounded_metrics, full_metrics) if bounded_metrics else full_metrics
 
 
 def _instrument_display_name(identity: Any) -> str | None:
@@ -98,6 +118,11 @@ class AnalysisService:
         revision_comparator: Callable[
             [str, ResearchRevision, ResearchRevisionDraft], ResearchRevisionDraft
         ] = assemble_full_update,
+        incremental_gate: Callable[
+            [ResearchRevision, AnalysisRequest, dict[str, Any], Callable[[], bool]],
+            IncrementalGateResult,
+        ]
+        | None = None,
     ):
         self.settings = settings
         if repository is None:
@@ -109,6 +134,7 @@ class AnalysisService:
         self.local_name_resolver = local_name_resolver
         self.state_assembler = state_assembler
         self.revision_comparator = revision_comparator
+        self.incremental_gate = incremental_gate or run_deterministic_incremental_gate
 
     def enqueue(
         self,
@@ -182,7 +208,7 @@ class AnalysisService:
                     "update_intent_id": view.update_intent_id,
                     "research_chain_id": chain_id,
                     "baseline_revision_id": baseline_revision_id,
-                    "execution_strategy": "full",
+                    "execution_strategy": view.research_execution_strategy,
                 },
             )
         return view
@@ -246,8 +272,65 @@ class AnalysisService:
             on_event=on_event,
         )
         metrics = MetricsCallback()
+        incremental_result: IncrementalGateResult | None = None
+        update_audit: ResearchUpdateAudit | None = None
         instrument_name = run.instrument_name
         instrument_local_name = run.instrument_local_name
+
+        def persist_incremental_audit(
+            result: IncrementalGateResult,
+        ) -> ResearchUpdateAudit:
+            nonlocal update_audit
+            candidate = result.candidate
+            bounded_coverage = result.coverage or (
+                candidate.coverage if candidate is not None else None
+            )
+            bounded_snapshot = result.evidence_snapshot or (
+                candidate.evidence_snapshot if candidate is not None else None
+            )
+            update_audit = ResearchUpdateAudit(
+                candidate=(
+                    ResearchUpdateCandidate(
+                        outcome=candidate.outcome.value,
+                        coverage=candidate.coverage.model_dump(mode="json"),
+                        update_summary=candidate.update_summary.model_dump(mode="json"),
+                        evidence_snapshot=candidate.evidence_snapshot.model_dump(mode="json"),
+                    )
+                    if candidate is not None
+                    else None
+                ),
+                coverage=(
+                    bounded_coverage.model_dump(mode="json")
+                    if bounded_coverage is not None
+                    else None
+                ),
+                checked_windows=(
+                    tuple(
+                        item.model_dump(mode="json") for item in bounded_snapshot.source_watermarks
+                    )
+                    if bounded_snapshot is not None
+                    else ()
+                ),
+                evidence_lineage=(
+                    tuple(item.model_dump(mode="json") for item in bounded_snapshot.lineage)
+                    if bounded_snapshot is not None
+                    else ()
+                ),
+                escalation_reason=(
+                    result.escalation_reason.value if result.escalation_reason is not None else None
+                ),
+                comparison="not_applicable",
+                bounded_metrics=result.metrics,
+            )
+            self.repository.set_research_update_audit(run.id, update_audit)
+            return update_audit
+
+        def persist_partial_full_metrics() -> None:
+            nonlocal update_audit
+            if update_audit is None:
+                return
+            update_audit = update_audit.model_copy(update={"full_metrics": metrics.snapshot()})
+            self.repository.set_research_update_audit(run.id, update_audit)
 
         with self._heartbeat(run.id, worker_id):
             try:
@@ -295,6 +378,64 @@ class AnalysisService:
                         run.request.ticker,
                         identity,
                     )
+                    if run.research_execution_strategy == "incremental":
+                        if run.baseline_revision_id is None:
+                            raise ValueError("Research Chain update has no baseline")
+                        baseline = self.repository.get_research_revision(run.baseline_revision_id)
+                        update_audit = ResearchUpdateAudit(
+                            comparison="not_applicable",
+                        )
+                        self.repository.set_research_update_audit(run.id, update_audit)
+                        if self.incremental_gate is run_deterministic_incremental_gate:
+                            incremental_result = run_deterministic_incremental_gate(
+                                baseline,
+                                run.request,
+                                dataflow_config,
+                                lambda: self.repository.cancel_requested(run.id),
+                                on_progress=persist_incremental_audit,
+                            )
+                        else:
+                            incremental_result = self.incremental_gate(
+                                baseline,
+                                run.request,
+                                dataflow_config,
+                                lambda: self.repository.cancel_requested(run.id),
+                            )
+                        candidate = incremental_result.candidate
+                        update_audit = persist_incremental_audit(incremental_result)
+                        self._emit(
+                            run.id,
+                            "research.incremental_assessed",
+                            payload={
+                                "candidate_outcome": (
+                                    candidate.outcome.value if candidate is not None else None
+                                ),
+                                "escalation_reason": update_audit.escalation_reason,
+                                "metrics": incremental_result.metrics.model_dump(mode="json"),
+                                "checked_windows": update_audit.checked_windows,
+                                "coverage": update_audit.coverage,
+                                "evidence_lineage": tuple(
+                                    item.model_dump(mode="json")
+                                    for item in update_audit.evidence_lineage
+                                ),
+                                "candidate_update_summary": (
+                                    update_audit.candidate.update_summary
+                                    if update_audit.candidate is not None
+                                    else None
+                                ),
+                            },
+                            on_event=on_event,
+                        )
+                        self._emit(
+                            run.id,
+                            "research.shadow_full_started",
+                            payload={
+                                "authoritative_strategy": "full",
+                                "escalation_reason": update_audit.escalation_reason,
+                            },
+                            on_event=on_event,
+                        )
+                        metrics = MetricsCallback()
                     memory = self.repository.memory_context(
                         run.request.ticker,
                         run.request.asset_type.value,
@@ -394,6 +535,51 @@ class AnalysisService:
                             baseline,
                             revision_draft,
                         )
+                    if update_audit is not None and revision_draft is not None:
+                        full_metrics = metrics.snapshot()
+                        comparison = (
+                            "agreement"
+                            if incremental_result is not None
+                            and incremental_result.candidate is not None
+                            and revision_draft.outcome.value == "no_material_change"
+                            else (
+                                "disagreement"
+                                if incremental_result is not None
+                                and incremental_result.candidate is not None
+                                else "not_applicable"
+                            )
+                        )
+                        update_audit = update_audit.model_copy(
+                            update={
+                                "comparison": comparison,
+                                "full_metrics": full_metrics,
+                            }
+                        )
+                        self.repository.set_research_update_audit(run.id, update_audit)
+                        revision_draft = revision_draft.model_copy(
+                            update={"research_update_audit": update_audit}
+                        )
+                        result = result.model_copy(
+                            update={
+                                "metrics": merge_run_metrics(
+                                    update_audit.bounded_metrics,
+                                    full_metrics,
+                                )
+                            }
+                        )
+                        self._emit(
+                            run.id,
+                            "research.shadow_compared",
+                            payload={
+                                "comparison": comparison,
+                                "authoritative_outcome": revision_draft.outcome.value,
+                                "metrics": {
+                                    "bounded": update_audit.bounded_metrics.model_dump(mode="json"),
+                                    "full": full_metrics.model_dump(mode="json"),
+                                },
+                            },
+                            on_event=on_event,
+                        )
                     aggregate_metrics = self.repository.complete(
                         run.id,
                         result,
@@ -411,9 +597,11 @@ class AnalysisService:
                 )
                 return result
             except RunCancelled:
+                persist_partial_full_metrics()
+                segment_metrics = _segment_metrics(incremental_result, update_audit, metrics)
                 aggregate_metrics = self.repository.finish_cancel(
                     run.id,
-                    metrics=metrics.snapshot(),
+                    metrics=segment_metrics,
                 )
                 self._clear_checkpoint(checkpoint_thread)
                 self._emit(
@@ -435,10 +623,12 @@ class AnalysisService:
                     warnings=("Run cancelled at a graph node boundary.",),
                 )
             except WorkerShutdown:
+                persist_partial_full_metrics()
+                segment_metrics = _segment_metrics(incremental_result, update_audit, metrics)
                 released = self.repository.release_claim(
                     run.id,
                     worker_id,
-                    metrics=metrics.snapshot(),
+                    metrics=segment_metrics,
                 )
                 self._emit(
                     run.id,
@@ -451,7 +641,8 @@ class AnalysisService:
                 )
                 raise
             except Exception as exc:
-                segment_metrics = metrics.snapshot()
+                persist_partial_full_metrics()
+                segment_metrics = _segment_metrics(incremental_result, update_audit, metrics)
                 try:
                     aggregate_metrics = self.repository.fail(
                         run.id,

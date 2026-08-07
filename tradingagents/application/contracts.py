@@ -1606,6 +1606,62 @@ class RunMetrics(FrozenModel):
     node_metrics: dict[str, NodeMetrics] = Field(default_factory=dict)
 
 
+class ResearchUpdateCandidate(FrozenModel):
+    """Retained bounded-update proposal used by the Shadow experiment."""
+
+    outcome: Literal["no_material_change"]
+    coverage: dict[str, Any]
+    update_summary: dict[str, Any]
+    evidence_snapshot: dict[str, Any]
+
+
+ResearchUpdateEscalationReason = Literal[
+    "invalid_baseline",
+    "source_correction",
+    "source_withdrawal",
+    "source_replacement",
+    "source_version_change",
+    "incompatible_semantics",
+    "threshold_crossing",
+    "coverage_incomplete",
+    "schema_invalid",
+]
+
+
+class ResearchUpdateCheckedWindow(FrozenModel):
+    source: str
+    scanned_start: date
+    scanned_end: date
+    status: Literal["complete", "limited", "unavailable"]
+    temporal_scope: Literal["point_in_time", "live_only", "unknown"] = "point_in_time"
+    limitations: tuple[str, ...] = ()
+    returned_records: int = Field(default=0, ge=0)
+    reported_records: int | None = Field(default=None, ge=0)
+    baseline_cutoff: date | None = None
+    overlap_start: date | None = None
+
+
+class ResearchUpdateEvidenceLineage(FrozenModel):
+    evidence_ref: str
+    lineage: Literal["new", "inherited"]
+    source_revision_id: str | None = None
+
+
+class ResearchUpdateAudit(FrozenModel):
+    """Durable phase attribution and finding for one Research Chain update."""
+
+    mode: Literal["shadow"] = "shadow"
+    candidate: ResearchUpdateCandidate | None = None
+    coverage: dict[str, Any] | None = None
+    checked_windows: tuple[ResearchUpdateCheckedWindow, ...] = ()
+    evidence_lineage: tuple[ResearchUpdateEvidenceLineage, ...] = ()
+    authoritative_strategy: Literal["full"] = "full"
+    escalation_reason: ResearchUpdateEscalationReason | None = None
+    comparison: Literal["agreement", "disagreement", "not_applicable"]
+    bounded_metrics: RunMetrics = Field(default_factory=RunMetrics)
+    full_metrics: RunMetrics = Field(default_factory=RunMetrics)
+
+
 class AnalysisRequest(FrozenModel):
     ticker: str = Field(min_length=1, max_length=64)
     analysis_date: date
@@ -1747,6 +1803,7 @@ class RunView(FrozenModel):
     research_chain_id: str | None = None
     baseline_revision_id: str | None = None
     research_execution_strategy: Literal["full", "incremental"] | None = None
+    research_update_audit: ResearchUpdateAudit | None = None
     status: RunStatus
     request: AnalysisRequest
     config_snapshot: dict[str, Any]

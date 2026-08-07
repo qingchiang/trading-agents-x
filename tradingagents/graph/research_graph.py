@@ -520,7 +520,7 @@ class ResearchGraph:
                     context=context,
                 )
             narrative = _clean_narrative(str(result.get(report_key, "")))
-            evidence = _collect_evidence(
+            evidence = collect_evidence(
                 result.get("messages", []),
                 narrative,
                 requested_date=context.request.analysis_date,
@@ -1528,7 +1528,7 @@ def _analyst_route(state: AgentState) -> str:
     return "done"
 
 
-def _collect_evidence(
+def collect_evidence(
     messages: Iterable[Any],
     _narrative: str,
     *,
@@ -1704,6 +1704,9 @@ def _collect_evidence(
         )
         items[item.ref] = item
     return list(items.values())
+
+
+_collect_evidence = collect_evidence
 
 
 def _evidence_from_record(

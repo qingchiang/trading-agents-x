@@ -39,6 +39,7 @@ from .contracts import (
     ResearchCase,
     ResearchDecision,
     ResearchRating,
+    ResearchUpdateAudit,
     ResearchWarning,
     RiskReview,
     RunAttemptView,
@@ -359,7 +360,11 @@ class RunRepository:
                 update_intent_id=str(uuid4()),
                 research_chain_id=chain.id,
                 baseline_revision_id=baseline.id,
-                research_execution_strategy=ResearchExecutionStrategy.FULL.value,
+                research_execution_strategy=(
+                    ResearchExecutionStrategy.INCREMENTAL.value
+                    if request.ticker.endswith(".T")
+                    else ResearchExecutionStrategy.FULL.value
+                ),
                 request_json=request_json,
                 config_json=_sanitize_payload(config_snapshot),
                 version=__version__,
@@ -380,6 +385,20 @@ class RunRepository:
                 )
             )
         return self.get_run(run_id), True
+
+    def set_research_update_audit(
+        self,
+        run_id: str,
+        audit: ResearchUpdateAudit,
+    ) -> None:
+        with self.sessions.begin() as session:
+            record = session.get(RunRecord, run_id)
+            if record is None:
+                raise RunNotFoundError(run_id)
+            if record.status != RunStatus.RUNNING.value:
+                raise InvalidRunTransitionError(record.status)
+            record.research_update_audit_json = audit.model_dump(mode="json")
+            record.updated_at = _utc_naive()
 
     @staticmethod
     def checkpoint_thread_id(run_id: str, attempt: int) -> str:
@@ -2084,6 +2103,11 @@ class RunRepository:
             coverage_json=draft.coverage.model_dump(mode="json"),
             update_summary_json=draft.update_summary.model_dump(mode="json"),
             evidence_snapshot_json=draft.evidence_snapshot.model_dump(mode="json"),
+            research_update_audit_json=(
+                draft.research_update_audit.model_dump(mode="json")
+                if draft.research_update_audit is not None
+                else None
+            ),
             metrics_json=metrics.model_dump(mode="json"),
             created_at=created_at,
         )
@@ -2137,6 +2161,11 @@ class RunRepository:
             evidence_snapshot=EffectiveEvidenceSnapshot.model_validate(
                 record.evidence_snapshot_json
             ),
+            research_update_audit=(
+                ResearchUpdateAudit.model_validate(record.research_update_audit_json)
+                if record.research_update_audit_json is not None
+                else None
+            ),
             metrics=RunMetrics.model_validate(record.metrics_json),
             created_at=_aware(record.created_at),
         )
@@ -2189,6 +2218,11 @@ class RunRepository:
             research_chain_id=record.research_chain_id,
             baseline_revision_id=record.baseline_revision_id,
             research_execution_strategy=record.research_execution_strategy,
+            research_update_audit=(
+                ResearchUpdateAudit.model_validate(record.research_update_audit_json)
+                if record.research_update_audit_json is not None
+                else None
+            ),
             status=RunStatus(record.status),
             request=AnalysisRequest.model_validate(record.request_json),
             config_snapshot=record.config_json,

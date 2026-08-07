@@ -23,6 +23,10 @@ from tradingagents.application.contracts import (
     ResearchArtifactDraft,
     RunStatus,
 )
+from tradingagents.application.research import (
+    IncrementalEscalationReason,
+    IncrementalGateResult,
+)
 from tradingagents.application.service import AnalysisService
 from tradingagents.application.settings import AppSettings
 from tradingagents.graph.research_graph import GraphExecution
@@ -186,6 +190,9 @@ async def test_initial_research_chain_creation_read_and_export_surfaces(
         graph_factory=_FullResearchGraph,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
         local_name_resolver=lambda _ticker, _date, _config: None,
+        incremental_gate=lambda *_args: IncrementalGateResult(
+            escalation_reason=IncrementalEscalationReason.THRESHOLD_CROSSING
+        ),
     )
     claimed = web_repository.claim_run(
         queued.json()["id"], "test-worker", web_settings.lease_seconds
@@ -234,7 +241,7 @@ async def test_initial_research_chain_creation_read_and_export_surfaces(
     )
     assert update.status_code == 202
     assert duplicate.json()["id"] == update.json()["id"]
-    assert update.json()["research_execution_strategy"] == "full"
+    assert update.json()["research_execution_strategy"] == "incremental"
     update_claim = web_repository.claim_run(
         update.json()["id"], "test-worker", web_settings.lease_seconds
     )
@@ -242,10 +249,13 @@ async def test_initial_research_chain_creation_read_and_export_surfaces(
     advanced = (await web_client.get(f"/api/v1/research-chains/{chain['id']}")).json()
     current_id = advanced["current_revision_id"]
     current = (await web_client.get(f"/api/v1/research-revisions/{current_id}")).json()
+    run_detail = (await web_client.get(f"/api/v1/runs/{update.json()['id']}")).json()
     signal = current["delta"]["change_signals"][0]
     assert signal["kind"] == "market_boundary_crossing"
     assert signal["previous_value"] == 95.0
     assert signal["current_value"] == 101.0
+    assert current["research_update_audit"]["escalation_reason"] == "threshold_crossing"
+    assert run_detail["run"]["research_update_audit"]["authoritative_strategy"] == "full"
     updated_export = await web_client.get(
         f"/api/v1/research-revisions/{current_id}/export?format=json"
     )

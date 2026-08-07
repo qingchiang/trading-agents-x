@@ -23,6 +23,7 @@ from .contracts import (
     ResearchDecision,
     ResearchRating,
     ResearchScenarioKind,
+    ResearchUpdateAudit,
     RunMetrics,
     report_language_value,
 )
@@ -135,6 +136,18 @@ class ResearchRevisionOutcome(str, Enum):
     MATERIAL_CHANGE = "material_change"
     NO_MATERIAL_CHANGE = "no_material_change"
     COVERAGE_INCOMPLETE = "coverage_incomplete"
+
+
+class IncrementalEscalationReason(str, Enum):
+    INVALID_BASELINE = "invalid_baseline"
+    SOURCE_CORRECTION = "source_correction"
+    SOURCE_WITHDRAWAL = "source_withdrawal"
+    SOURCE_REPLACEMENT = "source_replacement"
+    SOURCE_VERSION_CHANGE = "source_version_change"
+    INCOMPATIBLE_SEMANTICS = "incompatible_semantics"
+    THRESHOLD_CROSSING = "threshold_crossing"
+    COVERAGE_INCOMPLETE = "coverage_incomplete"
+    SCHEMA_INVALID = "schema_invalid"
 
 
 class ClaimChange(str, Enum):
@@ -357,13 +370,16 @@ class SourceRecordVersion(ResearchModel):
     record_kind: SourceRecordKind = SourceRecordKind.DISCLOSURE
     native_record_id: str | None = None
     comparison_key: str | None = None
-    change_hint: Literal[
-        "new_filing",
-        "correction",
-        "restatement",
-        "accounting_scope_change",
-        "unclassifiable",
-    ] | None = None
+    change_hint: (
+        Literal[
+            "new_filing",
+            "correction",
+            "restatement",
+            "accounting_scope_change",
+            "unclassifiable",
+        ]
+        | None
+    ) = None
     accounting_scope: str | None = None
     adjustment: str | None = None
     observation_value: float | None = None
@@ -498,6 +514,7 @@ class ResearchRevisionDraft(ResearchModel):
     coverage: CoverageAttestation
     update_summary: UpdateSummary
     evidence_snapshot: EffectiveEvidenceSnapshot
+    research_update_audit: ResearchUpdateAudit | None = None
 
     @model_validator(mode="after")
     def validate_complete_coverage(self) -> ResearchRevisionDraft:
@@ -516,6 +533,27 @@ class ResearchRevisionDraft(ResearchModel):
         snapshot_refs = {item.ref for item in self.evidence_snapshot.bundle.items}
         if not set(self.current_state.evidence_refs).issubset(snapshot_refs):
             raise ValueError("Current Research State uses Evidence outside its snapshot")
+        return self
+
+
+class IncrementalGateResult(ResearchModel):
+    """Result of deterministic bounded work before any semantic model call."""
+
+    candidate: ResearchRevisionDraft | None = None
+    escalation_reason: IncrementalEscalationReason | None = None
+    coverage: CoverageAttestation | None = None
+    evidence_snapshot: EffectiveEvidenceSnapshot | None = None
+    metrics: RunMetrics = Field(default_factory=RunMetrics)
+
+    @model_validator(mode="after")
+    def require_candidate_or_escalation(self) -> IncrementalGateResult:
+        if (self.candidate is None) == (self.escalation_reason is None):
+            raise ValueError("incremental gate requires exactly one candidate or escalation")
+        if self.candidate is not None and (
+            self.candidate.execution_strategy is not ResearchExecutionStrategy.INCREMENTAL
+            or self.candidate.outcome is not ResearchRevisionOutcome.NO_MATERIAL_CHANGE
+        ):
+            raise ValueError("incremental gate candidate must propose No Material Change")
         return self
 
 
@@ -625,8 +663,7 @@ def render_revision_export_markdown(export: RevisionExport) -> str:
         )
     lines.extend(["", "## Source Record Versions", ""])
     source_lineage = {
-        item.version_id: item
-        for item in revision.evidence_snapshot.source_record_lineage
+        item.version_id: item for item in revision.evidence_snapshot.source_record_lineage
     }
     for record in revision.evidence_snapshot.source_records:
         item = source_lineage[record.version_id]
@@ -657,6 +694,46 @@ def render_revision_export_markdown(export: RevisionExport) -> str:
             f"- `{signal.kind.value}` [{signal.domain}] `{signal.record_id}`; "
             f"requires Full Analysis: {str(signal.requires_full_analysis).lower()}"
             f"{values}{boundary}; {signal.detail}"
+        )
+    if revision.research_update_audit is not None:
+        audit = revision.research_update_audit
+        lines.extend(
+            [
+                "",
+                "## Shadow Update Finding",
+                "",
+                f"- Mode: {audit.mode}",
+                f"- Candidate outcome: "
+                f"{audit.candidate.outcome if audit.candidate is not None else 'none'}",
+                f"- Authoritative strategy: {audit.authoritative_strategy}",
+                f"- Escalation reason: {audit.escalation_reason or 'none'}",
+                f"- Comparison: {audit.comparison}",
+                "- Bounded checked windows: "
+                + (
+                    "; ".join(
+                        f"{item.source} {item.scanned_start} to {item.scanned_end} ({item.status})"
+                        for item in audit.checked_windows
+                    )
+                    or "none"
+                ),
+                "- Bounded Evidence lineage: "
+                + (
+                    ", ".join(
+                        f"{item.evidence_ref}:{item.lineage}" for item in audit.evidence_lineage
+                    )
+                    or "none"
+                ),
+                f"- Bounded work: {audit.bounded_metrics.llm_calls} LLM calls, "
+                f"{audit.bounded_metrics.tool_calls} tool calls, "
+                f"{audit.bounded_metrics.input_tokens}/"
+                f"{audit.bounded_metrics.output_tokens} input/output tokens, "
+                f"{audit.bounded_metrics.wall_time_seconds:.3f}s",
+                f"- Full work: {audit.full_metrics.llm_calls} LLM calls, "
+                f"{audit.full_metrics.tool_calls} tool calls, "
+                f"{audit.full_metrics.input_tokens}/"
+                f"{audit.full_metrics.output_tokens} input/output tokens, "
+                f"{audit.full_metrics.wall_time_seconds:.3f}s",
+            ]
         )
     lines.extend(["", "## Effective Evidence Snapshot", ""])
     lineage = {item.evidence_ref: item for item in revision.evidence_snapshot.lineage}
@@ -828,9 +905,7 @@ def _source_metadata(
                     if existing.temporal_scope == watermark.temporal_scope
                     else "unknown"
                 ),
-                limitations=tuple(
-                    dict.fromkeys((*existing.limitations, *watermark.limitations))
-                ),
+                limitations=tuple(dict.fromkeys((*existing.limitations, *watermark.limitations))),
                 returned_records=max(existing.returned_records, watermark.returned_records),
                 reported_records=max(reported_values) if reported_values else None,
             )
@@ -873,13 +948,20 @@ def _source_coverage(
     }
     for source_watermarks in watermarks_by_source.values():
         watermark = max(source_watermarks, key=lambda item: status_rank[item.status])
-        advisory = watermark.source == "Google News" and watermark.source not in explicitly_required
-        requirement = (
-            CoverageRequirement.ADVISORY if advisory else CoverageRequirement.REQUIRED
+        domain_name = {
+            "Google News": "media_news",
+            "J-Quants fundamentals": "fundamentals",
+            "J-Quants adjusted OHLCV": "market",
+        }.get(watermark.source, "company_disclosures")
+        required = (
+            watermark.source in explicitly_required
+            or (state.instrument.endswith(".T") and watermark.source in {"EDINET", "TDnet"})
+            or domain_name in required_data_domains
         )
-        live_only_required = (
-            requirement is CoverageRequirement.REQUIRED
-            and any(item.temporal_scope != "point_in_time" for item in source_watermarks)
+        advisory = not required
+        requirement = CoverageRequirement.ADVISORY if advisory else CoverageRequirement.REQUIRED
+        live_only_required = requirement is CoverageRequirement.REQUIRED and any(
+            item.temporal_scope != "point_in_time" for item in source_watermarks
         )
         ordered_intervals = sorted(
             (item.scanned_start, item.scanned_end) for item in source_watermarks
@@ -897,24 +979,15 @@ def _source_coverage(
             or missing_interval
         ):
             supports_quiet = False
-        limitations = tuple(
-            dict.fromkeys(
-                value for item in source_watermarks for value in item.limitations
+        limitations = (
+            tuple(dict.fromkeys(value for item in source_watermarks for value in item.limitations))
+            + (("Required source coverage is not point-in-time.",) if live_only_required else ())
+            + (
+                ("Source watermark intervals contain an unscanned gap.",)
+                if missing_interval
+                else ()
             )
-        ) + (
-            ("Required source coverage is not point-in-time.",)
-            if live_only_required
-            else ()
-        ) + (
-            ("Source watermark intervals contain an unscanned gap.",)
-            if missing_interval
-            else ()
         )
-        domain_name = {
-            "Google News": "media_news",
-            "J-Quants fundamentals": "fundamentals",
-            "J-Quants adjusted OHLCV": "market",
-        }.get(watermark.source, "company_disclosures")
         domains.append(
             ResearchDomainCoverage(
                 domain=domain_name,
@@ -975,11 +1048,8 @@ def _source_coverage(
             )
         )
     if any(
-        record.status is not SourceRecordStatus.PUBLISHED
-        and record.source in {"EDINET", "TDnet"}
-        for record in (
-            records if status_blocking_records is None else status_blocking_records
-        )
+        record.status is not SourceRecordStatus.PUBLISHED and record.source in {"EDINET", "TDnet"}
+        for record in (records if status_blocking_records is None else status_blocking_records)
     ):
         supports_quiet = False
     return tuple(domains), supports_quiet
@@ -1026,9 +1096,7 @@ def _change_signals(
                 ResearchChangeSignal(
                     kind=ResearchChangeKind.UNCHANGED_OBSERVATION,
                     domain=(
-                        "fundamentals"
-                        if record_kind is SourceRecordKind.FUNDAMENTAL
-                        else "market"
+                        "fundamentals" if record_kind is SourceRecordKind.FUNDAMENTAL else "market"
                     ),
                     record_id=record_id,
                     previous_version_id=previous.version_id if previous else None,
@@ -1051,8 +1119,7 @@ def _change_signals(
                     kind = ResearchChangeKind.NEW_FUNDAMENTAL_FILING
                     detail = "A new official fundamental reporting period was observed."
                 elif current.change_hint == "accounting_scope_change" or (
-                    previous is not None
-                    and current.accounting_scope != previous.accounting_scope
+                    previous is not None and current.accounting_scope != previous.accounting_scope
                 ):
                     kind = ResearchChangeKind.ACCOUNTING_SCOPE_CHANGE
                     detail = "The accounting standard or consolidation scope changed."
@@ -1139,6 +1206,281 @@ def _change_signals(
             )
         )
     return tuple(signals)
+
+
+def assess_deterministic_update(
+    baseline_revision_id: str,
+    baseline: ResearchRevisionDraft,
+    request: AnalysisRequest,
+    evidence: EvidenceBundle,
+    *,
+    metrics: RunMetrics | None = None,
+) -> IncrementalGateResult:
+    """Apply fail-closed gates and build a quiet Shadow candidate."""
+
+    if (
+        request.ticker != baseline.current_state.instrument
+        or request.analysis_date <= baseline.cutoff
+        or evidence.instrument != request.ticker
+        or evidence.analysis_date != request.analysis_date
+    ):
+        return IncrementalGateResult(
+            escalation_reason=IncrementalEscalationReason.INVALID_BASELINE,
+            metrics=metrics or RunMetrics(),
+        )
+    try:
+        candidate_records, candidate_watermarks = _source_metadata(evidence)
+        baseline_records = {
+            item.version_id: item for item in baseline.evidence_snapshot.source_records
+        }
+        newly_observed = tuple(
+            item for item in candidate_records if item.version_id not in baseline_records
+        )
+        state_refs = {
+            ref
+            for claim in baseline.current_state.claims
+            if claim.standing is ClaimStanding.ACTIVE
+            for ref in claim.evidence_refs
+        }
+        state_refs.update(
+            ref
+            for question in baseline.current_state.questions
+            if question.status is QuestionStatus.OPEN
+            for ref in question.evidence_refs
+        )
+        required_domains = {
+            (
+                "fundamentals"
+                if record.record_kind is SourceRecordKind.FUNDAMENTAL
+                else "market"
+                if record.record_kind is SourceRecordKind.MARKET
+                else "company_disclosures"
+            )
+            for record in baseline.evidence_snapshot.source_records
+            if record.evidence_ref in state_refs
+        }
+        if baseline.current_state.market_reference_levels:
+            required_domains.add("market")
+        watermarks = tuple(
+            item.model_copy(
+                update={
+                    "baseline_cutoff": baseline.cutoff,
+                    "overlap_start": (
+                        item.scanned_start
+                        if item.scanned_start <= baseline.cutoff <= item.scanned_end
+                        else None
+                    ),
+                    "status": (
+                        CoverageStatus.LIMITED
+                        if (
+                            not item.scanned_start <= baseline.cutoff <= item.scanned_end
+                            or item.scanned_end != request.analysis_date
+                        )
+                        and item.status is CoverageStatus.COMPLETE
+                        else item.status
+                    ),
+                    "limitations": tuple(
+                        dict.fromkeys(
+                            (
+                                *item.limitations,
+                                *(
+                                    ()
+                                    if item.scanned_start <= baseline.cutoff <= item.scanned_end
+                                    else (
+                                        "Collection window did not overlap the Eligible Baseline cutoff.",
+                                    )
+                                ),
+                                *(
+                                    ()
+                                    if item.scanned_end == request.analysis_date
+                                    else ("Collection window did not end at the update cutoff.",)
+                                ),
+                            )
+                        )
+                    ),
+                }
+            )
+            for item in candidate_watermarks
+        )
+        combined_records = tuple(
+            {
+                item.version_id: item for item in (*baseline_records.values(), *candidate_records)
+            }.values()
+        )
+        domains, supports_quiet = _source_coverage(
+            baseline.current_state,
+            combined_records,
+            watermarks,
+            status_blocking_records=newly_observed,
+            required_data_domains=tuple(sorted(required_domains)),
+        )
+        signals = _change_signals(baseline, candidate_records)
+        reason = None
+        status_reasons = {
+            SourceRecordStatus.CORRECTED: IncrementalEscalationReason.SOURCE_CORRECTION,
+            SourceRecordStatus.WITHDRAWN: IncrementalEscalationReason.SOURCE_WITHDRAWAL,
+            SourceRecordStatus.REPLACED: IncrementalEscalationReason.SOURCE_REPLACEMENT,
+        }
+        for record in newly_observed:
+            if record.status in status_reasons:
+                reason = status_reasons[record.status]
+                break
+        if reason is None:
+            for signal in signals:
+                if signal.kind is ResearchChangeKind.MARKET_SEMANTIC_INCOMPATIBILITY:
+                    reason = IncrementalEscalationReason.INCOMPATIBLE_SEMANTICS
+                    break
+                if signal.kind is ResearchChangeKind.MARKET_BOUNDARY_CROSSING:
+                    reason = IncrementalEscalationReason.THRESHOLD_CROSSING
+                    break
+                if signal.requires_full_analysis:
+                    reason = IncrementalEscalationReason.SOURCE_VERSION_CHANGE
+                    break
+        if reason is None and any(
+            item.record_kind is SourceRecordKind.DISCLOSURE for item in newly_observed
+        ):
+            reason = IncrementalEscalationReason.SOURCE_VERSION_CHANGE
+        if reason is None and not supports_quiet:
+            reason = IncrementalEscalationReason.COVERAGE_INCOMPLETE
+        baseline_bundle = baseline.evidence_snapshot.bundle
+        new_refs = {item.ref for item in evidence.items}
+        combined_items = tuple(
+            {item.ref: item for item in (*baseline_bundle.items, *evidence.items)}.values()
+        )
+        combined_tables = tuple(
+            {item.id: item for item in (*baseline_bundle.tables, *evidence.tables)}.values()
+        )
+        bundle = EvidenceBundle(
+            instrument=request.ticker,
+            analysis_date=request.analysis_date,
+            items=combined_items,
+            tables=combined_tables,
+            sealed_at=evidence.sealed_at,
+        )
+        evidence_snapshot = EffectiveEvidenceSnapshot(
+            bundle=bundle,
+            lineage=tuple(
+                EvidenceSnapshotItem(
+                    evidence_ref=item.ref,
+                    lineage="new" if item.ref in new_refs else "inherited",
+                    source_revision_id=(None if item.ref in new_refs else baseline_revision_id),
+                )
+                for item in combined_items
+            ),
+            source_records=combined_records,
+            source_record_lineage=tuple(
+                SourceRecordSnapshotItem(
+                    version_id=item.version_id,
+                    lineage=("new" if item.version_id not in baseline_records else "inherited"),
+                    observed_in_execution=item.version_id
+                    in {record.version_id for record in candidate_records},
+                    source_revision_id=(
+                        None if item.version_id not in baseline_records else baseline_revision_id
+                    ),
+                )
+                for item in combined_records
+            ),
+            source_watermarks=watermarks,
+        )
+        coverage_status = CoverageStatus.COMPLETE if supports_quiet else CoverageStatus.LIMITED
+        limitations = tuple(
+            dict.fromkeys(value for domain in domains for value in domain.limitations)
+        )
+        coverage = CoverageAttestation(
+            claims=tuple(
+                ResearchObjectCoverage(
+                    object_id=item.id,
+                    status=coverage_status,
+                    evidence_refs=item.evidence_refs,
+                )
+                for item in baseline.current_state.claims
+            ),
+            questions=tuple(
+                ResearchObjectCoverage(
+                    object_id=item.id,
+                    status=coverage_status,
+                )
+                for item in baseline.current_state.questions
+            ),
+            domains=domains,
+            limitations=limitations,
+            supports_no_material_change=supports_quiet,
+        )
+        if reason is not None:
+            return IncrementalGateResult(
+                escalation_reason=reason,
+                coverage=coverage,
+                evidence_snapshot=evidence_snapshot,
+                metrics=metrics or RunMetrics(),
+            )
+        candidate = ResearchRevisionDraft(
+            cutoff=request.analysis_date,
+            execution_strategy=ResearchExecutionStrategy.INCREMENTAL,
+            outcome=ResearchRevisionOutcome.NO_MATERIAL_CHANGE,
+            delta=RevisionDelta(
+                opinion_changed=False,
+                claims=tuple(
+                    ClaimRevisionDelta(
+                        object_id=item.id,
+                        previous_object_id=item.id,
+                        change=ClaimChange.REAFFIRMED,
+                        identity_disposition=IdentityDisposition.EXACT_MATCH,
+                    )
+                    for item in baseline.current_state.claims
+                ),
+                questions=tuple(
+                    QuestionRevisionDelta(
+                        object_id=item.id,
+                        previous_object_id=item.id,
+                        change=QuestionChange.REAFFIRMED,
+                        identity_disposition=IdentityDisposition.EXACT_MATCH,
+                    )
+                    for item in baseline.current_state.questions
+                ),
+                inherited_evidence_refs=tuple(
+                    item.ref for item in baseline_bundle.items if item.ref not in new_refs
+                ),
+                new_evidence_refs=tuple(item.ref for item in evidence.items),
+                change_signals=signals,
+            ),
+            current_state=baseline.current_state.model_copy(
+                update={
+                    "cutoff": request.analysis_date,
+                    "evidence_refs": tuple(item.ref for item in combined_items),
+                    "scenarios": tuple(
+                        item.model_copy(update={"cutoff": request.analysis_date})
+                        for item in baseline.current_state.scenarios
+                    ),
+                }
+            ),
+            coverage=coverage,
+            update_summary=UpdateSummary(
+                language=baseline.current_state.language,
+                summary=(
+                    "Deterministic gates found no material change; Shadow mode will compare "
+                    "this candidate with authoritative Full Analysis."
+                ),
+                checked_domains=tuple(dict.fromkeys(item.domain for item in domains)),
+                limitations=limitations,
+                baseline_cutoff=baseline.cutoff,
+                analysis_cutoff=request.analysis_date,
+                execution_strategy=ResearchExecutionStrategy.INCREMENTAL,
+                outcome=ResearchRevisionOutcome.NO_MATERIAL_CHANGE,
+                new_evidence_refs=tuple(item.ref for item in evidence.items),
+            ),
+            evidence_snapshot=evidence_snapshot,
+        )
+    except (TypeError, ValueError):
+        return IncrementalGateResult(
+            escalation_reason=IncrementalEscalationReason.SCHEMA_INVALID,
+            metrics=metrics or RunMetrics(),
+        )
+    return IncrementalGateResult(
+        candidate=candidate,
+        coverage=coverage,
+        evidence_snapshot=evidence_snapshot,
+        metrics=metrics or RunMetrics(),
+    )
 
 
 def assemble_full_update(
@@ -1278,9 +1620,7 @@ def assemble_full_update(
                         if overlap_limitation and item.status is CoverageStatus.COMPLETE
                         else item.status
                     ),
-                    "limitations": tuple(
-                        dict.fromkeys((*item.limitations, *overlap_limitation))
-                    ),
+                    "limitations": tuple(dict.fromkeys((*item.limitations, *overlap_limitation))),
                 }
             )
         )
@@ -1301,7 +1641,9 @@ def assemble_full_update(
         }
     )
     newly_observed_versions = tuple(
-        item for version_id, item in candidate_versions.items() if version_id not in baseline_versions
+        item
+        for version_id, item in candidate_versions.items()
+        if version_id not in baseline_versions
     )
     change_signals = _change_signals(baseline, candidate.evidence_snapshot.source_records)
     source_domains, supports_quiet = _source_coverage(
@@ -1319,9 +1661,9 @@ def assemble_full_update(
     )
     if any(item.requires_full_analysis for item in change_signals):
         supports_quiet = False
-    coverage_domains = tuple(
-        item for item in candidate.coverage.domains if item.source is None
-    ) + source_domains
+    coverage_domains = (
+        tuple(item for item in candidate.coverage.domains if item.source is None) + source_domains
+    )
 
     confidence_rank = {
         ClaimConfidence.LOW: 0,
@@ -1469,8 +1811,7 @@ def assemble_full_update(
             changed_sections.append(section)
     material = bool(changed_sections)
     material = material or any(
-        item.kind is ResearchChangeKind.MARKET_BOUNDARY_CROSSING
-        for item in change_signals
+        item.kind is ResearchChangeKind.MARKET_BOUNDARY_CROSSING for item in change_signals
     )
     delta = RevisionDelta(
         opinion_changed=opinion_changed,
@@ -1717,8 +2058,7 @@ def assemble_full_revision(
             )
         )
     question_dependencies = {
-        item.question: item.required_sources
-        for item in decision.question_source_dependencies
+        item.question: item.required_sources for item in decision.question_source_dependencies
     }
     questions = tuple(
         ResearchQuestion(

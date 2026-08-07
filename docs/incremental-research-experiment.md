@@ -1,6 +1,6 @@
 # Incremental Research Experiment
 
-This proposal explores whether TradingAgentsX can maintain a useful live thesis
+This experiment explores whether TradingAgentsX can maintain a useful live thesis
 for an Instrument while spending fewer model tokens on repeated analysis. It is
 an experimental open-source capability, not a promise of complete research or
 an advisory service.
@@ -8,9 +8,11 @@ an advisory service.
 The durable domain language is defined in [CONTEXT.md](../CONTEXT.md). The two
 hard-to-reverse choices are recorded in
 [ADR 0002](adr/0002-maintain-research-as-revision-chains.md) and
-[ADR 0003](adr/0003-fail-closed-incremental-coverage.md). The current implemented
-system remains documented in [architecture.md](architecture.md); this proposal
-does not claim that Research Chains already exist.
+[ADR 0003](adr/0003-fail-closed-incremental-coverage.md). Implemented Research
+Chains, Full updates, Japanese source lineage/change detection, and the
+deterministic Shadow gate are documented in
+[architecture.md](architecture.md). Bounded semantic assessment and
+authoritative No Material Change execution remain deferred experiment phases.
 
 ## Questions being tested
 
@@ -35,8 +37,9 @@ The first slice covers manual updates of a small Japanese-equity whitelist:
 3. A later manual update starts from the current Revision and obtains new or
    changed source material. Source-specific overlap or snapshot retrieval may
    be used where a simple date boundary would miss corrections.
-4. A bounded Change Assessment compares those changes with the current Claims,
-   Questions, scenarios, and Required Domains.
+4. Deterministic gates compare source identity/version, coverage, semantics,
+   and audited thresholds before any semantic model call. The implemented
+   Shadow phase stops here; bounded semantic Change Assessment is the next phase.
 5. If the state can be reaffirmed, the system creates a No Material Change
    Revision and a concise Update Summary. If not, it immediately continues
    through the existing Full Analysis pipeline and compares the resulting state

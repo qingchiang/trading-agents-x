@@ -27,13 +27,22 @@ from tradingagents.application.contracts import (
     EvidenceBundle,
     EvidenceItem,
     ResearchArtifactDraft,
+    RunMetrics,
     RunStatus,
 )
 from tradingagents.application.repository import RunRepository
+from tradingagents.application.research import (
+    IncrementalEscalationReason,
+    IncrementalGateResult,
+    ResearchExecutionStrategy,
+    ResearchRevisionOutcome,
+    SourceWatermarkSnapshot,
+)
 from tradingagents.application.runtime import RunCancelled, WorkerShutdown
 from tradingagents.application.service import AnalysisService
 from tradingagents.dataflows.config import get_config
 from tradingagents.graph.research_graph import GraphExecution
+from tradingagents.provenance import SourceWatermark, attach_source_watermarks
 
 
 def _execution(ticker: str) -> GraphExecution:
@@ -150,6 +159,14 @@ class _MetricFailureGraph:
             run_id=run_id,
         )
         raise RuntimeError("fixture structured output failure")
+
+
+class _MetricCancellationGraph(_MetricFailureGraph):
+    def execute(self, *args, **kwargs):
+        try:
+            return super().execute(*args, **kwargs)
+        except RuntimeError as exc:
+            raise RunCancelled("cancelled after measured Full work") from exc
 
 
 class _CheckpointState(TypedDict):
@@ -284,7 +301,14 @@ def _service(
     app_settings,
     repository: RunRepository,
     graph_factory=_Graph,
+    **kwargs,
 ) -> AnalysisService:
+    kwargs.setdefault(
+        "incremental_gate",
+        lambda *_args: IncrementalGateResult(
+            escalation_reason=IncrementalEscalationReason.COVERAGE_INCOMPLETE
+        ),
+    )
     return AnalysisService(
         app_settings,
         repository=repository,
@@ -292,6 +316,7 @@ def _service(
         graph_factory=graph_factory,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
         local_name_resolver=lambda _ticker, _date, _config: None,
+        **kwargs,
     )
 
 
@@ -418,7 +443,7 @@ def test_full_update_is_idempotent_for_current_head_and_advances_atomically(
     )
     assert duplicate.id == first.id
     assert duplicate.update_intent_id == first.update_intent_id
-    assert duplicate.research_execution_strategy == "full"
+    assert duplicate.research_execution_strategy == "incremental"
 
     claimed = repository.claim_run(first.id, "worker", 30)
     result = service.execute_claimed(claimed, worker_id="worker")
@@ -461,6 +486,426 @@ def test_full_update_is_idempotent_for_current_head_and_advances_atomically(
         assert connection.execute(
             "SELECT delta_json FROM research_revisions WHERE sequence = 2"
         ).fetchone()[0]
+
+
+def test_shadow_quiet_update_retains_candidate_and_full_remains_authoritative(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(app_settings, repository)
+    service.run_initial_chain(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+    baseline = repository.get_research_revision(chain.current_revision_id)
+    candidate = baseline.model_copy(
+        update={
+            "cutoff": date(2026, 7, 25),
+            "execution_strategy": ResearchExecutionStrategy.INCREMENTAL,
+            "outcome": ResearchRevisionOutcome.NO_MATERIAL_CHANGE,
+            "current_state": baseline.current_state.model_copy(
+                update={"cutoff": date(2026, 7, 25)}
+            ),
+            "update_summary": baseline.update_summary.model_copy(
+                update={
+                    "summary": "Deterministic gates found no material change.",
+                    "baseline_cutoff": baseline.cutoff,
+                    "analysis_cutoff": date(2026, 7, 25),
+                    "execution_strategy": ResearchExecutionStrategy.INCREMENTAL,
+                    "outcome": ResearchRevisionOutcome.NO_MATERIAL_CHANGE,
+                }
+            ),
+        }
+    )
+
+    def quiet_gate(_baseline, _request, _config, _cancel_requested):
+        return IncrementalGateResult(
+            candidate=candidate,
+            metrics=RunMetrics(tool_calls=2, wall_time_seconds=0.25),
+        )
+
+    shadow_service = _service(
+        app_settings,
+        repository,
+        incremental_gate=quiet_gate,
+        revision_comparator=lambda _id, _baseline, draft: draft.model_copy(
+            update={"outcome": ResearchRevisionOutcome.NO_MATERIAL_CHANGE}
+        ),
+    )
+    queued = shadow_service.enqueue_chain_update(
+        chain.id,
+        baseline.id,
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-25",
+            analysts=("market",),
+        ),
+    )
+    claimed = repository.claim_run(queued.id, "worker", 30)
+
+    result = shadow_service.execute_claimed(claimed, worker_id="worker")
+
+    advanced = repository.get_research_chain(chain.id)
+    revision = advanced.current_revision
+    audit = repository.get_run(queued.id).research_update_audit
+    assert result.status is RunStatus.SUCCEEDED
+    assert revision.execution_strategy is ResearchExecutionStrategy.FULL
+    assert revision.producing_run_id == queued.id
+    assert audit is not None
+    assert audit.candidate is not None
+    assert audit.candidate.outcome == "no_material_change"
+    assert audit.authoritative_strategy == "full"
+    assert audit.comparison == "agreement"
+    assert audit.escalation_reason is None
+    assert audit.bounded_metrics.tool_calls == 2
+    assert audit.full_metrics.llm_calls == result.metrics.llm_calls
+    assert revision.metrics.tool_calls == result.metrics.tool_calls == 2
+    events = repository.list_events(queued.id)
+    assert [event.event_type for event in events] == [
+        "run.queued",
+        "run.started",
+        "research.incremental_assessed",
+        "research.shadow_full_started",
+        "node.completed",
+        "evidence.sealed",
+        "research.shadow_compared",
+        "run.succeeded",
+    ]
+    assessed = next(
+        event for event in events if event.event_type == "research.incremental_assessed"
+    )
+    assert assessed.payload["coverage"] == audit.coverage
+    assert assessed.payload["evidence_lineage"] == [
+        item.model_dump(mode="json") for item in audit.evidence_lineage
+    ]
+    assert assessed.payload["candidate_update_summary"] == audit.candidate.update_summary
+
+
+def test_default_shadow_collection_runs_before_any_full_llm_client(
+    app_settings,
+    repository,
+    monkeypatch,
+) -> None:
+    llm_calls = 0
+    collector_calls = 0
+
+    def llm_factory(*_args, **_kwargs):
+        nonlocal llm_calls
+        llm_calls += 1
+        return object(), object()
+
+    def route_to_vendor(*_args, **_kwargs):
+        nonlocal collector_calls
+        assert llm_calls == 0
+        collector_calls += 1
+        return ""
+
+    monkeypatch.setattr(
+        "tradingagents.application.incremental.route_to_vendor",
+        route_to_vendor,
+    )
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=llm_factory,
+        graph_factory=_Graph,
+        identity_resolver=lambda ticker, _date: {"company_name": ticker},
+        local_name_resolver=lambda _ticker, _date, _config: None,
+    )
+    service.run_initial_chain(
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-24", analysts=("market",))
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+    llm_calls = 0
+    queued = service.enqueue_chain_update(
+        chain.id,
+        chain.current_revision_id,
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
+    )
+    claimed = repository.claim_run(queued.id, "worker", 30)
+
+    service.execute_claimed(claimed, worker_id="worker")
+
+    audit = repository.get_run(queued.id).research_update_audit
+    assert collector_calls == 1
+    assert llm_calls == 1
+    assert audit is not None
+    assert audit.escalation_reason == "coverage_incomplete"
+    assert audit.bounded_metrics.tool_calls == 1
+
+
+def test_cancelled_bounded_shadow_work_retains_audit_without_advancing_head(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(app_settings, repository)
+    service.run_initial_chain(
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-24", analysts=("market",))
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+
+    def cancelled_gate(_baseline, _request, _config, cancel_requested):
+        assert cancel_requested() is True
+        raise RunCancelled("cancelled during bounded collection")
+
+    shadow_service = _service(
+        app_settings,
+        repository,
+        incremental_gate=cancelled_gate,
+    )
+    queued = shadow_service.enqueue_chain_update(
+        chain.id,
+        chain.current_revision_id,
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
+    )
+    claimed = repository.claim_run(queued.id, "worker", 30)
+    shadow_service.cancel(queued.id)
+
+    result = shadow_service.execute_claimed(claimed, worker_id="worker")
+
+    run = repository.get_run(queued.id)
+    assert result.status is RunStatus.CANCELLED
+    assert run.research_update_audit is not None
+    assert run.research_update_audit.comparison == "not_applicable"
+    assert repository.get_research_chain(chain.id).current_revision_id == chain.current_revision_id
+
+
+def test_cancelled_after_partial_bounded_collection_retains_progress_and_metrics(
+    app_settings,
+    repository,
+    monkeypatch,
+) -> None:
+    service = _service(app_settings, repository)
+    service.run_initial_chain(
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-24", analysts=("market",))
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+    shadow_service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_Graph,
+        identity_resolver=lambda ticker, _date: {"company_name": ticker},
+        local_name_resolver=lambda _ticker, _date, _config: None,
+    )
+    queued = shadow_service.enqueue_chain_update(
+        chain.id,
+        chain.current_revision_id,
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
+    )
+    payload = attach_source_watermarks(
+        "No bounded source changes were returned.",
+        *(
+            SourceWatermark(
+                source=source,
+                scanned_start="2026-07-24",
+                scanned_end="2026-07-25",
+                status="complete",
+            )
+            for source in (
+                "EDINET",
+                "TDnet",
+                "Google News",
+                "J-Quants fundamentals",
+                "J-Quants adjusted OHLCV",
+            )
+        ),
+    )
+
+    def cancel_after_news(*_args, **_kwargs):
+        repository.request_cancel(queued.id)
+        return payload
+
+    monkeypatch.setattr(
+        "tradingagents.application.incremental.route_to_vendor",
+        cancel_after_news,
+    )
+    claimed = repository.claim_run(queued.id, "worker", 30)
+
+    result = shadow_service.execute_claimed(claimed, worker_id="worker")
+
+    run = repository.get_run(queued.id)
+    audit = run.research_update_audit
+    assert audit is not None
+    assert audit.escalation_reason is None
+    assert result.status is RunStatus.CANCELLED, audit
+    assert {item.source for item in audit.checked_windows} == {
+        "EDINET",
+        "TDnet",
+        "Google News",
+        "J-Quants fundamentals",
+        "J-Quants adjusted OHLCV",
+    }
+    assert audit.bounded_metrics.tool_calls == 1
+    assert run.metrics.tool_calls == 1
+    assert repository.get_research_chain(chain.id).current_revision_id == chain.current_revision_id
+
+
+def test_failed_bounded_shadow_work_retains_audit_without_advancing_head(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(app_settings, repository)
+    service.run_initial_chain(
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-24", analysts=("market",))
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+
+    def failed_gate(*_args):
+        raise RuntimeError("bounded fixture failure")
+
+    shadow_service = _service(
+        app_settings,
+        repository,
+        incremental_gate=failed_gate,
+    )
+    queued = shadow_service.enqueue_chain_update(
+        chain.id,
+        chain.current_revision_id,
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
+    )
+    claimed = repository.claim_run(queued.id, "worker", 30)
+
+    with pytest.raises(RuntimeError, match="bounded fixture failure"):
+        shadow_service.execute_claimed(claimed, worker_id="worker")
+
+    run = repository.get_run(queued.id)
+    assert run.status is RunStatus.FAILED
+    assert run.research_update_audit is not None
+    assert run.research_update_audit.comparison == "not_applicable"
+    assert repository.get_research_chain(chain.id).current_revision_id == chain.current_revision_id
+
+
+@pytest.mark.parametrize(
+    ("graph_factory", "cancelled"),
+    [(_MetricFailureGraph, False), (_MetricCancellationGraph, True)],
+)
+def test_shadow_terminal_full_path_retains_separate_partial_full_metrics(
+    app_settings,
+    repository,
+    graph_factory,
+    cancelled,
+) -> None:
+    service = _service(app_settings, repository)
+    service.run_initial_chain(
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-24", analysts=("market",))
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+    shadow_service = _service(
+        app_settings,
+        repository,
+        graph_factory=graph_factory,
+        incremental_gate=lambda *_args: IncrementalGateResult(
+            escalation_reason=IncrementalEscalationReason.COVERAGE_INCOMPLETE,
+            metrics=RunMetrics(tool_calls=2, wall_time_seconds=0.25),
+        ),
+    )
+    queued = shadow_service.enqueue_chain_update(
+        chain.id,
+        chain.current_revision_id,
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
+    )
+    claimed = repository.claim_run(queued.id, "worker", 30)
+
+    if cancelled:
+        result = shadow_service.execute_claimed(claimed, worker_id="worker")
+        assert result.status is RunStatus.CANCELLED
+    else:
+        with pytest.raises(RuntimeError, match="fixture structured output failure"):
+            shadow_service.execute_claimed(claimed, worker_id="worker")
+
+    run = repository.get_run(queued.id)
+    audit = run.research_update_audit
+    assert audit is not None
+    assert audit.bounded_metrics.tool_calls == 2
+    assert audit.full_metrics.llm_calls == 1
+    assert audit.full_metrics.input_tokens == 250
+    assert run.metrics.tool_calls == 2
+    assert run.metrics.llm_calls == 1
+    assert repository.get_research_chain(chain.id).current_revision_id == chain.current_revision_id
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        IncrementalEscalationReason.SOURCE_CORRECTION,
+        IncrementalEscalationReason.SOURCE_WITHDRAWAL,
+        IncrementalEscalationReason.COVERAGE_INCOMPLETE,
+        IncrementalEscalationReason.INCOMPATIBLE_SEMANTICS,
+        IncrementalEscalationReason.THRESHOLD_CROSSING,
+    ],
+)
+def test_shadow_deterministic_escalation_stops_bounded_work_and_runs_full(
+    app_settings,
+    repository,
+    reason,
+) -> None:
+    service = _service(app_settings, repository)
+    service.run_initial_chain(
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-24", analysts=("market",))
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+    baseline = repository.get_research_revision(chain.current_revision_id)
+    full_calls = 0
+
+    class CountingGraph(_Graph):
+        def execute(self, context, **kwargs):
+            nonlocal full_calls
+            full_calls += 1
+            return super().execute(context, **kwargs)
+
+    def escalated_gate(_baseline, _request, _config, _cancel_requested):
+        return IncrementalGateResult(
+            escalation_reason=reason,
+            coverage=_baseline.coverage,
+            evidence_snapshot=_baseline.evidence_snapshot.model_copy(
+                update={
+                    "source_watermarks": (
+                        SourceWatermarkSnapshot(
+                            source="EDINET",
+                            scanned_start=date(2026, 7, 1),
+                            scanned_end=date(2026, 7, 25),
+                            status="complete",
+                            baseline_cutoff=_baseline.cutoff,
+                            overlap_start=date(2026, 7, 1),
+                        ),
+                    )
+                }
+            ),
+            metrics=RunMetrics(tool_calls=1, wall_time_seconds=0.1),
+        )
+
+    shadow_service = _service(
+        app_settings,
+        repository,
+        graph_factory=CountingGraph,
+        incremental_gate=escalated_gate,
+    )
+    queued = shadow_service.enqueue_chain_update(
+        chain.id,
+        baseline.id,
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
+    )
+    claimed = repository.claim_run(queued.id, "worker", 30)
+
+    result = shadow_service.execute_claimed(claimed, worker_id="worker")
+
+    audit = repository.get_run(queued.id).research_update_audit
+    assert result.status is RunStatus.SUCCEEDED
+    assert full_calls == 1
+    assert audit is not None
+    assert audit.candidate is None
+    assert audit.escalation_reason == reason.value
+    assert audit.comparison == "not_applicable"
+    assert audit.coverage is not None
+    assert audit.checked_windows[0].source == "EDINET"
+    assert audit.evidence_lineage
+    assert audit.bounded_metrics.tool_calls == 1
+    assert result.metrics.tool_calls == 1
 
 
 def test_concurrent_full_update_submissions_resolve_to_one_execution(

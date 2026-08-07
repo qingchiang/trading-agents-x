@@ -4037,6 +4037,16 @@
             ],
             "title": "Producing Run Id"
           },
+          "research_update_audit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchUpdateAudit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "sequence": {
             "minimum": 1.0,
             "title": "Sequence",
@@ -4176,6 +4186,268 @@
           "evidence_refs"
         ],
         "title": "ResearchScenarioState",
+        "type": "object"
+      },
+      "ResearchUpdateAudit": {
+        "additionalProperties": false,
+        "description": "Durable phase attribution and finding for one Research Chain update.",
+        "properties": {
+          "authoritative_strategy": {
+            "const": "full",
+            "default": "full",
+            "title": "Authoritative Strategy",
+            "type": "string"
+          },
+          "bounded_metrics": {
+            "$ref": "#/components/schemas/RunMetrics"
+          },
+          "candidate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchUpdateCandidate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "checked_windows": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchUpdateCheckedWindow"
+            },
+            "title": "Checked Windows",
+            "type": "array"
+          },
+          "comparison": {
+            "enum": [
+              "agreement",
+              "disagreement",
+              "not_applicable"
+            ],
+            "title": "Comparison",
+            "type": "string"
+          },
+          "coverage": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage"
+          },
+          "escalation_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "invalid_baseline",
+                  "source_correction",
+                  "source_withdrawal",
+                  "source_replacement",
+                  "source_version_change",
+                  "incompatible_semantics",
+                  "threshold_crossing",
+                  "coverage_incomplete",
+                  "schema_invalid"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Escalation Reason"
+          },
+          "evidence_lineage": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchUpdateEvidenceLineage"
+            },
+            "title": "Evidence Lineage",
+            "type": "array"
+          },
+          "full_metrics": {
+            "$ref": "#/components/schemas/RunMetrics"
+          },
+          "mode": {
+            "const": "shadow",
+            "default": "shadow",
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "comparison"
+        ],
+        "title": "ResearchUpdateAudit",
+        "type": "object"
+      },
+      "ResearchUpdateCandidate": {
+        "additionalProperties": false,
+        "description": "Retained bounded-update proposal used by the Shadow experiment.",
+        "properties": {
+          "coverage": {
+            "additionalProperties": true,
+            "title": "Coverage",
+            "type": "object"
+          },
+          "evidence_snapshot": {
+            "additionalProperties": true,
+            "title": "Evidence Snapshot",
+            "type": "object"
+          },
+          "outcome": {
+            "const": "no_material_change",
+            "title": "Outcome",
+            "type": "string"
+          },
+          "update_summary": {
+            "additionalProperties": true,
+            "title": "Update Summary",
+            "type": "object"
+          }
+        },
+        "required": [
+          "outcome",
+          "coverage",
+          "update_summary",
+          "evidence_snapshot"
+        ],
+        "title": "ResearchUpdateCandidate",
+        "type": "object"
+      },
+      "ResearchUpdateCheckedWindow": {
+        "additionalProperties": false,
+        "properties": {
+          "baseline_cutoff": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Cutoff"
+          },
+          "limitations": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "overlap_start": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overlap Start"
+          },
+          "reported_records": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reported Records"
+          },
+          "returned_records": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Returned Records",
+            "type": "integer"
+          },
+          "scanned_end": {
+            "format": "date",
+            "title": "Scanned End",
+            "type": "string"
+          },
+          "scanned_start": {
+            "format": "date",
+            "title": "Scanned Start",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "complete",
+              "limited",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "temporal_scope": {
+            "default": "point_in_time",
+            "enum": [
+              "point_in_time",
+              "live_only",
+              "unknown"
+            ],
+            "title": "Temporal Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "scanned_start",
+          "scanned_end",
+          "status"
+        ],
+        "title": "ResearchUpdateCheckedWindow",
+        "type": "object"
+      },
+      "ResearchUpdateEvidenceLineage": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_ref": {
+            "title": "Evidence Ref",
+            "type": "string"
+          },
+          "lineage": {
+            "enum": [
+              "new",
+              "inherited"
+            ],
+            "title": "Lineage",
+            "type": "string"
+          },
+          "source_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Revision Id"
+          }
+        },
+        "required": [
+          "evidence_ref",
+          "lineage"
+        ],
+        "title": "ResearchUpdateEvidenceLineage",
         "type": "object"
       },
       "ResearchWarning": {
@@ -4992,6 +5264,16 @@
               }
             ]
           },
+          "research_update_audit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchUpdateAudit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "source_run_id": {
             "anyOf": [
               {
@@ -5197,6 +5479,16 @@
               }
             ],
             "title": "Research Execution Strategy"
+          },
+          "research_update_audit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchUpdateAudit"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "source_run_id": {
             "anyOf": [

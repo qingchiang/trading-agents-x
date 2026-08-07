@@ -22,6 +22,26 @@ export default function ResearchChainDetail() {
   const revision = chain.current_revision;
   if (!revision) return <div className="alert">{t("error")}</div>;
   const state = revision.current_state;
+  const updateAudit = revision.research_update_audit;
+  const emptyMetrics = {
+    llm_calls: 0,
+    tool_calls: 0,
+    input_tokens: 0,
+    output_tokens: 0,
+    wall_time_seconds: 0,
+  };
+  const boundedMetrics = { ...emptyMetrics, ...(updateAudit?.bounded_metrics ?? {}) };
+  const fullMetrics = { ...emptyMetrics, ...(updateAudit?.full_metrics ?? {}) };
+  const boundedCoverage = updateAudit?.coverage as
+    | {
+        supports_no_material_change?: boolean;
+        limitations?: string[];
+        domains?: Array<{ domain?: string; source?: string; status?: string }>;
+      }
+    | undefined;
+  const candidateSummary = updateAudit?.candidate?.update_summary as
+    | { summary?: string }
+    | undefined;
   const nextCutoff = updateCutoff || dayAfter(revision.cutoff);
   const evidenceByRef = new Map(
     revision.evidence_snapshot.bundle.items.map((item) => [item.ref, item]),
@@ -217,6 +237,44 @@ export default function ResearchChainDetail() {
 
       <article className="panel">
         <h2>{t("revisionHistory")}</h2>
+        {updateAudit && (
+          <section>
+            <h3>{t("shadowFinding")}</h3>
+            <ul>
+              <li>{t("candidateOutcome")}: {updateAudit.candidate?.outcome ?? t("none")}</li>
+              <li>{t("authoritativeStrategy")}: {updateAudit.authoritative_strategy}</li>
+              <li>{t("escalationReason")}: {updateAudit.escalation_reason ?? t("none")}</li>
+              <li>{t("shadowComparison")}: {updateAudit.comparison}</li>
+              <li>
+                {t("boundedWindows")}: {(updateAudit.checked_windows ?? []).length > 0
+                  ? (updateAudit.checked_windows ?? []).map((item) => `${item.source} ${item.scanned_start}–${item.scanned_end} (${item.status})`).join("; ")
+                  : t("none")}
+              </li>
+              <li>
+                {t("boundedUpdateSummary")}: {candidateSummary?.summary ?? t("none")}
+              </li>
+              <li>
+                {t("boundedCoverage")}: {boundedCoverage
+                  ? `${String(boundedCoverage.supports_no_material_change ?? false)}; ${(boundedCoverage.domains ?? []).map((item) => `${item.domain ?? item.source ?? "?"} (${item.status ?? "?"})`).join("; ")}`
+                  : t("none")}
+                {(boundedCoverage?.limitations ?? []).length > 0 && (
+                  <ul>{(boundedCoverage?.limitations ?? []).map((value) => <li key={value}>{value}</li>)}</ul>
+                )}
+              </li>
+              <li>
+                {t("boundedEvidenceLineage")}: {(updateAudit.evidence_lineage ?? []).length > 0
+                  ? (updateAudit.evidence_lineage ?? []).map((item) => `${item.evidence_ref} (${item.lineage})`).join("; ")
+                  : t("none")}
+              </li>
+              <li>
+                {t("boundedWork")}: {boundedMetrics.llm_calls} {t("llmCalls")} · {boundedMetrics.tool_calls} {t("toolCalls")} · {boundedMetrics.input_tokens}/{boundedMetrics.output_tokens} {t("inputOutputTokens")} · {boundedMetrics.wall_time_seconds.toFixed(1)}s
+              </li>
+              <li>
+                {t("fullWork")}: {fullMetrics.llm_calls} {t("llmCalls")} · {fullMetrics.tool_calls} {t("toolCalls")} · {fullMetrics.input_tokens}/{fullMetrics.output_tokens} {t("inputOutputTokens")} · {fullMetrics.wall_time_seconds.toFixed(1)}s
+              </li>
+            </ul>
+          </section>
+        )}
         <ol>
           {(chain.revisions ?? []).map((item) => (
             <li key={item.id}>
