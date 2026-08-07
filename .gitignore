@@ -248,3 +248,4 @@ reports/
 
 # Scratch space for manually downloaded bootstrap inputs (e.g. EdinetcodeDlInfo.csv)
 tmp/
+.scratch/

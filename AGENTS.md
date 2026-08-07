@@ -140,6 +140,19 @@ has since been deleted or renamed.
 - Harness-specific files should adapt this shared guide, not duplicate it or
   become a second source of project truth.
 
+## Agent skills
+
+### Issue tracker
+
+Issues and specs are stored as local Markdown under `.scratch/<feature>/`; do
+not publish them remotely unless explicitly requested. See
+`docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+This is a single-context repo with `CONTEXT.md` and `docs/adr/` at the root.
+See `docs/agents/domain.md`.
+
 ## Git commit instructions
 
 When creating or proposing a Git commit message, inspect the staged diff
