@@ -523,8 +523,9 @@ forex forms, bare A-share codes, and `CODE.SH` → `CODE.SS`.
 Ambiguous or unsupported mainland symbols fail loudly.
 Known Crypto symbols are rejected by the public request contract before data
 routing or research execution begins. Explicit Forex, future, and index
-symbols are also rejected by that listed-equity contract even though low-level
-vendor normalization helpers remain available to shared dataflow code.
+symbols and other shapes outside the supported listed-equity contract are also
+rejected even though low-level vendor normalization helpers remain available to
+shared dataflow code.
 
 The analysis cutoff uses the instrument market's timezone, never the host's
 calendar or an unconditional UTC date. Historical tools receive that cutoff

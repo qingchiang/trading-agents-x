@@ -16,10 +16,15 @@ from tradingagents.application.contracts import AnalysisRequest, AssetType
         "BTC-JPY",
         "DOGE-BTC",
         "DOGEBTC",
+        "DOGE-SHIB",
+        "DOGESHIB",
     ],
 )
 def test_request_rejects_crypto_pair_symbols(ticker: str) -> None:
-    with pytest.raises(ValidationError, match="Crypto instruments are not supported"):
+    with pytest.raises(
+        ValidationError,
+        match="Crypto instruments are not supported|Only listed equity instruments",
+    ):
         AnalysisRequest(ticker=ticker, analysis_date="2026-07-24")
 
 

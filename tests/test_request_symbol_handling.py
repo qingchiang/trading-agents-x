@@ -44,7 +44,7 @@ def test_normalize_symbol_does_not_route_crypto_aliases(
 
 @pytest.mark.parametrize(
     "value",
-    ["AAPL", "0700.HK", "7203.T", "600519"],
+    ["AAPL", "BRK-B", "TOTDY", "0700.HK", "7203.T", "600519"],
 )
 def test_request_accepts_supported_symbols(value: str) -> None:
     request = AnalysisRequest(ticker=value, analysis_date="2026-07-24")

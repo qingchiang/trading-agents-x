@@ -20,7 +20,7 @@ from pydantic_core import PydanticCustomError
 
 from tradingagents.application.reporting import order_reports
 from tradingagents.dataflows.symbol_utils import (
-    is_explicit_non_equity_symbol,
+    is_supported_equity_symbol,
     market_timezone,
     normalize_symbol,
     unsupported_crypto_base,
@@ -1662,7 +1662,7 @@ class AnalysisRequest(FrozenModel):
     def validate_asset_type(self) -> AnalysisRequest:
         if unsupported_crypto_base(self.ticker):
             raise ValueError("Crypto instruments are not supported")
-        if is_explicit_non_equity_symbol(self.ticker):
+        if not is_supported_equity_symbol(self.ticker):
             raise ValueError("Only listed equity instruments are supported")
         if self.asset_type is None:
             object.__setattr__(self, "asset_type", AssetType.STOCK)
