@@ -169,6 +169,12 @@ class JpNewsAssemblerTests(unittest.TestCase):
             "TDnet",
             "Google News",
         }
+        google = next(
+            item
+            for item in extract_source_watermarks(out)
+            if item.source == "Google News"
+        )
+        assert google.temporal_scope == "live_only"
 
     def test_configured_limit_is_applied_after_cross_source_merge(self):
         with mock.patch.object(jp_news, "get_config", return_value={"news_article_limit": 2}):

@@ -243,6 +243,36 @@ class GetNewsTests(unittest.TestCase):
                 out = self._run(_page(_row(title=title)))
                 assert extract_source_observations(out)[0].status == status
 
+    def test_links_explicit_revision_titles_to_the_prior_native_record(self):
+        for prefix, status in (
+            ("（訂正）", "corrected"),
+            ("（撤回）", "withdrawn"),
+            ("（差し替え）", "replaced"),
+        ):
+            with self.subTest(status=status):
+                out = self._run(
+                    _page(
+                        _row(
+                            title="2026年3月期決算短信",
+                            pdf="/inbs/140120260710590974.pdf",
+                            when="2026/07/10 16:00",
+                        ),
+                        _row(
+                            title=f"{prefix}2026年3月期決算短信",
+                            pdf="/inbs/140120260711590975.pdf",
+                            when="2026/07/11 09:00",
+                        ),
+                    )
+                )
+
+                observations = sorted(
+                    extract_source_observations(out), key=lambda item: item.available_at
+                )
+                assert observations[1].status == status
+                assert observations[1].record_id == observations[0].record_id
+                assert observations[1].version_id != observations[0].version_id
+                assert observations[1].replaces_version_id == observations[0].version_id
+
 
 @pytest.mark.unit
 class RegistrationTests(unittest.TestCase):

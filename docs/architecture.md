@@ -244,7 +244,9 @@ Version identity is independent of the requested analysis date, so overlapping
 collection can re-observe and deduplicate a version while retaining superseded,
 corrected, withdrawn, or replaced versions. Watermarks record the interval
 actually scanned plus archive, truncation, and availability limitations; they
-are not inferred from an empty result.
+are not inferred from an empty result. Disjoint intervals remain separate and
+an unscanned gap downgrades Required coverage instead of being treated as one
+continuous scan.
 
 ### Full Research Chain updates
 
@@ -270,8 +272,10 @@ EDINET and TDnet company disclosures are Required for Japanese disclosure
 coverage. Google News is Advisory unless an active Claim or open Question
 explicitly names it as Required. Limited or unavailable Required coverage, and
 observed official correction or withdrawal states, are represented as blocking
-a quiet reassessment; live-only Required coverage cannot establish No Material
-Change. A semantically unchanged Full update with one of these blockers records
+a quiet reassessment when first observed; an already assessed inherited version
+does not become a permanent blocker. Google News watermarks are live-only, so
+Required Google coverage cannot establish No Material Change. A semantically
+unchanged Full update with one of these blockers records
 `coverage_incomplete`, not No Material Change or a fabricated Material Change.
 Full Analysis exposes the limitation rather than interpreting missing coverage
 as no news.
@@ -407,7 +411,11 @@ Record observations and Source Watermarks outside human-visible Markdown.
 Evidence sealing validates and stores those structures in provenance before
 Revision assembly. EDINET uses its document and parent-document identities;
 TDnet uses the official PDF record identity and a deterministic observed-version
-digest. Both retain timezone-aware availability and actual-source/fallback
+digest. When a TDnet title explicitly marks a correction, withdrawal, or
+replacement of a same-subject disclosure present in the overlap window, the
+new version retains the prior official PDF record identity and records the
+replaced version; unmatched titles remain separate native records rather than
+being joined heuristically. Both retain timezone-aware availability and actual-source/fallback
 association through the Evidence item that carried the observation.
 
 `EvidenceBundle(version="8")` deduplicates items, validates unique references,

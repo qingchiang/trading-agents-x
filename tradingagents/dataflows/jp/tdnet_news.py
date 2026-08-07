@@ -30,6 +30,7 @@ import hashlib
 import html
 import logging
 import re
+from dataclasses import replace
 from datetime import datetime, timedelta
 from urllib.parse import urlencode, urljoin
 from urllib.request import Request
@@ -52,6 +53,9 @@ logger = logging.getLogger(__name__)
 
 _SEARCH_URL = "https://www.release.tdnet.info/onsf/TDJFSearch/TDJFSearch"
 _HOST = "https://www.release.tdnet.info"
+_REVISION_PREFIX_RE = re.compile(
+    r"^[（(](?:訂正|撤回|取消|差し替え|差替)(?:・[^）)]*)?[）)]\s*"
+)
 
 # The search result table (``id="maintable"``) lists one disclosure per
 # ``<tr class="odd|even">`` with stable per-cell classes; the title cell wraps
@@ -228,7 +232,7 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0)
         f"### {r['title']}\nDisclosed: {r['at'].strftime('%Y-%m-%d %H:%M')} JST · PDF: {r['pdf']}"
         for r in kept
     )
-    observations = tuple(_observation(row) for row in matches)
+    observations = _observations(matches)
     body = (
         f"## {ticker} timely disclosures (TDnet 適時開示), "
         f"from {start_date} to {end_date}:\n\n{body}"
@@ -263,6 +267,25 @@ def _observation(row: dict) -> SourceObservation:
         title=title,
         url=pdf,
     )
+
+
+def _observations(rows: list[dict]) -> tuple[SourceObservation, ...]:
+    """Link only explicit TDnet revision prefixes to an observed prior record."""
+    by_subject: dict[str, SourceObservation] = {}
+    observations = []
+    for row in sorted(rows, key=lambda item: item["at"]):
+        observation = _observation(row)
+        subject = _REVISION_PREFIX_RE.sub("", observation.title).strip()
+        prior = by_subject.get(subject)
+        if observation.status != "published" and prior is not None:
+            observation = replace(
+                observation,
+                record_id=prior.record_id,
+                replaces_version_id=prior.version_id,
+            )
+        by_subject[subject] = observation
+        observations.append(observation)
+    return tuple(observations)
 
 
 def _no_disclosures(ticker: str, start_date: str, end_date: str) -> str:

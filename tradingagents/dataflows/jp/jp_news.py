@@ -265,6 +265,9 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
                     scanned_start=effective_start,
                     scanned_end=effective_end,
                     status="unavailable" if block.startswith(_NOTE_PREFIX) else "complete",
+                    temporal_scope=(
+                        "live_only" if source == "Google News" else "point_in_time"
+                    ),
                     limitations=(
                         (f"{source} collection was unavailable.",)
                         if block.startswith(_NOTE_PREFIX)

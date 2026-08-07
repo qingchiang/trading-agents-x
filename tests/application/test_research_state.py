@@ -19,6 +19,7 @@ from tradingagents.application.research import (
     ClaimConfidence,
     ClaimStanding,
     CoverageRequirement,
+    CoverageStatus,
     CurrentResearchState,
     DecisionConfidence,
     DecisionRole,
@@ -30,6 +31,7 @@ from tradingagents.application.research import (
     ResearchOpinion,
     ResearchQuestion,
     ResearchRevision,
+    ResearchRevisionOutcome,
     ResearchScenarioState,
     RevisionExport,
     ScenarioLikelihood,
@@ -338,6 +340,10 @@ def test_revision_preserves_disjoint_source_watermark_intervals():
         (date(2026, 7, 1), date(2026, 7, 5)),
         (date(2026, 7, 20), date(2026, 7, 24)),
     ]
+    edinet = next(item for item in draft.coverage.domains if item.source == "EDINET")
+    assert edinet.status is CoverageStatus.LIMITED
+    assert "gap" in edinet.limitations[0].lower()
+    assert draft.coverage.supports_no_material_change is False
 
 
 def test_full_update_preserves_corrected_versions_with_overlap_lineage():
@@ -411,6 +417,87 @@ def test_full_update_preserves_corrected_versions_with_overlap_lineage():
     assert "## Source Record Versions" in exported
     assert "edinet:S100CORRECTION" in exported
     assert "corrected" in exported
+
+
+def test_inherited_correction_does_not_permanently_block_quiet_reassessment():
+    def single_claim(draft, cutoff):
+        claim = draft.current_state.claims[0]
+        state = draft.current_state.model_copy(
+            update={
+                "cutoff": cutoff,
+                "claims": (claim,),
+                "questions": (),
+                "scenarios": tuple(
+                    item.model_copy(
+                        update={
+                            "cutoff": cutoff,
+                            "assumption_claim_ids": (claim.id,),
+                        }
+                    )
+                    for item in draft.current_state.scenarios
+                ),
+                "opinion": draft.current_state.opinion.model_copy(
+                    update={"primary_claim_ids": (claim.id,)}
+                ),
+                "risks": (),
+                "catalysts": (),
+                "invalidation_conditions": (),
+            }
+        )
+        claim_coverage = next(
+            item for item in draft.coverage.claims if item.object_id == claim.id
+        )
+        return draft.model_copy(
+            update={
+                "cutoff": cutoff,
+                "current_state": state,
+                "coverage": draft.coverage.model_copy(
+                    update={"claims": (claim_coverage,), "questions": ()}
+                ),
+            }
+        )
+
+    corrected_records = [
+        _source_record("edinet:S100ROOT"),
+        _source_record(
+            "edinet:S100CORRECTION",
+            status="corrected",
+            replaces="edinet:S100ROOT",
+        ),
+    ]
+    complete_watermarks = [_watermark("EDINET"), _watermark("TDnet")]
+    baseline = single_claim(
+        assemble_full_revision(
+            AnalysisRequest(
+                ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)
+            ),
+            _with_disclosure_metadata(
+                _execution("6501.T"),
+                records=corrected_records,
+                watermarks=complete_watermarks,
+            ),
+        ),
+        CUTOFF,
+    )
+    next_cutoff = date(2026, 7, 25)
+    candidate = single_claim(
+        assemble_full_revision(
+            AnalysisRequest(
+                ticker="6501.T", analysis_date=next_cutoff, analysts=("market",)
+            ),
+            _with_disclosure_metadata(
+                _execution("6501.T"),
+                records=corrected_records,
+                watermarks=complete_watermarks,
+            ),
+        ),
+        next_cutoff,
+    )
+
+    updated = assemble_full_update("revision-1", baseline, candidate)
+
+    assert updated.coverage.supports_no_material_change is True
+    assert updated.outcome is ResearchRevisionOutcome.NO_MATERIAL_CHANGE
 
 
 def test_full_analysis_promotes_google_news_only_for_explicit_dependency():

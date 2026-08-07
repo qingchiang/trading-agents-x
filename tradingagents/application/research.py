@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 import json
 import zipfile
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from enum import Enum
 from typing import Literal, Protocol
 from uuid import uuid4
@@ -759,6 +759,8 @@ def _source_coverage(
     state: CurrentResearchState,
     records: tuple[SourceRecordVersion, ...],
     watermarks: tuple[SourceWatermarkSnapshot, ...],
+    *,
+    status_blocking_records: tuple[SourceRecordVersion, ...] | None = None,
 ) -> tuple[tuple[ResearchDomainCoverage, ...], bool]:
     explicitly_required = {
         source
@@ -796,8 +798,20 @@ def _source_coverage(
             requirement is CoverageRequirement.REQUIRED
             and any(item.temporal_scope != "point_in_time" for item in source_watermarks)
         )
+        ordered_intervals = sorted(
+            (item.scanned_start, item.scanned_end) for item in source_watermarks
+        )
+        missing_interval = False
+        covered_end = ordered_intervals[0][1]
+        for current_start, current_end in ordered_intervals[1:]:
+            if current_start > covered_end + timedelta(days=1):
+                missing_interval = True
+                break
+            covered_end = max(covered_end, current_end)
         if requirement is CoverageRequirement.REQUIRED and (
-            watermark.status is not CoverageStatus.COMPLETE or live_only_required
+            watermark.status is not CoverageStatus.COMPLETE
+            or live_only_required
+            or missing_interval
         ):
             supports_quiet = False
         limitations = tuple(
@@ -808,6 +822,10 @@ def _source_coverage(
             ("Required source coverage is not point-in-time.",)
             if live_only_required
             else ()
+        ) + (
+            ("Source watermark intervals contain an unscanned gap.",)
+            if missing_interval
+            else ()
         )
         domains.append(
             ResearchDomainCoverage(
@@ -816,7 +834,12 @@ def _source_coverage(
                 ),
                 source=watermark.source,
                 requirement=requirement,
-                status=(CoverageStatus.LIMITED if live_only_required else watermark.status),
+                status=(
+                    CoverageStatus.LIMITED
+                    if (live_only_required or missing_interval)
+                    and watermark.status is CoverageStatus.COMPLETE
+                    else watermark.status
+                ),
                 evidence_refs=tuple(dict.fromkeys(refs_by_source.get(watermark.source, ()))),
                 limitations=limitations,
             )
@@ -851,7 +874,9 @@ def _source_coverage(
     if any(
         record.status is not SourceRecordStatus.PUBLISHED
         and record.source in {"EDINET", "TDnet"}
-        for record in records
+        for record in (
+            records if status_blocking_records is None else status_blocking_records
+        )
     ):
         supports_quiet = False
     return tuple(domains), supports_quiet
@@ -1016,8 +1041,14 @@ def assemble_full_update(
             "evidence_refs": tuple(item.ref for item in combined_items),
         }
     )
+    newly_observed_versions = tuple(
+        item for version_id, item in candidate_versions.items() if version_id not in baseline_versions
+    )
     source_domains, supports_quiet = _source_coverage(
-        state, combined_versions, source_watermarks
+        state,
+        combined_versions,
+        source_watermarks,
+        status_blocking_records=newly_observed_versions,
     )
     coverage_domains = tuple(
         item for item in candidate.coverage.domains if item.source is None
