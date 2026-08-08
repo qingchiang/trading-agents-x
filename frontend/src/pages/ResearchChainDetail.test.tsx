@@ -56,7 +56,7 @@ const chain = {
           suggested_question_ids: [],
         }],
       },
-      bounded_metrics: { llm_calls: 0, tool_calls: 3, input_tokens: 0, output_tokens: 0, wall_time_seconds: 0.4 },
+      bounded_metrics: { llm_calls: 0, tool_calls: 3, input_tokens: 0, output_tokens: 0, cost_usd: 0.0042, wall_time_seconds: 0.4 },
       full_metrics: { llm_calls: 8, tool_calls: 12, input_tokens: 1200, output_tokens: 300, wall_time_seconds: 4.2 },
     },
     update_summary: { summary: "初回のフル分析を完了。" },
@@ -203,6 +203,7 @@ test("reads the complete current thesis, coverage, evidence, reports, and metric
   expect(screen.getByText(/support.*claim-1/)).toBeVisible();
   expect(screen.getByText(/Bounded work: 0 LLM calls · 3 Tool calls/)).toBeVisible();
   expect(screen.getAllByText(/Cache hit \/ miss: 0\/0/)).toHaveLength(2);
+  expect(screen.getByText(/Cost: \$0.0042/)).toBeVisible();
   expect(screen.getByText("rolling archive truncated the requested interval")).toBeVisible();
   expect(screen.getByText("market_boundary_crossing")).toBeVisible();
   expect(screen.getByText(/Thesis reference: 100/)).toBeVisible();

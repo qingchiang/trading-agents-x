@@ -30,6 +30,7 @@ export default function ResearchChainDetail() {
     output_tokens: 0,
     cache_hit_input_tokens: 0,
     cache_miss_input_tokens: 0,
+    cost_usd: null as number | null,
     wall_time_seconds: 0,
   };
   const boundedMetrics = { ...emptyMetrics, ...(updateAudit?.bounded_metrics ?? {}) };
@@ -294,10 +295,10 @@ export default function ResearchChainDetail() {
                 )}
               </li>
               <li>
-                {t("boundedWork")}: {boundedMetrics.llm_calls} {t("llmCalls")} · {boundedMetrics.tool_calls} {t("toolCalls")} · {boundedMetrics.input_tokens}/{boundedMetrics.output_tokens} {t("inputOutputTokens")} · {t("cacheUsage")}: {boundedMetrics.cache_hit_input_tokens}/{boundedMetrics.cache_miss_input_tokens} · {boundedMetrics.wall_time_seconds.toFixed(1)}s
+                {t("boundedWork")}: {boundedMetrics.llm_calls} {t("llmCalls")} · {boundedMetrics.tool_calls} {t("toolCalls")} · {boundedMetrics.input_tokens}/{boundedMetrics.output_tokens} {t("inputOutputTokens")} · {t("cacheUsage")}: {boundedMetrics.cache_hit_input_tokens}/{boundedMetrics.cache_miss_input_tokens} · {t("cost")}: {boundedMetrics.cost_usd == null ? t("none") : `$${boundedMetrics.cost_usd.toFixed(4)}`} · {boundedMetrics.wall_time_seconds.toFixed(1)}s
               </li>
               <li>
-                {t("fullWork")}: {fullMetrics.llm_calls} {t("llmCalls")} · {fullMetrics.tool_calls} {t("toolCalls")} · {fullMetrics.input_tokens}/{fullMetrics.output_tokens} {t("inputOutputTokens")} · {t("cacheUsage")}: {fullMetrics.cache_hit_input_tokens}/{fullMetrics.cache_miss_input_tokens} · {fullMetrics.wall_time_seconds.toFixed(1)}s
+                {t("fullWork")}: {fullMetrics.llm_calls} {t("llmCalls")} · {fullMetrics.tool_calls} {t("toolCalls")} · {fullMetrics.input_tokens}/{fullMetrics.output_tokens} {t("inputOutputTokens")} · {t("cacheUsage")}: {fullMetrics.cache_hit_input_tokens}/{fullMetrics.cache_miss_input_tokens} · {t("cost")}: {fullMetrics.cost_usd == null ? t("none") : `$${fullMetrics.cost_usd.toFixed(4)}`} · {fullMetrics.wall_time_seconds.toFixed(1)}s
               </li>
             </ul>
           </section>

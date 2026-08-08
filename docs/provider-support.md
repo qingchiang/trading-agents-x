@@ -85,7 +85,8 @@ The checks must cover:
 - thinking structured output for Debate Agenda and Final numeric generation;
 - strict Final core validation and optional numeric degradation;
 - invalid-candidate recovery and truncation behavior;
-- usage, reasoning-token, and node timing attribution;
+- usage, reasoning-token, node timing, and provider-reported USD cost
+  attribution when available (never a token-count estimate);
 - checkpoint persistence and successful export.
 
 Live qualification is never part of default pytest because it incurs external

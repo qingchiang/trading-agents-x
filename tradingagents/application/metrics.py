@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from math import isfinite
 from time import monotonic
 from typing import Any
 from uuid import UUID, uuid4
@@ -47,6 +48,7 @@ def merge_run_metrics(*metrics: RunMetrics) -> RunMetrics:
             detailed_usage_calls=sum(
                 value.detailed_usage_calls for value in node_values(node)
             ),
+            cost_usd=_sum_known_cost(value.cost_usd for value in node_values(node)),
             wall_time_seconds=sum(
                 value.wall_time_seconds for value in node_values(node)
             ),
@@ -70,6 +72,7 @@ def merge_run_metrics(*metrics: RunMetrics) -> RunMetrics:
         detailed_usage_calls=sum(
             snapshot.detailed_usage_calls for snapshot in metrics
         ),
+        cost_usd=_sum_known_cost(snapshot.cost_usd for snapshot in metrics),
         wall_time_seconds=sum(
             snapshot.wall_time_seconds for snapshot in metrics
         ),
@@ -87,6 +90,7 @@ class _NodeAccumulator:
     cache_miss_input_tokens: int = 0
     reasoning_output_tokens: int = 0
     detailed_usage_calls: int = 0
+    cost_usd: float | None = None
 
 
 @dataclass(frozen=True)
@@ -118,6 +122,7 @@ class MetricsCallback(BaseCallbackHandler):
         self.cache_miss_input_tokens = 0
         self.reasoning_output_tokens = 0
         self.detailed_usage_calls = 0
+        self.cost_usd: float | None = None
 
     def on_llm_start(
         self,
@@ -138,10 +143,12 @@ class MetricsCallback(BaseCallbackHandler):
     def on_llm_end(self, response: LLMResult, **kwargs: Any) -> None:
         node = self._finish_callback(self._llm_runs, kwargs)
         token_usage = _token_usage(response)
+        cost_usd = _reported_cost_usd(response)
         if not (
             token_usage.input_tokens
             or token_usage.output_tokens
             or token_usage.has_details
+            or cost_usd is not None
         ):
             return
         with self._lock:
@@ -151,6 +158,7 @@ class MetricsCallback(BaseCallbackHandler):
             self.cache_miss_input_tokens += token_usage.cache_miss_input_tokens
             self.reasoning_output_tokens += token_usage.reasoning_output_tokens
             self.detailed_usage_calls += int(token_usage.has_details)
+            self.cost_usd = _sum_known_cost((self.cost_usd, cost_usd))
             usage = self._node_usage.setdefault(node, _NodeAccumulator())
             usage.input_tokens += token_usage.input_tokens
             usage.output_tokens += token_usage.output_tokens
@@ -158,6 +166,7 @@ class MetricsCallback(BaseCallbackHandler):
             usage.cache_miss_input_tokens += token_usage.cache_miss_input_tokens
             usage.reasoning_output_tokens += token_usage.reasoning_output_tokens
             usage.detailed_usage_calls += int(token_usage.has_details)
+            usage.cost_usd = _sum_known_cost((usage.cost_usd, cost_usd))
 
     def on_llm_error(self, error: BaseException, **kwargs: Any) -> None:
         self._finish_callback(self._llm_runs, kwargs)
@@ -315,6 +324,7 @@ class MetricsCallback(BaseCallbackHandler):
                     cache_miss_input_tokens=usage.cache_miss_input_tokens,
                     reasoning_output_tokens=usage.reasoning_output_tokens,
                     detailed_usage_calls=usage.detailed_usage_calls,
+                    cost_usd=usage.cost_usd,
                     wall_time_seconds=node_times.get(node, 0.0),
                 )
             return RunMetrics(
@@ -326,9 +336,46 @@ class MetricsCallback(BaseCallbackHandler):
                 cache_miss_input_tokens=self.cache_miss_input_tokens,
                 reasoning_output_tokens=self.reasoning_output_tokens,
                 detailed_usage_calls=self.detailed_usage_calls,
+                cost_usd=self.cost_usd,
                 wall_time_seconds=max(0.0, now - self._started_at),
                 node_metrics=node_metrics,
             )
+
+
+def _sum_known_cost(values: Iterable[float | None]) -> float | None:
+    known = tuple(value for value in values if value is not None)
+    return sum(known) if known else None
+
+
+def _reported_cost_usd(response: LLMResult) -> float | None:
+    """Read explicit USD cost metadata without estimating from token counts."""
+    output = response.llm_output or {}
+    candidates: list[object] = [
+        output.get("cost_usd"),
+        output.get("total_cost_usd"),
+    ]
+    usage = output.get("usage")
+    if isinstance(usage, dict):
+        candidates.append(usage.get("cost"))
+        candidates.append(usage.get("cost_usd"))
+    for generations in response.generations:
+        for generation in generations:
+            metadata = getattr(generation.message, "response_metadata", {}) or {}
+            candidates.extend(
+                (metadata.get("cost_usd"), metadata.get("total_cost_usd"))
+            )
+            metadata_usage = metadata.get("usage")
+            if isinstance(metadata_usage, dict):
+                candidates.extend(
+                    (metadata_usage.get("cost"), metadata_usage.get("cost_usd"))
+                )
+    for value in candidates:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        normalized = float(value)
+        if normalized >= 0 and isfinite(normalized):
+            return normalized
+    return None
 
 
 def _callback_node(kwargs: dict[str, Any]) -> str:

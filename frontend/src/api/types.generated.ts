@@ -335,6 +335,7 @@ export interface components {
     NodeMetrics: {
       cache_hit_input_tokens?: number;
       cache_miss_input_tokens?: number;
+      cost_usd?: number | null;
       detailed_usage_calls?: number;
       input_tokens?: number;
       llm_calls?: number;
@@ -722,6 +723,7 @@ export interface components {
     RunMetrics: {
       cache_hit_input_tokens?: number;
       cache_miss_input_tokens?: number;
+      cost_usd?: number | null;
       detailed_usage_calls?: number;
       input_tokens?: number;
       llm_calls?: number;

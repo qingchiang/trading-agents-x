@@ -107,6 +107,24 @@ collectors/models. A few controlled live pairs may then be run with
 contain only ticker, cutoff, source status, reason codes, and aggregate metrics,
 never credentials, prompt text, private reasoning, or response headers.
 
+The read-only live runner uses existing chain heads and never advances them.
+Review a set of one to five expected cases, keep the mode at `shadow`, and run:
+
+```bash
+RUN_LIVE_DATA_TESTS=1 PYTHON_DOTENV_DISABLED=1 \
+TRADINGAGENTS_RESEARCH_UPDATE_MODE=shadow \
+TRADINGAGENTS_EXPERIMENTAL_NMC_JP_WHITELIST=6501.T,7203.T \
+TRADINGAGENTS_INCREMENTAL_LIVE_CASES='[{"chain_id":"<id>","analysis_date":"2026-08-07","expected":"no_material_change"}]' \
+uv run --locked pytest -q -m live_data \
+  tests/live/test_incremental_research_experiment.py
+```
+
+`expected` may be `no_material_change` or a stable Full-escalation reason such
+as `source_correction`, `source_withdrawal`, `coverage_incomplete`,
+`incompatible_semantics`, or `threshold_crossing`. The deterministic offline
+matrix covers every category; the live set is deliberately small and reviewed
+case by case because upstream corrections and availability change over time.
+
 During Shadow validation the Full Analysis result is authoritative:
 
 - an incremental Full escalation stops immediately after recording its reason;

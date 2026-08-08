@@ -161,6 +161,28 @@ def test_missing_metadata_and_provider_usage_are_explicit() -> None:
     assert snapshot.input_tokens == 0
     assert snapshot.node_metrics["unattributed"].llm_calls == 1
     assert snapshot.node_metrics["unattributed"].input_tokens == 0
+    assert snapshot.cost_usd is None
+
+
+def test_provider_reported_cost_is_attributed_when_available() -> None:
+    metrics = MetricsCallback()
+    run_id = uuid4()
+    metrics.on_chat_model_start(
+        {},
+        [[]],
+        run_id=run_id,
+        metadata={"research_node": "research.incremental.semantic_assessment"},
+    )
+    response = _result(80, 20)
+    response.llm_output = {"cost_usd": 0.0042}
+
+    metrics.on_llm_end(response, run_id=run_id)
+
+    snapshot = metrics.snapshot()
+    assert snapshot.cost_usd == pytest.approx(0.0042)
+    assert snapshot.node_metrics[
+        "research.incremental.semantic_assessment"
+    ].cost_usd == pytest.approx(0.0042)
 
 
 def test_deterministic_local_tool_calls_are_attributed_explicitly() -> None:
@@ -259,6 +281,7 @@ def test_merge_run_metrics_adds_totals_nodes_and_usage_coverage() -> None:
         cache_miss_input_tokens=60,
         detailed_usage_calls=1,
         wall_time_seconds=1.5,
+        cost_usd=0.01,
         node_metrics={
             "analyst.market": NodeMetrics(
                 llm_calls=1,
@@ -266,6 +289,7 @@ def test_merge_run_metrics_adds_totals_nodes_and_usage_coverage() -> None:
                 output_tokens=10,
                 detailed_usage_calls=1,
                 wall_time_seconds=1.5,
+                cost_usd=0.01,
             )
         },
     )
@@ -307,6 +331,8 @@ def test_merge_run_metrics_adds_totals_nodes_and_usage_coverage() -> None:
     assert merged.reasoning_output_tokens == 12
     assert merged.detailed_usage_calls == 2
     assert merged.wall_time_seconds == 3.5
+    assert merged.cost_usd == pytest.approx(0.01)
     assert merged.node_metrics["analyst.market"].llm_calls == 2
     assert merged.node_metrics["analyst.market"].input_tokens == 250
+    assert merged.node_metrics["analyst.market"].cost_usd == pytest.approx(0.01)
     assert merged.node_metrics["committee.final"].tool_calls == 1

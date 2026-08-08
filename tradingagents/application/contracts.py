@@ -1590,6 +1590,7 @@ class NodeMetrics(FrozenModel):
     cache_miss_input_tokens: int = Field(default=0, ge=0)
     reasoning_output_tokens: int = Field(default=0, ge=0)
     detailed_usage_calls: int = Field(default=0, ge=0)
+    cost_usd: float | None = Field(default=None, ge=0)
     wall_time_seconds: float = Field(default=0.0, ge=0.0)
 
 
@@ -1602,6 +1603,7 @@ class RunMetrics(FrozenModel):
     cache_miss_input_tokens: int = Field(default=0, ge=0)
     reasoning_output_tokens: int = Field(default=0, ge=0)
     detailed_usage_calls: int = Field(default=0, ge=0)
+    cost_usd: float | None = Field(default=None, ge=0)
     wall_time_seconds: float = Field(default=0.0, ge=0.0)
     node_metrics: dict[str, NodeMetrics] = Field(default_factory=dict)
 

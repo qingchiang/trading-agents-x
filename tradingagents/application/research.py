@@ -637,6 +637,30 @@ def validate_experimental_nmc_candidate(
         or candidate.evidence_snapshot.bundle.analysis_date != candidate.cutoff
     ):
         return IncrementalEscalationReason.SCHEMA_INVALID
+    status_reasons = {
+        SourceRecordStatus.CORRECTED: IncrementalEscalationReason.SOURCE_CORRECTION,
+        SourceRecordStatus.WITHDRAWN: IncrementalEscalationReason.SOURCE_WITHDRAWAL,
+        SourceRecordStatus.REPLACED: IncrementalEscalationReason.SOURCE_REPLACEMENT,
+    }
+    source_lineage = {
+        item.version_id: item for item in candidate.evidence_snapshot.source_record_lineage
+    }
+    for record in candidate.evidence_snapshot.source_records:
+        if (
+            record.status in status_reasons
+            and source_lineage[record.version_id].lineage == "new"
+        ):
+            return status_reasons[record.status]
+    for signal in candidate.delta.change_signals:
+        if not signal.requires_full_analysis:
+            continue
+        if signal.kind is ResearchChangeKind.MARKET_BOUNDARY_CROSSING:
+            return IncrementalEscalationReason.THRESHOLD_CROSSING
+        if signal.kind is ResearchChangeKind.MARKET_SEMANTIC_INCOMPATIBILITY:
+            return IncrementalEscalationReason.INCOMPATIBLE_SEMANTICS
+        if signal.kind is ResearchChangeKind.FUNDAMENTAL_CORRECTION:
+            return IncrementalEscalationReason.SOURCE_CORRECTION
+        return IncrementalEscalationReason.SOURCE_VERSION_CHANGE
     if (
         not candidate.coverage.supports_no_material_change
         or any(
@@ -892,11 +916,13 @@ def render_revision_export_markdown(export: RevisionExport) -> str:
                 f"{audit.bounded_metrics.tool_calls} tool calls, "
                 f"{audit.bounded_metrics.input_tokens}/"
                 f"{audit.bounded_metrics.output_tokens} input/output tokens, "
+                f"cost: {audit.bounded_metrics.cost_usd if audit.bounded_metrics.cost_usd is not None else 'not reported'}, "
                 f"{audit.bounded_metrics.wall_time_seconds:.3f}s",
                 f"- Full work: {audit.full_metrics.llm_calls} LLM calls, "
                 f"{audit.full_metrics.tool_calls} tool calls, "
                 f"{audit.full_metrics.input_tokens}/"
                 f"{audit.full_metrics.output_tokens} input/output tokens, "
+                f"cost: {audit.full_metrics.cost_usd if audit.full_metrics.cost_usd is not None else 'not reported'}, "
                 f"{audit.full_metrics.wall_time_seconds:.3f}s",
             ]
         )

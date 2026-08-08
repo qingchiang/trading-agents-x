@@ -32,6 +32,7 @@ from tradingagents.application.research import (
     QuestionStatus,
     ResearchChain,
     ResearchChangeKind,
+    ResearchChangeSignal,
     ResearchClaim,
     ResearchObjectCoverage,
     ResearchOpinion,
@@ -383,6 +384,23 @@ def test_experimental_nmc_validation_fails_closed_for_coverage_or_semantic_drift
             )
         }
     )
+    material_signal = candidate.model_copy(
+        update={
+            "delta": candidate.delta.model_copy(
+                update={
+                    "change_signals": (
+                        ResearchChangeSignal(
+                            kind=ResearchChangeKind.MARKET_BOUNDARY_CROSSING,
+                            domain="market",
+                            record_id="jquants-market:6501.T",
+                            requires_full_analysis=True,
+                            detail="A thesis-relevant threshold was crossed.",
+                        ),
+                    )
+                }
+            )
+        }
+    )
 
     assert validate_experimental_nmc_candidate(
         baseline, incomplete
@@ -390,6 +408,9 @@ def test_experimental_nmc_validation_fails_closed_for_coverage_or_semantic_drift
     assert validate_experimental_nmc_candidate(
         baseline, changed
     ) is IncrementalEscalationReason.INCOMPATIBLE_SEMANTICS
+    assert validate_experimental_nmc_candidate(
+        baseline, material_signal
+    ) is IncrementalEscalationReason.THRESHOLD_CROSSING
 
 
 class _SemanticInvoker:

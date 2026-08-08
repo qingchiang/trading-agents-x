@@ -2369,6 +2369,18 @@
             "title": "Cache Miss Input Tokens",
             "type": "integer"
           },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
+          },
           "detailed_usage_calls": {
             "default": 0,
             "minimum": 0.0,
@@ -5139,6 +5151,18 @@
             "minimum": 0.0,
             "title": "Cache Miss Input Tokens",
             "type": "integer"
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
           },
           "detailed_usage_calls": {
             "default": 0,
