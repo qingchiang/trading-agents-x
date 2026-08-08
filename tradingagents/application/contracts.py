@@ -1684,13 +1684,13 @@ class ResearchUpdateEvidenceLineage(FrozenModel):
 class ResearchUpdateAudit(FrozenModel):
     """Durable phase attribution and finding for one Research Chain update."""
 
-    mode: Literal["shadow"] = "shadow"
+    mode: Literal["shadow", "experimental"] = "shadow"
     candidate: ResearchUpdateCandidate | None = None
     coverage: dict[str, Any] | None = None
     checked_windows: tuple[ResearchUpdateCheckedWindow, ...] = ()
     evidence_lineage: tuple[ResearchUpdateEvidenceLineage, ...] = ()
     semantic_assessment: ResearchUpdateSemanticAssessment | None = None
-    authoritative_strategy: Literal["full"] = "full"
+    authoritative_strategy: Literal["full", "incremental"] = "full"
     escalation_reason: ResearchUpdateEscalationReason | None = None
     comparison: Literal["agreement", "disagreement", "not_applicable"]
     bounded_metrics: RunMetrics = Field(default_factory=RunMetrics)

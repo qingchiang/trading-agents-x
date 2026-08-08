@@ -611,6 +611,117 @@ class IncrementalGateResult(ResearchModel):
         return self
 
 
+def _semantic_state_payload(value: object) -> object:
+    if isinstance(value, dict):
+        return {
+            key: _semantic_state_payload(item)
+            for key, item in value.items()
+            if key not in {"cutoff", "evidence_refs"}
+        }
+    if isinstance(value, (list, tuple)):
+        return tuple(_semantic_state_payload(item) for item in value)
+    return value
+
+
+def validate_experimental_nmc_candidate(
+    baseline: ResearchRevisionDraft,
+    candidate: ResearchRevisionDraft,
+) -> IncrementalEscalationReason | None:
+    """Fail closed unless a bounded candidate can safely become authoritative."""
+    if (
+        candidate.execution_strategy is not ResearchExecutionStrategy.INCREMENTAL
+        or candidate.outcome is not ResearchRevisionOutcome.NO_MATERIAL_CHANGE
+        or candidate.cutoff <= baseline.cutoff
+        or candidate.current_state.instrument != baseline.current_state.instrument
+        or candidate.current_state.cutoff != candidate.cutoff
+        or candidate.evidence_snapshot.bundle.analysis_date != candidate.cutoff
+    ):
+        return IncrementalEscalationReason.SCHEMA_INVALID
+    if (
+        not candidate.coverage.supports_no_material_change
+        or any(
+            item.requirement is CoverageRequirement.REQUIRED
+            and item.status is not CoverageStatus.COMPLETE
+            for item in candidate.coverage.domains
+        )
+        or any(item.status is not CoverageStatus.COMPLETE for item in candidate.coverage.claims)
+        or any(item.status is not CoverageStatus.COMPLETE for item in candidate.coverage.questions)
+    ):
+        return IncrementalEscalationReason.COVERAGE_INCOMPLETE
+    if _semantic_state_payload(candidate.current_state.model_dump(mode="python")) != (
+        _semantic_state_payload(baseline.current_state.model_dump(mode="python"))
+    ):
+        return IncrementalEscalationReason.INCOMPATIBLE_SEMANTICS
+    active_claim_ids = {
+        item.id for item in baseline.current_state.claims if item.standing is ClaimStanding.ACTIVE
+    }
+    reaffirmed_claim_ids = {
+        item.object_id
+        for item in candidate.delta.claims
+        if item.change is ClaimChange.REAFFIRMED
+        and item.identity_disposition is IdentityDisposition.EXACT_MATCH
+        and item.previous_object_id == item.object_id
+    }
+    current_question_ids = {
+        item.id
+        for item in baseline.current_state.questions
+        if item.status in {QuestionStatus.OPEN, QuestionStatus.ANSWERED}
+    }
+    reaffirmed_question_ids = {
+        item.object_id
+        for item in candidate.delta.questions
+        if item.change is QuestionChange.REAFFIRMED
+        and item.identity_disposition is IdentityDisposition.EXACT_MATCH
+        and item.previous_object_id == item.object_id
+    }
+    if (
+        candidate.delta.opinion_changed
+        or candidate.delta.changed_sections
+        or reaffirmed_claim_ids != active_claim_ids
+        or reaffirmed_question_ids != current_question_ids
+    ):
+        return IncrementalEscalationReason.INCOMPATIBLE_SEMANTICS
+    return None
+
+
+def prepare_experimental_nmc_revision(
+    baseline: ResearchRevisionDraft,
+    candidate: ResearchRevisionDraft,
+    audit: ResearchUpdateAudit,
+) -> ResearchRevisionDraft:
+    """Render deterministic NMC summary text and attach the experiment audit."""
+    values = {
+        "baseline": baseline.cutoff.isoformat(),
+        "cutoff": candidate.cutoff.isoformat(),
+        "count": len(candidate.delta.new_evidence_refs),
+    }
+    summaries = {
+        "en": (
+            "Bounded assessment from {baseline} to {cutoff} found no material change; "
+            "the Current Research State was reaffirmed with {count} newly observed "
+            "Evidence items."
+        ),
+        "zh-CN": (
+            "从 {baseline} 到 {cutoff} 的有限变化评估未发现重大变化；当前研究状态已重申，"
+            "并记录 {count} 条新观察到的证据。"
+        ),
+        "ja": (
+            "{baseline} から {cutoff} までの限定的な変更評価では重要な変更は確認されず、"
+            "新たに観測した {count} 件の Evidence とともに現在の Research State を再確認しました。"
+        ),
+    }
+    summary = summaries.get(candidate.current_state.language, summaries["en"]).format(**values)
+    updated = candidate.model_copy(
+        update={
+            "update_summary": candidate.update_summary.model_copy(
+                update={"summary": summary}
+            ),
+            "research_update_audit": audit,
+        }
+    )
+    return ResearchRevisionDraft.model_validate(updated.model_dump(mode="python"))
+
+
 class ResearchRevision(ResearchRevisionDraft):
     id: str
     chain_id: str
@@ -754,7 +865,7 @@ def render_revision_export_markdown(export: RevisionExport) -> str:
         lines.extend(
             [
                 "",
-                "## Shadow Update Finding",
+                "## Bounded Update Finding",
                 "",
                 f"- Mode: {audit.mode}",
                 f"- Candidate outcome: "
@@ -1290,7 +1401,7 @@ def assess_deterministic_update(
     *,
     metrics: RunMetrics | None = None,
 ) -> IncrementalGateResult:
-    """Apply fail-closed gates and build a quiet Shadow candidate."""
+    """Apply fail-closed gates and build a quiet bounded-update candidate."""
 
     if (
         request.ticker != baseline.current_state.instrument
@@ -1533,8 +1644,8 @@ def assess_deterministic_update(
             update_summary=UpdateSummary(
                 language=baseline.current_state.language,
                 summary=(
-                    "Deterministic gates found no material change; Shadow mode will compare "
-                    "this candidate with authoritative Full Analysis."
+                    "Deterministic gates found no material change; the bounded candidate "
+                    "is ready for the configured research-update mode."
                 ),
                 checked_domains=tuple(dict.fromkeys(item.domain for item in domains)),
                 limitations=limitations,

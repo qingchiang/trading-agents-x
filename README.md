@@ -197,6 +197,21 @@ retrying failed maintenance after one hour. The default 30-day retention can
 be changed with `TRADINGAGENTS_TRASH_RETENTION_DAYS`; `0` disables permanent
 cleanup.
 
+Research Chain updates have an internal, opt-in Japanese incremental-research
+experiment. It is `off` by default. `shadow` retains a bounded candidate while
+Full Analysis remains authoritative; `experimental` lets a fully covered No
+Material Change assessment advance only an explicit `.T` whitelist without
+regenerating analyst reports or deliberation. Every material, incomplete,
+incompatible, invalid, novel, or uncertain result falls back to Full Analysis:
+
+```dotenv
+TRADINGAGENTS_RESEARCH_UPDATE_MODE=experimental
+TRADINGAGENTS_EXPERIMENTAL_NMC_JP_WHITELIST=6501.T,7203.T
+```
+
+See [the experiment guide](docs/incremental-research-experiment.md) for mode,
+whitelist, metrics, and opt-in live-validation details.
+
 See [architecture.md](docs/architecture.md) for subsystem and data-integrity
 contracts.
 

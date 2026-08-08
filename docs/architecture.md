@@ -362,6 +362,25 @@ private reasoning.
 Failed or cancelled Shadow executions retain their run audit but never create
 a Revision.
 
+The internal research-update mode is persisted in each update's immutable
+settings snapshot. `off` routes every update through Full Analysis. `shadow`
+runs bounded assessment only for explicitly whitelisted `.T` Instruments and
+keeps Full Analysis authoritative. `experimental` uses the same whitelist and
+fail-closed gates, but a validated No Material Change candidate becomes the
+authoritative incremental Revision without constructing the Full graph. Any
+coverage, integrity, semantic, novelty, schema, or uncertainty escalation in
+`experimental` continues through Full Analysis in the same execution. Tickers
+outside the whitelist, including unsupported markets, always use Full Analysis.
+
+Before an experimental candidate can commit, the application revalidates
+complete Required, Claim, and Question coverage; identical semantic Current
+Research State apart from cutoff and Evidence links; reaffirmed stable object
+identities; and cutoff/Evidence snapshot consistency. It then renders a
+deterministic localized Update Summary, seals the effective Evidence, and
+atomically completes the execution, appends the immutable Revision, and moves
+the chain head. Cancellation, validation failure, or a stale head cannot
+partially advance the chain.
+
 ### Trash lifecycle
 
 Only terminal runs can be moved to Trash. A trashed run remains readable and
@@ -400,7 +419,7 @@ Alembic manages application tables:
 | `run_evidence` | independently sealed EvidenceBundle and digest |
 | `decisions` | typed final decision, numeric audit appendix, market identity |
 | `research_chains` | one Instrument's linear lineage, Primary designation, and current head |
-| `research_revisions` | immutable complete state, coverage, summary, Evidence snapshot, producing execution, Shadow finding, and metrics |
+| `research_revisions` | immutable complete state, coverage, summary, Evidence snapshot, producing execution, bounded experiment finding, and metrics |
 | `outcomes` | benchmark, five-interval dates, raw return, alpha |
 | `reflections` | outcome-aware research reflection |
 

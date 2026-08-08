@@ -9,10 +9,37 @@ The durable domain language is defined in [CONTEXT.md](../CONTEXT.md). The two
 hard-to-reverse choices are recorded in
 [ADR 0002](adr/0002-maintain-research-as-revision-chains.md) and
 [ADR 0003](adr/0003-fail-closed-incremental-coverage.md). Implemented Research
-Chains, Full updates, Japanese source lineage/change detection, and the
-deterministic Shadow gate are documented in
-[architecture.md](architecture.md). Bounded semantic assessment and
-authoritative No Material Change execution remain deferred experiment phases.
+Chains, Full updates, Japanese source lineage/change detection, bounded
+semantic assessment, Shadow comparison, and authoritative experimental No
+Material Change execution are documented in [architecture.md](architecture.md).
+
+## Internal enablement
+
+The experiment is fail-closed and off by default. Configure both values on the
+Web and worker process, then restart them:
+
+```dotenv
+TRADINGAGENTS_RESEARCH_UPDATE_MODE=shadow
+TRADINGAGENTS_EXPERIMENTAL_NMC_JP_WHITELIST=6501.T,7203.T
+```
+
+`TRADINGAGENTS_RESEARCH_UPDATE_MODE` accepts exactly `off`, `shadow`, or
+`experimental`. The whitelist is a comma-separated, deduplicated list of at
+most 20 normalized Japanese `.T` equities; an empty whitelist enables no
+bounded updates.
+
+- `off` always runs Full Analysis.
+- `shadow` runs bounded assessment for a whitelisted Instrument, retains its
+  candidate or escalation reason, and always makes the paired Full result
+  authoritative.
+- `experimental` permits a fully covered, semantically unchanged NMC candidate
+  to advance the chain without analyst reports or deliberation. Every material,
+  incompatible, incomplete, invalid, novel, or uncertain result continues into
+  Full Analysis within the same update.
+
+Non-whitelisted Japanese equities and all other markets continue to use Full
+Analysis. The setting and whitelist are snapshotted when the update is queued,
+so a retry cannot silently change its experiment mode.
 
 ## Questions being tested
 
@@ -38,8 +65,8 @@ The first slice covers manual updates of a small Japanese-equity whitelist:
    changed source material. Source-specific overlap or snapshot retrieval may
    be used where a simple date boundary would miss corrections.
 4. Deterministic gates compare source identity/version, coverage, semantics,
-   and audited thresholds before any semantic model call. The implemented
-   Shadow phase stops here; bounded semantic Change Assessment is the next phase.
+   and audited thresholds before one schema-constrained semantic assessment is
+   allowed.
 5. If the state can be reaffirmed, the system creates a No Material Change
    Revision and a concise Update Summary. If not, it immediately continues
    through the existing Full Analysis pipeline and compares the resulting state
@@ -70,9 +97,17 @@ prompt schemas, retry counts, and UI components are implementation choices.
 
 ## Lightweight validation
 
-Shadow Validation is deliberately small. Historical intervals with known quiet
-and material events are followed by a few controlled live pairs. During this
-period the Full Analysis result is authoritative:
+Shadow Validation is deliberately small. The reviewed offline contract set
+covers quiet Evidence, official correction/withdrawal, missing Required
+coverage, incompatible semantics, threshold crossing, material novelty, and
+invalid or indeterminate structured output. These cases are exercised through
+the service seam with a real temporary SQLite repository and deterministic
+collectors/models. A few controlled live pairs may then be run with
+`RUN_LIVE_DATA_TESTS=1` and `PYTHON_DOTENV_DISABLED=1`; live observations must
+contain only ticker, cutoff, source status, reason codes, and aggregate metrics,
+never credentials, prompt text, private reasoning, or response headers.
+
+During Shadow validation the Full Analysis result is authoritative:
 
 - an incremental Full escalation stops immediately after recording its reason;
 - an incremental No Material Change proposal is compared with a paired Full

@@ -144,6 +144,20 @@ worker 在领取任务前检查，并在成功后每 24 小时再次执行，失
 `TRADINGAGENTS_TRASH_RETENTION_DAYS` 修改；设为 `0` 时关闭
 永久清理。
 
+Research Chain 更新提供一个内部、显式启用的日本股票增量研究实验，默认
+`off`。`shadow` 保留有界候选结果，但仍以完整分析为权威；`experimental`
+只允许覆盖完整且语义不变的“无重大变化”评估为显式 `.T` 白名单推进修订，
+无需重新生成 analyst 报告与研究讨论。任何重大变化、覆盖缺口、语义不兼容、
+无效、创新信息或不确定结果都会自动进入同一次更新的完整分析：
+
+```dotenv
+TRADINGAGENTS_RESEARCH_UPDATE_MODE=experimental
+TRADINGAGENTS_EXPERIMENTAL_NMC_JP_WHITELIST=6501.T,7203.T
+```
+
+模式、白名单、指标和显式启用的 live validation 详见
+[实验说明](../incremental-research-experiment.md)。
+
 事件先写入数据库，再发送给客户端。SSE 使用 `Last-Event-ID` 回放刷新或断线
 期间遗漏的事件，因此浏览器刷新不会丢失进度。
 

@@ -28,6 +28,8 @@ export default function ResearchChainDetail() {
     tool_calls: 0,
     input_tokens: 0,
     output_tokens: 0,
+    cache_hit_input_tokens: 0,
+    cache_miss_input_tokens: 0,
     wall_time_seconds: 0,
   };
   const boundedMetrics = { ...emptyMetrics, ...(updateAudit?.bounded_metrics ?? {}) };
@@ -49,6 +51,15 @@ export default function ResearchChainDetail() {
   const sourceLineageByVersion = new Map(
     (revision.evidence_snapshot.source_record_lineage ?? []).map((item) => [item.version_id, item]),
   );
+  const auditedRevisions = (chain.revisions ?? []).filter(
+    (item) => item.research_update_audit != null,
+  );
+  const escalationCount = auditedRevisions.filter(
+    (item) => item.research_update_audit?.escalation_reason != null,
+  ).length;
+  const escalationPercent = auditedRevisions.length > 0
+    ? Math.round((escalationCount / auditedRevisions.length) * 100)
+    : 0;
 
   return (
     <section>
@@ -103,7 +114,7 @@ export default function ResearchChainDetail() {
           >
             {t("exportPackage")}
           </a>
-          {revision.producing_run_id && (
+          {revision.producing_run_id && revision.execution_strategy === "full" && (
             <Link className="button" to={`/runs/${revision.producing_run_id}`}>
               {t("fullReports")}
             </Link>
@@ -241,6 +252,7 @@ export default function ResearchChainDetail() {
           <section>
             <h3>{t("shadowFinding")}</h3>
             <ul>
+              <li>{t("experimentMode")}: {updateAudit.mode}</li>
               <li>{t("candidateOutcome")}: {updateAudit.candidate?.outcome ?? t("none")}</li>
               <li>{t("authoritativeStrategy")}: {updateAudit.authoritative_strategy}</li>
               <li>{t("escalationReason")}: {updateAudit.escalation_reason ?? t("none")}</li>
@@ -282,14 +294,17 @@ export default function ResearchChainDetail() {
                 )}
               </li>
               <li>
-                {t("boundedWork")}: {boundedMetrics.llm_calls} {t("llmCalls")} · {boundedMetrics.tool_calls} {t("toolCalls")} · {boundedMetrics.input_tokens}/{boundedMetrics.output_tokens} {t("inputOutputTokens")} · {boundedMetrics.wall_time_seconds.toFixed(1)}s
+                {t("boundedWork")}: {boundedMetrics.llm_calls} {t("llmCalls")} · {boundedMetrics.tool_calls} {t("toolCalls")} · {boundedMetrics.input_tokens}/{boundedMetrics.output_tokens} {t("inputOutputTokens")} · {t("cacheUsage")}: {boundedMetrics.cache_hit_input_tokens}/{boundedMetrics.cache_miss_input_tokens} · {boundedMetrics.wall_time_seconds.toFixed(1)}s
               </li>
               <li>
-                {t("fullWork")}: {fullMetrics.llm_calls} {t("llmCalls")} · {fullMetrics.tool_calls} {t("toolCalls")} · {fullMetrics.input_tokens}/{fullMetrics.output_tokens} {t("inputOutputTokens")} · {fullMetrics.wall_time_seconds.toFixed(1)}s
+                {t("fullWork")}: {fullMetrics.llm_calls} {t("llmCalls")} · {fullMetrics.tool_calls} {t("toolCalls")} · {fullMetrics.input_tokens}/{fullMetrics.output_tokens} {t("inputOutputTokens")} · {t("cacheUsage")}: {fullMetrics.cache_hit_input_tokens}/{fullMetrics.cache_miss_input_tokens} · {fullMetrics.wall_time_seconds.toFixed(1)}s
               </li>
             </ul>
           </section>
         )}
+        <p>
+          {t("escalationRate")}: {escalationCount}/{auditedRevisions.length} ({escalationPercent}%)
+        </p>
         <ol>
           {(chain.revisions ?? []).map((item) => (
             <li key={item.id}>
@@ -301,7 +316,7 @@ export default function ResearchChainDetail() {
                 <>
                   {" · "}
                   <Link to={`/runs/${item.producing_run_id}`}>
-                    {t("producingRun")}
+                    {t("producingExecution")}
                   </Link>
                 </>
               )}

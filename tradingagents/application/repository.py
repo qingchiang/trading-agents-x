@@ -295,6 +295,7 @@ class RunRepository:
         request: AnalysisRequest,
         config_snapshot: dict[str, Any],
         *,
+        execution_strategy: ResearchExecutionStrategy,
         idempotency_key: str | None = None,
     ) -> tuple[RunView, bool]:
         """Atomically create or resolve one Full update for the current head."""
@@ -360,11 +361,7 @@ class RunRepository:
                 update_intent_id=str(uuid4()),
                 research_chain_id=chain.id,
                 baseline_revision_id=baseline.id,
-                research_execution_strategy=(
-                    ResearchExecutionStrategy.INCREMENTAL.value
-                    if request.ticker.endswith(".T")
-                    else ResearchExecutionStrategy.FULL.value
-                ),
+                research_execution_strategy=execution_strategy.value,
                 request_json=request_json,
                 config_json=_sanitize_payload(config_snapshot),
                 version=__version__,

@@ -33,11 +33,22 @@ from tradingagents.application.contracts import (
 from tradingagents.application.llms import RunLLMs
 from tradingagents.application.repository import RunRepository
 from tradingagents.application.research import (
+    ClaimChange,
+    ClaimRevisionDelta,
+    CoverageStatus,
+    EvidenceSnapshotItem,
+    IdentityDisposition,
     IncrementalEscalationReason,
     IncrementalGateResult,
+    QuestionChange,
+    QuestionRevisionDelta,
     ResearchExecutionStrategy,
+    ResearchRevisionDraft,
     ResearchRevisionOutcome,
+    RevisionDelta,
+    SourceRecordSnapshotItem,
     SourceWatermarkSnapshot,
+    validate_experimental_nmc_candidate,
 )
 from tradingagents.application.runtime import RunCancelled, WorkerShutdown
 from tradingagents.application.service import AnalysisService
@@ -544,9 +555,50 @@ def test_full_update_is_idempotent_for_current_head_and_advances_atomically(
             ).fetchone()[0]
             == 2
         )
-        assert connection.execute(
+    assert connection.execute(
             "SELECT delta_json FROM research_revisions WHERE sequence = 2"
         ).fetchone()[0]
+
+
+@pytest.mark.parametrize(
+    ("mode", "whitelist", "ticker", "expected_strategy"),
+    [
+        ("off", ("6501.T",), "6501.T", "full"),
+        ("shadow", ("6501.T",), "6501.T", "incremental"),
+        ("experimental", ("6501.T",), "6501.T", "incremental"),
+        ("experimental", ("7203.T",), "6501.T", "full"),
+        ("experimental", ("6501.T",), "NVDA", "full"),
+    ],
+)
+def test_chain_update_strategy_respects_mode_and_japanese_whitelist(
+    app_settings,
+    repository,
+    mode,
+    whitelist,
+    ticker,
+    expected_strategy,
+) -> None:
+    configured = app_settings.model_copy(
+        update={
+            "research_update_mode": mode,
+            "experimental_nmc_jp_whitelist": whitelist,
+        }
+    )
+    service = _service(configured, repository)
+    service.run_initial_chain(
+        AnalysisRequest(ticker=ticker, analysis_date="2026-07-24", analysts=("market",))
+    )
+    chain = repository.list_research_chains(instrument=ticker)[0]
+
+    queued = service.enqueue_chain_update(
+        chain.id,
+        chain.current_revision_id,
+        AnalysisRequest(ticker=ticker, analysis_date="2026-07-25", analysts=("market",)),
+    )
+
+    assert queued.research_execution_strategy == expected_strategy
+    assert queued.config_snapshot["research_update_mode"] == mode
+    assert queued.config_snapshot["experimental_nmc_jp_whitelist"] == list(whitelist)
 
 
 def test_shadow_quiet_update_retains_candidate_and_full_remains_authoritative(
@@ -644,6 +696,207 @@ def test_shadow_quiet_update_retains_candidate_and_full_remains_authoritative(
         item.model_dump(mode="json") for item in audit.evidence_lineage
     ]
     assert assessed.payload["candidate_update_summary"] == audit.candidate.update_summary
+
+
+def test_experimental_quiet_update_advances_with_nmc_without_full_analysis(
+    app_settings,
+    repository,
+    tmp_path,
+) -> None:
+    initial = _service(app_settings, repository)
+    initial.run_initial_chain(
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-24", analysts=("market",))
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+    baseline = repository.get_research_revision(chain.current_revision_id)
+    cutoff = date(2026, 7, 25)
+    inherited_snapshot = baseline.evidence_snapshot.model_copy(
+        update={
+            "bundle": baseline.evidence_snapshot.bundle.model_copy(
+                update={"analysis_date": cutoff}
+            ),
+            "lineage": tuple(
+                EvidenceSnapshotItem(
+                    evidence_ref=item.evidence_ref,
+                    lineage="inherited",
+                    source_revision_id=baseline.id,
+                )
+                for item in baseline.evidence_snapshot.lineage
+            ),
+            "source_record_lineage": tuple(
+                SourceRecordSnapshotItem(
+                    version_id=item.version_id,
+                    lineage="inherited",
+                    observed_in_execution=False,
+                    source_revision_id=baseline.id,
+                )
+                for item in baseline.evidence_snapshot.source_record_lineage
+            ),
+        }
+    )
+    candidate = ResearchRevisionDraft(
+        cutoff=cutoff,
+        execution_strategy=ResearchExecutionStrategy.INCREMENTAL,
+        outcome=ResearchRevisionOutcome.NO_MATERIAL_CHANGE,
+        delta=RevisionDelta(
+            opinion_changed=False,
+            claims=tuple(
+                ClaimRevisionDelta(
+                    object_id=item.id,
+                    previous_object_id=item.id,
+                    change=ClaimChange.REAFFIRMED,
+                    identity_disposition=IdentityDisposition.EXACT_MATCH,
+                )
+                for item in baseline.current_state.claims
+            ),
+            questions=tuple(
+                QuestionRevisionDelta(
+                    object_id=item.id,
+                    previous_object_id=item.id,
+                    change=QuestionChange.REAFFIRMED,
+                    identity_disposition=IdentityDisposition.EXACT_MATCH,
+                )
+                for item in baseline.current_state.questions
+            ),
+            inherited_evidence_refs=baseline.current_state.evidence_refs,
+        ),
+        current_state=baseline.current_state.model_copy(
+            update={
+                "cutoff": cutoff,
+                "scenarios": tuple(
+                    item.model_copy(update={"cutoff": cutoff})
+                    for item in baseline.current_state.scenarios
+                ),
+            }
+        ),
+        coverage=baseline.coverage.model_copy(
+            update={
+                "claims": tuple(
+                    item.model_copy(update={"status": CoverageStatus.COMPLETE})
+                    for item in baseline.coverage.claims
+                ),
+                "questions": tuple(
+                    item.model_copy(update={"status": CoverageStatus.COMPLETE})
+                    for item in baseline.coverage.questions
+                ),
+                "domains": tuple(
+                    item.model_copy(update={"status": CoverageStatus.COMPLETE})
+                    for item in baseline.coverage.domains
+                ),
+                "supports_no_material_change": True,
+            }
+        ),
+        update_summary=baseline.update_summary.model_copy(
+            update={
+                "summary": "Bounded assessment reaffirmed the current research state.",
+                "baseline_cutoff": baseline.cutoff,
+                "analysis_cutoff": cutoff,
+                "execution_strategy": ResearchExecutionStrategy.INCREMENTAL,
+                "outcome": ResearchRevisionOutcome.NO_MATERIAL_CHANGE,
+            }
+        ),
+        evidence_snapshot=inherited_snapshot,
+    )
+    assert validate_experimental_nmc_candidate(baseline, candidate) is None
+
+    class FullAnalysisMustNotRun:
+        def __init__(self, **_kwargs):
+            raise AssertionError("Full Analysis must not be constructed for experimental NMC")
+
+    experimental_settings = app_settings.model_copy(
+        update={
+            "research_update_mode": "experimental",
+            "experimental_nmc_jp_whitelist": ("6501.T",),
+        }
+    )
+    gate_calls = 0
+
+    def retrying_gate(*_args):
+        nonlocal gate_calls
+        gate_calls += 1
+        if gate_calls == 1:
+            return IncrementalGateResult(
+                escalation_reason=IncrementalEscalationReason.COVERAGE_INCOMPLETE,
+                metrics=RunMetrics(tool_calls=3, wall_time_seconds=0.2),
+            )
+        return IncrementalGateResult(
+            candidate=candidate,
+            metrics=RunMetrics(
+                llm_calls=1,
+                tool_calls=2,
+                input_tokens=80,
+                output_tokens=20,
+                wall_time_seconds=0.4,
+            ),
+        )
+
+    service = _service(
+        experimental_settings,
+        repository,
+        graph_factory=_MetricFailureGraph,
+        incremental_gate=retrying_gate,
+    )
+    queued = service.enqueue_chain_update(
+        chain.id,
+        baseline.id,
+        AnalysisRequest(ticker="6501.T", analysis_date=cutoff, analysts=("market",)),
+    )
+    duplicate = service.enqueue_chain_update(
+        chain.id,
+        baseline.id,
+        AnalysisRequest(ticker="6501.T", analysis_date=cutoff, analysts=("market",)),
+    )
+    first_claim = repository.claim_run(queued.id, "worker", 30)
+
+    with pytest.raises(RuntimeError, match="fixture structured output failure"):
+        service.execute_claimed(first_claim, worker_id="worker")
+    assert repository.get_research_chain(chain.id).current_revision_id == baseline.id
+    service.graph_factory = FullAnalysisMustNotRun
+    retried = service.retry(queued.id)
+    claimed = repository.claim_run(retried.id, "worker", 30)
+
+    result = service.execute_claimed(claimed, worker_id="worker")
+
+    revision = repository.get_research_chain(chain.id).current_revision
+    audit = repository.get_run(queued.id).research_update_audit
+    assert duplicate.id == queued.id
+    assert result.status is RunStatus.SUCCEEDED
+    assert result.reports == {}
+    assert result.decision is None
+    assert revision.execution_strategy is ResearchExecutionStrategy.INCREMENTAL
+    assert revision.outcome is ResearchRevisionOutcome.NO_MATERIAL_CHANGE
+    assert revision.current_state.opinion == baseline.current_state.opinion
+    assert revision.current_state.cutoff == cutoff
+    assert all(item.change is ClaimChange.REAFFIRMED for item in revision.delta.claims)
+    assert all(item.lineage == "inherited" for item in revision.evidence_snapshot.lineage)
+    assert audit is not None
+    assert audit.mode == "experimental"
+    assert audit.authoritative_strategy == "incremental"
+    assert audit.comparison == "not_applicable"
+    assert revision.metrics == result.metrics
+    assert revision.metrics.llm_calls == 2
+    assert revision.metrics.tool_calls == 5
+    assert audit.bounded_metrics.llm_calls == 1
+    assert audit.bounded_metrics.tool_calls == 5
+    assert audit.full_metrics.llm_calls == 1
+    events = [event.event_type for event in repository.list_events(queued.id)]
+    assert "run.failed" in events
+    assert "run.retry_queued" in events
+    assert events[-3:] == [
+        "evidence.sealed",
+        "research.experimental_nmc_committed",
+        "run.succeeded",
+    ]
+    media_type, exported = service.export_revision(revision.id, format="json")
+    assert media_type == "application/json"
+    assert json.loads(exported)["revision"]["research_update_audit"]["mode"] == "experimental"
+    backup = service.backup_database(tmp_path / "experimental-nmc.db")
+    with sqlite3.connect(backup) as connection:
+        stored = connection.execute(
+            "SELECT research_update_audit_json FROM research_revisions WHERE id = ?",
+            (revision.id,),
+        ).fetchone()[0]
+    assert json.loads(stored)["authoritative_strategy"] == "incremental"
 
 
 def test_default_shadow_collection_runs_before_any_full_llm_client(
@@ -997,9 +1250,12 @@ def test_shadow_terminal_full_path_retains_separate_partial_full_metrics(
         IncrementalEscalationReason.COVERAGE_INCOMPLETE,
         IncrementalEscalationReason.INCOMPATIBLE_SEMANTICS,
         IncrementalEscalationReason.THRESHOLD_CROSSING,
+        IncrementalEscalationReason.POTENTIALLY_MATERIAL_NOVELTY,
+        IncrementalEscalationReason.SEMANTIC_OUTPUT_INVALID,
+        IncrementalEscalationReason.SEMANTIC_UNCERTAINTY,
     ],
 )
-def test_shadow_deterministic_escalation_stops_bounded_work_and_runs_full(
+def test_experimental_escalation_stops_bounded_work_and_runs_full(
     app_settings,
     repository,
     reason,
@@ -1039,25 +1295,32 @@ def test_shadow_deterministic_escalation_stops_bounded_work_and_runs_full(
             metrics=RunMetrics(tool_calls=1, wall_time_seconds=0.1),
         )
 
-    shadow_service = _service(
-        app_settings,
+    experimental_settings = app_settings.model_copy(
+        update={
+            "research_update_mode": "experimental",
+            "experimental_nmc_jp_whitelist": ("6501.T",),
+        }
+    )
+    experimental_service = _service(
+        experimental_settings,
         repository,
         graph_factory=CountingGraph,
         incremental_gate=escalated_gate,
     )
-    queued = shadow_service.enqueue_chain_update(
+    queued = experimental_service.enqueue_chain_update(
         chain.id,
         baseline.id,
         AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
     )
     claimed = repository.claim_run(queued.id, "worker", 30)
 
-    result = shadow_service.execute_claimed(claimed, worker_id="worker")
+    result = experimental_service.execute_claimed(claimed, worker_id="worker")
 
     audit = repository.get_run(queued.id).research_update_audit
     assert result.status is RunStatus.SUCCEEDED
     assert full_calls == 1
     assert audit is not None
+    assert audit.mode == "experimental"
     assert audit.candidate is None
     assert audit.escalation_reason == reason.value
     assert audit.comparison == "not_applicable"
@@ -1066,6 +1329,9 @@ def test_shadow_deterministic_escalation_stops_bounded_work_and_runs_full(
     assert audit.evidence_lineage
     assert audit.bounded_metrics.tool_calls == 1
     assert result.metrics.tool_calls == 1
+    assert "research.full_escalation_started" in {
+        event.event_type for event in repository.list_events(queued.id)
+    }
 
 
 def test_concurrent_full_update_submissions_resolve_to_one_execution(

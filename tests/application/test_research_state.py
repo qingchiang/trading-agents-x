@@ -46,6 +46,7 @@ from tradingagents.application.research import (
     assemble_full_update,
     assess_deterministic_update,
     render_revision_export_markdown,
+    validate_experimental_nmc_candidate,
 )
 
 REF = "ev_0123456789ab"
@@ -346,6 +347,49 @@ def test_deterministic_incremental_gates_propose_quiet_candidate():
         for item in result.candidate.coverage.domains
         if item.source == "Google News"
     } == {CoverageRequirement.ADVISORY}
+
+
+def test_experimental_nmc_validation_fails_closed_for_coverage_or_semantic_drift():
+    baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    result = assess_deterministic_update(
+        "revision-1",
+        baseline,
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-25",
+            analysts=("market",),
+        ),
+        evidence,
+    )
+    candidate = result.candidate
+    assert candidate is not None
+    assert validate_experimental_nmc_candidate(baseline, candidate) is None
+
+    incomplete = candidate.model_copy(
+        update={
+            "coverage": candidate.coverage.model_copy(
+                update={"supports_no_material_change": False}
+            )
+        }
+    )
+    changed = candidate.model_copy(
+        update={
+            "current_state": candidate.current_state.model_copy(
+                update={
+                    "opinion": candidate.current_state.opinion.model_copy(
+                        update={"thesis": "A model attempted to rewrite the thesis."}
+                    )
+                }
+            )
+        }
+    )
+
+    assert validate_experimental_nmc_candidate(
+        baseline, incomplete
+    ) is IncrementalEscalationReason.COVERAGE_INCOMPLETE
+    assert validate_experimental_nmc_candidate(
+        baseline, changed
+    ) is IncrementalEscalationReason.INCOMPATIBLE_SEMANTICS
 
 
 class _SemanticInvoker:

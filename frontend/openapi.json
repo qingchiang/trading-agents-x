@@ -4193,8 +4193,11 @@
         "description": "Durable phase attribution and finding for one Research Chain update.",
         "properties": {
           "authoritative_strategy": {
-            "const": "full",
             "default": "full",
+            "enum": [
+              "full",
+              "incremental"
+            ],
             "title": "Authoritative Strategy",
             "type": "string"
           },
@@ -4284,8 +4287,11 @@
             "$ref": "#/components/schemas/RunMetrics"
           },
           "mode": {
-            "const": "shadow",
             "default": "shadow",
+            "enum": [
+              "shadow",
+              "experimental"
+            ],
             "title": "Mode",
             "type": "string"
           },

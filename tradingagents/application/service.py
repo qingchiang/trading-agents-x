@@ -36,6 +36,7 @@ from .contracts import (
     ResearchUpdateSemanticAssessment,
     RunEvent,
     RunExport,
+    RunMetrics,
     RunStatus,
 )
 from .exporting import (
@@ -49,13 +50,16 @@ from .metrics import MetricsCallback, merge_run_metrics
 from .repository import RunRepository, RunView
 from .research import (
     IncrementalGateResult,
+    ResearchExecutionStrategy,
     ResearchRevision,
     ResearchRevisionDraft,
     RevisionExport,
     assemble_full_revision,
     assemble_full_update,
+    prepare_experimental_nmc_revision,
     render_revision_export_markdown,
     render_revision_export_package,
+    validate_experimental_nmc_candidate,
 )
 from .runtime import RunCancelled, RunContext, WorkerShutdown
 from .settings import AppSettings, RunSettings
@@ -197,6 +201,11 @@ class AnalysisService:
             baseline_revision_id,
             request,
             run_settings.snapshot(),
+            execution_strategy=(
+                ResearchExecutionStrategy.INCREMENTAL
+                if run_settings.uses_incremental_research(request.ticker)
+                else ResearchExecutionStrategy.FULL
+            ),
             idempotency_key=idempotency_key,
         )
         if created:
@@ -275,6 +284,7 @@ class AnalysisService:
         metrics = MetricsCallback()
         incremental_result: IncrementalGateResult | None = None
         update_audit: ResearchUpdateAudit | None = None
+        prior_update_audit = run.research_update_audit
         instrument_name = run.instrument_name
         instrument_local_name = run.instrument_local_name
 
@@ -290,6 +300,11 @@ class AnalysisService:
                 candidate.evidence_snapshot if candidate is not None else None
             )
             update_audit = ResearchUpdateAudit(
+                mode=(
+                    "experimental"
+                    if run_settings.research_update_mode == "experimental"
+                    else "shadow"
+                ),
                 candidate=(
                     ResearchUpdateCandidate(
                         outcome=candidate.outcome.value,
@@ -328,7 +343,19 @@ class AnalysisService:
                     result.escalation_reason.value if result.escalation_reason is not None else None
                 ),
                 comparison="not_applicable",
-                bounded_metrics=result.metrics,
+                bounded_metrics=merge_run_metrics(
+                    (
+                        prior_update_audit.bounded_metrics
+                        if prior_update_audit is not None
+                        else RunMetrics()
+                    ),
+                    result.metrics,
+                ),
+                full_metrics=(
+                    prior_update_audit.full_metrics
+                    if prior_update_audit is not None
+                    else RunMetrics()
+                ),
             )
             self.repository.set_research_update_audit(run.id, update_audit)
             return update_audit
@@ -337,7 +364,14 @@ class AnalysisService:
             nonlocal update_audit
             if update_audit is None:
                 return
-            update_audit = update_audit.model_copy(update={"full_metrics": metrics.snapshot()})
+            update_audit = update_audit.model_copy(
+                update={
+                    "full_metrics": merge_run_metrics(
+                        update_audit.full_metrics,
+                        metrics.snapshot(),
+                    )
+                }
+            )
             self.repository.set_research_update_audit(run.id, update_audit)
 
         with self._heartbeat(run.id, worker_id):
@@ -433,6 +467,22 @@ class AnalysisService:
                                 lambda: self.repository.cancel_requested(run.id),
                             )
                         candidate = incremental_result.candidate
+                        if (
+                            candidate is not None
+                            and run_settings.research_update_mode == "experimental"
+                        ):
+                            invalid_reason = validate_experimental_nmc_candidate(
+                                baseline,
+                                candidate,
+                            )
+                            if invalid_reason is not None:
+                                incremental_result = incremental_result.model_copy(
+                                    update={
+                                        "candidate": None,
+                                        "escalation_reason": invalid_reason,
+                                    }
+                                )
+                                candidate = None
                         update_audit = persist_incremental_audit(incremental_result)
                         self._emit(
                             run.id,
@@ -462,9 +512,68 @@ class AnalysisService:
                             },
                             on_event=on_event,
                         )
+                        if (
+                            run_settings.research_update_mode == "experimental"
+                            and candidate is not None
+                        ):
+                            if self.repository.cancel_requested(run.id):
+                                raise RunCancelled("cancelled before experimental NMC commit")
+                            update_audit = update_audit.model_copy(
+                                update={"authoritative_strategy": "incremental"}
+                            )
+                            self.repository.set_research_update_audit(run.id, update_audit)
+                            revision_draft = prepare_experimental_nmc_revision(
+                                baseline,
+                                candidate,
+                                update_audit,
+                            )
+                            evidence = revision_draft.evidence_snapshot.bundle
+                            self._persist_evidence(run.id, evidence, on_event)
+                            result = AnalysisResult(
+                                run_id=run.id,
+                                status=RunStatus.SUCCEEDED,
+                                instrument=evidence.instrument,
+                                instrument_name=instrument_name,
+                                instrument_local_name=instrument_local_name,
+                                reports={},
+                                decision=None,
+                                evidence=evidence,
+                                metrics=incremental_result.metrics,
+                                recoveries=self.repository.list_recoveries(run.id),
+                                warnings=(),
+                            )
+                            aggregate_metrics = self.repository.complete(
+                                run.id,
+                                result,
+                                evidence=evidence,
+                                benchmark=self._benchmark(run.request.ticker, dataflow_config),
+                                revision_draft=revision_draft,
+                            )
+                            result = result.model_copy(update={"metrics": aggregate_metrics})
+                            self._emit(
+                                run.id,
+                                "research.experimental_nmc_committed",
+                                payload={
+                                    "authoritative_strategy": "incremental",
+                                    "outcome": "no_material_change",
+                                    "metrics": aggregate_metrics.model_dump(mode="json"),
+                                },
+                                on_event=on_event,
+                            )
+                            self._emit(
+                                run.id,
+                                "run.succeeded",
+                                payload={"metrics": aggregate_metrics.model_dump(mode="json")},
+                                on_event=on_event,
+                            )
+                            return result
                         self._emit(
                             run.id,
-                            "research.shadow_full_started",
+                            (
+                                "research.full_escalation_started"
+                                if run_settings.research_update_mode == "experimental"
+                                else "research.shadow_full_started"
+                            ),
                             payload={
                                 "authoritative_strategy": "full",
                                 "escalation_reason": update_audit.escalation_reason,
@@ -572,7 +681,15 @@ class AnalysisService:
                             revision_draft,
                         )
                     if update_audit is not None and revision_draft is not None:
-                        full_metrics = metrics.snapshot()
+                        current_full_metrics = metrics.snapshot()
+                        full_metrics = merge_run_metrics(
+                            (
+                                prior_update_audit.full_metrics
+                                if prior_update_audit is not None
+                                else RunMetrics()
+                            ),
+                            current_full_metrics,
+                        )
                         comparison = (
                             "agreement"
                             if incremental_result is not None
@@ -598,8 +715,12 @@ class AnalysisService:
                         result = result.model_copy(
                             update={
                                 "metrics": merge_run_metrics(
-                                    update_audit.bounded_metrics,
-                                    full_metrics,
+                                    (
+                                        incremental_result.metrics
+                                        if incremental_result is not None
+                                        else RunMetrics()
+                                    ),
+                                    current_full_metrics,
                                 )
                             }
                         )

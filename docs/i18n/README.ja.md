@@ -159,6 +159,22 @@ Web 起動時に一度、worker は work claim 前と成功後 24 時間ごと�
 確認し、失敗時は 1 時間後に再試行します。既定の保持期間は 30 日で、
 `TRADINGAGENTS_TRASH_RETENTION_DAYS=0` にすると完全削除を無効化します。
 
+Research Chain 更新には、明示的に有効化する日本株向けの内部増分リサーチ
+実験があります。既定値は `off` です。`shadow` は限定評価の候補を保持しつつ
+フル分析を正とし、`experimental` は完全な coverage と意味的不変性を満たす
+No Material Change 評価だけを、明示した `.T` whitelist で analyst report や
+deliberation を再生成せず Revision にできます。重要な変更、coverage 不足、
+互換性不良、無効、novelty、不確定な結果は、同じ更新内で自動的にフル分析へ
+移行します。
+
+```dotenv
+TRADINGAGENTS_RESEARCH_UPDATE_MODE=experimental
+TRADINGAGENTS_EXPERIMENTAL_NMC_JP_WHITELIST=6501.T,7203.T
+```
+
+mode、whitelist、metrics、opt-in live validation の詳細は
+[実験ガイド](../incremental-research-experiment.md) を参照してください。
+
 event はクライアント送信前に database へ commit されます。SSE は
 `Last-Event-ID` から欠落イベントを replay するため、ページ更新でも進捗を
 失いません。

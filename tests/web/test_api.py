@@ -481,6 +481,8 @@ async def test_openapi_contains_versioned_run_center_contract(
     assert "provenance" not in schema["components"]["schemas"]["CapabilityDefaults"]["properties"]
     assert schema["components"]["schemas"]["AssetType"]["enum"] == ["stock"]
     audit = schema["components"]["schemas"]["ResearchUpdateAudit"]["properties"]
+    assert audit["mode"]["enum"] == ["shadow", "experimental"]
+    assert audit["authoritative_strategy"]["enum"] == ["full", "incremental"]
     assert audit["semantic_assessment"]["anyOf"][0]["$ref"].endswith(
         "/ResearchUpdateSemanticAssessment"
     )

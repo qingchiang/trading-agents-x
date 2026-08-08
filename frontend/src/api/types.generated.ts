@@ -596,7 +596,7 @@ export interface components {
       outcome: string;
     };
     ResearchUpdateAudit: {
-      authoritative_strategy?: string;
+      authoritative_strategy?: "full" | "incremental";
       bounded_metrics?: components["schemas"]["RunMetrics"];
       candidate?: components["schemas"]["ResearchUpdateCandidate"] | null;
       checked_windows?: components["schemas"]["ResearchUpdateCheckedWindow"][];
@@ -605,7 +605,7 @@ export interface components {
       escalation_reason?: "invalid_baseline" | "source_correction" | "source_withdrawal" | "source_replacement" | "source_version_change" | "incompatible_semantics" | "threshold_crossing" | "coverage_incomplete" | "schema_invalid" | "semantic_weakening" | "semantic_contradiction" | "semantic_answering" | "semantic_reopening" | "semantic_uncertainty" | "potentially_material_novelty" | "confidence_change" | "ambiguous_identity" | "semantic_output_invalid" | "semantic_input_oversize" | null;
       evidence_lineage?: components["schemas"]["ResearchUpdateEvidenceLineage"][];
       full_metrics?: components["schemas"]["RunMetrics"];
-      mode?: string;
+      mode?: "shadow" | "experimental";
       semantic_assessment?: components["schemas"]["ResearchUpdateSemanticAssessment"] | null;
     };
     ResearchUpdateCandidate: {

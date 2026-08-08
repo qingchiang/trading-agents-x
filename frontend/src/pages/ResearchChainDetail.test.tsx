@@ -190,9 +190,10 @@ test("reads the complete current thesis, coverage, evidence, reports, and metric
   expect(screen.getByText(/JPY\/2/)).toBeVisible();
   expect(screen.getByText(/fallback true/)).toBeVisible();
   expect(screen.getByText(/2026-06-24.*2026-07-24/)).toBeVisible();
-  expect(screen.getByText("Shadow update finding")).toBeVisible();
+  expect(screen.getByText("Bounded update finding")).toBeVisible();
+  expect(screen.getByText(/Experiment mode: shadow/)).toBeVisible();
   expect(screen.getByText(/Candidate outcome: no_material_change/)).toBeVisible();
-  expect(screen.getByText(/Shadow comparison: disagreement/)).toBeVisible();
+  expect(screen.getByText(/Comparison: disagreement/)).toBeVisible();
   expect(screen.getByText(/Bounded checked windows: EDINET 2026-07-01–2026-07-25/)).toBeVisible();
   expect(screen.getByText(/Bounded update summary: No bounded material change detected/)).toBeVisible();
   expect(screen.getByText(/Bounded coverage attestation: true; company_disclosures \(complete\)/)).toBeVisible();
@@ -201,6 +202,7 @@ test("reads the complete current thesis, coverage, evidence, reports, and metric
   expect(screen.getByText(/Semantic assessment: 新しい証拠は既存の主張を支持します。/)).toBeVisible();
   expect(screen.getByText(/support.*claim-1/)).toBeVisible();
   expect(screen.getByText(/Bounded work: 0 LLM calls · 3 Tool calls/)).toBeVisible();
+  expect(screen.getAllByText(/Cache hit \/ miss: 0\/0/)).toHaveLength(2);
   expect(screen.getByText("rolling archive truncated the requested interval")).toBeVisible();
   expect(screen.getByText("market_boundary_crossing")).toBeVisible();
   expect(screen.getByText(/Thesis reference: 100/)).toBeVisible();
@@ -217,11 +219,11 @@ test("reads the complete current thesis, coverage, evidence, reports, and metric
     "/api/v1/research-revisions/revision-1/export?format=json",
   );
   expect(
-    screen.getByRole("link", { name: "Producing run and Full artifacts" }),
+    screen.getByRole("link", { name: "Producing execution" }),
   ).toHaveAttribute("href", "/runs/run-1");
 });
 
-test("queues a Shadow update from the displayed current head", async () => {
+test("queues an update from the displayed current head", async () => {
   vi.mocked(api.updateResearchChain).mockResolvedValue({ id: "run-2" } as never);
   render(
     <Router initialPath="/research/chain-1">
@@ -229,11 +231,43 @@ test("queues a Shadow update from the displayed current head", async () => {
     </Router>,
   );
 
-  fireEvent.click(await screen.findByRole("button", { name: "Update research (Shadow)" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Update research" }));
 
   await waitFor(() => expect(api.updateResearchChain).toHaveBeenCalled());
   expect(vi.mocked(api.updateResearchChain).mock.calls[0].slice(0, 2)).toEqual([
     "chain-1",
     { baseline_revision_id: "revision-1", analysis_date: "2026-07-25" },
   ]);
+});
+
+test("separates experimental NMC strategy, outcome, execution, and escalation rate", async () => {
+  const experimental = structuredClone(chain) as ResearchChain;
+  const revision = experimental.current_revision!;
+  revision.execution_strategy = "incremental";
+  revision.outcome = "no_material_change";
+  revision.research_update_audit = {
+    ...revision.research_update_audit!,
+    mode: "experimental",
+    authoritative_strategy: "incremental",
+    comparison: "not_applicable",
+    full_metrics: {},
+  };
+  experimental.revisions = [revision];
+  vi.mocked(api.researchChain).mockResolvedValue(experimental);
+
+  render(
+    <Router initialPath="/research/chain-1">
+      <ResearchChainDetail />
+    </Router>,
+  );
+
+  expect(await screen.findByText(/Experiment mode: experimental/)).toBeVisible();
+  expect(screen.getByText(/Authoritative strategy: incremental/)).toBeVisible();
+  expect(screen.getByText(/2026-07-24 · incremental · no_material_change/)).toBeVisible();
+  expect(screen.getByText(/Full escalation rate: 0\/1 \(0%\)/)).toBeVisible();
+  expect(screen.queryByRole("link", { name: "Full analysis" })).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Producing execution" })).toHaveAttribute(
+    "href",
+    "/runs/run-1",
+  );
 });
