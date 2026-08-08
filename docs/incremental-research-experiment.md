@@ -107,23 +107,36 @@ collectors/models. A few controlled live pairs may then be run with
 contain only ticker, cutoff, source status, reason codes, and aggregate metrics,
 never credentials, prompt text, private reasoning, or response headers.
 
-The read-only live runner uses existing chain heads and never advances them.
-Review a set of one to five expected cases, keep the mode at `shadow`, and run:
+The read-only live runner backs up the database and executes each case against
+its own temporary copy, so existing chain heads are never advanced. Review
+exactly five cases covering `quiet_interval`, `material_event`,
+`source_integrity`, `missing_coverage`, and `threshold_crossing`; keep the mode
+at `shadow`, and run both the live-data and live-LLM opt-ins:
 
 ```bash
-RUN_LIVE_DATA_TESTS=1 PYTHON_DOTENV_DISABLED=1 \
+RUN_LIVE_DATA_TESTS=1 RUN_LIVE_LLM_TESTS=1 PYTHON_DOTENV_DISABLED=1 \
+TRADINGAGENTS_LLM_PROVIDER=deepseek \
+TRADINGAGENTS_QUICK_MODEL=deepseek-chat TRADINGAGENTS_DEEP_MODEL=deepseek-chat \
 TRADINGAGENTS_RESEARCH_UPDATE_MODE=shadow \
 TRADINGAGENTS_EXPERIMENTAL_NMC_JP_WHITELIST=6501.T,7203.T \
-TRADINGAGENTS_INCREMENTAL_LIVE_CASES='[{"chain_id":"<id>","analysis_date":"2026-08-07","expected":"no_material_change"}]' \
+TRADINGAGENTS_INCREMENTAL_LIVE_CASES='[{"scenario":"quiet_interval","chain_id":"<quiet-chain-id>","analysis_date":"2026-08-07","expected_bounded":"no_material_change","expected_full_outcome":"no_material_change"},{"scenario":"material_event","chain_id":"<material-chain-id>","analysis_date":"2026-08-07","expected_bounded":"source_version_change","expected_full_outcome":"material_change"},{"scenario":"source_integrity","chain_id":"<integrity-chain-id>","analysis_date":"2026-08-07","expected_bounded":"source_correction","expected_full_outcome":"material_change"},{"scenario":"missing_coverage","chain_id":"<coverage-chain-id>","analysis_date":"2026-08-07","expected_bounded":"coverage_incomplete","expected_full_outcome":"no_material_change"},{"scenario":"threshold_crossing","chain_id":"<threshold-chain-id>","analysis_date":"2026-08-07","expected_bounded":"threshold_crossing","expected_full_outcome":"material_change"}]' \
 uv run --locked pytest -q -m live_data \
   tests/live/test_incremental_research_experiment.py
 ```
 
-`expected` may be `no_material_change` or a stable Full-escalation reason such
-as `source_correction`, `source_withdrawal`, `coverage_incomplete`,
-`incompatible_semantics`, or `threshold_crossing`. The deterministic offline
-matrix covers every category; the live set is deliberately small and reviewed
-case by case because upstream corrections and availability change over time.
+Export `DEEPSEEK_API_KEY` and, when the reviewed cases depend on authenticated
+official sources, `JQUANTS_API_KEY` and `EDINET_API_KEY` in the launching shell.
+The test harness retains only those explicitly supported live credentials and
+never prints them.
+
+`expected_bounded` may be `no_material_change` or a stable Full-escalation
+reason such as `source_correction`, `source_withdrawal`,
+`coverage_incomplete`, `source_version_change`, or `threshold_crossing`.
+`expected_full_outcome` records the independently reviewed Full result. The
+runner executes the bounded semantic assessment and authoritative Full Analysis
+in the same Shadow update, then verifies their persisted comparison. The live
+set remains deliberately small because upstream corrections and availability
+change over time.
 
 During Shadow validation the Full Analysis result is authoritative:
 
