@@ -55,8 +55,8 @@ CI (`.github/workflows/ci.yml`) uses uv and `uv.lock` for pytest on Python
 OpenAPI/type drift checks, wheel validation, and Docker Web/worker smoke. A
 fresh standard venv installs the final wheel with pip as the only project
 installation path that does not use uv, preserving the downstream wheel
-consumer contract. Pytest markers are `unit`, `integration`, `live_data`, and
-`smoke`.
+consumer contract. Pytest markers are `unit`, `integration`, `live_data`,
+`live_llm`, and `smoke`.
 
 ## Sandboxed environments
 
