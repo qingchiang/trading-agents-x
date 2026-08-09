@@ -22,11 +22,13 @@ from tradingagents.application.research import (
 
 
 class _Invoker:
-    def __init__(self, response: Any):
+    def __init__(self, response: Any, prompts: list[str]):
         self.response = response
+        self.prompts = prompts
 
-    def invoke(self, _prompt: str, config: Any = None) -> Any:
+    def invoke(self, prompt: str, config: Any = None) -> Any:
         del config
+        self.prompts.append(prompt)
         return self.response
 
 
@@ -35,10 +37,11 @@ class _LLM:
 
     def __init__(self, *responses: Any):
         self.responses = list(responses)
+        self.prompts: list[str] = []
 
     def with_structured_output(self, _schema: Any, **kwargs: Any) -> _Invoker:
         assert kwargs["include_raw"] is True
-        return _Invoker(self.responses.pop(0))
+        return _Invoker(self.responses.pop(0), self.prompts)
 
 
 def _response(*dispositions: dict[str, Any]) -> dict[str, Any]:
@@ -173,6 +176,10 @@ def test_answered_question_keeps_application_identity_and_current_evidence():
     assert delta.reason == "The Full snapshot contains the reported order conversion."
     assert updated.delta.question_disposition is not None
     assert updated.delta.question_disposition.status == "complete"
+    assert disposed.current_state.questions == ()
+    assert "current_evidence" in llm.prompts[0]
+    assert candidate.evidence_snapshot.bundle.items[0].source in llm.prompts[0]
+    assert str(candidate.evidence_snapshot.bundle.items[0].requested_date) in llm.prompts[0]
 
 
 def test_reaffirmed_question_is_not_resolved_by_full_decision_omission():
@@ -234,6 +241,8 @@ def test_answered_question_can_reopen_with_the_same_identity():
 
     reopened = next(item for item in updated.current_state.questions if item.id == question.id)
     assert reopened.status is QuestionStatus.OPEN
+    assert reopened.last_disposition == "reopened"
+    assert reopened.disposition_reason == "Current Evidence undermines the earlier answer."
     assert (
         next(item for item in updated.delta.questions if item.object_id == question.id).change
         is QuestionChange.REOPENED
@@ -395,7 +404,8 @@ def test_omitted_baseline_mapping_preserves_it_and_keeps_full_question_new():
         updated.delta.question_disposition.limitation_reason
         is QuestionDispositionLimitation.INCOMPLETE
     )
-    assert updated.change_conclusion is ResearchChangeConclusion.INDETERMINATE
+    assert updated.change_conclusion is ResearchChangeConclusion.MATERIAL_CHANGE
+    assert "questions" in updated.delta.changed_sections
 
 
 def test_invalid_output_is_repaired_at_most_once():

@@ -164,7 +164,8 @@ export default function ResearchChainDetail() {
         <ul>
           {(state.questions ?? []).map((question) => (
             <li id={`research-question-${question.id}`} key={question.id}>
-              <strong>{question.question}</strong> · {question.status}
+              <strong>{question.question}</strong> · {question.last_disposition ?? question.status}
+              {question.disposition_reason && <p>{question.disposition_reason}</p>}
               {(question.evidence_refs ?? []).length > 0 && (
                 <small>
                   {" · Evidence: "}

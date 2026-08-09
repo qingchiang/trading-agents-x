@@ -221,6 +221,18 @@ class QuestionDispositionLimitation(str, Enum):
     INCOMPLETE = "question_disposition_incomplete"
 
 
+def _status_after_question_disposition(
+    disposition: QuestionDispositionKind,
+    previous_status: QuestionStatus,
+) -> QuestionStatus:
+    return {
+        QuestionDispositionKind.ANSWERED: QuestionStatus.ANSWERED,
+        QuestionDispositionKind.REOPENED: QuestionStatus.OPEN,
+        QuestionDispositionKind.SUPERSEDED: QuestionStatus.SUPERSEDED,
+        QuestionDispositionKind.RETIRED: QuestionStatus.RETIRED,
+    }.get(disposition, previous_status)
+
+
 class IdentityDisposition(str, Enum):
     EXACT_MATCH = "exact_match"
     NEW = "new"
@@ -268,6 +280,8 @@ class ResearchQuestion(ResearchModel):
     evidence_refs: tuple[str, ...] = ()
     required_sources: tuple[str, ...] = ()
     successor_question_id: str | None = Field(default=None, pattern=_QUESTION_ID)
+    last_disposition: QuestionDispositionKind | None = None
+    disposition_reason: str | None = Field(default=None, min_length=1, max_length=1000)
 
 
 class ResearchOpinion(ResearchModel):
@@ -659,12 +673,6 @@ class ResearchRevisionDraft(ResearchModel):
         if question_disposition is not None and question_disposition.status == "complete":
             questions_by_id = {item.id: item for item in self.current_state.questions}
             question_delta_by_id = {item.object_id: item for item in self.delta.questions}
-            required_status = {
-                QuestionDispositionKind.ANSWERED: QuestionStatus.ANSWERED,
-                QuestionDispositionKind.REOPENED: QuestionStatus.OPEN,
-                QuestionDispositionKind.SUPERSEDED: QuestionStatus.SUPERSEDED,
-                QuestionDispositionKind.RETIRED: QuestionStatus.RETIRED,
-            }
             for item in question_disposition.dispositions:
                 question = questions_by_id.get(item.baseline_question_id)
                 delta = question_delta_by_id.get(item.baseline_question_id)
@@ -674,11 +682,15 @@ class ResearchRevisionDraft(ResearchModel):
                     raise ValueError("Question Disposition must agree with the Revision delta")
                 if delta.evidence_refs != item.evidence_refs or delta.reason != item.reason:
                     raise ValueError("Question Disposition support must agree with the delta")
-                if (
-                    item.disposition in required_status
-                    and question.status is not required_status[item.disposition]
+                if question.status is not _status_after_question_disposition(
+                    item.disposition, question.status
                 ):
                     raise ValueError("Question Disposition must agree with Question status")
+                if (
+                    question.last_disposition is not item.disposition
+                    or question.disposition_reason != item.reason
+                ):
+                    raise ValueError("Question Disposition must remain durable in state")
                 if question.successor_question_id != item.successor_question_id:
                     raise ValueError("Question successor must agree with its disposition")
         snapshot_refs = {item.ref for item in self.evidence_snapshot.bundle.items}
@@ -1123,9 +1135,19 @@ def render_revision_export_markdown(export: RevisionExport) -> str:
             else ""
         )
         evidence_refs = ", ".join(question.evidence_refs) or "none"
+        disposition = (
+            f"; disposition: {question.last_disposition.value}"
+            if question.last_disposition is not None
+            else ""
+        )
+        reason = (
+            f"; reason: {question.disposition_reason}"
+            if question.disposition_reason is not None
+            else ""
+        )
         lines.append(
             f"- `{question.id}` [{question.status.value}] {question.question} "
-            f"(Evidence: {evidence_refs}{successor})"
+            f"(Evidence: {evidence_refs}{disposition}{reason}{successor})"
         )
     if revision.delta.question_disposition is not None:
         question_audit = revision.delta.question_disposition
@@ -2072,6 +2094,11 @@ def assemble_full_update(
         candidate.current_state.questions,
         _question_identity,
     )
+    independently_introduced_question_ids = {
+        item.id
+        for item in candidate.current_state.questions
+        if item.id not in question_matches and item.id not in ambiguous_questions
+    }
     question_disposition = candidate.delta.question_disposition
     if baseline.current_state.questions and question_disposition is None:
         question_disposition = QuestionDispositionAudit(
@@ -2143,12 +2170,6 @@ def assemble_full_update(
             if value is not None
         }
         disposed_questions: list[ResearchQuestion] = []
-        status_by_disposition = {
-            QuestionDispositionKind.ANSWERED: QuestionStatus.ANSWERED,
-            QuestionDispositionKind.REOPENED: QuestionStatus.OPEN,
-            QuestionDispositionKind.SUPERSEDED: QuestionStatus.SUPERSEDED,
-            QuestionDispositionKind.RETIRED: QuestionStatus.RETIRED,
-        }
         for item in question_disposition.dispositions:
             previous = baseline_questions_by_id[item.baseline_question_id]
             source = (
@@ -2160,15 +2181,16 @@ def assemble_full_update(
                 source.model_copy(
                     update={
                         "id": previous.id,
-                        "status": status_by_disposition.get(
-                            item.disposition,
-                            previous.status,
+                        "status": _status_after_question_disposition(
+                            item.disposition, previous.status
                         ),
                         "evidence_refs": tuple(
                             dict.fromkeys((*source.evidence_refs, *item.evidence_refs))
                         ),
                         "required_sources": previous.required_sources,
                         "successor_question_id": item.successor_question_id,
+                        "last_disposition": item.disposition,
+                        "disposition_reason": item.reason,
                     }
                 )
             )
@@ -2361,12 +2383,6 @@ def assemble_full_update(
         disposition_changes = {
             item.value: QuestionChange(item.value) for item in QuestionDispositionKind
         }
-        assigned_candidate_ids = {
-            value
-            for item in question_disposition.dispositions
-            for value in (item.candidate_question_id, item.successor_question_id)
-            if value is not None
-        }
         question_delta.extend(
             QuestionRevisionDelta(
                 object_id=item.baseline_question_id,
@@ -2502,9 +2518,16 @@ def assemble_full_update(
         changed_sections.append("opinion")
     if any(item.change is not ClaimChange.REAFFIRMED for item in claim_delta):
         changed_sections.append("claims")
-    if (question_disposition is None or question_disposition.status == "complete") and any(
+    question_change_is_material = any(
         item.change is not QuestionChange.REAFFIRMED for item in question_delta
-    ):
+    )
+    if question_disposition is not None and question_disposition.status == "limited":
+        question_change_is_material = any(
+            item.change is QuestionChange.INTRODUCED
+            and item.object_id in independently_introduced_question_ids
+            for item in question_delta
+        )
+    if question_change_is_material:
         changed_sections.append("questions")
     if semantic_scenarios(scenarios) != semantic_scenarios(baseline.current_state.scenarios):
         changed_sections.append("scenarios")

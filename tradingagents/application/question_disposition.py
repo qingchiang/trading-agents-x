@@ -28,6 +28,28 @@ class _QuestionDispositionOutput(ResearchModel):
 
 
 _MAX_QUESTION_DISPOSITION_PROMPT_CHARS = 48_000
+_MAX_QUESTION_DISPOSITION_EVIDENCE_ITEMS = 32
+_MAX_QUESTION_DISPOSITION_EVIDENCE_TEXT = 1_200
+
+
+def _evidence_summary(item: Any) -> dict[str, Any]:
+    content = item.content
+    if content is not None and len(content) > _MAX_QUESTION_DISPOSITION_EVIDENCE_TEXT:
+        content = content[:_MAX_QUESTION_DISPOSITION_EVIDENCE_TEXT] + "..."
+    return {
+        "ref": item.ref,
+        "source": item.source,
+        "evidence_type": item.evidence_type,
+        "requested_date": item.requested_date,
+        "effective_date": item.effective_date,
+        "available_at": item.available_at,
+        "content": content,
+        "value": item.value,
+        "measurement_kind": item.measurement_kind,
+        "unit": item.unit,
+        "quality": item.quality,
+        "fallback": item.fallback,
+    }
 
 
 def run_full_question_disposition(
@@ -41,7 +63,8 @@ def run_full_question_disposition(
     if not baseline_questions:
         return candidate
     candidate_questions = {item.id: item for item in candidate.current_state.questions}
-    current_refs = {item.ref for item in candidate.evidence_snapshot.bundle.items}
+    current_evidence = candidate.evidence_snapshot.bundle.items
+    current_refs = {item.ref for item in current_evidence}
 
     def validate(value: _QuestionDispositionOutput) -> _QuestionDispositionOutput:
         if value.language != candidate.current_state.language:
@@ -91,14 +114,18 @@ def run_full_question_disposition(
                 "candidate_questions": tuple(
                     item.model_dump(mode="json") for item in candidate_questions.values()
                 ),
-                "current_evidence_refs": tuple(sorted(current_refs)),
+                "current_evidence": tuple(_evidence_summary(item) for item in current_evidence),
                 "output_language": candidate.current_state.language,
             },
+            default=str,
             ensure_ascii=False,
             sort_keys=True,
         )
     )
-    if len(prompt) > _MAX_QUESTION_DISPOSITION_PROMPT_CHARS:
+    if (
+        len(current_evidence) > _MAX_QUESTION_DISPOSITION_EVIDENCE_ITEMS
+        or len(prompt) > _MAX_QUESTION_DISPOSITION_PROMPT_CHARS
+    ):
         audit = QuestionDispositionAudit(
             status="limited",
             language=candidate.current_state.language,

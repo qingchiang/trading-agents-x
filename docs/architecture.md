@@ -295,8 +295,9 @@ Full Analysis pipeline without Prior Research. After Full Evidence and the
 independently assembled candidate Current Research State are sealed, but before
 comparison with the Eligible Baseline, the application runs a bounded Question
 Disposition step. Its structured result may refer only to baseline and
-candidate Question IDs assigned by application code, current Full Evidence
-references, one disposition, an optional successor, and a concise reason.
+candidate Question IDs assigned by application code, references from bounded
+current Full Evidence summaries (including content and PIT timing), one
+disposition, an optional successor, and a concise reason.
 Only complete one-to-one mappings are applied. Answered and reopened Questions
 retain their ID; superseded Questions retain their ID and link to a separately
 assigned successor ID. A Full decision's omission never changes a Question.
@@ -313,6 +314,9 @@ limitation. Claim identity comparison then runs together with the applied
 Question dispositions. The immutable Revision stores the typed delta, complete
 Current Research State, Coverage Attestation, Update Summary, Effective
 Evidence Snapshot with inherited/new lineage, Full artifacts, and metrics.
+Each disposed Question retains its latest disposition and reason in Current
+Research State, so the reader can distinguish a reopened Question from an
+ordinary open Question without reconstructing the delta.
 
 Coverage Attestation distinguishes Required and Advisory source domains.
 EDINET and TDnet company disclosures are Required for Japanese disclosure

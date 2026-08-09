@@ -510,6 +510,10 @@ async def test_openapi_contains_versioned_run_center_contract(
     assert revision["change_conclusion"]["anyOf"][0]["$ref"].endswith("/ResearchChangeConclusion")
     question = schema["components"]["schemas"]["ResearchQuestion"]["properties"]
     assert question["successor_question_id"]["anyOf"][0]["pattern"].startswith("^question_")
+    assert question["last_disposition"]["anyOf"][0]["$ref"].endswith(
+        "/QuestionDispositionKind"
+    )
+    assert question["disposition_reason"]["anyOf"][0]["maxLength"] == 1000
     question_disposition = schema["components"]["schemas"]["QuestionDispositionKind"]
     assert question_disposition["enum"] == [
         "reaffirmed",

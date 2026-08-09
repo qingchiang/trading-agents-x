@@ -697,6 +697,8 @@ def test_full_update_disposes_questions_after_assembly_and_persists_audit(
     retained = next(item for item in revision.current_state.questions if item.id == question.id)
     assert result.status is RunStatus.SUCCEEDED
     assert retained.status is QuestionStatus.ANSWERED
+    assert retained.last_disposition == "answered"
+    assert retained.disposition_reason == "The sealed Full Evidence answers the Question."
     assert revision.delta.question_disposition.status == "complete"
     event = next(
         item
@@ -711,6 +713,7 @@ def test_full_update_disposes_questions_after_assembly_and_persists_audit(
     media_type, markdown = service.export_revision(revision.id, format="markdown")
     assert media_type.startswith("text/markdown")
     assert "### Question Disposition Audit" in markdown
+    assert "; disposition: answered" in markdown
     assert "The sealed Full Evidence answers the Question." in markdown
     _, exported_json = service.export_revision(revision.id, format="json")
     assert (

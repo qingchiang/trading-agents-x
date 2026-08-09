@@ -576,8 +576,10 @@ export interface components {
       thesis: string;
     };
     ResearchQuestion: {
+      disposition_reason?: string | null;
       evidence_refs?: string[];
       id: string;
+      last_disposition?: components["schemas"]["QuestionDispositionKind"] | null;
       question: string;
       required_sources?: string[];
       status?: components["schemas"]["QuestionStatus"];

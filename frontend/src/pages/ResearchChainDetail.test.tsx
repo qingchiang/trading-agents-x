@@ -122,7 +122,9 @@ const chain = {
       questions: [{
         id: "question-1",
         question: "订单能否持续？",
-        status: "answered",
+        status: "open",
+        last_disposition: "reopened",
+        disposition_reason: "Current Evidence undermined the earlier answer.",
         evidence_refs: ["ev_0123456789ab"],
       }],
     },
@@ -203,7 +205,8 @@ test("reads the complete current thesis, coverage, evidence, reports, and metric
   expect(await screen.findByText("需要证据持续确认利润率修复。")).toBeVisible();
   expect(screen.getByText("初回のフル分析を完了。")).toBeVisible();
   expect(screen.getByText("订单能否持续？")).toBeVisible();
-  expect(screen.getAllByText(/answered/)[0]).toBeVisible();
+  expect(screen.getAllByText(/reopened/)[0]).toBeVisible();
+  expect(screen.getByText("Current Evidence undermined the earlier answer.")).toBeVisible();
   expect(screen.getAllByRole("link", { name: "ev_0123456789ab" })[0]).toHaveAttribute(
     "href",
     "#research-evidence-ev_0123456789ab",

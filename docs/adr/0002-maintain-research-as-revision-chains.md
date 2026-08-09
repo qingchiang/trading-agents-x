@@ -19,12 +19,16 @@ maintained over time. Prior Research identifies what must be reassessed but is
 not Evidence for its own correctness. After independent Full research and state
 assembly, a bounded Question Disposition step maps baseline Questions to
 reaffirmed, answered, reopened, superseded, or retired states only with current
-sealed Evidence. Omission never resolves a Question, and ambiguous mappings
+sealed Evidence summaries carrying content and PIT timing. Omission never
+resolves a Question, and ambiguous mappings
 preserve the old identity and expose limited coverage. The step receives one
 repair attempt; a remaining limitation makes an otherwise unchanged Revision
 Indeterminate, while an independently established Material Change remains
 Material Change. Supersession retains the old Question and links it to a
 separately assigned successor identity.
+The Current Research State retains the latest disposition and reason in
+addition to the operational status, making reopened and ordinary open
+Questions distinguishable to readers and exports.
 
 One Instrument may have alternative Research Chains, but only one is Primary.
 Starting from an older Revision creates a new Research Fork instead of a second

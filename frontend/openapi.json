@@ -4137,6 +4137,19 @@
       "ResearchQuestion": {
         "additionalProperties": false,
         "properties": {
+          "disposition_reason": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disposition Reason"
+          },
           "evidence_refs": {
             "default": [],
             "items": {
@@ -4149,6 +4162,16 @@
             "pattern": "^question_[a-f0-9]{32}$",
             "title": "Id",
             "type": "string"
+          },
+          "last_disposition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QuestionDispositionKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "question": {
             "minLength": 1,
