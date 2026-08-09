@@ -30,6 +30,10 @@ from tradingagents.application.contracts import (
     RunMetrics,
     RunStatus,
 )
+from tradingagents.application.live_thesis_validation import (
+    ReviewedLiveThesisScenario,
+    validate_live_thesis,
+)
 from tradingagents.application.llms import RunLLMs
 from tradingagents.application.outcomes import OutcomeObservation
 from tradingagents.application.repository import InvalidResearchBaselineError, RunRepository
@@ -2499,3 +2503,126 @@ def test_service_export_rejects_unknown_format(
 
     with pytest.raises(ValueError, match="markdown.*json"):
         service.export(result.run_id, format="pdf")
+
+
+def test_controlled_live_thesis_validation_advances_five_distinct_main_database_chains(
+    app_settings,
+    repository,
+    tmp_path,
+) -> None:
+    initial = _service(app_settings, repository)
+    for _ in range(5):
+        initial.run_initial_chain(
+            AnalysisRequest(
+                ticker="6501.T",
+                analysis_date="2026-07-24",
+                analysts=("market",),
+            )
+        )
+    chains = repository.list_research_chains(instrument="6501.T")
+    scenarios = tuple(
+        ReviewedLiveThesisScenario(
+            scenario=scenario,
+            chain_id=chain.id,
+            analysis_date=cutoff,
+            expected_bounded_result=bounded,
+            expected_full_change_conclusion=conclusion,
+        )
+        for chain, cutoff, scenario, bounded, conclusion in zip(
+            chains,
+            (date(2026, 7, day) for day in range(25, 30)),
+            (
+                "quiet_interval",
+                "material_event",
+                "source_integrity",
+                "missing_coverage",
+                "threshold_crossing",
+            ),
+            (
+                "no_material_change",
+                "source_version_change",
+                "source_correction",
+                "coverage_incomplete",
+                "threshold_crossing",
+            ),
+            (
+                ResearchChangeConclusion.INDETERMINATE,
+                ResearchChangeConclusion.MATERIAL_CHANGE,
+                ResearchChangeConclusion.NO_MATERIAL_CHANGE,
+                ResearchChangeConclusion.INDETERMINATE,
+                ResearchChangeConclusion.MATERIAL_CHANGE,
+            ),
+            strict=True,
+        )
+    )
+    scenario_by_cutoff = {item.analysis_date: item for item in scenarios}
+
+    def gate(baseline, request, *_args):
+        scenario = scenario_by_cutoff[request.analysis_date]
+        if scenario.scenario != "quiet_interval":
+            return IncrementalGateResult(
+                escalation_reason=IncrementalEscalationReason(scenario.expected_bounded_result),
+                metrics=RunMetrics(tool_calls=1, wall_time_seconds=0.1),
+            )
+        candidate = baseline.model_copy(
+            update={
+                "cutoff": request.analysis_date,
+                "role": ResearchRevisionRole.UPDATE,
+                "execution_strategy": ResearchExecutionStrategy.INCREMENTAL,
+                "change_conclusion": ResearchChangeConclusion.NO_MATERIAL_CHANGE,
+                "current_state": baseline.current_state.model_copy(
+                    update={"cutoff": request.analysis_date}
+                ),
+                "update_summary": baseline.update_summary.model_copy(
+                    update={
+                        "summary": "Deterministic gates found no material change.",
+                        "baseline_cutoff": baseline.cutoff,
+                        "analysis_cutoff": request.analysis_date,
+                        "execution_strategy": ResearchExecutionStrategy.INCREMENTAL,
+                        "change_conclusion": ResearchChangeConclusion.NO_MATERIAL_CHANGE,
+                    }
+                ),
+            }
+        )
+        return IncrementalGateResult(
+            candidate=candidate,
+            metrics=RunMetrics(tool_calls=2, wall_time_seconds=0.2),
+        )
+
+    def compare(_run_id, _baseline, draft):
+        conclusion = scenario_by_cutoff[draft.cutoff].expected_full_change_conclusion
+        return draft.model_copy(
+            update={
+                "role": ResearchRevisionRole.UPDATE,
+                "change_conclusion": conclusion,
+                "indeterminate_reason": (
+                    IndeterminateReason.COVERAGE_INCOMPLETE
+                    if conclusion is ResearchChangeConclusion.INDETERMINATE
+                    else None
+                ),
+            }
+        )
+
+    service = _service(
+        app_settings,
+        repository,
+        incremental_gate=gate,
+        revision_comparator=compare,
+    )
+    result = validate_live_thesis(
+        service,
+        scenarios,
+        backup_destination=tmp_path / "before-live-validation.db",
+        manifest_root=tmp_path / "manifest",
+        git_commit="a" * 40,
+        environ={"RUN_LIVE_DATA_TESTS": "1", "RUN_LIVE_LLM_TESTS": "1"},
+        in_place_database=True,
+    )
+
+    assert result.passed
+    assert len({item.chain_id for item in result.entries}) == 5
+    assert all(item.revision_id is not None for item in result.entries)
+    quiet_run = repository.get_run(
+        next(item.run_id for item in result.entries if item.scenario == "quiet_interval")
+    )
+    assert quiet_run.research_update_audit.comparison == "inconclusive"

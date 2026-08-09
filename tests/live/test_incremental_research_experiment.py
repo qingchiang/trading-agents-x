@@ -31,7 +31,7 @@ _BOUNDED_RESULTS = {
     "no_material_change",
     *(reason.value for reason in IncrementalEscalationReason),
 }
-_FULL_OUTCOMES = {"material_change", "no_material_change"}
+_FULL_OUTCOMES = {"material_change", "no_material_change", "indeterminate"}
 _SCENARIO_RESULTS = {
     "quiet_interval": {"no_material_change"},
     "material_event": {
@@ -164,9 +164,14 @@ def test_reviewed_japanese_shadow_pairs_are_sanitized_and_fail_closed(
             assert audit.semantic_assessment is not None
             assert audit.bounded_metrics.llm_calls > 0
         expected_comparison = (
-            "agreement"
+            "inconclusive"
+            if bounded == "no_material_change"
+            and revision.change_conclusion.value == "indeterminate"
+            else "agreement"
             if bounded == "no_material_change"
             and revision.change_conclusion.value == "no_material_change"
-            else ("disagreement" if bounded == "no_material_change" else "not_applicable")
+            else "disagreement"
+            if bounded == "no_material_change"
+            else "not_applicable"
         )
         assert audit.comparison == expected_comparison

@@ -125,36 +125,90 @@ collectors/models. A few controlled live pairs may then be run with
 contain only ticker, cutoff, source status, reason codes, and aggregate metrics,
 never credentials, prompt text, private reasoning, or response headers.
 
-The read-only live runner backs up the database and executes each case against
-its own temporary copy, so existing chain heads are never advanced. Review
-exactly five cases covering `quiet_interval`, `material_event`,
-`source_integrity`, `missing_coverage`, and `threshold_crossing`; keep the mode
-at `shadow`, and run both the live-data and live-LLM opt-ins:
+The pytest live runner remains a non-authoritative rehearsal: it backs up the
+configured database and runs each case against a temporary copy. It must not be
+used as evidence that a main-database Research Chain advanced.
+
+### Authoritative maintainer validation
+
+The authoritative workflow is deliberately user-triggered and writes to the
+configured main SQLite database. Implementing or installing it does not
+authorize a live run. Before a separately approved run:
+
+1. Stop or drain the worker so no other update can advance a selected head.
+2. In the Research Chain reader, review exactly five distinct Japanese Chains
+   whose server-derived next-update policy is `incremental_allowed`. Select one
+   Chain for each of `quiet_interval`, `material_event`, `source_integrity`,
+   `missing_coverage`, and `threshold_crossing`; do not reuse a Chain.
+3. Review each cutoff, expected bounded result, and expected Full Change
+   Conclusion. Include Material Change, No Material Change, and Indeterminate
+   across the set. Save only this control metadata in a JSON file such as
+   `tmp/incremental-research/reviewed-live-cases.json`:
+
+```json
+[
+  {"scenario":"quiet_interval","chain_id":"<quiet-chain-id>","analysis_date":"2026-08-10","expected_bounded_result":"no_material_change","expected_full_change_conclusion":"indeterminate"},
+  {"scenario":"material_event","chain_id":"<material-chain-id>","analysis_date":"2026-08-10","expected_bounded_result":"source_version_change","expected_full_change_conclusion":"material_change"},
+  {"scenario":"source_integrity","chain_id":"<integrity-chain-id>","analysis_date":"2026-08-10","expected_bounded_result":"source_correction","expected_full_change_conclusion":"no_material_change"},
+  {"scenario":"missing_coverage","chain_id":"<coverage-chain-id>","analysis_date":"2026-08-10","expected_bounded_result":"coverage_incomplete","expected_full_change_conclusion":"indeterminate"},
+  {"scenario":"threshold_crossing","chain_id":"<threshold-chain-id>","analysis_date":"2026-08-10","expected_bounded_result":"threshold_crossing","expected_full_change_conclusion":"material_change"}
+]
+```
+
+Keep the application in `shadow` mode and include every selected Instrument in
+the Japanese whitelist. Supply the two existing live opt-ins and the separate
+`--in-place-database` confirmation. The `--backup` destination must not exist:
 
 ```bash
 RUN_LIVE_DATA_TESTS=1 RUN_LIVE_LLM_TESTS=1 PYTHON_DOTENV_DISABLED=1 \
 TRADINGAGENTS_LLM_PROVIDER=deepseek \
-TRADINGAGENTS_QUICK_MODEL=deepseek-chat TRADINGAGENTS_DEEP_MODEL=deepseek-chat \
+TRADINGAGENTS_QUICK_THINK_LLM=deepseek-chat \
+TRADINGAGENTS_DEEP_THINK_LLM=deepseek-chat \
 TRADINGAGENTS_RESEARCH_UPDATE_MODE=shadow \
 TRADINGAGENTS_EXPERIMENTAL_NMC_JP_WHITELIST=6501.T,7203.T \
-TRADINGAGENTS_INCREMENTAL_LIVE_CASES='[{"scenario":"quiet_interval","chain_id":"<quiet-chain-id>","analysis_date":"2026-08-07","expected_bounded":"no_material_change","expected_full_outcome":"no_material_change"},{"scenario":"material_event","chain_id":"<material-chain-id>","analysis_date":"2026-08-07","expected_bounded":"source_version_change","expected_full_outcome":"material_change"},{"scenario":"source_integrity","chain_id":"<integrity-chain-id>","analysis_date":"2026-08-07","expected_bounded":"source_correction","expected_full_outcome":"material_change"},{"scenario":"missing_coverage","chain_id":"<coverage-chain-id>","analysis_date":"2026-08-07","expected_bounded":"coverage_incomplete","expected_full_outcome":"no_material_change"},{"scenario":"threshold_crossing","chain_id":"<threshold-chain-id>","analysis_date":"2026-08-07","expected_bounded":"threshold_crossing","expected_full_outcome":"material_change"}]' \
-uv run --locked pytest -q -m live_data \
-  tests/live/test_incremental_research_experiment.py
+uv run --locked tradingagents research validate-live-thesis \
+  tmp/incremental-research/reviewed-live-cases.json \
+  --backup tmp/incremental-research/live-validation-backup.db \
+  --in-place-database
 ```
 
 Export `DEEPSEEK_API_KEY` and, when the reviewed cases depend on authenticated
 official sources, `JQUANTS_API_KEY` and `EDINET_API_KEY` in the launching shell.
-The test harness retains only those explicitly supported live credentials and
-never prints them.
+Do not put credentials in the cases file or command line.
 
-`expected_bounded` may be `no_material_change` or a stable Full-escalation
+The command completes and verifies an ordinary online SQLite backup before it
+queues the first execution. It records a recovery-point file containing only
+the backup filename, size, SHA-256 digest, creation time, and Alembic revision.
+It then writes one exclusive sanitized JSON entry per scenario under the
+ignored `tmp/incremental-research/live-validation/` area. Entries contain only
+the source commit, reviewed expectations, application status, validation
+verdict, and run/Chain/Revision IDs. A successful application execution whose
+results differ from expectations is `expectation_mismatch`; it is never passed.
+
+`expected_bounded_result` may be `no_material_change` or a stable Full-escalation
 reason such as `source_correction`, `source_withdrawal`,
 `coverage_incomplete`, `source_version_change`, or `threshold_crossing`.
-`expected_full_outcome` records the independently reviewed Full result. The
-runner executes the bounded semantic assessment and authoritative Full Analysis
-in the same Shadow update, then verifies their persisted comparison. The live
-set remains deliberately small because upstream corrections and availability
-change over time.
+The paired Full result remains authoritative. A No Material Change candidate
+paired with an Indeterminate Full result must be recorded as `inconclusive`.
+
+Inspect the manifest first, then use its IDs to inspect the current CLI database
+layout without copying payloads into the manifest:
+
+```bash
+tradingagents runs show <run-id>
+sqlite3 ~/.tradingagents/tradingagents.db \
+  "SELECT id,status,research_chain_id,baseline_revision_id FROM runs WHERE id='<run-id>';"
+sqlite3 ~/.tradingagents/tradingagents.db \
+  "SELECT id,current_revision_id FROM research_chains WHERE id='<chain-id>';"
+sqlite3 ~/.tradingagents/tradingagents.db \
+  "SELECT id,predecessor_revision_id,producing_run_id,execution_strategy,change_conclusion FROM research_revisions WHERE id='<revision-id>';"
+```
+
+For recovery, first stop Web and worker and preserve the current database and
+its WAL/SHM sidecars. Prefer pointing `TRADINGAGENTS_DATABASE_PATH` at a copy of
+the recorded backup and inspecting it before replacing anything. The backup's
+filename, digest, size, and Alembic revision in `recovery-point.json` identify
+the intended recovery point. Never combine the backup with stale WAL/SHM files.
 
 During Shadow validation the Full Analysis result is authoritative:
 

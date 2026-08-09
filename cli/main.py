@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
+import subprocess
 import sys
 from datetime import date
 from enum import Enum
@@ -20,6 +22,11 @@ from rich.table import Table
 
 from tradingagents import AnalysisRequest, RunProfile, TradingAgents
 from tradingagents.application.contracts import RunEvent, RunStatus
+from tradingagents.application.live_thesis_validation import (
+    LiveThesisValidationError,
+    load_reviewed_scenarios,
+    validate_live_thesis,
+)
 from tradingagents.application.service import AnalysisService
 from tradingagents.application.settings import AppSettings
 from tradingagents.application.worker import AnalysisWorker
@@ -40,12 +47,15 @@ app = typer.Typer(
 )
 runs_app = typer.Typer(help="Inspect and control durable research runs.")
 db_app = typer.Typer(help="Maintain the local SQLite database.")
+research_app = typer.Typer(help="Run explicit maintainer Research Chain workflows.")
 app.add_typer(runs_app, name="runs")
 app.add_typer(db_app, name="db")
+app.add_typer(research_app, name="research")
 
 console = Console()
 event_console = Console(stderr=True)
 _ANALYSTS = ("market", "social", "news", "fundamentals")
+_LIVE_THESIS_MANIFEST_ROOT = Path("tmp/incremental-research/live-validation")
 
 
 class ExportFormat(str, Enum):
@@ -391,6 +401,71 @@ def backup_database(
         event_console.print(f"[red]Database backup failed: {exc}[/red]")
         raise typer.Exit(code=1) from None
     console.print(f"Backup created at {created}")
+
+
+@research_app.command("validate-live-thesis")
+def validate_live_thesis_command(
+    cases: Annotated[
+        Path,
+        typer.Argument(exists=True, dir_okay=False, readable=True),
+    ],
+    backup: Annotated[
+        Path,
+        typer.Option("--backup", dir_okay=False, help="New ordinary SQLite backup path."),
+    ],
+    git_commit: Annotated[
+        str | None,
+        typer.Option("--git-commit", help="Full source commit; auto-detected by default."),
+    ] = None,
+    in_place_database: Annotated[
+        bool,
+        typer.Option(
+            "--in-place-database",
+            help="Explicitly authorize authoritative writes to the configured database.",
+        ),
+    ] = False,
+) -> None:
+    """Run the reviewed five-scenario Shadow set against the configured database."""
+    if not in_place_database:
+        raise typer.BadParameter("--in-place-database is required for this authoritative workflow")
+    try:
+        scenarios = load_reviewed_scenarios(cases)
+        result = validate_live_thesis(
+            _service(),
+            scenarios,
+            backup_destination=backup,
+            manifest_root=_LIVE_THESIS_MANIFEST_ROOT,
+            git_commit=git_commit or _current_git_commit(),
+            environ=os.environ,
+            in_place_database=in_place_database,
+        )
+    except LiveThesisValidationError as exc:
+        event_console.print(f"[red]Live Thesis validation refused: {exc}[/red]")
+        raise typer.Exit(code=1) from None
+    console.print(f"Sanitized manifest: {result.manifest_directory}")
+    for entry in result.entries:
+        console.print(f"{entry.scenario}: {entry.validation_verdict}")
+    if not result.passed:
+        raise typer.Exit(code=1)
+
+
+def _current_git_commit() -> str:
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise LiveThesisValidationError(
+            "Git commit could not be detected; pass --git-commit"
+        ) from exc
+    commit = completed.stdout.strip().lower()
+    if re.fullmatch(r"[0-9a-f]{40}", commit) is None:
+        raise LiveThesisValidationError("detected Git commit is invalid")
+    return commit
 
 
 def _settings() -> AppSettings:

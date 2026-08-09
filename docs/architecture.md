@@ -413,6 +413,17 @@ private reasoning.
 Failed or cancelled Shadow executions retain their run audit but never create
 a Revision.
 
+The maintainer-only authoritative validation command requires both live test
+opt-ins plus a separate in-place database confirmation, verifies an ordinary
+online backup before its first execution, and rejects reused or ineligible
+reviewed Chains. It runs five distinct Shadow scenarios against the configured
+main SQLite database. SQLite remains the sole owner of requests, settings,
+Evidence, coverage, state, audit, events, metrics, artifacts, decisions, runs,
+and Revisions. The ignored experiment area receives only one exclusive,
+sanitized metadata entry per scenario plus non-sensitive recovery-point
+metadata; application success and expectation agreement remain separate
+verdict dimensions.
+
 The internal research-update mode is persisted in each update's immutable
 settings snapshot. `off` routes every update through Full Analysis. `shadow`
 runs bounded assessment only for explicitly whitelisted `.T` Instruments and

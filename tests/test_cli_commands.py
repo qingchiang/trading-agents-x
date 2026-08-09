@@ -51,6 +51,7 @@ def test_root_is_noninteractive_and_exposes_the_new_command_tree() -> None:
         "runs",
         "export",
         "db",
+        "research",
     ):
         assert command in result.output
     assert "memory" not in result.output
@@ -603,3 +604,91 @@ def test_database_backup_is_consistent_and_refuses_overwrite(
     assert destination.stat().st_size > 0
     assert refused.exit_code == 1
     assert "Refusing to overwrite" in refused.output
+
+
+def test_live_thesis_validation_cli_requires_explicit_in_place_flag_and_reports_manifest(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    cases = tmp_path / "cases.json"
+    cases.write_text("[]", encoding="utf-8")
+    captured = {}
+    monkeypatch.setattr(cli, "load_reviewed_scenarios", lambda path: (str(path),))
+    monkeypatch.setattr(cli, "_service", lambda: "service")
+
+    def validate(service, scenarios, **kwargs):
+        captured.update(service=service, scenarios=scenarios, **kwargs)
+        return SimpleNamespace(
+            manifest_directory=tmp_path / "manifest" / "session",
+            passed=True,
+            entries=(SimpleNamespace(scenario="quiet_interval", validation_verdict="passed"),),
+        )
+
+    monkeypatch.setattr(cli, "validate_live_thesis", validate)
+    refused = runner.invoke(
+        cli.app,
+        [
+            "research",
+            "validate-live-thesis",
+            str(cases),
+            "--backup",
+            str(tmp_path / "backup.db"),
+            "--git-commit",
+            "a" * 40,
+        ],
+    )
+    completed = runner.invoke(
+        cli.app,
+        [
+            "research",
+            "validate-live-thesis",
+            str(cases),
+            "--backup",
+            str(tmp_path / "backup.db"),
+            "--git-commit",
+            "a" * 40,
+            "--in-place-database",
+        ],
+    )
+
+    assert refused.exit_code == 2
+    assert completed.exit_code == 0
+    assert captured["service"] == "service"
+    assert captured["in_place_database"] is True
+    assert captured["git_commit"] == "a" * 40
+    assert captured["manifest_root"] == Path(
+        "tmp/incremental-research/live-validation"
+    )
+    assert "manifest/session" in completed.output
+    assert "quiet_interval: passed" in completed.output
+
+    monkeypatch.setattr(
+        cli,
+        "validate_live_thesis",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            manifest_directory=tmp_path / "manifest" / "mismatch",
+            passed=False,
+            entries=(
+                SimpleNamespace(
+                    scenario="quiet_interval",
+                    validation_verdict="expectation_mismatch",
+                ),
+            ),
+        ),
+    )
+    mismatch = runner.invoke(
+        cli.app,
+        [
+            "research",
+            "validate-live-thesis",
+            str(cases),
+            "--backup",
+            str(tmp_path / "backup-2.db"),
+            "--git-commit",
+            "a" * 40,
+            "--in-place-database",
+        ],
+    )
+
+    assert mismatch.exit_code == 1
+    assert "quiet_interval: expectation_mismatch" in mismatch.output
