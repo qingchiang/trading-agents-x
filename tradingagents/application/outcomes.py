@@ -16,6 +16,7 @@ from tradingagents.dataflows.symbol_utils import market_today, normalize_symbol
 
 from .contracts import report_language_prompt_label
 from .llms import create_run_llms
+from .outcome_feedback import OutcomeReflectionStatus
 from .reflection import OutcomeReflector
 from .repository import RunRepository
 from .settings import AppSettings
@@ -68,11 +69,7 @@ class OutcomeSettlement:
 
     def settle_once(self, *, limit: int = 20) -> dict[str, int]:
         stats = {"checked": 0, "resolved": 0, "pending": 0, "failed": 0}
-        now = self.utc_clock()
-        if now.tzinfo is None:
-            now = now.replace(tzinfo=timezone.utc)
-        else:
-            now = now.astimezone(timezone.utc)
+        now = self._now()
         for item in self.repository.pending_outcomes(limit, due_at=now):
             stats["checked"] += 1
             observation = self._persisted_observation(item)
@@ -85,6 +82,7 @@ class OutcomeSettlement:
                         holding_intervals=item["holding_intervals"],
                     )
                 except Exception as exc:
+                    checked_at = self._now()
                     logger.warning(
                         "Outcome observation failed for %s: %s",
                         item["ticker"],
@@ -92,24 +90,25 @@ class OutcomeSettlement:
                     )
                     self.repository.mark_outcome_checked(
                         item["outcome_id"],
-                        checked_at=now,
-                        next_check_at=now + ERROR_RECHECK_INTERVAL,
+                        checked_at=checked_at,
+                        next_check_at=checked_at + ERROR_RECHECK_INTERVAL,
                         error_message=type(exc).__name__,
                     )
                     stats["failed"] += 1
                     continue
                 if observation is None:
+                    checked_at = self._now()
                     self.repository.mark_outcome_checked(
                         item["outcome_id"],
-                        checked_at=now,
-                        next_check_at=now + PENDING_RECHECK_INTERVAL,
+                        checked_at=checked_at,
+                        next_check_at=checked_at + PENDING_RECHECK_INTERVAL,
                     )
                     stats["pending"] += 1
                     continue
                 self.repository.persist_outcome_observation(
                     item["outcome_id"],
                     observation=observation,
-                    observed_at=now,
+                    observed_at=self._now(),
                 )
             try:
                 reflection = self._reflection(
@@ -121,10 +120,15 @@ class OutcomeSettlement:
                 reflection_status = self.repository.persist_generated_reflection(
                     item["outcome_id"],
                     reflection=reflection,
-                    generated_at=now,
+                    generated_at=self._now(),
                 )
-                stats["failed" if reflection_status == "invalid" else "resolved"] += 1
+                stats[
+                    "failed"
+                    if reflection_status == OutcomeReflectionStatus.INVALID.value
+                    else "resolved"
+                ] += 1
             except Exception as exc:
+                attempted_at = self._now()
                 logger.warning(
                     "Outcome reflection failed for %s: %s",
                     item["ticker"],
@@ -132,12 +136,18 @@ class OutcomeSettlement:
                 )
                 self.repository.mark_reflection_failure(
                     item["outcome_id"],
-                    attempted_at=now,
-                    next_retry_at=now + ERROR_RECHECK_INTERVAL,
+                    attempted_at=attempted_at,
+                    next_retry_at=attempted_at + ERROR_RECHECK_INTERVAL,
                     error_code=type(exc).__name__,
                 )
                 stats["failed"] += 1
         return stats
+
+    def _now(self) -> datetime:
+        now = self.utc_clock()
+        if now.tzinfo is None:
+            return now.replace(tzinfo=timezone.utc)
+        return now.astimezone(timezone.utc)
 
     @staticmethod
     def _persisted_observation(item: dict[str, Any]) -> OutcomeObservation | None:

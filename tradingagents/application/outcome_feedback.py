@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import date, datetime
+from enum import StrEnum
 from typing import Any
 
 METHOD_CATEGORY = "short_term_relative_return"
@@ -39,10 +40,54 @@ _METHOD_LESSON_RE = re.compile(r"(?is)(?:^|\n)Method lesson:\s*(.+?)\s*$")
 
 @dataclass(frozen=True)
 class FeedbackQualification:
-    status: str
+    status: OutcomeFeedbackStatus
     reasons: tuple[str, ...]
     candidate: dict[str, Any]
     applicability: dict[str, Any]
+
+
+class OutcomeObservationStatus(StrEnum):
+    PENDING = "pending"
+    RESOLVED = "resolved"
+
+
+class OutcomeReflectionStatus(StrEnum):
+    PENDING = "pending"
+    GENERATED = "generated"
+    INVALID = "invalid"
+    RETRYABLE_FAILURE = "retryable_failure"
+
+
+class OutcomeFeedbackStatus(StrEnum):
+    ELIGIBLE = "eligible"
+    INELIGIBLE = "ineligible"
+    RETIRED = "retired"
+
+
+@dataclass(frozen=True)
+class FeedbackSource:
+    decision_id: int
+    revision_id: str | None
+    decision_rating: str
+    decision_thesis: str
+    decision_cutoff: date
+    ticker: str
+    market: str | None
+
+
+@dataclass(frozen=True)
+class ObservationQualificationInput:
+    start: date
+    end: date
+    data_available_at: datetime
+    method_category: str
+    horizon_limit: str
+
+
+@dataclass(frozen=True)
+class ReflectionQualificationInput:
+    text: str
+    generated_at: datetime
 
 
 def reflection_candidate_lesson(reflection: str) -> str | None:
@@ -53,63 +98,81 @@ def reflection_candidate_lesson(reflection: str) -> str | None:
     return lesson or None
 
 
+def _contains_thesis_text(lesson: str, thesis: str) -> bool:
+    normalized_lesson = " ".join(lesson.casefold().split())
+    normalized_thesis = " ".join(thesis.casefold().split())
+    if len(normalized_thesis) >= 20 and normalized_thesis in normalized_lesson:
+        return True
+    lesson_tokens = re.findall(r"\w+", normalized_lesson)
+    thesis_tokens = re.findall(r"\w+", normalized_thesis)
+    if len(lesson_tokens) >= 4 and len(thesis_tokens) >= 4:
+        lesson_windows = {
+            tuple(lesson_tokens[index : index + 4])
+            for index in range(len(lesson_tokens) - 3)
+        }
+        thesis_windows = {
+            tuple(thesis_tokens[index : index + 4])
+            for index in range(len(thesis_tokens) - 3)
+        }
+        if lesson_windows & thesis_windows:
+            return True
+    compact_lesson = "".join(re.findall(r"\w", normalized_lesson))
+    compact_thesis = "".join(re.findall(r"\w", normalized_thesis))
+    return len(compact_thesis) >= 8 and any(
+        compact_thesis[index : index + 8] in compact_lesson
+        for index in range(len(compact_thesis) - 7)
+    )
+
+
 def qualify_reflection(
     *,
-    reflection: str,
-    decision_id: int,
-    revision_id: str | None,
-    decision_rating: str,
-    decision_thesis: str,
-    decision_cutoff: date,
-    observation_start: date,
-    observation_end: date,
-    data_available_at: datetime,
-    generated_at: datetime,
+    source: FeedbackSource,
+    observation: ObservationQualificationInput,
+    reflection: ReflectionQualificationInput,
     qualified_at: datetime,
-    ticker: str,
-    market: str | None,
-    method_category: str,
-    horizon_limit: str,
 ) -> FeedbackQualification:
     """Qualify a generated lesson without treating its prose as research truth."""
-    reflection_text = reflection.strip()
+    reflection_text = reflection.text.strip()
     text = reflection_candidate_lesson(reflection_text) or ""
     candidate = {
         "schema_version": "1",
         "lesson": text,
-        "source_decision_id": decision_id,
-        "source_revision_id": revision_id,
-        "method_category": method_category,
-        "horizon_limit": horizon_limit,
+        "source_decision_id": source.decision_id,
+        "source_revision_id": source.revision_id,
+        "method_category": observation.method_category,
+        "horizon_limit": observation.horizon_limit,
     }
     applicability = {
         "schema_version": "1",
-        "instrument": ticker,
-        "market": market,
+        "scope": "instrument",
+        "instrument": source.ticker,
+        "market": source.market,
         "research_stages": ["analysis_methodology"],
         "research_domains": ["cross_domain"],
-        "method_category": method_category,
+        "method_category": observation.method_category,
         "horizon": "short_term",
     }
     reasons: list[str] = []
     if not reflection_text or len(reflection_text) > 12_000 or not text:
         reasons.append("schema_invalid")
-    if decision_id <= 0:
+    if source.decision_id <= 0:
         reasons.append("source_decision_missing")
-    if method_category != METHOD_CATEGORY:
+    if observation.method_category != METHOD_CATEGORY:
         reasons.append("method_category_invalid")
-    if not horizon_limit:
+    if not observation.horizon_limit:
         reasons.append("horizon_limit_missing")
-    if observation_start <= decision_cutoff or observation_end < observation_start:
+    if observation.start <= source.decision_cutoff or observation.end < observation.start:
         reasons.append("observation_window_not_after_decision")
-    if data_available_at > qualified_at or generated_at > qualified_at:
+    if (
+        observation.data_available_at > qualified_at
+        or reflection.generated_at > qualified_at
+    ):
         reasons.append("point_in_time_availability_invalid")
-    if decision_rating and re.search(
-        rf"(?i)(?:rating\s*[:=]?\s*)?\b{re.escape(decision_rating)}\b", text
+    if source.decision_rating and re.search(
+        rf"(?i)(?:rating\s*[:=]?\s*)?\b{re.escape(source.decision_rating)}\b", text
     ):
         reasons.append("contains_old_rating")
-    normalized_thesis = " ".join(decision_thesis.split())
-    if len(normalized_thesis) >= 20 and normalized_thesis.casefold() in text.casefold():
+    if _contains_thesis_text(text, source.decision_thesis):
         reasons.append("contains_thesis_text")
     for pattern, reason in (
         (_PRICE_TARGET_RE, "contains_price_target"),
@@ -120,7 +183,11 @@ def qualify_reflection(
         if pattern.search(text):
             reasons.append(reason)
     return FeedbackQualification(
-        status="eligible" if not reasons else "ineligible",
+        status=(
+            OutcomeFeedbackStatus.ELIGIBLE
+            if not reasons
+            else OutcomeFeedbackStatus.INELIGIBLE
+        ),
         reasons=tuple(dict.fromkeys(reasons)),
         candidate=candidate,
         applicability=applicability,

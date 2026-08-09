@@ -565,6 +565,49 @@ def test_initial_research_chain_does_not_load_or_inject_legacy_memory(
     assert _MemoryCapturingGraph.memories[0].items == ()
 
 
+def test_research_chain_update_and_full_comparison_do_not_load_legacy_memory(
+    app_settings,
+    repository,
+    monkeypatch,
+) -> None:
+    service = _service(
+        app_settings,
+        repository,
+        graph_factory=_MemoryCapturingGraph,
+    )
+    service.run_initial_chain(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+    _MemoryCapturingGraph.memories = []
+
+    def legacy_memory_must_not_load(*_args, **_kwargs):
+        raise AssertionError("Research Chain update loaded legacy memory")
+
+    monkeypatch.setattr(repository, "memory_context", legacy_memory_must_not_load)
+    queued = service.enqueue_chain_update(
+        chain.id,
+        chain.current_revision_id,
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-25",
+            analysts=("market",),
+        ),
+    )
+    claimed = repository.claim_run(queued.id, "worker", 30)
+
+    result = service.execute_claimed(claimed, worker_id="worker")
+
+    assert result.status is RunStatus.SUCCEEDED
+    assert len(_MemoryCapturingGraph.memories) == 1
+    assert _MemoryCapturingGraph.memories[0].items == ()
+    assert repository.get_research_chain(chain.id).current_revision.sequence == 2
+
+
 def test_feedback_failure_cannot_change_research_revision(
     app_settings,
     repository,

@@ -68,10 +68,10 @@ from tradingagents.version import __version__
 from .auth import COOKIE_NAME, SESSION_MAX_AGE, LanSessionManager
 from .models import (
     CapabilitiesResponse,
-    FeedbackRetireRequest,
     HealthResponse,
     LoginRequest,
     MemoryEntry,
+    OutcomeFeedbackRetireRequest,
     ProviderModelCatalog,
     ResearchChainUpdateRequest,
     RunBatchRequest,
@@ -534,13 +534,16 @@ def create_app(
             limit=limit,
         )
 
-    @app.post(f"{API_PREFIX}/memory/{{outcome_id}}/reflection/retry")
-    def retry_memory_reflection(outcome_id: int):
+    @app.post(f"{API_PREFIX}/outcome-observations/{{outcome_id}}/reflection/retry")
+    def retry_outcome_reflection(outcome_id: int):
         repository.retry_outcome_reflection(outcome_id)
         return {"status": "pending"}
 
-    @app.post(f"{API_PREFIX}/memory/feedback/{{feedback_id}}/retire")
-    def retire_memory_feedback(feedback_id: int, payload: FeedbackRetireRequest):
+    @app.post(f"{API_PREFIX}/outcome-feedback/{{feedback_id}}/retire")
+    def retire_outcome_feedback(
+        feedback_id: int,
+        payload: OutcomeFeedbackRetireRequest,
+    ):
         repository.retire_outcome_feedback(feedback_id, reason=payload.reason)
         return {"status": "retired"}
 

@@ -75,6 +75,12 @@ from .outcome_feedback import (
     METHOD_VERSION,
     OBSERVATION_LIMITATIONS,
     PRICE_SEMANTICS,
+    FeedbackSource,
+    ObservationQualificationInput,
+    OutcomeFeedbackStatus,
+    OutcomeObservationStatus,
+    OutcomeReflectionStatus,
+    ReflectionQualificationInput,
     qualify_reflection,
     reflection_candidate_lesson,
 )
@@ -1353,7 +1359,7 @@ class RunRepository:
                 session.flush()
                 outcome = OutcomeRecord(
                     decision_id=decision.id,
-                    status="pending",
+                    status=OutcomeObservationStatus.PENDING.value,
                     benchmark=benchmark,
                     market_timezone=str(market_timezone(request.ticker)),
                     method_category=METHOD_CATEGORY,
@@ -1646,16 +1652,17 @@ class RunRepository:
                 RunRecord.trashed_at.is_(None),
                 or_(
                     and_(
-                        OutcomeRecord.status == "pending",
+                        OutcomeRecord.status == OutcomeObservationStatus.PENDING.value,
                         OutcomeRecord.next_check_at.is_not(None),
                         OutcomeRecord.next_check_at <= due,
                     ),
                     and_(
-                        OutcomeRecord.status == "resolved",
+                        OutcomeRecord.status == OutcomeObservationStatus.RESOLVED.value,
                         or_(
-                            ReflectionRecord.status == "pending",
+                            ReflectionRecord.status == OutcomeReflectionStatus.PENDING.value,
                             and_(
-                                ReflectionRecord.status == "retryable_failure",
+                                ReflectionRecord.status
+                                == OutcomeReflectionStatus.RETRYABLE_FAILURE.value,
                                 ReflectionRecord.next_retry_at.is_not(None),
                                 ReflectionRecord.next_retry_at <= due,
                             ),
@@ -1688,7 +1695,7 @@ class RunRepository:
                     "reflection_status": reflection.status if reflection else None,
                     "next_check_at": _aware(
                         outcome.next_check_at
-                        if outcome.status == "pending"
+                        if outcome.status == OutcomeObservationStatus.PENDING.value
                         else reflection.next_retry_at if reflection else None
                     ),
                 }
@@ -1769,9 +1776,9 @@ class RunRepository:
                     RunRecord.trashed_at.is_(None),
                 )
             )
-            if outcome is None or outcome.status == "resolved":
+            if outcome is None or outcome.status == OutcomeObservationStatus.RESOLVED.value:
                 return
-            outcome.status = "resolved"
+            outcome.status = OutcomeObservationStatus.RESOLVED.value
             outcome.observation_start = observation.start_date
             outcome.observation_end = observation.end_date
             outcome.holding_intervals = observation.holding_intervals
@@ -1785,7 +1792,7 @@ class RunRepository:
             session.add(
                 ReflectionRecord(
                     outcome_id=outcome.id,
-                    status="pending",
+                    status=OutcomeReflectionStatus.PENDING.value,
                     text=None,
                     created_at=observed,
                 )
@@ -1813,9 +1820,12 @@ class RunRepository:
             reflection = session.scalar(
                 select(ReflectionRecord).where(ReflectionRecord.outcome_id == outcome_id)
             )
-            if reflection is None or reflection.status == "generated":
+            if (
+                reflection is None
+                or reflection.status == OutcomeReflectionStatus.GENERATED.value
+            ):
                 return
-            reflection.status = "retryable_failure"
+            reflection.status = OutcomeReflectionStatus.RETRYABLE_FAILURE.value
             reflection.last_attempted_at = attempted
             reflection.next_retry_at = retry
             reflection.error_code = _sanitize_text(error_code, limit=80)
@@ -1842,8 +1852,8 @@ class RunRepository:
             if row is None:
                 return None
             reflection_record, outcome, decision = row
-            if reflection_record.status == "generated":
-                return "generated"
+            if reflection_record.status == OutcomeReflectionStatus.GENERATED.value:
+                return OutcomeReflectionStatus.GENERATED.value
             reflection_record.last_attempted_at = generated
             reflection_record.next_retry_at = None
             reflection_record.error_code = None
@@ -1855,47 +1865,59 @@ class RunRepository:
                     and reflection_candidate_lesson(text) is None
                 )
             ):
-                reflection_record.status = "invalid"
+                reflection_record.status = OutcomeReflectionStatus.INVALID.value
                 reflection_record.text = None
                 reflection_record.candidate_json = None
-                return "invalid"
-            if outcome.data_available_at is None:
-                raise ValueError("Outcome Observation has no data availability time")
+                return OutcomeReflectionStatus.INVALID.value
+            if (
+                outcome.data_available_at is None
+                or outcome.observation_start is None
+                or outcome.observation_end is None
+            ):
+                raise ValueError("Outcome Observation is incomplete")
+            qualification_started_at = max(_utc_naive(), outcome.data_available_at, generated)
             qualification = qualify_reflection(
-                reflection=text,
-                decision_id=decision.id,
-                revision_id=outcome.research_revision_id,
-                decision_rating=decision.rating,
-                decision_thesis=str(decision.decision_json.get("thesis") or ""),
-                decision_cutoff=decision.analysis_date,
-                observation_start=outcome.observation_start,
-                observation_end=outcome.observation_end,
-                data_available_at=outcome.data_available_at,
-                generated_at=generated,
-                qualified_at=generated,
-                ticker=decision.ticker,
-                market=decision.market,
-                method_category=outcome.method_category,
-                horizon_limit=outcome.horizon_limit,
+                source=FeedbackSource(
+                    decision_id=decision.id,
+                    revision_id=outcome.research_revision_id,
+                    decision_rating=decision.rating,
+                    decision_thesis=str(decision.decision_json.get("thesis") or ""),
+                    decision_cutoff=decision.analysis_date,
+                    ticker=decision.ticker,
+                    market=decision.market,
+                ),
+                observation=ObservationQualificationInput(
+                    start=outcome.observation_start,
+                    end=outcome.observation_end,
+                    data_available_at=outcome.data_available_at,
+                    method_category=outcome.method_category,
+                    horizon_limit=outcome.horizon_limit,
+                ),
+                reflection=ReflectionQualificationInput(
+                    text=text,
+                    generated_at=generated,
+                ),
+                qualified_at=qualification_started_at,
             )
-            reflection_record.status = "generated"
+            qualified_at = max(_utc_naive(), qualification_started_at)
+            reflection_record.status = OutcomeReflectionStatus.GENERATED.value
             reflection_record.text = text
             reflection_record.candidate_json = qualification.candidate
             reflection_record.generated_at = generated
-            available_at = max(outcome.data_available_at, generated)
+            available_at = max(outcome.data_available_at, generated, qualified_at)
             session.add(
                 OutcomeFeedbackRecord(
                     reflection_id=reflection_record.id,
-                    status=qualification.status,
+                    status=qualification.status.value,
                     reasons_json=list(qualification.reasons),
                     method_category=outcome.method_category,
                     horizon_limit=outcome.horizon_limit,
                     applicability_json=qualification.applicability,
-                    qualified_at=generated,
+                    qualified_at=qualified_at,
                     available_at=available_at,
                 )
             )
-            return "generated"
+            return OutcomeReflectionStatus.GENERATED.value
 
     def retry_outcome_reflection(self, outcome_id: int) -> None:
         with self.sessions.begin() as session:
@@ -1903,11 +1925,11 @@ class RunRepository:
                 select(ReflectionRecord).where(ReflectionRecord.outcome_id == outcome_id)
             )
             if reflection is None or reflection.status not in {
-                "invalid",
-                "retryable_failure",
+                OutcomeReflectionStatus.INVALID.value,
+                OutcomeReflectionStatus.RETRYABLE_FAILURE.value,
             }:
                 return
-            reflection.status = "pending"
+            reflection.status = OutcomeReflectionStatus.PENDING.value
             reflection.next_retry_at = None
             reflection.error_code = None
 
@@ -1915,9 +1937,9 @@ class RunRepository:
         now = _utc_naive()
         with self.sessions.begin() as session:
             feedback = session.get(OutcomeFeedbackRecord, feedback_id)
-            if feedback is None or feedback.status == "retired":
+            if feedback is None or feedback.status == OutcomeFeedbackStatus.RETIRED.value:
                 return
-            feedback.status = "retired"
+            feedback.status = OutcomeFeedbackStatus.RETIRED.value
             feedback.reasons_json = [*feedback.reasons_json, _sanitize_text(reason) or "retired"]
             feedback.retired_at = now
 
@@ -1944,11 +1966,11 @@ class RunRepository:
             .join(RunRecord, RunRecord.id == DecisionRecord.run_id)
             .where(
                 RunRecord.trashed_at.is_(None),
-                OutcomeRecord.status == "resolved",
+                OutcomeRecord.status == OutcomeObservationStatus.RESOLVED.value,
                 OutcomeRecord.holding_intervals >= 5,
                 OutcomeRecord.raw_return.is_not(None),
                 OutcomeRecord.alpha_return.is_not(None),
-                ReflectionRecord.status == "generated",
+                ReflectionRecord.status == OutcomeReflectionStatus.GENERATED.value,
                 ReflectionRecord.text.is_not(None),
             )
             .order_by(
@@ -2161,7 +2183,7 @@ class RunRepository:
                         "data_available_at": _aware(outcome.data_available_at),
                     },
                     "reflection": reflection.text if reflection else None,
-                    "reflection_lifecycle": (
+                    "outcome_reflection": (
                         {
                             "status": reflection.status,
                             "generated_at": _aware(reflection.generated_at),
@@ -2172,7 +2194,7 @@ class RunRepository:
                         if reflection
                         else None
                     ),
-                    "feedback": (
+                    "outcome_feedback": (
                         {
                             "id": feedback.id,
                             "status": feedback.status,

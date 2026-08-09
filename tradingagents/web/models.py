@@ -16,6 +16,11 @@ from tradingagents.application.contracts import (
     RunProfile,
     RunView,
 )
+from tradingagents.application.outcome_feedback import (
+    OutcomeFeedbackStatus,
+    OutcomeObservationStatus,
+    OutcomeReflectionStatus,
+)
 
 
 class ApiModel(BaseModel):
@@ -70,7 +75,7 @@ class RunBatchResult(ApiModel):
     changed: int = Field(ge=0)
 
 
-class FeedbackRetireRequest(ApiModel):
+class OutcomeFeedbackRetireRequest(ApiModel):
     reason: str = Field(min_length=1, max_length=500)
 
 
@@ -143,8 +148,8 @@ class CapabilitiesResponse(ApiModel):
     defaults: CapabilityDefaults
 
 
-class MemoryOutcome(ApiModel):
-    status: Literal["pending", "resolved"]
+class OutcomeObservationView(ApiModel):
+    status: OutcomeObservationStatus
     source_decision_id: int
     source_revision_id: str | None
     benchmark: str
@@ -163,21 +168,32 @@ class MemoryOutcome(ApiModel):
     data_available_at: datetime | None
 
 
-class MemoryReflection(ApiModel):
-    status: Literal["pending", "generated", "invalid", "retryable_failure"]
+class OutcomeReflectionView(ApiModel):
+    status: OutcomeReflectionStatus
     generated_at: datetime | None
     last_attempted_at: datetime | None
     next_retry_at: datetime | None
     error_code: str | None
 
 
-class MemoryFeedback(ApiModel):
+class OutcomeFeedbackApplicabilityView(ApiModel):
+    schema_version: Literal["1"]
+    scope: Literal["instrument", "market"]
+    instrument: str | None
+    market: str | None
+    research_stages: list[str]
+    research_domains: list[str]
+    method_category: str
+    horizon: str
+
+
+class OutcomeFeedbackView(ApiModel):
     id: int
-    status: Literal["eligible", "ineligible", "retired"]
+    status: OutcomeFeedbackStatus
     reasons: list[str]
     method_category: str
     horizon_limit: str
-    applicability: dict[str, object]
+    applicability: OutcomeFeedbackApplicabilityView
     qualified_at: datetime
     available_at: datetime
     retired_at: datetime | None
@@ -194,7 +210,7 @@ class MemoryEntry(ApiModel):
     analysis_date: str
     profile: RunProfile
     decision: ResearchDecision
-    outcome: MemoryOutcome
+    outcome: OutcomeObservationView
     reflection: str | None
-    reflection_lifecycle: MemoryReflection | None
-    feedback: MemoryFeedback | None
+    outcome_reflection: OutcomeReflectionView | None
+    outcome_feedback: OutcomeFeedbackView | None

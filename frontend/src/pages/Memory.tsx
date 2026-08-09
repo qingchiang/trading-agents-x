@@ -242,22 +242,22 @@ export default function Memory() {
                 <p className="memory-lifecycle-note">{entry.outcome.horizon_limit}</p>
               </>
             )}
-            {entry.reflection_lifecycle && (
+            {entry.outcome_reflection && (
               <div className="memory-lifecycle-note">
                 <strong>{t("reflectionStatus")}: </strong>
-                {entry.reflection_lifecycle.status}
-                {entry.reflection_lifecycle.error_code && (
-                  <> · {entry.reflection_lifecycle.error_code}</>
+                {entry.outcome_reflection.status}
+                {entry.outcome_reflection.error_code && (
+                  <> · {entry.outcome_reflection.error_code}</>
                 )}
                 {["invalid", "retryable_failure"].includes(
-                  entry.reflection_lifecycle.status,
+                  entry.outcome_reflection.status,
                 ) && (
                   <button
                     className="button compact-button"
                     type="button"
                     onClick={() => {
                       void api
-                        .retryMemoryReflection(entry.outcome_id)
+                        .retryOutcomeReflection(entry.outcome_id)
                         .then(() => load(window.location.search))
                         .catch((cause) =>
                           setError(
@@ -277,24 +277,28 @@ export default function Memory() {
                 <Markdown>{entry.reflection}</Markdown>
               </blockquote>
             )}
-            {entry.feedback && (
+            {entry.outcome_feedback && (
               <div className="memory-lifecycle-note">
                 <strong>{t("feedbackQualification")}: </strong>
-                {entry.feedback.status} · {t("availableAt")} {entry.feedback.available_at}
-                {entry.feedback.reasons.length > 0 && (
+                {entry.outcome_feedback.status} · {t("availableAt")}{" "}
+                {entry.outcome_feedback.available_at}
+                {entry.outcome_feedback.reasons.length > 0 && (
                   <ul>
-                    {entry.feedback.reasons.map((reason) => (
+                    {entry.outcome_feedback.reasons.map((reason) => (
                       <li key={reason}>{reason}</li>
                     ))}
                   </ul>
                 )}
-                {entry.feedback.status !== "retired" && (
+                {entry.outcome_feedback.status !== "retired" && (
                   <button
                     className="button compact-button"
                     type="button"
                     onClick={() => {
                       void api
-                        .retireMemoryFeedback(entry.feedback!.id, "retired_by_user")
+                        .retireOutcomeFeedback(
+                          entry.outcome_feedback!.id,
+                          "retired_by_user",
+                        )
                         .then(() => load(window.location.search))
                         .catch((cause) =>
                           setError(

@@ -10,8 +10,8 @@ vi.mock("../api/client", () => ({
   api: {
     memory: vi.fn(),
     recentInstruments: vi.fn(),
-    retryMemoryReflection: vi.fn(),
-    retireMemoryFeedback: vi.fn(),
+    retryOutcomeReflection: vi.fn(),
+    retireOutcomeFeedback: vi.fn(),
   },
 }));
 
@@ -64,14 +64,14 @@ const entry = {
     data_available_at: "2026-08-01T20:00:00Z",
   },
   reflection: "### Imported reflection\n\n- Preserve the lesson.",
-  reflection_lifecycle: {
+  outcome_reflection: {
     status: "generated",
     generated_at: "2026-08-01T20:01:00Z",
     last_attempted_at: "2026-08-01T20:01:00Z",
     next_retry_at: null,
     error_code: null,
   },
-  feedback: {
+  outcome_feedback: {
     id: 11,
     status: "eligible",
     reasons: [],
@@ -79,8 +79,14 @@ const entry = {
     horizon_limit:
       "Five completed aligned intervals do not prove a long-horizon thesis.",
     applicability: {
+      schema_version: "1",
+      scope: "instrument",
       instrument: "7203.T",
       market: "Asia/Tokyo",
+      research_stages: ["analysis_methodology"],
+      research_domains: ["cross_domain"],
+      method_category: "short_term_relative_return",
+      horizon: "short_term",
     },
     qualified_at: "2026-08-01T20:02:00Z",
     available_at: "2026-08-01T20:02:00Z",
@@ -94,8 +100,8 @@ beforeEach(async () => {
   await i18n.changeLanguage("en");
   vi.mocked(api.memory).mockResolvedValue([entry]);
   vi.mocked(api.recentInstruments).mockResolvedValue([]);
-  vi.mocked(api.retryMemoryReflection).mockResolvedValue({ status: "pending" });
-  vi.mocked(api.retireMemoryFeedback).mockResolvedValue({ status: "retired" });
+  vi.mocked(api.retryOutcomeReflection).mockResolvedValue({ status: "pending" });
+  vi.mocked(api.retireOutcomeFeedback).mockResolvedValue({ status: "retired" });
 });
 
 function renderMemory() {
@@ -132,7 +138,7 @@ test("shows lifecycle metadata and retires qualified feedback", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Retire Feedback" }));
 
   await waitFor(() =>
-    expect(api.retireMemoryFeedback).toHaveBeenCalledWith(11, "retired_by_user"),
+    expect(api.retireOutcomeFeedback).toHaveBeenCalledWith(11, "retired_by_user"),
   );
 });
 

@@ -624,9 +624,11 @@ async def test_memory_lifecycle_actions_delegate_without_exposing_errors(
         lambda feedback_id, *, reason: retired.append((feedback_id, reason)),
     )
 
-    retry_response = await web_client.post("/api/v1/memory/7/reflection/retry")
+    retry_response = await web_client.post(
+        "/api/v1/outcome-observations/7/reflection/retry"
+    )
     retire_response = await web_client.post(
-        "/api/v1/memory/feedback/11/retire",
+        "/api/v1/outcome-feedback/11/retire",
         json={"reason": "Superseded methodology"},
     )
 

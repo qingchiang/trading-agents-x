@@ -38,6 +38,7 @@ class _ScheduledRepository:
     def __init__(self, item):
         self.item = item
         self.due_at = None
+        self.due_at = None
         self.checked = []
 
     def pending_outcomes(self, limit, *, due_at):
@@ -137,6 +138,7 @@ class _LifecycleRepository:
         self.reflections = []
 
     def pending_outcomes(self, _limit, *, due_at):
+        self.due_at = due_at
         if self.item["reflection_status"] == "generated":
             return []
         return [dict(self.item)]
@@ -256,6 +258,54 @@ def test_invalid_reflection_does_not_recompute_completed_observation(
     assert stats == {"checked": 1, "resolved": 0, "pending": 0, "failed": 1}
     assert repository.observations == []
     assert repository.item["reflection_status"] == "invalid"
+
+
+def test_lifecycle_timestamps_are_captured_after_each_phase(
+    app_settings,
+    monkeypatch,
+) -> None:
+    due_at = datetime(2026, 8, 5, 0, tzinfo=timezone.utc)
+    observed_at = datetime(2026, 8, 5, 0, 1, tzinfo=timezone.utc)
+    generated_at = datetime(2026, 8, 5, 0, 3, tzinfo=timezone.utc)
+    clock = iter((due_at, observed_at, generated_at))
+    item = {
+        **_pending_item(),
+        "status": "pending",
+        "reflection_status": None,
+        "observation_start": None,
+        "observation_end": None,
+        "raw_return": None,
+        "alpha_return": None,
+    }
+    repository = _LifecycleRepository(item)
+    settlement = OutcomeSettlement(
+        app_settings,
+        repository,
+        reflector=object(),
+        utc_clock=lambda: next(clock),
+    )
+    monkeypatch.setattr(
+        settlement,
+        "observe",
+        lambda *_args, **_kwargs: OutcomeObservation(
+            raw_return=0.10,
+            alpha_return=0.04,
+            holding_intervals=5,
+            start_date=date(2026, 7, 29),
+            end_date=date(2026, 8, 5),
+        ),
+    )
+    monkeypatch.setattr(
+        settlement,
+        "_reflection",
+        lambda **_kwargs: "Method lesson: Keep the method bounded.",
+    )
+
+    settlement.settle_once()
+
+    assert repository.due_at == due_at
+    assert repository.observations[0][2] == observed_at
+    assert repository.reflections[0][1]["generated_at"] == generated_at
 
 
 def test_observe_requires_six_common_closes_for_five_intervals(

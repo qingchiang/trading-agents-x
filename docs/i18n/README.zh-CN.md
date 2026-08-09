@@ -218,7 +218,8 @@ Markdown/JSON 只作为显式导出格式；SQLite 是唯一事实源。
 ## API 与安全
 
 版本化 API 覆盖 run 创建/查询、事件 SSE、cancel/retry、export、
-memory、capabilities 与 health。创建 run 时可发送 `Idempotency-Key`，
+memory 查询、Reflection 重试、Feedback 停用、capabilities 与 health。
+创建 run 时可发送 `Idempotency-Key`，
 避免浏览器重复提交；也可在用户确认模板表单后发送终态 run 的
 `source_run_id`。OpenAPI 位于 `/openapi.json`。
 

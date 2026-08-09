@@ -5,30 +5,49 @@ from datetime import date, datetime
 from tradingagents.application.outcome_feedback import (
     HORIZON_LIMIT,
     METHOD_CATEGORY,
+    FeedbackSource,
+    ObservationQualificationInput,
+    OutcomeFeedbackStatus,
+    ReflectionQualificationInput,
     qualify_reflection,
 )
 
 
 def _qualify(reflection: str, **updates):
-    values = {
-        "reflection": reflection,
-        "decision_id": 7,
-        "revision_id": "revision-1",
-        "decision_rating": "Hold",
-        "decision_thesis": "Demand durability remains uncertain over three years.",
-        "decision_cutoff": date(2026, 7, 24),
-        "observation_start": date(2026, 7, 25),
-        "observation_end": date(2026, 8, 1),
-        "data_available_at": datetime(2026, 8, 1, 20),
-        "generated_at": datetime(2026, 8, 1, 20, 1),
-        "qualified_at": datetime(2026, 8, 1, 20, 2),
-        "ticker": "NVDA",
-        "market": "America/New_York",
-        "method_category": METHOD_CATEGORY,
-        "horizon_limit": HORIZON_LIMIT,
-    }
-    values.update(updates)
-    return qualify_reflection(**values)
+    values = dict(updates)
+    source = FeedbackSource(
+        decision_id=values.pop("decision_id", 7),
+        revision_id=values.pop("revision_id", "revision-1"),
+        decision_rating=values.pop("decision_rating", "Hold"),
+        decision_thesis=values.pop(
+            "decision_thesis",
+            "Demand durability remains uncertain over three years.",
+        ),
+        decision_cutoff=values.pop("decision_cutoff", date(2026, 7, 24)),
+        ticker=values.pop("ticker", "NVDA"),
+        market=values.pop("market", "America/New_York"),
+    )
+    observation = ObservationQualificationInput(
+        start=values.pop("observation_start", date(2026, 7, 25)),
+        end=values.pop("observation_end", date(2026, 8, 1)),
+        data_available_at=values.pop(
+            "data_available_at", datetime(2026, 8, 1, 20)
+        ),
+        method_category=values.pop("method_category", METHOD_CATEGORY),
+        horizon_limit=values.pop("horizon_limit", HORIZON_LIMIT),
+    )
+    reflection_input = ReflectionQualificationInput(
+        text=reflection,
+        generated_at=values.pop("generated_at", datetime(2026, 8, 1, 20, 1)),
+    )
+    qualified_at = values.pop("qualified_at", datetime(2026, 8, 1, 20, 2))
+    assert values == {}
+    return qualify_reflection(
+        source=source,
+        observation=observation,
+        reflection=reflection_input,
+        qualified_at=qualified_at,
+    )
 
 
 def test_qualification_records_explicit_scope_and_short_horizon() -> None:
@@ -37,12 +56,13 @@ def test_qualification_records_explicit_scope_and_short_horizon() -> None:
         "method assumptions with a bounded short-window check."
     )
 
-    assert result.status == "eligible"
+    assert result.status is OutcomeFeedbackStatus.ELIGIBLE
     assert result.reasons == ()
     assert result.candidate["source_decision_id"] == 7
     assert result.candidate["source_revision_id"] == "revision-1"
     assert result.applicability == {
         "schema_version": "1",
+        "scope": "instrument",
         "instrument": "NVDA",
         "market": "America/New_York",
         "research_stages": ["analysis_methodology"],
@@ -58,7 +78,7 @@ def test_qualification_rejects_research_claims_and_execution_advice() -> None:
         "Hold rating, so buy now at the stated price target."
     )
 
-    assert result.status == "ineligible"
+    assert result.status is OutcomeFeedbackStatus.INELIGIBLE
     assert set(result.reasons) == {
         "contains_old_rating",
         "contains_price_target",
@@ -76,8 +96,17 @@ def test_qualification_fails_closed_when_availability_or_window_is_not_pit() -> 
         data_available_at=datetime(2026, 8, 2),
     )
 
-    assert result.status == "ineligible"
+    assert result.status is OutcomeFeedbackStatus.INELIGIBLE
     assert result.reasons == (
         "observation_window_not_after_decision",
         "point_in_time_availability_invalid",
     )
+
+
+def test_qualification_rejects_copied_thesis_fragments() -> None:
+    result = _qualify(
+        "Method lesson: Recheck demand durability remains uncertain before reuse."
+    )
+
+    assert result.status is OutcomeFeedbackStatus.INELIGIBLE
+    assert result.reasons == ("contains_thesis_text",)

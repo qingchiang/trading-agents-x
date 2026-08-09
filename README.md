@@ -289,6 +289,8 @@ POST /api/v1/runs/restore
 GET  /api/v1/runs/{id}/export
 GET  /api/v1/instruments/recent
 GET  /api/v1/memory
+POST /api/v1/outcome-observations/{outcome_id}/reflection/retry
+POST /api/v1/outcome-feedback/{feedback_id}/retire
 GET  /api/v1/capabilities
 GET  /api/v1/health
 ```

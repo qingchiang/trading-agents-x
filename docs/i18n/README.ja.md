@@ -241,7 +241,8 @@ truth です。
 ## API とセキュリティ
 
 バージョン化 API は run の作成・参照、event SSE、cancel/retry、
-export、memory、capabilities、health を提供します。run 作成時に
+export、memory 参照、Reflection の再試行、Feedback の廃止、capabilities、
+health を提供します。run 作成時に
 `Idempotency-Key` を送ることで、ブラウザ再送による重複を防げます。
 確認済みテンプレートからの作成では、終端 run の `source_run_id` も送信
 できます。OpenAPI は `/openapi.json` です。

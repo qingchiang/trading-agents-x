@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: proposed
 ---
 
 # Separate outcome feedback from longitudinal research state
