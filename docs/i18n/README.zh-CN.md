@@ -150,6 +150,10 @@ Research Chain 更新提供一个内部、显式启用的日本股票增量研�
 无需重新生成 analyst 报告与研究讨论。任何重大变化、覆盖缺口、语义不兼容、
 无效、创新信息或不确定结果都会自动进入同一次更新的完整分析：
 
+Revision Role、Execution Strategy 与 Change Conclusion 会分别展示。若完整
+重新评估仍无法得出重大变化或无重大变化，会创建可读的 Indeterminate head；
+服务器要求下一次更新继续使用完整重新评估。
+
 ```dotenv
 TRADINGAGENTS_RESEARCH_UPDATE_MODE=experimental
 TRADINGAGENTS_EXPERIMENTAL_NMC_JP_WHITELIST=6501.T,7203.T

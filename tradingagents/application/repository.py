@@ -74,13 +74,16 @@ from .research import (
     CoverageAttestation,
     CurrentResearchState,
     EffectiveEvidenceSnapshot,
+    IndeterminateReason,
     ResearchChain,
+    ResearchChangeConclusion,
     ResearchExecutionStrategy,
     ResearchRevision,
     ResearchRevisionDraft,
-    ResearchRevisionOutcome,
+    ResearchRevisionRole,
     RevisionDelta,
     UpdateSummary,
+    derive_next_update_policy,
 )
 from .settings import AppSettings
 
@@ -2092,8 +2095,25 @@ class RunRepository:
             predecessor_revision_id=predecessor_revision_id,
             producing_run_id=producing_run_id,
             cutoff=draft.cutoff,
+            role=draft.role.value,
             execution_strategy=draft.execution_strategy.value,
-            outcome=draft.outcome.value,
+            legacy_outcome=(
+                "material_change"
+                if draft.change_conclusion is None
+                else "coverage_incomplete"
+                if draft.change_conclusion is ResearchChangeConclusion.INDETERMINATE
+                else draft.change_conclusion.value
+            ),
+            change_conclusion=(
+                draft.change_conclusion.value
+                if draft.change_conclusion is not None
+                else None
+            ),
+            indeterminate_reason=(
+                draft.indeterminate_reason.value
+                if draft.indeterminate_reason is not None
+                else None
+            ),
             language=draft.current_state.language,
             current_state_json=draft.current_state.model_dump(mode="json"),
             delta_json=draft.delta.model_dump(mode="json"),
@@ -2129,6 +2149,7 @@ class RunRepository:
         )
         if current is None:
             raise ValueError(f"Research Chain {record.id} has no current Revision")
+        next_update_policy, next_update_reason = derive_next_update_policy(current)
         return ResearchChain(
             id=record.id,
             instrument=record.instrument,
@@ -2136,6 +2157,8 @@ class RunRepository:
             current_revision_id=current.id,
             current_revision=current,
             revisions=revisions,
+            next_update_policy=next_update_policy,
+            next_update_reason=next_update_reason,
             created_at=_aware(record.created_at),
             updated_at=_aware(record.updated_at),
         )
@@ -2149,8 +2172,18 @@ class RunRepository:
             predecessor_revision_id=record.predecessor_revision_id,
             producing_run_id=record.producing_run_id,
             cutoff=record.cutoff,
+            role=ResearchRevisionRole(record.role),
             execution_strategy=ResearchExecutionStrategy(record.execution_strategy),
-            outcome=ResearchRevisionOutcome(record.outcome),
+            change_conclusion=(
+                ResearchChangeConclusion(record.change_conclusion)
+                if record.change_conclusion is not None
+                else None
+            ),
+            indeterminate_reason=(
+                IndeterminateReason(record.indeterminate_reason)
+                if record.indeterminate_reason is not None
+                else None
+            ),
             current_state=CurrentResearchState.model_validate(record.current_state_json),
             delta=RevisionDelta.model_validate(record.delta_json),
             coverage=CoverageAttestation.model_validate(record.coverage_json),

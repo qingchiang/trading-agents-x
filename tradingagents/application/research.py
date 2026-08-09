@@ -132,10 +132,25 @@ class ResearchExecutionStrategy(str, Enum):
     INCREMENTAL = "incremental"
 
 
-class ResearchRevisionOutcome(str, Enum):
+class ResearchRevisionRole(str, Enum):
+    INITIAL = "initial"
+    UPDATE = "update"
+
+
+class ResearchChangeConclusion(str, Enum):
     MATERIAL_CHANGE = "material_change"
     NO_MATERIAL_CHANGE = "no_material_change"
+    INDETERMINATE = "indeterminate"
+
+
+class IndeterminateReason(str, Enum):
     COVERAGE_INCOMPLETE = "coverage_incomplete"
+
+
+class NextUpdateReason(str, Enum):
+    INDETERMINATE_HEAD = "indeterminate_head"
+    COVERAGE_INCOMPLETE = "coverage_incomplete"
+    INCOMPATIBLE_MARKET_SEMANTICS = "incompatible_market_semantics"
 
 
 class IncrementalEscalationReason(str, Enum):
@@ -310,6 +325,7 @@ class CurrentResearchState(ResearchModel):
             raise ValueError("state relationships must use active Claim IDs")
         linked_refs = set(self.opinion.evidence_refs)
         linked_refs.update(ref for claim in self.claims for ref in claim.evidence_refs)
+        linked_refs.update(ref for question in self.questions for ref in question.evidence_refs)
         linked_refs.update(ref for scenario in self.scenarios for ref in scenario.evidence_refs)
         linked_refs.update(
             ref
@@ -360,7 +376,7 @@ class UpdateSummary(ResearchModel):
     baseline_cutoff: date | None = None
     analysis_cutoff: date | None = None
     execution_strategy: ResearchExecutionStrategy | None = None
-    outcome: ResearchRevisionOutcome | None = None
+    change_conclusion: ResearchChangeConclusion | None = None
     new_evidence_refs: tuple[str, ...] = ()
 
     @field_validator("language", mode="before")
@@ -528,8 +544,10 @@ class ResearchChangeSignal(ResearchModel):
 
 class ResearchRevisionDraft(ResearchModel):
     cutoff: date
+    role: ResearchRevisionRole
     execution_strategy: ResearchExecutionStrategy
-    outcome: ResearchRevisionOutcome
+    change_conclusion: ResearchChangeConclusion | None = None
+    indeterminate_reason: IndeterminateReason | None = None
     delta: RevisionDelta
     current_state: CurrentResearchState
     coverage: CoverageAttestation
@@ -539,6 +557,20 @@ class ResearchRevisionDraft(ResearchModel):
 
     @model_validator(mode="after")
     def validate_complete_coverage(self) -> ResearchRevisionDraft:
+        if self.role is ResearchRevisionRole.INITIAL:
+            if self.change_conclusion is not None:
+                raise ValueError("initial Revision has no Change Conclusion")
+            if self.execution_strategy is not ResearchExecutionStrategy.FULL:
+                raise ValueError("initial Revision requires Full execution")
+        elif self.change_conclusion is None:
+            raise ValueError("update Revision requires a Change Conclusion")
+        if self.change_conclusion is ResearchChangeConclusion.INDETERMINATE:
+            if self.execution_strategy is not ResearchExecutionStrategy.FULL:
+                raise ValueError("Indeterminate Revision requires Full execution")
+            if self.indeterminate_reason is None:
+                raise ValueError("Indeterminate Revision requires a stable reason")
+        elif self.indeterminate_reason is not None:
+            raise ValueError("only an Indeterminate Revision has an indeterminate reason")
         claim_ids = {claim.id for claim in self.current_state.claims}
         covered_claim_ids = tuple(item.object_id for item in self.coverage.claims)
         if claim_ids != set(covered_claim_ids) or len(covered_claim_ids) != len(
@@ -552,8 +584,75 @@ class ResearchRevisionDraft(ResearchModel):
         ):
             raise ValueError("Coverage must attest every Research Question exactly once")
         snapshot_refs = {item.ref for item in self.evidence_snapshot.bundle.items}
-        if not set(self.current_state.evidence_refs).issubset(snapshot_refs):
-            raise ValueError("Current Research State uses Evidence outside its snapshot")
+        reachable_refs = set(self.current_state.evidence_refs)
+        reachable_refs.update(ref for item in self.coverage.claims for ref in item.evidence_refs)
+        reachable_refs.update(ref for item in self.coverage.questions for ref in item.evidence_refs)
+        reachable_refs.update(ref for item in self.coverage.domains for ref in item.evidence_refs)
+        reachable_refs.update(self.delta.inherited_evidence_refs)
+        reachable_refs.update(self.delta.new_evidence_refs)
+        reachable_refs.update(self.update_summary.new_evidence_refs)
+        reachable_refs.update(item.evidence_ref for item in self.evidence_snapshot.source_records)
+        if self.research_update_audit is not None:
+            audit_coverages = tuple(
+                item
+                for coverage in (
+                    self.research_update_audit.coverage,
+                    (
+                        self.research_update_audit.candidate.coverage
+                        if self.research_update_audit.candidate is not None
+                        else None
+                    ),
+                )
+                if coverage is not None
+                for item in (*coverage.claims, *coverage.questions, *coverage.domains)
+            )
+            reachable_refs.update(ref for item in audit_coverages for ref in item.evidence_refs)
+            if self.research_update_audit.candidate is not None:
+                reachable_refs.update(
+                    self.research_update_audit.candidate.update_summary.new_evidence_refs
+                )
+                reachable_refs.update(
+                    item.ref
+                    for item in self.research_update_audit.candidate.evidence_snapshot.bundle.items
+                )
+            reachable_refs.update(
+                item.evidence_ref for item in self.research_update_audit.evidence_lineage
+            )
+            if self.research_update_audit.semantic_assessment is not None:
+                reachable_refs.update(
+                    ref
+                    for relationship in self.research_update_audit.semantic_assessment.relationships
+                    for ref in relationship.evidence_refs
+                )
+        missing_refs = sorted(reachable_refs - snapshot_refs)
+        if missing_refs:
+            raise ValueError(
+                "Evidence closure requires every reachable reference in the snapshot: "
+                + ", ".join(missing_refs)
+            )
+        version_ids = {item.version_id for item in self.evidence_snapshot.source_records}
+        referenced_versions = {
+            item.replaces_version_id
+            for item in self.evidence_snapshot.source_records
+            if item.replaces_version_id is not None
+        }
+        referenced_versions.update(
+            version_id
+            for signal in self.delta.change_signals
+            for version_id in (signal.previous_version_id, signal.current_version_id)
+            if version_id is not None
+        )
+        if self.research_update_audit is not None and self.research_update_audit.candidate:
+            referenced_versions.update(
+                item.version_id
+                for item in self.research_update_audit.candidate.evidence_snapshot.source_records
+            )
+        missing_versions = sorted(referenced_versions - version_ids)
+        if missing_versions:
+            raise ValueError(
+                "Source Record closure requires every lineage version in the snapshot: "
+                + ", ".join(missing_versions)
+            )
         return self
 
 
@@ -605,7 +704,7 @@ class IncrementalGateResult(ResearchModel):
             raise ValueError("incremental gate requires exactly one candidate or escalation")
         if self.candidate is not None and (
             self.candidate.execution_strategy is not ResearchExecutionStrategy.INCREMENTAL
-            or self.candidate.outcome is not ResearchRevisionOutcome.NO_MATERIAL_CHANGE
+            or self.candidate.change_conclusion is not ResearchChangeConclusion.NO_MATERIAL_CHANGE
         ):
             raise ValueError("incremental gate candidate must propose No Material Change")
         return self
@@ -628,9 +727,11 @@ def validate_experimental_nmc_candidate(
     candidate: ResearchRevisionDraft,
 ) -> IncrementalEscalationReason | None:
     """Fail closed unless a bounded candidate can safely become authoritative."""
+    if derive_next_update_policy(baseline)[0] != "incremental_allowed":
+        return IncrementalEscalationReason.INVALID_BASELINE
     if (
         candidate.execution_strategy is not ResearchExecutionStrategy.INCREMENTAL
-        or candidate.outcome is not ResearchRevisionOutcome.NO_MATERIAL_CHANGE
+        or candidate.change_conclusion is not ResearchChangeConclusion.NO_MATERIAL_CHANGE
         or candidate.cutoff <= baseline.cutoff
         or candidate.current_state.instrument != baseline.current_state.instrument
         or candidate.current_state.cutoff != candidate.cutoff
@@ -646,10 +747,7 @@ def validate_experimental_nmc_candidate(
         item.version_id: item for item in candidate.evidence_snapshot.source_record_lineage
     }
     for record in candidate.evidence_snapshot.source_records:
-        if (
-            record.status in status_reasons
-            and source_lineage[record.version_id].lineage == "new"
-        ):
+        if record.status in status_reasons and source_lineage[record.version_id].lineage == "new":
             return status_reasons[record.status]
     for signal in candidate.delta.change_signals:
         if not signal.requires_full_analysis:
@@ -737,13 +835,72 @@ def prepare_experimental_nmc_revision(
     summary = summaries.get(candidate.current_state.language, summaries["en"]).format(**values)
     updated = candidate.model_copy(
         update={
-            "update_summary": candidate.update_summary.model_copy(
-                update={"summary": summary}
-            ),
+            "update_summary": candidate.update_summary.model_copy(update={"summary": summary}),
             "research_update_audit": audit,
         }
     )
     return ResearchRevisionDraft.model_validate(updated.model_dump(mode="python"))
+
+
+def close_revision_over_update_candidate(
+    revision: ResearchRevisionDraft,
+    candidate: ResearchRevisionDraft | EffectiveEvidenceSnapshot,
+) -> ResearchRevisionDraft:
+    """Seal bounded candidate Evidence into an authoritative Full Revision snapshot."""
+    full_snapshot = revision.evidence_snapshot
+    candidate_snapshot = (
+        candidate.evidence_snapshot if isinstance(candidate, ResearchRevisionDraft) else candidate
+    )
+    items = tuple(
+        {
+            item.ref: item
+            for item in (*full_snapshot.bundle.items, *candidate_snapshot.bundle.items)
+        }.values()
+    )
+    tables = tuple(
+        {
+            item.id: item
+            for item in (*full_snapshot.bundle.tables, *candidate_snapshot.bundle.tables)
+        }.values()
+    )
+    lineage = {
+        item.evidence_ref: item for item in (*candidate_snapshot.lineage, *full_snapshot.lineage)
+    }
+    records = tuple(
+        {
+            item.version_id: item
+            for item in (*full_snapshot.source_records, *candidate_snapshot.source_records)
+        }.values()
+    )
+    source_lineage = {
+        item.version_id: item
+        for item in (
+            *candidate_snapshot.source_record_lineage,
+            *full_snapshot.source_record_lineage,
+        )
+    }
+    snapshot = EffectiveEvidenceSnapshot(
+        bundle=EvidenceBundle(
+            instrument=full_snapshot.bundle.instrument,
+            analysis_date=full_snapshot.bundle.analysis_date,
+            items=items,
+            tables=tables,
+            sealed_at=full_snapshot.bundle.sealed_at,
+        ),
+        lineage=tuple(lineage[item.ref] for item in items),
+        source_records=records,
+        source_record_lineage=tuple(source_lineage[item.version_id] for item in records),
+        source_watermarks=tuple(
+            {
+                (item.source, item.scanned_start, item.scanned_end): item
+                for item in (
+                    *candidate_snapshot.source_watermarks,
+                    *full_snapshot.source_watermarks,
+                )
+            }.values()
+        ),
+    )
+    return revision.model_copy(update={"evidence_snapshot": snapshot})
 
 
 class ResearchRevision(ResearchRevisionDraft):
@@ -756,6 +913,46 @@ class ResearchRevision(ResearchRevisionDraft):
     created_at: datetime
 
 
+def derive_next_update_policy(
+    revision: ResearchRevisionDraft,
+) -> tuple[Literal["incremental_allowed", "full_required"], NextUpdateReason | None]:
+    """Derive bounded-update eligibility without conflating role or conclusion."""
+    if revision.change_conclusion is ResearchChangeConclusion.INDETERMINATE:
+        return "full_required", NextUpdateReason.INDETERMINATE_HEAD
+    if (
+        not revision.coverage.supports_no_material_change
+        or any(
+            item.requirement is CoverageRequirement.REQUIRED
+            and item.status is not CoverageStatus.COMPLETE
+            for item in revision.coverage.domains
+        )
+        or any(
+            item.status is not CoverageStatus.COMPLETE
+            for item in (*revision.coverage.claims, *revision.coverage.questions)
+        )
+    ):
+        return "full_required", NextUpdateReason.COVERAGE_INCOMPLETE
+    if any(
+        item.kind is ResearchChangeKind.MARKET_SEMANTIC_INCOMPATIBILITY
+        for item in revision.delta.change_signals
+    ):
+        return "full_required", NextUpdateReason.INCOMPATIBLE_MARKET_SEMANTICS
+    return "incremental_allowed", None
+
+
+def derive_shadow_comparison(
+    candidate: ResearchRevisionDraft | None,
+    authoritative: ResearchRevisionDraft,
+) -> Literal["agreement", "disagreement", "inconclusive", "not_applicable"]:
+    if candidate is None:
+        return "not_applicable"
+    if authoritative.change_conclusion is ResearchChangeConclusion.INDETERMINATE:
+        return "inconclusive"
+    if authoritative.change_conclusion is ResearchChangeConclusion.NO_MATERIAL_CHANGE:
+        return "agreement"
+    return "disagreement"
+
+
 class ResearchChain(ResearchModel):
     id: str
     instrument: str
@@ -763,6 +960,8 @@ class ResearchChain(ResearchModel):
     current_revision_id: str
     current_revision: ResearchRevision | None = None
     revisions: tuple[ResearchRevision, ...] = ()
+    next_update_policy: Literal["incremental_allowed", "full_required"] = "full_required"
+    next_update_reason: NextUpdateReason | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -784,8 +983,14 @@ def render_revision_export_markdown(export: RevisionExport) -> str:
         f"- Revision: `{revision.id}`",
         f"- Cutoff: {revision.cutoff.isoformat()}",
         f"- Language: {state.language}",
+        f"- Revision role: {revision.role.value}",
         f"- Execution strategy: {revision.execution_strategy.value}",
-        f"- Outcome: {revision.outcome.value}",
+        "- Change conclusion: "
+        + (
+            revision.change_conclusion.value
+            if revision.change_conclusion is not None
+            else "not applicable"
+        ),
         "",
         "## Current Research Opinion",
         "",
@@ -892,11 +1097,20 @@ def render_revision_export_markdown(export: RevisionExport) -> str:
                 "## Bounded Update Finding",
                 "",
                 f"- Mode: {audit.mode}",
-                f"- Candidate outcome: "
-                f"{audit.candidate.outcome if audit.candidate is not None else 'none'}",
+                f"- Candidate Change Conclusion: "
+                f"{audit.candidate.change_conclusion if audit.candidate is not None else 'none'}",
                 f"- Authoritative strategy: {audit.authoritative_strategy}",
                 f"- Escalation reason: {audit.escalation_reason or 'none'}",
                 f"- Comparison: {audit.comparison}",
+                *(
+                    [
+                        "- Comparison explanation: the authoritative Full reassessment was "
+                        "Indeterminate, so this result is counted as neither agreement nor "
+                        "disagreement."
+                    ]
+                    if audit.comparison == "inconclusive"
+                    else []
+                ),
                 "- Bounded checked windows: "
                 + (
                     "; ".join(
@@ -1430,7 +1644,8 @@ def assess_deterministic_update(
     """Apply fail-closed gates and build a quiet bounded-update candidate."""
 
     if (
-        request.ticker != baseline.current_state.instrument
+        derive_next_update_policy(baseline)[0] != "incremental_allowed"
+        or request.ticker != baseline.current_state.instrument
         or request.analysis_date <= baseline.cutoff
         or evidence.instrument != request.ticker
         or evidence.analysis_date != request.analysis_date
@@ -1626,8 +1841,9 @@ def assess_deterministic_update(
             )
         candidate = ResearchRevisionDraft(
             cutoff=request.analysis_date,
+            role=ResearchRevisionRole.UPDATE,
             execution_strategy=ResearchExecutionStrategy.INCREMENTAL,
-            outcome=ResearchRevisionOutcome.NO_MATERIAL_CHANGE,
+            change_conclusion=ResearchChangeConclusion.NO_MATERIAL_CHANGE,
             delta=RevisionDelta(
                 opinion_changed=False,
                 claims=tuple(
@@ -1678,7 +1894,7 @@ def assess_deterministic_update(
                 baseline_cutoff=baseline.cutoff,
                 analysis_cutoff=request.analysis_date,
                 execution_strategy=ResearchExecutionStrategy.INCREMENTAL,
-                outcome=ResearchRevisionOutcome.NO_MATERIAL_CHANGE,
+                change_conclusion=ResearchChangeConclusion.NO_MATERIAL_CHANGE,
                 new_evidence_refs=tuple(item.ref for item in evidence.items),
             ),
             evidence_snapshot=evidence_snapshot,
@@ -2035,20 +2251,20 @@ def assemble_full_update(
         new_evidence_refs=tuple(item.ref for item in candidate_bundle.items),
         change_signals=change_signals,
     )
-    outcome = (
-        ResearchRevisionOutcome.MATERIAL_CHANGE
+    change_conclusion = (
+        ResearchChangeConclusion.MATERIAL_CHANGE
         if material
         else (
-            ResearchRevisionOutcome.NO_MATERIAL_CHANGE
+            ResearchChangeConclusion.NO_MATERIAL_CHANGE
             if supports_quiet
-            else ResearchRevisionOutcome.COVERAGE_INCOMPLETE
+            else ResearchChangeConclusion.INDETERMINATE
         )
     )
     summary_values = {
         "baseline": baseline.cutoff.isoformat(),
         "cutoff": candidate.cutoff.isoformat(),
         "count": len(candidate_bundle.items),
-        "outcome": outcome.value,
+        "outcome": change_conclusion.value,
     }
     summaries = {
         "en": (
@@ -2074,7 +2290,13 @@ def assemble_full_update(
     updated = candidate.model_copy(
         update={
             "execution_strategy": ResearchExecutionStrategy.FULL,
-            "outcome": outcome,
+            "role": ResearchRevisionRole.UPDATE,
+            "change_conclusion": change_conclusion,
+            "indeterminate_reason": (
+                IndeterminateReason.COVERAGE_INCOMPLETE
+                if change_conclusion is ResearchChangeConclusion.INDETERMINATE
+                else None
+            ),
             "delta": delta,
             "current_state": state,
             "coverage": candidate.coverage.model_copy(
@@ -2099,7 +2321,7 @@ def assemble_full_update(
                     "baseline_cutoff": baseline.cutoff,
                     "analysis_cutoff": candidate.cutoff,
                     "execution_strategy": ResearchExecutionStrategy.FULL,
-                    "outcome": outcome,
+                    "change_conclusion": change_conclusion,
                     "new_evidence_refs": tuple(item.ref for item in candidate_bundle.items),
                     "limitations": tuple(
                         dict.fromkeys(
@@ -2382,8 +2604,9 @@ def assemble_full_revision(
     }
     return ResearchRevisionDraft(
         cutoff=request.analysis_date,
+        role=ResearchRevisionRole.INITIAL,
         execution_strategy=ResearchExecutionStrategy.FULL,
-        outcome=ResearchRevisionOutcome.MATERIAL_CHANGE,
+        change_conclusion=None,
         delta=RevisionDelta(
             opinion_changed=True,
             claims=tuple(
@@ -2419,7 +2642,7 @@ def assemble_full_revision(
             limitations=tuple(dict.fromkeys(limitations)),
             analysis_cutoff=request.analysis_date,
             execution_strategy=ResearchExecutionStrategy.FULL,
-            outcome=ResearchRevisionOutcome.MATERIAL_CHANGE,
+            change_conclusion=None,
             new_evidence_refs=evidence_refs,
         ),
         evidence_snapshot=EffectiveEvidenceSnapshot(

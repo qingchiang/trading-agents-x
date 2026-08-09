@@ -57,8 +57,7 @@ pytestmark = [
     pytest.mark.live_data,
     pytest.mark.live_llm,
     pytest.mark.skipif(
-        os.environ.get("RUN_LIVE_DATA_TESTS") != "1"
-        or os.environ.get("RUN_LIVE_LLM_TESTS") != "1",
+        os.environ.get("RUN_LIVE_DATA_TESTS") != "1" or os.environ.get("RUN_LIVE_LLM_TESTS") != "1",
         reason="Set RUN_LIVE_DATA_TESTS=1 and RUN_LIVE_LLM_TESTS=1",
     ),
 ]
@@ -143,7 +142,7 @@ def test_reviewed_japanese_shadow_pairs_are_sanitized_and_fail_closed(
             assert result.status is RunStatus.SUCCEEDED
             assert audit is not None and audit.mode == "shadow"
             bounded = (
-                audit.candidate.outcome
+                audit.candidate.change_conclusion
                 if audit.candidate is not None
                 else audit.escalation_reason
             )
@@ -153,13 +152,13 @@ def test_reviewed_japanese_shadow_pairs_are_sanitized_and_fail_closed(
                 last_observation=(
                     f"ticker={chain.instrument};cutoff={request.analysis_date};"
                     f"scenario={case['scenario']};bounded={bounded};"
-                    f"full={revision.outcome.value};comparison={audit.comparison};"
+                    f"full={revision.change_conclusion.value};comparison={audit.comparison};"
                     f"bounded_llm_calls={audit.bounded_metrics.llm_calls};"
                     f"full_llm_calls={audit.full_metrics.llm_calls}"
                 ),
             )
         assert bounded == case["expected_bounded"]
-        assert revision.outcome.value == case["expected_full_outcome"]
+        assert revision.change_conclusion.value == case["expected_full_outcome"]
         assert audit.full_metrics.llm_calls > 0
         if case["scenario"] == "quiet_interval":
             assert audit.semantic_assessment is not None
@@ -167,9 +166,7 @@ def test_reviewed_japanese_shadow_pairs_are_sanitized_and_fail_closed(
         expected_comparison = (
             "agreement"
             if bounded == "no_material_change"
-            and revision.outcome.value == "no_material_change"
-            else (
-                "disagreement" if bounded == "no_material_change" else "not_applicable"
-            )
+            and revision.change_conclusion.value == "no_material_change"
+            else ("disagreement" if bounded == "no_material_change" else "not_applicable")
         )
         assert audit.comparison == expected_comparison

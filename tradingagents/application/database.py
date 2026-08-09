@@ -122,8 +122,13 @@ class ResearchRevisionRecord(Base):
         ForeignKey("runs.id", ondelete="SET NULL"), nullable=True, unique=True
     )
     cutoff: Mapped[date] = mapped_column(Date, nullable=False)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
     execution_strategy: Mapped[str] = mapped_column(String(20), nullable=False)
-    outcome: Mapped[str] = mapped_column(String(30), nullable=False)
+    legacy_outcome: Mapped[str] = mapped_column(
+        "outcome", String(30), nullable=False, default="not_applicable"
+    )
+    change_conclusion: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    indeterminate_reason: Mapped[str | None] = mapped_column(String(50), nullable=True)
     language: Mapped[str] = mapped_column(String(40), nullable=False)
     current_state_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     delta_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)

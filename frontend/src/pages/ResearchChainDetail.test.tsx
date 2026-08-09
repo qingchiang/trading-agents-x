@@ -16,6 +16,8 @@ const chain = {
   current_revision_id: "revision-1",
   created_at: "2026-07-24T00:00:00Z",
   updated_at: "2026-07-24T00:00:00Z",
+  next_update_policy: "incremental_allowed",
+  next_update_reason: null,
   revisions: [],
   current_revision: {
     id: "revision-1",
@@ -23,17 +25,18 @@ const chain = {
     sequence: 1,
     producing_run_id: "run-1",
     cutoff: "2026-07-24",
+    role: "initial",
     execution_strategy: "full",
-    outcome: "material_change",
+    change_conclusion: null,
+    indeterminate_reason: null,
     created_at: "2026-07-24T00:00:00Z",
     metrics: { input_tokens: 1200, output_tokens: 300 },
     research_update_audit: {
       mode: "shadow",
       candidate: {
-        outcome: "no_material_change",
+        change_conclusion: "no_material_change",
         coverage: {},
         update_summary: { summary: "No bounded material change detected." },
-        evidence_snapshot: {},
       },
       coverage: {
         supports_no_material_change: true,
@@ -192,7 +195,7 @@ test("reads the complete current thesis, coverage, evidence, reports, and metric
   expect(screen.getByText(/2026-06-24.*2026-07-24/)).toBeVisible();
   expect(screen.getByText("Bounded update finding")).toBeVisible();
   expect(screen.getByText(/Experiment mode: shadow/)).toBeVisible();
-  expect(screen.getByText(/Candidate outcome: no_material_change/)).toBeVisible();
+  expect(screen.getByText(/Candidate Change Conclusion: no_material_change/)).toBeVisible();
   expect(screen.getByText(/Comparison: disagreement/)).toBeVisible();
   expect(screen.getByText(/Bounded checked windows: EDINET 2026-07-01–2026-07-25/)).toBeVisible();
   expect(screen.getByText(/Bounded update summary: No bounded material change detected/)).toBeVisible();
@@ -244,8 +247,9 @@ test("queues an update from the displayed current head", async () => {
 test("separates experimental NMC strategy, outcome, execution, and escalation rate", async () => {
   const experimental = structuredClone(chain) as ResearchChain;
   const revision = experimental.current_revision!;
+  revision.role = "update";
   revision.execution_strategy = "incremental";
-  revision.outcome = "no_material_change";
+  revision.change_conclusion = "no_material_change";
   revision.research_update_audit = {
     ...revision.research_update_audit!,
     mode: "experimental",
@@ -264,11 +268,47 @@ test("separates experimental NMC strategy, outcome, execution, and escalation ra
 
   expect(await screen.findByText(/Experiment mode: experimental/)).toBeVisible();
   expect(screen.getByText(/Authoritative strategy: incremental/)).toBeVisible();
-  expect(screen.getByText(/2026-07-24 · incremental · no_material_change/)).toBeVisible();
+  expect(screen.getByText(/Role: update · Execution strategy: incremental · Change conclusion: no_material_change/)).toBeVisible();
   expect(screen.getByText(/Full escalation rate: 0\/1 \(0%\)/)).toBeVisible();
   expect(screen.queryByRole("link", { name: "Full analysis" })).not.toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Producing execution" })).toHaveAttribute(
     "href",
     "/runs/run-1",
   );
+});
+
+test("warns before an Indeterminate thesis and queues only a Full reassessment", async () => {
+  const indeterminate = structuredClone(chain) as ResearchChain;
+  indeterminate.next_update_policy = "full_required";
+  indeterminate.next_update_reason = "indeterminate_head";
+  const revision = indeterminate.current_revision!;
+  revision.role = "update";
+  revision.change_conclusion = "indeterminate";
+  revision.indeterminate_reason = "coverage_incomplete";
+  revision.coverage.limitations = ["TDnet archive coverage is incomplete."];
+  indeterminate.revisions = [revision];
+  vi.mocked(api.researchChain).mockResolvedValue(indeterminate);
+  vi.mocked(api.updateResearchChain).mockResolvedValue({ id: "run-full" } as never);
+
+  render(
+    <Router initialPath="/research/chain-1">
+      <ResearchChainDetail />
+    </Router>,
+  );
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "This Research Revision is Indeterminate.",
+  );
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "TDnet archive coverage is incomplete.",
+  );
+  expect(screen.getByText("Quiet reassessment blocked")).toBeVisible();
+  expect(screen.queryByText("Quiet reassessment supported")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Run Full reassessment" }));
+  await waitFor(() => expect(api.updateResearchChain).toHaveBeenCalled());
+  expect(vi.mocked(api.updateResearchChain).mock.calls[0][1]).toEqual({
+    baseline_revision_id: "revision-1",
+    analysis_date: "2026-07-25",
+    execution_strategy: "full",
+  });
 });

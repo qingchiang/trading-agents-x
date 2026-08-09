@@ -74,6 +74,13 @@ The first slice covers manual updates of a small Japanese-equity whitelist:
 6. The execution records token use, model cost when available, elapsed time,
    data coverage limitations, and the reason for any Full escalation.
 
+Every Revision separately records its Role, Execution Strategy, and optional
+Change Conclusion. Initial Revisions have no Change Conclusion. If independent
+Full Analysis cannot justify Material Change or No Material Change, it advances
+the chain with an Indeterminate Revision, preserves the state, Evidence, and
+limitations, and requires the next manual update to be another Full
+reassessment.
+
 “Full Analysis” means the project's existing complete pipeline. It does not
 claim objective completeness and may reuse cached or persisted source material
 when the current point-in-time and provenance contracts allow it.
@@ -91,6 +98,11 @@ when the current point-in-time and provenance contracts allow it.
   its confidence, scenarios, risks, catalysts, invalidation conditions, or
   Evidence integrity is material.
 - A failed or cancelled execution does not advance the Research Chain.
+- A successful Revision advances only after all state, coverage, delta,
+  summary, audit, Evidence, and Source Record lineage references close within
+  its own Effective Evidence Snapshot.
+- Eligible Baseline status is server-derived. Incomplete or Indeterminate heads
+  report `full_required`; there is no force-incremental repair path.
 
 These rules define the state being tested. Exact table layouts, enum names,
 prompt schemas, retry counts, and UI components are implementation choices.
@@ -144,6 +156,8 @@ During Shadow validation the Full Analysis result is authoritative:
 - an incremental No Material Change proposal is compared with a paired Full
   Analysis;
 - disagreements are reviewed as experiment findings rather than incidents;
+- an Indeterminate Full result makes a paired No Material Change candidate
+  inconclusive, not agreement or disagreement;
 - no universal accuracy threshold or permanent canary system is required.
 
 The useful measurements are:

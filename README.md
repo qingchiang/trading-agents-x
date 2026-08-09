@@ -204,6 +204,11 @@ Material Change assessment advance only an explicit `.T` whitelist without
 regenerating analyst reports or deliberation. Every material, incomplete,
 incompatible, invalid, novel, or uncertain result falls back to Full Analysis:
 
+Research Revision Role, Execution Strategy, and Change Conclusion are shown
+separately. A Full reassessment that remains inconclusive creates an
+Indeterminate, readable head; the server then requires the next update to use
+Full reassessment again.
+
 ```dotenv
 TRADINGAGENTS_RESEARCH_UPDATE_MODE=experimental
 TRADINGAGENTS_EXPERIMENTAL_NMC_JP_WHITELIST=6501.T,7203.T

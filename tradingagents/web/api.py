@@ -52,7 +52,11 @@ from tradingagents.application.repository import (
     ResearchRevisionNotFoundError,
     RunNotFoundError,
 )
-from tradingagents.application.research import ResearchChain, ResearchRevision
+from tradingagents.application.research import (
+    ResearchChain,
+    ResearchExecutionStrategy,
+    ResearchRevision,
+)
 from tradingagents.application.service import AnalysisService
 from tradingagents.application.settings import AppSettings
 from tradingagents.llm_clients.model_discovery import (
@@ -317,6 +321,11 @@ def create_app(
                 output_language=baseline.current_state.language,
             ),
             idempotency_key=idempotency_key,
+            execution_strategy=(
+                ResearchExecutionStrategy(request.execution_strategy)
+                if request.execution_strategy is not None
+                else None
+            ),
         )
 
     @app.get(

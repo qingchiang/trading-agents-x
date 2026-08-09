@@ -209,6 +209,8 @@ async def test_initial_research_chain_creation_read_and_export_surfaces(
     assert chains.status_code == 200
     assert detail.json()["current_revision"]["current_state"]["language"] == "ja"
     assert detail.json()["current_revision"]["coverage"]["supports_no_material_change"] is False
+    assert detail.json()["next_update_policy"] == "full_required"
+    assert detail.json()["next_update_reason"] == "coverage_incomplete"
     assert revision.json()["producing_run_id"] == queued.json()["id"]
     assert revision.json()["evidence_snapshot"]["source_records"][0]["version_id"] == (
         "edinet:S100ROOT"
@@ -241,7 +243,7 @@ async def test_initial_research_chain_creation_read_and_export_surfaces(
     )
     assert update.status_code == 202
     assert duplicate.json()["id"] == update.json()["id"]
-    assert update.json()["research_execution_strategy"] == "incremental"
+    assert update.json()["research_execution_strategy"] == "full"
     update_claim = web_repository.claim_run(
         update.json()["id"], "test-worker", web_settings.lease_seconds
     )
@@ -254,8 +256,8 @@ async def test_initial_research_chain_creation_read_and_export_surfaces(
     assert signal["kind"] == "market_boundary_crossing"
     assert signal["previous_value"] == 95.0
     assert signal["current_value"] == 101.0
-    assert current["research_update_audit"]["escalation_reason"] == "threshold_crossing"
-    assert run_detail["run"]["research_update_audit"]["authoritative_strategy"] == "full"
+    assert current["research_update_audit"] is None
+    assert run_detail["run"]["research_update_audit"] is None
     updated_export = await web_client.get(
         f"/api/v1/research-revisions/{current_id}/export?format=json"
     )
@@ -484,6 +486,15 @@ async def test_openapi_contains_versioned_run_center_contract(
     audit = schema["components"]["schemas"]["ResearchUpdateAudit"]["properties"]
     assert audit["mode"]["enum"] == ["shadow", "experimental"]
     assert audit["authoritative_strategy"]["enum"] == ["full", "incremental"]
+    assert set(audit["comparison"]["enum"]) == {
+        "agreement",
+        "disagreement",
+        "inconclusive",
+        "not_applicable",
+    }
+    assert audit["coverage"]["anyOf"][0]["$ref"].endswith(
+        "/ResearchUpdateCoverageAttestation"
+    )
     assert audit["semantic_assessment"]["anyOf"][0]["$ref"].endswith(
         "/ResearchUpdateSemanticAssessment"
     )
@@ -498,6 +509,16 @@ async def test_openapi_contains_versioned_run_center_contract(
         "uncertainty",
         "potentially_material_novelty",
     }
+    revision = schema["components"]["schemas"]["ResearchRevision"]["properties"]
+    assert revision["role"]["$ref"].endswith("/ResearchRevisionRole")
+    assert revision["change_conclusion"]["anyOf"][0]["$ref"].endswith(
+        "/ResearchChangeConclusion"
+    )
+    chain = schema["components"]["schemas"]["ResearchChain"]["properties"]
+    assert chain["next_update_policy"]["enum"] == [
+        "incremental_allowed",
+        "full_required",
+    ]
 
 
 @pytest.mark.anyio

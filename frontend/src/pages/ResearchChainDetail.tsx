@@ -35,16 +35,10 @@ export default function ResearchChainDetail() {
   };
   const boundedMetrics = { ...emptyMetrics, ...(updateAudit?.bounded_metrics ?? {}) };
   const fullMetrics = { ...emptyMetrics, ...(updateAudit?.full_metrics ?? {}) };
-  const boundedCoverage = updateAudit?.coverage as
-    | {
-        supports_no_material_change?: boolean;
-        limitations?: string[];
-        domains?: Array<{ domain?: string; source?: string; status?: string }>;
-      }
-    | undefined;
-  const candidateSummary = updateAudit?.candidate?.update_summary as
-    | { summary?: string }
-    | undefined;
+  const boundedCoverage = updateAudit?.coverage;
+  const candidateSummary = updateAudit?.candidate?.update_summary;
+  const requiresFull = chain.next_update_policy === "full_required";
+  const isIndeterminate = revision.change_conclusion === "indeterminate";
   const nextCutoff = updateCutoff || dayAfter(revision.cutoff);
   const evidenceByRef = new Map(
     revision.evidence_snapshot.bundle.items.map((item) => [item.ref, item]),
@@ -88,6 +82,7 @@ export default function ResearchChainDetail() {
                   {
                     baseline_revision_id: revision.id,
                     analysis_date: nextCutoff,
+                    ...(requiresFull ? { execution_strategy: "full" as const } : {}),
                   },
                   createIdempotencyKey(),
                 )
@@ -106,7 +101,9 @@ export default function ResearchChainDetail() {
               onChange={(event) => setUpdateCutoff(event.target.value)}
             />
             <button className="button primary" disabled={updating}>
-              {updating ? t("loading") : t("updateResearch")}
+              {updating
+                ? t("loading")
+                : t(requiresFull ? "fullReassessment" : "updateResearch")}
             </button>
           </form>
           <a
@@ -122,6 +119,21 @@ export default function ResearchChainDetail() {
           )}
         </div>
       </header>
+
+      {isIndeterminate && (
+        <div className="alert" role="alert">
+          <strong>{t("indeterminateWarning")}</strong>
+          <p>{t("indeterminateReason")}: {revision.indeterminate_reason}</p>
+          {(revision.coverage.limitations ?? []).length > 0 && (
+            <ul>
+              {(revision.coverage.limitations ?? []).map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          )}
+          <p>{t("fullReassessmentRequired")}</p>
+        </div>
+      )}
 
       <article className="panel reader-panel">
         <p className="eyebrow">{t("currentResearchState")}</p>
@@ -173,7 +185,7 @@ export default function ResearchChainDetail() {
         </ul>
         <p>
           <strong>
-            {t(revision.coverage.supports_no_material_change === false
+            {t(requiresFull || revision.coverage.supports_no_material_change === false
               ? "quietReassessmentBlocked"
               : "quietReassessmentSupported")}
           </strong>
@@ -254,10 +266,13 @@ export default function ResearchChainDetail() {
             <h3>{t("shadowFinding")}</h3>
             <ul>
               <li>{t("experimentMode")}: {updateAudit.mode}</li>
-              <li>{t("candidateOutcome")}: {updateAudit.candidate?.outcome ?? t("none")}</li>
+              <li>{t("candidateConclusion")}: {updateAudit.candidate?.change_conclusion ?? t("none")}</li>
               <li>{t("authoritativeStrategy")}: {updateAudit.authoritative_strategy}</li>
               <li>{t("escalationReason")}: {updateAudit.escalation_reason ?? t("none")}</li>
               <li>{t("shadowComparison")}: {updateAudit.comparison}</li>
+              {updateAudit.comparison === "inconclusive" && (
+                <li>{t("shadowInconclusiveExplanation")}</li>
+              )}
               <li>
                 {t("boundedWindows")}: {(updateAudit.checked_windows ?? []).length > 0
                   ? (updateAudit.checked_windows ?? []).map((item) => `${item.source} ${item.scanned_start}–${item.scanned_end} (${item.status})`).join("; ")
@@ -309,7 +324,7 @@ export default function ResearchChainDetail() {
         <ol>
           {(chain.revisions ?? []).map((item) => (
             <li key={item.id}>
-              {item.cutoff} · {item.execution_strategy} · {item.outcome}{" "}
+              {item.cutoff} · {t("revisionRole")}: {item.role} · {t("executionStrategy")}: {item.execution_strategy} · {t("changeConclusion")}: {item.change_conclusion ?? t("notApplicable")}{" "}
               <a href={`/api/v1/research-revisions/${item.id}/export?format=json`}>
                 {t("revisionExport")}
               </a>

@@ -1896,6 +1896,13 @@
         "title": "IdentityDisposition",
         "type": "string"
       },
+      "IndeterminateReason": {
+        "enum": [
+          "coverage_incomplete"
+        ],
+        "title": "IndeterminateReason",
+        "type": "string"
+      },
       "IssueDisposition": {
         "additionalProperties": false,
         "description": "A judge routing result without duplicating the readable rationale.",
@@ -2352,6 +2359,15 @@
         ],
         "title": "ModelDiscoveryWarningView",
         "type": "object"
+      },
+      "NextUpdateReason": {
+        "enum": [
+          "indeterminate_head",
+          "coverage_incomplete",
+          "incompatible_market_semantics"
+        ],
+        "title": "NextUpdateReason",
+        "type": "string"
       },
       "NodeMetrics": {
         "additionalProperties": false,
@@ -3337,6 +3353,25 @@
             "title": "Is Primary",
             "type": "boolean"
           },
+          "next_update_policy": {
+            "default": "full_required",
+            "enum": [
+              "incremental_allowed",
+              "full_required"
+            ],
+            "title": "Next Update Policy",
+            "type": "string"
+          },
+          "next_update_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NextUpdateReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "revisions": {
             "default": [],
             "items": {
@@ -3375,6 +3410,21 @@
             "minLength": 1,
             "title": "Baseline Revision Id",
             "type": "string"
+          },
+          "execution_strategy": {
+            "anyOf": [
+              {
+                "enum": [
+                  "full",
+                  "incremental"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Strategy"
           }
         },
         "required": [
@@ -3383,6 +3433,15 @@
         ],
         "title": "ResearchChainUpdateRequest",
         "type": "object"
+      },
+      "ResearchChangeConclusion": {
+        "enum": [
+          "material_change",
+          "no_material_change",
+          "indeterminate"
+        ],
+        "title": "ResearchChangeConclusion",
+        "type": "string"
       },
       "ResearchChangeKind": {
         "enum": [
@@ -3992,6 +4051,16 @@
             "title": "Chain Id",
             "type": "string"
           },
+          "change_conclusion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchChangeConclusion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "coverage": {
             "$ref": "#/components/schemas/CoverageAttestation"
           },
@@ -4021,11 +4090,18 @@
             "title": "Id",
             "type": "string"
           },
+          "indeterminate_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IndeterminateReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "metrics": {
             "$ref": "#/components/schemas/RunMetrics"
-          },
-          "outcome": {
-            "$ref": "#/components/schemas/ResearchRevisionOutcome"
           },
           "predecessor_revision_id": {
             "anyOf": [
@@ -4059,6 +4135,9 @@
               }
             ]
           },
+          "role": {
+            "$ref": "#/components/schemas/ResearchRevisionRole"
+          },
           "sequence": {
             "minimum": 1.0,
             "title": "Sequence",
@@ -4070,8 +4149,8 @@
         },
         "required": [
           "cutoff",
+          "role",
           "execution_strategy",
-          "outcome",
           "delta",
           "current_state",
           "coverage",
@@ -4085,13 +4164,12 @@
         "title": "ResearchRevision",
         "type": "object"
       },
-      "ResearchRevisionOutcome": {
+      "ResearchRevisionRole": {
         "enum": [
-          "material_change",
-          "no_material_change",
-          "coverage_incomplete"
+          "initial",
+          "update"
         ],
-        "title": "ResearchRevisionOutcome",
+        "title": "ResearchRevisionRole",
         "type": "string"
       },
       "ResearchScenario": {
@@ -4238,6 +4316,7 @@
             "enum": [
               "agreement",
               "disagreement",
+              "inconclusive",
               "not_applicable"
             ],
             "title": "Comparison",
@@ -4246,14 +4325,12 @@
           "coverage": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "$ref": "#/components/schemas/ResearchUpdateCoverageAttestation"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Coverage"
+            ]
           },
           "escalation_reason": {
             "anyOf": [
@@ -4307,6 +4384,12 @@
             "title": "Mode",
             "type": "string"
           },
+          "schema_version": {
+            "const": "2",
+            "default": "2",
+            "title": "Schema Version",
+            "type": "string"
+          },
           "semantic_assessment": {
             "anyOf": [
               {
@@ -4328,29 +4411,29 @@
         "additionalProperties": false,
         "description": "Retained bounded-update proposal used by the Shadow experiment.",
         "properties": {
+          "change_conclusion": {
+            "const": "no_material_change",
+            "title": "Change Conclusion",
+            "type": "string"
+          },
           "coverage": {
-            "additionalProperties": true,
-            "title": "Coverage",
-            "type": "object"
+            "$ref": "#/components/schemas/ResearchUpdateCoverageAttestation"
           },
           "evidence_snapshot": {
-            "additionalProperties": true,
-            "title": "Evidence Snapshot",
-            "type": "object"
+            "$ref": "#/components/schemas/ResearchUpdateEvidenceSnapshot"
           },
-          "outcome": {
-            "const": "no_material_change",
-            "title": "Outcome",
+          "schema_version": {
+            "const": "2",
+            "default": "2",
+            "title": "Schema Version",
             "type": "string"
           },
           "update_summary": {
-            "additionalProperties": true,
-            "title": "Update Summary",
-            "type": "object"
+            "$ref": "#/components/schemas/ResearchUpdateSummaryContract"
           }
         },
         "required": [
-          "outcome",
+          "change_conclusion",
           "coverage",
           "update_summary",
           "evidence_snapshot"
@@ -4454,6 +4537,118 @@
         "title": "ResearchUpdateCheckedWindow",
         "type": "object"
       },
+      "ResearchUpdateCoverageAttestation": {
+        "additionalProperties": false,
+        "properties": {
+          "claims": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchUpdateObjectCoverage"
+            },
+            "title": "Claims",
+            "type": "array"
+          },
+          "domains": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchUpdateDomainCoverage"
+            },
+            "title": "Domains",
+            "type": "array"
+          },
+          "limitations": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchUpdateObjectCoverage"
+            },
+            "title": "Questions",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "1",
+            "default": "1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "supports_no_material_change": {
+            "title": "Supports No Material Change",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "claims",
+          "questions",
+          "domains",
+          "supports_no_material_change"
+        ],
+        "title": "ResearchUpdateCoverageAttestation",
+        "type": "object"
+      },
+      "ResearchUpdateDomainCoverage": {
+        "additionalProperties": false,
+        "properties": {
+          "domain": {
+            "title": "Domain",
+            "type": "string"
+          },
+          "evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "limitations": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "requirement": {
+            "default": "required",
+            "enum": [
+              "required",
+              "advisory"
+            ],
+            "title": "Requirement",
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "status": {
+            "enum": [
+              "complete",
+              "limited",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "domain",
+          "status"
+        ],
+        "title": "ResearchUpdateDomainCoverage",
+        "type": "object"
+      },
       "ResearchUpdateEvidenceLineage": {
         "additionalProperties": false,
         "properties": {
@@ -4486,6 +4681,132 @@
           "lineage"
         ],
         "title": "ResearchUpdateEvidenceLineage",
+        "type": "object"
+      },
+      "ResearchUpdateEvidenceSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "bundle": {
+            "$ref": "#/components/schemas/EvidenceBundle"
+          },
+          "lineage": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchUpdateEvidenceSnapshotItem"
+            },
+            "title": "Lineage",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "1",
+            "default": "1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "source_record_lineage": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchUpdateSourceRecordSnapshotItem"
+            },
+            "title": "Source Record Lineage",
+            "type": "array"
+          },
+          "source_records": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchUpdateSourceRecordVersion"
+            },
+            "title": "Source Records",
+            "type": "array"
+          },
+          "source_watermarks": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchUpdateSourceWatermarkSnapshot"
+            },
+            "title": "Source Watermarks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "bundle",
+          "lineage"
+        ],
+        "title": "ResearchUpdateEvidenceSnapshot",
+        "type": "object"
+      },
+      "ResearchUpdateEvidenceSnapshotItem": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_ref": {
+            "pattern": "^ev_[a-f0-9]{12}$",
+            "title": "Evidence Ref",
+            "type": "string"
+          },
+          "lineage": {
+            "enum": [
+              "new",
+              "inherited"
+            ],
+            "title": "Lineage",
+            "type": "string"
+          },
+          "source_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Revision Id"
+          }
+        },
+        "required": [
+          "evidence_ref",
+          "lineage"
+        ],
+        "title": "ResearchUpdateEvidenceSnapshotItem",
+        "type": "object"
+      },
+      "ResearchUpdateObjectCoverage": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "limitations": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "object_id": {
+            "title": "Object Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "complete",
+              "limited",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "object_id",
+          "status"
+        ],
+        "title": "ResearchUpdateObjectCoverage",
         "type": "object"
       },
       "ResearchUpdateSemanticAssessment": {
@@ -4584,6 +4905,446 @@
           "relationship"
         ],
         "title": "ResearchUpdateSemanticRelationship",
+        "type": "object"
+      },
+      "ResearchUpdateSourceRecordSnapshotItem": {
+        "additionalProperties": false,
+        "properties": {
+          "lineage": {
+            "enum": [
+              "new",
+              "inherited"
+            ],
+            "title": "Lineage",
+            "type": "string"
+          },
+          "observed_in_execution": {
+            "title": "Observed In Execution",
+            "type": "boolean"
+          },
+          "source_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Revision Id"
+          },
+          "version_id": {
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version_id",
+          "lineage",
+          "observed_in_execution"
+        ],
+        "title": "ResearchUpdateSourceRecordSnapshotItem",
+        "type": "object"
+      },
+      "ResearchUpdateSourceRecordVersion": {
+        "additionalProperties": false,
+        "properties": {
+          "accounting_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accounting Scope"
+          },
+          "adjustment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adjustment"
+          },
+          "availability_basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Availability Basis"
+          },
+          "available_at": {
+            "format": "date-time",
+            "title": "Available At",
+            "type": "string"
+          },
+          "change_hint": {
+            "anyOf": [
+              {
+                "enum": [
+                  "new_filing",
+                  "correction",
+                  "restatement",
+                  "accounting_scope_change",
+                  "unclassifiable"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Hint"
+          },
+          "comparison_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparison Key"
+          },
+          "evidence_ref": {
+            "pattern": "^ev_[a-f0-9]{12}$",
+            "title": "Evidence Ref",
+            "type": "string"
+          },
+          "fallback": {
+            "default": false,
+            "title": "Fallback",
+            "type": "boolean"
+          },
+          "native_record_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Native Record Id"
+          },
+          "observation_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observation Value"
+          },
+          "precision": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Precision"
+          },
+          "published_at": {
+            "title": "Published At",
+            "type": "string"
+          },
+          "record_id": {
+            "title": "Record Id",
+            "type": "string"
+          },
+          "record_kind": {
+            "default": "disclosure",
+            "enum": [
+              "disclosure",
+              "fundamental",
+              "market"
+            ],
+            "title": "Record Kind",
+            "type": "string"
+          },
+          "replaces_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replaces Version Id"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "published",
+              "corrected",
+              "withdrawn",
+              "replaced"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "version_id": {
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "record_id",
+          "version_id",
+          "status",
+          "published_at",
+          "available_at",
+          "title",
+          "evidence_ref"
+        ],
+        "title": "ResearchUpdateSourceRecordVersion",
+        "type": "object"
+      },
+      "ResearchUpdateSourceWatermarkSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "baseline_cutoff": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Cutoff"
+          },
+          "limitations": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "overlap_start": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overlap Start"
+          },
+          "reported_records": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reported Records"
+          },
+          "returned_records": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Returned Records",
+            "type": "integer"
+          },
+          "scanned_end": {
+            "format": "date",
+            "title": "Scanned End",
+            "type": "string"
+          },
+          "scanned_start": {
+            "format": "date",
+            "title": "Scanned Start",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "complete",
+              "limited",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "temporal_scope": {
+            "default": "point_in_time",
+            "enum": [
+              "point_in_time",
+              "live_only",
+              "unknown"
+            ],
+            "title": "Temporal Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "scanned_start",
+          "scanned_end",
+          "status"
+        ],
+        "title": "ResearchUpdateSourceWatermarkSnapshot",
+        "type": "object"
+      },
+      "ResearchUpdateSummaryContract": {
+        "additionalProperties": false,
+        "properties": {
+          "analysis_cutoff": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysis Cutoff"
+          },
+          "baseline_cutoff": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Cutoff"
+          },
+          "change_conclusion": {
+            "anyOf": [
+              {
+                "enum": [
+                  "material_change",
+                  "no_material_change",
+                  "indeterminate"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Conclusion"
+          },
+          "checked_domains": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Checked Domains",
+            "type": "array"
+          },
+          "execution_strategy": {
+            "anyOf": [
+              {
+                "enum": [
+                  "full",
+                  "incremental"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Strategy"
+          },
+          "language": {
+            "title": "Language",
+            "type": "string"
+          },
+          "limitations": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "new_evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "New Evidence Refs",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "1",
+            "default": "1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "language",
+          "summary",
+          "checked_domains"
+        ],
+        "title": "ResearchUpdateSummaryContract",
         "type": "object"
       },
       "ResearchWarning": {
@@ -6227,6 +6988,16 @@
             ],
             "title": "Baseline Cutoff"
           },
+          "change_conclusion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchChangeConclusion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "checked_domains": {
             "items": {
               "type": "string"
@@ -6264,16 +7035,6 @@
             },
             "title": "New Evidence Refs",
             "type": "array"
-          },
-          "outcome": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ResearchRevisionOutcome"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "schema_version": {
             "const": "1",

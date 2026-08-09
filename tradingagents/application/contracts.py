@@ -1307,9 +1307,7 @@ class ResearchDecision(FrozenModel):
 
     @model_validator(mode="after")
     def validate_scenario_set(self) -> ResearchDecision:
-        dependency_questions = tuple(
-            item.question for item in self.question_source_dependencies
-        )
+        dependency_questions = tuple(item.question for item in self.question_source_dependencies)
         if len(dependency_questions) != len(set(dependency_questions)):
             raise ValueError("question source dependencies must be unique")
         if not set(dependency_questions).issubset(self.unresolved_questions):
@@ -1608,13 +1606,140 @@ class RunMetrics(FrozenModel):
     node_metrics: dict[str, NodeMetrics] = Field(default_factory=dict)
 
 
+class ResearchUpdateObjectCoverage(FrozenModel):
+    object_id: str
+    status: Literal["complete", "limited", "unavailable"]
+    evidence_refs: tuple[str, ...] = ()
+    limitations: tuple[str, ...] = ()
+
+
+class ResearchUpdateDomainCoverage(FrozenModel):
+    domain: str
+    status: Literal["complete", "limited", "unavailable"]
+    evidence_refs: tuple[str, ...] = ()
+    limitations: tuple[str, ...] = ()
+    requirement: Literal["required", "advisory"] = "required"
+    source: str | None = None
+
+
+class ResearchUpdateCoverageAttestation(FrozenModel):
+    schema_version: Literal["1"] = "1"
+    claims: tuple[ResearchUpdateObjectCoverage, ...]
+    questions: tuple[ResearchUpdateObjectCoverage, ...]
+    domains: tuple[ResearchUpdateDomainCoverage, ...]
+    limitations: tuple[str, ...] = ()
+    supports_no_material_change: bool
+
+
+class ResearchUpdateSummaryContract(FrozenModel):
+    schema_version: Literal["1"] = "1"
+    language: str
+    summary: str
+    checked_domains: tuple[str, ...]
+    limitations: tuple[str, ...] = ()
+    baseline_cutoff: date | None = None
+    analysis_cutoff: date | None = None
+    execution_strategy: Literal["full", "incremental"] | None = None
+    change_conclusion: Literal["material_change", "no_material_change", "indeterminate"] | None = (
+        None
+    )
+    new_evidence_refs: tuple[str, ...] = ()
+
+
+class ResearchUpdateEvidenceSnapshotItem(FrozenModel):
+    evidence_ref: str = Field(pattern=r"^ev_[a-f0-9]{12}$")
+    lineage: Literal["new", "inherited"]
+    source_revision_id: str | None = None
+
+
+class ResearchUpdateSourceRecordVersion(FrozenModel):
+    source: str
+    record_id: str
+    version_id: str
+    status: Literal["published", "corrected", "withdrawn", "replaced"]
+    published_at: str
+    available_at: datetime
+    title: str
+    availability_basis: str | None = None
+    url: str | None = None
+    replaces_version_id: str | None = None
+    evidence_ref: str = Field(pattern=r"^ev_[a-f0-9]{12}$")
+    fallback: bool = False
+    record_kind: Literal["disclosure", "fundamental", "market"] = "disclosure"
+    native_record_id: str | None = None
+    comparison_key: str | None = None
+    change_hint: (
+        Literal[
+            "new_filing",
+            "correction",
+            "restatement",
+            "accounting_scope_change",
+            "unclassifiable",
+        ]
+        | None
+    ) = None
+    accounting_scope: str | None = None
+    adjustment: str | None = None
+    observation_value: float | None = None
+    unit: str | None = None
+    precision: int | None = Field(default=None, ge=0)
+
+
+class ResearchUpdateSourceRecordSnapshotItem(FrozenModel):
+    version_id: str
+    lineage: Literal["new", "inherited"]
+    observed_in_execution: bool
+    source_revision_id: str | None = None
+
+
+class ResearchUpdateSourceWatermarkSnapshot(FrozenModel):
+    source: str
+    scanned_start: date
+    scanned_end: date
+    status: Literal["complete", "limited", "unavailable"]
+    temporal_scope: Literal["point_in_time", "live_only", "unknown"] = "point_in_time"
+    limitations: tuple[str, ...] = ()
+    returned_records: int = Field(default=0, ge=0)
+    reported_records: int | None = Field(default=None, ge=0)
+    baseline_cutoff: date | None = None
+    overlap_start: date | None = None
+
+
+class ResearchUpdateEvidenceSnapshot(FrozenModel):
+    schema_version: Literal["1"] = "1"
+    bundle: EvidenceBundle
+    lineage: tuple[ResearchUpdateEvidenceSnapshotItem, ...]
+    source_records: tuple[ResearchUpdateSourceRecordVersion, ...] = ()
+    source_record_lineage: tuple[ResearchUpdateSourceRecordSnapshotItem, ...] = ()
+    source_watermarks: tuple[ResearchUpdateSourceWatermarkSnapshot, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_closure(self) -> ResearchUpdateEvidenceSnapshot:
+        evidence_refs = {item.ref for item in self.bundle.items}
+        if {item.evidence_ref for item in self.lineage} != evidence_refs:
+            raise ValueError("bounded Evidence lineage must cover its bundle")
+        if not {item.evidence_ref for item in self.source_records}.issubset(evidence_refs):
+            raise ValueError("bounded Source Records must reference Evidence in their bundle")
+        version_ids = {item.version_id for item in self.source_records}
+        if {item.version_id for item in self.source_record_lineage} != version_ids:
+            raise ValueError("bounded Source Record lineage must cover its versions")
+        if not {
+            item.replaces_version_id
+            for item in self.source_records
+            if item.replaces_version_id is not None
+        }.issubset(version_ids):
+            raise ValueError("bounded Source Record predecessor must resolve in its snapshot")
+        return self
+
+
 class ResearchUpdateCandidate(FrozenModel):
     """Retained bounded-update proposal used by the Shadow experiment."""
 
-    outcome: Literal["no_material_change"]
-    coverage: dict[str, Any]
-    update_summary: dict[str, Any]
-    evidence_snapshot: dict[str, Any]
+    schema_version: Literal["2"] = "2"
+    change_conclusion: Literal["no_material_change"]
+    coverage: ResearchUpdateCoverageAttestation
+    update_summary: ResearchUpdateSummaryContract
+    evidence_snapshot: ResearchUpdateEvidenceSnapshot
 
 
 ResearchUpdateEscalationReason = Literal[
@@ -1686,15 +1811,16 @@ class ResearchUpdateEvidenceLineage(FrozenModel):
 class ResearchUpdateAudit(FrozenModel):
     """Durable phase attribution and finding for one Research Chain update."""
 
+    schema_version: Literal["2"] = "2"
     mode: Literal["shadow", "experimental"] = "shadow"
     candidate: ResearchUpdateCandidate | None = None
-    coverage: dict[str, Any] | None = None
+    coverage: ResearchUpdateCoverageAttestation | None = None
     checked_windows: tuple[ResearchUpdateCheckedWindow, ...] = ()
     evidence_lineage: tuple[ResearchUpdateEvidenceLineage, ...] = ()
     semantic_assessment: ResearchUpdateSemanticAssessment | None = None
     authoritative_strategy: Literal["full", "incremental"] = "full"
     escalation_reason: ResearchUpdateEscalationReason | None = None
-    comparison: Literal["agreement", "disagreement", "not_applicable"]
+    comparison: Literal["agreement", "disagreement", "inconclusive", "not_applicable"]
     bounded_metrics: RunMetrics = Field(default_factory=RunMetrics)
     full_metrics: RunMetrics = Field(default_factory=RunMetrics)
 

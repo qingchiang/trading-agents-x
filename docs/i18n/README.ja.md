@@ -167,6 +167,11 @@ deliberation を再生成せず Revision にできます。重要な変更、cov
 互換性不良、無効、novelty、不確定な結果は、同じ更新内で自動的にフル分析へ
 移行します。
 
+Revision Role、Execution Strategy、Change Conclusion は別々に表示されます。
+フル再評価でも Material Change と No Material Change のどちらも正当化できない
+場合は、読取可能な Indeterminate head を作成し、次回更新にもフル再評価を
+要求します。
+
 ```dotenv
 TRADINGAGENTS_RESEARCH_UPDATE_MODE=experimental
 TRADINGAGENTS_EXPERIMENTAL_NMC_JP_WHITELIST=6501.T,7203.T

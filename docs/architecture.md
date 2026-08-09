@@ -241,6 +241,20 @@ without deleting or weakening the immutable research state. The API, Web
 reader, and Revision exports read the Revision directly rather than replaying
 the producing run.
 
+Revision Role (`initial` or `update`), Execution Strategy (`full` or
+`incremental`), and Change Conclusion are separate persisted fields. An
+initial Revision has no Change Conclusion. An update records Material Change,
+No Material Change, or Indeterminate; Full execution alone never implies
+Material Change. The unreleased `0008` migration derives role from structural
+predecessor lineage, preserves explicit historical update outcomes, leaves an
+initial Change Conclusion null, and retains the old `outcome` column only as a
+downgrade compatibility source. Application contracts never read it as current
+semantics. The legacy `coverage_incomplete` Revision outcome is migrated
+directly to Indeterminate; coverage JSON by itself never creates a Change
+Conclusion. Version-1 Shadow audit JSON is structurally migrated to the typed
+version-2 contract, and downgrade rewrites both audit JSON and compatibility
+outcomes into values understood by the prior application.
+
 For Japanese disclosures, the Effective Evidence Snapshot also carries stable
 EDINET/TDnet Source Record identities, immutable observed Source Record Version
 identities, per-version new/inherited lineage, and source-specific Watermarks.
@@ -294,10 +308,10 @@ observed official correction or withdrawal states, are represented as blocking
 a quiet reassessment when first observed; an already assessed inherited version
 does not become a permanent blocker. Google News watermarks are live-only, so
 Required Google coverage cannot establish No Material Change. A semantically
-unchanged Full update with one of these blockers records
-`coverage_incomplete`, not No Material Change or a fabricated Material Change.
-Full Analysis exposes the limitation rather than interpreting missing coverage
-as no news.
+unchanged Full update with one of these blockers creates an Indeterminate
+Revision with stable reason `coverage_incomplete`, not No Material Change or a
+fabricated Material Change. It becomes the readable and exportable head but is
+never an Eligible Baseline.
 
 When their analyst domains are selected, J-Quants fundamental snapshots and
 adjusted market history are Required for Japanese coverage. Missing, stale,
@@ -310,6 +324,22 @@ chain head in one SQLite transaction after rechecking the baseline. Failure,
 cancellation, invalid state, or a stale baseline therefore leaves the prior
 head unchanged. Historical runs and decision-memory rows are never inferred
 into Research Chains.
+
+Before the transaction advances the head, the Revision contract enumerates
+every Evidence reference reachable from Current Research State, Coverage,
+delta, Update Summary, and typed update audit. Every reference must resolve in
+the same Effective Evidence Snapshot, and every Source Record replacement must
+resolve to a Source Record Version there. Bounded Evidence retained by a
+Shadow audit is merged into the authoritative Full snapshot for this purpose.
+A closure failure rejects the Revision while the failed Research Execution and
+its sanitized audit remain durable.
+
+The server derives the head's next-update policy independently from role and
+conclusion. Complete state, Evidence closure, Required/object coverage, and
+compatible market semantics yield `incremental_allowed`; otherwise the API
+returns `full_required` and a stable reason. An Indeterminate head always
+requires an explicitly Full reassessment, and an incremental request is
+rejected rather than allowed to repair the baseline with candidate coverage.
 
 ### Shadow incremental updates
 
@@ -352,10 +382,12 @@ gets one repair attempt and then escalates fail-closed.
 When bounded gates can propose No Material Change, Shadow mode persists the
 candidate and its semantic assessment, then runs independent Full Analysis.
 Only the Full result creates the authoritative Revision and advances the
-chain. Agreement or
-disagreement is an experimental finding, not an execution failure. The run
-and Revision retain bounded checked windows, Coverage Attestation, candidate
-outcome, semantic relationships, Evidence lineage, escalation reason,
+chain. Agreement, disagreement, inconclusive, or not-applicable is an
+experimental finding, not an execution failure. A No Material Change candidate
+paired with an Indeterminate Full Revision is inconclusive and counts as
+neither agreement nor disagreement. The run and Revision retain bounded
+checked windows, Coverage Attestation, candidate Change Conclusion, semantic
+relationships, Evidence lineage, escalation reason,
 comparison, and separately attributed bounded/Full metrics; the API, reader,
 export, and events expose the same sanitized result without prompt text or
 private reasoning.

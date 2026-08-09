@@ -266,6 +266,7 @@ export interface components {
       version: string;
     };
     IdentityDisposition: "exact_match" | "new" | "ambiguous_new" | "conservative_retirement";
+    IndeterminateReason: "coverage_incomplete";
     IssueDisposition: {
       issue_id: string;
       status: "upheld" | "rejected" | "unresolved";
@@ -332,6 +333,7 @@ export interface components {
       code: string;
       message: string;
     };
+    NextUpdateReason: "indeterminate_head" | "coverage_incomplete" | "incompatible_market_semantics";
     NodeMetrics: {
       cache_hit_input_tokens?: number;
       cache_miss_input_tokens?: number;
@@ -467,13 +469,17 @@ export interface components {
       id: string;
       instrument: string;
       is_primary: boolean;
+      next_update_policy?: "incremental_allowed" | "full_required";
+      next_update_reason?: components["schemas"]["NextUpdateReason"] | null;
       revisions?: components["schemas"]["ResearchRevision"][];
       updated_at: string;
     };
     ResearchChainUpdateRequest: {
       analysis_date: string;
       baseline_revision_id: string;
+      execution_strategy?: "full" | "incremental" | null;
     };
+    ResearchChangeConclusion: "material_change" | "no_material_change" | "indeterminate";
     ResearchChangeKind: "new_fundamental_filing" | "fundamental_correction" | "fundamental_restatement" | "accounting_scope_change" | "unclassifiable_fundamental_change" | "market_semantic_incompatibility" | "market_boundary_crossing" | "ordinary_market_move" | "unchanged_observation";
     ResearchChangeSignal: {
       boundary_label?: string | null;
@@ -562,6 +568,7 @@ export interface components {
     ResearchRating: "Buy" | "Overweight" | "Hold" | "Underweight" | "Sell";
     ResearchRevision: {
       chain_id: string;
+      change_conclusion?: components["schemas"]["ResearchChangeConclusion"] | null;
       coverage: components["schemas"]["CoverageAttestation"];
       created_at: string;
       current_state: components["schemas"]["CurrentResearchState"];
@@ -570,15 +577,16 @@ export interface components {
       evidence_snapshot: components["schemas"]["EffectiveEvidenceSnapshot"];
       execution_strategy: components["schemas"]["ResearchExecutionStrategy"];
       id: string;
+      indeterminate_reason?: components["schemas"]["IndeterminateReason"] | null;
       metrics?: components["schemas"]["RunMetrics"];
-      outcome: components["schemas"]["ResearchRevisionOutcome"];
       predecessor_revision_id?: string | null;
       producing_run_id?: string | null;
       research_update_audit?: components["schemas"]["ResearchUpdateAudit"] | null;
+      role: components["schemas"]["ResearchRevisionRole"];
       sequence: number;
       update_summary: components["schemas"]["UpdateSummary"];
     };
-    ResearchRevisionOutcome: "material_change" | "no_material_change" | "coverage_incomplete";
+    ResearchRevisionRole: "initial" | "update";
     ResearchScenario: {
       core_assumptions: string[];
       evidence_refs?: string[];
@@ -601,19 +609,21 @@ export interface components {
       bounded_metrics?: components["schemas"]["RunMetrics"];
       candidate?: components["schemas"]["ResearchUpdateCandidate"] | null;
       checked_windows?: components["schemas"]["ResearchUpdateCheckedWindow"][];
-      comparison: "agreement" | "disagreement" | "not_applicable";
-      coverage?: Record<string, unknown> | null;
+      comparison: "agreement" | "disagreement" | "inconclusive" | "not_applicable";
+      coverage?: components["schemas"]["ResearchUpdateCoverageAttestation"] | null;
       escalation_reason?: "invalid_baseline" | "source_correction" | "source_withdrawal" | "source_replacement" | "source_version_change" | "incompatible_semantics" | "threshold_crossing" | "coverage_incomplete" | "schema_invalid" | "semantic_weakening" | "semantic_contradiction" | "semantic_answering" | "semantic_reopening" | "semantic_uncertainty" | "potentially_material_novelty" | "confidence_change" | "ambiguous_identity" | "semantic_output_invalid" | "semantic_input_oversize" | null;
       evidence_lineage?: components["schemas"]["ResearchUpdateEvidenceLineage"][];
       full_metrics?: components["schemas"]["RunMetrics"];
       mode?: "shadow" | "experimental";
+      schema_version?: string;
       semantic_assessment?: components["schemas"]["ResearchUpdateSemanticAssessment"] | null;
     };
     ResearchUpdateCandidate: {
-      coverage: Record<string, unknown>;
-      evidence_snapshot: Record<string, unknown>;
-      outcome: string;
-      update_summary: Record<string, unknown>;
+      change_conclusion: string;
+      coverage: components["schemas"]["ResearchUpdateCoverageAttestation"];
+      evidence_snapshot: components["schemas"]["ResearchUpdateEvidenceSnapshot"];
+      schema_version?: string;
+      update_summary: components["schemas"]["ResearchUpdateSummaryContract"];
     };
     ResearchUpdateCheckedWindow: {
       baseline_cutoff?: string | null;
@@ -627,10 +637,45 @@ export interface components {
       status: "complete" | "limited" | "unavailable";
       temporal_scope?: "point_in_time" | "live_only" | "unknown";
     };
+    ResearchUpdateCoverageAttestation: {
+      claims: components["schemas"]["ResearchUpdateObjectCoverage"][];
+      domains: components["schemas"]["ResearchUpdateDomainCoverage"][];
+      limitations?: string[];
+      questions: components["schemas"]["ResearchUpdateObjectCoverage"][];
+      schema_version?: string;
+      supports_no_material_change: boolean;
+    };
+    ResearchUpdateDomainCoverage: {
+      domain: string;
+      evidence_refs?: string[];
+      limitations?: string[];
+      requirement?: "required" | "advisory";
+      source?: string | null;
+      status: "complete" | "limited" | "unavailable";
+    };
     ResearchUpdateEvidenceLineage: {
       evidence_ref: string;
       lineage: "new" | "inherited";
       source_revision_id?: string | null;
+    };
+    ResearchUpdateEvidenceSnapshot: {
+      bundle: components["schemas"]["EvidenceBundle"];
+      lineage: components["schemas"]["ResearchUpdateEvidenceSnapshotItem"][];
+      schema_version?: string;
+      source_record_lineage?: components["schemas"]["ResearchUpdateSourceRecordSnapshotItem"][];
+      source_records?: components["schemas"]["ResearchUpdateSourceRecordVersion"][];
+      source_watermarks?: components["schemas"]["ResearchUpdateSourceWatermarkSnapshot"][];
+    };
+    ResearchUpdateEvidenceSnapshotItem: {
+      evidence_ref: string;
+      lineage: "new" | "inherited";
+      source_revision_id?: string | null;
+    };
+    ResearchUpdateObjectCoverage: {
+      evidence_refs?: string[];
+      limitations?: string[];
+      object_id: string;
+      status: "complete" | "limited" | "unavailable";
     };
     ResearchUpdateSemanticAssessment: {
       language: string;
@@ -644,6 +689,59 @@ export interface components {
       suggested_claim_confidence?: "low" | "medium" | "high" | "indeterminate" | null;
       suggested_claim_ids?: string[];
       suggested_question_ids?: string[];
+    };
+    ResearchUpdateSourceRecordSnapshotItem: {
+      lineage: "new" | "inherited";
+      observed_in_execution: boolean;
+      source_revision_id?: string | null;
+      version_id: string;
+    };
+    ResearchUpdateSourceRecordVersion: {
+      accounting_scope?: string | null;
+      adjustment?: string | null;
+      availability_basis?: string | null;
+      available_at: string;
+      change_hint?: "new_filing" | "correction" | "restatement" | "accounting_scope_change" | "unclassifiable" | null;
+      comparison_key?: string | null;
+      evidence_ref: string;
+      fallback?: boolean;
+      native_record_id?: string | null;
+      observation_value?: number | null;
+      precision?: number | null;
+      published_at: string;
+      record_id: string;
+      record_kind?: "disclosure" | "fundamental" | "market";
+      replaces_version_id?: string | null;
+      source: string;
+      status: "published" | "corrected" | "withdrawn" | "replaced";
+      title: string;
+      unit?: string | null;
+      url?: string | null;
+      version_id: string;
+    };
+    ResearchUpdateSourceWatermarkSnapshot: {
+      baseline_cutoff?: string | null;
+      limitations?: string[];
+      overlap_start?: string | null;
+      reported_records?: number | null;
+      returned_records?: number;
+      scanned_end: string;
+      scanned_start: string;
+      source: string;
+      status: "complete" | "limited" | "unavailable";
+      temporal_scope?: "point_in_time" | "live_only" | "unknown";
+    };
+    ResearchUpdateSummaryContract: {
+      analysis_cutoff?: string | null;
+      baseline_cutoff?: string | null;
+      change_conclusion?: "material_change" | "no_material_change" | "indeterminate" | null;
+      checked_domains: string[];
+      execution_strategy?: "full" | "incremental" | null;
+      language: string;
+      limitations?: string[];
+      new_evidence_refs?: string[];
+      schema_version?: string;
+      summary: string;
     };
     ResearchWarning: {
       code?: string;
@@ -861,12 +959,12 @@ export interface components {
     UpdateSummary: {
       analysis_cutoff?: string | null;
       baseline_cutoff?: string | null;
+      change_conclusion?: components["schemas"]["ResearchChangeConclusion"] | null;
       checked_domains: string[];
       execution_strategy?: components["schemas"]["ResearchExecutionStrategy"] | null;
       language: string;
       limitations?: string[];
       new_evidence_refs?: string[];
-      outcome?: components["schemas"]["ResearchRevisionOutcome"] | null;
       schema_version?: string;
       summary: string;
     };

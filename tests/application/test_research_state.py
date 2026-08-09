@@ -17,6 +17,10 @@ from tradingagents.application.contracts import (
     ResearchQuestionSourceDependency,
     ResearchRating,
     ResearchScenarioKind,
+    ResearchUpdateAudit,
+    ResearchUpdateCandidate,
+    ResearchUpdateCoverageAttestation,
+    ResearchUpdateSummaryContract,
 )
 from tradingagents.application.incremental import assess_semantic_update
 from tradingagents.application.research import (
@@ -29,8 +33,10 @@ from tradingagents.application.research import (
     DecisionRole,
     EpistemicKind,
     IncrementalEscalationReason,
+    IndeterminateReason,
     QuestionStatus,
     ResearchChain,
+    ResearchChangeConclusion,
     ResearchChangeKind,
     ResearchChangeSignal,
     ResearchClaim,
@@ -38,7 +44,7 @@ from tradingagents.application.research import (
     ResearchOpinion,
     ResearchQuestion,
     ResearchRevision,
-    ResearchRevisionOutcome,
+    ResearchRevisionRole,
     ResearchScenarioState,
     RevisionExport,
     ScenarioLikelihood,
@@ -46,6 +52,8 @@ from tradingagents.application.research import (
     assemble_full_revision,
     assemble_full_update,
     assess_deterministic_update,
+    derive_next_update_policy,
+    derive_shadow_comparison,
     render_revision_export_markdown,
     validate_experimental_nmc_candidate,
 )
@@ -163,6 +171,8 @@ def test_full_state_assembly_assigns_ids_and_preserves_selected_language():
     assert all(claim.id.startswith("claim_") for claim in state.claims)
     assert all(question.id.startswith("question_") for question in state.questions)
     assert draft.execution_strategy.value == "full"
+    assert draft.role is ResearchRevisionRole.INITIAL
+    assert draft.change_conclusion is None
     assert draft.coverage.domains[0].domain == "market"
     assert draft.evidence_snapshot.bundle.digest == execution.evidence.digest
     assert {item.lineage for item in draft.evidence_snapshot.lineage} == {"new"}
@@ -170,6 +180,246 @@ def test_full_state_assembly_assigns_ids_and_preserves_selected_language():
     missing_sources = {item.source for item in draft.coverage.domains if item.source}
     assert missing_sources == {"EDINET", "TDnet", "J-Quants adjusted OHLCV"}
     assert draft.coverage.supports_no_material_change is False
+
+
+def test_revision_role_and_change_conclusion_are_independent_contracts():
+    initial = assemble_full_revision(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date=CUTOFF,
+            analysts=("market",),
+        ),
+        _execution("6501.T"),
+    )
+
+    with pytest.raises(ValidationError, match="initial Revision has no Change Conclusion"):
+        initial.model_copy(
+            update={"change_conclusion": ResearchChangeConclusion.MATERIAL_CHANGE}
+        ).__class__.model_validate(
+            initial.model_copy(
+                update={"change_conclusion": ResearchChangeConclusion.MATERIAL_CHANGE}
+            ).model_dump(mode="python")
+        )
+
+
+def test_next_update_policy_is_derived_from_complete_baseline_eligibility():
+    initial = assemble_full_revision(
+        AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
+        _execution("6501.T"),
+    )
+    assert derive_next_update_policy(initial) == (
+        "full_required",
+        "coverage_incomplete",
+    )
+
+    complete = initial.model_copy(
+        update={
+            "coverage": initial.coverage.model_copy(
+                update={
+                    "claims": tuple(
+                        item.model_copy(update={"status": CoverageStatus.COMPLETE})
+                        for item in initial.coverage.claims
+                    ),
+                    "questions": tuple(
+                        item.model_copy(update={"status": CoverageStatus.COMPLETE})
+                        for item in initial.coverage.questions
+                    ),
+                    "domains": tuple(
+                        item.model_copy(update={"status": CoverageStatus.COMPLETE})
+                        for item in initial.coverage.domains
+                    ),
+                    "supports_no_material_change": True,
+                }
+            )
+        }
+    )
+    assert derive_next_update_policy(complete) == ("incremental_allowed", None)
+
+    indeterminate = complete.model_copy(
+        update={
+            "role": ResearchRevisionRole.UPDATE,
+            "change_conclusion": ResearchChangeConclusion.INDETERMINATE,
+            "indeterminate_reason": IndeterminateReason.COVERAGE_INCOMPLETE,
+        }
+    )
+    assert derive_next_update_policy(indeterminate) == (
+        "full_required",
+        "indeterminate_head",
+    )
+    assert derive_shadow_comparison(complete, indeterminate) == "inconclusive"
+
+    with pytest.raises(ValidationError, match="update Revision requires a Change Conclusion"):
+        initial.__class__.model_validate(
+            initial.model_copy(
+                update={"role": ResearchRevisionRole.UPDATE}
+            ).model_dump(mode="python")
+        )
+
+
+@pytest.mark.parametrize(
+    ("path", "unknown_ref"),
+    [
+        ("coverage", "ev_111111111111"),
+        ("delta", "ev_222222222222"),
+        ("update_summary", "ev_333333333333"),
+    ],
+)
+def test_revision_draft_rejects_every_unresolved_reachable_evidence_reference(
+    path: str,
+    unknown_ref: str,
+):
+    draft = assemble_full_revision(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date=CUTOFF,
+            analysts=("market",),
+        ),
+        _execution("6501.T"),
+    )
+    if path == "coverage":
+        value = draft.coverage.model_copy(
+            update={
+                "domains": (
+                    draft.coverage.domains[0].model_copy(
+                        update={"evidence_refs": (unknown_ref,)}
+                    ),
+                    *draft.coverage.domains[1:],
+                )
+            }
+        )
+    elif path == "delta":
+        value = draft.delta.model_copy(update={"new_evidence_refs": (unknown_ref,)})
+    else:
+        value = draft.update_summary.model_copy(
+            update={"new_evidence_refs": (unknown_ref,)}
+        )
+
+    with pytest.raises(ValidationError, match="Evidence closure"):
+        draft.__class__.model_validate(
+            draft.model_copy(update={path: value}).model_dump(mode="python")
+        )
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["audit.coverage", "audit.candidate.coverage", "audit.candidate.summary"],
+)
+def test_revision_draft_rejects_unresolved_typed_audit_evidence(path: str):
+    draft = assemble_full_revision(
+        AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
+        _execution("6501.T"),
+    )
+    unknown_ref = "ev_444444444444"
+    coverage = ResearchUpdateCoverageAttestation.model_validate(
+        draft.coverage.model_dump(mode="python")
+    )
+    summary = ResearchUpdateSummaryContract.model_validate(
+        draft.update_summary.model_dump(mode="python")
+    )
+    audit_coverage = coverage
+    candidate_coverage = coverage
+    candidate_summary = summary
+    if path == "audit.coverage":
+        audit_coverage = coverage.model_copy(
+            update={
+                "domains": (
+                    coverage.domains[0].model_copy(
+                        update={"evidence_refs": (unknown_ref,)}
+                    ),
+                    *coverage.domains[1:],
+                )
+            }
+        )
+    elif path == "audit.candidate.coverage":
+        candidate_coverage = coverage.model_copy(
+            update={
+                "domains": (
+                    coverage.domains[0].model_copy(
+                        update={"evidence_refs": (unknown_ref,)}
+                    ),
+                    *coverage.domains[1:],
+                )
+            }
+        )
+    else:
+        candidate_summary = summary.model_copy(
+            update={"new_evidence_refs": (unknown_ref,)}
+        )
+    audit = ResearchUpdateAudit(
+        candidate=ResearchUpdateCandidate(
+            change_conclusion="no_material_change",
+            coverage=candidate_coverage,
+            update_summary=candidate_summary,
+            evidence_snapshot=draft.evidence_snapshot.model_dump(mode="python"),
+        ),
+        coverage=audit_coverage,
+        comparison="inconclusive",
+    )
+
+    with pytest.raises(ValidationError, match="Evidence closure"):
+        draft.__class__.model_validate(
+            draft.model_copy(update={"research_update_audit": audit}).model_dump(
+                mode="python"
+            )
+        )
+
+
+def test_revision_draft_rejects_source_record_evidence_outside_snapshot():
+    draft = assemble_full_revision(
+        AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
+        _with_disclosure_metadata(
+            _execution("6501.T"),
+            records=[_source_record("edinet:S100ROOT")],
+            watermarks=[_watermark("EDINET")],
+        ),
+    )
+    broken_snapshot = draft.evidence_snapshot.model_copy(
+        update={
+            "source_records": (
+                draft.evidence_snapshot.source_records[0].model_copy(
+                    update={"evidence_ref": "ev_555555555555"}
+                ),
+            )
+        }
+    )
+
+    with pytest.raises(ValidationError, match="Evidence closure"):
+        draft.__class__.model_validate(
+            draft.model_copy(update={"evidence_snapshot": broken_snapshot}).model_dump(
+                mode="python"
+            )
+        )
+
+
+def test_revision_draft_rejects_change_signal_version_outside_snapshot():
+    draft = assemble_full_revision(
+        AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
+        _with_disclosure_metadata(
+            _execution("6501.T"),
+            records=[_source_record("edinet:S100ROOT")],
+            watermarks=[_watermark("EDINET")],
+        ),
+    )
+    broken_delta = draft.delta.model_copy(
+        update={
+            "change_signals": (
+                ResearchChangeSignal(
+                    kind=ResearchChangeKind.FUNDAMENTAL_CORRECTION,
+                    domain="fundamentals",
+                    record_id="S100ROOT",
+                    previous_version_id="edinet:missing",
+                    current_version_id="edinet:S100ROOT",
+                    requires_full_analysis=True,
+                    detail="Correction lineage must remain closed.",
+                ),
+            )
+        }
+    )
+
+    with pytest.raises(ValidationError, match="Source Record closure"):
+        draft.__class__.model_validate(
+            draft.model_copy(update={"delta": broken_delta}).model_dump(mode="python")
+        )
 
 
 def test_full_state_assembly_rejects_missing_explicit_claim_evidence():
@@ -213,7 +463,6 @@ def test_full_update_preserves_only_unambiguous_longitudinal_identities():
     candidate = assemble_full_revision(request, _execution("6501.T"))
 
     updated = assemble_full_update("revision-1", baseline, candidate)
-
     assert updated.current_state.claims[0].id == baseline.current_state.claims[0].id
     assert updated.delta.claims[0].change.value == "reaffirmed"
     assert {item.lineage for item in updated.evidence_snapshot.lineage} == {"new"}
@@ -301,6 +550,22 @@ def _incremental_baseline_and_evidence(
             watermarks=watermarks,
         ),
     )
+    baseline = baseline.model_copy(
+        update={
+            "coverage": baseline.coverage.model_copy(
+                update={
+                    "claims": tuple(
+                        item.model_copy(
+                            update={"status": CoverageStatus.COMPLETE, "limitations": ()}
+                        )
+                        for item in baseline.coverage.claims
+                    ),
+                    "limitations": (),
+                    "supports_no_material_change": True,
+                }
+            )
+        }
+    )
     item = EvidenceItem.create(
         source="bounded fixture",
         evidence_type="bounded update",
@@ -340,7 +605,7 @@ def test_deterministic_incremental_gates_propose_quiet_candidate():
 
     assert result.escalation_reason is None
     assert result.candidate is not None
-    assert result.candidate.outcome is ResearchRevisionOutcome.NO_MATERIAL_CHANGE
+    assert result.candidate.change_conclusion is ResearchChangeConclusion.NO_MATERIAL_CHANGE
     assert result.candidate.execution_strategy.value == "incremental"
     assert result.candidate.coverage.supports_no_material_change is True
     assert {
@@ -487,7 +752,7 @@ def test_semantic_change_assessment_supports_typed_relationships(
         question = ResearchQuestion(
             id="question_0123456789abcdef0123456789abcdef",
             question="Will margin recovery persist?",
-            evidence_refs=(REF,),
+            evidence_refs=(baseline.current_state.evidence_refs[0],),
         )
         baseline = baseline.model_copy(
             update={
@@ -744,7 +1009,7 @@ def test_quiet_candidate_reaffirms_only_relevant_research_objects():
         id="question_dddddddddddddddddddddddddddddddd",
         question="A retired question?",
         status=QuestionStatus.RETIRED,
-        evidence_refs=(REF,),
+        evidence_refs=(baseline.current_state.evidence_refs[0],),
     )
     baseline = baseline.model_copy(
         update={
@@ -1151,6 +1416,25 @@ def test_full_update_preserves_corrected_versions_with_overlap_lineage():
     )
 
     updated = assemble_full_update("revision-1", baseline, candidate)
+    audit_coverage = ResearchUpdateCoverageAttestation.model_validate(
+        updated.coverage.model_dump(mode="python")
+    )
+    updated = updated.model_copy(
+        update={
+            "research_update_audit": ResearchUpdateAudit(
+                candidate=ResearchUpdateCandidate(
+                    change_conclusion="no_material_change",
+                    coverage=audit_coverage,
+                    update_summary=ResearchUpdateSummaryContract.model_validate(
+                        updated.update_summary.model_dump(mode="python")
+                    ),
+                    evidence_snapshot=updated.evidence_snapshot.model_dump(mode="python"),
+                ),
+                coverage=audit_coverage,
+                comparison="inconclusive",
+            )
+        }
+    )
 
     assert {item.version_id for item in updated.evidence_snapshot.source_records} == {
         "edinet:S100ROOT",
@@ -1183,6 +1467,10 @@ def test_full_update_preserves_corrected_versions_with_overlap_lineage():
 
     exported = render_revision_export_markdown(RevisionExport(chain=chain, revision=revision))
 
+    assert "Revision role: update" in exported
+    assert "Execution strategy: full" in exported
+    assert "Change conclusion:" in exported
+    assert "counted as neither agreement nor disagreement" in exported
     assert "## Source Watermarks" in exported
     assert "EDINET: 2026-07-01 to 2026-07-24" in exported
     assert "## Source Record Versions" in exported
@@ -1235,7 +1523,7 @@ def test_full_update_classifies_fundamental_restatement_and_scope_change():
         AnalysisRequest(ticker="6501.T", analysis_date=date(2026, 7, 25), analysts=("market",)),
         _with_disclosure_metadata(
             _execution("6501.T"),
-            records=[changed_record, scope_record, new_filing],
+            records=[base_record, changed_record, scope_record, new_filing],
             watermarks=complete,
         ),
     )
@@ -1322,7 +1610,9 @@ def test_full_update_classifies_other_fundamental_snapshot_differences(
             analysts=("fundamentals",),
         ),
         _with_disclosure_metadata(
-            _execution("6501.T"), records=[candidate_record], watermarks=watermarks
+            _execution("6501.T"),
+            records=[baseline_record, candidate_record],
+            watermarks=watermarks,
         ),
     )
 
@@ -1416,7 +1706,7 @@ def test_full_update_does_not_use_baseline_market_watermark_for_missing_current_
     )
     assert market.status is CoverageStatus.UNAVAILABLE
     assert updated.coverage.supports_no_material_change is False
-    assert updated.outcome is not ResearchRevisionOutcome.NO_MATERIAL_CHANGE
+    assert updated.change_conclusion is not ResearchChangeConclusion.NO_MATERIAL_CHANGE
 
 
 def test_full_update_distinguishes_market_movement_from_boundary_crossing():
@@ -1563,7 +1853,7 @@ def test_inherited_correction_does_not_permanently_block_quiet_reassessment():
     updated = assemble_full_update("revision-1", baseline, candidate)
 
     assert updated.coverage.supports_no_material_change is True
-    assert updated.outcome is ResearchRevisionOutcome.NO_MATERIAL_CHANGE
+    assert updated.change_conclusion is ResearchChangeConclusion.NO_MATERIAL_CHANGE
 
 
 def test_full_analysis_promotes_google_news_only_for_explicit_dependency():
@@ -1730,7 +2020,8 @@ def test_coverage_blocker_cannot_produce_no_material_change():
 
     assert updated.delta.changed_sections == ()
     assert updated.coverage.supports_no_material_change is False
-    assert updated.outcome.value == "coverage_incomplete"
+    assert updated.change_conclusion is ResearchChangeConclusion.INDETERMINATE
+    assert updated.indeterminate_reason.value == "coverage_incomplete"
 
 
 def test_full_update_does_not_reassign_ambiguous_claim_identity():
@@ -1834,4 +2125,4 @@ def test_full_update_records_answered_question_as_material_change():
 
     assert updated.current_state.questions[0].id == baseline_question.id
     assert updated.delta.questions[0].change.value == "answered"
-    assert updated.outcome.value == "material_change"
+    assert updated.change_conclusion is ResearchChangeConclusion.MATERIAL_CHANGE

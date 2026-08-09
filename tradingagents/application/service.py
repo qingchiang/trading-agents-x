@@ -47,7 +47,7 @@ from .incremental import assess_semantic_update, run_deterministic_incremental_g
 from .instrument_names import resolve_local_instrument_name
 from .llms import RunLLMs, create_run_llms
 from .metrics import MetricsCallback, merge_run_metrics
-from .repository import RunRepository, RunView
+from .repository import InvalidResearchBaselineError, RunRepository, RunView
 from .research import (
     IncrementalGateResult,
     ResearchExecutionStrategy,
@@ -56,6 +56,9 @@ from .research import (
     RevisionExport,
     assemble_full_revision,
     assemble_full_update,
+    close_revision_over_update_candidate,
+    derive_next_update_policy,
+    derive_shadow_comparison,
     prepare_experimental_nmc_revision,
     render_revision_export_markdown,
     render_revision_export_package,
@@ -193,19 +196,32 @@ class AnalysisService:
         request: AnalysisRequest,
         *,
         idempotency_key: str | None = None,
+        execution_strategy: ResearchExecutionStrategy | None = None,
     ) -> RunView:
         run_settings = self.settings.resolve_run(request)
         request = self.settings.materialize_request(request, run_settings=run_settings)
+        baseline = self.repository.get_research_revision(baseline_revision_id)
+        next_policy, next_reason = derive_next_update_policy(baseline)
+        if (
+            execution_strategy is ResearchExecutionStrategy.INCREMENTAL
+            and next_policy != "incremental_allowed"
+        ):
+            raise InvalidResearchBaselineError(
+                "Eligible Baseline does not allow Incremental Execution: "
+                f"{next_reason or 'full_required'}"
+            )
+        selected_strategy = execution_strategy or (
+            ResearchExecutionStrategy.INCREMENTAL
+            if next_policy == "incremental_allowed"
+            and run_settings.uses_incremental_research(request.ticker)
+            else ResearchExecutionStrategy.FULL
+        )
         view, created = self.repository.create_chain_update(
             chain_id,
             baseline_revision_id,
             request,
             run_settings.snapshot(),
-            execution_strategy=(
-                ResearchExecutionStrategy.INCREMENTAL
-                if run_settings.uses_incremental_research(request.ticker)
-                else ResearchExecutionStrategy.FULL
-            ),
+            execution_strategy=selected_strategy,
             idempotency_key=idempotency_key,
         )
         if created:
@@ -307,7 +323,7 @@ class AnalysisService:
                 ),
                 candidate=(
                     ResearchUpdateCandidate(
-                        outcome=candidate.outcome.value,
+                        change_conclusion=candidate.change_conclusion.value,
                         coverage=candidate.coverage.model_dump(mode="json"),
                         update_summary=candidate.update_summary.model_dump(mode="json"),
                         evidence_snapshot=candidate.evidence_snapshot.model_dump(mode="json"),
@@ -489,18 +505,24 @@ class AnalysisService:
                             "research.incremental_assessed",
                             payload={
                                 "candidate_outcome": (
-                                    candidate.outcome.value if candidate is not None else None
+                                    candidate.change_conclusion.value
+                                    if candidate is not None
+                                    else None
                                 ),
                                 "escalation_reason": update_audit.escalation_reason,
                                 "metrics": incremental_result.metrics.model_dump(mode="json"),
                                 "checked_windows": update_audit.checked_windows,
-                                "coverage": update_audit.coverage,
+                                "coverage": (
+                                    update_audit.coverage.model_dump(mode="json")
+                                    if update_audit.coverage is not None
+                                    else None
+                                ),
                                 "evidence_lineage": tuple(
                                     item.model_dump(mode="json")
                                     for item in update_audit.evidence_lineage
                                 ),
                                 "candidate_update_summary": (
-                                    update_audit.candidate.update_summary
+                                    update_audit.candidate.update_summary.model_dump(mode="json")
                                     if update_audit.candidate is not None
                                     else None
                                 ),
@@ -681,6 +703,19 @@ class AnalysisService:
                             revision_draft,
                         )
                     if update_audit is not None and revision_draft is not None:
+                        bounded_snapshot = (
+                            incremental_result.candidate
+                            if incremental_result is not None
+                            and incremental_result.candidate is not None
+                            else incremental_result.evidence_snapshot
+                            if incremental_result is not None
+                            else None
+                        )
+                        if bounded_snapshot is not None:
+                            revision_draft = close_revision_over_update_candidate(
+                                revision_draft,
+                                bounded_snapshot,
+                            )
                         current_full_metrics = metrics.snapshot()
                         full_metrics = merge_run_metrics(
                             (
@@ -690,17 +725,13 @@ class AnalysisService:
                             ),
                             current_full_metrics,
                         )
-                        comparison = (
-                            "agreement"
-                            if incremental_result is not None
-                            and incremental_result.candidate is not None
-                            and revision_draft.outcome.value == "no_material_change"
-                            else (
-                                "disagreement"
+                        comparison = derive_shadow_comparison(
+                            (
+                                incremental_result.candidate
                                 if incremental_result is not None
-                                and incremental_result.candidate is not None
-                                else "not_applicable"
-                            )
+                                else None
+                            ),
+                            revision_draft,
                         )
                         update_audit = update_audit.model_copy(
                             update={
@@ -709,8 +740,10 @@ class AnalysisService:
                             }
                         )
                         self.repository.set_research_update_audit(run.id, update_audit)
-                        revision_draft = revision_draft.model_copy(
-                            update={"research_update_audit": update_audit}
+                        revision_draft = ResearchRevisionDraft.model_validate(
+                            revision_draft.model_copy(
+                                update={"research_update_audit": update_audit}
+                            ).model_dump(mode="python")
                         )
                         result = result.model_copy(
                             update={
@@ -729,7 +762,11 @@ class AnalysisService:
                             "research.shadow_compared",
                             payload={
                                 "comparison": comparison,
-                                "authoritative_outcome": revision_draft.outcome.value,
+                                "authoritative_outcome": (
+                                    revision_draft.change_conclusion.value
+                                    if revision_draft.change_conclusion is not None
+                                    else None
+                                ),
                                 "metrics": {
                                     "bounded": update_audit.bounded_metrics.model_dump(mode="json"),
                                     "full": full_metrics.model_dump(mode="json"),

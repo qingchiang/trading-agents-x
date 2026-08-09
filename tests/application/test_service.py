@@ -31,7 +31,7 @@ from tradingagents.application.contracts import (
     RunStatus,
 )
 from tradingagents.application.llms import RunLLMs
-from tradingagents.application.repository import RunRepository
+from tradingagents.application.repository import InvalidResearchBaselineError, RunRepository
 from tradingagents.application.research import (
     ClaimChange,
     ClaimRevisionDelta,
@@ -40,14 +40,17 @@ from tradingagents.application.research import (
     IdentityDisposition,
     IncrementalEscalationReason,
     IncrementalGateResult,
+    IndeterminateReason,
     QuestionChange,
     QuestionRevisionDelta,
+    ResearchChangeConclusion,
     ResearchExecutionStrategy,
     ResearchRevisionDraft,
-    ResearchRevisionOutcome,
+    ResearchRevisionRole,
     RevisionDelta,
     SourceRecordSnapshotItem,
     SourceWatermarkSnapshot,
+    assemble_full_revision,
     validate_experimental_nmc_candidate,
 )
 from tradingagents.application.runtime import RunCancelled, WorkerShutdown
@@ -369,12 +372,45 @@ def _reset_graph():
     _ResumableGraph.fail_second_once = True
 
 
+def _eligible_state_assembler(request, execution):
+    draft = assemble_full_revision(request, execution)
+    return draft.model_copy(
+        update={
+            "coverage": draft.coverage.model_copy(
+                update={
+                    "claims": tuple(
+                        item.model_copy(
+                            update={"status": CoverageStatus.COMPLETE, "limitations": ()}
+                        )
+                        for item in draft.coverage.claims
+                    ),
+                    "questions": tuple(
+                        item.model_copy(
+                            update={"status": CoverageStatus.COMPLETE, "limitations": ()}
+                        )
+                        for item in draft.coverage.questions
+                    ),
+                    "domains": tuple(
+                        item.model_copy(
+                            update={"status": CoverageStatus.COMPLETE, "limitations": ()}
+                        )
+                        for item in draft.coverage.domains
+                    ),
+                    "limitations": (),
+                    "supports_no_material_change": True,
+                }
+            )
+        }
+    )
+
+
 def _service(
     app_settings,
     repository: RunRepository,
     graph_factory=_Graph,
     **kwargs,
 ) -> AnalysisService:
+    kwargs.setdefault("state_assembler", _eligible_state_assembler)
     kwargs.setdefault(
         "incremental_gate",
         lambda *_args: IncrementalGateResult(
@@ -455,6 +491,8 @@ def test_successful_explicit_full_analysis_creates_primary_research_chain(
     assert revision.producing_run_id == result.run_id
     assert revision.cutoff == date(2026, 7, 24)
     assert revision.execution_strategy.value == "full"
+    assert revision.role is ResearchRevisionRole.INITIAL
+    assert revision.change_conclusion is None
     assert revision.current_state.language == "ja"
     assert revision.evidence_snapshot.bundle.digest == result.evidence.digest
     assert revision.metrics == result.metrics
@@ -476,7 +514,7 @@ def test_successful_explicit_full_analysis_creates_primary_research_chain(
     ):
         connection.execute(
             text(
-                "UPDATE research_revisions SET outcome = "
+                "UPDATE research_revisions SET change_conclusion = "
                 "'no_material_change' WHERE id = :revision_id"
             ),
             {"revision_id": revision.id},
@@ -530,7 +568,10 @@ def test_full_update_is_idempotent_for_current_head_and_advances_atomically(
     assert advanced.current_revision.update_summary.baseline_cutoff == date(2026, 7, 24)
     assert advanced.current_revision.update_summary.analysis_cutoff == date(2026, 7, 25)
     assert advanced.current_revision.update_summary.execution_strategy.value == "full"
-    assert advanced.current_revision.update_summary.outcome == advanced.current_revision.outcome
+    assert (
+        advanced.current_revision.update_summary.change_conclusion
+        == advanced.current_revision.change_conclusion
+    )
     assert "Evidence items" in advanced.current_revision.update_summary.summary
     completed_duplicate = service.enqueue_chain_update(
         chain.id,
@@ -601,9 +642,110 @@ def test_chain_update_strategy_respects_mode_and_japanese_whitelist(
     assert queued.config_snapshot["experimental_nmc_jp_whitelist"] == list(whitelist)
 
 
+def test_ineligible_head_rejects_explicit_incremental_but_allows_full(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(
+        app_settings,
+        repository,
+        state_assembler=assemble_full_revision,
+    )
+    service.run_initial_chain(
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-24", analysts=("market",))
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+    assert chain.next_update_policy == "full_required"
+    assert chain.next_update_reason == "coverage_incomplete"
+    request = AnalysisRequest(
+        ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)
+    )
+
+    with pytest.raises(InvalidResearchBaselineError, match="does not allow Incremental Execution"):
+        service.enqueue_chain_update(
+            chain.id,
+            chain.current_revision_id,
+            request,
+            execution_strategy=ResearchExecutionStrategy.INCREMENTAL,
+        )
+
+    queued = service.enqueue_chain_update(
+        chain.id,
+        chain.current_revision_id,
+        request,
+        execution_strategy=ResearchExecutionStrategy.FULL,
+    )
+    assert queued.research_execution_strategy == "full"
+
+
+def test_inconclusive_full_reassessment_advances_an_indeterminate_full_only_head(
+    app_settings,
+    repository,
+) -> None:
+    initial = _service(app_settings, repository)
+    initial.run_initial_chain(
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-24", analysts=("market",))
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+    service = _service(
+        app_settings,
+        repository,
+        state_assembler=assemble_full_revision,
+        revision_comparator=lambda _id, _baseline, draft: ResearchRevisionDraft.model_validate(
+            draft.model_copy(
+                update={
+                    "role": ResearchRevisionRole.UPDATE,
+                    "change_conclusion": ResearchChangeConclusion.INDETERMINATE,
+                    "indeterminate_reason": IndeterminateReason.COVERAGE_INCOMPLETE,
+                }
+            ).model_dump(mode="python")
+        ),
+    )
+    queued = service.enqueue_chain_update(
+        chain.id,
+        chain.current_revision_id,
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
+    )
+    claimed = repository.claim_run(queued.id, "worker", 30)
+
+    result = service.execute_claimed(claimed, worker_id="worker")
+
+    advanced = repository.get_research_chain(chain.id)
+    revision = advanced.current_revision
+    assert result.status is RunStatus.SUCCEEDED
+    assert revision.role is ResearchRevisionRole.UPDATE
+    assert revision.execution_strategy is ResearchExecutionStrategy.FULL
+    assert revision.change_conclusion is ResearchChangeConclusion.INDETERMINATE
+    assert revision.indeterminate_reason.value == "coverage_incomplete"
+    assert advanced.next_update_policy == "full_required"
+    assert advanced.next_update_reason == "indeterminate_head"
+    assert revision.research_update_audit.comparison == "not_applicable"
+
+    next_run = service.enqueue_chain_update(
+        advanced.id,
+        revision.id,
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-26", analysts=("market",)),
+    )
+    assert next_run.research_execution_strategy == "full"
+
+
+@pytest.mark.parametrize(
+    ("full_conclusion", "indeterminate_reason", "expected_comparison"),
+    [
+        (ResearchChangeConclusion.NO_MATERIAL_CHANGE, None, "agreement"),
+        (
+            ResearchChangeConclusion.INDETERMINATE,
+            IndeterminateReason.COVERAGE_INCOMPLETE,
+            "inconclusive",
+        ),
+    ],
+)
 def test_shadow_quiet_update_retains_candidate_and_full_remains_authoritative(
     app_settings,
     repository,
+    full_conclusion,
+    indeterminate_reason,
+    expected_comparison,
 ) -> None:
     service = _service(app_settings, repository)
     service.run_initial_chain(
@@ -618,8 +760,9 @@ def test_shadow_quiet_update_retains_candidate_and_full_remains_authoritative(
     candidate = baseline.model_copy(
         update={
             "cutoff": date(2026, 7, 25),
+            "role": ResearchRevisionRole.UPDATE,
             "execution_strategy": ResearchExecutionStrategy.INCREMENTAL,
-            "outcome": ResearchRevisionOutcome.NO_MATERIAL_CHANGE,
+            "change_conclusion": ResearchChangeConclusion.NO_MATERIAL_CHANGE,
             "current_state": baseline.current_state.model_copy(
                 update={"cutoff": date(2026, 7, 25)}
             ),
@@ -629,7 +772,7 @@ def test_shadow_quiet_update_retains_candidate_and_full_remains_authoritative(
                     "baseline_cutoff": baseline.cutoff,
                     "analysis_cutoff": date(2026, 7, 25),
                     "execution_strategy": ResearchExecutionStrategy.INCREMENTAL,
-                    "outcome": ResearchRevisionOutcome.NO_MATERIAL_CHANGE,
+                    "change_conclusion": ResearchChangeConclusion.NO_MATERIAL_CHANGE,
                 }
             ),
         }
@@ -646,7 +789,11 @@ def test_shadow_quiet_update_retains_candidate_and_full_remains_authoritative(
         repository,
         incremental_gate=quiet_gate,
         revision_comparator=lambda _id, _baseline, draft: draft.model_copy(
-            update={"outcome": ResearchRevisionOutcome.NO_MATERIAL_CHANGE}
+            update={
+                "role": ResearchRevisionRole.UPDATE,
+                "change_conclusion": full_conclusion,
+                "indeterminate_reason": indeterminate_reason,
+            }
         ),
     )
     queued = shadow_service.enqueue_chain_update(
@@ -670,9 +817,9 @@ def test_shadow_quiet_update_retains_candidate_and_full_remains_authoritative(
     assert revision.producing_run_id == queued.id
     assert audit is not None
     assert audit.candidate is not None
-    assert audit.candidate.outcome == "no_material_change"
+    assert audit.candidate.change_conclusion == "no_material_change"
     assert audit.authoritative_strategy == "full"
-    assert audit.comparison == "agreement"
+    assert audit.comparison == expected_comparison
     assert audit.escalation_reason is None
     assert audit.bounded_metrics.tool_calls == 2
     assert audit.full_metrics.llm_calls == result.metrics.llm_calls
@@ -691,11 +838,13 @@ def test_shadow_quiet_update_retains_candidate_and_full_remains_authoritative(
     assessed = next(
         event for event in events if event.event_type == "research.incremental_assessed"
     )
-    assert assessed.payload["coverage"] == audit.coverage
+    assert assessed.payload["coverage"] == audit.coverage.model_dump(mode="json")
     assert assessed.payload["evidence_lineage"] == [
         item.model_dump(mode="json") for item in audit.evidence_lineage
     ]
-    assert assessed.payload["candidate_update_summary"] == audit.candidate.update_summary
+    assert assessed.payload["candidate_update_summary"] == (
+        audit.candidate.update_summary.model_dump(mode="json")
+    )
 
 
 def test_experimental_quiet_update_advances_with_nmc_without_full_analysis(
@@ -736,8 +885,9 @@ def test_experimental_quiet_update_advances_with_nmc_without_full_analysis(
     )
     candidate = ResearchRevisionDraft(
         cutoff=cutoff,
+        role=ResearchRevisionRole.UPDATE,
         execution_strategy=ResearchExecutionStrategy.INCREMENTAL,
-        outcome=ResearchRevisionOutcome.NO_MATERIAL_CHANGE,
+        change_conclusion=ResearchChangeConclusion.NO_MATERIAL_CHANGE,
         delta=RevisionDelta(
             opinion_changed=False,
             claims=tuple(
@@ -792,7 +942,7 @@ def test_experimental_quiet_update_advances_with_nmc_without_full_analysis(
                 "baseline_cutoff": baseline.cutoff,
                 "analysis_cutoff": cutoff,
                 "execution_strategy": ResearchExecutionStrategy.INCREMENTAL,
-                "outcome": ResearchRevisionOutcome.NO_MATERIAL_CHANGE,
+                "change_conclusion": ResearchChangeConclusion.NO_MATERIAL_CHANGE,
             }
         ),
         evidence_snapshot=inherited_snapshot,
@@ -864,7 +1014,7 @@ def test_experimental_quiet_update_advances_with_nmc_without_full_analysis(
     assert result.reports == {}
     assert result.decision is None
     assert revision.execution_strategy is ResearchExecutionStrategy.INCREMENTAL
-    assert revision.outcome is ResearchRevisionOutcome.NO_MATERIAL_CHANGE
+    assert revision.change_conclusion is ResearchChangeConclusion.NO_MATERIAL_CHANGE
     assert revision.current_state.opinion == baseline.current_state.opinion
     assert revision.current_state.cutoff == cutoff
     assert all(item.change is ClaimChange.REAFFIRMED for item in revision.delta.claims)
@@ -927,6 +1077,7 @@ def test_default_shadow_collection_runs_before_any_full_llm_client(
         repository=repository,
         llm_factory=llm_factory,
         graph_factory=_Graph,
+        state_assembler=_eligible_state_assembler,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
         local_name_resolver=lambda _ticker, _date, _config: None,
     )
@@ -1008,6 +1159,7 @@ def test_default_shadow_semantic_assessment_is_audited_before_independent_full(
         repository=repository,
         llm_factory=llm_factory,
         graph_factory=_Graph,
+        state_assembler=_eligible_state_assembler,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
         local_name_resolver=lambda _ticker, _date, _config: None,
     )
@@ -1034,7 +1186,7 @@ def test_default_shadow_semantic_assessment_is_audited_before_independent_full(
     assert audit.semantic_assessment.language == "ja"
     assert audit.semantic_assessment.relationships[0].relationship == "support"
     assert audit.candidate is not None
-    assert audit.candidate.update_summary["summary"] == "既存の主張を再確認しました。"
+    assert audit.candidate.update_summary.summary == "既存の主張を再確認しました。"
     assert audit.bounded_metrics.llm_calls == 1
     assert audit.bounded_metrics.tool_calls == 2
     assert "research.incremental.semantic_assessment" in audit.bounded_metrics.node_metrics
@@ -1102,6 +1254,7 @@ def test_cancelled_after_partial_bounded_collection_retains_progress_and_metrics
         repository=repository,
         llm_factory=lambda *_args, **_kwargs: (object(), object()),
         graph_factory=_Graph,
+        state_assembler=_eligible_state_assembler,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
         local_name_resolver=lambda _ticker, _date, _config: None,
     )

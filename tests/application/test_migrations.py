@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import date, datetime
 from importlib import resources
@@ -17,10 +18,12 @@ from tradingagents.application.contracts import (
     ArtifactGenerationObservation,
     EvidenceBundle,
     ResearchArtifactDraft,
+    ResearchUpdateAudit,
     RunStatus,
 )
 from tradingagents.application.database import create_sqlite_engine
 from tradingagents.application.repository import RunRepository
+from tradingagents.application.research import EffectiveEvidenceSnapshot
 from tradingagents.persistence import (
     IncompatibleDatabaseError,
     upgrade_database,
@@ -70,7 +73,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     finally:
         engine.dispose()
 
-    assert revision == "0007_shadow_research_updates"
+    assert revision == "0008_evidence_closed_revisions"
     assert {
         "id",
         "run_id",
@@ -114,12 +117,216 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     assert "research_execution_strategy" in run_columns
     assert "research_update_audit_json" in run_columns
     assert "research_update_audit_json" in revision_columns
+    assert {"role", "execution_strategy", "change_conclusion", "indeterminate_reason"}.issubset(
+        revision_columns
+    )
+    assert "outcome" in revision_columns  # unreleased compatibility source, not public semantics
     assert "research_chains" in table_names
     assert "research_revisions" in table_names
     assert "ix_runs_trash" in run_indexes
     assert "next_check_at" in outcome_columns
     assert "ix_outcomes_due" in outcome_indexes
     assert "numeric_audit_json" in decision_columns
+
+
+def test_revision_semantic_migration_does_not_invent_initial_change_conclusion(
+    app_settings,
+) -> None:
+    app_settings.prepare_filesystem()
+    config = _alembic_config(app_settings)
+    command.upgrade(config, "0007_shadow_research_updates")
+    engine = create_sqlite_engine(app_settings.database_path)
+    empty = '{"schema_version":"1"}'
+    old_candidate_snapshot = {
+        "schema_version": "1",
+        "bundle": {
+            "version": "8",
+            "instrument": "6501.T",
+            "analysis_date": "2026-07-25",
+            "items": [
+                {
+                    "ref": "ev_aaaaaaaaaaaa",
+                    "source": "TDnet",
+                    "evidence_type": "bounded disclosure",
+                    "requested_date": "2026-07-25",
+                    "content": "Bounded candidate Evidence.",
+                }
+            ],
+            "tables": [],
+            "sealed_at": "2026-07-25T00:00:00Z",
+            "digest": None,
+        },
+        "lineage": [{"evidence_ref": "ev_aaaaaaaaaaaa", "lineage": "new"}],
+        "source_records": [],
+        "source_record_lineage": [],
+        "source_watermarks": [],
+    }
+    old_candidate_snapshot["bundle"] = EvidenceBundle.model_validate(
+        old_candidate_snapshot["bundle"]
+    ).model_dump(mode="json")
+    authoritative_snapshot = {
+        **old_candidate_snapshot,
+        "bundle": EvidenceBundle.model_validate(
+            {**old_candidate_snapshot["bundle"], "items": [], "digest": None}
+        ).model_dump(mode="json"),
+        "lineage": [],
+    }
+    old_audit = json.dumps(
+        {
+            "mode": "shadow",
+            "candidate": {
+                "outcome": "no_material_change",
+                "coverage": {
+                    "schema_version": "1",
+                    "claims": [],
+                    "questions": [],
+                    "domains": [],
+                    "limitations": [],
+                    "supports_no_material_change": True,
+                },
+                "update_summary": {
+                    "schema_version": "1",
+                    "language": "en",
+                    "summary": "No material change.",
+                    "checked_domains": ["market"],
+                    "outcome": "no_material_change",
+                },
+                "evidence_snapshot": old_candidate_snapshot,
+            },
+            "comparison": "agreement",
+        }
+    )
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO research_chains "
+                "(id, instrument, is_primary, current_revision_id, created_at, updated_at) "
+                "VALUES ('chain-1', '6501.T', 1, NULL, :now, :now)"
+            ),
+            {"now": datetime(2026, 7, 24)},
+        )
+        for revision_id, sequence, predecessor, outcome in (
+            ("revision-1", 1, None, "material_change"),
+            ("revision-2", 2, "revision-1", "no_material_change"),
+            ("revision-3", 3, "revision-2", "coverage_incomplete"),
+        ):
+            connection.execute(
+                text(
+                    "INSERT INTO research_revisions "
+                    "(id, chain_id, sequence, predecessor_revision_id, producing_run_id, "
+                    "cutoff, execution_strategy, outcome, language, current_state_json, "
+                    "delta_json, coverage_json, update_summary_json, evidence_snapshot_json, "
+                    "research_update_audit_json, metrics_json, created_at) VALUES "
+                    "(:id, 'chain-1', :sequence, :predecessor, NULL, :cutoff, 'full', "
+                    ":outcome, 'en', :empty, :empty, :empty, :empty, :snapshot, :audit, :empty, :now)"
+                ),
+                {
+                    "id": revision_id,
+                    "sequence": sequence,
+                    "predecessor": predecessor,
+                    "cutoff": date(2026, 7, 23 + sequence),
+                    "outcome": outcome,
+                    "audit": old_audit if sequence == 2 else None,
+                    "snapshot": (
+                        json.dumps(authoritative_snapshot)
+                        if sequence == 2
+                        else empty
+                    ),
+                    "empty": empty,
+                    "now": datetime(2026, 7, 24),
+                },
+            )
+        connection.execute(
+            text(
+                "UPDATE research_chains SET current_revision_id = 'revision-3' "
+                "WHERE id = 'chain-1'"
+            )
+        )
+    engine.dispose()
+
+    command.upgrade(config, "head")
+    engine = create_sqlite_engine(app_settings.database_path)
+    try:
+        with engine.connect() as connection:
+            rows = connection.execute(
+                text(
+                    "SELECT role, change_conclusion, indeterminate_reason "
+                    "FROM research_revisions ORDER BY sequence"
+                )
+            ).all()
+            upgraded_audit_value = connection.execute(
+                text(
+                    "SELECT research_update_audit_json FROM research_revisions "
+                    "WHERE id = 'revision-2'"
+                )
+            ).scalar_one()
+            upgraded_snapshot_value = connection.execute(
+                text(
+                    "SELECT evidence_snapshot_json FROM research_revisions "
+                    "WHERE id = 'revision-2'"
+                )
+            ).scalar_one()
+    finally:
+        engine.dispose()
+
+    assert rows == [
+        ("initial", None, None),
+        ("update", "no_material_change", None),
+        ("update", "indeterminate", "coverage_incomplete"),
+    ]
+    upgraded_audit = ResearchUpdateAudit.model_validate(json.loads(upgraded_audit_value))
+    assert upgraded_audit.schema_version == "2"
+    assert upgraded_audit.candidate is not None
+    assert upgraded_audit.candidate.change_conclusion == "no_material_change"
+    assert upgraded_audit.candidate.evidence_snapshot.bundle.instrument == "6501.T"
+    upgraded_snapshot = json.loads(upgraded_snapshot_value)
+    assert upgraded_snapshot["bundle"]["items"][0]["ref"] == "ev_aaaaaaaaaaaa"
+    assert upgraded_snapshot["bundle"]["digest"] is None
+    validated_snapshot = EffectiveEvidenceSnapshot.model_validate(upgraded_snapshot)
+    assert validated_snapshot.bundle.digest is not None
+
+    upgraded_audit_json = upgraded_audit.model_dump(mode="json")
+    upgraded_audit_json["comparison"] = "inconclusive"
+    engine = create_sqlite_engine(app_settings.database_path)
+    with engine.begin() as connection:
+        connection.exec_driver_sql("DROP TRIGGER research_revisions_immutable_content")
+        connection.execute(
+            text(
+                "UPDATE research_revisions SET research_update_audit_json = :audit "
+                "WHERE id = 'revision-2'"
+            ),
+            {"audit": json.dumps(upgraded_audit_json)},
+        )
+    engine.dispose()
+
+    command.downgrade(config, "0007_shadow_research_updates")
+    engine = create_sqlite_engine(app_settings.database_path)
+    try:
+        with engine.connect() as connection:
+            downgraded_rows = connection.execute(
+                text("SELECT outcome FROM research_revisions ORDER BY sequence")
+            ).scalars().all()
+            downgraded_audit_value = connection.execute(
+                text(
+                    "SELECT research_update_audit_json FROM research_revisions "
+                    "WHERE id = 'revision-2'"
+                )
+            ).scalar_one()
+    finally:
+        engine.dispose()
+    downgraded_audit = json.loads(downgraded_audit_value)
+    assert downgraded_rows == [
+        "material_change",
+        "no_material_change",
+        "coverage_incomplete",
+    ]
+    assert "schema_version" not in downgraded_audit
+    assert downgraded_audit["comparison"] == "not_applicable"
+    assert downgraded_audit["candidate"]["outcome"] == "no_material_change"
+    assert (
+        downgraded_audit["candidate"]["evidence_snapshot"]["bundle"]["instrument"]
+        == "6501.T"
+    )
 
 
 def test_v8_upgrade_preserves_research_data_and_downgrade_recreates_empty_table(
