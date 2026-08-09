@@ -615,6 +615,11 @@ def test_live_thesis_validation_cli_requires_explicit_in_place_flag_and_reports_
     captured = {}
     monkeypatch.setattr(cli, "load_reviewed_scenarios", lambda path: (str(path),))
     monkeypatch.setattr(cli, "_service", lambda: "service")
+    monkeypatch.setattr(
+        cli,
+        "_source_checkout",
+        lambda: (tmp_path / "checkout", "a" * 40),
+    )
 
     def validate(service, scenarios, **kwargs):
         captured.update(service=service, scenarios=scenarios, **kwargs)
@@ -633,8 +638,6 @@ def test_live_thesis_validation_cli_requires_explicit_in_place_flag_and_reports_
             str(cases),
             "--backup",
             str(tmp_path / "backup.db"),
-            "--git-commit",
-            "a" * 40,
         ],
     )
     completed = runner.invoke(
@@ -645,8 +648,6 @@ def test_live_thesis_validation_cli_requires_explicit_in_place_flag_and_reports_
             str(cases),
             "--backup",
             str(tmp_path / "backup.db"),
-            "--git-commit",
-            "a" * 40,
             "--in-place-database",
         ],
     )
@@ -656,8 +657,8 @@ def test_live_thesis_validation_cli_requires_explicit_in_place_flag_and_reports_
     assert captured["service"] == "service"
     assert captured["in_place_database"] is True
     assert captured["git_commit"] == "a" * 40
-    assert captured["manifest_root"] == Path(
-        "tmp/incremental-research/live-validation"
+    assert captured["manifest_root"] == (
+        tmp_path / "checkout" / "tmp/incremental-research/live-validation"
     )
     assert "manifest/session" in completed.output
     assert "quiet_interval: passed" in completed.output
@@ -684,8 +685,6 @@ def test_live_thesis_validation_cli_requires_explicit_in_place_flag_and_reports_
             str(cases),
             "--backup",
             str(tmp_path / "backup-2.db"),
-            "--git-commit",
-            "a" * 40,
             "--in-place-database",
         ],
     )

@@ -74,6 +74,14 @@ logger = logging.getLogger(__name__)
 EventHandler = Callable[[RunEvent], None]
 
 
+class ChainUpdateExecutionError(RuntimeError):
+    """A synchronous Chain update failed after its durable run was created."""
+
+    def __init__(self, run_id: str):
+        super().__init__("Research Chain update execution failed")
+        self.run_id = run_id
+
+
 def _segment_metrics(
     incremental_result: IncrementalGateResult | None,
     update_audit: ResearchUpdateAudit | None,
@@ -282,6 +290,38 @@ class AnalysisService:
             worker_id=worker_id,
             on_event=on_event,
         )
+
+    def run_chain_update(
+        self,
+        chain_id: str,
+        baseline_revision_id: str,
+        request: AnalysisRequest,
+        *,
+        idempotency_key: str | None = None,
+        on_event: EventHandler | None = None,
+    ) -> tuple[RunView, AnalysisResult]:
+        """Own one synchronous Research Chain update from enqueue through completion."""
+        view = self.enqueue_chain_update(
+            chain_id,
+            baseline_revision_id,
+            request,
+            idempotency_key=idempotency_key,
+        )
+        worker_id = f"python-chain-update:{uuid4()}"
+        try:
+            claimed = self.repository.claim_run(
+                view.id,
+                worker_id,
+                self.settings.lease_seconds,
+            )
+            result = self.execute_claimed(
+                claimed,
+                worker_id=worker_id,
+                on_event=on_event,
+            )
+        except Exception as exc:
+            raise ChainUpdateExecutionError(view.id) from exc
+        return view, result
 
     def execute_claimed(
         self,

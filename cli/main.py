@@ -55,7 +55,7 @@ app.add_typer(research_app, name="research")
 console = Console()
 event_console = Console(stderr=True)
 _ANALYSTS = ("market", "social", "news", "fundamentals")
-_LIVE_THESIS_MANIFEST_ROOT = Path("tmp/incremental-research/live-validation")
+_LIVE_THESIS_MANIFEST_RELATIVE = Path("tmp/incremental-research/live-validation")
 
 
 class ExportFormat(str, Enum):
@@ -413,10 +413,6 @@ def validate_live_thesis_command(
         Path,
         typer.Option("--backup", dir_okay=False, help="New ordinary SQLite backup path."),
     ],
-    git_commit: Annotated[
-        str | None,
-        typer.Option("--git-commit", help="Full source commit; auto-detected by default."),
-    ] = None,
     in_place_database: Annotated[
         bool,
         typer.Option(
@@ -429,13 +425,14 @@ def validate_live_thesis_command(
     if not in_place_database:
         raise typer.BadParameter("--in-place-database is required for this authoritative workflow")
     try:
+        checkout_root, git_commit = _source_checkout()
         scenarios = load_reviewed_scenarios(cases)
         result = validate_live_thesis(
             _service(),
             scenarios,
             backup_destination=backup,
-            manifest_root=_LIVE_THESIS_MANIFEST_ROOT,
-            git_commit=git_commit or _current_git_commit(),
+            manifest_root=checkout_root / _LIVE_THESIS_MANIFEST_RELATIVE,
+            git_commit=git_commit,
             environ=os.environ,
             in_place_database=in_place_database,
         )
@@ -449,23 +446,37 @@ def validate_live_thesis_command(
         raise typer.Exit(code=1)
 
 
-def _current_git_commit() -> str:
+def _source_checkout() -> tuple[Path, str]:
     try:
         completed = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
+            ["git", "rev-parse", "--show-toplevel", "HEAD"],
             check=True,
             capture_output=True,
             text=True,
             timeout=5,
         )
-    except (OSError, subprocess.SubprocessError) as exc:
+        root_text, commit = completed.stdout.splitlines()
+        root = Path(root_text).resolve()
+        subprocess.run(
+            [
+                "git",
+                "check-ignore",
+                "-q",
+                str(_LIVE_THESIS_MANIFEST_RELATIVE / "manifest-entry.json"),
+            ],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            timeout=5,
+        )
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
         raise LiveThesisValidationError(
-            "Git commit could not be detected; pass --git-commit"
+            "a Git checkout with an ignored Live Thesis experiment area is required"
         ) from exc
-    commit = completed.stdout.strip().lower()
+    commit = commit.strip().lower()
     if re.fullmatch(r"[0-9a-f]{40}", commit) is None:
         raise LiveThesisValidationError("detected Git commit is invalid")
-    return commit
+    return root, commit
 
 
 def _settings() -> AppSettings:

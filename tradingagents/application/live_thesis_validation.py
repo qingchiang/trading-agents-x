@@ -15,7 +15,11 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from .contracts import AnalysisRequest, RunStatus
 from .metrics import merge_run_metrics
-from .research import ResearchChangeConclusion
+from .research import (
+    ResearchChangeConclusion,
+    derive_shadow_comparison_from_conclusions,
+)
+from .service import ChainUpdateExecutionError
 
 ValidationScenario = Literal[
     "quiet_interval",
@@ -50,6 +54,14 @@ _SCENARIO_BOUNDED_RESULTS = {
     },
     "missing_coverage": {"coverage_incomplete"},
     "threshold_crossing": {"threshold_crossing"},
+}
+_SEMANTIC_BOUNDED_RESULTS = {
+    "semantic_weakening",
+    "semantic_contradiction",
+    "semantic_answering",
+    "semantic_reopening",
+    "potentially_material_novelty",
+    "confidence_change",
 }
 
 
@@ -94,7 +106,7 @@ class LiveThesisManifestEntry(BaseModel):
     expected_full_change_conclusion: ResearchChangeConclusion
     application_status: Literal["succeeded", "failed", "cancelled"]
     validation_verdict: Literal["passed", "expectation_mismatch", "application_failed"]
-    run_id: str
+    run_id: str | None
     chain_id: str
     revision_id: str | None
 
@@ -134,6 +146,12 @@ def _validate_reviewed_scenarios(
         raise LiveThesisValidationError("exactly one of each reviewed scenario is required")
     if len({item.chain_id for item in scenarios}) != len(scenarios):
         raise LiveThesisValidationError("every scenario requires a distinct Research Chain")
+    if {item.expected_full_change_conclusion for item in scenarios} != set(
+        ResearchChangeConclusion
+    ):
+        raise LiveThesisValidationError(
+            "reviewed scenarios must include every Full Change Conclusion"
+        )
     for item in scenarios:
         if item.expected_bounded_result not in _SCENARIO_BOUNDED_RESULTS[item.scenario]:
             raise LiveThesisValidationError(f"bounded result is not reviewed for {item.scenario}")
@@ -210,52 +228,35 @@ def validate_live_thesis(
     entries: list[LiveThesisManifestEntry] = []
     for index, scenario in enumerate(scenarios, start=1):
         baseline = selected_chains[scenario.chain_id].current_revision
-        queued = service.enqueue_chain_update(
-            scenario.chain_id,
-            baseline.id,
-            AnalysisRequest(
-                ticker=selected_chains[scenario.chain_id].instrument,
-                analysis_date=scenario.analysis_date,
-            ),
-            idempotency_key=(
-                f"live-thesis:{manifest_directory.name}:{scenario.scenario}:{uuid4()}"
-            ),
-        )
-        worker_id = f"live-thesis-validation:{uuid4()}"
+        run_id: str | None = None
         try:
-            claimed = service.repository.claim_run(
-                queued.id,
-                worker_id,
-                service.settings.lease_seconds,
-            )
-            service.execute_claimed(claimed, worker_id=worker_id)
-        except Exception:
-            completed = service.repository.get_run(queued.id)
-            entry = LiveThesisManifestEntry(
-                git_commit=git_commit,
-                scenario=scenario.scenario,
-                expected_bounded_result=scenario.expected_bounded_result,
-                expected_full_change_conclusion=(scenario.expected_full_change_conclusion),
-                application_status=(
-                    completed.status.value
-                    if completed.status in {RunStatus.FAILED, RunStatus.CANCELLED}
-                    else "failed"
+            run, _result = service.run_chain_update(
+                scenario.chain_id,
+                baseline.id,
+                AnalysisRequest(
+                    ticker=selected_chains[scenario.chain_id].instrument,
+                    analysis_date=scenario.analysis_date,
                 ),
-                validation_verdict="application_failed",
-                run_id=queued.id,
-                chain_id=scenario.chain_id,
-                revision_id=None,
+                idempotency_key=(
+                    f"live-thesis:{manifest_directory.name}:{scenario.scenario}:{uuid4()}"
+                ),
             )
-        else:
+            run_id = run.id
             entry = _successful_entry(
                 service,
                 scenario,
                 baseline_revision_id=baseline.id,
-                run_id=queued.id,
+                run_id=run_id,
                 git_commit=git_commit,
             )
+        except ChainUpdateExecutionError as exc:
+            run_id = exc.run_id
+            entry = _failed_entry(service, scenario, run_id=run_id, git_commit=git_commit)
+        except Exception:
+            entry = _failed_entry(service, scenario, run_id=run_id, git_commit=git_commit)
         _write_json_exclusive(
-            manifest_directory / f"{index:02d}-{scenario.scenario}-{queued.id}.json",
+            manifest_directory
+            / f"{index:02d}-{scenario.scenario}-{run_id or f'no-run-{uuid4()}'}.json",
             entry.model_dump(mode="json"),
         )
         entries.append(entry)
@@ -327,16 +328,13 @@ def _successful_entry(
             if audit.candidate is not None
             else audit.escalation_reason
         )
-    expected_comparison = (
-        "inconclusive"
-        if bounded_result == "no_material_change"
-        and revision.change_conclusion is ResearchChangeConclusion.INDETERMINATE
-        else "agreement"
-        if bounded_result == "no_material_change"
-        and revision.change_conclusion is ResearchChangeConclusion.NO_MATERIAL_CHANGE
-        else "disagreement"
-        if bounded_result == "no_material_change"
-        else "not_applicable"
+    expected_comparison = derive_shadow_comparison_from_conclusions(
+        (
+            ResearchChangeConclusion.NO_MATERIAL_CHANGE
+            if bounded_result == "no_material_change"
+            else None
+        ),
+        revision.change_conclusion,
     )
     reconciled_metrics = (
         merge_run_metrics(audit.bounded_metrics, audit.full_metrics) if audit is not None else None
@@ -349,6 +347,11 @@ def _successful_entry(
             audit is not None and audit.mode == "shadow",
             audit is not None and audit.authoritative_strategy == "full",
             bounded_result == scenario.expected_bounded_result,
+            (
+                audit is not None and audit.semantic_assessment is not None
+                if bounded_result in _SEMANTIC_BOUNDED_RESULTS
+                else True
+            ),
             revision.change_conclusion is scenario.expected_full_change_conclusion,
             audit is not None and audit.comparison == expected_comparison,
             reconciled_metrics == completed.metrics,
@@ -365,4 +368,33 @@ def _successful_entry(
         run_id=run_id,
         chain_id=scenario.chain_id,
         revision_id=revision.id,
+    )
+
+
+def _failed_entry(
+    service: Any,
+    scenario: ReviewedLiveThesisScenario,
+    *,
+    run_id: str | None,
+    git_commit: str,
+) -> LiveThesisManifestEntry:
+    status: Literal["failed", "cancelled"] = "failed"
+    if run_id is not None:
+        try:
+            completed = service.repository.get_run(run_id)
+        except Exception:
+            pass
+        else:
+            if completed.status is RunStatus.CANCELLED:
+                status = "cancelled"
+    return LiveThesisManifestEntry(
+        git_commit=git_commit,
+        scenario=scenario.scenario,
+        expected_bounded_result=scenario.expected_bounded_result,
+        expected_full_change_conclusion=scenario.expected_full_change_conclusion,
+        application_status=status,
+        validation_verdict="application_failed",
+        run_id=run_id,
+        chain_id=scenario.chain_id,
+        revision_id=None,
     )

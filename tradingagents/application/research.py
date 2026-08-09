@@ -1060,11 +1060,22 @@ def derive_shadow_comparison(
     candidate: ResearchRevisionDraft | None,
     authoritative: ResearchRevisionDraft,
 ) -> Literal["agreement", "disagreement", "inconclusive", "not_applicable"]:
+    return derive_shadow_comparison_from_conclusions(
+        candidate.change_conclusion if candidate is not None else None,
+        authoritative.change_conclusion,
+    )
+
+
+def derive_shadow_comparison_from_conclusions(
+    candidate: ResearchChangeConclusion | None,
+    authoritative: ResearchChangeConclusion | None,
+) -> Literal["agreement", "disagreement", "inconclusive", "not_applicable"]:
+    """Compare bounded and authoritative conclusions without duplicating policy."""
     if candidate is None:
         return "not_applicable"
-    if authoritative.change_conclusion is ResearchChangeConclusion.INDETERMINATE:
+    if authoritative is ResearchChangeConclusion.INDETERMINATE:
         return "inconclusive"
-    if authoritative.change_conclusion is ResearchChangeConclusion.NO_MATERIAL_CHANGE:
+    if authoritative is ResearchChangeConclusion.NO_MATERIAL_CHANGE:
         return "agreement"
     return "disagreement"
 

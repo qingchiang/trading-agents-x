@@ -158,6 +158,8 @@ authorize a live run. Before a separately approved run:
 Keep the application in `shadow` mode and include every selected Instrument in
 the Japanese whitelist. Supply the two existing live opt-ins and the separate
 `--in-place-database` confirmation. The `--backup` destination must not exist:
+Run the command from a Git checkout; it refuses to run unless it can bind the
+manifest to that checkout's ignored `tmp/` area and detect the exact HEAD.
 
 ```bash
 RUN_LIVE_DATA_TESTS=1 RUN_LIVE_LLM_TESTS=1 PYTHON_DOTENV_DISABLED=1 \
@@ -184,6 +186,8 @@ ignored `tmp/incremental-research/live-validation/` area. Entries contain only
 the source commit, reviewed expectations, application status, validation
 verdict, and run/Chain/Revision IDs. A successful application execution whose
 results differ from expectations is `expectation_mismatch`; it is never passed.
+If enqueueing fails before SQLite creates a run, the scenario still receives an
+`application_failed` entry with a null run and Revision ID.
 
 `expected_bounded_result` may be `no_material_change` or a stable Full-escalation
 reason such as `source_correction`, `source_withdrawal`,

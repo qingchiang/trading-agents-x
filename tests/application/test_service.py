@@ -64,7 +64,7 @@ from tradingagents.application.research import (
     validate_experimental_nmc_candidate,
 )
 from tradingagents.application.runtime import RunCancelled, WorkerShutdown
-from tradingagents.application.service import AnalysisService
+from tradingagents.application.service import AnalysisService, ChainUpdateExecutionError
 from tradingagents.dataflows.config import get_config
 from tradingagents.graph.research_graph import GraphExecution
 from tradingagents.provenance import SourceWatermark, attach_source_watermarks
@@ -2626,3 +2626,36 @@ def test_controlled_live_thesis_validation_advances_five_distinct_main_database_
         next(item.run_id for item in result.entries if item.scenario == "quiet_interval")
     )
     assert quiet_run.research_update_audit.comparison == "inconclusive"
+
+
+def test_synchronous_chain_update_failure_retains_the_durable_run_id(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(app_settings, repository)
+    service.run_initial_chain(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+    _Graph.error = RuntimeError("fixture Full failure")
+
+    with pytest.raises(ChainUpdateExecutionError) as captured:
+        service.run_chain_update(
+            chain.id,
+            chain.current_revision_id,
+            AnalysisRequest(
+                ticker="6501.T",
+                analysis_date="2026-07-25",
+                analysts=("market",),
+            ),
+        )
+
+    failed = repository.get_run(captured.value.run_id)
+    assert failed.status is RunStatus.FAILED
+    assert repository.get_research_chain(chain.id).current_revision_id == (
+        chain.current_revision_id
+    )

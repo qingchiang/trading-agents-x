@@ -16,7 +16,11 @@ import pytest
 
 from tradingagents.application.contracts import AnalysisRequest, RunStatus
 from tradingagents.application.repository import RunRepository
-from tradingagents.application.research import IncrementalEscalationReason
+from tradingagents.application.research import (
+    IncrementalEscalationReason,
+    ResearchChangeConclusion,
+    derive_shadow_comparison_from_conclusions,
+)
 from tradingagents.application.service import AnalysisService
 from tradingagents.application.settings import AppSettings
 
@@ -163,15 +167,12 @@ def test_reviewed_japanese_shadow_pairs_are_sanitized_and_fail_closed(
         if case["scenario"] == "quiet_interval":
             assert audit.semantic_assessment is not None
             assert audit.bounded_metrics.llm_calls > 0
-        expected_comparison = (
-            "inconclusive"
-            if bounded == "no_material_change"
-            and revision.change_conclusion.value == "indeterminate"
-            else "agreement"
-            if bounded == "no_material_change"
-            and revision.change_conclusion.value == "no_material_change"
-            else "disagreement"
-            if bounded == "no_material_change"
-            else "not_applicable"
+        expected_comparison = derive_shadow_comparison_from_conclusions(
+            (
+                ResearchChangeConclusion.NO_MATERIAL_CHANGE
+                if bounded == "no_material_change"
+                else None
+            ),
+            revision.change_conclusion,
         )
         assert audit.comparison == expected_comparison

@@ -74,7 +74,7 @@ def _reviewed_payload() -> list[dict[str, str]]:
             "scenario": "material_event",
             "chain_id": "chain-material",
             "analysis_date": "2026-08-10",
-            "expected_bounded_result": "source_version_change",
+            "expected_bounded_result": "semantic_weakening",
             "expected_full_change_conclusion": "material_change",
         },
         {
@@ -127,6 +127,17 @@ def test_reviewed_scenarios_reject_unreviewed_result_for_scenario(
     cases_path.write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(LiveThesisValidationError, match="quiet_interval"):
+        load_reviewed_scenarios(cases_path)
+
+
+def test_reviewed_scenarios_require_all_full_change_conclusions(tmp_path: Path) -> None:
+    payload = _reviewed_payload()
+    for item in payload:
+        item["expected_full_change_conclusion"] = "material_change"
+    cases_path = tmp_path / "cases.json"
+    cases_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(LiveThesisValidationError, match="every Full Change Conclusion"):
         load_reviewed_scenarios(cases_path)
 
 
@@ -204,6 +215,8 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
     }
     runs = {}
     run_sequence = [0]
+    enqueue_failures: set[str] = set()
+    omit_semantic_assessment = [False]
 
     class Repository:
         def get_research_chain(self, chain_id):
@@ -223,6 +236,27 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
             lease_seconds=30,
         )
         repository = Repository()
+
+        def run_chain_update(
+            self,
+            chain_id,
+            baseline_revision_id,
+            request,
+            *,
+            idempotency_key,
+        ):
+            scenario = by_chain[chain_id]
+            if scenario.scenario in enqueue_failures:
+                raise RuntimeError("fixture enqueue failure")
+            run = self.enqueue_chain_update(
+                chain_id,
+                baseline_revision_id,
+                request,
+                idempotency_key=idempotency_key,
+            )
+            claimed = self.repository.claim_run(run.id, "fixture-worker", 30)
+            result = self.execute_claimed(claimed, worker_id="fixture-worker")
+            return run, result
 
         def backup_database(self, destination: Path) -> Path:
             with (
@@ -253,7 +287,7 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
             return run
 
         def execute_claimed(self, run, *, worker_id):
-            assert worker_id.startswith("live-thesis-validation:")
+            assert worker_id == "fixture-worker"
             scenario = by_chain[run.chain_id]
             bounded = RunMetrics(tool_calls=2, wall_time_seconds=0.25)
             full = RunMetrics(
@@ -289,6 +323,12 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
                 comparison=comparison,
                 bounded_metrics=bounded,
                 full_metrics=full,
+                semantic_assessment=(
+                    None
+                    if omit_semantic_assessment[0]
+                    or not scenario.expected_bounded_result.startswith("semantic_")
+                    else object()
+                ),
                 evidence="Fixture Evidence that must stay in SQLite",
             )
             revision = SimpleNamespace(
@@ -354,6 +394,8 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
     assert "metrics" not in serialized_manifest
 
     actual_full_conclusions["threshold_crossing"] = ResearchChangeConclusion.NO_MATERIAL_CHANGE
+    enqueue_failures.add("source_integrity")
+    omit_semantic_assessment[0] = True
     later_scenarios = tuple(
         item.model_copy(update={"analysis_date": item.analysis_date + timedelta(days=1)})
         for item in scenarios
@@ -370,6 +412,17 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
     mismatch_entry = next(
         item for item in mismatch.entries if item.scenario == "threshold_crossing"
     )
+    semantic_entry = next(
+        item for item in mismatch.entries if item.scenario == "material_event"
+    )
+    enqueue_entry = next(
+        item for item in mismatch.entries if item.scenario == "source_integrity"
+    )
     assert not mismatch.passed
     assert mismatch_entry.application_status == "succeeded"
     assert mismatch_entry.validation_verdict == "expectation_mismatch"
+    assert semantic_entry.validation_verdict == "expectation_mismatch"
+    assert enqueue_entry.application_status == "failed"
+    assert enqueue_entry.validation_verdict == "application_failed"
+    assert enqueue_entry.run_id is None
+    assert len(mismatch.entries) == 5
