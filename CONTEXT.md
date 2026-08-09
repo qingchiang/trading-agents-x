@@ -29,8 +29,19 @@ _Avoid_: Latest chain, active branch
 
 **Research Revision**:
 An immutable reassessment in a Research Chain containing the complete resulting
-research state and a description of what changed from its predecessor.
+research state and, for an update, a conclusion about change from its predecessor.
 _Avoid_: Incremental report, rerun
+
+**Revision Role**:
+Whether a Research Revision establishes the first Current Research State or
+updates a preceding Revision.
+_Avoid_: Execution strategy, change outcome
+
+**Change Conclusion**:
+The conclusion of an update Revision relative to its predecessor: Material
+Change, No Material Change, or Indeterminate. An initial Revision has no Change
+Conclusion.
+_Avoid_: Execution strategy, coverage status
 
 **Current Research State**:
 The structured thesis established or reaffirmed by the current Research
@@ -103,6 +114,11 @@ _Avoid_: Evidence relationship, free-form link
 A persistent uncertainty that remains open, becomes answered, is superseded or
 retired, and may reopen when later Evidence changes the answer.
 _Avoid_: Research Claim, debate issue
+
+**Question Disposition**:
+How an update treats a persistent Research Question, such as reaffirming,
+answering, reopening, superseding, or retiring it.
+_Avoid_: Question status, omission from a report
 
 **Scenario Likelihood**:
 An ordinal assessment of which scenario is more plausible over a shared cutoff
@@ -185,7 +201,9 @@ _Avoid_: Sentiment label, Claim Change
 
 **Eligible Baseline**:
 The current Revision of a Research Chain when it contains enough state,
-Evidence, and coverage information to support a bounded update.
+Evidence, coverage, and compatible semantics to support a bounded update.
+Eligibility is independent of its Change Conclusion; an Indeterminate Revision
+is never eligible.
 _Avoid_: Latest run, same-ticker result
 
 **Update Intent**:
@@ -218,17 +236,60 @@ The transition from Incremental Execution to Full Analysis when the bounded
 assessment cannot justify No Material Change.
 _Avoid_: Incremental failure, user retry
 
+**Shadow Comparison**:
+The experimental comparison of a bounded No Material Change candidate with an
+independent Full Analysis conclusion. An Indeterminate Full result is
+inconclusive rather than agreement or disagreement.
+_Avoid_: Accuracy verdict, Full ground truth
+
 **Material Change**:
-A change to a decision-relevant part of the Current Research State; new
-Evidence alone is not necessarily material.
+A Change Conclusion that a decision-relevant part of the Current Research State
+changed; new Evidence alone is not necessarily material.
 _Avoid_: Any new data, model impression
 
 **No Material Change**:
-A Research Revision outcome that advances the research cutoff and Evidence
-record while reaffirming the semantic Current Research State.
+A Change Conclusion that advances the research cutoff and Evidence record while
+reaffirming the semantic Current Research State.
 _Avoid_: No-op, copied revision
+
+**Indeterminate**:
+A Change Conclusion used when an update cannot justify either Material Change
+or No Material Change. The Revision advances the chain but is not an Eligible
+Baseline.
+_Avoid_: Coverage incomplete, failed execution
 
 **Update Summary**:
 A human-readable account of what an update checked, what changed, its coverage
 limitations, and whether it used Incremental Execution or Full Analysis.
 _Avoid_: Regenerated full report, status badge
+
+## Outcome feedback
+
+**Outcome Observation**:
+A bounded ex-post observation associated with a Research Decision over an
+explicit market-local window and declared observation method. It does not by
+itself prove or disprove a thesis.
+_Avoid_: Thesis result, current Evidence
+
+**Outcome Reflection**:
+A limited methodological lesson derived from a Research Decision and its
+Outcome Observation. It is neither Prior Research nor Evidence.
+_Avoid_: Updated thesis, verified cause
+
+**Outcome Feedback**:
+A qualified, auditable methodological lesson associated with a Research
+Decision or Research Revision, its Outcome Observation, and an Outcome
+Reflection. It becomes available only after the Observation data, Reflection,
+and qualification decision all exist; its `available_at` is the latest of
+those times.
+_Avoid_: Research memory, longitudinal thesis
+
+**Outcome Feedback Context**:
+A bounded, point-in-time view of applicable Outcome Feedback selected for a
+specific research cutoff. Selection requires eligible Feedback whose declared
+instrument or market, research stage, domain, category, and horizon apply to
+the target research; the selector is versioned, bounded, and records inclusion
+and exclusion reasons. An empty context is valid. It cannot establish Current
+Research State, serve as Evidence, satisfy Coverage, or determine a Change
+Conclusion.
+_Avoid_: Memory context, Prior Research
