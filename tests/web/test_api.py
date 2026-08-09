@@ -81,7 +81,7 @@ class _FullResearchGraph:
                         "observation_value": close,
                         "unit": "JPY",
                         "precision": 2,
-                    }
+                    },
                 ],
                 "source_watermarks": [
                     {
@@ -99,7 +99,7 @@ class _FullResearchGraph:
                         "scanned_end": cutoff.isoformat(),
                         "status": "complete",
                         "returned_records": 250,
-                    }
+                    },
                 ],
             },
         )
@@ -125,17 +125,17 @@ class _FullResearchGraph:
             decision=research_decision(evidence_refs=(item.ref,)).model_copy(
                 update={
                     "market_reference_levels": (
-                    MarketReferenceLevel(
-                        label="Thesis reference",
-                        value=100.0,
-                        measurement_kind="currency",
-                        unit="JPY",
-                        as_of_date=cutoff,
-                        interpretation="Crossing changes the thesis envelope.",
-                        evidence_refs=(item.ref,),
-                        date_evidence_refs=(item.ref,),
-                        basis="interpreted",
-                    ),
+                        MarketReferenceLevel(
+                            label="Thesis reference",
+                            value=100.0,
+                            measurement_kind="currency",
+                            unit="JPY",
+                            as_of_date=cutoff,
+                            interpretation="Crossing changes the thesis envelope.",
+                            evidence_refs=(item.ref,),
+                            date_evidence_refs=(item.ref,),
+                            basis="interpreted",
+                        ),
                     )
                 }
             ),
@@ -215,9 +215,7 @@ async def test_initial_research_chain_creation_read_and_export_surfaces(
     assert revision.json()["evidence_snapshot"]["source_records"][0]["version_id"] == (
         "edinet:S100ROOT"
     )
-    assert revision.json()["evidence_snapshot"]["source_watermarks"][0]["status"] == (
-        "limited"
-    )
+    assert revision.json()["evidence_snapshot"]["source_watermarks"][0]["status"] == ("limited")
     persisted = web_repository.get_research_revision(revision_id)
     assert persisted.evidence_snapshot.source_records[0].record_id == "S100ROOT"
     assert exported.status_code == 200
@@ -330,10 +328,10 @@ async def test_run_lifecycle_routes_and_filters(
                 "output_tokens": 0,
                 "cache_hit_input_tokens": 0,
                 "cache_miss_input_tokens": 0,
-                    "reasoning_output_tokens": 0,
-                    "detailed_usage_calls": 0,
-                    "cost_usd": None,
-                    "wall_time_seconds": 0.0,
+                "reasoning_output_tokens": 0,
+                "detailed_usage_calls": 0,
+                "cost_usd": None,
+                "wall_time_seconds": 0.0,
                 "node_metrics": {},
             },
             "started_at": None,
@@ -492,9 +490,7 @@ async def test_openapi_contains_versioned_run_center_contract(
         "inconclusive",
         "not_applicable",
     }
-    assert audit["coverage"]["anyOf"][0]["$ref"].endswith(
-        "/ResearchUpdateCoverageAttestation"
-    )
+    assert audit["coverage"]["anyOf"][0]["$ref"].endswith("/ResearchUpdateCoverageAttestation")
     assert audit["semantic_assessment"]["anyOf"][0]["$ref"].endswith(
         "/ResearchUpdateSemanticAssessment"
     )
@@ -511,9 +507,19 @@ async def test_openapi_contains_versioned_run_center_contract(
     }
     revision = schema["components"]["schemas"]["ResearchRevision"]["properties"]
     assert revision["role"]["$ref"].endswith("/ResearchRevisionRole")
-    assert revision["change_conclusion"]["anyOf"][0]["$ref"].endswith(
-        "/ResearchChangeConclusion"
-    )
+    assert revision["change_conclusion"]["anyOf"][0]["$ref"].endswith("/ResearchChangeConclusion")
+    question = schema["components"]["schemas"]["ResearchQuestion"]["properties"]
+    assert question["successor_question_id"]["anyOf"][0]["pattern"].startswith("^question_")
+    question_disposition = schema["components"]["schemas"]["QuestionDispositionKind"]
+    assert question_disposition["enum"] == [
+        "reaffirmed",
+        "answered",
+        "reopened",
+        "superseded",
+        "retired",
+    ]
+    delta = schema["components"]["schemas"]["RevisionDelta"]["properties"]
+    assert delta["question_disposition"]["anyOf"][0]["$ref"].endswith("/QuestionDispositionAudit")
     chain = schema["components"]["schemas"]["ResearchChain"]["properties"]
     assert chain["next_update_policy"]["enum"] == [
         "incremental_allowed",

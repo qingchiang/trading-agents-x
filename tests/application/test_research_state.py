@@ -34,6 +34,8 @@ from tradingagents.application.research import (
     EpistemicKind,
     IncrementalEscalationReason,
     IndeterminateReason,
+    QuestionDispositionAudit,
+    QuestionDispositionRecord,
     QuestionStatus,
     ResearchChain,
     ResearchChangeConclusion,
@@ -250,9 +252,9 @@ def test_next_update_policy_is_derived_from_complete_baseline_eligibility():
 
     with pytest.raises(ValidationError, match="update Revision requires a Change Conclusion"):
         initial.__class__.model_validate(
-            initial.model_copy(
-                update={"role": ResearchRevisionRole.UPDATE}
-            ).model_dump(mode="python")
+            initial.model_copy(update={"role": ResearchRevisionRole.UPDATE}).model_dump(
+                mode="python"
+            )
         )
 
 
@@ -280,9 +282,7 @@ def test_revision_draft_rejects_every_unresolved_reachable_evidence_reference(
         value = draft.coverage.model_copy(
             update={
                 "domains": (
-                    draft.coverage.domains[0].model_copy(
-                        update={"evidence_refs": (unknown_ref,)}
-                    ),
+                    draft.coverage.domains[0].model_copy(update={"evidence_refs": (unknown_ref,)}),
                     *draft.coverage.domains[1:],
                 )
             }
@@ -290,9 +290,7 @@ def test_revision_draft_rejects_every_unresolved_reachable_evidence_reference(
     elif path == "delta":
         value = draft.delta.model_copy(update={"new_evidence_refs": (unknown_ref,)})
     else:
-        value = draft.update_summary.model_copy(
-            update={"new_evidence_refs": (unknown_ref,)}
-        )
+        value = draft.update_summary.model_copy(update={"new_evidence_refs": (unknown_ref,)})
 
     with pytest.raises(ValidationError, match="Evidence closure"):
         draft.__class__.model_validate(
@@ -323,9 +321,7 @@ def test_revision_draft_rejects_unresolved_typed_audit_evidence(path: str):
         audit_coverage = coverage.model_copy(
             update={
                 "domains": (
-                    coverage.domains[0].model_copy(
-                        update={"evidence_refs": (unknown_ref,)}
-                    ),
+                    coverage.domains[0].model_copy(update={"evidence_refs": (unknown_ref,)}),
                     *coverage.domains[1:],
                 )
             }
@@ -334,17 +330,13 @@ def test_revision_draft_rejects_unresolved_typed_audit_evidence(path: str):
         candidate_coverage = coverage.model_copy(
             update={
                 "domains": (
-                    coverage.domains[0].model_copy(
-                        update={"evidence_refs": (unknown_ref,)}
-                    ),
+                    coverage.domains[0].model_copy(update={"evidence_refs": (unknown_ref,)}),
                     *coverage.domains[1:],
                 )
             }
         )
     else:
-        candidate_summary = summary.model_copy(
-            update={"new_evidence_refs": (unknown_ref,)}
-        )
+        candidate_summary = summary.model_copy(update={"new_evidence_refs": (unknown_ref,)})
     audit = ResearchUpdateAudit(
         candidate=ResearchUpdateCandidate(
             change_conclusion="no_material_change",
@@ -358,9 +350,7 @@ def test_revision_draft_rejects_unresolved_typed_audit_evidence(path: str):
 
     with pytest.raises(ValidationError, match="Evidence closure"):
         draft.__class__.model_validate(
-            draft.model_copy(update={"research_update_audit": audit}).model_dump(
-                mode="python"
-            )
+            draft.model_copy(update={"research_update_audit": audit}).model_dump(mode="python")
         )
 
 
@@ -633,9 +623,7 @@ def test_experimental_nmc_validation_fails_closed_for_coverage_or_semantic_drift
 
     incomplete = candidate.model_copy(
         update={
-            "coverage": candidate.coverage.model_copy(
-                update={"supports_no_material_change": False}
-            )
+            "coverage": candidate.coverage.model_copy(update={"supports_no_material_change": False})
         }
     )
     changed = candidate.model_copy(
@@ -667,15 +655,18 @@ def test_experimental_nmc_validation_fails_closed_for_coverage_or_semantic_drift
         }
     )
 
-    assert validate_experimental_nmc_candidate(
-        baseline, incomplete
-    ) is IncrementalEscalationReason.COVERAGE_INCOMPLETE
-    assert validate_experimental_nmc_candidate(
-        baseline, changed
-    ) is IncrementalEscalationReason.INCOMPATIBLE_SEMANTICS
-    assert validate_experimental_nmc_candidate(
-        baseline, material_signal
-    ) is IncrementalEscalationReason.THRESHOLD_CROSSING
+    assert (
+        validate_experimental_nmc_candidate(baseline, incomplete)
+        is IncrementalEscalationReason.COVERAGE_INCOMPLETE
+    )
+    assert (
+        validate_experimental_nmc_candidate(baseline, changed)
+        is IncrementalEscalationReason.INCOMPATIBLE_SEMANTICS
+    )
+    assert (
+        validate_experimental_nmc_candidate(baseline, material_signal)
+        is IncrementalEscalationReason.THRESHOLD_CROSSING
+    )
 
 
 class _SemanticInvoker:
@@ -920,7 +911,9 @@ def test_semantic_change_assessment_excludes_prior_research_disguised_as_evidenc
         provenance={"content_kind": "prior_research"},
     )
     claim = baseline.current_state.claims[0].model_copy(
-        update={"evidence_refs": (*baseline.current_state.claims[0].evidence_refs, prior_research.ref)}
+        update={
+            "evidence_refs": (*baseline.current_state.claims[0].evidence_refs, prior_research.ref)
+        }
     )
     claims = (claim, *baseline.current_state.claims[1:])
     baseline_bundle = baseline.evidence_snapshot.bundle.model_copy(
@@ -1047,9 +1040,7 @@ def test_quiet_candidate_reaffirms_only_relevant_research_objects():
 
     assert result.candidate is not None
     assert {item.object_id for item in result.candidate.delta.claims} == {
-        item.id
-        for item in baseline.current_state.claims
-        if item.standing is ClaimStanding.ACTIVE
+        item.id for item in baseline.current_state.claims if item.standing is ClaimStanding.ACTIVE
     }
     assert result.candidate.delta.questions == ()
 
@@ -2063,7 +2054,7 @@ def test_full_update_does_not_reassign_ambiguous_claim_identity():
     assert updated.delta.claims[0].identity_disposition.value == "ambiguous_new"
 
 
-def test_full_update_records_answered_question_as_material_change():
+def test_full_update_applies_explicit_answered_question_as_material_change():
     baseline = assemble_full_revision(
         AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
         _execution("6501.T"),
@@ -2114,6 +2105,23 @@ def test_full_update_records_answered_question_as_material_change():
                         ResearchObjectCoverage(
                             object_id=candidate_question.id,
                             status="complete",
+                        ),
+                    )
+                }
+            ),
+            "delta": candidate.delta.model_copy(
+                update={
+                    "question_disposition": QuestionDispositionAudit(
+                        status="complete",
+                        language="en",
+                        dispositions=(
+                            QuestionDispositionRecord(
+                                baseline_question_id=baseline_question.id,
+                                disposition="answered",
+                                candidate_question_id=candidate_question.id,
+                                evidence_refs=(candidate.current_state.evidence_refs[0],),
+                                reason="Current Full Evidence answers the baseline Question.",
+                            ),
                         ),
                     )
                 }

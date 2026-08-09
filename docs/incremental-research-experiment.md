@@ -90,7 +90,13 @@ when the current point-in-time and provenance contracts allow it.
 - Prior Research directs reassessment but never supports itself as Evidence.
 - Claims are atomic, decision-relevant, and distinguish observation, inference,
   and forecast. Inferences and forecasts state a falsifier.
-- Questions persist until answered, superseded, or retired and may reopen.
+- Questions persist until explicitly reaffirmed, answered, superseded, or
+  retired and may reopen. After independent Full research, a bounded Question
+  Disposition step uses only current sealed Evidence and application-assigned
+  IDs. Omission never resolves a Question; ambiguous, incomplete, or twice
+  invalid output preserves the baseline status, limits Question coverage, and
+  makes an otherwise unchanged Revision Indeterminate. A superseded Question
+  links to a separately identified successor.
 - Decision Confidence, Claim Confidence, and Scenario Likelihood use ordinal
   values. Numeric probabilities are omitted unless a separate auditable method
   justifies them.

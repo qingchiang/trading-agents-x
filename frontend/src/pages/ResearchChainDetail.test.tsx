@@ -65,7 +65,24 @@ const chain = {
     update_summary: { summary: "初回のフル分析を完了。" },
     delta: {
       claims: [],
-      questions: [],
+      questions: [{
+        object_id: "question-1",
+        previous_object_id: "question-1",
+        change: "answered",
+        identity_disposition: "exact_match",
+        evidence_refs: ["ev_0123456789ab"],
+        reason: "The order conversion was reported in current Evidence.",
+      }],
+      question_disposition: {
+        status: "complete",
+        language: "ja",
+        dispositions: [{
+          baseline_question_id: "question-1",
+          disposition: "answered",
+          evidence_refs: ["ev_0123456789ab"],
+          reason: "The order conversion was reported in current Evidence.",
+        }],
+      },
       change_signals: [
         {
           kind: "market_boundary_crossing",
@@ -102,7 +119,12 @@ const chain = {
         { kind: "bull", likelihood: "low", horizon: "12 months", outcome: "改善" },
         { kind: "bear", likelihood: "low", horizon: "12 months", outcome: "恶化" },
       ],
-      questions: [{ id: "question-1", question: "订单能否持续？" }],
+      questions: [{
+        id: "question-1",
+        question: "订单能否持续？",
+        status: "answered",
+        evidence_refs: ["ev_0123456789ab"],
+      }],
     },
     coverage: {
       limitations: ["news archive limited"],
@@ -181,10 +203,16 @@ test("reads the complete current thesis, coverage, evidence, reports, and metric
   expect(await screen.findByText("需要证据持续确认利润率修复。")).toBeVisible();
   expect(screen.getByText("初回のフル分析を完了。")).toBeVisible();
   expect(screen.getByText("订单能否持续？")).toBeVisible();
+  expect(screen.getAllByText(/answered/)[0]).toBeVisible();
+  expect(screen.getAllByRole("link", { name: "ev_0123456789ab" })[0]).toHaveAttribute(
+    "href",
+    "#research-evidence-ev_0123456789ab",
+  );
+  expect(screen.getByText("The order conversion was reported in current Evidence.")).toBeVisible();
   expect(screen.getByText("利润率再次下降。")).toBeVisible();
   expect(screen.getByText("news archive limited")).toBeVisible();
   expect(screen.getByText("answer pending")).toBeVisible();
-  expect(screen.getByText("ev_0123456789ab")).toBeVisible();
+  expect(screen.getAllByText("ev_0123456789ab")[0]).toBeVisible();
   expect(screen.getByText("订单同比增长。")).toBeVisible();
   expect(screen.getByText("訂正有価証券報告書")).toBeVisible();
   expect(screen.getByText(/edinet:S100CORRECTION/)).toBeVisible();

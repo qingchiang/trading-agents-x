@@ -17,10 +17,14 @@ Reports and deliberation remain Research Artifacts, while persistent Claims,
 Questions, scenarios, and Evidence relationships form the thesis that is
 maintained over time. Prior Research identifies what must be reassessed but is
 not Evidence for its own correctness. After independent Full research and state
-assembly, a bounded Question Disposition step may map baseline Questions to
+assembly, a bounded Question Disposition step maps baseline Questions to
 reaffirmed, answered, reopened, superseded, or retired states only with current
 sealed Evidence. Omission never resolves a Question, and ambiguous mappings
-preserve the old identity and expose limited coverage.
+preserve the old identity and expose limited coverage. The step receives one
+repair attempt; a remaining limitation makes an otherwise unchanged Revision
+Indeterminate, while an independently established Material Change remains
+Material Change. Supersession retains the old Question and links it to a
+separately assigned successor identity.
 
 One Instrument may have alternative Research Chains, but only one is Primary.
 Starting from an older Revision creates a new Research Fork instead of a second

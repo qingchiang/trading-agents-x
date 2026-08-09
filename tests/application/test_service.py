@@ -42,9 +42,14 @@ from tradingagents.application.research import (
     IncrementalGateResult,
     IndeterminateReason,
     QuestionChange,
+    QuestionDispositionAudit,
+    QuestionDispositionRecord,
     QuestionRevisionDelta,
+    QuestionStatus,
     ResearchChangeConclusion,
     ResearchExecutionStrategy,
+    ResearchObjectCoverage,
+    ResearchQuestion,
     ResearchRevisionDraft,
     ResearchRevisionRole,
     RevisionDelta,
@@ -597,8 +602,121 @@ def test_full_update_is_idempotent_for_current_head_and_advances_atomically(
             == 2
         )
     assert connection.execute(
-            "SELECT delta_json FROM research_revisions WHERE sequence = 2"
-        ).fetchone()[0]
+        "SELECT delta_json FROM research_revisions WHERE sequence = 2"
+    ).fetchone()[0]
+
+
+def test_full_update_disposes_questions_after_assembly_and_persists_audit(
+    app_settings,
+    repository,
+) -> None:
+    question = ResearchQuestion(
+        id="question_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        question="Will orders remain durable?",
+    )
+
+    def state_assembler(request, execution):
+        draft = _eligible_state_assembler(request, execution)
+        if request.analysis_date == date(2026, 7, 24):
+            return draft.model_copy(
+                update={
+                    "current_state": draft.current_state.model_copy(
+                        update={"questions": (question,)}
+                    ),
+                    "coverage": draft.coverage.model_copy(
+                        update={
+                            "questions": (
+                                ResearchObjectCoverage(
+                                    object_id=question.id,
+                                    status=CoverageStatus.COMPLETE,
+                                ),
+                            )
+                        }
+                    ),
+                }
+            )
+        assert draft.current_state.questions == ()
+        return draft
+
+    def question_dispositioner(baseline, candidate, _llm):
+        assert baseline.current_state.questions == (question,)
+        assert candidate.current_state.questions == ()
+        evidence_ref = candidate.evidence_snapshot.bundle.items[0].ref
+        return candidate.model_copy(
+            update={
+                "delta": candidate.delta.model_copy(
+                    update={
+                        "question_disposition": QuestionDispositionAudit(
+                            status="complete",
+                            language=candidate.current_state.language,
+                            dispositions=(
+                                QuestionDispositionRecord(
+                                    baseline_question_id=question.id,
+                                    disposition="answered",
+                                    evidence_refs=(evidence_ref,),
+                                    reason="The sealed Full Evidence answers the Question.",
+                                ),
+                            ),
+                        )
+                    }
+                )
+            }
+        )
+
+    service = _service(
+        app_settings,
+        repository,
+        state_assembler=state_assembler,
+        question_dispositioner=question_dispositioner,
+    )
+    service.run_initial_chain(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+    queued = service.enqueue_chain_update(
+        chain.id,
+        chain.current_revision_id,
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-25",
+            analysts=("market",),
+        ),
+        execution_strategy=ResearchExecutionStrategy.FULL,
+    )
+
+    result = service.execute_claimed(
+        repository.claim_run(queued.id, "worker", 30),
+        worker_id="worker",
+    )
+
+    revision = repository.get_research_chain(chain.id).current_revision
+    retained = next(item for item in revision.current_state.questions if item.id == question.id)
+    assert result.status is RunStatus.SUCCEEDED
+    assert retained.status is QuestionStatus.ANSWERED
+    assert revision.delta.question_disposition.status == "complete"
+    event = next(
+        item
+        for item in repository.list_events(queued.id)
+        if item.event_type == "research.question_disposition_completed"
+    )
+    assert event.payload == {
+        "status": "complete",
+        "limitation_reason": None,
+        "repair_attempted": False,
+    }
+    media_type, markdown = service.export_revision(revision.id, format="markdown")
+    assert media_type.startswith("text/markdown")
+    assert "### Question Disposition Audit" in markdown
+    assert "The sealed Full Evidence answers the Question." in markdown
+    _, exported_json = service.export_revision(revision.id, format="json")
+    assert (
+        json.loads(exported_json)["revision"]["delta"]["question_disposition"]["status"]
+        == "complete"
+    )
 
 
 @pytest.mark.parametrize(
@@ -657,9 +775,7 @@ def test_ineligible_head_rejects_explicit_incremental_but_allows_full(
     chain = repository.list_research_chains(instrument="6501.T")[0]
     assert chain.next_update_policy == "full_required"
     assert chain.next_update_reason == "coverage_incomplete"
-    request = AnalysisRequest(
-        ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)
-    )
+    request = AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",))
 
     with pytest.raises(InvalidResearchBaselineError, match="does not allow Incremental Execution"):
         service.enqueue_chain_update(

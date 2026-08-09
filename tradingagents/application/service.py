@@ -47,6 +47,7 @@ from .incremental import assess_semantic_update, run_deterministic_incremental_g
 from .instrument_names import resolve_local_instrument_name
 from .llms import RunLLMs, create_run_llms
 from .metrics import MetricsCallback, merge_run_metrics
+from .question_disposition import run_full_question_disposition
 from .repository import InvalidResearchBaselineError, RunRepository, RunView
 from .research import (
     IncrementalGateResult,
@@ -126,6 +127,9 @@ class AnalysisService:
         revision_comparator: Callable[
             [str, ResearchRevision, ResearchRevisionDraft], ResearchRevisionDraft
         ] = assemble_full_update,
+        question_dispositioner: Callable[
+            [ResearchRevision, ResearchRevisionDraft, Any], ResearchRevisionDraft
+        ] = run_full_question_disposition,
         incremental_gate: Callable[
             [ResearchRevision, AnalysisRequest, dict[str, Any], Callable[[], bool]],
             IncrementalGateResult,
@@ -142,6 +146,7 @@ class AnalysisService:
         self.local_name_resolver = local_name_resolver
         self.state_assembler = state_assembler
         self.revision_comparator = revision_comparator
+        self.question_dispositioner = question_dispositioner
         self.incremental_gate = incremental_gate or run_deterministic_incremental_gate
 
     def enqueue(
@@ -697,6 +702,35 @@ class AnalysisService:
                         if run.baseline_revision_id is None:
                             raise ValueError("Research Chain update has no baseline")
                         baseline = self.repository.get_research_revision(run.baseline_revision_id)
+                        if baseline.current_state.questions:
+                            if self.repository.cancel_requested(run.id):
+                                raise RunCancelled("cancelled before Question Disposition")
+                            revision_draft = self.question_dispositioner(
+                                baseline,
+                                revision_draft,
+                                quick_serializer_llm,
+                            )
+                            if self.repository.cancel_requested(run.id):
+                                raise RunCancelled("cancelled after Question Disposition")
+                            result = result.model_copy(update={"metrics": metrics.snapshot()})
+                            disposition = revision_draft.delta.question_disposition
+                            self._emit(
+                                run.id,
+                                "research.question_disposition_completed",
+                                payload={
+                                    "status": disposition.status if disposition else "limited",
+                                    "limitation_reason": (
+                                        disposition.limitation_reason.value
+                                        if disposition is not None
+                                        and disposition.limitation_reason is not None
+                                        else None
+                                    ),
+                                    "repair_attempted": (
+                                        disposition.repair_attempted if disposition else False
+                                    ),
+                                },
+                                on_event=on_event,
+                            )
                         revision_draft = self.revision_comparator(
                             baseline.id,
                             baseline,

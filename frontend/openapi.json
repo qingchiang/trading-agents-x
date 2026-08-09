@@ -1898,7 +1898,8 @@
       },
       "IndeterminateReason": {
         "enum": [
-          "coverage_incomplete"
+          "coverage_incomplete",
+          "question_disposition_limited"
         ],
         "title": "IndeterminateReason",
         "type": "string"
@@ -2968,11 +2969,153 @@
         "title": "QuestionChange",
         "type": "string"
       },
+      "QuestionDispositionAudit": {
+        "additionalProperties": false,
+        "properties": {
+          "dispositions": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/QuestionDispositionRecord"
+            },
+            "maxItems": 64,
+            "title": "Dispositions",
+            "type": "array"
+          },
+          "language": {
+            "title": "Language",
+            "type": "string"
+          },
+          "limitation_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QuestionDispositionLimitation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "repair_attempted": {
+            "default": false,
+            "title": "Repair Attempted",
+            "type": "boolean"
+          },
+          "schema_version": {
+            "const": "1",
+            "default": "1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "complete",
+              "limited"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "language"
+        ],
+        "title": "QuestionDispositionAudit",
+        "type": "object"
+      },
+      "QuestionDispositionKind": {
+        "enum": [
+          "reaffirmed",
+          "answered",
+          "reopened",
+          "superseded",
+          "retired"
+        ],
+        "title": "QuestionDispositionKind",
+        "type": "string"
+      },
+      "QuestionDispositionLimitation": {
+        "enum": [
+          "question_disposition_output_invalid",
+          "question_disposition_evidence_invalid",
+          "question_disposition_ambiguous_identity",
+          "question_disposition_incomplete"
+        ],
+        "title": "QuestionDispositionLimitation",
+        "type": "string"
+      },
+      "QuestionDispositionRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "baseline_question_id": {
+            "pattern": "^question_[a-f0-9]{32}$",
+            "title": "Baseline Question Id",
+            "type": "string"
+          },
+          "candidate_question_id": {
+            "anyOf": [
+              {
+                "pattern": "^question_[a-f0-9]{32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Question Id"
+          },
+          "disposition": {
+            "$ref": "#/components/schemas/QuestionDispositionKind"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "successor_question_id": {
+            "anyOf": [
+              {
+                "pattern": "^question_[a-f0-9]{32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Successor Question Id"
+          }
+        },
+        "required": [
+          "baseline_question_id",
+          "disposition",
+          "evidence_refs",
+          "reason"
+        ],
+        "title": "QuestionDispositionRecord",
+        "type": "object"
+      },
       "QuestionRevisionDelta": {
         "additionalProperties": false,
         "properties": {
           "change": {
             "$ref": "#/components/schemas/QuestionChange"
+          },
+          "evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
           },
           "identity_disposition": {
             "$ref": "#/components/schemas/IdentityDisposition"
@@ -2993,6 +3136,30 @@
               }
             ],
             "title": "Previous Object Id"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "successor_object_id": {
+            "anyOf": [
+              {
+                "pattern": "^question_[a-f0-9]{32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Successor Object Id"
           }
         },
         "required": [
@@ -3999,6 +4166,18 @@
           "status": {
             "$ref": "#/components/schemas/QuestionStatus",
             "default": "open"
+          },
+          "successor_question_id": {
+            "anyOf": [
+              {
+                "pattern": "^question_[a-f0-9]{32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Successor Question Id"
           }
         },
         "required": [
@@ -5448,6 +5627,16 @@
           "opinion_changed": {
             "title": "Opinion Changed",
             "type": "boolean"
+          },
+          "question_disposition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QuestionDispositionAudit"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "questions": {
             "items": {

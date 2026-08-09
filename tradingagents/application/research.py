@@ -145,6 +145,7 @@ class ResearchChangeConclusion(str, Enum):
 
 class IndeterminateReason(str, Enum):
     COVERAGE_INCOMPLETE = "coverage_incomplete"
+    QUESTION_DISPOSITION_LIMITED = "question_disposition_limited"
 
 
 class NextUpdateReason(str, Enum):
@@ -205,6 +206,21 @@ class QuestionChange(str, Enum):
     RETIRED = "retired"
 
 
+class QuestionDispositionKind(str, Enum):
+    REAFFIRMED = "reaffirmed"
+    ANSWERED = "answered"
+    REOPENED = "reopened"
+    SUPERSEDED = "superseded"
+    RETIRED = "retired"
+
+
+class QuestionDispositionLimitation(str, Enum):
+    OUTPUT_INVALID = "question_disposition_output_invalid"
+    EVIDENCE_INVALID = "question_disposition_evidence_invalid"
+    AMBIGUOUS_IDENTITY = "question_disposition_ambiguous_identity"
+    INCOMPLETE = "question_disposition_incomplete"
+
+
 class IdentityDisposition(str, Enum):
     EXACT_MATCH = "exact_match"
     NEW = "new"
@@ -251,6 +267,7 @@ class ResearchQuestion(ResearchModel):
     status: QuestionStatus = QuestionStatus.OPEN
     evidence_refs: tuple[str, ...] = ()
     required_sources: tuple[str, ...] = ()
+    successor_question_id: str | None = Field(default=None, pattern=_QUESTION_ID)
 
 
 class ResearchOpinion(ResearchModel):
@@ -306,6 +323,15 @@ class CurrentResearchState(ResearchModel):
         question_ids = tuple(question.id for question in self.questions)
         if len(question_ids) != len(set(question_ids)):
             raise ValueError("Research Question IDs must be unique")
+        if any(
+            question.successor_question_id is not None
+            and (
+                question.successor_question_id == question.id
+                or question.successor_question_id not in set(question_ids)
+            )
+            for question in self.questions
+        ):
+            raise ValueError("Question successors must identify another Question in the state")
         active_ids = {claim.id for claim in self.claims if claim.standing is ClaimStanding.ACTIVE}
         if not set(self.opinion.primary_claim_ids).issubset(active_ids):
             raise ValueError("opinion primary claims must be active")
@@ -504,6 +530,51 @@ class QuestionRevisionDelta(ResearchModel):
     previous_object_id: str | None = Field(default=None, pattern=_QUESTION_ID)
     change: QuestionChange
     identity_disposition: IdentityDisposition
+    evidence_refs: tuple[str, ...] = ()
+    reason: str | None = Field(default=None, min_length=1)
+    successor_object_id: str | None = Field(default=None, pattern=_QUESTION_ID)
+
+
+class QuestionDispositionRecord(ResearchModel):
+    baseline_question_id: str = Field(pattern=_QUESTION_ID)
+    disposition: QuestionDispositionKind
+    candidate_question_id: str | None = Field(default=None, pattern=_QUESTION_ID)
+    successor_question_id: str | None = Field(default=None, pattern=_QUESTION_ID)
+    evidence_refs: tuple[str, ...] = Field(min_length=1, max_length=32)
+    reason: str = Field(min_length=1, max_length=1000)
+
+    @model_validator(mode="after")
+    def validate_successor(self) -> QuestionDispositionRecord:
+        if self.disposition is QuestionDispositionKind.SUPERSEDED:
+            if self.successor_question_id is None or self.candidate_question_id is not None:
+                raise ValueError("supersession requires only a successor Question")
+        elif self.successor_question_id is not None:
+            raise ValueError("only supersession may identify a successor Question")
+        return self
+
+
+class QuestionDispositionAudit(ResearchModel):
+    schema_version: Literal["1"] = "1"
+    status: Literal["complete", "limited"]
+    language: str
+    dispositions: tuple[QuestionDispositionRecord, ...] = Field(default=(), max_length=64)
+    limitation_reason: QuestionDispositionLimitation | None = None
+    repair_attempted: bool = False
+
+    @field_validator("language", mode="before")
+    @classmethod
+    def normalize_language(cls, value: ReportLanguage | str) -> str:
+        return report_language_value(value)
+
+    @model_validator(mode="after")
+    def validate_status(self) -> QuestionDispositionAudit:
+        if (self.status == "limited") != (self.limitation_reason is not None):
+            raise ValueError("limited Question Disposition requires one stable reason")
+        if self.status == "limited" and self.dispositions:
+            raise ValueError("limited Question Disposition cannot apply dispositions")
+        if self.status == "complete" and not self.dispositions:
+            raise ValueError("complete Question Disposition must cover baseline Questions")
+        return self
 
 
 class RevisionDelta(ResearchModel):
@@ -526,6 +597,7 @@ class RevisionDelta(ResearchModel):
     inherited_evidence_refs: tuple[str, ...] = ()
     new_evidence_refs: tuple[str, ...] = ()
     change_signals: tuple[ResearchChangeSignal, ...] = ()
+    question_disposition: QuestionDispositionAudit | None = None
 
 
 class ResearchChangeSignal(ResearchModel):
@@ -583,6 +655,32 @@ class ResearchRevisionDraft(ResearchModel):
             set(covered_question_ids)
         ):
             raise ValueError("Coverage must attest every Research Question exactly once")
+        question_disposition = self.delta.question_disposition
+        if question_disposition is not None and question_disposition.status == "complete":
+            questions_by_id = {item.id: item for item in self.current_state.questions}
+            question_delta_by_id = {item.object_id: item for item in self.delta.questions}
+            required_status = {
+                QuestionDispositionKind.ANSWERED: QuestionStatus.ANSWERED,
+                QuestionDispositionKind.REOPENED: QuestionStatus.OPEN,
+                QuestionDispositionKind.SUPERSEDED: QuestionStatus.SUPERSEDED,
+                QuestionDispositionKind.RETIRED: QuestionStatus.RETIRED,
+            }
+            for item in question_disposition.dispositions:
+                question = questions_by_id.get(item.baseline_question_id)
+                delta = question_delta_by_id.get(item.baseline_question_id)
+                if question is None or delta is None:
+                    raise ValueError("applied Question Disposition must remain in state and delta")
+                if delta.change.value != item.disposition.value:
+                    raise ValueError("Question Disposition must agree with the Revision delta")
+                if delta.evidence_refs != item.evidence_refs or delta.reason != item.reason:
+                    raise ValueError("Question Disposition support must agree with the delta")
+                if (
+                    item.disposition in required_status
+                    and question.status is not required_status[item.disposition]
+                ):
+                    raise ValueError("Question Disposition must agree with Question status")
+                if question.successor_question_id != item.successor_question_id:
+                    raise ValueError("Question successor must agree with its disposition")
         snapshot_refs = {item.ref for item in self.evidence_snapshot.bundle.items}
         reachable_refs = set(self.current_state.evidence_refs)
         reachable_refs.update(ref for item in self.coverage.claims for ref in item.evidence_refs)
@@ -590,6 +688,12 @@ class ResearchRevisionDraft(ResearchModel):
         reachable_refs.update(ref for item in self.coverage.domains for ref in item.evidence_refs)
         reachable_refs.update(self.delta.inherited_evidence_refs)
         reachable_refs.update(self.delta.new_evidence_refs)
+        if self.delta.question_disposition is not None:
+            reachable_refs.update(
+                ref
+                for item in self.delta.question_disposition.dispositions
+                for ref in item.evidence_refs
+            )
         reachable_refs.update(self.update_summary.new_evidence_refs)
         reachable_refs.update(item.evidence_ref for item in self.evidence_snapshot.source_records)
         if self.research_update_audit is not None:
@@ -1012,10 +1116,45 @@ def render_revision_export_markdown(export: RevisionExport) -> str:
             f"{claim.statement} (Evidence: {refs})"
         )
     lines.extend(["", "## Research Questions", ""])
-    lines.extend(
-        f"- `{question.id}` [{question.status.value}] {question.question}"
-        for question in state.questions
-    )
+    for question in state.questions:
+        successor = (
+            f"; successor: `{question.successor_question_id}`"
+            if question.successor_question_id is not None
+            else ""
+        )
+        evidence_refs = ", ".join(question.evidence_refs) or "none"
+        lines.append(
+            f"- `{question.id}` [{question.status.value}] {question.question} "
+            f"(Evidence: {evidence_refs}{successor})"
+        )
+    if revision.delta.question_disposition is not None:
+        question_audit = revision.delta.question_disposition
+        lines.extend(
+            [
+                "",
+                "### Question Disposition Audit",
+                "",
+                f"- Status: {question_audit.status}",
+                f"- Limitation reason: "
+                f"{question_audit.limitation_reason.value if question_audit.limitation_reason is not None else 'none'}",
+                f"- Repair attempted: {str(question_audit.repair_attempted).lower()}",
+            ]
+        )
+        for item in question_audit.dispositions:
+            successor = (
+                f"; successor: `{item.successor_question_id}`"
+                if item.successor_question_id is not None
+                else ""
+            )
+            candidate = (
+                f"; candidate: `{item.candidate_question_id}`"
+                if item.candidate_question_id is not None
+                else ""
+            )
+            lines.append(
+                f"- `{item.baseline_question_id}`: {item.disposition.value}{candidate}"
+                f"{successor}; Evidence: {', '.join(item.evidence_refs)}; {item.reason}"
+            )
     lines.extend(["", "## Scenarios", ""])
     for scenario in state.scenarios:
         lines.append(
@@ -1933,6 +2072,24 @@ def assemble_full_update(
         candidate.current_state.questions,
         _question_identity,
     )
+    question_disposition = candidate.delta.question_disposition
+    if baseline.current_state.questions and question_disposition is None:
+        question_disposition = QuestionDispositionAudit(
+            status="limited",
+            language=candidate.current_state.language,
+            limitation_reason=QuestionDispositionLimitation.INCOMPLETE,
+        )
+    if question_disposition is not None and question_disposition.status == "complete":
+        baseline_questions_by_id = {item.id: item for item in baseline.current_state.questions}
+        question_matches = {
+            item.candidate_question_id: baseline_questions_by_id[item.baseline_question_id]
+            for item in question_disposition.dispositions
+            if item.candidate_question_id is not None
+        }
+        ambiguous_questions = set()
+    elif baseline.current_state.questions:
+        question_matches = {}
+        ambiguous_questions = set()
     claim_ids = {candidate_id: previous.id for candidate_id, previous in claim_matches.items()}
     question_ids = {
         candidate_id: previous.id for candidate_id, previous in question_matches.items()
@@ -1972,10 +2129,64 @@ def assemble_full_update(
         if claim.id not in retained_claim_ids
     )
     retired_questions = tuple(
-        question.model_copy(update={"status": QuestionStatus.RETIRED})
+        question
         for question in baseline.current_state.questions
         if question.id not in retained_question_ids
     )
+    if question_disposition is not None and question_disposition.status == "complete":
+        candidate_questions_by_id = {item.id: item for item in candidate.current_state.questions}
+        baseline_questions_by_id = {item.id: item for item in baseline.current_state.questions}
+        assigned_candidate_ids = {
+            value
+            for item in question_disposition.dispositions
+            for value in (item.candidate_question_id, item.successor_question_id)
+            if value is not None
+        }
+        disposed_questions: list[ResearchQuestion] = []
+        status_by_disposition = {
+            QuestionDispositionKind.ANSWERED: QuestionStatus.ANSWERED,
+            QuestionDispositionKind.REOPENED: QuestionStatus.OPEN,
+            QuestionDispositionKind.SUPERSEDED: QuestionStatus.SUPERSEDED,
+            QuestionDispositionKind.RETIRED: QuestionStatus.RETIRED,
+        }
+        for item in question_disposition.dispositions:
+            previous = baseline_questions_by_id[item.baseline_question_id]
+            source = (
+                candidate_questions_by_id[item.candidate_question_id]
+                if item.candidate_question_id is not None
+                else previous
+            )
+            disposed_questions.append(
+                source.model_copy(
+                    update={
+                        "id": previous.id,
+                        "status": status_by_disposition.get(
+                            item.disposition,
+                            previous.status,
+                        ),
+                        "evidence_refs": tuple(
+                            dict.fromkeys((*source.evidence_refs, *item.evidence_refs))
+                        ),
+                        "required_sources": previous.required_sources,
+                        "successor_question_id": item.successor_question_id,
+                    }
+                )
+            )
+        questions = (
+            *disposed_questions,
+            *(
+                item
+                for item in candidate.current_state.questions
+                if item.id not in assigned_candidate_ids
+            ),
+            *(
+                candidate_questions_by_id[item.successor_question_id]
+                for item in question_disposition.dispositions
+                if item.successor_question_id is not None
+            ),
+        )
+        retained_question_ids = {question.id for question in questions}
+        retired_questions = ()
 
     def remap_claim_ids(values: tuple[str, ...]) -> tuple[str, ...]:
         return tuple(claim_ids.get(value, value) for value in values)
@@ -2090,6 +2301,8 @@ def assemble_full_update(
     )
     if any(item.requires_full_analysis for item in change_signals):
         supports_quiet = False
+    if question_disposition is not None and question_disposition.status == "limited":
+        supports_quiet = False
     coverage_domains = (
         tuple(item for item in candidate.coverage.domains if item.source is None) + source_domains
     )
@@ -2144,45 +2357,74 @@ def assemble_full_update(
     )
 
     question_delta: list[QuestionRevisionDelta] = []
-    for original in candidate.current_state.questions:
-        previous = question_matches.get(original.id)
-        if previous is None:
-            change = QuestionChange.INTRODUCED
-        elif previous.status is original.status:
-            change = QuestionChange.REAFFIRMED
-        elif original.status is QuestionStatus.ANSWERED:
-            change = QuestionChange.ANSWERED
-        elif original.status is QuestionStatus.OPEN:
-            change = QuestionChange.REOPENED
-        elif original.status is QuestionStatus.SUPERSEDED:
-            change = QuestionChange.SUPERSEDED
-        else:
-            change = QuestionChange.RETIRED
-        question_delta.append(
+    if question_disposition is not None and question_disposition.status == "complete":
+        disposition_changes = {
+            item.value: QuestionChange(item.value) for item in QuestionDispositionKind
+        }
+        assigned_candidate_ids = {
+            value
+            for item in question_disposition.dispositions
+            for value in (item.candidate_question_id, item.successor_question_id)
+            if value is not None
+        }
+        question_delta.extend(
             QuestionRevisionDelta(
-                object_id=question_ids.get(original.id, original.id),
-                previous_object_id=previous.id if previous is not None else None,
-                change=change,
-                identity_disposition=(
-                    IdentityDisposition.EXACT_MATCH
-                    if previous is not None
-                    else (
-                        IdentityDisposition.AMBIGUOUS_NEW
-                        if original.id in ambiguous_questions
-                        else IdentityDisposition.NEW
-                    )
-                ),
+                object_id=item.baseline_question_id,
+                previous_object_id=item.baseline_question_id,
+                change=disposition_changes[item.disposition.value],
+                identity_disposition=IdentityDisposition.EXACT_MATCH,
+                evidence_refs=item.evidence_refs,
+                reason=item.reason,
+                successor_object_id=item.successor_question_id,
             )
+            for item in question_disposition.dispositions
         )
-    question_delta.extend(
-        QuestionRevisionDelta(
-            object_id=question.id,
-            previous_object_id=question.id,
-            change=QuestionChange.RETIRED,
-            identity_disposition=IdentityDisposition.CONSERVATIVE_RETIREMENT,
+        question_delta.extend(
+            QuestionRevisionDelta(
+                object_id=item.id,
+                change=QuestionChange.INTRODUCED,
+                identity_disposition=IdentityDisposition.NEW,
+            )
+            for item in candidate.current_state.questions
+            if item.id
+            not in {
+                record.candidate_question_id
+                for record in question_disposition.dispositions
+                if record.candidate_question_id is not None
+            }
         )
-        for question in retired_questions
-    )
+    else:
+        for original in candidate.current_state.questions:
+            previous = question_matches.get(original.id)
+            question_delta.append(
+                QuestionRevisionDelta(
+                    object_id=question_ids.get(original.id, original.id),
+                    previous_object_id=previous.id if previous is not None else None,
+                    change=(
+                        QuestionChange.REAFFIRMED
+                        if previous is not None
+                        else QuestionChange.INTRODUCED
+                    ),
+                    identity_disposition=(
+                        IdentityDisposition.EXACT_MATCH
+                        if previous is not None
+                        else (
+                            IdentityDisposition.AMBIGUOUS_NEW
+                            if original.id in ambiguous_questions
+                            else IdentityDisposition.NEW
+                        )
+                    ),
+                )
+            )
+        question_delta.extend(
+            QuestionRevisionDelta(
+                object_id=question.id,
+                previous_object_id=question.id,
+                change=QuestionChange.REAFFIRMED,
+                identity_disposition=IdentityDisposition.EXACT_MATCH,
+            )
+            for question in retired_questions
+        )
 
     coverage_claims = tuple(
         item.model_copy(update={"object_id": claim_ids.get(item.object_id, item.object_id)})
@@ -2196,18 +2438,55 @@ def assemble_full_update(
         )
         for claim in retired_claims
     )
-    coverage_questions = tuple(
-        item.model_copy(update={"object_id": question_ids.get(item.object_id, item.object_id)})
-        for item in candidate.coverage.questions
-    ) + tuple(
-        ResearchObjectCoverage(
-            object_id=question.id,
-            status=CoverageStatus.LIMITED,
-            evidence_refs=question.evidence_refs,
-            limitations=("The independent Full Analysis did not reproduce this Question.",),
+    if question_disposition is not None and question_disposition.status == "complete":
+        disposition_by_baseline = {
+            item.baseline_question_id: item for item in question_disposition.dispositions
+        }
+        candidate_coverage_by_id = {item.object_id: item for item in candidate.coverage.questions}
+        coverage_questions = tuple(
+            ResearchObjectCoverage(
+                object_id=question.id,
+                status=(
+                    CoverageStatus.COMPLETE
+                    if question.id in disposition_by_baseline
+                    else candidate_coverage_by_id.get(
+                        question.id,
+                        ResearchObjectCoverage(
+                            object_id=question.id,
+                            status=CoverageStatus.LIMITED,
+                        ),
+                    ).status
+                ),
+                evidence_refs=(
+                    disposition_by_baseline[question.id].evidence_refs
+                    if question.id in disposition_by_baseline
+                    else candidate_coverage_by_id.get(
+                        question.id,
+                        ResearchObjectCoverage(
+                            object_id=question.id,
+                            status=CoverageStatus.LIMITED,
+                        ),
+                    ).evidence_refs
+                ),
+                limitations=(),
+            )
+            for question in questions
         )
-        for question in retired_questions
-    )
+    else:
+        coverage_questions = tuple(
+            item.model_copy(update={"object_id": question_ids.get(item.object_id, item.object_id)})
+            for item in candidate.coverage.questions
+        ) + tuple(
+            ResearchObjectCoverage(
+                object_id=question.id,
+                status=CoverageStatus.LIMITED,
+                evidence_refs=question.evidence_refs,
+                limitations=("Question Disposition was not completed.",),
+            )
+            for question in retired_questions
+        )
+    if any(item.status is not CoverageStatus.COMPLETE for item in coverage_questions):
+        supports_quiet = False
     opinion_changed = opinion.model_dump(
         exclude={"evidence_refs"}
     ) != baseline.current_state.opinion.model_dump(exclude={"evidence_refs"})
@@ -2223,7 +2502,9 @@ def assemble_full_update(
         changed_sections.append("opinion")
     if any(item.change is not ClaimChange.REAFFIRMED for item in claim_delta):
         changed_sections.append("claims")
-    if any(item.change is not QuestionChange.REAFFIRMED for item in question_delta):
+    if (question_disposition is None or question_disposition.status == "complete") and any(
+        item.change is not QuestionChange.REAFFIRMED for item in question_delta
+    ):
         changed_sections.append("questions")
     if semantic_scenarios(scenarios) != semantic_scenarios(baseline.current_state.scenarios):
         changed_sections.append("scenarios")
@@ -2250,6 +2531,7 @@ def assemble_full_update(
         inherited_evidence_refs=inherited_refs,
         new_evidence_refs=tuple(item.ref for item in candidate_bundle.items),
         change_signals=change_signals,
+        question_disposition=question_disposition,
     )
     change_conclusion = (
         ResearchChangeConclusion.MATERIAL_CHANGE
@@ -2293,7 +2575,11 @@ def assemble_full_update(
             "role": ResearchRevisionRole.UPDATE,
             "change_conclusion": change_conclusion,
             "indeterminate_reason": (
-                IndeterminateReason.COVERAGE_INCOMPLETE
+                (
+                    IndeterminateReason.QUESTION_DISPOSITION_LIMITED
+                    if question_disposition is not None and question_disposition.status == "limited"
+                    else IndeterminateReason.COVERAGE_INCOMPLETE
+                )
                 if change_conclusion is ResearchChangeConclusion.INDETERMINATE
                 else None
             ),
@@ -2309,6 +2595,12 @@ def assemble_full_update(
                             (
                                 *candidate.coverage.limitations,
                                 *(value for item in source_domains for value in item.limitations),
+                                *(
+                                    (question_disposition.limitation_reason.value,)
+                                    if question_disposition is not None
+                                    and question_disposition.limitation_reason is not None
+                                    else ()
+                                ),
                             )
                         )
                     ),
@@ -2328,6 +2620,12 @@ def assemble_full_update(
                             (
                                 *candidate.update_summary.limitations,
                                 *(value for item in source_domains for value in item.limitations),
+                                *(
+                                    (question_disposition.limitation_reason.value,)
+                                    if question_disposition is not None
+                                    and question_disposition.limitation_reason is not None
+                                    else ()
+                                ),
                             )
                         )
                     ),

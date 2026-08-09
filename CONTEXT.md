@@ -117,7 +117,9 @@ _Avoid_: Research Claim, debate issue
 
 **Question Disposition**:
 How an update treats a persistent Research Question, such as reaffirming,
-answering, reopening, superseding, or retiring it.
+answering, reopening, superseding, or retiring it, with applicable current
+Evidence and a durable reason. Supersession links the retained Question to a
+separately identified successor.
 _Avoid_: Question status, omission from a report
 
 **Scenario Likelihood**:

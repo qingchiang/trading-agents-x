@@ -160,8 +160,33 @@ export default function ResearchChainDetail() {
         <ul>{(state.invalidation_conditions ?? []).map((item) => <li key={item.statement}>{item.statement}</li>)}</ul>
         <h3>{t("scenarios")}</h3>
         <ul>{state.scenarios.map((scenario) => <li key={scenario.kind}><strong>{scenario.kind}</strong> · {scenario.likelihood} · {scenario.horizon}: {scenario.outcome}</li>)}</ul>
-        <h3>{t("unresolved")}</h3>
-        <ul>{(state.questions ?? []).map((question) => <li key={question.id}>{question.question}</li>)}</ul>
+        <h3>{t("researchQuestions")}</h3>
+        <ul>
+          {(state.questions ?? []).map((question) => (
+            <li id={`research-question-${question.id}`} key={question.id}>
+              <strong>{question.question}</strong> · {question.status}
+              {(question.evidence_refs ?? []).length > 0 && (
+                <small>
+                  {" · Evidence: "}
+                  {(question.evidence_refs ?? []).map((ref, index) => (
+                    <span key={ref}>
+                      {index > 0 ? ", " : ""}
+                      <a href={`#research-evidence-${ref}`}>{ref}</a>
+                    </span>
+                  ))}
+                </small>
+              )}
+              {question.successor_question_id && (
+                <small>
+                  {" · "}{t("successorQuestion")}: {" "}
+                  <a href={`#research-question-${question.successor_question_id}`}>
+                    {question.successor_question_id}
+                  </a>
+                </small>
+              )}
+            </li>
+          ))}
+        </ul>
       </article>
 
       <article className="panel">
@@ -249,7 +274,7 @@ export default function ResearchChainDetail() {
           {revision.evidence_snapshot.lineage.map((item) => {
             const evidence = evidenceByRef.get(item.evidence_ref);
             return (
-              <li key={item.evidence_ref}>
+              <li id={`research-evidence-${item.evidence_ref}`} key={item.evidence_ref}>
                 <code>{item.evidence_ref}</code> · {item.lineage} ·{" "}
                 {evidence?.source} / {evidence?.evidence_type}
                 {evidence?.content && <p>{evidence.content}</p>}
@@ -349,6 +374,15 @@ export default function ResearchChainDetail() {
           {(revision.delta?.questions ?? []).map((item) => (
             <li key={`question-${item.object_id}`}>
               <code>{item.object_id}</code> · {item.change} · {item.identity_disposition}
+              {item.successor_object_id && (
+                <> · {t("successorQuestion")}: <a href={`#research-question-${item.successor_object_id}`}>{item.successor_object_id}</a></>
+              )}
+              {(item.evidence_refs ?? []).length > 0 && (
+                <> · {(item.evidence_refs ?? []).map((ref, index) => (
+                  <span key={ref}>{index > 0 ? ", " : ""}<a href={`#research-evidence-${ref}`}>{ref}</a></span>
+                ))}</>
+              )}
+              {item.reason && <p>{item.reason}</p>}
             </li>
           ))}
         </ul>

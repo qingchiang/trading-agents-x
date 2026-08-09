@@ -266,7 +266,7 @@ export interface components {
       version: string;
     };
     IdentityDisposition: "exact_match" | "new" | "ambiguous_new" | "conservative_retirement";
-    IndeterminateReason: "coverage_incomplete";
+    IndeterminateReason: "coverage_incomplete" | "question_disposition_limited";
     IssueDisposition: {
       issue_id: string;
       status: "upheld" | "rejected" | "unresolved";
@@ -411,11 +411,32 @@ export interface components {
       warning?: components["schemas"]["ModelDiscoveryWarningView"] | null;
     };
     QuestionChange: "introduced" | "reaffirmed" | "answered" | "reopened" | "superseded" | "retired";
+    QuestionDispositionAudit: {
+      dispositions?: components["schemas"]["QuestionDispositionRecord"][];
+      language: string;
+      limitation_reason?: components["schemas"]["QuestionDispositionLimitation"] | null;
+      repair_attempted?: boolean;
+      schema_version?: string;
+      status: "complete" | "limited";
+    };
+    QuestionDispositionKind: "reaffirmed" | "answered" | "reopened" | "superseded" | "retired";
+    QuestionDispositionLimitation: "question_disposition_output_invalid" | "question_disposition_evidence_invalid" | "question_disposition_ambiguous_identity" | "question_disposition_incomplete";
+    QuestionDispositionRecord: {
+      baseline_question_id: string;
+      candidate_question_id?: string | null;
+      disposition: components["schemas"]["QuestionDispositionKind"];
+      evidence_refs: string[];
+      reason: string;
+      successor_question_id?: string | null;
+    };
     QuestionRevisionDelta: {
       change: components["schemas"]["QuestionChange"];
+      evidence_refs?: string[];
       identity_disposition: components["schemas"]["IdentityDisposition"];
       object_id: string;
       previous_object_id?: string | null;
+      reason?: string | null;
+      successor_object_id?: string | null;
     };
     QuestionStatus: "open" | "answered" | "superseded" | "retired";
     QueueHealth: {
@@ -560,6 +581,7 @@ export interface components {
       question: string;
       required_sources?: string[];
       status?: components["schemas"]["QuestionStatus"];
+      successor_question_id?: string | null;
     };
     ResearchQuestionSourceDependency: {
       question: string;
@@ -756,6 +778,7 @@ export interface components {
       inherited_evidence_refs?: string[];
       new_evidence_refs?: string[];
       opinion_changed: boolean;
+      question_disposition?: components["schemas"]["QuestionDispositionAudit"] | null;
       questions: components["schemas"]["QuestionRevisionDelta"][];
       schema_version?: string;
     };

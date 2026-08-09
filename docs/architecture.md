@@ -291,14 +291,28 @@ retries add an attempt to that execution. A partial unique constraint prevents
 concurrent queued or running updates for one chain.
 
 The ResearchGraph receives only the new `AnalysisRequest` and runs the existing
-Full Analysis pipeline without Prior Research. After it completes, the
-application compares the independently assembled state with the Eligible
-Baseline. Exact, unique Claim and Question matches retain their
-application-assigned identities. Ambiguous matches create new identities and
-record a conservative disposition; they never silently reassign an old
-identity. The immutable Revision stores a typed delta, complete Current
-Research State, Coverage Attestation, Update Summary, Effective Evidence
-Snapshot with inherited/new lineage, Full artifacts, and metrics.
+Full Analysis pipeline without Prior Research. After Full Evidence and the
+independently assembled candidate Current Research State are sealed, but before
+comparison with the Eligible Baseline, the application runs a bounded Question
+Disposition step. Its structured result may refer only to baseline and
+candidate Question IDs assigned by application code, current Full Evidence
+references, one disposition, an optional successor, and a concise reason.
+Only complete one-to-one mappings are applied. Answered and reopened Questions
+retain their ID; superseded Questions retain their ID and link to a separately
+assigned successor ID. A Full decision's omission never changes a Question.
+
+The structured step receives one repair attempt. A second invalid result,
+current-Evidence violation, incomplete coverage of baseline Questions, or
+ambiguous identity preserves every baseline status and retains unmatched Full
+Questions as new objects. The Revision records the stable limitation in its
+delta, Question coverage, Update Summary, and event audit. Without an
+independently established Material Change this makes the Revision
+Indeterminate with reason `question_disposition_limited`; independently
+established Material Change remains authoritative while exposing the
+limitation. Claim identity comparison then runs together with the applied
+Question dispositions. The immutable Revision stores the typed delta, complete
+Current Research State, Coverage Attestation, Update Summary, Effective
+Evidence Snapshot with inherited/new lineage, Full artifacts, and metrics.
 
 Coverage Attestation distinguishes Required and Advisory source domains.
 EDINET and TDnet company disclosures are Required for Japanese disclosure
