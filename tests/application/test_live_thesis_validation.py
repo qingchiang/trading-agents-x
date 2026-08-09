@@ -216,6 +216,7 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
     runs = {}
     run_sequence = [0]
     enqueue_failures: set[str] = set()
+    cancelled_scenarios: set[str] = set()
     omit_semantic_assessment = [False]
 
     class Repository:
@@ -254,6 +255,10 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
                 request,
                 idempotency_key=idempotency_key,
             )
+            if scenario.scenario in cancelled_scenarios:
+                run.status = RunStatus.CANCELLED
+                run.metrics = RunMetrics()
+                return run, SimpleNamespace(status=RunStatus.CANCELLED)
             claimed = self.repository.claim_run(run.id, "fixture-worker", 30)
             result = self.execute_claimed(claimed, worker_id="fixture-worker")
             return run, result
@@ -395,6 +400,7 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
 
     actual_full_conclusions["threshold_crossing"] = ResearchChangeConclusion.NO_MATERIAL_CHANGE
     enqueue_failures.add("source_integrity")
+    cancelled_scenarios.add("missing_coverage")
     omit_semantic_assessment[0] = True
     later_scenarios = tuple(
         item.model_copy(update={"analysis_date": item.analysis_date + timedelta(days=1)})
@@ -418,6 +424,9 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
     enqueue_entry = next(
         item for item in mismatch.entries if item.scenario == "source_integrity"
     )
+    cancelled_entry = next(
+        item for item in mismatch.entries if item.scenario == "missing_coverage"
+    )
     assert not mismatch.passed
     assert mismatch_entry.application_status == "succeeded"
     assert mismatch_entry.validation_verdict == "expectation_mismatch"
@@ -425,4 +434,6 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
     assert enqueue_entry.application_status == "failed"
     assert enqueue_entry.validation_verdict == "application_failed"
     assert enqueue_entry.run_id is None
+    assert cancelled_entry.application_status == "cancelled"
+    assert cancelled_entry.validation_verdict == "application_failed"
     assert len(mismatch.entries) == 5

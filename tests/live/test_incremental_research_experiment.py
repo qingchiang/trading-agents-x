@@ -174,5 +174,6 @@ def test_reviewed_japanese_shadow_pairs_are_sanitized_and_fail_closed(
                 else None
             ),
             revision.change_conclusion,
+            candidate_present=bounded == "no_material_change",
         )
         assert audit.comparison == expected_comparison

@@ -447,9 +447,10 @@ def validate_live_thesis_command(
 
 
 def _source_checkout() -> tuple[Path, str]:
+    source_root = Path(__file__).resolve().parents[1]
     try:
         completed = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel", "HEAD"],
+            ["git", "-C", str(source_root), "rev-parse", "--show-toplevel", "HEAD"],
             check=True,
             capture_output=True,
             text=True,
@@ -457,6 +458,10 @@ def _source_checkout() -> tuple[Path, str]:
         )
         root_text, commit = completed.stdout.splitlines()
         root = Path(root_text).resolve()
+        if root != source_root:
+            raise LiveThesisValidationError(
+                "executing source is not rooted at the detected Git checkout"
+            )
         subprocess.run(
             [
                 "git",

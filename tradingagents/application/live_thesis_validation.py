@@ -230,7 +230,7 @@ def validate_live_thesis(
         baseline = selected_chains[scenario.chain_id].current_revision
         run_id: str | None = None
         try:
-            run, _result = service.run_chain_update(
+            run, result = service.run_chain_update(
                 scenario.chain_id,
                 baseline.id,
                 AnalysisRequest(
@@ -242,12 +242,21 @@ def validate_live_thesis(
                 ),
             )
             run_id = run.id
-            entry = _successful_entry(
-                service,
-                scenario,
-                baseline_revision_id=baseline.id,
-                run_id=run_id,
-                git_commit=git_commit,
+            entry = (
+                _successful_entry(
+                    service,
+                    scenario,
+                    baseline_revision_id=baseline.id,
+                    run_id=run_id,
+                    git_commit=git_commit,
+                )
+                if result.status is RunStatus.SUCCEEDED
+                else _failed_entry(
+                    service,
+                    scenario,
+                    run_id=run_id,
+                    git_commit=git_commit,
+                )
             )
         except ChainUpdateExecutionError as exc:
             run_id = exc.run_id
@@ -335,6 +344,7 @@ def _successful_entry(
             else None
         ),
         revision.change_conclusion,
+        candidate_present=bounded_result == "no_material_change",
     )
     reconciled_metrics = (
         merge_run_metrics(audit.bounded_metrics, audit.full_metrics) if audit is not None else None
