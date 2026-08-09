@@ -31,6 +31,7 @@ from tradingagents.application.contracts import (
     RunStatus,
 )
 from tradingagents.application.llms import RunLLMs
+from tradingagents.application.outcomes import OutcomeObservation
 from tradingagents.application.repository import InvalidResearchBaselineError, RunRepository
 from tradingagents.application.research import (
     ClaimChange,
@@ -127,6 +128,14 @@ class _Graph:
         if self.error is not None:
             raise self.error
         return _execution(context.request.ticker)
+
+
+class _MemoryCapturingGraph(_Graph):
+    memories = []
+
+    def execute(self, context, **kwargs):
+        self.memories.append(context.memory)
+        return super().execute(context, **kwargs)
 
 
 class _SemanticServiceInvoker:
@@ -524,6 +533,86 @@ def test_successful_explicit_full_analysis_creates_primary_research_chain(
             ),
             {"revision_id": revision.id},
         )
+
+
+def test_initial_research_chain_does_not_load_or_inject_legacy_memory(
+    app_settings,
+    repository,
+    monkeypatch,
+) -> None:
+    _MemoryCapturingGraph.memories = []
+
+    def legacy_memory_must_not_load(*_args, **_kwargs):
+        raise AssertionError("Research Chain execution loaded legacy memory")
+
+    monkeypatch.setattr(repository, "memory_context", legacy_memory_must_not_load)
+    service = _service(
+        app_settings,
+        repository,
+        graph_factory=_MemoryCapturingGraph,
+    )
+
+    result = service.run_initial_chain(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+
+    assert result.status is RunStatus.SUCCEEDED
+    assert len(_MemoryCapturingGraph.memories) == 1
+    assert _MemoryCapturingGraph.memories[0].items == ()
+
+
+def test_feedback_failure_cannot_change_research_revision(
+    app_settings,
+    repository,
+    monkeypatch,
+) -> None:
+    service = _service(app_settings, repository)
+    result = service.run_initial_chain(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+    chain = repository.list_research_chains(instrument="NVDA")[0]
+    revision_before = chain.current_revision
+    outcome = repository.pending_outcomes(
+        due_at=datetime(2100, 1, 1, tzinfo=timezone.utc)
+    )[0]
+    repository.persist_outcome_observation(
+        outcome["outcome_id"],
+        observation=OutcomeObservation(
+            raw_return=0.03,
+            alpha_return=0.01,
+            holding_intervals=5,
+            start_date=date(2026, 7, 25),
+            end_date=date(2026, 8, 1),
+        ),
+        observed_at=datetime(2026, 8, 1, 20, tzinfo=timezone.utc),
+    )
+
+    def fail_qualification(**_kwargs):
+        raise RuntimeError("qualification failed")
+
+    monkeypatch.setattr(
+        "tradingagents.application.repository.qualify_reflection",
+        fail_qualification,
+    )
+    with pytest.raises(RuntimeError, match="qualification failed"):
+        repository.persist_generated_reflection(
+            outcome["outcome_id"],
+            reflection="Method lesson: Use a bounded methodological check.",
+            generated_at=datetime(2026, 8, 1, 20, 1, tzinfo=timezone.utc),
+        )
+
+    revision_after = repository.get_research_chain(chain.id).current_revision
+    assert revision_before is not None
+    assert revision_after == revision_before
+    assert revision_after.producing_run_id == result.run_id
 
 
 def test_full_update_is_idempotent_for_current_head_and_advances_atomically(

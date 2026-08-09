@@ -174,14 +174,15 @@ settings must remain isolated even if worker concurrency changes in the future.
 1. normalizes and validates `AnalysisRequest`;
 2. resolves and redacts run configuration;
 3. creates or idempotently returns a run;
-4. retrieves deterministic decision memory;
+4. retrieves deterministic legacy decision memory for ordinary runs; Research
+   Chain executions receive an explicit empty `MemoryContext`;
 5. builds per-run LLM clients and `RunContext`;
 6. executes or resumes the graph;
 7. persists events, reports, evidence, decision, metrics, and warnings and,
    for an explicitly requested initial chain, atomically commits its first
    Research Revision;
 8. cleans up or retains checkpoints according to terminal state;
-9. creates a pending outcome for background settlement.
+9. creates a pending Outcome Observation for background settlement.
 
 Graph nodes return state; they do not write files, reports, or application
 tables.
@@ -470,8 +471,9 @@ Alembic manages application tables:
 | `decisions` | typed final decision, numeric audit appendix, market identity |
 | `research_chains` | one Instrument's linear lineage, Primary designation, and current head |
 | `research_revisions` | immutable complete state, coverage, summary, Evidence snapshot, producing execution, bounded experiment finding, and metrics |
-| `outcomes` | benchmark, five-interval dates, raw return, alpha |
-| `reflections` | outcome-aware research reflection |
+| `outcomes` | versioned Observation method, source Decision/optional Revision, market-local window, benchmark, semantics, returns, availability and limitations |
+| `reflections` | independent pending/generated/invalid/retryable-failure Reflection lifecycle and sanitized candidate |
+| `outcome_feedback` | qualification status/reasons, applicability, horizon and PIT availability |
 
 LangGraph saver tables live in the same database file but remain owned by its
 saver. Application code does not treat them as domain tables.
@@ -719,7 +721,8 @@ collapsible views.
 
 ## Decision memory and outcomes
 
-The repository supplies deterministic context:
+The repository retains the original deterministic Decision-memory selector for
+ordinary non-chain runs only:
 
 - up to five most recent resolved full entries for the same ticker;
 - up to three most recent resolved reflection-only entries for a different
@@ -729,8 +732,15 @@ The repository supplies deterministic context:
 No vector database is used. This avoids introducing an unmeasured semantic
 similarity feedback loop.
 
+Initial and updated Research Chain executions do not call that selector and do
+not inject historical Decisions, Reflections, `MemoryContext`, or Outcome
+Feedback into collection, analysis, deliberation, the Judge, Final Committee,
+state assembly, Change Assessment, or Full comparison. There is no Outcome
+Feedback Context selector in the first experiment.
+
 Outcome settlement is a low-priority worker task, independent of a future run
-for the same ticker. Ticker and benchmark histories retain their own
+for the same ticker. The deterministic Outcome Observation is persisted before
+any model call. Ticker and benchmark histories retain their own
 exchange-local date labels and are intersected by date. Six common completed
 closes form five intervals:
 
@@ -745,8 +755,23 @@ observation is deferred for 24 hours; a provider or transport failure is
 retried after one hour. Exchange holidays therefore degrade to bounded daily
 checks instead of the worker poll interval.
 
-The stored range and reflection describe short-term feedback. They are not the
-sole truth for long-horizon thesis validity or graph quality.
+The method is versioned as `short_term_relative_return.v1` and records its
+source Decision and optional Research Revision, benchmark, market timezone,
+window, holding intervals, explicitly adjusted daily-close semantics, data
+availability, raw and relative return, and limitations. It is short-term
+methodological feedback and cannot prove or disprove a medium- or long-horizon
+thesis.
+
+Reflection has a separate pending, generated, invalid, or retryable-failure
+lifecycle. A failure stores only a sanitized error code and retry time; it does
+not recompute or erase the Observation, fail a Research Execution, or alter a
+Research Revision. Generated Reflection text is only a Feedback candidate.
+Deterministic qualification checks its schema, source, PIT window and
+availability, method category, horizon and applicability and rejects content
+that repeats old ratings or thesis text, price targets, current factual or
+Evidence claims, or execution advice. Feedback records eligible, ineligible,
+or retired status and reasons. Its `available_at` is the latest of Observation
+data availability, Reflection generation, and qualification completion.
 
 ## Data routing and point-in-time contracts
 

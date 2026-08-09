@@ -33,8 +33,9 @@ invalidation conditions、time horizon が含まれます。ポジション比�
 - **Run Detail:** 永続イベントタイムライン、レポート、構造化 decision、
   折りたたみ可能な監査詳細、token/tool/wall-time 指標、cancel/retry、
   アーカイブ復元、現在の run をもとにした新規作成、export。
-- **Memory:** 完全な decision、outcome、reflection を検索し、catalyst、
-  risk、invalidation と銘柄名を表示して元の run の判断へ戻る。
+- **Memory:** 永続化済み Outcome Observation、Reflection の lifecycle、
+  Feedback の適格性と理由を個別に確認する。失敗した Reflection の再試行、
+  Feedback の廃止、decision の展開、元の run への移動も行える。
 - **Settings:** provider/model capability、安全なデフォルト値、API key の
   設定有無を読み取り専用で表示。
 
@@ -308,7 +309,8 @@ latency、token consumption の改善を証明するものではありません�
   `tradingagents db backup /path/to/backup.db`
 - 旧 report directory は読み取り専用 archive とし、旧 checkpoint は移行
   しません。
-- reports、events、decisions、outcomes、reflections は長期保持します。
+- reports、events、decisions、Outcome Observations、Reflections、審査済み
+  Feedback は長期保持します。
 - 初版には permanent-delete API がありません。
 
 TradingAgentsX は Apache-2.0 で提供されます。[LICENSE](../../LICENSE) と

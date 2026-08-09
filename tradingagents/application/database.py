@@ -277,8 +277,20 @@ class OutcomeRecord(Base):
         unique=True,
         index=True,
     )
+    research_revision_id: Mapped[str | None] = mapped_column(
+        ForeignKey("research_revisions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     benchmark: Mapped[str] = mapped_column(String(64), nullable=False)
+    market_timezone: Mapped[str] = mapped_column(String(80), nullable=False)
+    method_category: Mapped[str] = mapped_column(String(80), nullable=False)
+    method_version: Mapped[str] = mapped_column(String(80), nullable=False)
+    price_semantics: Mapped[str] = mapped_column(String(80), nullable=False)
+    adjustment_semantics: Mapped[str] = mapped_column(String(80), nullable=False)
+    horizon_limit: Mapped[str] = mapped_column(Text, nullable=False)
+    limitations_json: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     observation_start: Mapped[date | None] = mapped_column(Date, nullable=True)
     observation_end: Mapped[date | None] = mapped_column(Date, nullable=True)
     holding_intervals: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
@@ -287,6 +299,7 @@ class OutcomeRecord(Base):
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     next_check_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    data_available_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (Index("ix_outcomes_due", "status", "next_check_at"),)
@@ -302,8 +315,34 @@ class ReflectionRecord(Base):
         unique=True,
         index=True,
     )
-    text: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    candidate_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    generated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_attempted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+
+class OutcomeFeedbackRecord(Base):
+    __tablename__ = "outcome_feedback"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    reflection_id: Mapped[int] = mapped_column(
+        ForeignKey("reflections.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    reasons_json: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    method_category: Mapped[str] = mapped_column(String(80), nullable=False)
+    horizon_limit: Mapped[str] = mapped_column(Text, nullable=False)
+    applicability_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    qualified_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    available_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 def create_sqlite_engine(path: Path, *, busy_timeout_ms: int = 5000) -> Engine:

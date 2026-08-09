@@ -55,6 +55,7 @@ from .contracts import (
 from .database import (
     Base,
     DecisionRecord,
+    OutcomeFeedbackRecord,
     OutcomeRecord,
     ReflectionRecord,
     ResearchChainRecord,
@@ -67,6 +68,16 @@ from .database import (
     create_sqlite_engine,
 )
 from .metrics import merge_run_metrics
+from .outcome_feedback import (
+    ADJUSTMENT_SEMANTICS,
+    HORIZON_LIMIT,
+    METHOD_CATEGORY,
+    METHOD_VERSION,
+    OBSERVATION_LIMITATIONS,
+    PRICE_SEMANTICS,
+    qualify_reflection,
+    reflection_candidate_lesson,
+)
 from .outcome_schedule import earliest_outcome_check_at
 from .recoveries import rebuild_structured_recoveries
 from .reporting import order_reports
@@ -1340,22 +1351,28 @@ class RunRepository:
                 )
                 session.add(decision)
                 session.flush()
-                session.add(
-                    OutcomeRecord(
-                        decision_id=decision.id,
-                        status="pending",
-                        benchmark=benchmark,
-                        holding_intervals=5,
-                        next_check_at=max(
-                            now,
-                            earliest_outcome_check_at(
-                                ticker=request.ticker,
-                                analysis_date=request.analysis_date,
-                                holding_intervals=5,
-                            ).replace(tzinfo=None),
-                        ),
-                    )
+                outcome = OutcomeRecord(
+                    decision_id=decision.id,
+                    status="pending",
+                    benchmark=benchmark,
+                    market_timezone=str(market_timezone(request.ticker)),
+                    method_category=METHOD_CATEGORY,
+                    method_version=METHOD_VERSION,
+                    price_semantics=PRICE_SEMANTICS,
+                    adjustment_semantics=ADJUSTMENT_SEMANTICS,
+                    horizon_limit=HORIZON_LIMIT,
+                    limitations_json=list(OBSERVATION_LIMITATIONS),
+                    holding_intervals=5,
+                    next_check_at=max(
+                        now,
+                        earliest_outcome_check_at(
+                            ticker=request.ticker,
+                            analysis_date=request.analysis_date,
+                            holding_intervals=5,
+                        ).replace(tzinfo=None),
+                    ),
                 )
+                session.add(outcome)
             record.status = RunStatus.SUCCEEDED.value
             record.finished_at = now
             record.updated_at = now
@@ -1370,23 +1387,29 @@ class RunRepository:
             if record.research_chain_requested:
                 if revision_draft is None:
                     raise ValueError("explicit Research Chain execution requires a Revision draft")
-                self._create_initial_revision(
+                revision_id = self._create_initial_revision(
                     session,
                     record=record,
                     draft=revision_draft,
                     metrics=aggregate,
                     created_at=now,
                 )
+                session.flush()
+                if result.decision is not None:
+                    outcome.research_revision_id = revision_id
             elif record.research_chain_id is not None:
                 if revision_draft is None:
                     raise ValueError("Research Chain update requires a Revision draft")
-                self._advance_research_chain(
+                revision_id = self._advance_research_chain(
                     session,
                     record=record,
                     draft=revision_draft,
                     metrics=aggregate,
                     created_at=now,
                 )
+                session.flush()
+                if result.decision is not None:
+                    outcome.research_revision_id = revision_id
             elif revision_draft is not None:
                 raise ValueError("ordinary runs cannot create a Research Revision")
         return aggregate
@@ -1615,16 +1638,35 @@ class RunRepository:
         if due.tzinfo is not None:
             due = due.astimezone(timezone.utc).replace(tzinfo=None)
         stmt = (
-            select(OutcomeRecord, DecisionRecord)
+            select(OutcomeRecord, DecisionRecord, ReflectionRecord)
             .join(DecisionRecord, OutcomeRecord.decision_id == DecisionRecord.id)
             .join(RunRecord, RunRecord.id == DecisionRecord.run_id)
+            .outerjoin(ReflectionRecord, ReflectionRecord.outcome_id == OutcomeRecord.id)
             .where(
-                OutcomeRecord.status == "pending",
                 RunRecord.trashed_at.is_(None),
-                OutcomeRecord.next_check_at.is_not(None),
-                OutcomeRecord.next_check_at <= due,
+                or_(
+                    and_(
+                        OutcomeRecord.status == "pending",
+                        OutcomeRecord.next_check_at.is_not(None),
+                        OutcomeRecord.next_check_at <= due,
+                    ),
+                    and_(
+                        OutcomeRecord.status == "resolved",
+                        or_(
+                            ReflectionRecord.status == "pending",
+                            and_(
+                                ReflectionRecord.status == "retryable_failure",
+                                ReflectionRecord.next_retry_at.is_not(None),
+                                ReflectionRecord.next_retry_at <= due,
+                            ),
+                        ),
+                    ),
+                ),
             )
-            .order_by(OutcomeRecord.next_check_at, DecisionRecord.analysis_date)
+            .order_by(
+                func.coalesce(OutcomeRecord.next_check_at, ReflectionRecord.next_retry_at),
+                DecisionRecord.analysis_date,
+            )
             .limit(limit)
         )
         with self.sessions() as session:
@@ -1637,9 +1679,20 @@ class RunRepository:
                     "benchmark": outcome.benchmark,
                     "holding_intervals": outcome.holding_intervals,
                     "decision": decision.decision_json,
-                    "next_check_at": _aware(outcome.next_check_at),
+                    "status": outcome.status,
+                    "observation_start": outcome.observation_start,
+                    "observation_end": outcome.observation_end,
+                    "raw_return": outcome.raw_return,
+                    "alpha_return": outcome.alpha_return,
+                    "market_timezone": outcome.market_timezone,
+                    "reflection_status": reflection.status if reflection else None,
+                    "next_check_at": _aware(
+                        outcome.next_check_at
+                        if outcome.status == "pending"
+                        else reflection.next_retry_at if reflection else None
+                    ),
                 }
-                for outcome, decision in session.execute(stmt)
+                for outcome, decision, reflection in session.execute(stmt)
             ]
 
     def mark_outcome_checked(
@@ -1672,7 +1725,37 @@ class RunRepository:
         alpha_return: float,
         reflection: str,
     ) -> None:
-        now = _utc_naive()
+        now = _aware(_utc_naive())
+        from .outcomes import OutcomeObservation
+
+        self.persist_outcome_observation(
+            outcome_id,
+            observation=OutcomeObservation(
+                raw_return=raw_return,
+                alpha_return=alpha_return,
+                holding_intervals=5,
+                start_date=observation_start,
+                end_date=observation_end,
+            ),
+            observed_at=now,
+        )
+        self.persist_generated_reflection(
+            outcome_id,
+            reflection=reflection,
+            generated_at=now,
+            allow_legacy_unstructured=True,
+        )
+
+    def persist_outcome_observation(
+        self,
+        outcome_id: int,
+        *,
+        observation: Any,
+        observed_at: datetime,
+    ) -> None:
+        observed = observed_at
+        if observed.tzinfo is not None:
+            observed = observed.astimezone(timezone.utc).replace(tzinfo=None)
         with self.sessions.begin() as session:
             outcome = session.scalar(
                 select(OutcomeRecord)
@@ -1686,24 +1769,157 @@ class RunRepository:
                     RunRecord.trashed_at.is_(None),
                 )
             )
-            if outcome is None or outcome.status != "pending":
+            if outcome is None or outcome.status == "resolved":
                 return
             outcome.status = "resolved"
-            outcome.observation_start = observation_start
-            outcome.observation_end = observation_end
-            outcome.raw_return = raw_return
-            outcome.alpha_return = alpha_return
-            outcome.last_checked_at = now
+            outcome.observation_start = observation.start_date
+            outcome.observation_end = observation.end_date
+            outcome.holding_intervals = observation.holding_intervals
+            outcome.raw_return = observation.raw_return
+            outcome.alpha_return = observation.alpha_return
+            outcome.last_checked_at = observed
             outcome.next_check_at = None
-            outcome.resolved_at = now
+            outcome.resolved_at = observed
+            outcome.data_available_at = observed
             outcome.error_message = None
             session.add(
                 ReflectionRecord(
                     outcome_id=outcome.id,
-                    text=reflection,
-                    created_at=now,
+                    status="pending",
+                    text=None,
+                    created_at=observed,
                 )
             )
+
+    def mark_reflection_failure(
+        self,
+        outcome_id: int,
+        *,
+        attempted_at: datetime,
+        next_retry_at: datetime,
+        error_code: str,
+    ) -> None:
+        attempted = (
+            attempted_at.astimezone(timezone.utc).replace(tzinfo=None)
+            if attempted_at.tzinfo is not None
+            else attempted_at
+        )
+        retry = (
+            next_retry_at.astimezone(timezone.utc).replace(tzinfo=None)
+            if next_retry_at.tzinfo is not None
+            else next_retry_at
+        )
+        with self.sessions.begin() as session:
+            reflection = session.scalar(
+                select(ReflectionRecord).where(ReflectionRecord.outcome_id == outcome_id)
+            )
+            if reflection is None or reflection.status == "generated":
+                return
+            reflection.status = "retryable_failure"
+            reflection.last_attempted_at = attempted
+            reflection.next_retry_at = retry
+            reflection.error_code = _sanitize_text(error_code, limit=80)
+
+    def persist_generated_reflection(
+        self,
+        outcome_id: int,
+        *,
+        reflection: str,
+        generated_at: datetime,
+        allow_legacy_unstructured: bool = False,
+    ) -> str | None:
+        generated = generated_at
+        if generated.tzinfo is not None:
+            generated = generated.astimezone(timezone.utc).replace(tzinfo=None)
+        text = reflection.strip() if isinstance(reflection, str) else ""
+        with self.sessions.begin() as session:
+            row = session.execute(
+                select(ReflectionRecord, OutcomeRecord, DecisionRecord)
+                .join(OutcomeRecord, OutcomeRecord.id == ReflectionRecord.outcome_id)
+                .join(DecisionRecord, DecisionRecord.id == OutcomeRecord.decision_id)
+                .where(OutcomeRecord.id == outcome_id)
+            ).first()
+            if row is None:
+                return None
+            reflection_record, outcome, decision = row
+            if reflection_record.status == "generated":
+                return "generated"
+            reflection_record.last_attempted_at = generated
+            reflection_record.next_retry_at = None
+            reflection_record.error_code = None
+            if (
+                not text
+                or len(text) > 12_000
+                or (
+                    not allow_legacy_unstructured
+                    and reflection_candidate_lesson(text) is None
+                )
+            ):
+                reflection_record.status = "invalid"
+                reflection_record.text = None
+                reflection_record.candidate_json = None
+                return "invalid"
+            if outcome.data_available_at is None:
+                raise ValueError("Outcome Observation has no data availability time")
+            qualification = qualify_reflection(
+                reflection=text,
+                decision_id=decision.id,
+                revision_id=outcome.research_revision_id,
+                decision_rating=decision.rating,
+                decision_thesis=str(decision.decision_json.get("thesis") or ""),
+                decision_cutoff=decision.analysis_date,
+                observation_start=outcome.observation_start,
+                observation_end=outcome.observation_end,
+                data_available_at=outcome.data_available_at,
+                generated_at=generated,
+                qualified_at=generated,
+                ticker=decision.ticker,
+                market=decision.market,
+                method_category=outcome.method_category,
+                horizon_limit=outcome.horizon_limit,
+            )
+            reflection_record.status = "generated"
+            reflection_record.text = text
+            reflection_record.candidate_json = qualification.candidate
+            reflection_record.generated_at = generated
+            available_at = max(outcome.data_available_at, generated)
+            session.add(
+                OutcomeFeedbackRecord(
+                    reflection_id=reflection_record.id,
+                    status=qualification.status,
+                    reasons_json=list(qualification.reasons),
+                    method_category=outcome.method_category,
+                    horizon_limit=outcome.horizon_limit,
+                    applicability_json=qualification.applicability,
+                    qualified_at=generated,
+                    available_at=available_at,
+                )
+            )
+            return "generated"
+
+    def retry_outcome_reflection(self, outcome_id: int) -> None:
+        with self.sessions.begin() as session:
+            reflection = session.scalar(
+                select(ReflectionRecord).where(ReflectionRecord.outcome_id == outcome_id)
+            )
+            if reflection is None or reflection.status not in {
+                "invalid",
+                "retryable_failure",
+            }:
+                return
+            reflection.status = "pending"
+            reflection.next_retry_at = None
+            reflection.error_code = None
+
+    def retire_outcome_feedback(self, feedback_id: int, *, reason: str) -> None:
+        now = _utc_naive()
+        with self.sessions.begin() as session:
+            feedback = session.get(OutcomeFeedbackRecord, feedback_id)
+            if feedback is None or feedback.status == "retired":
+                return
+            feedback.status = "retired"
+            feedback.reasons_json = [*feedback.reasons_json, _sanitize_text(reason) or "retired"]
+            feedback.retired_at = now
 
     def memory_context(
         self,
@@ -1732,6 +1948,8 @@ class RunRepository:
                 OutcomeRecord.holding_intervals >= 5,
                 OutcomeRecord.raw_return.is_not(None),
                 OutcomeRecord.alpha_return.is_not(None),
+                ReflectionRecord.status == "generated",
+                ReflectionRecord.text.is_not(None),
             )
             .order_by(
                 OutcomeRecord.resolved_at.desc(),
@@ -1745,7 +1963,7 @@ class RunRepository:
         ticker_key = ticker.casefold()
         asset_type_key = asset_type.casefold()
         for decision_record, outcome_record, reflection_record in rows:
-            reflection = reflection_record.text.strip()
+            reflection = (reflection_record.text or "").strip()
             if not reflection:
                 continue
             try:
@@ -1812,6 +2030,7 @@ class RunRepository:
                 DecisionRecord,
                 OutcomeRecord,
                 ReflectionRecord,
+                OutcomeFeedbackRecord,
                 RunRecord.instrument_name,
                 RunRecord.instrument_local_name,
                 RunRecord.request_json,
@@ -1821,6 +2040,10 @@ class RunRepository:
             .outerjoin(
                 ReflectionRecord,
                 ReflectionRecord.outcome_id == OutcomeRecord.id,
+            )
+            .outerjoin(
+                OutcomeFeedbackRecord,
+                OutcomeFeedbackRecord.reflection_id == ReflectionRecord.id,
             )
             .order_by(
                 DecisionRecord.created_at.desc(),
@@ -1903,6 +2126,7 @@ class RunRepository:
             return [
                 {
                     "run_id": decision.run_id,
+                    "outcome_id": outcome.id,
                     "ticker": decision.ticker,
                     "instrument_name": instrument_name,
                     "instrument_local_name": instrument_local_name,
@@ -1913,7 +2137,16 @@ class RunRepository:
                     "decision": decision.decision_json,
                     "outcome": {
                         "status": outcome.status,
+                        "source_decision_id": decision.id,
+                        "source_revision_id": outcome.research_revision_id,
                         "benchmark": outcome.benchmark,
+                        "market_timezone": outcome.market_timezone,
+                        "method_category": outcome.method_category,
+                        "method_version": outcome.method_version,
+                        "price_semantics": outcome.price_semantics,
+                        "adjustment_semantics": outcome.adjustment_semantics,
+                        "horizon_limit": outcome.horizon_limit,
+                        "limitations": outcome.limitations_json,
                         "observation_start": (
                             outcome.observation_start.isoformat()
                             if outcome.observation_start
@@ -1925,13 +2158,41 @@ class RunRepository:
                         "holding_intervals": outcome.holding_intervals,
                         "raw_return": outcome.raw_return,
                         "alpha_return": outcome.alpha_return,
+                        "data_available_at": _aware(outcome.data_available_at),
                     },
                     "reflection": reflection.text if reflection else None,
+                    "reflection_lifecycle": (
+                        {
+                            "status": reflection.status,
+                            "generated_at": _aware(reflection.generated_at),
+                            "last_attempted_at": _aware(reflection.last_attempted_at),
+                            "next_retry_at": _aware(reflection.next_retry_at),
+                            "error_code": reflection.error_code,
+                        }
+                        if reflection
+                        else None
+                    ),
+                    "feedback": (
+                        {
+                            "id": feedback.id,
+                            "status": feedback.status,
+                            "reasons": feedback.reasons_json,
+                            "method_category": feedback.method_category,
+                            "horizon_limit": feedback.horizon_limit,
+                            "applicability": feedback.applicability_json,
+                            "qualified_at": _aware(feedback.qualified_at),
+                            "available_at": _aware(feedback.available_at),
+                            "retired_at": _aware(feedback.retired_at),
+                        }
+                        if feedback
+                        else None
+                    ),
                 }
                 for (
                     decision,
                     outcome,
                     reflection,
+                    feedback,
                     instrument_name,
                     instrument_local_name,
                     request_json,
@@ -1990,14 +2251,14 @@ class RunRepository:
         draft: ResearchRevisionDraft,
         metrics: RunMetrics,
         created_at: datetime,
-    ) -> None:
+    ) -> str:
         existing = session.scalar(
             select(ResearchRevisionRecord).where(
                 ResearchRevisionRecord.producing_run_id == record.id
             )
         )
         if existing is not None:
-            return
+            return existing.id
         request = AnalysisRequest.model_validate(record.request_json)
         has_primary = session.scalar(
             select(ResearchChainRecord.id).where(
@@ -2030,6 +2291,7 @@ class RunRepository:
             )
         )
         chain.current_revision_id = revision_id
+        return revision_id
 
     @staticmethod
     def _advance_research_chain(
@@ -2039,7 +2301,7 @@ class RunRepository:
         draft: ResearchRevisionDraft,
         metrics: RunMetrics,
         created_at: datetime,
-    ) -> None:
+    ) -> str:
         chain = session.get(ResearchChainRecord, record.research_chain_id)
         baseline = session.get(ResearchRevisionRecord, record.baseline_revision_id)
         if (
@@ -2075,6 +2337,7 @@ class RunRepository:
         )
         chain.current_revision_id = revision_id
         chain.updated_at = created_at
+        return revision_id
 
     @staticmethod
     def _revision_record(

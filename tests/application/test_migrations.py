@@ -58,6 +58,12 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
         artifact_columns = {column["name"] for column in inspector.get_columns("run_artifacts")}
         outcome_columns = {column["name"] for column in inspector.get_columns("outcomes")}
         outcome_indexes = {index["name"] for index in inspector.get_indexes("outcomes")}
+        reflection_columns = {
+            column["name"] for column in inspector.get_columns("reflections")
+        }
+        feedback_columns = {
+            column["name"] for column in inspector.get_columns("outcome_feedback")
+        }
         run_columns = {column["name"] for column in inspector.get_columns("runs")}
         run_indexes = {index["name"] for index in inspector.get_indexes("runs")}
         revision_columns = {
@@ -73,7 +79,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     finally:
         engine.dispose()
 
-    assert revision == "0008_evidence_closed_revisions"
+    assert revision == "0009_outcome_feedback_lifecycle"
     assert {
         "id",
         "run_id",
@@ -125,7 +131,37 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     assert "research_revisions" in table_names
     assert "ix_runs_trash" in run_indexes
     assert "next_check_at" in outcome_columns
+    assert {
+        "research_revision_id",
+        "market_timezone",
+        "method_category",
+        "method_version",
+        "price_semantics",
+        "adjustment_semantics",
+        "horizon_limit",
+        "limitations_json",
+        "data_available_at",
+    }.issubset(outcome_columns)
     assert "ix_outcomes_due" in outcome_indexes
+    assert {
+        "status",
+        "candidate_json",
+        "generated_at",
+        "last_attempted_at",
+        "next_retry_at",
+        "error_code",
+    }.issubset(reflection_columns)
+    assert {
+        "reflection_id",
+        "status",
+        "reasons_json",
+        "method_category",
+        "horizon_limit",
+        "applicability_json",
+        "qualified_at",
+        "available_at",
+        "retired_at",
+    }.issubset(feedback_columns)
     assert "numeric_audit_json" in decision_columns
 
 
@@ -351,6 +387,18 @@ def test_v8_upgrade_preserves_research_data_and_downgrade_recreates_empty_table(
         connection.exec_driver_sql(
             "ALTER TABLE runs ADD COLUMN research_update_audit_json JSON"
         )
+        for definition in (
+            "research_revision_id VARCHAR(36)",
+            "market_timezone VARCHAR(80)",
+            "method_category VARCHAR(80)",
+            "method_version VARCHAR(80)",
+            "price_semantics VARCHAR(80)",
+            "adjustment_semantics VARCHAR(80)",
+            "horizon_limit TEXT",
+            "limitations_json JSON",
+            "data_available_at DATETIME",
+        ):
+            connection.exec_driver_sql(f"ALTER TABLE outcomes ADD COLUMN {definition}")
     seed_engine.dispose()
     repository = RunRepository(app_settings)
     request = AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
@@ -375,16 +423,19 @@ def test_v8_upgrade_preserves_research_data_and_downgrade_recreates_empty_table(
         evidence=evidence,
         benchmark="SPY",
     )
-    outcome_id = repository.pending_outcomes(due_at=datetime(2100, 1, 1))[0]["outcome_id"]
-    repository.resolve_outcome(
-        outcome_id,
-        observation_start=date(2026, 7, 25),
-        observation_end=date(2026, 8, 1),
-        raw_return=0.05,
-        alpha_return=0.01,
-        reflection="Preserved reflection.",
-    )
     with repository.engine.begin() as connection:
+        outcome_id = connection.exec_driver_sql("SELECT id FROM outcomes").scalar_one()
+        connection.exec_driver_sql(
+            "UPDATE outcomes SET status = 'resolved', observation_start = ?, "
+            "observation_end = ?, raw_return = 0.05, alpha_return = 0.01, "
+            "resolved_at = CURRENT_TIMESTAMP, next_check_at = NULL WHERE id = ?",
+            (date(2026, 7, 25), date(2026, 8, 1), outcome_id),
+        )
+        connection.exec_driver_sql(
+            "INSERT INTO reflections (outcome_id, text, created_at) "
+            "VALUES (?, ?, CURRENT_TIMESTAMP)",
+            (outcome_id, "Preserved reflection."),
+        )
         connection.exec_driver_sql(
             "INSERT INTO legacy_imports "
             "(source_path, content_hash, status, run_id, imported_at) "
@@ -402,6 +453,18 @@ def test_v8_upgrade_preserves_research_data_and_downgrade_recreates_empty_table(
         connection.exec_driver_sql("ALTER TABLE runs DROP COLUMN baseline_revision_id")
         connection.exec_driver_sql("ALTER TABLE runs DROP COLUMN research_execution_strategy")
         connection.exec_driver_sql("ALTER TABLE runs DROP COLUMN research_update_audit_json")
+        for column in (
+            "research_revision_id",
+            "market_timezone",
+            "method_category",
+            "method_version",
+            "price_semantics",
+            "adjustment_semantics",
+            "horizon_limit",
+            "limitations_json",
+            "data_available_at",
+        ):
+            connection.exec_driver_sql(f"ALTER TABLE outcomes DROP COLUMN {column}")
     seed_engine.dispose()
 
     upgrade_database(app_settings)
@@ -417,8 +480,25 @@ def test_v8_upgrade_preserves_research_data_and_downgrade_recreates_empty_table(
                 "decisions",
                 "outcomes",
                 "reflections",
+                "outcome_feedback",
             ):
                 assert connection.scalar(text(f"SELECT count(*) FROM {table}")) == 1
+            observation = connection.execute(
+                text(
+                    "SELECT market_timezone, method_version, data_available_at "
+                    "FROM outcomes"
+                )
+            ).one()
+            assert observation.market_timezone == "America/New_York"
+            assert observation.method_version == "short_term_relative_return.v1"
+            assert observation.data_available_at is not None
+            assert connection.scalar(text("SELECT status FROM reflections")) == "generated"
+            assert connection.scalar(text("SELECT status FROM outcome_feedback")) == (
+                "ineligible"
+            )
+            assert json.loads(
+                connection.scalar(text("SELECT reasons_json FROM outcome_feedback"))
+            ) == ["legacy_unqualified_reflection"]
     finally:
         engine.dispose()
 

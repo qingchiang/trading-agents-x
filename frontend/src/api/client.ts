@@ -155,6 +155,16 @@ export const api = {
     request<RunView>(`/api/v1/runs/${id}/${action}`, { method: "POST" }),
   memory: (query = "") =>
     request<MemoryEntry[]>(`/api/v1/memory${query}`),
+  retryMemoryReflection: (outcomeId: number) =>
+    request<{ status: string }>(
+      `/api/v1/memory/${encodeURIComponent(outcomeId)}/reflection/retry`,
+      { method: "POST", body: "{}" },
+    ),
+  retireMemoryFeedback: (feedbackId: number, reason: string) =>
+    request<{ status: string }>(
+      `/api/v1/memory/feedback/${encodeURIComponent(feedbackId)}/retire`,
+      { method: "POST", body: JSON.stringify({ reason }) },
+    ),
   login: (token: string) =>
     request<{ authenticated: boolean }>("/api/v1/auth/login", {
       method: "POST",

@@ -46,9 +46,9 @@ or portfolio rebalancing.
 - **Run Detail:** persistent event timeline, analyst reports, structured
   decision, collapsible audit details, token/tool metrics, cancellation,
   retry, restore, editable run templates, and export.
-- **Memory:** search complete decisions, outcomes, and reflections, expand
-  catalysts/risks/invalidation, see instrument names, and reopen the
-  originating run.
+- **Memory:** inspect separately persisted Outcome Observations, Reflection
+  lifecycle state, and Feedback qualification/reasons; retry failed Reflections,
+  retire Feedback, expand decisions, and reopen the originating run.
 - **Settings:** read-only capabilities, safe defaults, and whether provider
   credentials are configured.
 - **Locales:** `en`, `zh-CN`, and `ja`; UI locale and report output language
@@ -343,9 +343,13 @@ when the bundle is sealed. Missing coverage is unknown, not a neutral or bearish
 signal.
 
 After six common completed ticker/benchmark closes are available, the background
-worker forms five aligned trading intervals, stores raw return and alpha, and
-generates a short-term reflection. This outcome is feedback, not the sole truth
-for a long-horizon thesis or graph quality.
+worker forms five aligned trading intervals and first stores a versioned,
+market-local Observation with raw return, alpha, price-adjustment semantics,
+availability, and horizon limitations. Reflection runs independently and may be
+retried without recomputing the Observation. A generated Reflection becomes
+eligible Feedback only after deterministic PIT, schema, source, applicability,
+content, method, and horizon qualification. Research Chain analysis injects
+none of this historical feedback in the first experiment.
 
 ## Development and release gates
 
@@ -373,7 +377,8 @@ comparative model research quality, latency, or token improvement.
 - [Breaking migration guide](docs/migration-independent-platform.md)
 - Create a consistent online backup with
   `tradingagents db backup /path/to/backup.db`.
-- Reports, events, decisions, outcomes, and reflections are retained in SQLite.
+- Reports, events, decisions, Outcome Observations, Reflections, and qualified
+  Feedback are retained in SQLite.
 - Successful/cancelled checkpoints are removed automatically.
 - Legacy report directories remain read-only archives; they are not imported.
 - The first release of this architecture has no permanent-delete API.

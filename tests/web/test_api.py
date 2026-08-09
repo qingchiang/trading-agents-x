@@ -606,6 +606,37 @@ async def test_memory_api_forwards_audited_search_filters(
 
 
 @pytest.mark.anyio
+async def test_memory_lifecycle_actions_delegate_without_exposing_errors(
+    web_client: httpx.AsyncClient,
+    web_repository,
+    monkeypatch,
+) -> None:
+    retried = []
+    retired = []
+    monkeypatch.setattr(
+        web_repository,
+        "retry_outcome_reflection",
+        lambda outcome_id: retried.append(outcome_id),
+    )
+    monkeypatch.setattr(
+        web_repository,
+        "retire_outcome_feedback",
+        lambda feedback_id, *, reason: retired.append((feedback_id, reason)),
+    )
+
+    retry_response = await web_client.post("/api/v1/memory/7/reflection/retry")
+    retire_response = await web_client.post(
+        "/api/v1/memory/feedback/11/retire",
+        json={"reason": "Superseded methodology"},
+    )
+
+    assert retry_response.json() == {"status": "pending"}
+    assert retire_response.json() == {"status": "retired"}
+    assert retried == [7]
+    assert retired == [(11, "Superseded methodology")]
+
+
+@pytest.mark.anyio
 async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
     web_client: httpx.AsyncClient,
     web_service,

@@ -49,6 +49,9 @@ class OutcomeReflector:
             "concrete lesson for a similar analysis. Do not claim this short window "
             "proves or disproves a medium- or long-term thesis. Do not invent causes, "
             "targets, position sizes, entry levels, or account instructions. "
+            "The final sentence must start with the exact ASCII marker "
+            "'Method lesson:'; write only a reusable research-method lesson after "
+            "that marker and keep the marker unchanged in every output language. "
             f"{language}"
         )
         human = (

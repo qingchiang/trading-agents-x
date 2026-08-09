@@ -1,0 +1,83 @@
+from __future__ import annotations
+
+from datetime import date, datetime
+
+from tradingagents.application.outcome_feedback import (
+    HORIZON_LIMIT,
+    METHOD_CATEGORY,
+    qualify_reflection,
+)
+
+
+def _qualify(reflection: str, **updates):
+    values = {
+        "reflection": reflection,
+        "decision_id": 7,
+        "revision_id": "revision-1",
+        "decision_rating": "Hold",
+        "decision_thesis": "Demand durability remains uncertain over three years.",
+        "decision_cutoff": date(2026, 7, 24),
+        "observation_start": date(2026, 7, 25),
+        "observation_end": date(2026, 8, 1),
+        "data_available_at": datetime(2026, 8, 1, 20),
+        "generated_at": datetime(2026, 8, 1, 20, 1),
+        "qualified_at": datetime(2026, 8, 1, 20, 2),
+        "ticker": "NVDA",
+        "market": "America/New_York",
+        "method_category": METHOD_CATEGORY,
+        "horizon_limit": HORIZON_LIMIT,
+    }
+    values.update(updates)
+    return qualify_reflection(**values)
+
+
+def test_qualification_records_explicit_scope_and_short_horizon() -> None:
+    result = _qualify(
+        "Directional consistency was mixed.\nMethod lesson: Compare the original "
+        "method assumptions with a bounded short-window check."
+    )
+
+    assert result.status == "eligible"
+    assert result.reasons == ()
+    assert result.candidate["source_decision_id"] == 7
+    assert result.candidate["source_revision_id"] == "revision-1"
+    assert result.applicability == {
+        "schema_version": "1",
+        "instrument": "NVDA",
+        "market": "America/New_York",
+        "research_stages": ["analysis_methodology"],
+        "research_domains": ["cross_domain"],
+        "method_category": "short_term_relative_return",
+        "horizon": "short_term",
+    }
+
+
+def test_qualification_rejects_research_claims_and_execution_advice() -> None:
+    result = _qualify(
+        "Directional consistency was mixed.\nMethod lesson: Evidence proves the old "
+        "Hold rating, so buy now at the stated price target."
+    )
+
+    assert result.status == "ineligible"
+    assert set(result.reasons) == {
+        "contains_old_rating",
+        "contains_price_target",
+        "contains_current_factual_assertion",
+        "contains_evidence_claim",
+        "contains_execution_advice",
+    }
+
+
+def test_qualification_fails_closed_when_availability_or_window_is_not_pit() -> None:
+    result = _qualify(
+        "Directional consistency was mixed.\nMethod lesson: Use a bounded "
+        "methodological check.",
+        observation_start=date(2026, 7, 24),
+        data_available_at=datetime(2026, 8, 2),
+    )
+
+    assert result.status == "ineligible"
+    assert result.reasons == (
+        "observation_window_not_after_decision",
+        "point_in_time_availability_invalid",
+    )

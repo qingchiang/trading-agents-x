@@ -256,6 +256,9 @@ export interface components {
       row_id?: string | null;
       table_id?: string | null;
     };
+    FeedbackRetireRequest: {
+      reason: string;
+    };
     HTTPValidationError: {
       detail?: components["schemas"]["ValidationError"][];
     };
@@ -311,23 +314,54 @@ export interface components {
       analysis_date: string;
       asset_type: string;
       decision: components["schemas"]["ResearchDecision"];
+      feedback: components["schemas"]["MemoryFeedback"] | null;
       instrument_local_name?: string | null;
       instrument_name?: string | null;
       market: string | null;
       outcome: components["schemas"]["MemoryOutcome"];
+      outcome_id: number;
       profile: components["schemas"]["RunProfile"];
       reflection: string | null;
+      reflection_lifecycle: components["schemas"]["MemoryReflection"] | null;
       run_id: string;
       ticker: string;
     };
+    MemoryFeedback: {
+      applicability: Record<string, unknown>;
+      available_at: string;
+      horizon_limit: string;
+      id: number;
+      method_category: string;
+      qualified_at: string;
+      reasons: string[];
+      retired_at: string | null;
+      status: "eligible" | "ineligible" | "retired";
+    };
     MemoryOutcome: {
+      adjustment_semantics: string;
       alpha_return: number | null;
       benchmark: string;
+      data_available_at: string | null;
       holding_intervals: number;
+      horizon_limit: string;
+      limitations: string[];
+      market_timezone: string;
+      method_category: string;
+      method_version: string;
       observation_end: string | null;
       observation_start: string | null;
+      price_semantics: string;
       raw_return: number | null;
+      source_decision_id: number;
+      source_revision_id: string | null;
       status: "pending" | "resolved";
+    };
+    MemoryReflection: {
+      error_code: string | null;
+      generated_at: string | null;
+      last_attempted_at: string | null;
+      next_retry_at: string | null;
+      status: "pending" | "generated" | "invalid" | "retryable_failure";
     };
     ModelDiscoveryWarningView: {
       code: string;

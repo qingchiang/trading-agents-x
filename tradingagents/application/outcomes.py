@@ -75,13 +75,29 @@ class OutcomeSettlement:
             now = now.astimezone(timezone.utc)
         for item in self.repository.pending_outcomes(limit, due_at=now):
             stats["checked"] += 1
-            try:
-                observation = self.observe(
-                    item["ticker"],
-                    item["analysis_date"],
-                    benchmark=item["benchmark"],
-                    holding_intervals=item["holding_intervals"],
-                )
+            observation = self._persisted_observation(item)
+            if observation is None:
+                try:
+                    observation = self.observe(
+                        item["ticker"],
+                        item["analysis_date"],
+                        benchmark=item["benchmark"],
+                        holding_intervals=item["holding_intervals"],
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Outcome observation failed for %s: %s",
+                        item["ticker"],
+                        type(exc).__name__,
+                    )
+                    self.repository.mark_outcome_checked(
+                        item["outcome_id"],
+                        checked_at=now,
+                        next_check_at=now + ERROR_RECHECK_INTERVAL,
+                        error_message=type(exc).__name__,
+                    )
+                    stats["failed"] += 1
+                    continue
                 if observation is None:
                     self.repository.mark_outcome_checked(
                         item["outcome_id"],
@@ -90,35 +106,56 @@ class OutcomeSettlement:
                     )
                     stats["pending"] += 1
                     continue
+                self.repository.persist_outcome_observation(
+                    item["outcome_id"],
+                    observation=observation,
+                    observed_at=now,
+                )
+            try:
                 reflection = self._reflection(
                     ticker=item["ticker"],
                     benchmark=item["benchmark"],
                     decision=item["decision"],
                     observation=observation,
                 )
-                self.repository.resolve_outcome(
+                reflection_status = self.repository.persist_generated_reflection(
                     item["outcome_id"],
-                    observation_start=observation.start_date,
-                    observation_end=observation.end_date,
-                    raw_return=observation.raw_return,
-                    alpha_return=observation.alpha_return,
                     reflection=reflection,
+                    generated_at=now,
                 )
-                stats["resolved"] += 1
+                stats["failed" if reflection_status == "invalid" else "resolved"] += 1
             except Exception as exc:
                 logger.warning(
-                    "Outcome settlement failed for %s: %s",
+                    "Outcome reflection failed for %s: %s",
                     item["ticker"],
-                    exc,
+                    type(exc).__name__,
                 )
-                self.repository.mark_outcome_checked(
+                self.repository.mark_reflection_failure(
                     item["outcome_id"],
-                    checked_at=now,
-                    next_check_at=now + ERROR_RECHECK_INTERVAL,
-                    error_message=type(exc).__name__,
+                    attempted_at=now,
+                    next_retry_at=now + ERROR_RECHECK_INTERVAL,
+                    error_code=type(exc).__name__,
                 )
                 stats["failed"] += 1
         return stats
+
+    @staticmethod
+    def _persisted_observation(item: dict[str, Any]) -> OutcomeObservation | None:
+        required = (
+            item.get("observation_start"),
+            item.get("observation_end"),
+            item.get("raw_return"),
+            item.get("alpha_return"),
+        )
+        if any(value is None for value in required):
+            return None
+        return OutcomeObservation(
+            raw_return=float(item["raw_return"]),
+            alpha_return=float(item["alpha_return"]),
+            holding_intervals=int(item["holding_intervals"]),
+            start_date=item["observation_start"],
+            end_date=item["observation_end"],
+        )
 
     def observe(
         self,
@@ -137,10 +174,14 @@ class OutcomeSettlement:
         stock = self.history_provider.Ticker(canonical).history(
             start=analysis_date.isoformat(),
             end=stock_end.isoformat(),
+            auto_adjust=True,
+            actions=False,
         )
         bench = self.history_provider.Ticker(benchmark).history(
             start=analysis_date.isoformat(),
             end=benchmark_end.isoformat(),
+            auto_adjust=True,
+            actions=False,
         )
         stock_close = close_by_local_date(stock)
         benchmark_close = close_by_local_date(bench)

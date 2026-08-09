@@ -70,6 +70,10 @@ class RunBatchResult(ApiModel):
     changed: int = Field(ge=0)
 
 
+class FeedbackRetireRequest(ApiModel):
+    reason: str = Field(min_length=1, max_length=500)
+
+
 class ExportQuery(ApiModel):
     format: Literal["package", "markdown", "json"] = "package"
 
@@ -141,15 +145,46 @@ class CapabilitiesResponse(ApiModel):
 
 class MemoryOutcome(ApiModel):
     status: Literal["pending", "resolved"]
+    source_decision_id: int
+    source_revision_id: str | None
     benchmark: str
+    market_timezone: str
+    method_category: str
+    method_version: str
+    price_semantics: str
+    adjustment_semantics: str
+    horizon_limit: str
+    limitations: list[str]
     observation_start: str | None
     observation_end: str | None
     holding_intervals: int
     raw_return: float | None
     alpha_return: float | None
+    data_available_at: datetime | None
+
+
+class MemoryReflection(ApiModel):
+    status: Literal["pending", "generated", "invalid", "retryable_failure"]
+    generated_at: datetime | None
+    last_attempted_at: datetime | None
+    next_retry_at: datetime | None
+    error_code: str | None
+
+
+class MemoryFeedback(ApiModel):
+    id: int
+    status: Literal["eligible", "ineligible", "retired"]
+    reasons: list[str]
+    method_category: str
+    horizon_limit: str
+    applicability: dict[str, object]
+    qualified_at: datetime
+    available_at: datetime
+    retired_at: datetime | None
 
 
 class MemoryEntry(ApiModel):
+    outcome_id: int
     run_id: str
     ticker: str
     instrument_name: str | None = None
@@ -161,3 +196,5 @@ class MemoryEntry(ApiModel):
     decision: ResearchDecision
     outcome: MemoryOutcome
     reflection: str | None
+    reflection_lifecycle: MemoryReflection | None
+    feedback: MemoryFeedback | None

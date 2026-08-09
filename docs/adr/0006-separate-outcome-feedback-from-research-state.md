@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Separate outcome feedback from longitudinal research state
@@ -35,3 +35,8 @@ evaluate a non-authoritative Context only after the point-in-time,
 applicability, qualification, and selection contracts exist. This delays any
 benefit from reflective learning, but keeps incremental-versus-Full validation
 from being confounded by an unqualified and asymmetric input.
+
+Implemented by the versioned `short_term_relative_return.v1` Observation,
+independent Reflection states, deterministic Feedback qualification and the
+explicit empty-memory boundary for Research Chain executions. Selection and
+injection of Outcome Feedback Context remain deferred.

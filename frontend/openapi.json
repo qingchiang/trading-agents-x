@@ -1837,6 +1837,22 @@
         "title": "EvidenceValueLocator",
         "type": "object"
       },
+      "FeedbackRetireRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "FeedbackRetireRequest",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -2193,6 +2209,16 @@
           "decision": {
             "$ref": "#/components/schemas/ResearchDecision"
           },
+          "feedback": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MemoryFeedback"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "instrument_local_name": {
             "anyOf": [
               {
@@ -2229,6 +2255,10 @@
           "outcome": {
             "$ref": "#/components/schemas/MemoryOutcome"
           },
+          "outcome_id": {
+            "title": "Outcome Id",
+            "type": "integer"
+          },
           "profile": {
             "$ref": "#/components/schemas/RunProfile"
           },
@@ -2243,6 +2273,16 @@
             ],
             "title": "Reflection"
           },
+          "reflection_lifecycle": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MemoryReflection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "run_id": {
             "title": "Run Id",
             "type": "string"
@@ -2253,6 +2293,7 @@
           }
         },
         "required": [
+          "outcome_id",
           "run_id",
           "ticker",
           "market",
@@ -2261,14 +2302,93 @@
           "profile",
           "decision",
           "outcome",
-          "reflection"
+          "reflection",
+          "reflection_lifecycle",
+          "feedback"
         ],
         "title": "MemoryEntry",
+        "type": "object"
+      },
+      "MemoryFeedback": {
+        "additionalProperties": false,
+        "properties": {
+          "applicability": {
+            "additionalProperties": true,
+            "title": "Applicability",
+            "type": "object"
+          },
+          "available_at": {
+            "format": "date-time",
+            "title": "Available At",
+            "type": "string"
+          },
+          "horizon_limit": {
+            "title": "Horizon Limit",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "method_category": {
+            "title": "Method Category",
+            "type": "string"
+          },
+          "qualified_at": {
+            "format": "date-time",
+            "title": "Qualified At",
+            "type": "string"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "retired_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retired At"
+          },
+          "status": {
+            "enum": [
+              "eligible",
+              "ineligible",
+              "retired"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "reasons",
+          "method_category",
+          "horizon_limit",
+          "applicability",
+          "qualified_at",
+          "available_at",
+          "retired_at"
+        ],
+        "title": "MemoryFeedback",
         "type": "object"
       },
       "MemoryOutcome": {
         "additionalProperties": false,
         "properties": {
+          "adjustment_semantics": {
+            "title": "Adjustment Semantics",
+            "type": "string"
+          },
           "alpha_return": {
             "anyOf": [
               {
@@ -2284,9 +2404,44 @@
             "title": "Benchmark",
             "type": "string"
           },
+          "data_available_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Available At"
+          },
           "holding_intervals": {
             "title": "Holding Intervals",
             "type": "integer"
+          },
+          "horizon_limit": {
+            "title": "Horizon Limit",
+            "type": "string"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "market_timezone": {
+            "title": "Market Timezone",
+            "type": "string"
+          },
+          "method_category": {
+            "title": "Method Category",
+            "type": "string"
+          },
+          "method_version": {
+            "title": "Method Version",
+            "type": "string"
           },
           "observation_end": {
             "anyOf": [
@@ -2310,6 +2465,10 @@
             ],
             "title": "Observation Start"
           },
+          "price_semantics": {
+            "title": "Price Semantics",
+            "type": "string"
+          },
           "raw_return": {
             "anyOf": [
               {
@@ -2320,6 +2479,21 @@
               }
             ],
             "title": "Raw Return"
+          },
+          "source_decision_id": {
+            "title": "Source Decision Id",
+            "type": "integer"
+          },
+          "source_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Revision Id"
           },
           "status": {
             "enum": [
@@ -2332,14 +2506,95 @@
         },
         "required": [
           "status",
+          "source_decision_id",
+          "source_revision_id",
           "benchmark",
+          "market_timezone",
+          "method_category",
+          "method_version",
+          "price_semantics",
+          "adjustment_semantics",
+          "horizon_limit",
+          "limitations",
           "observation_start",
           "observation_end",
           "holding_intervals",
           "raw_return",
-          "alpha_return"
+          "alpha_return",
+          "data_available_at"
         ],
         "title": "MemoryOutcome",
+        "type": "object"
+      },
+      "MemoryReflection": {
+        "additionalProperties": false,
+        "properties": {
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "generated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generated At"
+          },
+          "last_attempted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Attempted At"
+          },
+          "next_retry_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Retry At"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "generated",
+              "invalid",
+              "retryable_failure"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "generated_at",
+          "last_attempted_at",
+          "next_retry_at",
+          "error_code"
+        ],
+        "title": "MemoryReflection",
         "type": "object"
       },
       "ModelDiscoveryWarningView": {
@@ -7607,6 +7862,90 @@
           }
         },
         "summary": "Memory"
+      }
+    },
+    "/api/v1/memory/feedback/{feedback_id}/retire": {
+      "post": {
+        "operationId": "retire_memory_feedback_api_v1_memory_feedback__feedback_id__retire_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feedback_id",
+            "required": true,
+            "schema": {
+              "title": "Feedback Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeedbackRetireRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retire Memory Feedback"
+      }
+    },
+    "/api/v1/memory/{outcome_id}/reflection/retry": {
+      "post": {
+        "operationId": "retry_memory_reflection_api_v1_memory__outcome_id__reflection_retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "outcome_id",
+            "required": true,
+            "schema": {
+              "title": "Outcome Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retry Memory Reflection"
       }
     },
     "/api/v1/providers/{provider}/models": {

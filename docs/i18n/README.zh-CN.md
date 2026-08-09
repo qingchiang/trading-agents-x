@@ -28,8 +28,9 @@ TradingAgentsX 是一个面向本地单用户的投资研究运行中心。它�
 - **Run Detail：** 可恢复的事件时间线、报告 tabs、结构化决策、warning、
   可折叠审计详情、token/tool/wall-time 指标，以及取消、retry、
   恢复归档、基于当前运行新建和导出。
-- **Memory：** 检索完整 decision、outcome 与 reflection，展开催化因素、
-  风险和失效条件，同时显示标的简称并返回对应运行的研究结论。
+- **Memory：** 分别查看已持久化的 Outcome Observation、Reflection 生命周期和
+  Feedback 资格/原因；可重试失败的 Reflection、停用 Feedback、展开 decision，
+  并返回对应运行的研究结论。
 - **Settings：** 只读能力列表、非敏感默认值和 API key 是否已配置。
 
 UI 支持 `zh-CN`、`en`、`ja`。界面语言与报告输出语言相互独立。
@@ -278,7 +279,8 @@ Web+worker smoke。
 - [Breaking migration guide](../migration-independent-platform.md)
 - 在线备份：`tradingagents db backup /path/to/backup.db`
 - 旧 report 目录保留为只读档案，不迁移旧 checkpoint。
-- reports、events、decisions、outcomes 和 reflections 默认长期保留。
+- reports、events、decisions、Outcome Observations、Reflections 和已审查的
+  Feedback 默认长期保留。
 - 首版不提供永久删除 API。
 
 TradingAgentsX 使用 Apache-2.0 许可证，详见 [LICENSE](../../LICENSE) 与
