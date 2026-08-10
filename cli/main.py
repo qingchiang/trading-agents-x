@@ -435,6 +435,9 @@ def validate_live_thesis_command(
             git_commit=git_commit,
             environ=os.environ,
             in_place_database=in_place_database,
+            verify_source_checkout=lambda: _verify_source_checkout(
+                checkout_root, git_commit
+            ),
         )
     except LiveThesisValidationError as exc:
         event_console.print(f"[red]Live Thesis validation refused: {exc}[/red]")
@@ -448,6 +451,14 @@ def validate_live_thesis_command(
 
 def _source_checkout() -> tuple[Path, str]:
     source_root = Path(__file__).resolve().parents[1]
+    commit = _verify_source_checkout(source_root)
+    return source_root, commit
+
+
+def _verify_source_checkout(
+    source_root: Path,
+    expected_commit: str | None = None,
+) -> str:
     try:
         completed = subprocess.run(
             ["git", "-C", str(source_root), "rev-parse", "--show-toplevel", "HEAD"],
@@ -456,7 +467,7 @@ def _source_checkout() -> tuple[Path, str]:
             text=True,
             timeout=5,
         )
-        root_text, commit = completed.stdout.splitlines()
+        root_text, initial_commit = completed.stdout.splitlines()
         root = Path(root_text).resolve()
         if root != source_root:
             raise LiveThesisValidationError(
@@ -489,6 +500,13 @@ def _source_checkout() -> tuple[Path, str]:
             capture_output=True,
             timeout=5,
         )
+        verified_commit = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).stdout
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         raise LiveThesisValidationError(
             "a Git checkout with an ignored Live Thesis experiment area is required"
@@ -498,10 +516,16 @@ def _source_checkout() -> tuple[Path, str]:
             "a clean source checkout is required; staged, modified, or "
             "non-ignored untracked files are present"
         )
-    commit = commit.strip().lower()
-    if re.fullmatch(r"[0-9a-f]{40}", commit) is None:
+    commits = tuple(value.strip().lower() for value in (initial_commit, verified_commit))
+    if any(re.fullmatch(r"[0-9a-f]{40}", commit) is None for commit in commits):
         raise LiveThesisValidationError("detected Git commit is invalid")
-    return root, commit
+    if commits[0] != commits[1] or (
+        expected_commit is not None and commits[1] != expected_commit
+    ):
+        raise LiveThesisValidationError(
+            "the Git commit changed during source verification"
+        )
+    return commits[1]
 
 
 def _settings() -> AppSettings:

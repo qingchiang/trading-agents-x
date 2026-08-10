@@ -812,3 +812,58 @@ def test_live_thesis_validation_cli_refuses_dirty_source_before_application_work
 
     assert result.exit_code == 1
     assert "clean source checkout" in result.output
+
+
+def test_live_thesis_validation_cli_refuses_head_change_during_source_check(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    checkout, cases, _commit = _git_checkout_for_live_validation(tmp_path)
+    tracked = checkout / "cli/main.py"
+    original_run = subprocess.run
+
+    def change_head_after_status(*args, **kwargs):
+        completed = original_run(*args, **kwargs)
+        command = args[0]
+        if "status" in command:
+            original_run(
+                [
+                    "git",
+                    "-C",
+                    str(checkout),
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=test@example.com",
+                    "commit",
+                    "--allow-empty",
+                    "-qm",
+                    "changed head",
+                ],
+                check=True,
+            )
+        return completed
+
+    monkeypatch.setattr(cli, "__file__", str(tracked))
+    monkeypatch.setattr(cli.subprocess, "run", change_head_after_status)
+    monkeypatch.setattr(
+        cli,
+        "load_reviewed_scenarios",
+        lambda _path: pytest.fail("cases must not load after HEAD changes"),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "research",
+            "validate-live-thesis",
+            str(cases),
+            "--backup",
+            str(checkout / "new-backup.db"),
+            "--in-place-database",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Git commit changed" in result.output
+    assert "verification" in result.output

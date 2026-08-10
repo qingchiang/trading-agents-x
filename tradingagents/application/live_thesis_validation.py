@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -166,6 +166,7 @@ def validate_live_thesis(
     git_commit: str,
     environ: Mapping[str, str],
     in_place_database: bool,
+    verify_source_checkout: Callable[[], None],
 ) -> LiveThesisValidationResult:
     """Run the reviewed Shadow set after backup and retain only sanitized metadata."""
     if environ.get("RUN_LIVE_DATA_TESTS") != "1":
@@ -199,6 +200,7 @@ def validate_live_thesis(
                 f"reviewed cutoff must be later than Research Chain {chain.id} head"
             )
         selected_chains[scenario.chain_id] = chain
+    verify_source_checkout()
     if backup_destination.exists():
         raise LiveThesisValidationError("backup destination already exists")
     try:
@@ -223,6 +225,7 @@ def validate_live_thesis(
 
     entries: list[LiveThesisManifestEntry] = []
     for index, scenario in enumerate(scenarios, start=1):
+        verify_source_checkout()
         baseline = selected_chains[scenario.chain_id].current_revision
         run_id: str | None = None
         try:
@@ -259,6 +262,7 @@ def validate_live_thesis(
             entry = _failed_entry(service, scenario, run_id=run_id, git_commit=git_commit)
         except Exception:
             entry = _failed_entry(service, scenario, run_id=run_id, git_commit=git_commit)
+        verify_source_checkout()
         _write_json_exclusive(
             manifest_directory
             / f"{index:02d}-{scenario.scenario}-{run_id or f'no-run-{uuid4()}'}.json",

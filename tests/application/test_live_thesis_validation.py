@@ -5,6 +5,7 @@ import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -58,6 +59,7 @@ def test_live_thesis_validation_refuses_before_backup_without_every_opt_in(
             git_commit="a" * 40,
             environ=environ,
             in_place_database=in_place_database,
+            verify_source_checkout=lambda: None,
         )
 
 
@@ -183,6 +185,7 @@ def test_backup_failure_prevents_authoritative_execution_and_manifest(
             git_commit="a" * 40,
             environ={"RUN_LIVE_DATA_TESTS": "1", "RUN_LIVE_LLM_TESTS": "1"},
             in_place_database=True,
+            verify_source_checkout=lambda: None,
         )
 
     assert not manifest_root.exists()
@@ -228,10 +231,64 @@ def test_source_policy_rejection_prevents_backup_and_execution(tmp_path: Path) -
             git_commit="a" * 40,
             environ={"RUN_LIVE_DATA_TESTS": "1", "RUN_LIVE_LLM_TESTS": "1"},
             in_place_database=True,
+            verify_source_checkout=lambda: None,
         )
 
     assert not (tmp_path / "backup.db").exists()
     assert not (tmp_path / "manifest").exists()
+
+
+def test_source_is_reverified_after_backup_before_each_execution(tmp_path: Path) -> None:
+    scenarios = _loaded_scenarios(tmp_path)
+    chains = {
+        scenario.chain_id: SimpleNamespace(
+            id=scenario.chain_id,
+            instrument="6501.T",
+            next_update_policy="incremental_allowed",
+            current_revision=SimpleNamespace(
+                id=f"baseline-{scenario.scenario}",
+                cutoff=date(2026, 8, 9),
+            ),
+        )
+        for scenario in scenarios
+    }
+    verification_count = 0
+
+    def verify_source_checkout() -> None:
+        nonlocal verification_count
+        verification_count += 1
+        if verification_count == 2:
+            raise LiveThesisValidationError("source checkout changed")
+
+    class SourceChangedService:
+        settings = SimpleNamespace(research_update_mode="shadow")
+
+        def get_research_chain(self, chain_id):
+            return chains[chain_id]
+
+        def backup_database(self, destination: Path) -> Path:
+            with sqlite3.connect(destination) as connection:
+                connection.execute("CREATE TABLE alembic_version (version_num TEXT NOT NULL)")
+                connection.execute("INSERT INTO alembic_version VALUES ('fixture')")
+            return destination
+
+        def run_chain_update(self, *_args, **_kwargs):
+            raise AssertionError("execution must not start after source changes")
+
+    with pytest.raises(LiveThesisValidationError, match="source checkout changed"):
+        validate_live_thesis(
+            SourceChangedService(),
+            scenarios,
+            backup_destination=tmp_path / "backup.db",
+            manifest_root=tmp_path / "manifest",
+            git_commit="a" * 40,
+            environ={"RUN_LIVE_DATA_TESTS": "1", "RUN_LIVE_LLM_TESTS": "1"},
+            in_place_database=True,
+            verify_source_checkout=verify_source_checkout,
+        )
+
+    assert verification_count == 2
+    assert (tmp_path / "backup.db").is_file()
 
 
 def test_validation_writes_authoritative_main_database_and_only_sanitized_manifest(
@@ -406,6 +463,7 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
             return SimpleNamespace(status=RunStatus.SUCCEEDED, metrics=metrics)
 
     backup = tmp_path / "recovery.db"
+    verify_source_checkout = Mock()
     result = validate_live_thesis(
         MainDatabaseService(),
         scenarios,
@@ -414,9 +472,11 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
         git_commit="a" * 40,
         environ={"RUN_LIVE_DATA_TESTS": "1", "RUN_LIVE_LLM_TESTS": "1"},
         in_place_database=True,
+        verify_source_checkout=verify_source_checkout,
     )
 
     assert result.passed
+    assert verify_source_checkout.call_count == 11
     assert {entry.validation_verdict for entry in result.entries} == {"passed"}
     assert {entry.expected_full_change_conclusion for entry in result.entries} == {
         ResearchChangeConclusion.MATERIAL_CHANGE,
@@ -466,6 +526,7 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
         git_commit="b" * 40,
         environ={"RUN_LIVE_DATA_TESTS": "1", "RUN_LIVE_LLM_TESTS": "1"},
         in_place_database=True,
+        verify_source_checkout=lambda: None,
     )
     mismatch_entry = next(
         item for item in mismatch.entries if item.scenario == "threshold_crossing"

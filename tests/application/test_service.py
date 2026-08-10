@@ -2757,6 +2757,7 @@ def test_controlled_live_thesis_validation_advances_five_distinct_main_database_
         git_commit="a" * 40,
         environ={"RUN_LIVE_DATA_TESTS": "1", "RUN_LIVE_LLM_TESTS": "1"},
         in_place_database=True,
+        verify_source_checkout=lambda: None,
     )
 
     assert result.passed

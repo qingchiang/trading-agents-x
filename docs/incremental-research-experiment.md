@@ -168,7 +168,9 @@ credentials, SQLite databases, backups, reviewed cases, and prior manifests do
 not make an otherwise clean checkout invalid. The command records the full
 commit of that exact source checkout and binds the sanitized manifest to its
 ignored `tmp/` area; it never copies a diff or repository content into the
-manifest.
+manifest. The same clean commit is reverified immediately before the backup,
+before every scenario, and before its manifest entry is written. Keep the
+checkout unchanged until the command finishes.
 
 ```bash
 RUN_LIVE_DATA_TESTS=1 RUN_LIVE_LLM_TESTS=1 PYTHON_DOTENV_DISABLED=1 \
