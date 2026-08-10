@@ -27,6 +27,7 @@ from .research import (
     SemanticChangeAssessment,
     SemanticChangeRelationship,
     assess_deterministic_update,
+    required_research_sources,
 )
 from .runtime import RunCancelled
 
@@ -36,19 +37,7 @@ _MAX_SEMANTIC_PROMPT_CHARS = 48_000
 
 
 def _required_sources(baseline: ResearchRevision) -> set[str]:
-    sources = {
-        source
-        for claim in baseline.current_state.claims
-        if claim.standing is ClaimStanding.ACTIVE
-        for source in claim.required_sources
-    }
-    sources.update(
-        source
-        for question in baseline.current_state.questions
-        if question.status is QuestionStatus.OPEN
-        for source in question.required_sources
-    )
-    return sources
+    return set(required_research_sources(baseline.current_state))
 
 
 def _unavailable_payload(sources: tuple[str, ...], start: str, end: str) -> str:

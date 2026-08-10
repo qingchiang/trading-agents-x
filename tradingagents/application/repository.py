@@ -2430,14 +2430,13 @@ class RunRepository:
             created_at=created_at,
         )
 
-    @classmethod
     def _research_chain(
-        cls,
+        self,
         session: Session,
         record: ResearchChainRecord,
     ) -> ResearchChain:
         revisions = tuple(
-            cls._research_revision(item)
+            self._research_revision(item)
             for item in session.scalars(
                 select(ResearchRevisionRecord)
                 .where(ResearchRevisionRecord.chain_id == record.id)
@@ -2453,7 +2452,7 @@ class RunRepository:
         evaluation = evaluate_next_update_policy(
             current,
             instrument=record.instrument,
-            mode="experimental",
+            mode=self.settings.research_update_mode,
         )
         return ResearchChain(
             id=record.id,

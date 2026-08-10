@@ -976,6 +976,27 @@ def test_chain_update_strategy_uses_source_qualified_japanese_capability(
     assert "experimental_nmc_jp_whitelist" not in queued.config_snapshot
 
 
+def test_repository_round_trip_uses_configured_mode_for_source_qualified_policy(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(app_settings, repository)
+    service.run_initial_chain(
+        AnalysisRequest(ticker="7203.T", analysis_date="2026-07-24", analysts=("market",))
+    )
+
+    eligible = repository.list_research_chains(instrument="7203.T")[0]
+    assert eligible.next_update_policy == "incremental_allowed"
+    assert eligible.next_update_reason is None
+
+    off_repository = RunRepository(
+        app_settings.model_copy(update={"research_update_mode": "off"})
+    )
+    full_only = off_repository.get_research_chain(eligible.id)
+    assert full_only.next_update_policy == "full_required"
+    assert full_only.next_update_reason == "experiment_mode_off"
+
+
 def test_ineligible_head_rejects_explicit_incremental_but_allows_full(
     app_settings,
     repository,
@@ -1250,6 +1271,16 @@ def test_experimental_quiet_update_advances_with_nmc_without_full_analysis(
                     source_revision_id=baseline.id,
                 )
                 for item in baseline.evidence_snapshot.source_record_lineage
+            ),
+            "source_watermarks": tuple(
+                item.model_copy(
+                    update={
+                        "scanned_end": cutoff,
+                        "baseline_cutoff": baseline.cutoff,
+                        "overlap_start": baseline.cutoff,
+                    }
+                )
+                for item in baseline.evidence_snapshot.source_watermarks
             ),
         }
     )

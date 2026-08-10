@@ -223,6 +223,20 @@ async def test_initial_research_chain_creation_read_and_export_surfaces(
     assert exported.json()["revision"]["evidence_snapshot"]["source_records"]
     assert exported.json()["linked_reports"]["market"].startswith("# Overview")
 
+    refused_incremental = await web_client.post(
+        f"/api/v1/research-chains/{chain['id']}/updates",
+        json={
+            "baseline_revision_id": revision_id,
+            "analysis_date": "2026-07-25",
+            "execution_strategy": "incremental",
+        },
+    )
+    assert refused_incremental.status_code == 409
+    assert refused_incremental.json()["error"]["code"] == "invalid_research_baseline"
+    assert "required_source_coverage_incomplete" in (
+        refused_incremental.json()["error"]["message"]
+    )
+
     update = await web_client.post(
         f"/api/v1/research-chains/{chain['id']}/updates",
         json={

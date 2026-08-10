@@ -927,6 +927,20 @@ def validate_experimental_nmc_candidate(
         or reaffirmed_question_ids != current_question_ids
     ):
         return IncrementalEscalationReason.INCOMPATIBLE_SEMANTICS
+    candidate_policy = evaluate_next_update_policy(
+        candidate,
+        instrument=candidate.current_state.instrument,
+        mode="experimental",
+    )
+    if candidate_policy.policy != "incremental_allowed":
+        if candidate_policy.reason in {
+            NextUpdateReason.REQUIRED_SOURCE_COVERAGE_INCOMPLETE,
+            NextUpdateReason.COVERAGE_INCOMPLETE,
+        }:
+            return IncrementalEscalationReason.COVERAGE_INCOMPLETE
+        if candidate_policy.reason is NextUpdateReason.INCOMPATIBLE_MARKET_SEMANTICS:
+            return IncrementalEscalationReason.INCOMPATIBLE_SEMANTICS
+        return IncrementalEscalationReason.SCHEMA_INVALID
     return None
 
 
@@ -1047,20 +1061,25 @@ class NextUpdatePolicyEvaluation(ResearchModel):
     required_sources: tuple[str, ...] = ()
 
 
-def _required_incremental_sources(revision: ResearchRevisionDraft) -> tuple[str, ...]:
-    sources = {"EDINET", "TDnet"}
-    sources.update(
+def required_research_sources(state: CurrentResearchState) -> tuple[str, ...]:
+    """Return source dependencies declared by active Claims and open Questions."""
+    sources = {
         source
-        for claim in revision.current_state.claims
+        for claim in state.claims
         if claim.standing is ClaimStanding.ACTIVE
         for source in claim.required_sources
-    )
+    }
     sources.update(
         source
-        for question in revision.current_state.questions
+        for question in state.questions
         if question.status is QuestionStatus.OPEN
         for source in question.required_sources
     )
+    return tuple(sorted(sources))
+
+
+def _required_incremental_sources(revision: ResearchRevisionDraft) -> tuple[str, ...]:
+    sources = {"EDINET", "TDnet", *required_research_sources(revision.current_state)}
     typed_domains = {
         "fundamentals": "J-Quants fundamentals",
         "market": "J-Quants adjusted OHLCV",
@@ -1096,6 +1115,7 @@ def _required_source_coverage_complete(
             item
             for item in source_watermarks
             if item.scanned_start <= revision.cutoff <= item.scanned_end
+            and item.scanned_end == revision.cutoff
             and item.status is CoverageStatus.COMPLETE
             and item.temporal_scope == "point_in_time"
             and not item.limitations
@@ -1113,8 +1133,17 @@ def _required_source_coverage_complete(
                 ordered, ordered[1:], strict=False
             )
         )
+        has_required_overlap = revision.role is ResearchRevisionRole.INITIAL or any(
+            item.baseline_cutoff is not None
+            and item.overlap_start is not None
+            and item.baseline_cutoff < revision.cutoff
+            and item.scanned_start <= item.overlap_start
+            and item.overlap_start <= item.baseline_cutoff <= item.scanned_end
+            for item in applicable
+        )
         if (
             not applicable
+            or not has_required_overlap
             or has_gap
             or any(
                 item.status is not CoverageStatus.COMPLETE
@@ -1671,18 +1700,7 @@ def _source_coverage(
     observed_records: tuple[SourceRecordVersion, ...] | None = None,
     required_data_domains: tuple[str, ...] = (),
 ) -> tuple[tuple[ResearchDomainCoverage, ...], bool]:
-    explicitly_required = {
-        source
-        for claim in state.claims
-        if claim.standing is ClaimStanding.ACTIVE
-        for source in claim.required_sources
-    }
-    explicitly_required.update(
-        source
-        for question in state.questions
-        if question.status is QuestionStatus.OPEN
-        for source in question.required_sources
-    )
+    explicitly_required = set(required_research_sources(state))
     refs_by_source: dict[str, list[str]] = {}
     for record in records:
         refs_by_source.setdefault(record.source, []).append(record.evidence_ref)

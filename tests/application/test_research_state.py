@@ -778,6 +778,55 @@ def test_next_update_policy_distinguishes_general_coverage_and_market_semantics(
     assert incompatible_result.reason == "incompatible_market_semantics"
 
 
+def test_next_update_policy_rejects_future_scan_invalid_revision_and_missing_overlap():
+    baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    future_scan = baseline.model_copy(
+        update={
+            "evidence_snapshot": baseline.evidence_snapshot.model_copy(
+                update={
+                    "source_watermarks": tuple(
+                        item.model_copy(update={"scanned_end": date(2026, 7, 25)})
+                        if item.source == "TDnet"
+                        else item
+                        for item in baseline.evidence_snapshot.source_watermarks
+                    )
+                }
+            )
+        }
+    )
+    assert evaluate_next_update_policy(
+        future_scan, instrument="6501.T", mode="shadow"
+    ).reason == "required_source_coverage_incomplete"
+
+    invalid = baseline.model_copy(update={"cutoff": date(2026, 7, 23)})
+    assert evaluate_next_update_policy(
+        invalid, instrument="6501.T", mode="shadow"
+    ).reason == "invalid_revision"
+
+    candidate = assess_deterministic_update(
+        "revision-1",
+        baseline,
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
+        evidence,
+    ).candidate
+    assert candidate is not None
+    missing_overlap = candidate.model_copy(
+        update={
+            "evidence_snapshot": candidate.evidence_snapshot.model_copy(
+                update={
+                    "source_watermarks": tuple(
+                        item.model_copy(update={"baseline_cutoff": None, "overlap_start": None})
+                        for item in candidate.evidence_snapshot.source_watermarks
+                    )
+                }
+            )
+        }
+    )
+    assert evaluate_next_update_policy(
+        missing_overlap, instrument="6501.T", mode="experimental"
+    ).reason == "required_source_coverage_incomplete"
+
+
 def test_deterministic_incremental_gates_propose_quiet_candidate():
     baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence()
 
