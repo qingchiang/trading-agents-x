@@ -173,7 +173,7 @@ def qualify_reflection(
         or observation.end <= source.cutoff
         or observation.end < observation.start
     ):
-        reasons.append("observation_window_not_after_decision")
+        reasons.append("observation_window_not_after_source_cutoff")
     if (
         observation.data_available_at > qualified_at
         or reflection.generated_at > qualified_at

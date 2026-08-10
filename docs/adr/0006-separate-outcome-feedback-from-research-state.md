@@ -28,11 +28,13 @@ Context is valid. Feedback is neither Evidence nor Prior Research: it cannot
 establish Current Research State, satisfy Coverage, or determine a Change
 Conclusion or escalation.
 
-For the five-completed-interval return method, the source Decision cutoff may
-serve as the return's baseline price date. The Observation start cannot precede
-that cutoff, its end must follow the cutoff, and qualification still becomes
-available only after the Observation data, Reflection, and qualification all
-exist. Outcome Feedback records a qualification-policy version independently
+For the five-completed-interval return method, the source Decision or linked
+Research Revision cutoff may serve as the return's baseline price date. The
+linked Revision cutoff is authoritative when present. The Observation start
+cannot precede the effective source cutoff, its end must follow the cutoff, and
+qualification still becomes available only after the Observation data,
+Reflection, and qualification all exist. Outcome Feedback records a
+qualification-policy version independently
 from its schema version and Observation method version. The first explicit
 policy is `outcome_feedback_qualification.v1`. Correcting a policy does not
 retroactively requalify an existing Feedback record; legacy and otherwise

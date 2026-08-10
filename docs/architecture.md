@@ -784,10 +784,12 @@ Evidence claims, or execution advice. Feedback records eligible, ineligible,
 or retired status and reasons. Its `available_at` is the latest of Observation
 data availability, Reflection generation, and qualification completion.
 For the versioned five-completed-interval policy, an Observation may begin on
-the source Decision's market-local cutoff date but never before it, and must end
-strictly after that cutoff. Newly qualified Feedback records
-`outcome_feedback_qualification.v1`; pre-policy and legacy-unqualified rows keep
-an explicit null policy version and their persisted status is never recalculated.
+the source Decision's or linked Research Revision's market-local cutoff date
+but never before it, and must end strictly after that cutoff. When a linked
+Revision exists, its cutoff is the effective source cutoff. Newly qualified
+Feedback records `outcome_feedback_qualification.v1`; pre-policy and
+legacy-unqualified rows keep an explicit null policy version and their persisted
+status is never recalculated.
 
 ## Data routing and point-in-time contracts
 

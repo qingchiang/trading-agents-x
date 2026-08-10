@@ -36,6 +36,8 @@ invalidation conditions、time horizon が含まれます。ポジション比�
 - **Memory:** 永続化済み Outcome Observation、Reflection の lifecycle、
   バージョン付き Feedback の適格性と理由を個別に確認する。失敗した Reflection
   の再試行、Feedback の廃止、decision の展開、元の run への移動も行える。
+  完了した Observation は、source Decision または紐づく Research Revision の
+  market-local cutoff を収益基準にできるが、その後に終了しなければならない。
   履歴上のバージョンなし資格状態は、そのまま明示される。
 - **Settings:** provider/model capability、安全なデフォルト値、API key の
   設定有無を読み取り専用で表示。

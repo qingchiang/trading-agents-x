@@ -49,7 +49,9 @@ or portfolio rebalancing.
 - **Memory:** inspect separately persisted Outcome Observations, Reflection
   lifecycle state, and versioned Feedback qualification/reasons; retry failed
   Reflections, retire Feedback, expand decisions, and reopen the originating
-  run. Historical unversioned qualification remains visibly unversioned.
+  run. A completed Observation may use its source Decision or linked Research
+  Revision cutoff as the market-local return baseline but must end later.
+  Historical unversioned qualification remains visibly unversioned.
 - **Settings:** read-only capabilities, safe defaults, and whether provider
   credentials are configured.
 - **Locales:** `en`, `zh-CN`, and `ja`; UI locale and report output language

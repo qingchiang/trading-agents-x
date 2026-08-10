@@ -271,8 +271,9 @@ _Avoid_: Regenerated full report, status badge
 **Outcome Observation**:
 A bounded ex-post observation associated with a Research Decision over an
 explicit market-local window and declared observation method. Its return
-baseline may be anchored at the Decision cutoff, but its observation end must
-follow that cutoff; it does not by itself prove or disprove a thesis.
+baseline may be anchored at the source Decision or linked Research Revision
+cutoff, but its observation end must follow that cutoff; it does not by itself
+prove or disprove a thesis.
 _Avoid_: Thesis result, current Evidence
 
 **Outcome Reflection**:

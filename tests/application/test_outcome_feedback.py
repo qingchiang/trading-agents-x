@@ -113,7 +113,7 @@ def test_qualification_uses_linked_revision_cutoff() -> None:
     )
 
     assert result.status is OutcomeFeedbackStatus.INELIGIBLE
-    assert result.reasons == ("observation_window_not_after_decision",)
+    assert result.reasons == ("observation_window_not_after_source_cutoff",)
 
 
 def test_qualification_fails_closed_when_availability_is_not_pit() -> None:
@@ -148,7 +148,7 @@ def test_qualification_rejects_invalid_market_local_observation_windows(
     )
 
     assert result.status is OutcomeFeedbackStatus.INELIGIBLE
-    assert result.reasons == ("observation_window_not_after_decision",)
+    assert result.reasons == ("observation_window_not_after_source_cutoff",)
 
 
 def test_qualification_rejects_copied_thesis_fragments() -> None:
