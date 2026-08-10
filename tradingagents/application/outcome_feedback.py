@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import date, datetime
-from enum import StrEnum
+from enum import Enum
 from typing import Any
 
 METHOD_CATEGORY = "short_term_relative_return"
@@ -48,19 +48,19 @@ class FeedbackQualification:
     applicability: dict[str, Any]
 
 
-class OutcomeObservationStatus(StrEnum):
+class OutcomeObservationStatus(str, Enum):
     PENDING = "pending"
     RESOLVED = "resolved"
 
 
-class OutcomeReflectionStatus(StrEnum):
+class OutcomeReflectionStatus(str, Enum):
     PENDING = "pending"
     GENERATED = "generated"
     INVALID = "invalid"
     RETRYABLE_FAILURE = "retryable_failure"
 
 
-class OutcomeFeedbackStatus(StrEnum):
+class OutcomeFeedbackStatus(str, Enum):
     ELIGIBLE = "eligible"
     INELIGIBLE = "ineligible"
     RETIRED = "retired"

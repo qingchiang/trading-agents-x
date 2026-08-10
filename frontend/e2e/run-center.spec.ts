@@ -327,7 +327,7 @@ test("updates the Primary Research Chain through a Full-only Indeterminate head"
   });
 });
 
-test("runs, templates, trash, and restores local research", async ({
+test("runs, legacy templates, trash, and restores local research", async ({
   page,
 }) => {
   test.setTimeout(60_000);
@@ -666,7 +666,10 @@ test("runs, templates, trash, and restores local research", async ({
     page.locator("header").getByText("Cancelled", { exact: true }),
   ).toBeVisible();
 
-  await page.getByRole("link", { name: "New from this run" }).click();
+  await expect(
+    page.getByRole("link", { name: "New from this run" }),
+  ).toHaveCount(0);
+  await page.goto("/runs/new?from_run=run-created");
   await expect(ticker).toHaveValue("7203.T");
   await ticker.fill("MSFT");
   await page.getByRole("button", { name: /Queue research/ }).click();
