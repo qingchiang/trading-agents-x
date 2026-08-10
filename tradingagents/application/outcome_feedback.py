@@ -73,8 +73,13 @@ class FeedbackSource:
     decision_rating: str
     decision_thesis: str
     decision_cutoff: date
+    revision_cutoff: date | None
     ticker: str
     market: str | None
+
+    @property
+    def cutoff(self) -> date:
+        return self.revision_cutoff or self.decision_cutoff
 
 
 @dataclass(frozen=True)
@@ -164,8 +169,8 @@ def qualify_reflection(
     if not observation.horizon_limit:
         reasons.append("horizon_limit_missing")
     if (
-        observation.start < source.decision_cutoff
-        or observation.end <= source.decision_cutoff
+        observation.start < source.cutoff
+        or observation.end <= source.cutoff
         or observation.end < observation.start
     ):
         reasons.append("observation_window_not_after_decision")

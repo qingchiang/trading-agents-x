@@ -35,7 +35,7 @@ from tradingagents.application.live_thesis_validation import (
     validate_live_thesis,
 )
 from tradingagents.application.llms import RunLLMs
-from tradingagents.application.outcomes import OutcomeObservation
+from tradingagents.application.outcomes import OutcomeObservation, OutcomeSettlement
 from tradingagents.application.repository import InvalidResearchBaselineError, RunRepository
 from tradingagents.application.research import (
     ClaimChange,
@@ -661,6 +661,63 @@ def test_feedback_failure_cannot_change_research_revision(
     assert revision_before is not None
     assert revision_after == revision_before
     assert revision_after.producing_run_id == result.run_id
+
+
+def test_settlement_qualifies_decision_cutoff_as_versioned_feedback(
+    app_settings,
+    repository,
+    monkeypatch,
+) -> None:
+    service = _service(app_settings, repository)
+    result = service.run_initial_chain(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+    chain = repository.list_research_chains(instrument="NVDA")[0]
+    revision_before = chain.current_revision
+    clock = iter(
+        (
+            datetime(2100, 1, 1, tzinfo=timezone.utc),
+            datetime(2100, 1, 1, 0, 1, tzinfo=timezone.utc),
+            datetime(2100, 1, 1, 0, 2, tzinfo=timezone.utc),
+        )
+    )
+    settlement = OutcomeSettlement(
+        app_settings,
+        repository,
+        reflector=object(),
+        utc_clock=lambda: next(clock),
+    )
+    monkeypatch.setattr(
+        settlement,
+        "observe",
+        lambda *_args, **_kwargs: OutcomeObservation(
+            raw_return=0.03,
+            alpha_return=0.01,
+            holding_intervals=5,
+            start_date=date(2026, 7, 24),
+            end_date=date(2026, 8, 1),
+        ),
+    )
+    monkeypatch.setattr(
+        settlement,
+        "_reflection",
+        lambda **_kwargs: "Method lesson: Use a bounded methodological check.",
+    )
+
+    stats = settlement.settle_once()
+
+    feedback = repository.memory_entries(ticker="NVDA")[0]["outcome_feedback"]
+    assert stats == {"checked": 1, "resolved": 1, "pending": 0, "failed": 0}
+    assert feedback["status"] == "eligible"
+    assert feedback["qualification_policy_version"] == (
+        "outcome_feedback_qualification.v1"
+    )
+    assert repository.get_run(result.run_id).status is RunStatus.SUCCEEDED
+    assert repository.get_research_chain(chain.id).current_revision == revision_before
 
 
 def test_full_update_is_idempotent_for_current_head_and_advances_atomically(

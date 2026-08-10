@@ -27,6 +27,7 @@ def _qualify(reflection: str, **updates):
             "Demand durability remains uncertain over three years.",
         ),
         decision_cutoff=values.pop("decision_cutoff", date(2026, 7, 24)),
+        revision_cutoff=values.pop("revision_cutoff", None),
         ticker=values.pop("ticker", "NVDA"),
         market=values.pop("market", "America/New_York"),
     )
@@ -101,6 +102,18 @@ def test_qualification_accepts_decision_cutoff_as_return_baseline() -> None:
 
     assert result.status is OutcomeFeedbackStatus.ELIGIBLE
     assert result.reasons == ()
+
+
+def test_qualification_uses_linked_revision_cutoff() -> None:
+    result = _qualify(
+        "Directional consistency was mixed.\nMethod lesson: Use a bounded "
+        "methodological check.",
+        revision_cutoff=date(2026, 7, 25),
+        observation_start=date(2026, 7, 24),
+    )
+
+    assert result.status is OutcomeFeedbackStatus.INELIGIBLE
+    assert result.reasons == ("observation_window_not_after_decision",)
 
 
 def test_qualification_fails_closed_when_availability_is_not_pit() -> None:

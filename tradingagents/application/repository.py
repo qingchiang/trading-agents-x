@@ -1844,14 +1844,23 @@ class RunRepository:
         text = reflection.strip() if isinstance(reflection, str) else ""
         with self.sessions.begin() as session:
             row = session.execute(
-                select(ReflectionRecord, OutcomeRecord, DecisionRecord)
+                select(
+                    ReflectionRecord,
+                    OutcomeRecord,
+                    DecisionRecord,
+                    ResearchRevisionRecord,
+                )
                 .join(OutcomeRecord, OutcomeRecord.id == ReflectionRecord.outcome_id)
                 .join(DecisionRecord, DecisionRecord.id == OutcomeRecord.decision_id)
+                .outerjoin(
+                    ResearchRevisionRecord,
+                    ResearchRevisionRecord.id == OutcomeRecord.research_revision_id,
+                )
                 .where(OutcomeRecord.id == outcome_id)
             ).first()
             if row is None:
                 return None
-            reflection_record, outcome, decision = row
+            reflection_record, outcome, decision, revision = row
             if reflection_record.status == OutcomeReflectionStatus.GENERATED.value:
                 return OutcomeReflectionStatus.GENERATED.value
             reflection_record.last_attempted_at = generated
@@ -1883,6 +1892,7 @@ class RunRepository:
                     decision_rating=decision.rating,
                     decision_thesis=str(decision.decision_json.get("thesis") or ""),
                     decision_cutoff=decision.analysis_date,
+                    revision_cutoff=revision.cutoff if revision is not None else None,
                     ticker=decision.ticker,
                     market=decision.market,
                 ),
