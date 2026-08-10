@@ -34,8 +34,9 @@ invalidation conditions、time horizon が含まれます。ポジション比�
   折りたたみ可能な監査詳細、token/tool/wall-time 指標、cancel/retry、
   アーカイブ復元、現在の run をもとにした新規作成、export。
 - **Memory:** 永続化済み Outcome Observation、Reflection の lifecycle、
-  Feedback の適格性と理由を個別に確認する。失敗した Reflection の再試行、
-  Feedback の廃止、decision の展開、元の run への移動も行える。
+  バージョン付き Feedback の適格性と理由を個別に確認する。失敗した Reflection
+  の再試行、Feedback の廃止、decision の展開、元の run への移動も行える。
+  履歴上のバージョンなし資格状態は、そのまま明示される。
 - **Settings:** provider/model capability、安全なデフォルト値、API key の
   設定有無を読み取り専用で表示。
 

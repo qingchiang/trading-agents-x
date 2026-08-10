@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
+import pytest
+
 from tradingagents.application.outcome_feedback import (
     HORIZON_LIMIT,
     METHOD_CATEGORY,
+    QUALIFICATION_POLICY_VERSION,
     FeedbackSource,
     ObservationQualificationInput,
     OutcomeFeedbackStatus,
@@ -57,6 +60,7 @@ def test_qualification_records_explicit_scope_and_short_horizon() -> None:
     )
 
     assert result.status is OutcomeFeedbackStatus.ELIGIBLE
+    assert result.qualification_policy_version == QUALIFICATION_POLICY_VERSION
     assert result.reasons == ()
     assert result.candidate["source_decision_id"] == 7
     assert result.candidate["source_revision_id"] == "revision-1"
@@ -88,7 +92,18 @@ def test_qualification_rejects_research_claims_and_execution_advice() -> None:
     }
 
 
-def test_qualification_fails_closed_when_availability_or_window_is_not_pit() -> None:
+def test_qualification_accepts_decision_cutoff_as_return_baseline() -> None:
+    result = _qualify(
+        "Directional consistency was mixed.\nMethod lesson: Use a bounded "
+        "methodological check.",
+        observation_start=date(2026, 7, 24),
+    )
+
+    assert result.status is OutcomeFeedbackStatus.ELIGIBLE
+    assert result.reasons == ()
+
+
+def test_qualification_fails_closed_when_availability_is_not_pit() -> None:
     result = _qualify(
         "Directional consistency was mixed.\nMethod lesson: Use a bounded "
         "methodological check.",
@@ -97,10 +112,30 @@ def test_qualification_fails_closed_when_availability_or_window_is_not_pit() -> 
     )
 
     assert result.status is OutcomeFeedbackStatus.INELIGIBLE
-    assert result.reasons == (
-        "observation_window_not_after_decision",
-        "point_in_time_availability_invalid",
+    assert result.reasons == ("point_in_time_availability_invalid",)
+
+
+@pytest.mark.parametrize(
+    ("observation_start", "observation_end"),
+    (
+        (date(2026, 7, 23), date(2026, 8, 1)),
+        (date(2026, 7, 24), date(2026, 7, 24)),
+        (date(2026, 7, 26), date(2026, 7, 25)),
+    ),
+)
+def test_qualification_rejects_invalid_market_local_observation_windows(
+    observation_start: date,
+    observation_end: date,
+) -> None:
+    result = _qualify(
+        "Directional consistency was mixed.\nMethod lesson: Use a bounded "
+        "methodological check.",
+        observation_start=observation_start,
+        observation_end=observation_end,
     )
+
+    assert result.status is OutcomeFeedbackStatus.INELIGIBLE
+    assert result.reasons == ("observation_window_not_after_decision",)
 
 
 def test_qualification_rejects_copied_thesis_fragments() -> None:

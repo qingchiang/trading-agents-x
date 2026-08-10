@@ -336,6 +336,9 @@ class OutcomeFeedbackRecord(Base):
         index=True,
     )
     status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    qualification_policy_version: Mapped[str | None] = mapped_column(
+        String(80), nullable=True
+    )
     reasons_json: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     method_category: Mapped[str] = mapped_column(String(80), nullable=False)
     horizon_limit: Mapped[str] = mapped_column(Text, nullable=False)

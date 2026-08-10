@@ -407,6 +407,7 @@ export interface components {
       horizon_limit: string;
       id: number;
       method_category: string;
+      qualification_policy_version: string | null;
       qualified_at: string;
       reasons: string[];
       retired_at: string | null;

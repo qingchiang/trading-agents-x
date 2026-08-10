@@ -280,8 +280,9 @@ export default function Memory() {
             {entry.outcome_feedback && (
               <div className="memory-lifecycle-note">
                 <strong>{t("feedbackQualification")}: </strong>
-                {entry.outcome_feedback.status} · {t("availableAt")}{" "}
-                {entry.outcome_feedback.available_at}
+                {entry.outcome_feedback.status} · {entry.outcome_feedback
+                  .qualification_policy_version ?? t("unversioned")} ·{" "}
+                {t("availableAt")} {entry.outcome_feedback.available_at}
                 {entry.outcome_feedback.reasons.length > 0 && (
                   <ul>
                     {entry.outcome_feedback.reasons.map((reason) => (

@@ -190,6 +190,7 @@ class OutcomeFeedbackApplicabilityView(ApiModel):
 class OutcomeFeedbackView(ApiModel):
     id: int
     status: OutcomeFeedbackStatus
+    qualification_policy_version: str | None
     reasons: list[str]
     method_category: str
     horizon_limit: str

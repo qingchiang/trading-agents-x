@@ -1909,6 +1909,9 @@ class RunRepository:
                 OutcomeFeedbackRecord(
                     reflection_id=reflection_record.id,
                     status=qualification.status.value,
+                    qualification_policy_version=(
+                        qualification.qualification_policy_version
+                    ),
                     reasons_json=list(qualification.reasons),
                     method_category=outcome.method_category,
                     horizon_limit=outcome.horizon_limit,
@@ -2198,6 +2201,9 @@ class RunRepository:
                         {
                             "id": feedback.id,
                             "status": feedback.status,
+                            "qualification_policy_version": (
+                                feedback.qualification_policy_version
+                            ),
                             "reasons": feedback.reasons_json,
                             "method_category": feedback.method_category,
                             "horizon_limit": feedback.horizon_limit,

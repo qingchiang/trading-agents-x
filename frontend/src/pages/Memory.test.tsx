@@ -74,6 +74,7 @@ const entry = {
   outcome_feedback: {
     id: 11,
     status: "eligible",
+    qualification_policy_version: "outcome_feedback_qualification.v1",
     reasons: [],
     method_category: "short_term_relative_return",
     horizon_limit:
@@ -134,12 +135,31 @@ test("shows lifecycle metadata and retires qualified feedback", async () => {
   renderMemory();
 
   expect(await screen.findByText(/short_term_relative_return\.v1/)).toBeVisible();
+  expect(
+    screen.getByText(/outcome_feedback_qualification\.v1/),
+  ).toBeVisible();
   expect(screen.getByText(/Reflection status:/)).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Retire Feedback" }));
 
   await waitFor(() =>
     expect(api.retireOutcomeFeedback).toHaveBeenCalledWith(11, "retired_by_user"),
   );
+});
+
+test("keeps historical feedback visibly unversioned", async () => {
+  vi.mocked(api.memory).mockResolvedValue([
+    {
+      ...entry,
+      outcome_feedback: {
+        ...entry.outcome_feedback!,
+        qualification_policy_version: null,
+      },
+    },
+  ]);
+
+  renderMemory();
+
+  expect(await screen.findByText(/Unversioned/)).toBeVisible();
 });
 
 test("uses recent ticker suggestions and stable autocomplete fields", async () => {

@@ -285,7 +285,9 @@ A qualified, auditable methodological lesson associated with a Research
 Decision or Research Revision, its Outcome Observation, and an Outcome
 Reflection. It becomes available only after the Observation data, Reflection,
 and qualification decision all exist; its `available_at` is the latest of
-those times.
+those times. Its qualification-policy version is independent from both the
+Feedback schema and Observation method versions; unversioned historical status
+is retained rather than recalculated.
 _Avoid_: Research memory, longitudinal thesis
 
 **Outcome Feedback Context**:

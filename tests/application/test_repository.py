@@ -851,7 +851,7 @@ def test_complete_persists_result_and_resolved_memory(
 
     repository.complete(run.id, result, evidence=evidence, benchmark="SPY")
     restored = repository.get_result(run.id)
-    due_at = datetime(2026, 8, 10, tzinfo=timezone.utc)
+    due_at = datetime(2100, 1, 1, tzinfo=timezone.utc)
     pending = repository.pending_outcomes(due_at=due_at)
     repository.trash_runs((run.id,))
     assert repository.pending_outcomes(due_at=due_at) == []
@@ -909,6 +909,10 @@ def test_complete_persists_result_and_resolved_memory(
         assert reflection.text == "The thesis worked because earnings accelerated."
         assert feedback is not None
         assert feedback.status in {"eligible", "ineligible"}
+        assert (
+            feedback.qualification_policy_version
+            == "outcome_feedback_qualification.v1"
+        )
         assert feedback.available_at == max(
             outcome.data_available_at,
             reflection.generated_at,
@@ -916,6 +920,11 @@ def test_complete_persists_result_and_resolved_memory(
         )
         assert session.scalar(select(func.count()).select_from(ReflectionRecord)) == 1
         assert session.scalar(select(func.count()).select_from(OutcomeFeedbackRecord)) == 1
+
+    feedback_view = repository.memory_entries()[0]["outcome_feedback"]
+    assert feedback_view["qualification_policy_version"] == (
+        "outcome_feedback_qualification.v1"
+    )
 
     with repository.sessions() as session:
         record = session.scalar(

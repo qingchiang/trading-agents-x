@@ -656,6 +656,7 @@ def test_feedback_failure_cannot_change_research_revision(
             generated_at=datetime(2026, 8, 1, 20, 1, tzinfo=timezone.utc),
         )
 
+    assert repository.get_run(result.run_id).status is RunStatus.SUCCEEDED
     revision_after = repository.get_research_chain(chain.id).current_revision
     assert revision_before is not None
     assert revision_after == revision_before

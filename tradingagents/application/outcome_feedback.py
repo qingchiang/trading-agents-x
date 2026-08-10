@@ -10,6 +10,7 @@ from typing import Any
 
 METHOD_CATEGORY = "short_term_relative_return"
 METHOD_VERSION = "short_term_relative_return.v1"
+QUALIFICATION_POLICY_VERSION = "outcome_feedback_qualification.v1"
 PRICE_SEMANTICS = "exchange_local_daily_close"
 ADJUSTMENT_SEMANTICS = "split_and_dividend_adjusted"
 HORIZON_LIMIT = (
@@ -42,6 +43,7 @@ _METHOD_LESSON_RE = re.compile(r"(?is)(?:^|\n)Method lesson:\s*(.+?)\s*$")
 class FeedbackQualification:
     status: OutcomeFeedbackStatus
     reasons: tuple[str, ...]
+    qualification_policy_version: str
     candidate: dict[str, Any]
     applicability: dict[str, Any]
 
@@ -161,7 +163,11 @@ def qualify_reflection(
         reasons.append("method_category_invalid")
     if not observation.horizon_limit:
         reasons.append("horizon_limit_missing")
-    if observation.start <= source.decision_cutoff or observation.end < observation.start:
+    if (
+        observation.start < source.decision_cutoff
+        or observation.end <= source.decision_cutoff
+        or observation.end < observation.start
+    ):
         reasons.append("observation_window_not_after_decision")
     if (
         observation.data_available_at > qualified_at
@@ -189,6 +195,7 @@ def qualify_reflection(
             else OutcomeFeedbackStatus.INELIGIBLE
         ),
         reasons=tuple(dict.fromkeys(reasons)),
+        qualification_policy_version=QUALIFICATION_POLICY_VERSION,
         candidate=candidate,
         applicability=applicability,
     )

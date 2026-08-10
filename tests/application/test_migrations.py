@@ -79,7 +79,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     finally:
         engine.dispose()
 
-    assert revision == "0009_outcome_feedback_lifecycle"
+    assert revision == "0010_outcome_feedback_policy"
     assert {
         "id",
         "run_id",
@@ -154,6 +154,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     assert {
         "reflection_id",
         "status",
+        "qualification_policy_version",
         "reasons_json",
         "method_category",
         "horizon_limit",
@@ -496,6 +497,9 @@ def test_v8_upgrade_preserves_research_data_and_downgrade_recreates_empty_table(
             assert connection.scalar(text("SELECT status FROM outcome_feedback")) == (
                 "ineligible"
             )
+            assert connection.scalar(
+                text("SELECT qualification_policy_version FROM outcome_feedback")
+            ) is None
             assert json.loads(
                 connection.scalar(text("SELECT reasons_json FROM outcome_feedback"))
             ) == ["legacy_unqualified_reflection"]

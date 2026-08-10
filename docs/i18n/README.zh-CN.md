@@ -29,8 +29,8 @@ TradingAgentsX 是一个面向本地单用户的投资研究运行中心。它�
   可折叠审计详情、token/tool/wall-time 指标，以及取消、retry、
   恢复归档、基于当前运行新建和导出。
 - **Memory：** 分别查看已持久化的 Outcome Observation、Reflection 生命周期和
-  Feedback 资格/原因；可重试失败的 Reflection、停用 Feedback、展开 decision，
-  并返回对应运行的研究结论。
+  带版本的 Feedback 资格/原因；可重试失败的 Reflection、停用 Feedback、展开
+  decision，并返回对应运行的研究结论。历史未标版本的资格状态仍明确显示为未标版本。
 - **Settings：** 只读能力列表、非敏感默认值和 API key 是否已配置。
 
 UI 支持 `zh-CN`、`en`、`ja`。界面语言与报告输出语言相互独立。

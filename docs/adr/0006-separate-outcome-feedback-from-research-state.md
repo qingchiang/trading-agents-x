@@ -33,8 +33,10 @@ serve as the return's baseline price date. The Observation start cannot precede
 that cutoff, its end must follow the cutoff, and qualification still becomes
 available only after the Observation data, Reflection, and qualification all
 exist. Outcome Feedback records a qualification-policy version independently
-from its schema version and Observation method version. Correcting a policy
-does not retroactively requalify an existing Feedback record.
+from its schema version and Observation method version. The first explicit
+policy is `outcome_feedback_qualification.v1`. Correcting a policy does not
+retroactively requalify an existing Feedback record; legacy and otherwise
+unversioned rows remain explicit.
 
 The first Research Chain experiment continues to generate, persist, and expose
 Outcome Observation and Reflection but injects neither legacy memory nor

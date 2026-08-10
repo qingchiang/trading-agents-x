@@ -47,8 +47,9 @@ or portfolio rebalancing.
   decision, collapsible audit details, token/tool metrics, cancellation,
   retry, restore, editable run templates, and export.
 - **Memory:** inspect separately persisted Outcome Observations, Reflection
-  lifecycle state, and Feedback qualification/reasons; retry failed Reflections,
-  retire Feedback, expand decisions, and reopen the originating run.
+  lifecycle state, and versioned Feedback qualification/reasons; retry failed
+  Reflections, retire Feedback, expand decisions, and reopen the originating
+  run. Historical unversioned qualification remains visibly unversioned.
 - **Settings:** read-only capabilities, safe defaults, and whether provider
   credentials are configured.
 - **Locales:** `en`, `zh-CN`, and `ja`; UI locale and report output language

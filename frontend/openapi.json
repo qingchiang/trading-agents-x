@@ -2920,6 +2920,17 @@
             "title": "Method Category",
             "type": "string"
           },
+          "qualification_policy_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qualification Policy Version"
+          },
           "qualified_at": {
             "format": "date-time",
             "title": "Qualified At",
@@ -2951,6 +2962,7 @@
         "required": [
           "id",
           "status",
+          "qualification_policy_version",
           "reasons",
           "method_category",
           "horizon_limit",
