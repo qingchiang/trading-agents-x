@@ -15,21 +15,19 @@ Material Change execution are documented in [architecture.md](architecture.md).
 
 ## Internal enablement
 
-The experiment is fail-closed and off by default. Configure both values on the
-Web and worker process, then restart them:
+The experiment is fail-closed and off by default. Configure the same mode on
+the Web and worker process, then restart them:
 
 ```dotenv
 TRADINGAGENTS_RESEARCH_UPDATE_MODE=shadow
-TRADINGAGENTS_EXPERIMENTAL_NMC_JP_WHITELIST=6501.T,7203.T
 ```
 
 `TRADINGAGENTS_RESEARCH_UPDATE_MODE` accepts exactly `off`, `shadow`, or
-`experimental`. The whitelist is a comma-separated, deduplicated list of at
-most 20 normalized Japanese `.T` equities; an empty whitelist enables no
-bounded updates.
+`experimental`.
 
 - `off` always runs Full Analysis.
-- `shadow` runs bounded assessment for a whitelisted Instrument, retains its
+- `shadow` runs bounded assessment for a source-qualified supported Japanese
+  Instrument, retains its
   candidate or escalation reason, and always makes the paired Full result
   authoritative.
 - `experimental` permits a fully covered, semantically unchanged NMC candidate
@@ -37,9 +35,9 @@ bounded updates.
   incompatible, incomplete, invalid, novel, or uncertain result continues into
   Full Analysis within the same update.
 
-Non-whitelisted Japanese equities and all other markets continue to use Full
-Analysis. The setting and whitelist are snapshotted when the update is queued,
-so a retry cannot silently change its experiment mode.
+Japanese heads without complete Required Source coverage and all other markets
+continue to use Full Analysis. The mode is snapshotted when the update is
+queued, so a retry cannot silently change its experiment mode.
 
 ## Questions being tested
 
@@ -55,7 +53,7 @@ governance system.
 
 ## First vertical slice
 
-The first slice covers manual updates of a small Japanese-equity whitelist:
+The first slice covers manual updates of supported Japanese equities:
 
 1. An initial Full Analysis creates a Research Chain and its first Revision.
 2. The Revision stores a compact Current Research State: Research Opinion,
@@ -109,6 +107,12 @@ when the current point-in-time and provenance contracts allow it.
   its own Effective Evidence Snapshot.
 - Eligible Baseline status is server-derived. Incomplete or Indeterminate heads
   report `full_required`; there is no force-incremental repair path.
+- EDINET and TDnet are always Required for Japanese announcements. Required
+  fundamentals and market domains use their typed J-Quants contracts, and
+  active Claim/open Question dependencies add further Required Sources. Each
+  source needs a complete point-in-time Watermark over the cutoff. Zero results
+  are valid; positive results need a same-source observed version whose Evidence
+  resolves in the Effective Evidence Snapshot.
 
 These rules define the state being tested. Exact table layouts, enum names,
 prompt schemas, retry counts, and UI components are implementation choices.
@@ -155,8 +159,7 @@ authorize a live run. Before a separately approved run:
 ]
 ```
 
-Keep the application in `shadow` mode and include every selected Instrument in
-the Japanese whitelist. Supply the two existing live opt-ins and the separate
+Keep the application in `shadow` mode. Supply the two existing live opt-ins and the separate
 `--in-place-database` confirmation. The `--backup` destination must not exist:
 Run the command from a Git checkout; it refuses to run unless it can bind the
 manifest to that checkout's ignored `tmp/` area and detect the exact HEAD.
@@ -167,7 +170,6 @@ TRADINGAGENTS_LLM_PROVIDER=deepseek \
 TRADINGAGENTS_QUICK_THINK_LLM=deepseek-chat \
 TRADINGAGENTS_DEEP_THINK_LLM=deepseek-chat \
 TRADINGAGENTS_RESEARCH_UPDATE_MODE=shadow \
-TRADINGAGENTS_EXPERIMENTAL_NMC_JP_WHITELIST=6501.T,7203.T \
 uv run --locked tradingagents research validate-live-thesis \
   tmp/incremental-research/reviewed-live-cases.json \
   --backup tmp/incremental-research/live-validation-backup.db \

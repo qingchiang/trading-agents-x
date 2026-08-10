@@ -392,6 +392,11 @@ def _reset_graph():
 
 def _eligible_state_assembler(request, execution):
     draft = assemble_full_revision(request, execution)
+    required_sources = ["EDINET", "TDnet"]
+    if "fundamentals" in request.analysts:
+        required_sources.append("J-Quants fundamentals")
+    if "market" in request.analysts:
+        required_sources.append("J-Quants adjusted OHLCV")
     return draft.model_copy(
         update={
             "coverage": draft.coverage.model_copy(
@@ -417,7 +422,24 @@ def _eligible_state_assembler(request, execution):
                     "limitations": (),
                     "supports_no_material_change": True,
                 }
-            )
+            ),
+            "evidence_snapshot": draft.evidence_snapshot.model_copy(
+                update={
+                    "source_watermarks": tuple(
+                        SourceWatermarkSnapshot(
+                            source=source,
+                            scanned_start=request.analysis_date,
+                            scanned_end=request.analysis_date,
+                            status="complete",
+                            returned_records=0,
+                            reported_records=0,
+                        )
+                        for source in required_sources
+                    )
+                    if request.ticker.endswith(".T")
+                    else ()
+                }
+            ),
         }
     )
 
@@ -917,28 +939,25 @@ def test_full_update_disposes_questions_after_assembly_and_persists_audit(
 
 
 @pytest.mark.parametrize(
-    ("mode", "whitelist", "ticker", "expected_strategy"),
+    ("mode", "ticker", "expected_strategy"),
     [
-        ("off", ("6501.T",), "6501.T", "full"),
-        ("shadow", ("6501.T",), "6501.T", "incremental"),
-        ("experimental", ("6501.T",), "6501.T", "incremental"),
-        ("experimental", ("7203.T",), "6501.T", "full"),
-        ("experimental", ("6501.T",), "NVDA", "full"),
+        ("off", "6501.T", "full"),
+        ("shadow", "6501.T", "incremental"),
+        ("experimental", "6501.T", "incremental"),
+        ("experimental", "7203.T", "incremental"),
+        ("experimental", "NVDA", "full"),
+        ("experimental", "600309.SS", "full"),
     ],
 )
-def test_chain_update_strategy_respects_mode_and_japanese_whitelist(
+def test_chain_update_strategy_uses_source_qualified_japanese_capability(
     app_settings,
     repository,
     mode,
-    whitelist,
     ticker,
     expected_strategy,
 ) -> None:
     configured = app_settings.model_copy(
-        update={
-            "research_update_mode": mode,
-            "experimental_nmc_jp_whitelist": whitelist,
-        }
+        update={"research_update_mode": mode}
     )
     service = _service(configured, repository)
     service.run_initial_chain(
@@ -954,7 +973,7 @@ def test_chain_update_strategy_respects_mode_and_japanese_whitelist(
 
     assert queued.research_execution_strategy == expected_strategy
     assert queued.config_snapshot["research_update_mode"] == mode
-    assert queued.config_snapshot["experimental_nmc_jp_whitelist"] == list(whitelist)
+    assert "experimental_nmc_jp_whitelist" not in queued.config_snapshot
 
 
 def test_ineligible_head_rejects_explicit_incremental_but_allows_full(
@@ -971,7 +990,7 @@ def test_ineligible_head_rejects_explicit_incremental_but_allows_full(
     )
     chain = repository.list_research_chains(instrument="6501.T")[0]
     assert chain.next_update_policy == "full_required"
-    assert chain.next_update_reason == "coverage_incomplete"
+    assert chain.next_update_reason == "required_source_coverage_incomplete"
     request = AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",))
 
     with pytest.raises(InvalidResearchBaselineError, match="does not allow Incremental Execution"):
@@ -989,6 +1008,44 @@ def test_ineligible_head_rejects_explicit_incremental_but_allows_full(
         execution_strategy=ResearchExecutionStrategy.FULL,
     )
     assert queued.research_execution_strategy == "full"
+
+
+def test_explicit_incremental_cannot_bypass_off_mode_or_unsupported_market(
+    app_settings,
+    repository,
+) -> None:
+    off_service = _service(
+        app_settings.model_copy(update={"research_update_mode": "off"}),
+        repository,
+    )
+    off_service.run_initial_chain(
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-24", analysts=("market",))
+    )
+    jp_chain = repository.list_research_chains(instrument="6501.T")[0]
+
+    with pytest.raises(InvalidResearchBaselineError, match="experiment_mode_off"):
+        off_service.enqueue_chain_update(
+            jp_chain.id,
+            jp_chain.current_revision_id,
+            AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
+            execution_strategy=ResearchExecutionStrategy.INCREMENTAL,
+        )
+
+    experimental = _service(
+        app_settings.model_copy(update={"research_update_mode": "experimental"}),
+        repository,
+    )
+    experimental.run_initial_chain(
+        AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24", analysts=("market",))
+    )
+    us_chain = repository.list_research_chains(instrument="NVDA")[0]
+    with pytest.raises(InvalidResearchBaselineError, match="unsupported_incremental_market"):
+        experimental.enqueue_chain_update(
+            us_chain.id,
+            us_chain.current_revision_id,
+            AnalysisRequest(ticker="NVDA", analysis_date="2026-07-25", analysts=("market",)),
+            execution_strategy=ResearchExecutionStrategy.INCREMENTAL,
+        )
 
 
 def test_inconclusive_full_reassessment_advances_an_indeterminate_full_only_head(
@@ -1267,10 +1324,7 @@ def test_experimental_quiet_update_advances_with_nmc_without_full_analysis(
             raise AssertionError("Full Analysis must not be constructed for experimental NMC")
 
     experimental_settings = app_settings.model_copy(
-        update={
-            "research_update_mode": "experimental",
-            "experimental_nmc_jp_whitelist": ("6501.T",),
-        }
+        update={"research_update_mode": "experimental"}
     )
     gate_calls = 0
 
@@ -1762,10 +1816,7 @@ def test_experimental_escalation_stops_bounded_work_and_runs_full(
         )
 
     experimental_settings = app_settings.model_copy(
-        update={
-            "research_update_mode": "experimental",
-            "experimental_nmc_jp_whitelist": ("6501.T",),
-        }
+        update={"research_update_mode": "experimental"}
     )
     experimental_service = _service(
         experimental_settings,

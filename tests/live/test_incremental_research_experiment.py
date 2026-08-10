@@ -113,7 +113,7 @@ def test_reviewed_japanese_shadow_pairs_are_sanitized_and_fail_closed(
 
     for index, case in enumerate(_reviewed_cases()):
         source_chain = source_repository.get_research_chain(case["chain_id"])
-        assert source_chain.instrument in settings.experimental_nmc_jp_whitelist
+        assert source_chain.instrument.endswith(".T")
         case_root = tmp_path / f"case-{index}"
         case_root.mkdir()
         isolated = _isolated_settings(settings, case_root)

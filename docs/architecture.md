@@ -426,13 +426,25 @@ verdict dimensions.
 
 The internal research-update mode is persisted in each update's immutable
 settings snapshot. `off` routes every update through Full Analysis. `shadow`
-runs bounded assessment only for explicitly whitelisted `.T` Instruments and
-keeps Full Analysis authoritative. `experimental` uses the same whitelist and
+runs bounded assessment for any supported Japanese equity whose current
+Revision has complete Required Source coverage, and keeps Full Analysis
+authoritative. `experimental` uses the same source-qualified policy and
 fail-closed gates, but a validated No Material Change candidate becomes the
 authoritative incremental Revision without constructing the Full graph. Any
 coverage, integrity, semantic, novelty, schema, or uncertainty escalation in
-`experimental` continues through Full Analysis in the same execution. Tickers
-outside the whitelist, including unsupported markets, always use Full Analysis.
+`experimental` continues through Full Analysis in the same execution. United
+States and mainland-China equities remain manually updateable through Full
+Analysis only.
+
+The typed next-update policy combines mode, Japanese-equity capability,
+Revision/Evidence closure, general Coverage, compatible market semantics, and
+Required Source completeness. EDINET and TDnet are always Required for Japanese
+announcements; Required fundamentals and market domains use J-Quants
+fundamentals and adjusted-OHLCV contracts. Active Claim and open Question source
+dependencies add further Required Sources. Each needs a complete point-in-time
+Watermark covering the Revision cutoff. A zero-result Watermark is sufficient;
+a positive result needs a same-source version observed by that execution and
+resolved through Evidence in the Effective Evidence Snapshot.
 
 Before an experimental candidate can commit, the application revalidates
 complete Required, Claim, and Question coverage; identical semantic Current

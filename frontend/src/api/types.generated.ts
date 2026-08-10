@@ -327,7 +327,7 @@ export interface components {
       code: string;
       message: string;
     };
-    NextUpdateReason: "indeterminate_head" | "coverage_incomplete" | "incompatible_market_semantics";
+    NextUpdateReason: "experiment_mode_off" | "unsupported_incremental_market" | "required_source_coverage_incomplete" | "indeterminate_head" | "coverage_incomplete" | "incompatible_market_semantics" | "invalid_revision";
     NodeMetrics: {
       cache_hit_input_tokens?: number;
       cache_miss_input_tokens?: number;

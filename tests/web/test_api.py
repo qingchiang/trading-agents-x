@@ -210,7 +210,7 @@ async def test_initial_research_chain_creation_read_and_export_surfaces(
     assert detail.json()["current_revision"]["current_state"]["language"] == "ja"
     assert detail.json()["current_revision"]["coverage"]["supports_no_material_change"] is False
     assert detail.json()["next_update_policy"] == "full_required"
-    assert detail.json()["next_update_reason"] == "coverage_incomplete"
+    assert detail.json()["next_update_reason"] == "required_source_coverage_incomplete"
     assert revision.json()["producing_run_id"] == queued.json()["id"]
     assert revision.json()["evidence_snapshot"]["source_records"][0]["version_id"] == (
         "edinet:S100ROOT"

@@ -160,10 +160,12 @@ def test_backup_failure_prevents_authoritative_execution_and_manifest(
     class BackupFailureService:
         settings = SimpleNamespace(
             research_update_mode="shadow",
-            experimental_nmc_jp_whitelist=("6501.T",),
             database_path=tmp_path / "tradingagents.db",
         )
         repository = SimpleNamespace(get_research_chain=chains.__getitem__)
+
+        def get_research_chain(self, chain_id):
+            return chains[chain_id]
 
         def backup_database(self, _destination: Path) -> Path:
             raise OSError("fixture backup failure")
@@ -232,11 +234,13 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
     class MainDatabaseService:
         settings = SimpleNamespace(
             research_update_mode="shadow",
-            experimental_nmc_jp_whitelist=("6501.T",),
             database_path=database_path,
             lease_seconds=30,
         )
         repository = Repository()
+
+        def get_research_chain(self, chain_id):
+            return self.repository.get_research_chain(chain_id)
 
         def run_chain_update(
             self,

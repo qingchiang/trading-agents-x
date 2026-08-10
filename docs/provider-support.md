@@ -52,8 +52,8 @@ serializer for one bounded semantic Change Assessment. A provider/model's
 support level therefore still applies to that call. Invalid or indeterminate
 structured output receives at most one repair and then escalates to Full
 Analysis; `experimental` mode never turns a provider failure into No Material
-Change. The experiment is disabled by default and restricted by the explicit
-Japanese-equity whitelist described in
+Change. The experiment is disabled by default and restricted to source-qualified
+supported Japanese equities as described in
 [incremental-research-experiment.md](incremental-research-experiment.md).
 
 ## Known portability boundaries

@@ -305,7 +305,7 @@ def create_app(
             Header(alias="Idempotency-Key", max_length=200),
         ] = None,
     ):
-        chain = repository.get_research_chain(chain_id)
+        chain = service.get_research_chain(chain_id)
         baseline = chain.current_revision
         if baseline is None:
             raise InvalidResearchBaselineError("Research Chain has no Eligible Baseline")
@@ -336,14 +336,14 @@ def create_app(
     def list_research_chains(
         instrument: Annotated[str | None, Query(max_length=64)] = None,
     ):
-        return repository.list_research_chains(instrument=instrument)
+        return service.list_research_chains(instrument=instrument)
 
     @app.get(
         f"{API_PREFIX}/research-chains/{{chain_id}}",
         response_model=ResearchChain,
     )
     def get_research_chain(chain_id: str):
-        return repository.get_research_chain(chain_id)
+        return service.get_research_chain(chain_id)
 
     @app.get(
         f"{API_PREFIX}/research-revisions/{{revision_id}}",

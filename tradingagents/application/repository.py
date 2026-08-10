@@ -100,7 +100,7 @@ from .research import (
     ResearchRevisionRole,
     RevisionDelta,
     UpdateSummary,
-    derive_next_update_policy,
+    evaluate_next_update_policy,
 )
 from .settings import AppSettings
 
@@ -2450,7 +2450,11 @@ class RunRepository:
         )
         if current is None:
             raise ValueError(f"Research Chain {record.id} has no current Revision")
-        next_update_policy, next_update_reason = derive_next_update_policy(current)
+        evaluation = evaluate_next_update_policy(
+            current,
+            instrument=record.instrument,
+            mode="experimental",
+        )
         return ResearchChain(
             id=record.id,
             instrument=record.instrument,
@@ -2458,8 +2462,8 @@ class RunRepository:
             current_revision_id=current.id,
             current_revision=current,
             revisions=revisions,
-            next_update_policy=next_update_policy,
-            next_update_reason=next_update_reason,
+            next_update_policy=evaluation.policy,
+            next_update_reason=evaluation.reason,
             created_at=_aware(record.created_at),
             updated_at=_aware(record.updated_at),
         )

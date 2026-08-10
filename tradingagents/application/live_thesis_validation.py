@@ -184,7 +184,7 @@ def validate_live_thesis(
     selected_chains: dict[str, Any] = {}
     for scenario in scenarios:
         try:
-            chain = service.repository.get_research_chain(scenario.chain_id)
+            chain = service.get_research_chain(scenario.chain_id)
         except Exception as exc:
             raise LiveThesisValidationError("reviewed Research Chain was not found") from exc
         if chain.next_update_policy != "incremental_allowed":
@@ -197,10 +197,6 @@ def validate_live_thesis(
         ):
             raise LiveThesisValidationError(
                 f"reviewed cutoff must be later than Research Chain {chain.id} head"
-            )
-        if chain.instrument not in service.settings.experimental_nmc_jp_whitelist:
-            raise LiveThesisValidationError(
-                f"reviewed Research Chain {chain.id} is not in the Japanese whitelist"
             )
         selected_chains[scenario.chain_id] = chain
     if backup_destination.exists():

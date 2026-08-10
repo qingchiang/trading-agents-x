@@ -32,6 +32,7 @@ from tradingagents.application.research import (
     DecisionConfidence,
     DecisionRole,
     EpistemicKind,
+    EvidenceSnapshotItem,
     IncrementalEscalationReason,
     IndeterminateReason,
     QuestionDispositionAudit,
@@ -42,6 +43,7 @@ from tradingagents.application.research import (
     ResearchChangeKind,
     ResearchChangeSignal,
     ResearchClaim,
+    ResearchExecutionStrategy,
     ResearchObjectCoverage,
     ResearchOpinion,
     ResearchQuestion,
@@ -54,8 +56,8 @@ from tradingagents.application.research import (
     assemble_full_revision,
     assemble_full_update,
     assess_deterministic_update,
-    derive_next_update_policy,
     derive_shadow_comparison,
+    evaluate_next_update_policy,
     render_revision_export_markdown,
     validate_experimental_nmc_candidate,
 )
@@ -209,9 +211,12 @@ def test_next_update_policy_is_derived_from_complete_baseline_eligibility():
         AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
         _execution("6501.T"),
     )
-    assert derive_next_update_policy(initial) == (
+    initial_policy = evaluate_next_update_policy(
+        initial, instrument="6501.T", mode="experimental"
+    )
+    assert (initial_policy.policy, initial_policy.reason) == (
         "full_required",
-        "coverage_incomplete",
+        "required_source_coverage_incomplete",
     )
 
     complete = initial.model_copy(
@@ -235,7 +240,13 @@ def test_next_update_policy_is_derived_from_complete_baseline_eligibility():
             )
         }
     )
-    assert derive_next_update_policy(complete) == ("incremental_allowed", None)
+    complete_policy = evaluate_next_update_policy(
+        complete, instrument="6501.T", mode="experimental"
+    )
+    assert (complete_policy.policy, complete_policy.reason) == (
+        "full_required",
+        "required_source_coverage_incomplete",
+    )
 
     indeterminate = complete.model_copy(
         update={
@@ -244,7 +255,10 @@ def test_next_update_policy_is_derived_from_complete_baseline_eligibility():
             "indeterminate_reason": IndeterminateReason.COVERAGE_INCOMPLETE,
         }
     )
-    assert derive_next_update_policy(indeterminate) == (
+    indeterminate_policy = evaluate_next_update_policy(
+        indeterminate, instrument="6501.T", mode="experimental"
+    )
+    assert (indeterminate_policy.policy, indeterminate_policy.reason) == (
         "full_required",
         "indeterminate_head",
     )
@@ -499,6 +513,8 @@ def _watermark(
     status="complete",
     limitations=(),
     temporal_scope="point_in_time",
+    returned_records=1,
+    reported_records=1,
 ):
     return {
         "source": source,
@@ -507,8 +523,8 @@ def _watermark(
         "status": status,
         "temporal_scope": temporal_scope,
         "limitations": limitations,
-        "returned_records": 1,
-        "reported_records": 1,
+        "returned_records": returned_records,
+        "reported_records": reported_records,
     }
 
 
@@ -527,8 +543,8 @@ def _incremental_baseline_and_evidence(
         "unit": "JPY",
     }
     watermarks = [
-        _watermark("EDINET"),
-        _watermark("TDnet"),
+        _watermark("EDINET", returned_records=0, reported_records=0),
+        _watermark("TDnet", returned_records=0, reported_records=0),
         _watermark("J-Quants adjusted OHLCV"),
         _watermark("Google News"),
     ]
@@ -577,6 +593,189 @@ def _incremental_baseline_and_evidence(
         items=(item,),
     )
     return baseline, evidence, market, watermarks
+
+
+@pytest.mark.parametrize(
+    ("mode", "ticker", "revision_update", "expected_reason"),
+    [
+        ("off", "6501.T", {}, "experiment_mode_off"),
+        ("experimental", "NVDA", {}, "unsupported_incremental_market"),
+        (
+            "experimental",
+            "6501.T",
+            {"change_conclusion": ResearchChangeConclusion.INDETERMINATE},
+            "indeterminate_head",
+        ),
+    ],
+)
+def test_next_update_policy_has_stable_mode_market_and_head_reasons(
+    mode,
+    ticker,
+    revision_update,
+    expected_reason,
+):
+    baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    if revision_update:
+        baseline = baseline.model_copy(
+            update={
+                "role": ResearchRevisionRole.UPDATE,
+                "execution_strategy": ResearchExecutionStrategy.FULL,
+                "indeterminate_reason": IndeterminateReason.COVERAGE_INCOMPLETE,
+                **revision_update,
+            }
+        )
+
+    result = evaluate_next_update_policy(baseline, instrument=ticker, mode=mode)
+
+    assert result.policy == "full_required"
+    assert result.reason == expected_reason
+
+
+def test_next_update_policy_requires_source_qualified_japanese_coverage():
+    baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    baseline = baseline.model_copy(
+        update={
+            "evidence_snapshot": baseline.evidence_snapshot.model_copy(
+                update={
+                    "source_watermarks": tuple(
+                        item.model_copy(update={"returned_records": 0, "reported_records": 0})
+                        if item.source in {"EDINET", "TDnet"}
+                        else item
+                        for item in baseline.evidence_snapshot.source_watermarks
+                    )
+                }
+            )
+        }
+    )
+    eligible = evaluate_next_update_policy(
+        baseline,
+        instrument="6501.T",
+        mode="experimental",
+    )
+    assert eligible.policy == "incremental_allowed"
+    assert eligible.reason is None
+
+    missing_tdnet = baseline.model_copy(
+        update={
+            "evidence_snapshot": baseline.evidence_snapshot.model_copy(
+                update={
+                    "source_watermarks": tuple(
+                        item
+                        for item in baseline.evidence_snapshot.source_watermarks
+                        if item.source != "TDnet"
+                    )
+                }
+            )
+        }
+    )
+    refused = evaluate_next_update_policy(
+        missing_tdnet,
+        instrument="6501.T",
+        mode="shadow",
+    )
+    assert refused.policy == "full_required"
+    assert refused.reason == "required_source_coverage_incomplete"
+
+
+def test_next_update_policy_rejects_positive_watermark_without_observed_version():
+    baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    invalid = baseline.model_copy(
+        update={
+            "evidence_snapshot": baseline.evidence_snapshot.model_copy(
+                update={
+                    "source_watermarks": tuple(
+                        item.model_copy(update={"returned_records": 1, "reported_records": 1})
+                        if item.source == "TDnet"
+                        else item
+                        for item in baseline.evidence_snapshot.source_watermarks
+                    )
+                }
+            )
+        }
+    )
+
+    result = evaluate_next_update_policy(
+        invalid,
+        instrument="6501.T",
+        mode="experimental",
+    )
+
+    assert result.reason == "required_source_coverage_incomplete"
+
+
+def test_bounded_update_rejects_positive_results_without_observed_version():
+    candidate_watermarks = [
+        {
+            **_watermark(source, returned_records=returned, reported_records=returned),
+            "scanned_end": "2026-07-25",
+        }
+        for source, returned in (
+            ("EDINET", 0),
+            ("TDnet", 1),
+            ("J-Quants adjusted OHLCV", 0),
+            ("Google News", 0),
+        )
+    ]
+    baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence(
+        candidate_records=[],
+        candidate_watermarks=candidate_watermarks,
+    )
+
+    result = assess_deterministic_update(
+        "revision-1",
+        baseline,
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
+        evidence,
+    )
+
+    assert result.escalation_reason is IncrementalEscalationReason.COVERAGE_INCOMPLETE
+
+
+def test_next_update_policy_distinguishes_general_coverage_and_market_semantics():
+    baseline, _evidence, market, _watermarks = _incremental_baseline_and_evidence()
+    limited = baseline.model_copy(
+        update={
+            "coverage": baseline.coverage.model_copy(
+                update={
+                    "claims": tuple(
+                        item.model_copy(update={"status": CoverageStatus.LIMITED})
+                        for item in baseline.coverage.claims
+                    )
+                }
+            )
+        }
+    )
+    limited_result = evaluate_next_update_policy(
+        limited,
+        instrument="6501.T",
+        mode="shadow",
+    )
+    assert limited_result.reason == "coverage_incomplete"
+
+    incompatible = baseline.model_copy(
+        update={
+            "delta": baseline.delta.model_copy(
+                update={
+                    "change_signals": (
+                        ResearchChangeSignal(
+                            kind=ResearchChangeKind.MARKET_SEMANTIC_INCOMPATIBILITY,
+                            domain="market",
+                            record_id=market["record_id"],
+                            current_version_id=market["version_id"],
+                            requires_full_analysis=True,
+                            detail="Adjustment semantics changed.",
+                        ),
+                    )
+                }
+            )
+        }
+    )
+    incompatible_result = evaluate_next_update_policy(
+        incompatible,
+        instrument="6501.T",
+        mode="shadow",
+    )
+    assert incompatible_result.reason == "incompatible_market_semantics"
 
 
 def test_deterministic_incremental_gates_propose_quiet_candidate():
@@ -930,12 +1129,12 @@ def test_semantic_change_assessment_excludes_prior_research_disguised_as_evidenc
             "evidence_snapshot": baseline.evidence_snapshot.model_copy(
                 update={
                     "bundle": baseline_bundle,
-                    "lineage": (
-                        *baseline.evidence_snapshot.lineage,
-                        {
-                            "evidence_ref": prior_research.ref,
-                            "lineage": "new",
-                        },
+                        "lineage": (
+                            *baseline.evidence_snapshot.lineage,
+                            EvidenceSnapshotItem(
+                                evidence_ref=prior_research.ref,
+                                lineage="new",
+                            ),
                     ),
                 }
             ),
@@ -1222,6 +1421,7 @@ def test_deterministic_incremental_gates_escalate_incompatible_market_semantics(
 
 def test_deterministic_incremental_gates_escalate_market_threshold_crossing():
     baseline, _evidence, market, watermarks = _incremental_baseline_and_evidence()
+    evidence_ref = baseline.current_state.evidence_refs[0]
     boundary = MarketReferenceLevel(
         label="Thesis reference",
         value=100.0,
@@ -1229,14 +1429,16 @@ def test_deterministic_incremental_gates_escalate_market_threshold_crossing():
         unit="JPY",
         as_of_date=CUTOFF,
         interpretation="Crossing changes the thesis envelope.",
-        evidence_refs=(REF,),
-        date_evidence_refs=(REF,),
+        evidence_refs=(evidence_ref,),
+        date_evidence_refs=(evidence_ref,),
         basis="interpreted",
     )
     baseline = baseline.model_copy(
         update={
             "current_state": baseline.current_state.model_copy(
-                update={"market_reference_levels": (boundary,)}
+                update={
+                    "market_reference_levels": (boundary,),
+                }
             )
         }
     )
@@ -1814,7 +2016,7 @@ def test_inherited_correction_does_not_permanently_block_quiet_reassessment():
     ]
     complete_watermarks = [
         _watermark("EDINET"),
-        _watermark("TDnet"),
+        _watermark("TDnet", returned_records=0, reported_records=0),
         _watermark("J-Quants adjusted OHLCV"),
     ]
     baseline = single_claim(

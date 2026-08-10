@@ -130,7 +130,6 @@ def app_settings(tmp_path: Path):
             ),
             "TRADINGAGENTS_CACHE_DIR": str(tmp_path / "cache"),
             "TRADINGAGENTS_RESEARCH_UPDATE_MODE": "shadow",
-            "TRADINGAGENTS_EXPERIMENTAL_NMC_JP_WHITELIST": "6501.T",
         },
         load_env_files=False,
     )

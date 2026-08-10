@@ -35,8 +35,8 @@ check. Each Required Source must have a complete point-in-time Source Watermark
 covering the Revision cutoff. A completed scan that returns no records is valid;
 a scan that reports records must resolve to observed Source Record Versions in
 the same Effective Evidence Snapshot. The first bounded capability applies to
-supported Japanese equities as a market capability, without a per-Instrument
-whitelist. United States and mainland-China equities remain Full-only until
+supported Japanese equities as a market capability. United States and
+mainland-China equities remain Full-only until
 their own typed source-coverage contracts exist.
 
 One typed next-update policy evaluation combines Revision validity, Required

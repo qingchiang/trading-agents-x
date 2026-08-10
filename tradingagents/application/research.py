@@ -12,7 +12,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from tradingagents.dataflows.symbol_utils import market_timezone
+from tradingagents.dataflows.symbol_utils import is_supported_equity_symbol, market_timezone
 
 from .contracts import (
     AnalysisRequest,
@@ -149,9 +149,13 @@ class IndeterminateReason(str, Enum):
 
 
 class NextUpdateReason(str, Enum):
+    EXPERIMENT_MODE_OFF = "experiment_mode_off"
+    UNSUPPORTED_INCREMENTAL_MARKET = "unsupported_incremental_market"
+    REQUIRED_SOURCE_COVERAGE_INCOMPLETE = "required_source_coverage_incomplete"
     INDETERMINATE_HEAD = "indeterminate_head"
     COVERAGE_INCOMPLETE = "coverage_incomplete"
     INCOMPATIBLE_MARKET_SEMANTICS = "incompatible_market_semantics"
+    INVALID_REVISION = "invalid_revision"
 
 
 class IncrementalEscalationReason(str, Enum):
@@ -843,7 +847,11 @@ def validate_experimental_nmc_candidate(
     candidate: ResearchRevisionDraft,
 ) -> IncrementalEscalationReason | None:
     """Fail closed unless a bounded candidate can safely become authoritative."""
-    if derive_next_update_policy(baseline)[0] != "incremental_allowed":
+    if evaluate_next_update_policy(
+        baseline,
+        instrument=baseline.current_state.instrument,
+        mode="experimental",
+    ).policy != "incremental_allowed":
         return IncrementalEscalationReason.INVALID_BASELINE
     if (
         candidate.execution_strategy is not ResearchExecutionStrategy.INCREMENTAL
@@ -1029,12 +1037,154 @@ class ResearchRevision(ResearchRevisionDraft):
     created_at: datetime
 
 
-def derive_next_update_policy(
+class NextUpdatePolicyEvaluation(ResearchModel):
+    """One typed decision shared by presentation, enforcement, and execution."""
+
+    policy: Literal["incremental_allowed", "full_required"]
+    reason: NextUpdateReason | None = None
+    instrument: str
+    mode: Literal["off", "shadow", "experimental"]
+    required_sources: tuple[str, ...] = ()
+
+
+def _required_incremental_sources(revision: ResearchRevisionDraft) -> tuple[str, ...]:
+    sources = {"EDINET", "TDnet"}
+    sources.update(
+        source
+        for claim in revision.current_state.claims
+        if claim.standing is ClaimStanding.ACTIVE
+        for source in claim.required_sources
+    )
+    sources.update(
+        source
+        for question in revision.current_state.questions
+        if question.status is QuestionStatus.OPEN
+        for source in question.required_sources
+    )
+    typed_domains = {
+        "fundamentals": "J-Quants fundamentals",
+        "market": "J-Quants adjusted OHLCV",
+    }
+    for domain in revision.coverage.domains:
+        if domain.requirement is not CoverageRequirement.REQUIRED:
+            continue
+        source = typed_domains.get(domain.domain, domain.source)
+        if source:
+            sources.add(source)
+    return tuple(sorted(sources))
+
+
+def _required_source_coverage_complete(
     revision: ResearchRevisionDraft,
-) -> tuple[Literal["incremental_allowed", "full_required"], NextUpdateReason | None]:
-    """Derive bounded-update eligibility without conflating role or conclusion."""
+    required_sources: tuple[str, ...],
+) -> bool:
+    snapshot = revision.evidence_snapshot
+    evidence_refs = {item.ref for item in snapshot.bundle.items}
+    lineage = {item.version_id: item for item in snapshot.source_record_lineage}
+    records_by_source: dict[str, list[SourceRecordVersion]] = {}
+    for record in snapshot.source_records:
+        records_by_source.setdefault(record.source, []).append(record)
+        if record.evidence_ref not in evidence_refs:
+            return False
+        if record.available_at.astimezone(market_timezone(revision.current_state.instrument)).date() > revision.cutoff:
+            return False
+    for source in required_sources:
+        source_watermarks = tuple(
+            item for item in snapshot.source_watermarks if item.source == source
+        )
+        applicable = tuple(
+            item
+            for item in source_watermarks
+            if item.scanned_start <= revision.cutoff <= item.scanned_end
+            and item.status is CoverageStatus.COMPLETE
+            and item.temporal_scope == "point_in_time"
+            and not item.limitations
+            and (
+                item.reported_records is None
+                or item.reported_records >= item.returned_records
+            )
+        )
+        ordered = sorted(
+            (item.scanned_start, item.scanned_end) for item in source_watermarks
+        )
+        has_gap = any(
+            current_start > previous_end + timedelta(days=1)
+            for (_, previous_end), (current_start, _) in zip(
+                ordered, ordered[1:], strict=False
+            )
+        )
+        if (
+            not applicable
+            or has_gap
+            or any(
+                item.status is not CoverageStatus.COMPLETE
+                or item.temporal_scope != "point_in_time"
+                or item.limitations
+                or (
+                    item.reported_records is not None
+                    and item.reported_records < item.returned_records
+                )
+                for item in source_watermarks
+            )
+        ):
+            return False
+        for watermark in applicable:
+            if watermark.returned_records == 0:
+                continue
+            if not any(
+                lineage.get(record.version_id) is not None
+                and lineage[record.version_id].observed_in_execution
+                for record in records_by_source.get(source, ())
+            ):
+                return False
+    return True
+
+
+def evaluate_next_update_policy(
+    revision: ResearchRevisionDraft,
+    *,
+    instrument: str,
+    mode: Literal["off", "shadow", "experimental"],
+) -> NextUpdatePolicyEvaluation:
+    """Evaluate the complete fail-closed bounded-update capability."""
+
+    def result(reason: NextUpdateReason | None) -> NextUpdatePolicyEvaluation:
+        return NextUpdatePolicyEvaluation(
+            policy="incremental_allowed" if reason is None else "full_required",
+            reason=reason,
+            instrument=instrument,
+            mode=mode,
+            required_sources=required_sources,
+        )
+
+    required_sources = _required_incremental_sources(revision)
     if revision.change_conclusion is ResearchChangeConclusion.INDETERMINATE:
-        return "full_required", NextUpdateReason.INDETERMINATE_HEAD
+        return result(NextUpdateReason.INDETERMINATE_HEAD)
+    if mode == "off":
+        return result(NextUpdateReason.EXPERIMENT_MODE_OFF)
+    if (
+        not is_supported_equity_symbol(instrument)
+        or not instrument.endswith(".T")
+        or revision.current_state.instrument != instrument
+    ):
+        return result(NextUpdateReason.UNSUPPORTED_INCREMENTAL_MARKET)
+    try:
+        ResearchRevisionDraft.model_validate(
+            {
+                field: getattr(revision, field)
+                for field in ResearchRevisionDraft.model_fields
+            }
+        )
+    except ValueError:
+        return result(NextUpdateReason.INVALID_REVISION)
+    if (
+        revision.cutoff != revision.current_state.cutoff
+        or revision.cutoff != revision.evidence_snapshot.bundle.analysis_date
+        or instrument != revision.evidence_snapshot.bundle.instrument
+    ):
+        return result(NextUpdateReason.INVALID_REVISION)
+    if not _required_source_coverage_complete(revision, required_sources):
+        return result(NextUpdateReason.REQUIRED_SOURCE_COVERAGE_INCOMPLETE)
     if (
         not revision.coverage.supports_no_material_change
         or any(
@@ -1047,13 +1197,13 @@ def derive_next_update_policy(
             for item in (*revision.coverage.claims, *revision.coverage.questions)
         )
     ):
-        return "full_required", NextUpdateReason.COVERAGE_INCOMPLETE
+        return result(NextUpdateReason.COVERAGE_INCOMPLETE)
     if any(
         item.kind is ResearchChangeKind.MARKET_SEMANTIC_INCOMPATIBILITY
         for item in revision.delta.change_signals
     ):
-        return "full_required", NextUpdateReason.INCOMPATIBLE_MARKET_SEMANTICS
-    return "incremental_allowed", None
+        return result(NextUpdateReason.INCOMPATIBLE_MARKET_SEMANTICS)
+    return result(None)
 
 
 def derive_shadow_comparison(
@@ -1518,6 +1668,7 @@ def _source_coverage(
     watermarks: tuple[SourceWatermarkSnapshot, ...],
     *,
     status_blocking_records: tuple[SourceRecordVersion, ...] | None = None,
+    observed_records: tuple[SourceRecordVersion, ...] | None = None,
     required_data_domains: tuple[str, ...] = (),
 ) -> tuple[tuple[ResearchDomainCoverage, ...], bool]:
     explicitly_required = {
@@ -1563,6 +1714,19 @@ def _source_coverage(
         live_only_required = requirement is CoverageRequirement.REQUIRED and any(
             item.temporal_scope != "point_in_time" for item in source_watermarks
         )
+        count_inconsistent = any(
+            item.reported_records is not None
+            and item.reported_records < item.returned_records
+            for item in source_watermarks
+        )
+        positive_without_observed_version = (
+            requirement is CoverageRequirement.REQUIRED
+            and any(item.returned_records > 0 for item in source_watermarks)
+            and not any(
+                item.source == watermark.source
+                for item in (records if observed_records is None else observed_records)
+            )
+        )
         ordered_intervals = sorted(
             (item.scanned_start, item.scanned_end) for item in source_watermarks
         )
@@ -1577,6 +1741,8 @@ def _source_coverage(
             watermark.status is not CoverageStatus.COMPLETE
             or live_only_required
             or missing_interval
+            or count_inconsistent
+            or positive_without_observed_version
         ):
             supports_quiet = False
         limitations = (
@@ -1587,6 +1753,12 @@ def _source_coverage(
                 if missing_interval
                 else ()
             )
+            + (("Source watermark record counts are inconsistent.",) if count_inconsistent else ())
+            + (
+                ("Positive source results have no observed Source Record Version.",)
+                if positive_without_observed_version
+                else ()
+            )
         )
         domains.append(
             ResearchDomainCoverage(
@@ -1595,7 +1767,12 @@ def _source_coverage(
                 requirement=requirement,
                 status=(
                     CoverageStatus.LIMITED
-                    if (live_only_required or missing_interval)
+                    if (
+                        live_only_required
+                        or missing_interval
+                        or count_inconsistent
+                        or positive_without_observed_version
+                    )
                     and watermark.status is CoverageStatus.COMPLETE
                     else watermark.status
                 ),
@@ -1815,11 +1992,17 @@ def assess_deterministic_update(
     evidence: EvidenceBundle,
     *,
     metrics: RunMetrics | None = None,
+    mode: Literal["off", "shadow", "experimental"] = "experimental",
 ) -> IncrementalGateResult:
     """Apply fail-closed gates and build a quiet bounded-update candidate."""
 
     if (
-        derive_next_update_policy(baseline)[0] != "incremental_allowed"
+        evaluate_next_update_policy(
+            baseline,
+            instrument=request.ticker,
+            mode=mode,
+        ).policy
+        != "incremental_allowed"
         or request.ticker != baseline.current_state.instrument
         or request.analysis_date <= baseline.cutoff
         or evidence.instrument != request.ticker
@@ -1913,6 +2096,7 @@ def assess_deterministic_update(
             combined_records,
             watermarks,
             status_blocking_records=newly_observed,
+            observed_records=candidate_records,
             required_data_domains=tuple(sorted(required_domains)),
         )
         signals = _change_signals(baseline, candidate_records)

@@ -70,7 +70,7 @@ def _unavailable_payload(sources: tuple[str, ...], start: str, end: str) -> str:
 def run_deterministic_incremental_gate(
     baseline: ResearchRevision,
     request: AnalysisRequest,
-    _config: dict[str, Any],
+    config: dict[str, Any],
     cancel_requested: Callable[[], bool],
     *,
     on_progress: Callable[[IncrementalGateResult], None] | None = None,
@@ -134,6 +134,7 @@ def run_deterministic_incremental_gate(
             request,
             bundle,
             metrics=metrics,
+            mode=config.get("research_update_mode", "off"),
         )
         if on_progress is not None:
             on_progress(result)

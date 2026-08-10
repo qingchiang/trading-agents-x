@@ -219,7 +219,7 @@ def test_trash_retention_defaults_can_be_disabled_and_reject_negatives(
         )
 
 
-def test_incremental_research_experiment_is_off_by_default_and_normalizes_whitelist(
+def test_incremental_research_experiment_is_off_by_default_and_has_no_whitelist_surface(
     tmp_path,
 ) -> None:
     defaults = AppSettings.from_env(
@@ -236,18 +236,22 @@ def test_incremental_research_experiment_is_off_by_default_and_normalizes_whitel
     )
 
     assert defaults.research_update_mode == "off"
-    assert defaults.experimental_nmc_jp_whitelist == ()
     assert enabled.research_update_mode == "experimental"
-    assert enabled.experimental_nmc_jp_whitelist == ("6501.T", "7203.T")
-    with pytest.raises(ValueError, match="Japanese equities"):
-        AppSettings.from_env(
-            environ={
-                "TRADINGAGENTS_HOME": str(tmp_path / "invalid"),
-                "TRADINGAGENTS_RESEARCH_UPDATE_MODE": "shadow",
-                "TRADINGAGENTS_EXPERIMENTAL_NMC_JP_WHITELIST": "NVDA",
-            },
-            load_env_files=False,
-        )
+    assert "experimental_nmc_jp_whitelist" not in enabled.model_fields
+    assert "experimental_nmc_jp_whitelist" not in enabled.default_run_settings.snapshot()
+
+
+def test_old_run_snapshot_whitelist_is_readable_but_ignored() -> None:
+    restored = RunSettings.model_validate(
+        {
+            "research_update_mode": "experimental",
+            "experimental_nmc_jp_whitelist": ["6501.T"],
+            "data_config": {"news_article_limit": 30},
+        }
+    )
+
+    assert restored.research_update_mode == "experimental"
+    assert "experimental_nmc_jp_whitelist" not in restored.snapshot()
 
 
 def test_legacy_archive_retention_setting_fails_with_rename_guidance(

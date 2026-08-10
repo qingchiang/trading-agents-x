@@ -16,9 +16,9 @@ from pydantic import (
     Field,
     SecretStr,
     field_validator,
+    model_validator,
 )
 
-from tradingagents.dataflows.symbol_utils import normalize_symbol
 from tradingagents.default_config import build_default_config
 
 from .contracts import (
@@ -33,22 +33,6 @@ from .contracts import (
 
 _SECRET_FRAGMENTS = ("key", "secret", "token", "password", "authorization")
 ResearchUpdateMode = Literal["off", "shadow", "experimental"]
-
-
-def _normalize_experimental_whitelist(value: Any) -> tuple[str, ...]:
-    values = value.split(",") if isinstance(value, str) else value
-    normalized = tuple(
-        dict.fromkeys(
-            normalize_symbol(str(item))
-            for item in values
-            if str(item).strip()
-        )
-    )
-    if any(not ticker.endswith(".T") for ticker in normalized):
-        raise ValueError("experimental NMC whitelist supports Japanese equities only")
-    if len(normalized) > 20:
-        raise ValueError("experimental NMC whitelist is limited to 20 Japanese equities")
-    return normalized
 
 
 def _env_bool(environ: Mapping[str, str], name: str, default: bool) -> bool:
@@ -89,8 +73,15 @@ class RunSettings(BaseModel):
     llm_max_retries: int | None = Field(default=None, ge=0)
     output_language: OutputLanguage = ReportLanguage.ENGLISH
     research_update_mode: ResearchUpdateMode = "off"
-    experimental_nmc_jp_whitelist: tuple[str, ...] = ()
     data_config: Mapping[str, Any]
+
+    @model_validator(mode="before")
+    @classmethod
+    def ignore_unreleased_whitelist_snapshot(cls, value: Any) -> Any:
+        if isinstance(value, Mapping) and "experimental_nmc_jp_whitelist" in value:
+            value = dict(value)
+            value.pop("experimental_nmc_jp_whitelist", None)
+        return value
 
     @field_validator("output_language", mode="before")
     @classmethod
@@ -111,17 +102,6 @@ class RunSettings(BaseModel):
         if isinstance(value, bool):
             raise ValueError("llm_max_retries must be an integer, not boolean")
         return value
-
-    @field_validator("experimental_nmc_jp_whitelist", mode="before")
-    @classmethod
-    def normalize_experimental_whitelist(cls, value: Any) -> tuple[str, ...]:
-        return _normalize_experimental_whitelist(value)
-
-    def uses_incremental_research(self, ticker: str) -> bool:
-        return (
-            self.research_update_mode != "off"
-            and normalize_symbol(ticker) in self.experimental_nmc_jp_whitelist
-        )
 
     def dataflow_config(self, app: AppSettings) -> dict[str, Any]:
         """Build the run-scoped data and model configuration."""
@@ -167,18 +147,12 @@ class AppSettings(BaseModel):
     busy_timeout_ms: int = Field(default=5000, ge=100)
     trash_retention_days: int = Field(default=30, ge=0)
     research_update_mode: ResearchUpdateMode = "off"
-    experimental_nmc_jp_whitelist: tuple[str, ...] = ()
     default_run_settings: RunSettings
 
     @field_validator("database_path", "data_cache_dir", mode="before")
     @classmethod
     def expand_path(cls, value: str | Path) -> Path:
         return Path(value).expanduser().resolve()
-
-    @field_validator("experimental_nmc_jp_whitelist", mode="before")
-    @classmethod
-    def normalize_experimental_whitelist(cls, value: Any) -> tuple[str, ...]:
-        return _normalize_experimental_whitelist(value)
 
     @classmethod
     def from_env(
@@ -226,9 +200,6 @@ class AppSettings(BaseModel):
             "TRADINGAGENTS_RESEARCH_UPDATE_MODE",
             "off",
         ).strip().lower()
-        experimental_nmc_jp_whitelist = _normalize_experimental_whitelist(
-            env.get("TRADINGAGENTS_EXPERIMENTAL_NMC_JP_WHITELIST", "")
-        )
         run_settings = RunSettings(
             llm_provider=provider,
             quick_model=env.get(
@@ -260,7 +231,6 @@ class AppSettings(BaseModel):
             ),
             output_language=output_language,
             research_update_mode=research_update_mode,
-            experimental_nmc_jp_whitelist=experimental_nmc_jp_whitelist,
             data_config=data_config,
         )
         lan_enabled = _env_bool(env, "TRADINGAGENTS_LAN_ENABLED", False)
@@ -299,7 +269,6 @@ class AppSettings(BaseModel):
                 env, "TRADINGAGENTS_TRASH_RETENTION_DAYS", 30
             ),
             research_update_mode=research_update_mode,
-            experimental_nmc_jp_whitelist=experimental_nmc_jp_whitelist,
             default_run_settings=run_settings,
         )
 
@@ -323,7 +292,6 @@ class AppSettings(BaseModel):
                 ),
                 "output_language": request.output_language or base.output_language,
                 "research_update_mode": self.research_update_mode,
-                "experimental_nmc_jp_whitelist": self.experimental_nmc_jp_whitelist,
             }
         )
 

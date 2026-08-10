@@ -2314,9 +2314,13 @@
       },
       "NextUpdateReason": {
         "enum": [
+          "experiment_mode_off",
+          "unsupported_incremental_market",
+          "required_source_coverage_incomplete",
           "indeterminate_head",
           "coverage_incomplete",
-          "incompatible_market_semantics"
+          "incompatible_market_semantics",
+          "invalid_revision"
         ],
         "title": "NextUpdateReason",
         "type": "string"

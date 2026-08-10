@@ -52,6 +52,7 @@ from .question_disposition import run_full_question_disposition
 from .repository import InvalidResearchBaselineError, RunRepository, RunView
 from .research import (
     IncrementalGateResult,
+    ResearchChain,
     ResearchExecutionStrategy,
     ResearchRevision,
     ResearchRevisionDraft,
@@ -59,8 +60,8 @@ from .research import (
     assemble_full_revision,
     assemble_full_update,
     close_revision_over_update_candidate,
-    derive_next_update_policy,
     derive_shadow_comparison,
+    evaluate_next_update_policy,
     prepare_experimental_nmc_revision,
     render_revision_export_markdown,
     render_revision_export_package,
@@ -158,6 +159,31 @@ class AnalysisService:
         self.question_dispositioner = question_dispositioner
         self.incremental_gate = incremental_gate or run_deterministic_incremental_gate
 
+    def _present_chain(self, chain: ResearchChain) -> ResearchChain:
+        revision = chain.current_revision
+        if revision is None:
+            return chain
+        evaluation = evaluate_next_update_policy(
+            revision,
+            instrument=chain.instrument,
+            mode=self.settings.research_update_mode,
+        )
+        return chain.model_copy(
+            update={
+                "next_update_policy": evaluation.policy,
+                "next_update_reason": evaluation.reason,
+            }
+        )
+
+    def get_research_chain(self, chain_id: str) -> ResearchChain:
+        return self._present_chain(self.repository.get_research_chain(chain_id))
+
+    def list_research_chains(self, *, instrument: str | None = None) -> list[ResearchChain]:
+        return [
+            self._present_chain(chain)
+            for chain in self.repository.list_research_chains(instrument=instrument)
+        ]
+
     def enqueue(
         self,
         request: AnalysisRequest,
@@ -215,19 +241,22 @@ class AnalysisService:
         run_settings = self.settings.resolve_run(request)
         request = self.settings.materialize_request(request, run_settings=run_settings)
         baseline = self.repository.get_research_revision(baseline_revision_id)
-        next_policy, next_reason = derive_next_update_policy(baseline)
+        evaluation = evaluate_next_update_policy(
+            baseline,
+            instrument=request.ticker,
+            mode=run_settings.research_update_mode,
+        )
         if (
             execution_strategy is ResearchExecutionStrategy.INCREMENTAL
-            and next_policy != "incremental_allowed"
+            and evaluation.policy != "incremental_allowed"
         ):
             raise InvalidResearchBaselineError(
                 "Eligible Baseline does not allow Incremental Execution: "
-                f"{next_reason or 'full_required'}"
+                f"{evaluation.reason.value if evaluation.reason is not None else 'full_required'}"
             )
         selected_strategy = execution_strategy or (
             ResearchExecutionStrategy.INCREMENTAL
-            if next_policy == "incremental_allowed"
-            and run_settings.uses_incremental_research(request.ticker)
+            if evaluation.policy == "incremental_allowed"
             else ResearchExecutionStrategy.FULL
         )
         view, created = self.repository.create_chain_update(
@@ -494,7 +523,10 @@ class AnalysisService:
                             incremental_result = run_deterministic_incremental_gate(
                                 baseline,
                                 run.request,
-                                dataflow_config,
+                                {
+                                    **dataflow_config,
+                                    "research_update_mode": run_settings.research_update_mode,
+                                },
                                 lambda: self.repository.cancel_requested(run.id),
                                 on_progress=persist_incremental_audit,
                             )
@@ -1010,7 +1042,7 @@ class AnalysisService:
 
     def get_revision_export(self, revision_id: str) -> RevisionExport:
         revision = self.repository.get_research_revision(revision_id)
-        chain = self.repository.get_research_chain(revision.chain_id)
+        chain = self.get_research_chain(revision.chain_id)
         linked_reports: dict[str, str] = {}
         if revision.producing_run_id is not None:
             result = self.repository.get_result(revision.producing_run_id)
