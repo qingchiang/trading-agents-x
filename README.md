@@ -200,12 +200,14 @@ retrying failed maintenance after one hour. The default 30-day retention can
 be changed with `TRADINGAGENTS_TRASH_RETENTION_DAYS`; `0` disables permanent
 cleanup.
 
-Research Chain updates have an internal, opt-in Japanese incremental-research
-experiment. It is `off` by default. `shadow` retains a bounded candidate while
-Full Analysis remains authoritative; `experimental` lets a fully covered No
-Material Change assessment advance any source-qualified supported `.T` equity without
-regenerating analyst reports or deliberation. Every material, incomplete,
-incompatible, invalid, novel, or uncertain result falls back to Full Analysis:
+Research Chain updates have an internal, manually triggered Japanese
+incremental-research experiment. It is `off` by default. `shadow` retains a
+bounded candidate while Full Analysis remains authoritative; `experimental`
+lets a fully covered No Material Change assessment advance any source-qualified
+supported `.T` equity without regenerating analyst reports or deliberation.
+Every material, incomplete, incompatible, invalid, novel, or uncertain result
+falls back to Full Analysis. US and mainland-China Research Chains remain
+manually updateable through Full Analysis only.
 
 Research Revision Role, Execution Strategy, and Change Conclusion are shown
 separately. A Full reassessment that remains inconclusive creates an
@@ -218,6 +220,8 @@ TRADINGAGENTS_RESEARCH_UPDATE_MODE=experimental
 
 See [the experiment guide](docs/incremental-research-experiment.md) for mode,
 source qualification, metrics, and opt-in live-validation details.
+This capability does not schedule updates, provide production automation, or
+produce account-specific advice.
 
 See [architecture.md](docs/architecture.md) for subsystem and data-integrity
 contracts.
@@ -352,8 +356,12 @@ market-local Observation with raw return, alpha, price-adjustment semantics,
 availability, and horizon limitations. Reflection runs independently and may be
 retried without recomputing the Observation. A generated Reflection becomes
 eligible Feedback only after deterministic PIT, schema, source, applicability,
-content, method, and horizon qualification. Research Chain analysis injects
-none of this historical feedback in the first experiment.
+content, method, and horizon qualification under
+`outcome_feedback_qualification.v1`. Its `available_at` is the latest time of
+Observation data availability, Reflection generation, and qualification.
+Historical unversioned status is retained rather than recalculated. Research
+Chain analysis injects none of this historical feedback in the first
+experiment.
 
 ## Development and release gates
 

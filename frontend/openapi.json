@@ -2908,6 +2908,7 @@
             "$ref": "#/components/schemas/OutcomeFeedbackApplicabilityView"
           },
           "available_at": {
+            "description": "Latest availability time of the Observation data, Reflection, and qualification.",
             "format": "date-time",
             "title": "Available At",
             "type": "string"
@@ -2933,6 +2934,7 @@
                 "type": "null"
               }
             ],
+            "description": "Prospective qualification-policy version, independent from the Feedback schema and Observation method versions; legacy rows may be unversioned.",
             "title": "Qualification Policy Version"
           },
           "qualified_at": {
@@ -3056,6 +3058,7 @@
                 "type": "null"
               }
             ],
+            "description": "Market-local observation end, strictly after the effective source cutoff.",
             "title": "Observation End"
           },
           "observation_start": {
@@ -3067,6 +3070,7 @@
                 "type": "null"
               }
             ],
+            "description": "Market-local return-baseline date; it may equal but cannot precede the effective source cutoff.",
             "title": "Observation Start"
           },
           "price_semantics": {
@@ -3874,6 +3878,7 @@
           },
           "next_update_policy": {
             "default": "full_required",
+            "description": "Server-derived policy: bounded Incremental Execution is allowed only for a source-qualified supported Japanese head in an enabled experiment mode.",
             "enum": [
               "incremental_allowed",
               "full_required"
@@ -3889,7 +3894,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Stable reason that the next manual update requires Full Analysis instead of bounded Incremental Execution."
           },
           "revisions": {
             "default": [],

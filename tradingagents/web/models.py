@@ -160,8 +160,15 @@ class OutcomeObservationView(ApiModel):
     adjustment_semantics: str
     horizon_limit: str
     limitations: list[str]
-    observation_start: str | None
-    observation_end: str | None
+    observation_start: str | None = Field(
+        description=(
+            "Market-local return-baseline date; it may equal but cannot precede "
+            "the effective source cutoff."
+        )
+    )
+    observation_end: str | None = Field(
+        description="Market-local observation end, strictly after the effective source cutoff."
+    )
     holding_intervals: int
     raw_return: float | None
     alpha_return: float | None
@@ -190,13 +197,22 @@ class OutcomeFeedbackApplicabilityView(ApiModel):
 class OutcomeFeedbackView(ApiModel):
     id: int
     status: OutcomeFeedbackStatus
-    qualification_policy_version: str | None
+    qualification_policy_version: str | None = Field(
+        description=(
+            "Prospective qualification-policy version, independent from the Feedback "
+            "schema and Observation method versions; legacy rows may be unversioned."
+        )
+    )
     reasons: list[str]
     method_category: str
     horizon_limit: str
     applicability: OutcomeFeedbackApplicabilityView
     qualified_at: datetime
-    available_at: datetime
+    available_at: datetime = Field(
+        description=(
+            "Latest availability time of the Observation data, Reflection, and qualification."
+        )
+    )
     retired_at: datetime | None
 
 

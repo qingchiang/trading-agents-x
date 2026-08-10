@@ -536,6 +536,16 @@ async def test_openapi_contains_versioned_run_center_contract(
         "superseded",
         "retired",
     ]
+    observation = schema["components"]["schemas"]["OutcomeObservationView"]["properties"]
+    assert "effective source cutoff" in observation["observation_start"]["description"]
+    assert "strictly after" in observation["observation_end"]["description"]
+    feedback = schema["components"]["schemas"]["OutcomeFeedbackView"]["properties"]
+    assert "schema and Observation method versions" in feedback[
+        "qualification_policy_version"
+    ]["description"]
+    assert "Observation data, Reflection, and qualification" in feedback["available_at"][
+        "description"
+    ]
     delta = schema["components"]["schemas"]["RevisionDelta"]["properties"]
     assert delta["question_disposition"]["anyOf"][0]["$ref"].endswith("/QuestionDispositionAudit")
     chain = schema["components"]["schemas"]["ResearchChain"]["properties"]
@@ -543,6 +553,8 @@ async def test_openapi_contains_versioned_run_center_contract(
         "incremental_allowed",
         "full_required",
     ]
+    assert "server-derived" in chain["next_update_policy"]["description"].lower()
+    assert "Full Analysis" in chain["next_update_reason"]["description"]
 
 
 @pytest.mark.anyio

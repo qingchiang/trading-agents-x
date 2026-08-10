@@ -163,13 +163,14 @@ Web 起動時に一度、worker は work claim 前と成功後 24 時間ごと�
 確認し、失敗時は 1 時間後に再試行します。既定の保持期間は 30 日で、
 `TRADINGAGENTS_TRASH_RETENTION_DAYS=0` にすると完全削除を無効化します。
 
-Research Chain 更新には、明示的に有効化する日本株向けの内部増分リサーチ
+Research Chain 更新には、手動でのみ開始する日本株向けの内部増分リサーチ
 実験があります。既定値は `off` です。`shadow` は限定評価の候補を保持しつつ
 フル分析を正とし、`experimental` は完全な coverage と意味的不変性を満たす
-No Material Change 評価だけを、Required Source が完全な対応 `.T` 銘柄で analyst report や
-deliberation を再生成せず Revision にできます。重要な変更、coverage 不足、
-互換性不良、無効、novelty、不確定な結果は、同じ更新内で自動的にフル分析へ
-移行します。
+No Material Change 評価だけを、Required Source が完全な対応 `.T` 銘柄で
+analyst report や deliberation を再生成せず Revision にできます。重要な変更、
+coverage 不足、互換性不良、無効、novelty、不確定な結果は、同じ更新内で
+自動的にフル分析へ移行します。米国株と中国本土株の Research Chain は、
+引き続き手動のフル分析でのみ更新できます。
 
 Revision Role、Execution Strategy、Change Conclusion は別々に表示されます。
 フル再評価でも Material Change と No Material Change のどちらも正当化できない
@@ -182,6 +183,8 @@ TRADINGAGENTS_RESEARCH_UPDATE_MODE=experimental
 
 mode、source qualification、metrics、opt-in live validation の詳細は
 [実験ガイド](../incremental-research-experiment.md) を参照してください。
+この機能は更新を schedule せず、production automation や口座別 advice を
+提供しません。
 
 event はクライアント送信前に database へ commit されます。SSE は
 `Last-Event-ID` から欠落イベントを replay するため、ページ更新でも進捗を
@@ -280,9 +283,18 @@ Evidence は requested/effective date、timezone 付き availability、実際の
 source、quality、fallback、provenance を保持し、seal 時に未来可視データを
 拒否します。データ欠落は unknown であり、中立・弱気シグナルではありません。
 
-ticker と benchmark に 6 個の共通 completed close が揃うと、worker は
-5 trading interval の raw return と alpha、および短期 reflection を保存
-します。これは長期 thesis や graph 品質の唯一の正解ではありません。
+ticker と benchmark に 6 個の共通 completed close が揃うと、worker は 5
+trading interval を形成し、versioned market-local Outcome Observation、raw
+return、alpha、availability、horizon limitation を先に独立保存します。収益の
+baseline は source Decision または関連 Research Revision の cutoff と同日でも
+よい一方、それより前にはできず、Observation end は cutoff より後でなければ
+なりません。Reflection は独立生成され、失敗しても Observation を削除しません。
+Feedback は `outcome_feedback_qualification.v1` の PIT、schema、source、
+applicability、content、method、horizon qualification をすべて通過した場合のみ
+eligible になります。`available_at` は Observation data availability、Reflection
+generation、qualification completion のうち最も遅い時刻です。履歴上の
+unversioned status は再計算しません。最初の Research Chain 実験はこれらの
+historical Feedback を注入せず、長期 thesis の証明・反証にも使いません。
 
 ## 開発・リリースゲート
 

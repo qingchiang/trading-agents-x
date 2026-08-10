@@ -147,11 +147,12 @@ worker 在领取任务前检查，并在成功后每 24 小时再次执行，失
 `TRADINGAGENTS_TRASH_RETENTION_DAYS` 修改；设为 `0` 时关闭
 永久清理。
 
-Research Chain 更新提供一个内部、显式启用的日本股票增量研究实验，默认
+Research Chain 更新提供一个内部、仅手动触发的日本股票增量研究实验，默认
 `off`。`shadow` 保留有界候选结果，但仍以完整分析为权威；`experimental`
-只允许覆盖完整且语义不变的“无重大变化”评估为来源资格完整的受支持 `.T` 股票推进修订，
-无需重新生成 analyst 报告与研究讨论。任何重大变化、覆盖缺口、语义不兼容、
-无效、创新信息或不确定结果都会自动进入同一次更新的完整分析：
+只允许覆盖完整且语义不变的“无重大变化”评估为来源资格完整的受支持 `.T`
+股票推进修订，无需重新生成 analyst 报告与研究讨论。任何重大变化、覆盖缺口、
+语义不兼容、无效、创新信息或不确定结果都会自动进入同一次更新的完整分析。
+美国和中国大陆 Research Chain 仍只能通过手动完整分析更新。
 
 Revision Role、Execution Strategy 与 Change Conclusion 会分别展示。若完整
 重新评估仍无法得出重大变化或无重大变化，会创建可读的 Indeterminate head；
@@ -163,6 +164,7 @@ TRADINGAGENTS_RESEARCH_UPDATE_MODE=experimental
 
 模式、来源资格、指标和显式启用的 live validation 详见
 [实验说明](../incremental-research-experiment.md)。
+此能力不调度更新，不提供生产级自动化，也不提供账户相关建议。
 
 事件先写入数据库，再发送给客户端。SSE 使用 `Last-Event-ID` 回放刷新或断线
 期间遗漏的事件，因此浏览器刷新不会丢失进度。
@@ -252,9 +254,16 @@ Crypto、明确的非权益类、其他不支持或存在歧义的标的会在�
 date、带时区的 available time、实际来源、质量、fallback 和 provenance；
 封存时会拒绝未来可见证据。缺数据表示 unknown，不能自动解释成中性或利空。
 
-当 ticker 与 benchmark 已有六个共同完成收盘价时，后台 worker 形成五个
-交易区间，记录 raw return、alpha 与短期 reflection。它不是长期 thesis 或
-graph 质量的唯一真值。
+当 ticker 与 benchmark 已有六个共同完成收盘价时，后台 worker 先形成五个
+交易区间，并独立保存带版本的市场本地 Outcome Observation、raw return、alpha、
+可用时间与期限限制。其收益基准可以等于来源 Decision 或关联 Research
+Revision 的 cutoff，但不能更早，Observation 结束时间必须更晚。Reflection
+独立生成且失败不会删除 Observation。Feedback 只有在
+`outcome_feedback_qualification.v1` 的 PIT、schema、来源、适用性、内容、方法与
+期限检查全部通过后才符合资格；`available_at` 取 Observation 数据可用、
+Reflection 生成和资格完成三者中的最晚时间。历史未标版本状态不会重新计算。
+首个 Research Chain 实验不注入这些历史 Feedback，它们也不能证明或否定长期
+thesis。
 
 ## 开发与验收
 

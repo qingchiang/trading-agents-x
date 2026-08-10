@@ -1,9 +1,10 @@
 # Incremental Research Experiment
 
-This experiment explores whether TradingAgentsX can maintain a useful live thesis
-for an Instrument while spending fewer model tokens on repeated analysis. It is
-an experimental open-source capability, not a promise of complete research or
-an advisory service.
+This experiment explores whether TradingAgentsX can maintain a useful live
+thesis for an Instrument while spending fewer model tokens on repeated
+analysis. It is a manually triggered experimental open-source capability, not
+a scheduled or production-grade automation facility, a promise of complete
+research, or an account-specific advisory service.
 
 The durable domain language is defined in [CONTEXT.md](../CONTEXT.md). The two
 hard-to-reverse choices are recorded in
@@ -117,6 +118,23 @@ when the current point-in-time and provenance contracts allow it.
 These rules define the state being tested. Exact table layouts, enum names,
 prompt schemas, retry counts, and UI components are implementation choices.
 
+## Outcome feedback boundary
+
+Outcome settlement remains independent from Research Chain execution. After
+six common completed ticker/benchmark closes exist, the worker first persists a
+versioned five-completed-interval Outcome Observation. Its market-local return
+baseline may equal the source Decision or linked Research Revision cutoff but
+cannot precede it, and the Observation end must be later than that cutoff. A
+Reflection is generated separately and cannot erase the completed Observation.
+
+Reusable Feedback requires prospective deterministic qualification under
+`outcome_feedback_qualification.v1`. Its `available_at` is the latest of
+Observation data availability, Reflection generation, and qualification
+completion. The qualification-policy version is independent from the Feedback
+schema and Observation method versions; existing unversioned or legacy rows
+retain their recorded status rather than being recalculated. The first Research
+Chain experiment selects or injects no Outcome Feedback Context.
+
 ## Lightweight validation
 
 Shadow Validation is deliberately small. The reviewed offline contract set
@@ -132,6 +150,11 @@ never credentials, prompt text, private reasoning, or response headers.
 The pytest live runner remains a non-authoritative rehearsal: it backs up the
 configured database and runs each case against a temporary copy. It must not be
 used as evidence that a main-database Research Chain advanced.
+
+The repository documents and deterministically tests the authoritative
+workflow, but that alone is not evidence that a real live validation occurred.
+Only a separately authorized execution and its sanitized manifest can establish
+that provenance.
 
 ### Authoritative maintainer validation
 

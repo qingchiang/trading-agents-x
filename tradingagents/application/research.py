@@ -1273,8 +1273,20 @@ class ResearchChain(ResearchModel):
     current_revision_id: str
     current_revision: ResearchRevision | None = None
     revisions: tuple[ResearchRevision, ...] = ()
-    next_update_policy: Literal["incremental_allowed", "full_required"] = "full_required"
-    next_update_reason: NextUpdateReason | None = None
+    next_update_policy: Literal["incremental_allowed", "full_required"] = Field(
+        default="full_required",
+        description=(
+            "Server-derived policy: bounded Incremental Execution is allowed only for a "
+            "source-qualified supported Japanese head in an enabled experiment mode."
+        ),
+    )
+    next_update_reason: NextUpdateReason | None = Field(
+        default=None,
+        description=(
+            "Stable reason that the next manual update requires Full Analysis instead of "
+            "bounded Incremental Execution."
+        ),
+    )
     created_at: datetime
     updated_at: datetime
 
