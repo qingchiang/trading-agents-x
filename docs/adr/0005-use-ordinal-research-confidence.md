@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Use ordinal confidence until calibration exists

@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Fall back to Full Analysis when a bounded update is inconclusive
@@ -29,6 +29,21 @@ Revision Role and Change Conclusion and requires complete state, Evidence
 closure, Coverage Attestation, source versions, and compatible market
 semantics. A later candidate cannot repair an ineligible baseline by rewriting
 its coverage.
+
+Required Source completeness is source-aware rather than a non-empty-version
+check. Each Required Source must have a complete point-in-time Source Watermark
+covering the Revision cutoff. A completed scan that returns no records is valid;
+a scan that reports records must resolve to observed Source Record Versions in
+the same Effective Evidence Snapshot. The first bounded capability applies to
+supported Japanese equities as a market capability, without a per-Instrument
+whitelist. United States and mainland-China equities remain Full-only until
+their own typed source-coverage contracts exist.
+
+One typed next-update policy evaluation combines Revision validity, Required
+Source completeness, market capability, and the configured experiment mode.
+API presentation, enqueue enforcement, and deterministic assessment use that
+same result and stable reasons; no caller can force an unsupported or
+ineligible Instrument into Incremental Execution.
 
 Evidence closure covers every Evidence reference reachable from the Current
 Research State, its Claims and Questions, scenarios, risks, catalysts,

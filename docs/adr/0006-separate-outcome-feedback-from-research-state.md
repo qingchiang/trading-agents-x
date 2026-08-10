@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Separate outcome feedback from longitudinal research state
@@ -27,6 +27,14 @@ Instrument or market, research stage, domain, category, and horizon. An empty
 Context is valid. Feedback is neither Evidence nor Prior Research: it cannot
 establish Current Research State, satisfy Coverage, or determine a Change
 Conclusion or escalation.
+
+For the five-completed-interval return method, the source Decision cutoff may
+serve as the return's baseline price date. The Observation start cannot precede
+that cutoff, its end must follow the cutoff, and qualification still becomes
+available only after the Observation data, Reflection, and qualification all
+exist. Outcome Feedback records a qualification-policy version independently
+from its schema version and Observation method version. Correcting a policy
+does not retroactively requalify an existing Feedback record.
 
 The first Research Chain experiment continues to generate, persist, and expose
 Outcome Observation and Reflection but injects neither legacy memory nor

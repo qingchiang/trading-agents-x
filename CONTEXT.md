@@ -203,9 +203,10 @@ _Avoid_: Sentiment label, Claim Change
 
 **Eligible Baseline**:
 The current Revision of a Research Chain when it contains enough state,
-Evidence, coverage, and compatible semantics to support a bounded update.
-Eligibility is independent of its Change Conclusion; an Indeterminate Revision
-is never eligible.
+Evidence closure, Required Source coverage, and compatible semantics to support
+a bounded update under the declared market capability. Eligibility is
+independent of its Change Conclusion; an Indeterminate Revision is never
+eligible.
 _Avoid_: Latest run, same-ticker result
 
 **Update Intent**:
@@ -269,8 +270,9 @@ _Avoid_: Regenerated full report, status badge
 
 **Outcome Observation**:
 A bounded ex-post observation associated with a Research Decision over an
-explicit market-local window and declared observation method. It does not by
-itself prove or disprove a thesis.
+explicit market-local window and declared observation method. Its return
+baseline may be anchored at the Decision cutoff, but its observation end must
+follow that cutoff; it does not by itself prove or disprove a thesis.
 _Avoid_: Thesis result, current Evidence
 
 **Outcome Reflection**:

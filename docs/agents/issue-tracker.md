@@ -12,6 +12,10 @@ The directory is git-ignored and is not a remote publication surface.
 - When a skill needs workflow state, record it as a `Status:` line near the top
   of the issue file
 - Append conversation history under a `## Comments` heading
+- A spec is published as `ready-for-agent`. Mark it `resolved` only after all
+  accepted in-scope implementation issues are resolved and the maintainer
+  confirms that the implemented behavior satisfies the spec. Explicitly
+  deferred or out-of-scope work does not keep that completed scope open.
 
 ## When a skill says "publish to the issue tracker"
 

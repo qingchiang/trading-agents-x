@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Maintain research as revision chains
