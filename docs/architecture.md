@@ -414,15 +414,24 @@ Failed or cancelled Shadow executions retain their run audit but never create
 a Revision.
 
 The maintainer-only authoritative validation command requires both live test
-opt-ins plus a separate in-place database confirmation, verifies an ordinary
-online backup before its first execution, and rejects reused or ineligible
-reviewed Chains. It runs five distinct Shadow scenarios against the configured
-main SQLite database. SQLite remains the sole owner of requests, settings,
-Evidence, coverage, state, audit, events, metrics, artifacts, decisions, runs,
-and Revisions. The ignored experiment area receives only one exclusive,
-sanitized metadata entry per scenario plus non-sensitive recovery-point
-metadata; application success and expectation agreement remain separate
-verdict dimensions.
+opt-ins plus a separate in-place database confirmation. Before backup or
+execution it requires the executing Git checkout to have no staged changes,
+tracked modifications, or non-ignored untracked files; ignored credentials,
+databases, backups, reviewed cases, and experiment manifests remain outside
+that source-cleanliness decision. The full clean-checkout commit is the source
+provenance recorded in the sanitized manifest; repository contents and diffs
+are not copied there. The command verifies an ordinary online backup before its
+first execution and rejects reused cases or heads whose server-derived,
+source-qualified next-update policy is not `incremental_allowed`. The five
+reviewed cases directly select distinct supported Japanese Research Chains and
+run isolated Shadow scenarios against the configured main SQLite database;
+there is no runtime ticker whitelist. SQLite remains the sole owner of
+requests, settings, Evidence, coverage, state, audit, events, metrics,
+artifacts, decisions, runs, and Revisions. The ignored experiment area receives
+only one exclusive, sanitized metadata entry per scenario plus non-sensitive
+recovery-point metadata; application success and expectation agreement remain
+separate verdict dimensions. This is a manual, user-triggered experiment, not
+a scheduled or production automation facility.
 
 The internal research-update mode is persisted in each update's immutable
 settings snapshot. `off` routes every update through Full Analysis. `shadow`

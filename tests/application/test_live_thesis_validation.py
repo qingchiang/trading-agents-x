@@ -188,6 +188,52 @@ def test_backup_failure_prevents_authoritative_execution_and_manifest(
     assert not manifest_root.exists()
 
 
+def test_source_policy_rejection_prevents_backup_and_execution(tmp_path: Path) -> None:
+    scenarios = _loaded_scenarios(tmp_path)
+    chains = {
+        scenario.chain_id: SimpleNamespace(
+            id=scenario.chain_id,
+            instrument="6501.T",
+            next_update_policy=(
+                "full_required"
+                if scenario.scenario == "source_integrity"
+                else "incremental_allowed"
+            ),
+            current_revision=SimpleNamespace(
+                id=f"baseline-{scenario.scenario}",
+                cutoff=date(2026, 8, 9),
+            ),
+        )
+        for scenario in scenarios
+    }
+
+    class SourcePolicyFailureService:
+        settings = SimpleNamespace(research_update_mode="shadow")
+
+        def get_research_chain(self, chain_id):
+            return chains[chain_id]
+
+        def backup_database(self, _destination: Path) -> Path:
+            raise AssertionError("backup must not run for a source-ineligible head")
+
+        def run_chain_update(self, *_args, **_kwargs):
+            raise AssertionError("execution must not run for a source-ineligible head")
+
+    with pytest.raises(LiveThesisValidationError, match="not an Eligible Baseline"):
+        validate_live_thesis(
+            SourcePolicyFailureService(),
+            scenarios,
+            backup_destination=tmp_path / "backup.db",
+            manifest_root=tmp_path / "manifest",
+            git_commit="a" * 40,
+            environ={"RUN_LIVE_DATA_TESTS": "1", "RUN_LIVE_LLM_TESTS": "1"},
+            in_place_database=True,
+        )
+
+    assert not (tmp_path / "backup.db").exists()
+    assert not (tmp_path / "manifest").exists()
+
+
 def test_validation_writes_authoritative_main_database_and_only_sanitized_manifest(
     tmp_path: Path,
 ) -> None:
@@ -385,6 +431,7 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
     manifest_files = sorted(result.manifest_directory.glob("*.json"))
     assert len(manifest_files) == 6
     entry_payload = json.loads(manifest_files[1].read_text(encoding="utf-8"))
+    assert entry_payload["git_commit"] == "a" * 40
     assert set(entry_payload) == {
         "application_status",
         "chain_id",
@@ -401,6 +448,7 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
     assert "Fixture Evidence" not in serialized_manifest
     assert "secret prompt" not in serialized_manifest
     assert "metrics" not in serialized_manifest
+    assert "diff" not in serialized_manifest
 
     actual_full_conclusions["threshold_crossing"] = ResearchChangeConclusion.NO_MATERIAL_CHANGE
     enqueue_failures.add("source_integrity")

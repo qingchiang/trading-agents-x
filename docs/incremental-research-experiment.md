@@ -161,8 +161,14 @@ authorize a live run. Before a separately approved run:
 
 Keep the application in `shadow` mode. Supply the two existing live opt-ins and the separate
 `--in-place-database` confirmation. The `--backup` destination must not exist:
-Run the command from a Git checkout; it refuses to run unless it can bind the
-manifest to that checkout's ignored `tmp/` area and detect the exact HEAD.
+Run the command from a clean Git checkout. Before it loads the cases, opens the
+application, creates the backup, or starts a Research Execution, it refuses
+staged changes, tracked modifications, and non-ignored untracked files. Ignored
+credentials, SQLite databases, backups, reviewed cases, and prior manifests do
+not make an otherwise clean checkout invalid. The command records the full
+commit of that exact source checkout and binds the sanitized manifest to its
+ignored `tmp/` area; it never copies a diff or repository content into the
+manifest.
 
 ```bash
 RUN_LIVE_DATA_TESTS=1 RUN_LIVE_LLM_TESTS=1 PYTHON_DOTENV_DISABLED=1 \
@@ -185,7 +191,7 @@ queues the first execution. It records a recovery-point file containing only
 the backup filename, size, SHA-256 digest, creation time, and Alembic revision.
 It then writes one exclusive sanitized JSON entry per scenario under the
 ignored `tmp/incremental-research/live-validation/` area. Entries contain only
-the source commit, reviewed expectations, application status, validation
+the exact clean source commit, reviewed expectations, application status, validation
 verdict, and run/Chain/Revision IDs. A successful application execution whose
 results differ from expectations is `expectation_mismatch`; it is never passed.
 If enqueueing fails before SQLite creates a run, the scenario still receives an

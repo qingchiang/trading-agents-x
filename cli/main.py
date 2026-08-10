@@ -462,6 +462,21 @@ def _source_checkout() -> tuple[Path, str]:
             raise LiveThesisValidationError(
                 "executing source is not rooted at the detected Git checkout"
             )
+        status = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "status",
+                "--porcelain=v1",
+                "--untracked-files=all",
+                "--ignore-submodules=none",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
         subprocess.run(
             [
                 "git",
@@ -478,6 +493,11 @@ def _source_checkout() -> tuple[Path, str]:
         raise LiveThesisValidationError(
             "a Git checkout with an ignored Live Thesis experiment area is required"
         ) from exc
+    if status.stdout:
+        raise LiveThesisValidationError(
+            "a clean source checkout is required; staged, modified, or "
+            "non-ignored untracked files are present"
+        )
     commit = commit.strip().lower()
     if re.fullmatch(r"[0-9a-f]{40}", commit) is None:
         raise LiveThesisValidationError("detected Git commit is invalid")
