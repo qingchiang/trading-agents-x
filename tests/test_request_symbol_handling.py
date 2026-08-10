@@ -12,11 +12,6 @@ from tradingagents.dataflows.symbol_utils import normalize_symbol
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
-        ("BTCUSD", "BTC-USD"),
-        ("BTCUSDT", "BTC-USD"),
-        ("BTC-USDT", "BTC-USD"),
-        ("BTC-USDC", "BTC-USD"),
-        ("ethusdt", "ETH-USD"),
         ("AAPL", "AAPL"),
         ("GC=F", "GC=F"),
         ("600519", "600519.SS"),
@@ -26,18 +21,55 @@ from tradingagents.dataflows.symbol_utils import normalize_symbol
         ("EURUSD", "EURUSD=X"),
     ],
 )
-def test_normalize_symbol_crypto_and_passthrough(raw: str, expected: str) -> None:
+def test_normalize_symbol_supported_aliases_and_passthrough(raw: str, expected: str) -> None:
+    assert normalize_symbol(raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("BTCUSD", "BTCUSD"),
+        ("BTCUSDT", "BTCUSDT"),
+        ("BTC-USDT", "BTC-USDT"),
+        ("BTC-USDC", "BTC-USDC"),
+        ("ethusdt", "ETHUSDT"),
+    ],
+)
+def test_normalize_symbol_does_not_route_crypto_aliases(
+    raw: str,
+    expected: str,
+) -> None:
     assert normalize_symbol(raw) == expected
 
 
 @pytest.mark.parametrize(
     "value",
-    ["GC=F", "EURUSD=X", "AAPL", "0700.HK", "^GSPC", "600519"],
+    ["AAPL", "BRK-B", "TOTDY", "7203.T", "130A.T", "600519", "000001"],
 )
 def test_request_accepts_supported_symbols(value: str) -> None:
     request = AnalysisRequest(ticker=value, analysis_date="2026-07-24")
 
     assert request.ticker == normalize_symbol(value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["GC=F", "XAUUSD", "EURUSD", "EURUSD=X", "^GSPC", "SPX500"],
+)
+def test_request_rejects_explicit_non_equity_symbols(value: str) -> None:
+    with pytest.raises(ValidationError, match="Only listed equity instruments"):
+        AnalysisRequest(ticker=value, analysis_date="2026-07-24")
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["0700.HK", "CNC.TO", "BHP.AX", "AAPL.SS", "000001.SS", "399001.SZ"],
+)
+def test_request_rejects_symbols_outside_supported_equity_markets(
+    value: str,
+) -> None:
+    with pytest.raises(ValidationError, match="Only listed equity instruments"):
+        AnalysisRequest(ticker=value, analysis_date="2026-07-24")
 
 
 @pytest.mark.parametrize("value", ["", "bad symbol!", "A" * 65])
@@ -58,12 +90,7 @@ def test_request_rejects_unsupported_china_symbols(value: str) -> None:
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
-        ("BTCUSD", AssetType.CRYPTO),
-        ("BTC-USDT", AssetType.CRYPTO),
-        ("BTC-USD", AssetType.CRYPTO),
-        ("ETHUSD", AssetType.CRYPTO),
         ("AAPL", AssetType.STOCK),
-        ("GC=F", AssetType.STOCK),
         ("600519.SS", AssetType.STOCK),
     ],
 )
@@ -75,9 +102,6 @@ def test_request_infers_asset_type(raw: str, expected: AssetType) -> None:
 
 def test_request_uses_the_data_layer_canonical_symbol() -> None:
     for raw in (
-        "XAUUSD",
-        "BTCUSD",
-        "btc-usdt",
         "600519",
         "600519.SH",
         "000001",

@@ -53,6 +53,10 @@ _CREDENTIAL_ENV_VARS = (
 _EXPLICIT_LIVE_LLM_KEYS = {
     "DEEPSEEK_API_KEY": os.environ.get("DEEPSEEK_API_KEY"),
 }
+_EXPLICIT_INCREMENTAL_DATA_KEYS = {
+    "JQUANTS_API_KEY": os.environ.get("JQUANTS_API_KEY"),
+    "EDINET_API_KEY": os.environ.get("EDINET_API_KEY"),
+}
 for _env_var in _CREDENTIAL_ENV_VARS:
     os.environ[_env_var] = "placeholder"
 
@@ -68,6 +72,15 @@ def _dummy_api_keys(monkeypatch, request):
         monkeypatch.setenv(env_var, "placeholder")
     if live_test:
         for env_var, value in _EXPLICIT_LIVE_LLM_KEYS.items():
+            if value and value != "placeholder":
+                monkeypatch.setenv(env_var, value)
+    incremental_live = (
+        live_test
+        and request.node.get_closest_marker("live_data") is not None
+        and os.environ.get("RUN_LIVE_DATA_TESTS") == "1"
+    )
+    if incremental_live:
+        for env_var, value in _EXPLICIT_INCREMENTAL_DATA_KEYS.items():
             if value and value != "placeholder":
                 monkeypatch.setenv(env_var, value)
 
@@ -116,6 +129,7 @@ def app_settings(tmp_path: Path):
                 tmp_path / "tradingagents.db"
             ),
             "TRADINGAGENTS_CACHE_DIR": str(tmp_path / "cache"),
+            "TRADINGAGENTS_RESEARCH_UPDATE_MODE": "shadow",
         },
         load_env_files=False,
     )

@@ -221,18 +221,54 @@ export default function Memory() {
               </div>
             </details>
             {entry.outcome.status === "resolved" && (
-              <div className="returns">
-                <span>
-                  {t("rawReturn")}{" "}
-                  <strong>{percent(entry.outcome.raw_return)}</strong>
-                </span>
-                <span>
-                  {t("alphaReturn")}{" "}
-                  <strong>{percent(entry.outcome.alpha_return)}</strong>
-                </span>
-                <span>
-                  {entry.outcome.observation_start} → {entry.outcome.observation_end}
-                </span>
+              <>
+                <div className="returns">
+                  <span>
+                    {t("rawReturn")}{" "}
+                    <strong>{percent(entry.outcome.raw_return)}</strong>
+                  </span>
+                  <span>
+                    {t("alphaReturn")}{" "}
+                    <strong>{percent(entry.outcome.alpha_return)}</strong>
+                  </span>
+                  <span>
+                    {entry.outcome.observation_start} → {entry.outcome.observation_end}
+                  </span>
+                </div>
+                <p className="memory-lifecycle-note">
+                  {entry.outcome.method_version} · {entry.outcome.market_timezone} ·{" "}
+                  {entry.outcome.price_semantics} / {entry.outcome.adjustment_semantics}
+                </p>
+                <p className="memory-lifecycle-note">{entry.outcome.horizon_limit}</p>
+              </>
+            )}
+            {entry.outcome_reflection && (
+              <div className="memory-lifecycle-note">
+                <strong>{t("reflectionStatus")}: </strong>
+                {entry.outcome_reflection.status}
+                {entry.outcome_reflection.error_code && (
+                  <> · {entry.outcome_reflection.error_code}</>
+                )}
+                {["invalid", "retryable_failure"].includes(
+                  entry.outcome_reflection.status,
+                ) && (
+                  <button
+                    className="button compact-button"
+                    type="button"
+                    onClick={() => {
+                      void api
+                        .retryOutcomeReflection(entry.outcome_id)
+                        .then(() => load(window.location.search))
+                        .catch((cause) =>
+                          setError(
+                            cause instanceof Error ? cause.message : t("error"),
+                          ),
+                        );
+                    }}
+                  >
+                    {t("retryReflection")}
+                  </button>
+                )}
               </div>
             )}
             {entry.reflection && (
@@ -240,6 +276,42 @@ export default function Memory() {
                 <strong>{t("reflection")}</strong>
                 <Markdown>{entry.reflection}</Markdown>
               </blockquote>
+            )}
+            {entry.outcome_feedback && (
+              <div className="memory-lifecycle-note">
+                <strong>{t("feedbackQualification")}: </strong>
+                {entry.outcome_feedback.status} · {entry.outcome_feedback
+                  .qualification_policy_version ?? t("unversioned")} ·{" "}
+                {t("availableAt")} {entry.outcome_feedback.available_at}
+                {entry.outcome_feedback.reasons.length > 0 && (
+                  <ul>
+                    {entry.outcome_feedback.reasons.map((reason) => (
+                      <li key={reason}>{reason}</li>
+                    ))}
+                  </ul>
+                )}
+                {entry.outcome_feedback.status !== "retired" && (
+                  <button
+                    className="button compact-button"
+                    type="button"
+                    onClick={() => {
+                      void api
+                        .retireOutcomeFeedback(
+                          entry.outcome_feedback!.id,
+                          "retired_by_user",
+                        )
+                        .then(() => load(window.location.search))
+                        .catch((cause) =>
+                          setError(
+                            cause instanceof Error ? cause.message : t("error"),
+                          ),
+                        );
+                    }}
+                  >
+                    {t("retireFeedback")}
+                  </button>
+                )}
+              </div>
             )}
           </article>
         ))}

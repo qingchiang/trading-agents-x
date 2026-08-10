@@ -26,12 +26,22 @@ feeds (Reddit, Google News) — no new dependency.
 
 from __future__ import annotations
 
+import hashlib
 import html
 import logging
 import re
+from dataclasses import replace
 from datetime import datetime, timedelta
 from urllib.parse import urlencode, urljoin
 from urllib.request import Request
+from zoneinfo import ZoneInfo
+
+from tradingagents.provenance import (
+    SourceObservation,
+    SourceWatermark,
+    attach_source_observations,
+    attach_source_watermarks,
+)
 
 from ..config import get_config
 from ..symbol_utils import tokyo_securities_base
@@ -43,6 +53,9 @@ logger = logging.getLogger(__name__)
 
 _SEARCH_URL = "https://www.release.tdnet.info/onsf/TDJFSearch/TDJFSearch"
 _HOST = "https://www.release.tdnet.info"
+_REVISION_PREFIX_RE = re.compile(
+    r"^[（(](?:訂正|撤回|取消|差し替え|差替)(?:・[^）)]*)?[）)]\s*"
+)
 
 # The search result table (``id="maintable"``) lists one disclosure per
 # ``<tr class="odd|even">`` with stable per-cell classes; the title cell wraps
@@ -60,6 +73,7 @@ _TAG_RE = re.compile(r"<[^>]+>")
 # TDnet renders the timestamp as "YYYY/MM/DD HH:MM"; tolerate an optional :SS tail.
 _TIMESTAMP_FORMATS = ("%Y/%m/%d %H:%M", "%Y/%m/%d %H:%M:%S")
 _MAX_LOOKBACK_DAYS = 30
+_TOKYO = ZoneInfo("Asia/Tokyo")
 
 
 def _clean(text: str) -> str:
@@ -153,12 +167,23 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0)
     except (TypeError, ValueError):
         return _no_disclosures(ticker, start_date, end_date)
 
+    requested_start = start
     retained_start = today - timedelta(days=_MAX_LOOKBACK_DAYS)
     if end < retained_start:
-        return (
+        body = (
             "<TDnet unavailable: the free service exposes only 31 calendar dates "
             f"including today; requested historical window {start_date} to {end_date} "
             "is outside the rolling archive>"
+        )
+        return attach_source_watermarks(
+            body,
+            SourceWatermark(
+                source="TDnet",
+                scanned_start=start_date,
+                scanned_end=end_date,
+                status="unavailable",
+                limitations=("Requested interval is outside the TDnet rolling archive.",),
+            ),
         )
 
     # Clamp both to 31 dates ending on the requested analysis date and to what
@@ -170,15 +195,36 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0)
     page = _search(code, start_date.replace("-", ""), end_date.replace("-", ""), timeout)
     rows = _parse_rows(page) if page else []
     _warn_if_truncated(page, code, len(rows))
+    count_m = _COUNT_RE.search(page) if page else None
+    reported = int(count_m.group(1)) if count_m else None
     # Re-check server-side filters locally: exact code (``q`` is a free-word match)
     # and the disclosure date within the window (the search accepts loose/reversed
     # ranges, so look-ahead safety must be enforced here, not trusted to it).
-    matches = [
+    filtered_matches = [
         r for r in rows
         if tokyo_securities_base(r["code"]) == code and start <= r["at"].date() <= end
     ]
+    matches = list({_observation(row).version_id: row for row in filtered_matches}.values())
+    limitations = []
+    if start > requested_start:
+        limitations.append("Requested interval was truncated by the TDnet rolling archive.")
+    if reported is not None and reported > len(rows):
+        limitations.append("TDnet results were truncated before all reported records were parsed.")
+    if page is None:
+        limitations.append("TDnet collection was unavailable.")
+    watermark = SourceWatermark(
+        source="TDnet",
+        scanned_start=start_date,
+        scanned_end=end_date,
+        status=("unavailable" if page is None else "limited" if limitations else "complete"),
+        limitations=tuple(limitations),
+        returned_records=len(matches),
+        reported_records=reported,
+    )
     if not matches:
-        return _no_disclosures(ticker, start_date, end_date)
+        return attach_source_watermarks(
+            _no_disclosures(ticker, start_date, end_date), watermark
+        )
 
     matches.sort(key=lambda r: r["at"], reverse=True)  # most recent first
     kept = matches[: get_config()["news_article_limit"]]
@@ -186,10 +232,60 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0)
         f"### {r['title']}\nDisclosed: {r['at'].strftime('%Y-%m-%d %H:%M')} JST · PDF: {r['pdf']}"
         for r in kept
     )
-    return (
+    observations = _observations(matches)
+    body = (
         f"## {ticker} timely disclosures (TDnet 適時開示), "
         f"from {start_date} to {end_date}:\n\n{body}"
     )
+    body = attach_source_observations(body, *observations)
+    return attach_source_watermarks(body, watermark)
+
+
+def _observation(row: dict) -> SourceObservation:
+    pdf = str(row["pdf"])
+    native_id = pdf.rsplit("/", 1)[-1].removesuffix(".pdf")
+    published = row["at"].isoformat(sep=" ")
+    payload = "\x1f".join((native_id, published, str(row["title"]), pdf))
+    version = hashlib.sha256(payload.encode()).hexdigest()[:24]
+    available_at = row["at"].replace(tzinfo=_TOKYO).isoformat()
+    title = str(row["title"])
+    if any(token in title for token in ("撤回", "取消", "取下")):
+        status = "withdrawn"
+    elif any(token in title for token in ("差し替え", "差替")):
+        status = "replaced"
+    elif "訂正" in title:
+        status = "corrected"
+    else:
+        status = "published"
+    return SourceObservation(
+        source="TDnet",
+        record_id=native_id,
+        version_id=f"tdnet:{version}",
+        status=status,
+        published_at=published,
+        available_at=available_at,
+        title=title,
+        url=pdf,
+    )
+
+
+def _observations(rows: list[dict]) -> tuple[SourceObservation, ...]:
+    """Link only explicit TDnet revision prefixes to an observed prior record."""
+    by_subject: dict[str, SourceObservation] = {}
+    observations = []
+    for row in sorted(rows, key=lambda item: item["at"]):
+        observation = _observation(row)
+        subject = _REVISION_PREFIX_RE.sub("", observation.title).strip()
+        prior = by_subject.get(subject)
+        if observation.status != "published" and prior is not None:
+            observation = replace(
+                observation,
+                record_id=prior.record_id,
+                replaces_version_id=prior.version_id,
+            )
+        by_subject[subject] = observation
+        observations.append(observation)
+    return tuple(observations)
 
 
 def _no_disclosures(ticker: str, start_date: str, end_date: str) -> str:

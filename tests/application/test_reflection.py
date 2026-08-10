@@ -100,6 +100,7 @@ def test_reflection_prompt_is_short_term_research_feedback_only() -> None:
     assert "Do not invent causes" in system
     assert "position sizes" in system
     assert "account instructions" in system
+    assert "Method lesson:" in system
     assert "Alpha vs SPY: +1.2%" in human
     assert "5 completed aligned trading intervals" in human
     assert "Demand evidence improved" in human

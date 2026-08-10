@@ -11,7 +11,7 @@ TradingAgentsX is a local, single-user research system:
 
 - one Web process and, by default, one analysis worker;
 - one SQLite database on a local filesystem shared by those processes;
-- US/default, Japanese, China A-share, and compatible crypto/FX data paths;
+- US, Japanese, and China A-share equity data paths;
 - research decisions, not accounts, holdings, cash, execution, or rebalancing;
 - no multi-tenancy, collaboration, schedules, watchlists, or cross-host worker
   fleet in this architecture.
@@ -39,6 +39,10 @@ flowchart TB
     WORKER["AnalysisWorker"] --> REPO
     WORKER --> SERVICE
     SERVICE --> GRAPH["ResearchGraph"]
+    SERVICE --> BOUNDED["Bounded update coordinator"]
+    BOUNDED -. "typed progress result" .-> SERVICE
+    BOUNDED --> DATA
+    BOUNDED -. "shared deterministic Evidence assembly" .-> GRAPH
     GRAPH --> DATA["Market dataflows"]
     GRAPH --> CHECKPOINT["LangGraph SQLite saver"]
     CHECKPOINT --> DB
@@ -75,6 +79,7 @@ catalysts
 risks
 invalidation_conditions
 unresolved_questions
+question_source_dependencies[{question, required_sources}]
 time_horizon
 scenarios[base, bull, bear]
 valuation_assessment
@@ -169,12 +174,15 @@ settings must remain isolated even if worker concurrency changes in the future.
 1. normalizes and validates `AnalysisRequest`;
 2. resolves and redacts run configuration;
 3. creates or idempotently returns a run;
-4. retrieves deterministic decision memory;
+4. retrieves deterministic legacy decision memory for ordinary runs; Research
+   Chain executions receive an explicit empty `MemoryContext`;
 5. builds per-run LLM clients and `RunContext`;
 6. executes or resumes the graph;
-7. persists events, reports, evidence, decision, metrics, and warnings;
+7. persists events, reports, evidence, decision, metrics, and warnings and,
+   for an explicitly requested initial chain, atomically commits its first
+   Research Revision;
 8. cleans up or retains checkpoints according to terminal state;
-9. creates a pending outcome for background settlement.
+9. creates a pending Outcome Observation for background settlement.
 
 Graph nodes return state; they do not write files, reports, or application
 tables.
@@ -198,8 +206,9 @@ interrupt forces termination.
 
 - `retry` is valid for a failed run, increments its attempt, and reuses the
   compatible checkpoint thread.
-- a terminal run can seed an editable New Run form; submitting it creates a
-  linked run with a new ID and fresh data/evidence snapshot.
+- `source_run_id` remains a legacy template relation for compatible API
+  callers, but it is not exposed in the primary reader flow and is never used
+  as Research Chain lineage or an Eligible Baseline;
 - a queued cancellation becomes terminal immediately;
 - a running cancellation is checked cooperatively at graph-node boundaries;
 - supervisor shutdown returns a running claim to the queue at the next node
@@ -209,6 +218,255 @@ interrupt forces termination.
 
 Successful and cancelled runs delete their checkpoint thread. Failed runs keep
 it for retry or later trash cleanup.
+
+### Initial Research Chains
+
+A user may explicitly request that a Full Analysis establish longitudinal
+research. The run remains the Research Execution and uses the unchanged Full
+ResearchGraph inputs. After the graph succeeds, the application performs
+Research State Assembly from the sealed Evidence, reports, and final decision.
+It assigns opaque Claim and Question identities and validates a complete,
+versioned Current Research State, Coverage Attestation, Update Summary, and
+Effective Evidence Snapshot.
+
+The repository commits the successful run, a new linear Research Chain, and
+its immutable first Research Revision in one SQLite transaction. The first
+chain for a normalized Instrument becomes Primary; later alternative chains
+do not replace it automatically. Failed or cancelled executions create no
+chain or Revision. Ordinary Full Analysis runs remain independent unless the
+user selected the chain-creation workflow explicitly.
+
+Each Revision owns its complete state and Evidence snapshot. Its producing-run
+link uses `ON DELETE SET NULL`, so trash expiry can remove the execution audit
+without deleting or weakening the immutable research state. The API, Web
+reader, and Revision exports read the Revision directly rather than replaying
+the producing run.
+
+Revision Role (`initial` or `update`), Execution Strategy (`full` or
+`incremental`), and Change Conclusion are separate persisted fields. An
+initial Revision has no Change Conclusion. An update records Material Change,
+No Material Change, or Indeterminate; Full execution alone never implies
+Material Change. The unreleased `0008` migration derives role from structural
+predecessor lineage, preserves explicit historical update outcomes, leaves an
+initial Change Conclusion null, and retains the old `outcome` column only as a
+downgrade compatibility source. Application contracts never read it as current
+semantics. The legacy `coverage_incomplete` Revision outcome is migrated
+directly to Indeterminate; coverage JSON by itself never creates a Change
+Conclusion. Version-1 Shadow audit JSON is structurally migrated to the typed
+version-2 contract, and downgrade rewrites both audit JSON and compatibility
+outcomes into values understood by the prior application.
+
+For Japanese disclosures, the Effective Evidence Snapshot also carries stable
+EDINET/TDnet Source Record identities, immutable observed Source Record Version
+identities, per-version new/inherited lineage, and source-specific Watermarks.
+Version identity is independent of the requested analysis date, so overlapping
+collection can re-observe and deduplicate a version while retaining superseded,
+corrected, withdrawn, or replaced versions. Watermarks record the interval
+actually scanned plus archive, truncation, and availability limitations; they
+are not inferred from an empty result. Disjoint intervals remain separate and
+an unscanned gap downgrades Required coverage instead of being treated as one
+continuous scan.
+
+Japanese J-Quants fundamentals use a stable issuer/period Source Record identity,
+retain each upstream disclosure number as the version's native record identity,
+and carry an explicit accounting-period comparison key. These fields classify
+new filings, corrections, restatements, accounting-scope changes, and otherwise
+unclassifiable differences across snapshots without conflating logical identity
+with an individual upstream disclosure. A latest visible disclosure more than
+180 days before the analysis cutoff marks the snapshot limited. Adjusted
+market history records its provider, adjustment contract, latest observation,
+unit, precision, and the actual returned warm-up interval rather than the
+requested interval. The Current Research
+State retains audited market reference levels, and a Revision delta records
+ordinary movement separately from a deterministic crossing of one of those
+levels. Provider, adjustment, or unit drift is an incompatible market signal,
+not an unchanged observation.
+
+### Full Research Chain updates
+
+In `off` mode a manual update targets exactly the current Revision of one
+Research Chain and requires a strictly later cutoff. The application records
+one Update Intent on the existing run execution boundary. Duplicate
+submissions for the same head and request resolve to the same run, while
+retries add an attempt to that execution. A partial unique constraint prevents
+concurrent queued or running updates for one chain.
+
+The ResearchGraph receives only the new `AnalysisRequest` and runs the existing
+Full Analysis pipeline without Prior Research. After Full Evidence and the
+independently assembled candidate Current Research State are sealed, but before
+comparison with the Eligible Baseline, the application runs a bounded Question
+Disposition step. Its structured result may refer only to baseline and
+candidate Question IDs assigned by application code, references from bounded
+current Full Evidence summaries (including content and PIT timing), one
+disposition, an optional successor, and a concise reason.
+Only complete one-to-one mappings are applied. Answered and reopened Questions
+retain their ID; superseded Questions retain their ID and link to a separately
+assigned successor ID. A Full decision's omission never changes a Question.
+
+The structured step receives one repair attempt. A second invalid result,
+current-Evidence violation, incomplete coverage of baseline Questions, or
+ambiguous identity preserves every baseline status and retains unmatched Full
+Questions as new objects. The Revision records the stable limitation in its
+delta, Question coverage, Update Summary, and event audit. Without an
+independently established Material Change this makes the Revision
+Indeterminate with reason `question_disposition_limited`; independently
+established Material Change remains authoritative while exposing the
+limitation. Claim identity comparison then runs together with the applied
+Question dispositions. The immutable Revision stores the typed delta, complete
+Current Research State, Coverage Attestation, Update Summary, Effective
+Evidence Snapshot with inherited/new lineage, Full artifacts, and metrics.
+Each disposed Question retains its latest disposition and reason in Current
+Research State, so the reader can distinguish a reopened Question from an
+ordinary open Question without reconstructing the delta.
+
+Coverage Attestation distinguishes Required and Advisory source domains.
+EDINET and TDnet company disclosures are Required for Japanese disclosure
+coverage. Google News is Advisory unless an active Claim or open Question
+explicitly names it as Required. Limited or unavailable Required coverage, and
+observed official correction or withdrawal states, are represented as blocking
+a quiet reassessment when first observed; an already assessed inherited version
+does not become a permanent blocker. Google News watermarks are live-only, so
+Required Google coverage cannot establish No Material Change. A semantically
+unchanged Full update with one of these blockers creates an Indeterminate
+Revision with stable reason `coverage_incomplete`, not No Material Change or a
+fabricated Material Change. It becomes the readable and exportable head but is
+never an Eligible Baseline.
+
+When their analyst domains are selected, J-Quants fundamental snapshots and
+adjusted market history are Required for Japanese coverage. Missing, stale,
+partial, incompatible, truncated, or insufficient-warm-up observations block a
+quiet reassessment. Social sentiment and broad media remain Advisory unless an
+active Claim or open Question promotes a named source to Required.
+
+The repository commits the successful execution, new Revision, and changed
+chain head in one SQLite transaction after rechecking the baseline. Failure,
+cancellation, invalid state, or a stale baseline therefore leaves the prior
+head unchanged. Historical runs and decision-memory rows are never inferred
+into Research Chains.
+
+Before the transaction advances the head, the Revision contract enumerates
+every Evidence reference reachable from Current Research State, Coverage,
+delta, Update Summary, and typed update audit. Every reference must resolve in
+the same Effective Evidence Snapshot, and every Source Record replacement must
+resolve to a Source Record Version there. Bounded Evidence retained by a
+Shadow audit is merged into the authoritative Full snapshot for this purpose.
+A closure failure rejects the Revision while the failed Research Execution and
+its sanitized audit remain durable.
+
+The server derives the head's next-update policy independently from role and
+conclusion. Complete state, Evidence closure, Required/object coverage, and
+compatible market semantics yield `incremental_allowed`; otherwise the API
+returns `full_required` and a stable reason. An Indeterminate head always
+requires an explicitly Full reassessment, and an incremental request is
+rejected rather than allowed to repair the baseline with candidate coverage.
+
+### Shadow incremental updates
+
+Manual Japanese Research Chain updates begin with a bounded, deterministic
+collection phase before any LLM client is created. The phase rechecks EDINET
+and TDnet with overlap, collects selected or thesis-required J-Quants
+fundamental and adjusted-market snapshots, and labels contextual sources
+Advisory. Required sources are derived from active Claims and open Questions;
+EDINET and TDnet remain Required for Japanese chains, and audited market
+reference levels require compatible adjusted-market coverage.
+
+Instrument/cutoff mismatches, incomplete or non-PIT Required coverage, newly
+observed corrections, withdrawals, replacements or source versions,
+fundamental changes, provider/adjustment/unit incompatibility, threshold
+crossings, and invalid schemas produce stable Full-escalation reasons. Once a
+gate escalates, no later incremental or semantic stage runs. Collection
+failure becomes unavailable coverage and continues fail-closed through the
+same update's existing Full Analysis rather than becoming a quiet result.
+The dotted bounded-to-graph edge is deliberately narrow: the coordinator
+reuses the pure `collect_evidence` assembler currently housed in the graph
+module, but never constructs or executes a graph, invokes a model, or writes
+durable state. `AnalysisService` remains the sole persistence coordinator.
+Bounded partial results return through an explicit progress callback owned by
+`AnalysisService`; the service persists each completed checkpoint so later
+cancellation or failure does not erase already checked windows or metrics.
+
+If deterministic gates leave new Evidence unclassified, `AnalysisService`
+creates a schema-focused quick client for one bounded semantic Change
+Assessment. Its input is limited to the Current Research State, applicable
+Claim and Question identifiers, materiality and coverage rules, necessary
+prior Evidence summaries, and the new Evidence. Research Artifacts and earlier
+research conclusions are not inputs. The typed result records support,
+weakening, contradiction, answering, reopening, irrelevance, uncertainty, or
+potentially material novelty. Application code resolves suggested identities;
+ambiguous targets never reuse a persistent ID. Weakening, contradiction,
+Question-state changes, novelty, ordinal Claim Confidence changes, and
+uncertainty produce stable Full-escalation reasons. Invalid structured output
+gets one repair attempt and then escalates fail-closed.
+
+When bounded gates can propose No Material Change, Shadow mode persists the
+candidate and its semantic assessment, then runs independent Full Analysis.
+Only the Full result creates the authoritative Revision and advances the
+chain. Agreement, disagreement, inconclusive, or not-applicable is an
+experimental finding, not an execution failure. A No Material Change candidate
+paired with an Indeterminate Full Revision is inconclusive and counts as
+neither agreement nor disagreement. The run and Revision retain bounded
+checked windows, Coverage Attestation, candidate Change Conclusion, semantic
+relationships, Evidence lineage, escalation reason,
+comparison, and separately attributed bounded/Full metrics; the API, reader,
+export, and events expose the same sanitized result without prompt text or
+private reasoning.
+Failed or cancelled Shadow executions retain their run audit but never create
+a Revision.
+
+The maintainer-only authoritative validation command requires both live test
+opt-ins plus a separate in-place database confirmation. Before backup or
+execution it requires the executing Git checkout to have no staged changes,
+tracked modifications, or non-ignored untracked files; ignored credentials,
+databases, backups, reviewed cases, and experiment manifests remain outside
+that source-cleanliness decision. The full commit observed at the clean-checkout
+check is the procedural source identifier recorded in the sanitized manifest;
+repository contents and diffs are not copied there. The workflow reverifies
+the same HEAD and clean-worktree condition before backup, at each execution
+boundary, and before recording each scenario. This is a process attestation,
+not byte-for-byte proof of modules already loaded into the process. The
+command verifies an ordinary online backup before its first execution and
+rejects reused cases or heads whose server-derived,
+source-qualified next-update policy is not `incremental_allowed`. The five
+reviewed cases directly select distinct supported Japanese Research Chains and
+run isolated Shadow scenarios against the configured main SQLite database;
+there is no runtime ticker whitelist. SQLite remains the sole owner of
+requests, settings, Evidence, coverage, state, audit, events, metrics,
+artifacts, decisions, runs, and Revisions. The ignored experiment area receives
+only one exclusive, sanitized metadata entry per scenario plus non-sensitive
+recovery-point metadata; application success and expectation agreement remain
+separate verdict dimensions. This is a manual, user-triggered experiment, not
+a scheduled or production automation facility.
+
+The internal research-update mode is persisted in each update's immutable
+settings snapshot. `off` routes every update through Full Analysis. `shadow`
+runs bounded assessment for any supported Japanese equity whose current
+Revision has complete Required Source coverage, and keeps Full Analysis
+authoritative. `experimental` uses the same source-qualified policy and
+fail-closed gates, but a validated No Material Change candidate becomes the
+authoritative incremental Revision without constructing the Full graph. Any
+coverage, integrity, semantic, novelty, schema, or uncertainty escalation in
+`experimental` continues through Full Analysis in the same execution. United
+States and mainland-China equities remain manually updateable through Full
+Analysis only.
+
+The typed next-update policy combines mode, Japanese-equity capability,
+Revision/Evidence closure, general Coverage, compatible market semantics, and
+Required Source completeness. EDINET and TDnet are always Required for Japanese
+announcements; Required fundamentals and market domains use J-Quants
+fundamentals and adjusted-OHLCV contracts. Active Claim and open Question source
+dependencies add further Required Sources. Each needs a complete point-in-time
+Watermark covering the Revision cutoff. A zero-result Watermark is sufficient;
+a positive result needs a same-source version observed by that execution and
+resolved through Evidence in the Effective Evidence Snapshot.
+
+Before an experimental candidate can commit, the application revalidates
+complete Required, Claim, and Question coverage; identical semantic Current
+Research State apart from cutoff and Evidence links; reaffirmed stable object
+identities; and cutoff/Evidence snapshot consistency. It then renders a
+deterministic localized Update Summary, seals the effective Evidence, and
+atomically completes the execution, appends the immutable Revision, and moves
+the chain head. Cancellation, validation failure, or a stale head cannot
+partially advance the chain.
 
 ### Trash lifecycle
 
@@ -241,14 +499,17 @@ Alembic manages application tables:
 
 | Table | Responsibility |
 | --- | --- |
-| `runs` | request, redacted settings snapshot, status, lease, error, metrics |
+| `runs` | request, redacted settings snapshot, status, lease, error, metrics, and in-progress/terminal Shadow audit |
 | `run_attempts` | attempt state, checkpoint thread, lease and resume count |
 | `run_events` | per-run monotonic sequence, attempt, node, sanitized payload |
 | `run_artifacts` | versioned analyst, deliberation, and decision-stage artifacts, including component generation observations |
 | `run_evidence` | independently sealed EvidenceBundle and digest |
 | `decisions` | typed final decision, numeric audit appendix, market identity |
-| `outcomes` | benchmark, five-interval dates, raw return, alpha |
-| `reflections` | outcome-aware research reflection |
+| `research_chains` | one Instrument's linear lineage, Primary designation, and current head |
+| `research_revisions` | immutable complete state, coverage, summary, Evidence snapshot, producing execution, bounded experiment finding, and metrics |
+| `outcomes` | versioned Observation method, source Decision/optional Revision, market-local window, benchmark, semantics, returns, availability and limitations |
+| `reflections` | independent pending/generated/invalid/retryable-failure Reflection lifecycle and sanitized candidate |
+| `outcome_feedback` | qualification status/reasons, applicability, horizon and PIT availability |
 
 LangGraph saver tables live in the same database file but remain owned by its
 saver. Application code does not treat them as domain tables.
@@ -297,7 +558,7 @@ markdown
 report_sections[{id, title, anchor, source_refs}]
 confidence
 key_claims[{id, section_id, kind, importance, statement, implication,
-            confidence, evidence_refs}]
+            confidence, evidence_refs, required_sources}]
 source_refs
 audit_status: complete | incomplete
 warnings
@@ -327,6 +588,18 @@ quality
 fallback
 provenance
 ```
+
+Japanese disclosure producers additionally attach machine-readable Source
+Record observations and Source Watermarks outside human-visible Markdown.
+Evidence sealing validates and stores those structures in provenance before
+Revision assembly. EDINET uses its document and parent-document identities;
+TDnet uses the official PDF record identity and a deterministic observed-version
+digest. When a TDnet title explicitly marks a correction, withdrawal, or
+replacement of a same-subject disclosure present in the overlap window, the
+new version retains the prior official PDF record identity and records the
+replaced version; unmatched titles remain separate native records rather than
+being joined heuristically. Both retain timezone-aware availability and actual-source/fallback
+association through the Evidence item that carried the observation.
 
 `EvidenceBundle(version="8")` deduplicates items, validates unique references,
 rejects effective dates after the analysis cutoff, interprets `available_at`
@@ -484,7 +757,8 @@ collapsible views.
 
 ## Decision memory and outcomes
 
-The repository supplies deterministic context:
+The repository retains the original deterministic Decision-memory selector for
+ordinary non-chain runs only:
 
 - up to five most recent resolved full entries for the same ticker;
 - up to three most recent resolved reflection-only entries for a different
@@ -494,8 +768,15 @@ The repository supplies deterministic context:
 No vector database is used. This avoids introducing an unmeasured semantic
 similarity feedback loop.
 
+Initial and updated Research Chain executions do not call that selector and do
+not inject historical Decisions, Reflections, `MemoryContext`, or Outcome
+Feedback into collection, analysis, deliberation, the Judge, Final Committee,
+state assembly, Change Assessment, or Full comparison. There is no Outcome
+Feedback Context selector in the first experiment.
+
 Outcome settlement is a low-priority worker task, independent of a future run
-for the same ticker. Ticker and benchmark histories retain their own
+for the same ticker. The deterministic Outcome Observation is persisted before
+any model call. Ticker and benchmark histories retain their own
 exchange-local date labels and are intersected by date. Six common completed
 closes form five intervals:
 
@@ -505,14 +786,35 @@ alpha      = raw return - (benchmark_close[5] / benchmark_close[0] - 1)
 ```
 
 Each pending outcome stores its next due time. The initial check is no earlier
-than the market-local day after six plausible closes (daily for crypto,
-weekdays as the lower bound for other markets). An incomplete observation is
-deferred for 24 hours; a provider or transport failure is retried after one
-hour. Exchange holidays therefore degrade to bounded daily checks instead of
-the worker poll interval.
+than the market-local day after six plausible weekday closes. An incomplete
+observation is deferred for 24 hours; a provider or transport failure is
+retried after one hour. Exchange holidays therefore degrade to bounded daily
+checks instead of the worker poll interval.
 
-The stored range and reflection describe short-term feedback. They are not the
-sole truth for long-horizon thesis validity or graph quality.
+The method is versioned as `short_term_relative_return.v1` and records its
+source Decision and optional Research Revision, benchmark, market timezone,
+window, holding intervals, explicitly adjusted daily-close semantics, data
+availability, raw and relative return, and limitations. It is short-term
+methodological feedback and cannot prove or disprove a medium- or long-horizon
+thesis.
+
+Reflection has a separate pending, generated, invalid, or retryable-failure
+lifecycle. A failure stores only a sanitized error code and retry time; it does
+not recompute or erase the Observation, fail a Research Execution, or alter a
+Research Revision. Generated Reflection text is only a Feedback candidate.
+Deterministic qualification checks its schema, source, PIT window and
+availability, method category, horizon and applicability and rejects content
+that repeats old ratings or thesis text, price targets, current factual or
+Evidence claims, or execution advice. Feedback records eligible, ineligible,
+or retired status and reasons. Its `available_at` is the latest of Observation
+data availability, Reflection generation, and qualification completion.
+For the versioned five-completed-interval policy, an Observation may begin on
+the source Decision's or linked Research Revision's market-local cutoff date
+but never before it, and must end strictly after that cutoff. When a linked
+Revision exists, its cutoff is the effective source cutoff. Newly qualified
+Feedback records `outcome_feedback_qualification.v1`; pre-policy and
+legacy-unqualified rows keep an explicit null policy version and their persisted
+status is never recalculated.
 
 ## Data routing and point-in-time contracts
 
@@ -520,8 +822,13 @@ sole truth for long-horizon thesis validity or graph quality.
 
 `normalize_symbol` converts supported aliases to canonical
 Yahoo-compatible symbols before routing. It covers broker aliases, common
-forex/crypto forms, bare A-share codes, and `CODE.SH` → `CODE.SS`.
+forex forms, bare A-share codes, and `CODE.SH` → `CODE.SS`.
 Ambiguous or unsupported mainland symbols fail loudly.
+Known Crypto symbols are rejected by the public request contract before data
+routing or research execution begins. The same positive product boundary
+accepts only US, Japanese, and mainland-China A-share equity shapes. Forex,
+future, index, and other exchange suffixes remain available to low-level vendor
+normalization where needed but cannot create a research run.
 
 The analysis cutoff uses the instrument market's timezone, never the host's
 calendar or an unconditional UTC date. Historical tools receive that cutoff

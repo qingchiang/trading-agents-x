@@ -6,7 +6,7 @@ import json
 import operator
 import re
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import date
 from typing import Annotated, Any, Literal
 
@@ -106,6 +106,8 @@ from tradingagents.provenance import (
     ProvenanceRecord,
     extract_evidence_spans,
     extract_provenance,
+    extract_source_observations,
+    extract_source_watermarks,
     strip_provenance_markers,
     temporal_scope_from_records,
 )
@@ -518,7 +520,7 @@ class ResearchGraph:
                     context=context,
                 )
             narrative = _clean_narrative(str(result.get(report_key, "")))
-            evidence = _collect_evidence(
+            evidence = collect_evidence(
                 result.get("messages", []),
                 narrative,
                 requested_date=context.request.analysis_date,
@@ -1526,7 +1528,7 @@ def _analyst_route(state: AgentState) -> str:
     return "done"
 
 
-def _collect_evidence(
+def collect_evidence(
     messages: Iterable[Any],
     _narrative: str,
     *,
@@ -1605,6 +1607,11 @@ def _collect_evidence(
             )
             continue
         content = message.content if isinstance(message.content, str) else str(message.content)
+        source_metadata = {
+            "source_records": [asdict(item) for item in extract_source_observations(content)],
+            "source_watermarks": [asdict(item) for item in extract_source_watermarks(content)],
+        }
+        source_metadata = {key: value for key, value in source_metadata.items() if value}
         spans = extract_evidence_spans(content)
         if spans:
             for span in spans:
@@ -1625,6 +1632,7 @@ def _collect_evidence(
                     records,
                     span.content,
                     span.temporal_scope,
+                    source_metadata,
                 )
             continue
         records = extract_provenance(content)
@@ -1641,6 +1649,7 @@ def _collect_evidence(
         collect_payload(
             records,
             strip_provenance_markers(content).strip() or None,
+            provenance_metadata=source_metadata,
         )
 
     for block in prefetched_blocks:
@@ -1658,7 +1667,9 @@ def _collect_evidence(
             {
                 "structured_numeric_facts": block.get(
                     "structured_numeric_facts", []
-                )
+                ),
+                "source_records": block.get("source_records", []),
+                "source_watermarks": block.get("source_watermarks", []),
             },
         )
 
@@ -1693,6 +1704,9 @@ def _collect_evidence(
         )
         items[item.ref] = item
     return list(items.values())
+
+
+_collect_evidence = collect_evidence
 
 
 def _evidence_from_record(

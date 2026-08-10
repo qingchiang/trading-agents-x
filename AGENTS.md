@@ -55,8 +55,8 @@ CI (`.github/workflows/ci.yml`) uses uv and `uv.lock` for pytest on Python
 OpenAPI/type drift checks, wheel validation, and Docker Web/worker smoke. A
 fresh standard venv installs the final wheel with pip as the only project
 installation path that does not use uv, preserving the downstream wheel
-consumer contract. Pytest markers are `unit`, `integration`, `live_data`, and
-`smoke`.
+consumer contract. Pytest markers are `unit`, `integration`, `live_data`,
+`live_llm`, and `smoke`.
 
 ## Sandboxed environments
 
@@ -139,6 +139,19 @@ has since been deleted or renamed.
   automatically loaded by every agent session.
 - Harness-specific files should adapt this shared guide, not duplicate it or
   become a second source of project truth.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs are stored as local Markdown under `.scratch/<feature>/`; do
+not publish them remotely unless explicitly requested. See
+`docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+This is a single-context repo with `CONTEXT.md` and `docs/adr/` at the root.
+See `docs/agents/domain.md`.
 
 ## Git commit instructions
 

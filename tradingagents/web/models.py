@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -15,6 +15,11 @@ from tradingagents.application.contracts import (
     RunAttemptView,
     RunProfile,
     RunView,
+)
+from tradingagents.application.outcome_feedback import (
+    OutcomeFeedbackStatus,
+    OutcomeObservationStatus,
+    OutcomeReflectionStatus,
 )
 
 
@@ -42,9 +47,13 @@ class RunCreateRequest(AnalysisRequest):
         return value.strip() if isinstance(value, str) else value
 
     def analysis_request(self) -> AnalysisRequest:
-        return AnalysisRequest.model_validate(
-            self.model_dump(exclude={"source_run_id"})
-        )
+        return AnalysisRequest.model_validate(self.model_dump(exclude={"source_run_id"}))
+
+
+class ResearchChainUpdateRequest(ApiModel):
+    baseline_revision_id: str = Field(min_length=1, max_length=36)
+    analysis_date: date
+    execution_strategy: Literal["full", "incremental"] | None = None
 
 
 class RunBatchRequest(ApiModel):
@@ -64,6 +73,10 @@ class RunBatchRequest(ApiModel):
 class RunBatchResult(ApiModel):
     runs: tuple[RunView, ...]
     changed: int = Field(ge=0)
+
+
+class OutcomeFeedbackRetireRequest(ApiModel):
+    reason: str = Field(min_length=1, max_length=500)
 
 
 class ExportQuery(ApiModel):
@@ -135,17 +148,76 @@ class CapabilitiesResponse(ApiModel):
     defaults: CapabilityDefaults
 
 
-class MemoryOutcome(ApiModel):
-    status: Literal["pending", "resolved"]
+class OutcomeObservationView(ApiModel):
+    status: OutcomeObservationStatus
+    source_decision_id: int
+    source_revision_id: str | None
     benchmark: str
-    observation_start: str | None
-    observation_end: str | None
+    market_timezone: str
+    method_category: str
+    method_version: str
+    price_semantics: str
+    adjustment_semantics: str
+    horizon_limit: str
+    limitations: list[str]
+    observation_start: str | None = Field(
+        description=(
+            "Market-local return-baseline date; it may equal but cannot precede "
+            "the effective source cutoff."
+        )
+    )
+    observation_end: str | None = Field(
+        description="Market-local observation end, strictly after the effective source cutoff."
+    )
     holding_intervals: int
     raw_return: float | None
     alpha_return: float | None
+    data_available_at: datetime | None
+
+
+class OutcomeReflectionView(ApiModel):
+    status: OutcomeReflectionStatus
+    generated_at: datetime | None
+    last_attempted_at: datetime | None
+    next_retry_at: datetime | None
+    error_code: str | None
+
+
+class OutcomeFeedbackApplicabilityView(ApiModel):
+    schema_version: Literal["1"]
+    scope: Literal["instrument", "market"]
+    instrument: str | None
+    market: str | None
+    research_stages: list[str]
+    research_domains: list[str]
+    method_category: str
+    horizon: str
+
+
+class OutcomeFeedbackView(ApiModel):
+    id: int
+    status: OutcomeFeedbackStatus
+    qualification_policy_version: str | None = Field(
+        description=(
+            "Prospective qualification-policy version, independent from the Feedback "
+            "schema and Observation method versions; legacy rows may be unversioned."
+        )
+    )
+    reasons: list[str]
+    method_category: str
+    horizon_limit: str
+    applicability: OutcomeFeedbackApplicabilityView
+    qualified_at: datetime
+    available_at: datetime = Field(
+        description=(
+            "Latest availability time of the Observation data, Reflection, and qualification."
+        )
+    )
+    retired_at: datetime | None
 
 
 class MemoryEntry(ApiModel):
+    outcome_id: int
     run_id: str
     ticker: str
     instrument_name: str | None = None
@@ -155,5 +227,7 @@ class MemoryEntry(ApiModel):
     analysis_date: str
     profile: RunProfile
     decision: ResearchDecision
-    outcome: MemoryOutcome
+    outcome: OutcomeObservationView
     reflection: str | None
+    outcome_reflection: OutcomeReflectionView | None
+    outcome_feedback: OutcomeFeedbackView | None

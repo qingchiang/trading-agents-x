@@ -9,6 +9,7 @@ from tradingagents.application.outcome_schedule import earliest_outcome_check_at
 from tradingagents.application.outcomes import (
     ERROR_RECHECK_INTERVAL,
     PENDING_RECHECK_INTERVAL,
+    OutcomeObservation,
     OutcomeSettlement,
 )
 
@@ -37,6 +38,7 @@ class _ScheduledRepository:
     def __init__(self, item):
         self.item = item
         self.due_at = None
+        self.due_at = None
         self.checked = []
 
     def pending_outcomes(self, limit, *, due_at):
@@ -61,19 +63,11 @@ def _pending_item():
 def test_earliest_check_uses_six_market_closes_and_local_timezone() -> None:
     stock_due = earliest_outcome_check_at(
         ticker="6501.T",
-        asset_type="stock",
-        analysis_date=date(2026, 7, 28),
-        holding_intervals=5,
-    )
-    crypto_due = earliest_outcome_check_at(
-        ticker="BTC-USD",
-        asset_type="crypto",
         analysis_date=date(2026, 7, 28),
         holding_intervals=5,
     )
 
     assert stock_due == datetime(2026, 8, 4, 15, tzinfo=timezone.utc)
-    assert crypto_due == datetime(2026, 8, 3, 0, tzinfo=timezone.utc)
 
 
 def test_pending_observation_is_deferred_for_24_hours(
@@ -134,6 +128,184 @@ def test_provider_failure_is_deferred_for_one_hour(
             },
         )
     ]
+
+
+class _LifecycleRepository:
+    def __init__(self, item):
+        self.item = item
+        self.observations = []
+        self.failures = []
+        self.reflections = []
+
+    def pending_outcomes(self, _limit, *, due_at):
+        self.due_at = due_at
+        if self.item["reflection_status"] == "generated":
+            return []
+        return [dict(self.item)]
+
+    def persist_outcome_observation(self, outcome_id, *, observation, observed_at):
+        self.observations.append((outcome_id, observation, observed_at))
+        self.item.update(
+            {
+                "status": "resolved",
+                "observation_start": observation.start_date,
+                "observation_end": observation.end_date,
+                "raw_return": observation.raw_return,
+                "alpha_return": observation.alpha_return,
+                "reflection_status": "pending",
+            }
+        )
+
+    def mark_reflection_failure(self, outcome_id, **kwargs):
+        self.failures.append((outcome_id, kwargs))
+        self.item["reflection_status"] = "retryable_failure"
+
+    def persist_generated_reflection(self, outcome_id, **kwargs):
+        self.reflections.append((outcome_id, kwargs))
+        status = "generated" if kwargs["reflection"].strip() else "invalid"
+        self.item["reflection_status"] = status
+        return status
+
+
+def test_observation_survives_reflection_failure_and_retry_does_not_reobserve(
+    app_settings,
+    monkeypatch,
+) -> None:
+    now = datetime(2026, 8, 5, 0, tzinfo=timezone.utc)
+    item = {
+        **_pending_item(),
+        "status": "pending",
+        "reflection_status": None,
+        "observation_start": None,
+        "observation_end": None,
+        "raw_return": None,
+        "alpha_return": None,
+        "market_timezone": "Asia/Tokyo",
+    }
+    repository = _LifecycleRepository(item)
+    settlement = OutcomeSettlement(
+        app_settings,
+        repository,
+        reflector=object(),
+        utc_clock=lambda: now,
+    )
+    observation = OutcomeObservation(
+        raw_return=0.10,
+        alpha_return=0.04,
+        holding_intervals=5,
+        start_date=date(2026, 7, 29),
+        end_date=date(2026, 8, 5),
+    )
+    observe_calls = 0
+    reflection_calls = 0
+
+    def observe(*_args, **_kwargs):
+        nonlocal observe_calls
+        observe_calls += 1
+        return observation
+
+    def reflect(**_kwargs):
+        nonlocal reflection_calls
+        reflection_calls += 1
+        if reflection_calls == 1:
+            raise RuntimeError("sensitive provider detail")
+        return "Use explicit short-window checks when reviewing methodology."
+
+    monkeypatch.setattr(settlement, "observe", observe)
+    monkeypatch.setattr(settlement, "_reflection", reflect)
+
+    first = settlement.settle_once()
+    second = settlement.settle_once()
+
+    assert first == {"checked": 1, "resolved": 0, "pending": 0, "failed": 1}
+    assert second == {"checked": 1, "resolved": 1, "pending": 0, "failed": 0}
+    assert observe_calls == 1
+    assert len(repository.observations) == 1
+    assert repository.failures[0][1]["error_code"] == "RuntimeError"
+    assert repository.reflections[0][1]["reflection"].startswith("Use explicit")
+
+
+def test_invalid_reflection_does_not_recompute_completed_observation(
+    app_settings,
+    monkeypatch,
+) -> None:
+    now = datetime(2026, 8, 5, 0, tzinfo=timezone.utc)
+    item = {
+        **_pending_item(),
+        "status": "resolved",
+        "reflection_status": "pending",
+        "observation_start": date(2026, 7, 29),
+        "observation_end": date(2026, 8, 5),
+        "raw_return": 0.10,
+        "alpha_return": 0.04,
+    }
+    repository = _LifecycleRepository(item)
+    settlement = OutcomeSettlement(
+        app_settings,
+        repository,
+        reflector=object(),
+        utc_clock=lambda: now,
+    )
+    monkeypatch.setattr(
+        settlement,
+        "observe",
+        lambda *_args, **_kwargs: pytest.fail("Observation was recomputed"),
+    )
+    monkeypatch.setattr(settlement, "_reflection", lambda **_kwargs: "   ")
+
+    stats = settlement.settle_once()
+
+    assert stats == {"checked": 1, "resolved": 0, "pending": 0, "failed": 1}
+    assert repository.observations == []
+    assert repository.item["reflection_status"] == "invalid"
+
+
+def test_lifecycle_timestamps_are_captured_after_each_phase(
+    app_settings,
+    monkeypatch,
+) -> None:
+    due_at = datetime(2026, 8, 5, 0, tzinfo=timezone.utc)
+    observed_at = datetime(2026, 8, 5, 0, 1, tzinfo=timezone.utc)
+    generated_at = datetime(2026, 8, 5, 0, 3, tzinfo=timezone.utc)
+    clock = iter((due_at, observed_at, generated_at))
+    item = {
+        **_pending_item(),
+        "status": "pending",
+        "reflection_status": None,
+        "observation_start": None,
+        "observation_end": None,
+        "raw_return": None,
+        "alpha_return": None,
+    }
+    repository = _LifecycleRepository(item)
+    settlement = OutcomeSettlement(
+        app_settings,
+        repository,
+        reflector=object(),
+        utc_clock=lambda: next(clock),
+    )
+    monkeypatch.setattr(
+        settlement,
+        "observe",
+        lambda *_args, **_kwargs: OutcomeObservation(
+            raw_return=0.10,
+            alpha_return=0.04,
+            holding_intervals=5,
+            start_date=date(2026, 7, 29),
+            end_date=date(2026, 8, 5),
+        ),
+    )
+    monkeypatch.setattr(
+        settlement,
+        "_reflection",
+        lambda **_kwargs: "Method lesson: Keep the method bounded.",
+    )
+
+    settlement.settle_once()
+
+    assert repository.due_at == due_at
+    assert repository.observations[0][2] == observed_at
+    assert repository.reflections[0][1]["generated_at"] == generated_at
 
 
 def test_observe_requires_six_common_closes_for_five_intervals(

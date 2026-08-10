@@ -842,7 +842,7 @@ test("shows requirement comparisons separately from candidate drafts", async () 
   expect(screen.getByText("numeric.requirement.req_forward_pe.result_mismatch")).toBeVisible();
 });
 
-test("opens an editable new-run template instead of rerunning immediately", async () => {
+test("does not expose the legacy editable new-run template in the primary flow", async () => {
   render(
     <Router initialPath="/runs/run-1">
       <RunDetail />
@@ -850,13 +850,11 @@ test("opens an editable new-run template instead of rerunning immediately", asyn
     </Router>,
   );
 
-  fireEvent.click(
-    await screen.findByRole("link", { name: "New from this run" }),
-  );
-
-  expect(screen.getByTestId("router-location")).toHaveTextContent(
-    "/runs/new?from_run=run-1",
-  );
+  await screen.findByText("NVIDIA Corporation");
+  expect(
+    screen.queryByRole("link", { name: "New from this run" }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByTestId("router-location")).toHaveTextContent("/runs/run-1");
   expect(api.action).not.toHaveBeenCalled();
 });
 

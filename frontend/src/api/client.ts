@@ -45,6 +45,10 @@ export type RunAttemptView = components["schemas"]["RunAttemptView"];
 export type StructuredRecoveryNotice =
   components["schemas"]["StructuredRecoveryNotice"];
 export type RecentInstrument = components["schemas"]["RecentInstrument"];
+export type ResearchChain = components["schemas"]["ResearchChain"];
+export type ResearchRevision = components["schemas"]["ResearchRevision"];
+export type ResearchChainUpdateRequest =
+  components["schemas"]["ResearchChainUpdateRequest"];
 
 export class ApiError extends Error {
   constructor(
@@ -120,10 +124,47 @@ export const api = {
       headers: { "Idempotency-Key": idempotencyKey },
       body: JSON.stringify(payload),
     }),
+  createResearchChain: (
+    payload: RunCreateRequest,
+    idempotencyKey: string,
+  ) =>
+    request<RunView>("/api/v1/research-chains", {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify(payload),
+    }),
+  researchChains: (instrument = "") =>
+    request<ResearchChain[]>(
+      `/api/v1/research-chains${
+        instrument ? `?instrument=${encodeURIComponent(instrument)}` : ""
+      }`,
+    ),
+  researchChain: (id: string) =>
+    request<ResearchChain>(`/api/v1/research-chains/${id}`),
+  updateResearchChain: (
+    id: string,
+    payload: ResearchChainUpdateRequest,
+    idempotencyKey: string,
+  ) =>
+    request<RunView>(`/api/v1/research-chains/${id}/updates`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify(payload),
+    }),
   action: (id: string, action: "cancel" | "retry") =>
     request<RunView>(`/api/v1/runs/${id}/${action}`, { method: "POST" }),
   memory: (query = "") =>
     request<MemoryEntry[]>(`/api/v1/memory${query}`),
+  retryOutcomeReflection: (outcomeId: number) =>
+    request<{ status: string }>(
+      `/api/v1/outcome-observations/${encodeURIComponent(outcomeId)}/reflection/retry`,
+      { method: "POST", body: "{}" },
+    ),
+  retireOutcomeFeedback: (feedbackId: number, reason: string) =>
+    request<{ status: string }>(
+      `/api/v1/outcome-feedback/${encodeURIComponent(feedbackId)}/retire`,
+      { method: "POST", body: JSON.stringify({ reason }) },
+    ),
   login: (token: string) =>
     request<{ authenticated: boolean }>("/api/v1/auth/login", {
       method: "POST",

@@ -27,6 +27,11 @@ from tradingagents.dataflows.jp.edinet_common import (
     EDINETNotConfiguredError,
     EDINETRateLimitError,
 )
+from tradingagents.provenance import (
+    extract_source_observations,
+    extract_source_watermarks,
+    strip_provenance_markers,
+)
 
 
 class FakeResp:
@@ -86,13 +91,18 @@ class NewsRenderTests(unittest.TestCase):
         with self._patch({"2026-06-22": [_doc("72030")]}):  # only another company
             out = edinet_news.get_news("9984.T", "2026-06-22", "2026-06-22")
         self.assertEqual(
-            out, "No EDINET disclosures found for 9984.T between 2026-06-22 and 2026-06-22"
+            strip_provenance_markers(out).strip(),
+            "No EDINET disclosures found for 9984.T between 2026-06-22 and 2026-06-22",
         )
 
     def test_window_iterates_each_date_and_sorts_recent_first(self):
         mapping = {
-            "2026-06-20": [_doc(when="2026-06-20 09:00", desc="古い開示")],
-            "2026-06-22": [_doc(when="2026-06-22 15:00", desc="新しい開示")],
+            "2026-06-20": [
+                _doc(when="2026-06-20 09:00", desc="古い開示", doc_id="OLD")
+            ],
+            "2026-06-22": [
+                _doc(when="2026-06-22 15:00", desc="新しい開示", doc_id="NEW")
+            ],
         }
         with self._patch(mapping):
             out = edinet_news.get_news("9984.T", "2026-06-20", "2026-06-22")
@@ -141,6 +151,72 @@ class NewsRenderTests(unittest.TestCase):
             mock_fetch.call_count, edinet_common.MAX_WINDOW_CALENDAR_DAYS
         )
         self.assertIn("between 2026-03-25 and 2026-06-22", out)
+
+    def test_exposes_stable_record_and_immutable_version_identities(self):
+        original = _doc(doc_id="S100ORIGINAL", desc="有価証券報告書")
+        correction = {
+            **_doc(doc_id="S100CORRECTED", desc="訂正有価証券報告書"),
+            "parentDocID": "S100ORIGINAL",
+            "docInfoEditStatus": "2",
+        }
+        withdrawn = {
+            **_doc(doc_id="S100WITHDRAWN", desc="取下げ"),
+            "parentDocID": "S100ORIGINAL",
+            "withdrawalStatus": "1",
+        }
+
+        with self._patch({"2026-06-22": [original, correction, withdrawn]}):
+            out = edinet_news.get_news("9984.T", "2026-06-22", "2026-06-22")
+
+        observations = extract_source_observations(out)
+        assert {item.record_id for item in observations} == {"S100ORIGINAL"}
+        assert len({item.version_id for item in observations}) == 3
+        assert {item.status for item in observations} == {
+            "published",
+            "corrected",
+            "withdrawn",
+        }
+        assert all(item.available_at.startswith("2026-06-22T") for item in observations)
+        watermark = extract_source_watermarks(out)[0]
+        assert watermark.source == "EDINET"
+        assert watermark.scanned_start == "2026-06-22"
+        assert watermark.scanned_end == "2026-06-22"
+        assert watermark.status == "complete"
+
+    def test_stable_identity_is_independent_of_requested_analysis_date(self):
+        record = _doc(doc_id="S100SAME")
+        with self._patch({"2026-06-22": [record]}):
+            first = extract_source_observations(
+                edinet_news.get_news("9984.T", "2026-06-22", "2026-06-22")
+            )[0]
+        edinet_common._documents_cache.clear()
+        with self._patch({"2026-06-22": [record], "2026-06-23": []}):
+            second = extract_source_observations(
+                edinet_news.get_news("9984.T", "2026-06-22", "2026-06-23")
+            )[0]
+
+        assert second.record_id == first.record_id
+        assert second.version_id == first.version_id
+
+    def test_overlap_retrieval_deduplicates_the_same_observed_version(self):
+        record = _doc(doc_id="S100DUPLICATE")
+        with self._patch({"2026-06-21": [record], "2026-06-22": [record]}):
+            out = edinet_news.get_news("9984.T", "2026-06-21", "2026-06-22")
+
+        assert out.count("EDINET docID: S100DUPLICATE") == 1
+        assert len(extract_source_observations(out)) == 1
+
+    def test_parent_document_without_correction_marker_is_replacement(self):
+        replacement = {
+            **_doc(doc_id="S100NEW", desc="臨時報告書"),
+            "parentDocID": "S100OLD",
+        }
+        with self._patch({"2026-06-22": [replacement]}):
+            out = edinet_news.get_news("9984.T", "2026-06-22", "2026-06-22")
+
+        observation = extract_source_observations(out)[0]
+        assert observation.status == "replaced"
+        assert observation.replaces_version_id == "edinet:S100OLD"
 
 
 @pytest.mark.unit

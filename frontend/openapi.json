@@ -379,8 +379,7 @@
       },
       "AssetType": {
         "enum": [
-          "stock",
-          "crypto"
+          "stock"
         ],
         "title": "AssetType",
         "type": "string"
@@ -668,6 +667,29 @@
         "title": "CapabilityDefaults",
         "type": "object"
       },
+      "ClaimChange": {
+        "enum": [
+          "introduced",
+          "reaffirmed",
+          "strengthened",
+          "weakened",
+          "invalidated",
+          "retired",
+          "superseded"
+        ],
+        "title": "ClaimChange",
+        "type": "string"
+      },
+      "ClaimConfidence": {
+        "enum": [
+          "low",
+          "medium",
+          "high",
+          "indeterminate"
+        ],
+        "title": "ClaimConfidence",
+        "type": "string"
+      },
       "ClaimImportance": {
         "enum": [
           "primary",
@@ -675,6 +697,229 @@
         ],
         "title": "ClaimImportance",
         "type": "string"
+      },
+      "ClaimRevisionDelta": {
+        "additionalProperties": false,
+        "properties": {
+          "change": {
+            "$ref": "#/components/schemas/ClaimChange"
+          },
+          "identity_disposition": {
+            "$ref": "#/components/schemas/IdentityDisposition"
+          },
+          "object_id": {
+            "pattern": "^claim_[a-f0-9]{32}$",
+            "title": "Object Id",
+            "type": "string"
+          },
+          "previous_object_id": {
+            "anyOf": [
+              {
+                "pattern": "^claim_[a-f0-9]{32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Object Id"
+          }
+        },
+        "required": [
+          "object_id",
+          "change",
+          "identity_disposition"
+        ],
+        "title": "ClaimRevisionDelta",
+        "type": "object"
+      },
+      "ClaimStanding": {
+        "enum": [
+          "active",
+          "invalidated",
+          "retired"
+        ],
+        "title": "ClaimStanding",
+        "type": "string"
+      },
+      "CoverageAttestation": {
+        "additionalProperties": false,
+        "properties": {
+          "claims": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchObjectCoverage"
+            },
+            "title": "Claims",
+            "type": "array"
+          },
+          "domains": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchDomainCoverage"
+            },
+            "minItems": 1,
+            "title": "Domains",
+            "type": "array"
+          },
+          "limitations": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchObjectCoverage"
+            },
+            "title": "Questions",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "1",
+            "default": "1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "supports_no_material_change": {
+            "default": true,
+            "title": "Supports No Material Change",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "claims",
+          "questions",
+          "domains"
+        ],
+        "title": "CoverageAttestation",
+        "type": "object"
+      },
+      "CoverageRequirement": {
+        "enum": [
+          "required",
+          "advisory"
+        ],
+        "title": "CoverageRequirement",
+        "type": "string"
+      },
+      "CoverageStatus": {
+        "enum": [
+          "complete",
+          "limited",
+          "unavailable"
+        ],
+        "title": "CoverageStatus",
+        "type": "string"
+      },
+      "CurrentResearchState": {
+        "additionalProperties": false,
+        "properties": {
+          "catalysts": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchFactor"
+            },
+            "title": "Catalysts",
+            "type": "array"
+          },
+          "claims": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchClaim"
+            },
+            "minItems": 1,
+            "title": "Claims",
+            "type": "array"
+          },
+          "cutoff": {
+            "format": "date",
+            "title": "Cutoff",
+            "type": "string"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "instrument": {
+            "minLength": 1,
+            "title": "Instrument",
+            "type": "string"
+          },
+          "invalidation_conditions": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchFactor"
+            },
+            "title": "Invalidation Conditions",
+            "type": "array"
+          },
+          "language": {
+            "title": "Language",
+            "type": "string"
+          },
+          "market_reference_levels": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/MarketReferenceLevel"
+            },
+            "title": "Market Reference Levels",
+            "type": "array"
+          },
+          "opinion": {
+            "$ref": "#/components/schemas/ResearchOpinion"
+          },
+          "prompt_version": {
+            "default": "research-state-assembly-v1",
+            "title": "Prompt Version",
+            "type": "string"
+          },
+          "questions": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchQuestion"
+            },
+            "title": "Questions",
+            "type": "array"
+          },
+          "risks": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchFactor"
+            },
+            "title": "Risks",
+            "type": "array"
+          },
+          "scenarios": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchScenarioState"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "title": "Scenarios",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "1",
+            "default": "1",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "language",
+          "instrument",
+          "cutoff",
+          "opinion",
+          "claims",
+          "scenarios",
+          "evidence_refs"
+        ],
+        "title": "CurrentResearchState",
+        "type": "object"
       },
       "DebateAgenda": {
         "additionalProperties": false,
@@ -791,6 +1036,16 @@
         "title": "DecisionCalculationUse",
         "type": "object"
       },
+      "DecisionConfidence": {
+        "enum": [
+          "low",
+          "medium",
+          "high",
+          "indeterminate"
+        ],
+        "title": "DecisionConfidence",
+        "type": "string"
+      },
       "DecisionNumericAuditAppendix": {
         "additionalProperties": false,
         "description": "Decision calculation comparisons and unverified numeric proposals.",
@@ -829,6 +1084,17 @@
         ],
         "title": "DecisionNumericAuditAppendix",
         "type": "object"
+      },
+      "DecisionRole": {
+        "enum": [
+          "thesis",
+          "risk",
+          "catalyst",
+          "invalidation",
+          "scenario_assumption"
+        ],
+        "title": "DecisionRole",
+        "type": "string"
       },
       "DiscoveredModelView": {
         "additionalProperties": false,
@@ -877,6 +1143,66 @@
         ],
         "title": "DiscoveredModelView",
         "type": "object"
+      },
+      "EffectiveEvidenceSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "bundle": {
+            "$ref": "#/components/schemas/EvidenceBundle"
+          },
+          "lineage": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceSnapshotItem"
+            },
+            "title": "Lineage",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "1",
+            "default": "1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "source_record_lineage": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SourceRecordSnapshotItem"
+            },
+            "title": "Source Record Lineage",
+            "type": "array"
+          },
+          "source_records": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SourceRecordVersion"
+            },
+            "title": "Source Records",
+            "type": "array"
+          },
+          "source_watermarks": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SourceWatermarkSnapshot"
+            },
+            "title": "Source Watermarks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "bundle",
+          "lineage"
+        ],
+        "title": "EffectiveEvidenceSnapshot",
+        "type": "object"
+      },
+      "EpistemicKind": {
+        "enum": [
+          "observation",
+          "inference",
+          "forecast"
+        ],
+        "title": "EpistemicKind",
+        "type": "string"
       },
       "EvidenceBundle": {
         "additionalProperties": false,
@@ -1216,6 +1542,41 @@
         "title": "EvidenceSealView",
         "type": "object"
       },
+      "EvidenceSnapshotItem": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_ref": {
+            "pattern": "^ev_[a-f0-9]{12}$",
+            "title": "Evidence Ref",
+            "type": "string"
+          },
+          "lineage": {
+            "enum": [
+              "new",
+              "inherited"
+            ],
+            "title": "Lineage",
+            "type": "string"
+          },
+          "source_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Revision Id"
+          }
+        },
+        "required": [
+          "evidence_ref",
+          "lineage"
+        ],
+        "title": "EvidenceSnapshotItem",
+        "type": "object"
+      },
       "EvidenceTable": {
         "additionalProperties": false,
         "description": "A complete fact table deterministically extracted from source evidence.",
@@ -1525,6 +1886,24 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "IdentityDisposition": {
+        "enum": [
+          "exact_match",
+          "new",
+          "ambiguous_new",
+          "conservative_retirement"
+        ],
+        "title": "IdentityDisposition",
+        "type": "string"
+      },
+      "IndeterminateReason": {
+        "enum": [
+          "coverage_incomplete",
+          "question_disposition_limited"
+        ],
+        "title": "IndeterminateReason",
+        "type": "string"
+      },
       "IssueDisposition": {
         "additionalProperties": false,
         "description": "A judge routing result without duplicating the readable rationale.",
@@ -1632,6 +2011,15 @@
           },
           "kind": {
             "$ref": "#/components/schemas/AnalystClaimType"
+          },
+          "required_sources": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Required Sources",
+            "type": "array"
           },
           "section_id": {
             "pattern": "^[a-z][a-z0-9_.-]*$",
@@ -1839,7 +2227,31 @@
             "title": "Market"
           },
           "outcome": {
-            "$ref": "#/components/schemas/MemoryOutcome"
+            "$ref": "#/components/schemas/OutcomeObservationView"
+          },
+          "outcome_feedback": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OutcomeFeedbackView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "outcome_id": {
+            "title": "Outcome Id",
+            "type": "integer"
+          },
+          "outcome_reflection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OutcomeReflectionView"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "profile": {
             "$ref": "#/components/schemas/RunProfile"
@@ -1865,6 +2277,7 @@
           }
         },
         "required": [
+          "outcome_id",
           "run_id",
           "ticker",
           "market",
@@ -1873,85 +2286,11 @@
           "profile",
           "decision",
           "outcome",
-          "reflection"
+          "reflection",
+          "outcome_reflection",
+          "outcome_feedback"
         ],
         "title": "MemoryEntry",
-        "type": "object"
-      },
-      "MemoryOutcome": {
-        "additionalProperties": false,
-        "properties": {
-          "alpha_return": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Alpha Return"
-          },
-          "benchmark": {
-            "title": "Benchmark",
-            "type": "string"
-          },
-          "holding_intervals": {
-            "title": "Holding Intervals",
-            "type": "integer"
-          },
-          "observation_end": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Observation End"
-          },
-          "observation_start": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Observation Start"
-          },
-          "raw_return": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Raw Return"
-          },
-          "status": {
-            "enum": [
-              "pending",
-              "resolved"
-            ],
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "status",
-          "benchmark",
-          "observation_start",
-          "observation_end",
-          "holding_intervals",
-          "raw_return",
-          "alpha_return"
-        ],
-        "title": "MemoryOutcome",
         "type": "object"
       },
       "ModelDiscoveryWarningView": {
@@ -1973,6 +2312,19 @@
         "title": "ModelDiscoveryWarningView",
         "type": "object"
       },
+      "NextUpdateReason": {
+        "enum": [
+          "experiment_mode_off",
+          "unsupported_incremental_market",
+          "required_source_coverage_incomplete",
+          "indeterminate_head",
+          "coverage_incomplete",
+          "incompatible_market_semantics",
+          "invalid_revision"
+        ],
+        "title": "NextUpdateReason",
+        "type": "string"
+      },
       "NodeMetrics": {
         "additionalProperties": false,
         "description": "Resource usage attributed to one research graph node.",
@@ -1988,6 +2340,18 @@
             "minimum": 0.0,
             "title": "Cache Miss Input Tokens",
             "type": "integer"
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
           },
           "detailed_usage_calls": {
             "default": 0,
@@ -2438,6 +2802,407 @@
         "title": "NumericTemporalBasis",
         "type": "string"
       },
+      "OutcomeFeedbackApplicabilityView": {
+        "additionalProperties": false,
+        "properties": {
+          "horizon": {
+            "title": "Horizon",
+            "type": "string"
+          },
+          "instrument": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument"
+          },
+          "market": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market"
+          },
+          "method_category": {
+            "title": "Method Category",
+            "type": "string"
+          },
+          "research_domains": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Research Domains",
+            "type": "array"
+          },
+          "research_stages": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Research Stages",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "instrument",
+              "market"
+            ],
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "scope",
+          "instrument",
+          "market",
+          "research_stages",
+          "research_domains",
+          "method_category",
+          "horizon"
+        ],
+        "title": "OutcomeFeedbackApplicabilityView",
+        "type": "object"
+      },
+      "OutcomeFeedbackRetireRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "OutcomeFeedbackRetireRequest",
+        "type": "object"
+      },
+      "OutcomeFeedbackStatus": {
+        "enum": [
+          "eligible",
+          "ineligible",
+          "retired"
+        ],
+        "title": "OutcomeFeedbackStatus",
+        "type": "string"
+      },
+      "OutcomeFeedbackView": {
+        "additionalProperties": false,
+        "properties": {
+          "applicability": {
+            "$ref": "#/components/schemas/OutcomeFeedbackApplicabilityView"
+          },
+          "available_at": {
+            "description": "Latest availability time of the Observation data, Reflection, and qualification.",
+            "format": "date-time",
+            "title": "Available At",
+            "type": "string"
+          },
+          "horizon_limit": {
+            "title": "Horizon Limit",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "method_category": {
+            "title": "Method Category",
+            "type": "string"
+          },
+          "qualification_policy_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Prospective qualification-policy version, independent from the Feedback schema and Observation method versions; legacy rows may be unversioned.",
+            "title": "Qualification Policy Version"
+          },
+          "qualified_at": {
+            "format": "date-time",
+            "title": "Qualified At",
+            "type": "string"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "retired_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retired At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OutcomeFeedbackStatus"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "qualification_policy_version",
+          "reasons",
+          "method_category",
+          "horizon_limit",
+          "applicability",
+          "qualified_at",
+          "available_at",
+          "retired_at"
+        ],
+        "title": "OutcomeFeedbackView",
+        "type": "object"
+      },
+      "OutcomeObservationStatus": {
+        "enum": [
+          "pending",
+          "resolved"
+        ],
+        "title": "OutcomeObservationStatus",
+        "type": "string"
+      },
+      "OutcomeObservationView": {
+        "additionalProperties": false,
+        "properties": {
+          "adjustment_semantics": {
+            "title": "Adjustment Semantics",
+            "type": "string"
+          },
+          "alpha_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alpha Return"
+          },
+          "benchmark": {
+            "title": "Benchmark",
+            "type": "string"
+          },
+          "data_available_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Available At"
+          },
+          "holding_intervals": {
+            "title": "Holding Intervals",
+            "type": "integer"
+          },
+          "horizon_limit": {
+            "title": "Horizon Limit",
+            "type": "string"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "market_timezone": {
+            "title": "Market Timezone",
+            "type": "string"
+          },
+          "method_category": {
+            "title": "Method Category",
+            "type": "string"
+          },
+          "method_version": {
+            "title": "Method Version",
+            "type": "string"
+          },
+          "observation_end": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Market-local observation end, strictly after the effective source cutoff.",
+            "title": "Observation End"
+          },
+          "observation_start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Market-local return-baseline date; it may equal but cannot precede the effective source cutoff.",
+            "title": "Observation Start"
+          },
+          "price_semantics": {
+            "title": "Price Semantics",
+            "type": "string"
+          },
+          "raw_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Return"
+          },
+          "source_decision_id": {
+            "title": "Source Decision Id",
+            "type": "integer"
+          },
+          "source_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Revision Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OutcomeObservationStatus"
+          }
+        },
+        "required": [
+          "status",
+          "source_decision_id",
+          "source_revision_id",
+          "benchmark",
+          "market_timezone",
+          "method_category",
+          "method_version",
+          "price_semantics",
+          "adjustment_semantics",
+          "horizon_limit",
+          "limitations",
+          "observation_start",
+          "observation_end",
+          "holding_intervals",
+          "raw_return",
+          "alpha_return",
+          "data_available_at"
+        ],
+        "title": "OutcomeObservationView",
+        "type": "object"
+      },
+      "OutcomeReflectionStatus": {
+        "enum": [
+          "pending",
+          "generated",
+          "invalid",
+          "retryable_failure"
+        ],
+        "title": "OutcomeReflectionStatus",
+        "type": "string"
+      },
+      "OutcomeReflectionView": {
+        "additionalProperties": false,
+        "properties": {
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "generated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generated At"
+          },
+          "last_attempted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Attempted At"
+          },
+          "next_retry_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Retry At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OutcomeReflectionStatus"
+          }
+        },
+        "required": [
+          "status",
+          "generated_at",
+          "last_attempted_at",
+          "next_retry_at",
+          "error_code"
+        ],
+        "title": "OutcomeReflectionView",
+        "type": "object"
+      },
       "ProviderCapabilities": {
         "additionalProperties": false,
         "properties": {
@@ -2547,6 +3312,229 @@
         ],
         "title": "ProviderModelCatalog",
         "type": "object"
+      },
+      "QuestionChange": {
+        "enum": [
+          "introduced",
+          "reaffirmed",
+          "answered",
+          "reopened",
+          "superseded",
+          "retired"
+        ],
+        "title": "QuestionChange",
+        "type": "string"
+      },
+      "QuestionDispositionAudit": {
+        "additionalProperties": false,
+        "properties": {
+          "dispositions": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/QuestionDispositionRecord"
+            },
+            "maxItems": 64,
+            "title": "Dispositions",
+            "type": "array"
+          },
+          "language": {
+            "title": "Language",
+            "type": "string"
+          },
+          "limitation_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QuestionDispositionLimitation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "repair_attempted": {
+            "default": false,
+            "title": "Repair Attempted",
+            "type": "boolean"
+          },
+          "schema_version": {
+            "const": "1",
+            "default": "1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "complete",
+              "limited"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "language"
+        ],
+        "title": "QuestionDispositionAudit",
+        "type": "object"
+      },
+      "QuestionDispositionKind": {
+        "enum": [
+          "reaffirmed",
+          "answered",
+          "reopened",
+          "superseded",
+          "retired"
+        ],
+        "title": "QuestionDispositionKind",
+        "type": "string"
+      },
+      "QuestionDispositionLimitation": {
+        "enum": [
+          "question_disposition_output_invalid",
+          "question_disposition_evidence_invalid",
+          "question_disposition_ambiguous_identity",
+          "question_disposition_incomplete"
+        ],
+        "title": "QuestionDispositionLimitation",
+        "type": "string"
+      },
+      "QuestionDispositionRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "baseline_question_id": {
+            "pattern": "^question_[a-f0-9]{32}$",
+            "title": "Baseline Question Id",
+            "type": "string"
+          },
+          "candidate_question_id": {
+            "anyOf": [
+              {
+                "pattern": "^question_[a-f0-9]{32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Question Id"
+          },
+          "disposition": {
+            "$ref": "#/components/schemas/QuestionDispositionKind"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "successor_question_id": {
+            "anyOf": [
+              {
+                "pattern": "^question_[a-f0-9]{32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Successor Question Id"
+          }
+        },
+        "required": [
+          "baseline_question_id",
+          "disposition",
+          "evidence_refs",
+          "reason"
+        ],
+        "title": "QuestionDispositionRecord",
+        "type": "object"
+      },
+      "QuestionRevisionDelta": {
+        "additionalProperties": false,
+        "properties": {
+          "change": {
+            "$ref": "#/components/schemas/QuestionChange"
+          },
+          "evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "identity_disposition": {
+            "$ref": "#/components/schemas/IdentityDisposition"
+          },
+          "object_id": {
+            "pattern": "^question_[a-f0-9]{32}$",
+            "title": "Object Id",
+            "type": "string"
+          },
+          "previous_object_id": {
+            "anyOf": [
+              {
+                "pattern": "^question_[a-f0-9]{32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Object Id"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "successor_object_id": {
+            "anyOf": [
+              {
+                "pattern": "^question_[a-f0-9]{32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Successor Object Id"
+          }
+        },
+        "required": [
+          "object_id",
+          "change",
+          "identity_disposition"
+        ],
+        "title": "QuestionRevisionDelta",
+        "type": "object"
+      },
+      "QuestionStatus": {
+        "enum": [
+          "open",
+          "answered",
+          "superseded",
+          "retired"
+        ],
+        "title": "QuestionStatus",
+        "type": "string"
       },
       "QueueHealth": {
         "additionalProperties": false,
@@ -2854,6 +3842,339 @@
         "title": "ResearchCase",
         "type": "object"
       },
+      "ResearchChain": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "current_revision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchRevision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "current_revision_id": {
+            "title": "Current Revision Id",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "instrument": {
+            "title": "Instrument",
+            "type": "string"
+          },
+          "is_primary": {
+            "title": "Is Primary",
+            "type": "boolean"
+          },
+          "next_update_policy": {
+            "default": "full_required",
+            "description": "Server-derived policy: bounded Incremental Execution is allowed only for a source-qualified supported Japanese head in an enabled experiment mode.",
+            "enum": [
+              "incremental_allowed",
+              "full_required"
+            ],
+            "title": "Next Update Policy",
+            "type": "string"
+          },
+          "next_update_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NextUpdateReason"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Stable reason that the next manual update requires Full Analysis instead of bounded Incremental Execution."
+          },
+          "revisions": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchRevision"
+            },
+            "title": "Revisions",
+            "type": "array"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "instrument",
+          "is_primary",
+          "current_revision_id",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ResearchChain",
+        "type": "object"
+      },
+      "ResearchChainUpdateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "analysis_date": {
+            "format": "date",
+            "title": "Analysis Date",
+            "type": "string"
+          },
+          "baseline_revision_id": {
+            "maxLength": 36,
+            "minLength": 1,
+            "title": "Baseline Revision Id",
+            "type": "string"
+          },
+          "execution_strategy": {
+            "anyOf": [
+              {
+                "enum": [
+                  "full",
+                  "incremental"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Strategy"
+          }
+        },
+        "required": [
+          "baseline_revision_id",
+          "analysis_date"
+        ],
+        "title": "ResearchChainUpdateRequest",
+        "type": "object"
+      },
+      "ResearchChangeConclusion": {
+        "enum": [
+          "material_change",
+          "no_material_change",
+          "indeterminate"
+        ],
+        "title": "ResearchChangeConclusion",
+        "type": "string"
+      },
+      "ResearchChangeKind": {
+        "enum": [
+          "new_fundamental_filing",
+          "fundamental_correction",
+          "fundamental_restatement",
+          "accounting_scope_change",
+          "unclassifiable_fundamental_change",
+          "market_semantic_incompatibility",
+          "market_boundary_crossing",
+          "ordinary_market_move",
+          "unchanged_observation"
+        ],
+        "title": "ResearchChangeKind",
+        "type": "string"
+      },
+      "ResearchChangeSignal": {
+        "additionalProperties": false,
+        "properties": {
+          "boundary_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Boundary Label"
+          },
+          "boundary_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Boundary Value"
+          },
+          "current_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Value"
+          },
+          "current_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Version Id"
+          },
+          "detail": {
+            "minLength": 1,
+            "title": "Detail",
+            "type": "string"
+          },
+          "domain": {
+            "enum": [
+              "fundamentals",
+              "market"
+            ],
+            "title": "Domain",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ResearchChangeKind"
+          },
+          "previous_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Value"
+          },
+          "previous_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Version Id"
+          },
+          "record_id": {
+            "minLength": 1,
+            "title": "Record Id",
+            "type": "string"
+          },
+          "requires_full_analysis": {
+            "title": "Requires Full Analysis",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind",
+          "domain",
+          "record_id",
+          "requires_full_analysis",
+          "detail"
+        ],
+        "title": "ResearchChangeSignal",
+        "type": "object"
+      },
+      "ResearchClaim": {
+        "additionalProperties": false,
+        "properties": {
+          "confidence": {
+            "$ref": "#/components/schemas/ClaimConfidence"
+          },
+          "decision_role": {
+            "$ref": "#/components/schemas/DecisionRole"
+          },
+          "epistemic_kind": {
+            "$ref": "#/components/schemas/EpistemicKind"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "evidence_relationship": {
+            "default": "direct",
+            "enum": [
+              "direct",
+              "decision_envelope"
+            ],
+            "title": "Evidence Relationship",
+            "type": "string"
+          },
+          "falsifier": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Falsifier"
+          },
+          "id": {
+            "pattern": "^claim_[a-f0-9]{32}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "required_sources": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Sources",
+            "type": "array"
+          },
+          "standing": {
+            "$ref": "#/components/schemas/ClaimStanding",
+            "default": "active"
+          },
+          "statement": {
+            "minLength": 1,
+            "title": "Statement",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "statement",
+          "epistemic_kind",
+          "decision_role",
+          "confidence",
+          "evidence_refs"
+        ],
+        "title": "ResearchClaim",
+        "type": "object"
+      },
       "ResearchDecision": {
         "additionalProperties": false,
         "description": "Research-only conclusion; deliberately excludes account-level advice.",
@@ -2927,6 +4248,14 @@
               }
             ]
           },
+          "question_source_dependencies": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchQuestionSourceDependency"
+            },
+            "title": "Question Source Dependencies",
+            "type": "array"
+          },
           "rating": {
             "$ref": "#/components/schemas/ResearchRating"
           },
@@ -2997,6 +4326,273 @@
         "title": "ResearchDecision",
         "type": "object"
       },
+      "ResearchDomainCoverage": {
+        "additionalProperties": false,
+        "properties": {
+          "domain": {
+            "minLength": 1,
+            "title": "Domain",
+            "type": "string"
+          },
+          "evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "limitations": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "requirement": {
+            "$ref": "#/components/schemas/CoverageRequirement",
+            "default": "required"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CoverageStatus"
+          }
+        },
+        "required": [
+          "domain",
+          "status"
+        ],
+        "title": "ResearchDomainCoverage",
+        "type": "object"
+      },
+      "ResearchExecutionStrategy": {
+        "enum": [
+          "full",
+          "incremental"
+        ],
+        "title": "ResearchExecutionStrategy",
+        "type": "string"
+      },
+      "ResearchFactor": {
+        "additionalProperties": false,
+        "properties": {
+          "claim_ids": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Claim Ids",
+            "type": "array"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "statement": {
+            "minLength": 1,
+            "title": "Statement",
+            "type": "string"
+          }
+        },
+        "required": [
+          "statement",
+          "claim_ids",
+          "evidence_refs"
+        ],
+        "title": "ResearchFactor",
+        "type": "object"
+      },
+      "ResearchObjectCoverage": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "limitations": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "object_id": {
+            "title": "Object Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CoverageStatus"
+          }
+        },
+        "required": [
+          "object_id",
+          "status"
+        ],
+        "title": "ResearchObjectCoverage",
+        "type": "object"
+      },
+      "ResearchOpinion": {
+        "additionalProperties": false,
+        "properties": {
+          "confidence": {
+            "$ref": "#/components/schemas/DecisionConfidence"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "primary_claim_ids": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Primary Claim Ids",
+            "type": "array"
+          },
+          "rating": {
+            "$ref": "#/components/schemas/ResearchRating"
+          },
+          "thesis": {
+            "minLength": 1,
+            "title": "Thesis",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rating",
+          "confidence",
+          "thesis",
+          "primary_claim_ids",
+          "evidence_refs"
+        ],
+        "title": "ResearchOpinion",
+        "type": "object"
+      },
+      "ResearchQuestion": {
+        "additionalProperties": false,
+        "properties": {
+          "disposition_reason": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disposition Reason"
+          },
+          "evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "id": {
+            "pattern": "^question_[a-f0-9]{32}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_disposition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QuestionDispositionKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "question": {
+            "minLength": 1,
+            "title": "Question",
+            "type": "string"
+          },
+          "required_sources": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Sources",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/QuestionStatus",
+            "default": "open"
+          },
+          "successor_question_id": {
+            "anyOf": [
+              {
+                "pattern": "^question_[a-f0-9]{32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Successor Question Id"
+          }
+        },
+        "required": [
+          "id",
+          "question"
+        ],
+        "title": "ResearchQuestion",
+        "type": "object"
+      },
+      "ResearchQuestionSourceDependency": {
+        "additionalProperties": false,
+        "properties": {
+          "question": {
+            "minLength": 1,
+            "title": "Question",
+            "type": "string"
+          },
+          "required_sources": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "minItems": 1,
+            "title": "Required Sources",
+            "type": "array"
+          }
+        },
+        "required": [
+          "question",
+          "required_sources"
+        ],
+        "title": "ResearchQuestionSourceDependency",
+        "type": "object"
+      },
       "ResearchRating": {
         "enum": [
           "Buy",
@@ -3006,6 +4602,134 @@
           "Sell"
         ],
         "title": "ResearchRating",
+        "type": "string"
+      },
+      "ResearchRevision": {
+        "additionalProperties": false,
+        "properties": {
+          "chain_id": {
+            "title": "Chain Id",
+            "type": "string"
+          },
+          "change_conclusion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchChangeConclusion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/CoverageAttestation"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "current_state": {
+            "$ref": "#/components/schemas/CurrentResearchState"
+          },
+          "cutoff": {
+            "format": "date",
+            "title": "Cutoff",
+            "type": "string"
+          },
+          "delta": {
+            "$ref": "#/components/schemas/RevisionDelta"
+          },
+          "evidence_snapshot": {
+            "$ref": "#/components/schemas/EffectiveEvidenceSnapshot"
+          },
+          "execution_strategy": {
+            "$ref": "#/components/schemas/ResearchExecutionStrategy"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "indeterminate_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IndeterminateReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "metrics": {
+            "$ref": "#/components/schemas/RunMetrics"
+          },
+          "predecessor_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Predecessor Revision Id"
+          },
+          "producing_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Producing Run Id"
+          },
+          "research_update_audit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchUpdateAudit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "role": {
+            "$ref": "#/components/schemas/ResearchRevisionRole"
+          },
+          "sequence": {
+            "minimum": 1.0,
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "update_summary": {
+            "$ref": "#/components/schemas/UpdateSummary"
+          }
+        },
+        "required": [
+          "cutoff",
+          "role",
+          "execution_strategy",
+          "delta",
+          "current_state",
+          "coverage",
+          "update_summary",
+          "evidence_snapshot",
+          "id",
+          "chain_id",
+          "sequence",
+          "created_at"
+        ],
+        "title": "ResearchRevision",
+        "type": "object"
+      },
+      "ResearchRevisionRole": {
+        "enum": [
+          "initial",
+          "update"
+        ],
+        "title": "ResearchRevisionRole",
         "type": "string"
       },
       "ResearchScenario": {
@@ -3061,6 +4785,1128 @@
         "title": "ResearchScenarioKind",
         "type": "string"
       },
+      "ResearchScenarioState": {
+        "additionalProperties": false,
+        "properties": {
+          "assumption_claim_ids": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Assumption Claim Ids",
+            "type": "array"
+          },
+          "cutoff": {
+            "format": "date",
+            "title": "Cutoff",
+            "type": "string"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "horizon": {
+            "minLength": 1,
+            "title": "Horizon",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ResearchScenarioKind"
+          },
+          "likelihood": {
+            "$ref": "#/components/schemas/ScenarioLikelihood"
+          },
+          "outcome": {
+            "minLength": 1,
+            "title": "Outcome",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "likelihood",
+          "cutoff",
+          "horizon",
+          "outcome",
+          "assumption_claim_ids",
+          "evidence_refs"
+        ],
+        "title": "ResearchScenarioState",
+        "type": "object"
+      },
+      "ResearchUpdateAudit": {
+        "additionalProperties": false,
+        "description": "Durable phase attribution and finding for one Research Chain update.",
+        "properties": {
+          "authoritative_strategy": {
+            "default": "full",
+            "enum": [
+              "full",
+              "incremental"
+            ],
+            "title": "Authoritative Strategy",
+            "type": "string"
+          },
+          "bounded_metrics": {
+            "$ref": "#/components/schemas/RunMetrics"
+          },
+          "candidate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchUpdateCandidate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "checked_windows": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchUpdateCheckedWindow"
+            },
+            "title": "Checked Windows",
+            "type": "array"
+          },
+          "comparison": {
+            "enum": [
+              "agreement",
+              "disagreement",
+              "inconclusive",
+              "not_applicable"
+            ],
+            "title": "Comparison",
+            "type": "string"
+          },
+          "coverage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchUpdateCoverageAttestation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "escalation_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "invalid_baseline",
+                  "source_correction",
+                  "source_withdrawal",
+                  "source_replacement",
+                  "source_version_change",
+                  "incompatible_semantics",
+                  "threshold_crossing",
+                  "coverage_incomplete",
+                  "schema_invalid",
+                  "semantic_weakening",
+                  "semantic_contradiction",
+                  "semantic_answering",
+                  "semantic_reopening",
+                  "semantic_uncertainty",
+                  "potentially_material_novelty",
+                  "confidence_change",
+                  "ambiguous_identity",
+                  "semantic_output_invalid",
+                  "semantic_input_oversize"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Escalation Reason"
+          },
+          "evidence_lineage": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchUpdateEvidenceLineage"
+            },
+            "title": "Evidence Lineage",
+            "type": "array"
+          },
+          "full_metrics": {
+            "$ref": "#/components/schemas/RunMetrics"
+          },
+          "mode": {
+            "default": "shadow",
+            "enum": [
+              "shadow",
+              "experimental"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "2",
+            "default": "2",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "semantic_assessment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchUpdateSemanticAssessment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "comparison"
+        ],
+        "title": "ResearchUpdateAudit",
+        "type": "object"
+      },
+      "ResearchUpdateCandidate": {
+        "additionalProperties": false,
+        "description": "Retained bounded-update proposal used by the Shadow experiment.",
+        "properties": {
+          "change_conclusion": {
+            "const": "no_material_change",
+            "title": "Change Conclusion",
+            "type": "string"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/ResearchUpdateCoverageAttestation"
+          },
+          "evidence_snapshot": {
+            "$ref": "#/components/schemas/ResearchUpdateEvidenceSnapshot"
+          },
+          "schema_version": {
+            "const": "2",
+            "default": "2",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "update_summary": {
+            "$ref": "#/components/schemas/ResearchUpdateSummaryContract"
+          }
+        },
+        "required": [
+          "change_conclusion",
+          "coverage",
+          "update_summary",
+          "evidence_snapshot"
+        ],
+        "title": "ResearchUpdateCandidate",
+        "type": "object"
+      },
+      "ResearchUpdateCheckedWindow": {
+        "additionalProperties": false,
+        "properties": {
+          "baseline_cutoff": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Cutoff"
+          },
+          "limitations": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "overlap_start": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overlap Start"
+          },
+          "reported_records": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reported Records"
+          },
+          "returned_records": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Returned Records",
+            "type": "integer"
+          },
+          "scanned_end": {
+            "format": "date",
+            "title": "Scanned End",
+            "type": "string"
+          },
+          "scanned_start": {
+            "format": "date",
+            "title": "Scanned Start",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "complete",
+              "limited",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "temporal_scope": {
+            "default": "point_in_time",
+            "enum": [
+              "point_in_time",
+              "live_only",
+              "unknown"
+            ],
+            "title": "Temporal Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "scanned_start",
+          "scanned_end",
+          "status"
+        ],
+        "title": "ResearchUpdateCheckedWindow",
+        "type": "object"
+      },
+      "ResearchUpdateCoverageAttestation": {
+        "additionalProperties": false,
+        "properties": {
+          "claims": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchUpdateObjectCoverage"
+            },
+            "title": "Claims",
+            "type": "array"
+          },
+          "domains": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchUpdateDomainCoverage"
+            },
+            "title": "Domains",
+            "type": "array"
+          },
+          "limitations": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchUpdateObjectCoverage"
+            },
+            "title": "Questions",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "1",
+            "default": "1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "supports_no_material_change": {
+            "title": "Supports No Material Change",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "claims",
+          "questions",
+          "domains",
+          "supports_no_material_change"
+        ],
+        "title": "ResearchUpdateCoverageAttestation",
+        "type": "object"
+      },
+      "ResearchUpdateDomainCoverage": {
+        "additionalProperties": false,
+        "properties": {
+          "domain": {
+            "title": "Domain",
+            "type": "string"
+          },
+          "evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "limitations": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "requirement": {
+            "default": "required",
+            "enum": [
+              "required",
+              "advisory"
+            ],
+            "title": "Requirement",
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "status": {
+            "enum": [
+              "complete",
+              "limited",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "domain",
+          "status"
+        ],
+        "title": "ResearchUpdateDomainCoverage",
+        "type": "object"
+      },
+      "ResearchUpdateEvidenceLineage": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_ref": {
+            "title": "Evidence Ref",
+            "type": "string"
+          },
+          "lineage": {
+            "enum": [
+              "new",
+              "inherited"
+            ],
+            "title": "Lineage",
+            "type": "string"
+          },
+          "source_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Revision Id"
+          }
+        },
+        "required": [
+          "evidence_ref",
+          "lineage"
+        ],
+        "title": "ResearchUpdateEvidenceLineage",
+        "type": "object"
+      },
+      "ResearchUpdateEvidenceSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "bundle": {
+            "$ref": "#/components/schemas/EvidenceBundle"
+          },
+          "lineage": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchUpdateEvidenceSnapshotItem"
+            },
+            "title": "Lineage",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "1",
+            "default": "1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "source_record_lineage": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchUpdateSourceRecordSnapshotItem"
+            },
+            "title": "Source Record Lineage",
+            "type": "array"
+          },
+          "source_records": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchUpdateSourceRecordVersion"
+            },
+            "title": "Source Records",
+            "type": "array"
+          },
+          "source_watermarks": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchUpdateSourceWatermarkSnapshot"
+            },
+            "title": "Source Watermarks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "bundle",
+          "lineage"
+        ],
+        "title": "ResearchUpdateEvidenceSnapshot",
+        "type": "object"
+      },
+      "ResearchUpdateEvidenceSnapshotItem": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_ref": {
+            "pattern": "^ev_[a-f0-9]{12}$",
+            "title": "Evidence Ref",
+            "type": "string"
+          },
+          "lineage": {
+            "enum": [
+              "new",
+              "inherited"
+            ],
+            "title": "Lineage",
+            "type": "string"
+          },
+          "source_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Revision Id"
+          }
+        },
+        "required": [
+          "evidence_ref",
+          "lineage"
+        ],
+        "title": "ResearchUpdateEvidenceSnapshotItem",
+        "type": "object"
+      },
+      "ResearchUpdateObjectCoverage": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "limitations": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "object_id": {
+            "title": "Object Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "complete",
+              "limited",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "object_id",
+          "status"
+        ],
+        "title": "ResearchUpdateObjectCoverage",
+        "type": "object"
+      },
+      "ResearchUpdateSemanticAssessment": {
+        "additionalProperties": false,
+        "properties": {
+          "language": {
+            "title": "Language",
+            "type": "string"
+          },
+          "relationships": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchUpdateSemanticRelationship"
+            },
+            "title": "Relationships",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "1",
+            "default": "1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "language",
+          "summary",
+          "relationships"
+        ],
+        "title": "ResearchUpdateSemanticAssessment",
+        "type": "object"
+      },
+      "ResearchUpdateSemanticRelationship": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "relationship": {
+            "enum": [
+              "support",
+              "weakening",
+              "contradiction",
+              "answering",
+              "reopening",
+              "irrelevance",
+              "uncertainty",
+              "potentially_material_novelty"
+            ],
+            "title": "Relationship",
+            "type": "string"
+          },
+          "suggested_claim_confidence": {
+            "anyOf": [
+              {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high",
+                  "indeterminate"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggested Claim Confidence"
+          },
+          "suggested_claim_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Suggested Claim Ids",
+            "type": "array"
+          },
+          "suggested_question_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Suggested Question Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "evidence_refs",
+          "relationship"
+        ],
+        "title": "ResearchUpdateSemanticRelationship",
+        "type": "object"
+      },
+      "ResearchUpdateSourceRecordSnapshotItem": {
+        "additionalProperties": false,
+        "properties": {
+          "lineage": {
+            "enum": [
+              "new",
+              "inherited"
+            ],
+            "title": "Lineage",
+            "type": "string"
+          },
+          "observed_in_execution": {
+            "title": "Observed In Execution",
+            "type": "boolean"
+          },
+          "source_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Revision Id"
+          },
+          "version_id": {
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version_id",
+          "lineage",
+          "observed_in_execution"
+        ],
+        "title": "ResearchUpdateSourceRecordSnapshotItem",
+        "type": "object"
+      },
+      "ResearchUpdateSourceRecordVersion": {
+        "additionalProperties": false,
+        "properties": {
+          "accounting_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accounting Scope"
+          },
+          "adjustment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adjustment"
+          },
+          "availability_basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Availability Basis"
+          },
+          "available_at": {
+            "format": "date-time",
+            "title": "Available At",
+            "type": "string"
+          },
+          "change_hint": {
+            "anyOf": [
+              {
+                "enum": [
+                  "new_filing",
+                  "correction",
+                  "restatement",
+                  "accounting_scope_change",
+                  "unclassifiable"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Hint"
+          },
+          "comparison_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparison Key"
+          },
+          "evidence_ref": {
+            "pattern": "^ev_[a-f0-9]{12}$",
+            "title": "Evidence Ref",
+            "type": "string"
+          },
+          "fallback": {
+            "default": false,
+            "title": "Fallback",
+            "type": "boolean"
+          },
+          "native_record_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Native Record Id"
+          },
+          "observation_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observation Value"
+          },
+          "precision": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Precision"
+          },
+          "published_at": {
+            "title": "Published At",
+            "type": "string"
+          },
+          "record_id": {
+            "title": "Record Id",
+            "type": "string"
+          },
+          "record_kind": {
+            "default": "disclosure",
+            "enum": [
+              "disclosure",
+              "fundamental",
+              "market"
+            ],
+            "title": "Record Kind",
+            "type": "string"
+          },
+          "replaces_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replaces Version Id"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "published",
+              "corrected",
+              "withdrawn",
+              "replaced"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "version_id": {
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "record_id",
+          "version_id",
+          "status",
+          "published_at",
+          "available_at",
+          "title",
+          "evidence_ref"
+        ],
+        "title": "ResearchUpdateSourceRecordVersion",
+        "type": "object"
+      },
+      "ResearchUpdateSourceWatermarkSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "baseline_cutoff": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Cutoff"
+          },
+          "limitations": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "overlap_start": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overlap Start"
+          },
+          "reported_records": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reported Records"
+          },
+          "returned_records": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Returned Records",
+            "type": "integer"
+          },
+          "scanned_end": {
+            "format": "date",
+            "title": "Scanned End",
+            "type": "string"
+          },
+          "scanned_start": {
+            "format": "date",
+            "title": "Scanned Start",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "complete",
+              "limited",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "temporal_scope": {
+            "default": "point_in_time",
+            "enum": [
+              "point_in_time",
+              "live_only",
+              "unknown"
+            ],
+            "title": "Temporal Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "scanned_start",
+          "scanned_end",
+          "status"
+        ],
+        "title": "ResearchUpdateSourceWatermarkSnapshot",
+        "type": "object"
+      },
+      "ResearchUpdateSummaryContract": {
+        "additionalProperties": false,
+        "properties": {
+          "analysis_cutoff": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysis Cutoff"
+          },
+          "baseline_cutoff": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Cutoff"
+          },
+          "change_conclusion": {
+            "anyOf": [
+              {
+                "enum": [
+                  "material_change",
+                  "no_material_change",
+                  "indeterminate"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Conclusion"
+          },
+          "checked_domains": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Checked Domains",
+            "type": "array"
+          },
+          "execution_strategy": {
+            "anyOf": [
+              {
+                "enum": [
+                  "full",
+                  "incremental"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Strategy"
+          },
+          "language": {
+            "title": "Language",
+            "type": "string"
+          },
+          "limitations": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "new_evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "New Evidence Refs",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "1",
+            "default": "1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "language",
+          "summary",
+          "checked_domains"
+        ],
+        "title": "ResearchUpdateSummaryContract",
+        "type": "object"
+      },
       "ResearchWarning": {
         "additionalProperties": false,
         "description": "Structured, plain-text warning suitable for APIs and audit exports.",
@@ -3106,6 +5952,93 @@
           "message"
         ],
         "title": "ResearchWarning",
+        "type": "object"
+      },
+      "RevisionDelta": {
+        "additionalProperties": false,
+        "properties": {
+          "change_signals": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchChangeSignal"
+            },
+            "title": "Change Signals",
+            "type": "array"
+          },
+          "changed_sections": {
+            "default": [],
+            "items": {
+              "enum": [
+                "opinion",
+                "claims",
+                "questions",
+                "scenarios",
+                "risks",
+                "catalysts",
+                "invalidation_conditions"
+              ],
+              "type": "string"
+            },
+            "title": "Changed Sections",
+            "type": "array"
+          },
+          "claims": {
+            "items": {
+              "$ref": "#/components/schemas/ClaimRevisionDelta"
+            },
+            "title": "Claims",
+            "type": "array"
+          },
+          "inherited_evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Inherited Evidence Refs",
+            "type": "array"
+          },
+          "new_evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "New Evidence Refs",
+            "type": "array"
+          },
+          "opinion_changed": {
+            "title": "Opinion Changed",
+            "type": "boolean"
+          },
+          "question_disposition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QuestionDispositionAudit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/QuestionRevisionDelta"
+            },
+            "title": "Questions",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "1",
+            "default": "1",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "opinion_changed",
+          "claims",
+          "questions"
+        ],
+        "title": "RevisionDelta",
         "type": "object"
       },
       "RiskReview": {
@@ -3550,6 +6483,18 @@
             "title": "Cache Miss Input Tokens",
             "type": "integer"
           },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
+          },
           "detailed_usage_calls": {
             "default": 0,
             "minimum": 0.0,
@@ -3666,6 +6611,17 @@
             "title": "Attempt",
             "type": "integer"
           },
+          "baseline_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Revision Id"
+          },
           "cancel_requested": {
             "title": "Cancel Requested",
             "type": "boolean"
@@ -3746,10 +6702,51 @@
           "request": {
             "$ref": "#/components/schemas/AnalysisRequest"
           },
+          "research_chain_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Research Chain Id"
+          },
+          "research_chain_requested": {
+            "default": false,
+            "title": "Research Chain Requested",
+            "type": "boolean"
+          },
+          "research_execution_strategy": {
+            "anyOf": [
+              {
+                "enum": [
+                  "full",
+                  "incremental"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Research Execution Strategy"
+          },
           "research_rating": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/ResearchRating"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "research_update_audit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchUpdateAudit"
               },
               {
                 "type": "null"
@@ -3794,6 +6791,17 @@
             ],
             "title": "Trashed At"
           },
+          "update_intent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Update Intent Id"
+          },
           "updated_at": {
             "format": "date-time",
             "title": "Updated At",
@@ -3828,6 +6836,17 @@
           "attempt": {
             "title": "Attempt",
             "type": "integer"
+          },
+          "baseline_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Revision Id"
           },
           "cancel_requested": {
             "title": "Cancel Requested",
@@ -3909,6 +6928,47 @@
           "request": {
             "$ref": "#/components/schemas/AnalysisRequest"
           },
+          "research_chain_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Research Chain Id"
+          },
+          "research_chain_requested": {
+            "default": false,
+            "title": "Research Chain Requested",
+            "type": "boolean"
+          },
+          "research_execution_strategy": {
+            "anyOf": [
+              {
+                "enum": [
+                  "full",
+                  "incremental"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Research Execution Strategy"
+          },
+          "research_update_audit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchUpdateAudit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "source_run_id": {
             "anyOf": [
               {
@@ -3947,6 +7007,17 @@
             ],
             "title": "Trashed At"
           },
+          "update_intent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Update Intent Id"
+          },
           "updated_at": {
             "format": "date-time",
             "title": "Updated At",
@@ -3965,6 +7036,16 @@
         ],
         "title": "RunView",
         "type": "object"
+      },
+      "ScenarioLikelihood": {
+        "enum": [
+          "low",
+          "medium",
+          "high",
+          "indeterminate"
+        ],
+        "title": "ScenarioLikelihood",
+        "type": "string"
       },
       "ScenarioReferenceCategory": {
         "description": "Research purpose of a non-valuation scenario reference range.",
@@ -4039,6 +7120,349 @@
         "title": "ScenarioReferenceRange",
         "type": "object"
       },
+      "SourceRecordKind": {
+        "enum": [
+          "disclosure",
+          "fundamental",
+          "market"
+        ],
+        "title": "SourceRecordKind",
+        "type": "string"
+      },
+      "SourceRecordSnapshotItem": {
+        "additionalProperties": false,
+        "properties": {
+          "lineage": {
+            "enum": [
+              "new",
+              "inherited"
+            ],
+            "title": "Lineage",
+            "type": "string"
+          },
+          "observed_in_execution": {
+            "title": "Observed In Execution",
+            "type": "boolean"
+          },
+          "source_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Revision Id"
+          },
+          "version_id": {
+            "minLength": 1,
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version_id",
+          "lineage",
+          "observed_in_execution"
+        ],
+        "title": "SourceRecordSnapshotItem",
+        "type": "object"
+      },
+      "SourceRecordStatus": {
+        "enum": [
+          "published",
+          "corrected",
+          "withdrawn",
+          "replaced"
+        ],
+        "title": "SourceRecordStatus",
+        "type": "string"
+      },
+      "SourceRecordVersion": {
+        "additionalProperties": false,
+        "properties": {
+          "accounting_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accounting Scope"
+          },
+          "adjustment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adjustment"
+          },
+          "availability_basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Availability Basis"
+          },
+          "available_at": {
+            "format": "date-time",
+            "title": "Available At",
+            "type": "string"
+          },
+          "change_hint": {
+            "anyOf": [
+              {
+                "enum": [
+                  "new_filing",
+                  "correction",
+                  "restatement",
+                  "accounting_scope_change",
+                  "unclassifiable"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Hint"
+          },
+          "comparison_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparison Key"
+          },
+          "evidence_ref": {
+            "pattern": "^ev_[a-f0-9]{12}$",
+            "title": "Evidence Ref",
+            "type": "string"
+          },
+          "fallback": {
+            "default": false,
+            "title": "Fallback",
+            "type": "boolean"
+          },
+          "native_record_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Native Record Id"
+          },
+          "observation_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observation Value"
+          },
+          "precision": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Precision"
+          },
+          "published_at": {
+            "minLength": 1,
+            "title": "Published At",
+            "type": "string"
+          },
+          "record_id": {
+            "minLength": 1,
+            "title": "Record Id",
+            "type": "string"
+          },
+          "record_kind": {
+            "$ref": "#/components/schemas/SourceRecordKind",
+            "default": "disclosure"
+          },
+          "replaces_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replaces Version Id"
+          },
+          "source": {
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SourceRecordStatus"
+          },
+          "title": {
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "version_id": {
+            "minLength": 1,
+            "title": "Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "record_id",
+          "version_id",
+          "status",
+          "published_at",
+          "available_at",
+          "title",
+          "evidence_ref"
+        ],
+        "title": "SourceRecordVersion",
+        "type": "object"
+      },
+      "SourceWatermarkSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "baseline_cutoff": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Cutoff"
+          },
+          "limitations": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "overlap_start": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overlap Start"
+          },
+          "reported_records": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reported Records"
+          },
+          "returned_records": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Returned Records",
+            "type": "integer"
+          },
+          "scanned_end": {
+            "format": "date",
+            "title": "Scanned End",
+            "type": "string"
+          },
+          "scanned_start": {
+            "format": "date",
+            "title": "Scanned Start",
+            "type": "string"
+          },
+          "source": {
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CoverageStatus"
+          },
+          "temporal_scope": {
+            "default": "point_in_time",
+            "enum": [
+              "point_in_time",
+              "live_only",
+              "unknown"
+            ],
+            "title": "Temporal Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "scanned_start",
+          "scanned_end",
+          "status"
+        ],
+        "title": "SourceWatermarkSnapshot",
+        "type": "object"
+      },
       "StructuredRecoveryNotice": {
         "additionalProperties": false,
         "description": "One successful bounded structured-output recovery rebuilt from events.",
@@ -4106,6 +7530,101 @@
         ],
         "title": "TableDataType",
         "type": "string"
+      },
+      "UpdateSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "analysis_cutoff": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysis Cutoff"
+          },
+          "baseline_cutoff": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Cutoff"
+          },
+          "change_conclusion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchChangeConclusion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "checked_domains": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Checked Domains",
+            "type": "array"
+          },
+          "execution_strategy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchExecutionStrategy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "language": {
+            "title": "Language",
+            "type": "string"
+          },
+          "limitations": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "new_evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "New Evidence Refs",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "1",
+            "default": "1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "summary": {
+            "minLength": 1,
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "language",
+          "summary",
+          "checked_domains"
+        ],
+        "title": "UpdateSummary",
+        "type": "object"
       },
       "ValidationError": {
         "properties": {
@@ -4448,6 +7967,90 @@
         "summary": "Memory"
       }
     },
+    "/api/v1/outcome-feedback/{feedback_id}/retire": {
+      "post": {
+        "operationId": "retire_outcome_feedback_api_v1_outcome_feedback__feedback_id__retire_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feedback_id",
+            "required": true,
+            "schema": {
+              "title": "Feedback Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OutcomeFeedbackRetireRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retire Outcome Feedback"
+      }
+    },
+    "/api/v1/outcome-observations/{outcome_id}/reflection/retry": {
+      "post": {
+        "operationId": "retry_outcome_reflection_api_v1_outcome_observations__outcome_id__reflection_retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "outcome_id",
+            "required": true,
+            "schema": {
+              "title": "Outcome Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retry Outcome Reflection"
+      }
+    },
     "/api/v1/providers/{provider}/models": {
       "get": {
         "operationId": "provider_models_api_v1_providers__provider__models_get",
@@ -4495,6 +8098,308 @@
           }
         },
         "summary": "Provider Models"
+      }
+    },
+    "/api/v1/research-chains": {
+      "get": {
+        "operationId": "list_research_chains_api_v1_research_chains_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "instrument",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Instrument"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ResearchChain"
+                  },
+                  "title": "Response List Research Chains Api V1 Research Chains Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Research Chains"
+      },
+      "post": {
+        "operationId": "create_research_chain_api_v1_research_chains_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Research Chain"
+      }
+    },
+    "/api/v1/research-chains/{chain_id}": {
+      "get": {
+        "operationId": "get_research_chain_api_v1_research_chains__chain_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chain_id",
+            "required": true,
+            "schema": {
+              "title": "Chain Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResearchChain"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Research Chain"
+      }
+    },
+    "/api/v1/research-chains/{chain_id}/updates": {
+      "post": {
+        "operationId": "update_research_chain_api_v1_research_chains__chain_id__updates_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chain_id",
+            "required": true,
+            "schema": {
+              "title": "Chain Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResearchChainUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Research Chain"
+      }
+    },
+    "/api/v1/research-revisions/{revision_id}": {
+      "get": {
+        "operationId": "get_research_revision_api_v1_research_revisions__revision_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "revision_id",
+            "required": true,
+            "schema": {
+              "title": "Revision Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResearchRevision"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Research Revision"
+      }
+    },
+    "/api/v1/research-revisions/{revision_id}/export": {
+      "get": {
+        "operationId": "export_research_revision_api_v1_research_revisions__revision_id__export_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "revision_id",
+            "required": true,
+            "schema": {
+              "title": "Revision Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "package",
+              "enum": [
+                "package",
+                "markdown",
+                "json"
+              ],
+              "title": "Format",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Research Revision"
       }
     },
     "/api/v1/runs": {

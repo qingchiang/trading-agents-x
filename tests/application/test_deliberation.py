@@ -3706,7 +3706,6 @@ def test_descriptive_pseudo_formula_does_not_remove_observed_scenario_ranges() -
         ("6501.T", date(2026, 8, 1), "2026-08-01T01:00:00+00:00", date(2026, 8, 1)),
         ("600519.SS", date(2026, 8, 1), "2026-08-01T01:00:00+00:00", date(2026, 8, 1)),
         ("NVDA", date(2026, 7, 31), "2026-08-01T01:00:00+00:00", date(2026, 7, 31)),
-        ("BTC-USD", date(2026, 8, 1), "2026-08-01T01:00:00+00:00", date(2026, 8, 1)),
     ),
 )
 def test_live_numeric_evidence_uses_market_local_snapshot_date(

@@ -20,6 +20,7 @@ from sqlalchemy import (
     UniqueConstraint,
     create_engine,
     event,
+    text,
 )
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -36,30 +37,32 @@ class RunRecord(Base):
     source_run_id: Mapped[str | None] = mapped_column(
         ForeignKey("runs.id", ondelete="SET NULL"), nullable=True
     )
-    idempotency_key: Mapped[str | None] = mapped_column(
-        String(200), nullable=True, unique=True
-    )
+    idempotency_key: Mapped[str | None] = mapped_column(String(200), nullable=True, unique=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
-    instrument_name: Mapped[str | None] = mapped_column(
-        String(300), nullable=True
+    instrument_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    instrument_local_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    research_chain_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    update_intent_id: Mapped[str | None] = mapped_column(String(36), nullable=True, unique=True)
+    research_chain_id: Mapped[str | None] = mapped_column(
+        ForeignKey("research_chains.id", ondelete="RESTRICT"), nullable=True
     )
-    instrument_local_name: Mapped[str | None] = mapped_column(
-        String(300), nullable=True
+    baseline_revision_id: Mapped[str | None] = mapped_column(
+        ForeignKey("research_revisions.id", ondelete="RESTRICT"), nullable=True
+    )
+    research_execution_strategy: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    research_update_audit_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True
     )
     request_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     config_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     version: Mapped[str] = mapped_column(String(40), nullable=False)
     current_attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    cancel_requested: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False
-    )
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     lease_owner: Mapped[str | None] = mapped_column(String(120), nullable=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    metrics_json: Mapped[dict[str, Any]] = mapped_column(
-        JSON, nullable=False, default=dict
-    )
+    metrics_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -73,6 +76,74 @@ class RunRecord(Base):
     __table_args__ = (
         Index("ix_runs_claim", "status", "lease_expires_at", "created_at"),
         Index("ix_runs_trash", "trashed_at", "created_at"),
+        Index(
+            "uq_runs_active_research_chain_update",
+            "research_chain_id",
+            unique=True,
+            sqlite_where=text("research_chain_id IS NOT NULL AND status IN ('queued', 'running')"),
+        ),
+    )
+
+
+class ResearchChainRecord(Base):
+    __tablename__ = "research_chains"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    instrument: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    current_revision_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+    __table_args__ = (
+        Index(
+            "uq_research_chains_primary_instrument",
+            "instrument",
+            unique=True,
+            sqlite_where=text("is_primary = 1"),
+        ),
+    )
+
+
+class ResearchRevisionRecord(Base):
+    __tablename__ = "research_revisions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    chain_id: Mapped[str] = mapped_column(
+        ForeignKey("research_chains.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    predecessor_revision_id: Mapped[str | None] = mapped_column(
+        ForeignKey("research_revisions.id", ondelete="RESTRICT"), nullable=True
+    )
+    producing_run_id: Mapped[str | None] = mapped_column(
+        ForeignKey("runs.id", ondelete="SET NULL"), nullable=True, unique=True
+    )
+    cutoff: Mapped[date] = mapped_column(Date, nullable=False)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    execution_strategy: Mapped[str] = mapped_column(String(20), nullable=False)
+    legacy_outcome: Mapped[str] = mapped_column(
+        "outcome", String(30), nullable=False, default="not_applicable"
+    )
+    change_conclusion: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    indeterminate_reason: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    language: Mapped[str] = mapped_column(String(40), nullable=False)
+    current_state_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    delta_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    coverage_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    update_summary_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    evidence_snapshot_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    research_update_audit_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True
+    )
+    metrics_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("chain_id", "sequence"),
+        Index("ix_research_revisions_chain_order", "chain_id", "sequence"),
     )
 
 
@@ -93,9 +164,7 @@ class RunAttemptRecord(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    metrics_json: Mapped[dict[str, Any]] = mapped_column(
-        JSON, nullable=False, default=dict
-    )
+    metrics_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
 
     run: Mapped[RunRecord] = relationship(back_populates="attempts")
 
@@ -113,9 +182,7 @@ class RunEventRecord(Base):
     attempt: Mapped[int] = mapped_column(Integer, nullable=False)
     event_type: Mapped[str] = mapped_column(String(100), nullable=False)
     node: Mapped[str | None] = mapped_column(String(160), nullable=True)
-    payload_json: Mapped[dict[str, Any]] = mapped_column(
-        JSON, nullable=False, default=dict
-    )
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
     __table_args__ = (
@@ -137,9 +204,7 @@ class RunArtifactRecord(Base):
     round: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     schema_version: Mapped[str] = mapped_column(String(20), nullable=False)
     prompt_version: Mapped[str] = mapped_column(String(80), nullable=False)
-    generation_method: Mapped[str] = mapped_column(
-        String(40), nullable=False
-    )
+    generation_method: Mapped[str] = mapped_column(String(40), nullable=False)
     generation_observations_json: Mapped[list[dict[str, Any]] | None] = mapped_column(
         JSON, nullable=True
     )
@@ -169,9 +234,7 @@ class RunArtifactRecord(Base):
 class RunEvidenceRecord(Base):
     __tablename__ = "run_evidence"
 
-    run_id: Mapped[str] = mapped_column(
-        ForeignKey("runs.id", ondelete="CASCADE"), primary_key=True
-    )
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), primary_key=True)
     sealed_attempt: Mapped[int] = mapped_column(Integer, nullable=False)
     bundle_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     digest: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -214,8 +277,20 @@ class OutcomeRecord(Base):
         unique=True,
         index=True,
     )
+    research_revision_id: Mapped[str | None] = mapped_column(
+        ForeignKey("research_revisions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     benchmark: Mapped[str] = mapped_column(String(64), nullable=False)
+    market_timezone: Mapped[str] = mapped_column(String(80), nullable=False)
+    method_category: Mapped[str] = mapped_column(String(80), nullable=False)
+    method_version: Mapped[str] = mapped_column(String(80), nullable=False)
+    price_semantics: Mapped[str] = mapped_column(String(80), nullable=False)
+    adjustment_semantics: Mapped[str] = mapped_column(String(80), nullable=False)
+    horizon_limit: Mapped[str] = mapped_column(Text, nullable=False)
+    limitations_json: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     observation_start: Mapped[date | None] = mapped_column(Date, nullable=True)
     observation_end: Mapped[date | None] = mapped_column(Date, nullable=True)
     holding_intervals: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
@@ -224,11 +299,10 @@ class OutcomeRecord(Base):
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     next_check_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    data_available_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    __table_args__ = (
-        Index("ix_outcomes_due", "status", "next_check_at"),
-    )
+    __table_args__ = (Index("ix_outcomes_due", "status", "next_check_at"),)
 
 
 class ReflectionRecord(Base):
@@ -241,8 +315,37 @@ class ReflectionRecord(Base):
         unique=True,
         index=True,
     )
-    text: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    candidate_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    generated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_attempted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+
+class OutcomeFeedbackRecord(Base):
+    __tablename__ = "outcome_feedback"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    reflection_id: Mapped[int] = mapped_column(
+        ForeignKey("reflections.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    qualification_policy_version: Mapped[str | None] = mapped_column(
+        String(80), nullable=True
+    )
+    reasons_json: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    method_category: Mapped[str] = mapped_column(String(80), nullable=False)
+    horizon_limit: Mapped[str] = mapped_column(Text, nullable=False)
+    applicability_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    qualified_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    available_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 def create_sqlite_engine(path: Path, *, busy_timeout_ms: int = 5000) -> Engine:

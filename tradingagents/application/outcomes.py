@@ -16,6 +16,7 @@ from tradingagents.dataflows.symbol_utils import market_today, normalize_symbol
 
 from .contracts import report_language_prompt_label
 from .llms import create_run_llms
+from .outcome_feedback import OutcomeReflectionStatus
 from .reflection import OutcomeReflector
 from .repository import RunRepository
 from .settings import AppSettings
@@ -68,57 +69,103 @@ class OutcomeSettlement:
 
     def settle_once(self, *, limit: int = 20) -> dict[str, int]:
         stats = {"checked": 0, "resolved": 0, "pending": 0, "failed": 0}
-        now = self.utc_clock()
-        if now.tzinfo is None:
-            now = now.replace(tzinfo=timezone.utc)
-        else:
-            now = now.astimezone(timezone.utc)
+        now = self._now()
         for item in self.repository.pending_outcomes(limit, due_at=now):
             stats["checked"] += 1
-            try:
-                observation = self.observe(
-                    item["ticker"],
-                    item["analysis_date"],
-                    benchmark=item["benchmark"],
-                    holding_intervals=item["holding_intervals"],
-                )
-                if observation is None:
+            observation = self._persisted_observation(item)
+            if observation is None:
+                try:
+                    observation = self.observe(
+                        item["ticker"],
+                        item["analysis_date"],
+                        benchmark=item["benchmark"],
+                        holding_intervals=item["holding_intervals"],
+                    )
+                except Exception as exc:
+                    checked_at = self._now()
+                    logger.warning(
+                        "Outcome observation failed for %s: %s",
+                        item["ticker"],
+                        type(exc).__name__,
+                    )
                     self.repository.mark_outcome_checked(
                         item["outcome_id"],
-                        checked_at=now,
-                        next_check_at=now + PENDING_RECHECK_INTERVAL,
+                        checked_at=checked_at,
+                        next_check_at=checked_at + ERROR_RECHECK_INTERVAL,
+                        error_message=type(exc).__name__,
+                    )
+                    stats["failed"] += 1
+                    continue
+                if observation is None:
+                    checked_at = self._now()
+                    self.repository.mark_outcome_checked(
+                        item["outcome_id"],
+                        checked_at=checked_at,
+                        next_check_at=checked_at + PENDING_RECHECK_INTERVAL,
                     )
                     stats["pending"] += 1
                     continue
+                self.repository.persist_outcome_observation(
+                    item["outcome_id"],
+                    observation=observation,
+                    observed_at=self._now(),
+                )
+            try:
                 reflection = self._reflection(
                     ticker=item["ticker"],
                     benchmark=item["benchmark"],
                     decision=item["decision"],
                     observation=observation,
                 )
-                self.repository.resolve_outcome(
+                reflection_status = self.repository.persist_generated_reflection(
                     item["outcome_id"],
-                    observation_start=observation.start_date,
-                    observation_end=observation.end_date,
-                    raw_return=observation.raw_return,
-                    alpha_return=observation.alpha_return,
                     reflection=reflection,
+                    generated_at=self._now(),
                 )
-                stats["resolved"] += 1
+                stats[
+                    "failed"
+                    if reflection_status == OutcomeReflectionStatus.INVALID.value
+                    else "resolved"
+                ] += 1
             except Exception as exc:
+                attempted_at = self._now()
                 logger.warning(
-                    "Outcome settlement failed for %s: %s",
+                    "Outcome reflection failed for %s: %s",
                     item["ticker"],
-                    exc,
+                    type(exc).__name__,
                 )
-                self.repository.mark_outcome_checked(
+                self.repository.mark_reflection_failure(
                     item["outcome_id"],
-                    checked_at=now,
-                    next_check_at=now + ERROR_RECHECK_INTERVAL,
-                    error_message=type(exc).__name__,
+                    attempted_at=attempted_at,
+                    next_retry_at=attempted_at + ERROR_RECHECK_INTERVAL,
+                    error_code=type(exc).__name__,
                 )
                 stats["failed"] += 1
         return stats
+
+    def _now(self) -> datetime:
+        now = self.utc_clock()
+        if now.tzinfo is None:
+            return now.replace(tzinfo=timezone.utc)
+        return now.astimezone(timezone.utc)
+
+    @staticmethod
+    def _persisted_observation(item: dict[str, Any]) -> OutcomeObservation | None:
+        required = (
+            item.get("observation_start"),
+            item.get("observation_end"),
+            item.get("raw_return"),
+            item.get("alpha_return"),
+        )
+        if any(value is None for value in required):
+            return None
+        return OutcomeObservation(
+            raw_return=float(item["raw_return"]),
+            alpha_return=float(item["alpha_return"]),
+            holding_intervals=int(item["holding_intervals"]),
+            start_date=item["observation_start"],
+            end_date=item["observation_end"],
+        )
 
     def observe(
         self,
@@ -137,10 +184,14 @@ class OutcomeSettlement:
         stock = self.history_provider.Ticker(canonical).history(
             start=analysis_date.isoformat(),
             end=stock_end.isoformat(),
+            auto_adjust=True,
+            actions=False,
         )
         bench = self.history_provider.Ticker(benchmark).history(
             start=analysis_date.isoformat(),
             end=benchmark_end.isoformat(),
+            auto_adjust=True,
+            actions=False,
         )
         stock_close = close_by_local_date(stock)
         benchmark_close = close_by_local_date(bench)

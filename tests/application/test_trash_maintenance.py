@@ -19,6 +19,7 @@ from tradingagents.application.contracts import (
 )
 from tradingagents.application.database import (
     DecisionRecord,
+    OutcomeFeedbackRecord,
     OutcomeRecord,
     ReflectionRecord,
     RunArtifactRecord,
@@ -197,6 +198,10 @@ def test_trash_maintenance_purges_owned_data_and_detaches_child_runs(
         )
         assert (
             session.scalar(select(func.count()).select_from(ReflectionRecord))
+            == 0
+        )
+        assert (
+            session.scalar(select(func.count()).select_from(OutcomeFeedbackRecord))
             == 0
         )
     with repository.engine.connect() as connection:

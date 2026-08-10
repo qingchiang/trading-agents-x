@@ -33,8 +33,12 @@ invalidation conditions、time horizon が含まれます。ポジション比�
 - **Run Detail:** 永続イベントタイムライン、レポート、構造化 decision、
   折りたたみ可能な監査詳細、token/tool/wall-time 指標、cancel/retry、
   アーカイブ復元、現在の run をもとにした新規作成、export。
-- **Memory:** 完全な decision、outcome、reflection を検索し、catalyst、
-  risk、invalidation と銘柄名を表示して元の run の判断へ戻る。
+- **Memory:** 永続化済み Outcome Observation、Reflection の lifecycle、
+  バージョン付き Feedback の適格性と理由を個別に確認する。失敗した Reflection
+  の再試行、Feedback の廃止、decision の展開、元の run への移動も行える。
+  完了した Observation は、source Decision または紐づく Research Revision の
+  market-local cutoff を収益基準にできるが、その後に終了しなければならない。
+  履歴上のバージョンなし資格状態は、そのまま明示される。
 - **Settings:** provider/model capability、安全なデフォルト値、API key の
   設定有無を読み取り専用で表示。
 
@@ -159,6 +163,29 @@ Web 起動時に一度、worker は work claim 前と成功後 24 時間ごと�
 確認し、失敗時は 1 時間後に再試行します。既定の保持期間は 30 日で、
 `TRADINGAGENTS_TRASH_RETENTION_DAYS=0` にすると完全削除を無効化します。
 
+Research Chain 更新には、手動でのみ開始する日本株向けの内部増分リサーチ
+実験があります。既定値は `off` です。`shadow` は限定評価の候補を保持しつつ
+フル分析を正とし、`experimental` は完全な coverage と意味的不変性を満たす
+No Material Change 評価だけを、Required Source が完全な対応 `.T` 銘柄で
+analyst report や deliberation を再生成せず Revision にできます。重要な変更、
+coverage 不足、互換性不良、無効、novelty、不確定な結果は、同じ更新内で
+自動的にフル分析へ移行します。米国株と中国本土株の Research Chain は、
+引き続き手動のフル分析でのみ更新できます。
+
+Revision Role、Execution Strategy、Change Conclusion は別々に表示されます。
+フル再評価でも Material Change と No Material Change のどちらも正当化できない
+場合は、読取可能な Indeterminate head を作成し、次回更新にもフル再評価を
+要求します。
+
+```dotenv
+TRADINGAGENTS_RESEARCH_UPDATE_MODE=experimental
+```
+
+mode、source qualification、metrics、opt-in live validation の詳細は
+[実験ガイド](../incremental-research-experiment.md) を参照してください。
+この機能は更新を schedule せず、production automation や口座別 advice を
+提供しません。
+
 event はクライアント送信前に database へ commit されます。SSE は
 `Last-Event-ID` から欠落イベントを replay するため、ページ更新でも進捗を
 失いません。
@@ -219,7 +246,8 @@ truth です。
 ## API とセキュリティ
 
 バージョン化 API は run の作成・参照、event SSE、cancel/retry、
-export、memory、capabilities、health を提供します。run 作成時に
+export、memory 参照、Reflection の再試行、Feedback の廃止、capabilities、
+health を提供します。run 作成時に
 `Idempotency-Key` を送ることで、ブラウザ再送による重複を防げます。
 確認済みテンプレートからの作成では、終端 run の `source_run_id` も送信
 できます。OpenAPI は `/openapi.json` です。
@@ -247,16 +275,26 @@ Web login は token を署名済み `HttpOnly`、`SameSite=Strict` cookie に交
 | US/default | `NVDA`, `SPY` | yfinance default |
 | Japan | `7203.T` | J-Quants、EDINET、TDnet、日本の news/macro |
 | China A-share | `600519.SS`, `000001.SZ` | Tencent/AkShare、CNINFO、Sina、Eastmoney、中国 macro |
-| Crypto/FX | `BTC-USD`, `EURUSD=X` | 互換 default route |
+
+Crypto、明示的な非株式、未対応、または曖昧な instrument は data routing 前に明示的に失敗します。
 
 historical analysis の cutoff は instrument market のローカル日付です。
 Evidence は requested/effective date、timezone 付き availability、実際の
 source、quality、fallback、provenance を保持し、seal 時に未来可視データを
 拒否します。データ欠落は unknown であり、中立・弱気シグナルではありません。
 
-ticker と benchmark に 6 個の共通 completed close が揃うと、worker は
-5 trading interval の raw return と alpha、および短期 reflection を保存
-します。これは長期 thesis や graph 品質の唯一の正解ではありません。
+ticker と benchmark に 6 個の共通 completed close が揃うと、worker は 5
+trading interval を形成し、versioned market-local Outcome Observation、raw
+return、alpha、availability、horizon limitation を先に独立保存します。収益の
+baseline は source Decision または関連 Research Revision の cutoff と同日でも
+よい一方、それより前にはできず、Observation end は cutoff より後でなければ
+なりません。Reflection は独立生成され、失敗しても Observation を削除しません。
+Feedback は `outcome_feedback_qualification.v1` の PIT、schema、source、
+applicability、content、method、horizon qualification をすべて通過した場合のみ
+eligible になります。`available_at` は Observation data availability、Reflection
+generation、qualification completion のうち最も遅い時刻です。履歴上の
+unversioned status は再計算しません。最初の Research Chain 実験はこれらの
+historical Feedback を注入せず、長期 thesis の証明・反証にも使いません。
 
 ## 開発・リリースゲート
 
@@ -286,7 +324,8 @@ latency、token consumption の改善を証明するものではありません�
   `tradingagents db backup /path/to/backup.db`
 - 旧 report directory は読み取り専用 archive とし、旧 checkpoint は移行
   しません。
-- reports、events、decisions、outcomes、reflections は長期保持します。
+- reports、events、decisions、Outcome Observations、Reflections、審査済み
+  Feedback は長期保持します。
 - 初版には permanent-delete API がありません。
 
 TradingAgentsX は Apache-2.0 で提供されます。[LICENSE](../../LICENSE) と

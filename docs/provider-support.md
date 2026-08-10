@@ -47,6 +47,16 @@ These rules prevent an accepted response from bypassing the application
 contract. They cannot make an unsupported provider transport emit a valid
 response in the first place.
 
+The manually triggered Japanese incremental-research experiment uses the
+configured quick serializer for one bounded semantic Change Assessment. A
+provider/model's support level therefore still applies to that call. Invalid or
+indeterminate structured output receives at most one repair and then escalates
+to Full Analysis; `experimental` mode never turns a provider failure into No
+Material Change. The experiment is disabled by default and restricted to
+source-qualified supported Japanese equities. US and mainland-China Research
+Chains remain Full-only, as described in
+[incremental-research-experiment.md](incremental-research-experiment.md).
+
 ## Known portability boundaries
 
 The most likely provider-specific failures are:
@@ -76,7 +86,8 @@ The checks must cover:
 - thinking structured output for Debate Agenda and Final numeric generation;
 - strict Final core validation and optional numeric degradation;
 - invalid-candidate recovery and truncation behavior;
-- usage, reasoning-token, and node timing attribution;
+- usage, reasoning-token, node timing, and provider-reported USD cost
+  attribution when available (never a token-count estimate);
 - checkpoint persistence and successful export.
 
 Live qualification is never part of default pytest because it incurs external

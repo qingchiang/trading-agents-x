@@ -7,7 +7,7 @@ from pathlib import Path
 from threading import Barrier
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from tests.factories import (
     analyst_report,
@@ -51,7 +51,14 @@ from tradingagents.application.contracts import (
     RunStatus,
     RunTrashState,
 )
-from tradingagents.application.database import DecisionRecord, RunAttemptRecord, RunRecord
+from tradingagents.application.database import (
+    DecisionRecord,
+    OutcomeFeedbackRecord,
+    OutcomeRecord,
+    ReflectionRecord,
+    RunAttemptRecord,
+    RunRecord,
+)
 from tradingagents.application.maintenance import TrashMaintenance
 from tradingagents.application.repository import (
     ArtifactConflictError,
@@ -844,7 +851,7 @@ def test_complete_persists_result_and_resolved_memory(
 
     repository.complete(run.id, result, evidence=evidence, benchmark="SPY")
     restored = repository.get_result(run.id)
-    due_at = datetime(2026, 8, 10, tzinfo=timezone.utc)
+    due_at = datetime(2100, 1, 1, tzinfo=timezone.utc)
     pending = repository.pending_outcomes(due_at=due_at)
     repository.trash_runs((run.id,))
     assert repository.pending_outcomes(due_at=due_at) == []
@@ -860,6 +867,14 @@ def test_complete_persists_result_and_resolved_memory(
         raw_return=0.08,
         alpha_return=0.03,
         reflection="The thesis worked because earnings accelerated.",
+    )
+    repository.resolve_outcome(
+        pending[0]["outcome_id"],
+        observation_start=date(2026, 7, 25),
+        observation_end=date(2026, 8, 1),
+        raw_return=0.08,
+        alpha_return=0.03,
+        reflection="A replay must not replace the generated Reflection.",
     )
 
     assert restored.status is RunStatus.SUCCEEDED
@@ -878,6 +893,38 @@ def test_complete_persists_result_and_resolved_memory(
     assert repository.memory_entries() == []
     repository.restore_runs((run.id,))
     assert repository.memory_context("NVDA", "stock").items[0].run_id == run.id
+
+    with repository.sessions() as session:
+        outcome = session.scalar(select(OutcomeRecord))
+        reflection = session.scalar(select(ReflectionRecord))
+        feedback = session.scalar(select(OutcomeFeedbackRecord))
+        assert outcome is not None
+        assert outcome.method_version == "short_term_relative_return.v1"
+        assert outcome.method_category == "short_term_relative_return"
+        assert outcome.market_timezone == "America/New_York"
+        assert "do not prove or disprove" in outcome.horizon_limit
+        assert outcome.data_available_at == outcome.resolved_at
+        assert reflection is not None
+        assert reflection.status == "generated"
+        assert reflection.text == "The thesis worked because earnings accelerated."
+        assert feedback is not None
+        assert feedback.status in {"eligible", "ineligible"}
+        assert (
+            feedback.qualification_policy_version
+            == "outcome_feedback_qualification.v1"
+        )
+        assert feedback.available_at == max(
+            outcome.data_available_at,
+            reflection.generated_at,
+            feedback.qualified_at,
+        )
+        assert session.scalar(select(func.count()).select_from(ReflectionRecord)) == 1
+        assert session.scalar(select(func.count()).select_from(OutcomeFeedbackRecord)) == 1
+
+    feedback_view = repository.memory_entries()[0]["outcome_feedback"]
+    assert feedback_view["qualification_policy_version"] == (
+        "outcome_feedback_qualification.v1"
+    )
 
     with repository.sessions() as session:
         record = session.scalar(

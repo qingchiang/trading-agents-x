@@ -268,7 +268,7 @@ function firstRoleSequence(roleId: string, events: RunEvent[]): number {
   }, Number.MAX_SAFE_INTEGER);
 }
 
-function usage(raw: Record<string, number | undefined>): Usage {
+function usage(raw: Record<string, number | null | undefined>): Usage {
   return {
     llmCalls: raw.llm_calls ?? 0,
     toolCalls: raw.tool_calls ?? 0,

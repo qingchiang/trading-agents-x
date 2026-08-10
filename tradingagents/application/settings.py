@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal
 
 from dotenv import find_dotenv, load_dotenv
 from pydantic import (
@@ -16,6 +16,7 @@ from pydantic import (
     Field,
     SecretStr,
     field_validator,
+    model_validator,
 )
 
 from tradingagents.default_config import build_default_config
@@ -31,6 +32,7 @@ from .contracts import (
 )
 
 _SECRET_FRAGMENTS = ("key", "secret", "token", "password", "authorization")
+ResearchUpdateMode = Literal["off", "shadow", "experimental"]
 
 
 def _env_bool(environ: Mapping[str, str], name: str, default: bool) -> bool:
@@ -70,7 +72,16 @@ class RunSettings(BaseModel):
     temperature: float | None = None
     llm_max_retries: int | None = Field(default=None, ge=0)
     output_language: OutputLanguage = ReportLanguage.ENGLISH
+    research_update_mode: ResearchUpdateMode = "off"
     data_config: Mapping[str, Any]
+
+    @model_validator(mode="before")
+    @classmethod
+    def ignore_unreleased_whitelist_snapshot(cls, value: Any) -> Any:
+        if isinstance(value, Mapping) and "experimental_nmc_jp_whitelist" in value:
+            value = dict(value)
+            value.pop("experimental_nmc_jp_whitelist", None)
+        return value
 
     @field_validator("output_language", mode="before")
     @classmethod
@@ -135,6 +146,7 @@ class AppSettings(BaseModel):
     lease_seconds: int = Field(default=300, ge=30)
     busy_timeout_ms: int = Field(default=5000, ge=100)
     trash_retention_days: int = Field(default=30, ge=0)
+    research_update_mode: ResearchUpdateMode = "off"
     default_run_settings: RunSettings
 
     @field_validator("database_path", "data_cache_dir", mode="before")
@@ -184,6 +196,10 @@ class AppSettings(BaseModel):
         )
         data_config = deepcopy(defaults)
         data_config["output_language"] = report_language_value(output_language)
+        research_update_mode = env.get(
+            "TRADINGAGENTS_RESEARCH_UPDATE_MODE",
+            "off",
+        ).strip().lower()
         run_settings = RunSettings(
             llm_provider=provider,
             quick_model=env.get(
@@ -214,6 +230,7 @@ class AppSettings(BaseModel):
                 else defaults.get("llm_max_retries")
             ),
             output_language=output_language,
+            research_update_mode=research_update_mode,
             data_config=data_config,
         )
         lan_enabled = _env_bool(env, "TRADINGAGENTS_LAN_ENABLED", False)
@@ -251,6 +268,7 @@ class AppSettings(BaseModel):
             trash_retention_days=_env_int(
                 env, "TRADINGAGENTS_TRASH_RETENTION_DAYS", 30
             ),
+            research_update_mode=research_update_mode,
             default_run_settings=run_settings,
         )
 
@@ -273,6 +291,7 @@ class AppSettings(BaseModel):
                     else base.deep_reasoning_effort
                 ),
                 "output_language": request.output_language or base.output_language,
+                "research_update_mode": self.research_update_mode,
             }
         )
 

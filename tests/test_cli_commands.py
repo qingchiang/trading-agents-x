@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -20,6 +21,40 @@ from tradingagents.application.service import AnalysisService
 from tradingagents.application.settings import AppSettings
 
 runner = CliRunner()
+
+
+def _git_checkout_for_live_validation(tmp_path: Path) -> tuple[Path, Path, str]:
+    checkout = tmp_path / "checkout"
+    (checkout / "cli").mkdir(parents=True)
+    (checkout / "cli/main.py").write_text("# tracked source\n", encoding="utf-8")
+    (checkout / ".gitignore").write_text(".env\n*.db\ntmp/\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q", str(checkout)], check=True)
+    subprocess.run(["git", "-C", str(checkout), "add", "."], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(checkout),
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-qm",
+            "fixture",
+        ],
+        check=True,
+    )
+    commit = subprocess.run(
+        ["git", "-C", str(checkout), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    cases = checkout / "tmp/incremental-research/reviewed-live-cases.json"
+    cases.parent.mkdir(parents=True)
+    cases.write_text("[]", encoding="utf-8")
+    return checkout, cases, commit
 
 
 @pytest.fixture
@@ -51,6 +86,7 @@ def test_root_is_noninteractive_and_exposes_the_new_command_tree() -> None:
         "runs",
         "export",
         "db",
+        "research",
     ):
         assert command in result.output
     assert "memory" not in result.output
@@ -273,6 +309,44 @@ def test_run_reports_market_date_resolution_as_a_usage_error(monkeypatch) -> Non
 
     assert result.exit_code == 2
     assert "unsupported market symbol" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_run_rejects_crypto_instruments_before_starting_analysis(monkeypatch) -> None:
+    monkeypatch.setattr(
+        cli,
+        "_application",
+        lambda: pytest.fail("application should not be created"),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["run", "BTC-USD", "--date", "2026-07-24"],
+    )
+
+    assert result.exit_code == 2
+    assert "Crypto instruments are not supported" in result.output
+    assert "Traceback" not in result.output
+
+
+@pytest.mark.parametrize("ticker", ["EURUSD", "GC=F", "^GSPC"])
+def test_run_rejects_non_equity_instruments_before_starting_analysis(
+    monkeypatch,
+    ticker: str,
+) -> None:
+    monkeypatch.setattr(
+        cli,
+        "_application",
+        lambda: pytest.fail("application should not be created"),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["run", ticker, "--date", "2026-07-24"],
+    )
+
+    assert result.exit_code == 2
+    assert "Only listed equity instruments are supported" in result.output
     assert "Traceback" not in result.output
 
 
@@ -565,3 +639,274 @@ def test_database_backup_is_consistent_and_refuses_overwrite(
     assert destination.stat().st_size > 0
     assert refused.exit_code == 1
     assert "Refusing to overwrite" in refused.output
+
+
+def test_live_thesis_validation_cli_requires_explicit_in_place_flag_and_reports_manifest(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    cases = tmp_path / "cases.json"
+    cases.write_text("[]", encoding="utf-8")
+    captured = {}
+    monkeypatch.setattr(cli, "load_reviewed_scenarios", lambda path: (str(path),))
+    monkeypatch.setattr(cli, "_service", lambda: "service")
+    monkeypatch.setattr(
+        cli,
+        "_source_checkout",
+        lambda: (tmp_path / "checkout", "a" * 40),
+    )
+
+    def validate(service, scenarios, **kwargs):
+        captured.update(service=service, scenarios=scenarios, **kwargs)
+        return SimpleNamespace(
+            manifest_directory=tmp_path / "manifest" / "session",
+            passed=True,
+            entries=(SimpleNamespace(scenario="quiet_interval", validation_verdict="passed"),),
+        )
+
+    monkeypatch.setattr(cli, "validate_live_thesis", validate)
+    refused = runner.invoke(
+        cli.app,
+        [
+            "research",
+            "validate-live-thesis",
+            str(cases),
+            "--backup",
+            str(tmp_path / "backup.db"),
+        ],
+    )
+    completed = runner.invoke(
+        cli.app,
+        [
+            "research",
+            "validate-live-thesis",
+            str(cases),
+            "--backup",
+            str(tmp_path / "backup.db"),
+            "--in-place-database",
+        ],
+    )
+
+    assert refused.exit_code == 2
+    assert completed.exit_code == 0
+    assert captured["service"] == "service"
+    assert captured["in_place_database"] is True
+    assert captured["git_commit"] == "a" * 40
+    assert captured["manifest_root"] == (
+        tmp_path / "checkout" / "tmp/incremental-research/live-validation"
+    )
+    assert "manifest/session" in completed.output
+    assert "quiet_interval: passed" in completed.output
+
+    monkeypatch.setattr(
+        cli,
+        "validate_live_thesis",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            manifest_directory=tmp_path / "manifest" / "mismatch",
+            passed=False,
+            entries=(
+                SimpleNamespace(
+                    scenario="quiet_interval",
+                    validation_verdict="expectation_mismatch",
+                ),
+            ),
+        ),
+    )
+    mismatch = runner.invoke(
+        cli.app,
+        [
+            "research",
+            "validate-live-thesis",
+            str(cases),
+            "--backup",
+            str(tmp_path / "backup-2.db"),
+            "--in-place-database",
+        ],
+    )
+
+    assert mismatch.exit_code == 1
+    assert "quiet_interval: expectation_mismatch" in mismatch.output
+
+
+def test_live_thesis_validation_cli_accepts_clean_checkout_with_ignored_runtime_files(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    checkout, cases, commit = _git_checkout_for_live_validation(tmp_path)
+    (checkout / ".env").write_text("IGNORED_SECRET=fixture\n", encoding="utf-8")
+    (checkout / "configured.db").write_bytes(b"ignored database")
+    (checkout / "backup.db").write_bytes(b"ignored backup")
+    manifest = checkout / "tmp/incremental-research/live-validation/old.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text("{}", encoding="utf-8")
+    captured = {}
+    monkeypatch.setattr(cli, "__file__", str(checkout / "cli/main.py"))
+    monkeypatch.setattr(cli, "load_reviewed_scenarios", lambda _path: ())
+    monkeypatch.setattr(cli, "_service", lambda: "service")
+
+    def validate(_service, _scenarios, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            manifest_directory=manifest.parent / "new-session",
+            passed=True,
+            entries=(),
+        )
+
+    monkeypatch.setattr(cli, "validate_live_thesis", validate)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "research",
+            "validate-live-thesis",
+            str(cases),
+            "--backup",
+            str(checkout / "new-backup.db"),
+            "--in-place-database",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured["git_commit"] == commit
+    assert captured["manifest_root"] == manifest.parent
+
+
+@pytest.mark.parametrize("dirty_kind", ["staged", "modified", "untracked"])
+def test_live_thesis_validation_cli_refuses_dirty_source_before_application_work(
+    monkeypatch,
+    tmp_path: Path,
+    dirty_kind: str,
+) -> None:
+    checkout, cases, _commit = _git_checkout_for_live_validation(tmp_path)
+    tracked = checkout / "cli/main.py"
+    if dirty_kind == "staged":
+        tracked.write_text("# staged source\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(checkout), "add", "cli/main.py"], check=True)
+    elif dirty_kind == "modified":
+        tracked.write_text("# modified source\n", encoding="utf-8")
+    else:
+        (checkout / "ordinary-untracked.txt").write_text("source", encoding="utf-8")
+    monkeypatch.setattr(cli, "__file__", str(tracked))
+    monkeypatch.setattr(
+        cli,
+        "load_reviewed_scenarios",
+        lambda _path: pytest.fail("cases must not load for a dirty checkout"),
+    )
+    monkeypatch.setattr(
+        cli,
+        "_service",
+        lambda: pytest.fail("service must not load for a dirty checkout"),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "research",
+            "validate-live-thesis",
+            str(cases),
+            "--backup",
+            str(checkout / "new-backup.db"),
+            "--in-place-database",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "clean source checkout" in result.output
+
+
+def test_live_thesis_validation_cli_refuses_head_change_during_source_check(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    checkout, cases, _commit = _git_checkout_for_live_validation(tmp_path)
+    tracked = checkout / "cli/main.py"
+    original_run = subprocess.run
+
+    def change_head_after_status(*args, **kwargs):
+        completed = original_run(*args, **kwargs)
+        command = args[0]
+        if "status" in command:
+            original_run(
+                [
+                    "git",
+                    "-C",
+                    str(checkout),
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=test@example.com",
+                    "commit",
+                    "--allow-empty",
+                    "-qm",
+                    "changed head",
+                ],
+                check=True,
+            )
+        return completed
+
+    monkeypatch.setattr(cli, "__file__", str(tracked))
+    monkeypatch.setattr(cli.subprocess, "run", change_head_after_status)
+    monkeypatch.setattr(
+        cli,
+        "load_reviewed_scenarios",
+        lambda _path: pytest.fail("cases must not load after HEAD changes"),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "research",
+            "validate-live-thesis",
+            str(cases),
+            "--backup",
+            str(checkout / "new-backup.db"),
+            "--in-place-database",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Git commit changed" in result.output
+    assert "verification" in result.output
+
+
+def test_live_thesis_validation_cli_refuses_dirty_change_during_source_check(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    checkout, cases, _commit = _git_checkout_for_live_validation(tmp_path)
+    tracked = checkout / "cli/main.py"
+    original_run = subprocess.run
+    status_calls = 0
+
+    def add_untracked_after_first_status(*args, **kwargs):
+        nonlocal status_calls
+        completed = original_run(*args, **kwargs)
+        command = args[0]
+        if "status" in command:
+            status_calls += 1
+            if status_calls == 1:
+                (checkout / "late-untracked.txt").write_text("source", encoding="utf-8")
+        return completed
+
+    monkeypatch.setattr(cli, "__file__", str(tracked))
+    monkeypatch.setattr(cli.subprocess, "run", add_untracked_after_first_status)
+    monkeypatch.setattr(
+        cli,
+        "load_reviewed_scenarios",
+        lambda _path: pytest.fail("cases must not load after the checkout becomes dirty"),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "research",
+            "validate-live-thesis",
+            str(cases),
+            "--backup",
+            str(checkout / "new-backup.db"),
+            "--in-place-database",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "clean source checkout" in result.output

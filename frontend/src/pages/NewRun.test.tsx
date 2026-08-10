@@ -17,6 +17,7 @@ vi.mock("../api/client", () => ({
     capabilities: vi.fn(),
     providerModels: vi.fn(),
     createRun: vi.fn(),
+    createResearchChain: vi.fn(),
     run: vi.fn(),
     recentInstruments: vi.fn(),
   },
@@ -137,6 +138,7 @@ test("reuses the idempotency key when a browser submission is retried", async ()
   expect(secondKey).toBe(firstKey);
   expect(vi.mocked(api.createRun).mock.calls[1][0]).toMatchObject({
     ticker: "NVDA",
+    asset_type: "stock",
     quick_reasoning_effort: "low",
     deep_reasoning_effort: "high",
     output_language: "zh-CN",
@@ -165,6 +167,37 @@ test("keeps UI locale and report output language independent", async () => {
   await waitFor(() => expect(api.createRun).toHaveBeenCalled());
   expect(vi.mocked(api.createRun).mock.calls[0][0].output_language).toBe("ja");
   expect(i18n.language).toBe("en");
+});
+
+test("explicitly queues a Full Analysis that starts a Research Chain", async () => {
+  vi.mocked(api.createResearchChain).mockResolvedValue({ id: "chain-run" } as RunView);
+  render(
+    <Router initialPath="/runs/new">
+      <NewRunRoutes />
+    </Router>,
+  );
+  await screen.findAllByRole("option", { name: "Quick" });
+  fireEvent.change(screen.getByLabelText(/^Ticker/), {
+    target: { value: "6501.T" },
+  });
+  fireEvent.click(
+    screen.getByRole("checkbox", {
+      name: /Start a longitudinal Research Chain/,
+    }),
+  );
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: /Queue Full Analysis and start chain/,
+    }),
+  );
+
+  await waitFor(() => expect(api.createResearchChain).toHaveBeenCalled());
+  expect(api.createRun).not.toHaveBeenCalled();
+  expect(vi.mocked(api.createResearchChain).mock.calls[0][0]).toMatchObject({
+    ticker: "6501.T",
+    output_language: "zh-CN",
+    source_run_id: null,
+  });
 });
 
 test("offers recent instruments with stable browser-autocomplete metadata", async () => {

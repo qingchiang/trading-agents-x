@@ -5,9 +5,9 @@ from tradingagents.application.contracts import AnalysisRequest
 
 
 def test_request_preserves_exchange_suffix() -> None:
-    request = AnalysisRequest(ticker=" cnc.to ", analysis_date="2026-07-24")
+    request = AnalysisRequest(ticker=" 7203.t ", analysis_date="2026-07-24")
 
-    assert request.ticker == "CNC.TO"
+    assert request.ticker == "7203.T"
 
 
 def test_request_infers_mainland_exchange() -> None:

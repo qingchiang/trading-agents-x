@@ -57,6 +57,11 @@ def _fetch_ohlcv_frame(symbol: str, start_date: str, end_date: str) -> pd.DataFr
             symbol, canonical, f"no rows between {start_date} and {end_date}"
         )
 
+    adjusted_complete = all(
+        record.get(adjusted) is not None
+        for record in records
+        for adjusted, _raw in _PRICE_FIELDS.values()
+    )
     rows = [
         {
             "Date": r.get("Date"),
@@ -77,6 +82,11 @@ def _fetch_ohlcv_frame(symbol: str, start_date: str, end_date: str) -> pd.DataFr
     # Reject a stale frame (latest row far older than the requested end) before
     # it reaches indicators or the agent, mirroring the yfinance path (#1021).
     _assert_ohlcv_not_stale(df, end_date, symbol, canonical)
+    df.attrs["price_adjustment"] = (
+        "J-Quants adjusted OHLCV v2"
+        if adjusted_complete
+        else "mixed adjusted/raw J-Quants OHLCV v2"
+    )
     return df
 
 

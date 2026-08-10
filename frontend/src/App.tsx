@@ -6,6 +6,8 @@ import Memory from "./pages/Memory";
 import NewRun from "./pages/NewRun";
 import RunDetail from "./pages/RunDetail";
 import Runs from "./pages/Runs";
+import ResearchChains from "./pages/ResearchChains";
+import ResearchChainDetail from "./pages/ResearchChainDetail";
 import Settings from "./pages/Settings";
 import { usePathname } from "./router";
 
@@ -22,6 +24,10 @@ export default function App() {
   const page =
     pathname === "/runs/new" ? (
       <NewRun />
+    ) : pathname === "/research" ? (
+      <ResearchChains />
+    ) : /^\/research\/[^/]+\/?$/.test(pathname) ? (
+      <ResearchChainDetail />
     ) : pathname === "/runs" ? (
       <Runs />
     ) : /^\/runs\/[^/]+\/?$/.test(pathname) ? (

@@ -239,7 +239,95 @@ function artifacts(id: string) {
   ];
 }
 
-test("runs, templates, trash, and restores local research", async ({
+test("updates the Primary Research Chain through a Full-only Indeterminate head", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("tradingagents-locale", "en");
+  });
+  let updatePayload: Record<string, unknown> | null = null;
+  const revision = {
+    id: "revision-2",
+    chain_id: "chain-1",
+    sequence: 2,
+    predecessor_revision_id: "revision-1",
+    producing_run_id: "run-full",
+    cutoff: "2026-07-24",
+    role: "update",
+    execution_strategy: "full",
+    change_conclusion: "indeterminate",
+    indeterminate_reason: "coverage_incomplete",
+    delta: { claims: [], questions: [], change_signals: [] },
+    current_state: {
+      instrument: "6501.T",
+      cutoff: "2026-07-24",
+      language: "en",
+      opinion: { rating: "Hold", confidence: "medium", thesis: "Demand remains uncertain." },
+      claims: [],
+      questions: [],
+      scenarios: [],
+      risks: [],
+      catalysts: [],
+      invalidation_conditions: [],
+    },
+    coverage: {
+      supports_no_material_change: false,
+      limitations: ["TDnet archive coverage is incomplete."],
+      domains: [],
+      claims: [],
+      questions: [],
+    },
+    update_summary: { summary: "Full Analysis remained inconclusive." },
+    evidence_snapshot: {
+      bundle: { items: [] },
+      lineage: [],
+      source_records: [],
+      source_record_lineage: [],
+      source_watermarks: [],
+    },
+    research_update_audit: null,
+    metrics: {},
+    created_at: timestamp,
+  };
+  const chain = {
+    id: "chain-1",
+    instrument: "6501.T",
+    is_primary: true,
+    current_revision_id: revision.id,
+    current_revision: revision,
+    revisions: [revision],
+    next_update_policy: "full_required",
+    next_update_reason: "indeterminate_head",
+    created_at: timestamp,
+    updated_at: timestamp,
+  };
+
+  await page.route("**/api/v1/**", async (route) => {
+    const request = route.request();
+    if (request.method() === "GET" && request.url().endsWith("/research-chains/chain-1")) {
+      await route.fulfill({ json: chain });
+      return;
+    }
+    if (request.method() === "POST" && request.url().endsWith("/research-chains/chain-1/updates")) {
+      updatePayload = request.postDataJSON() as Record<string, unknown>;
+      await route.fulfill({ status: 202, json: makeRun("run-reassessment", "queued") });
+      return;
+    }
+    await route.fulfill({ status: 404, json: {} });
+  });
+
+  await page.goto("/research/chain-1");
+  await expect(page.getByRole("alert")).toContainText("Indeterminate");
+  await expect(page.getByRole("alert")).toContainText("TDnet archive coverage is incomplete.");
+  await page.getByRole("button", { name: "Run Full reassessment" }).click();
+  await expect.poll(() => updatePayload).toMatchObject({
+    baseline_revision_id: "revision-2",
+    analysis_date: "2026-07-25",
+    execution_strategy: "full",
+  });
+});
+
+test("runs, legacy templates, trash, and restores local research", async ({
   page,
 }) => {
   test.setTimeout(60_000);
@@ -578,7 +666,10 @@ test("runs, templates, trash, and restores local research", async ({
     page.locator("header").getByText("Cancelled", { exact: true }),
   ).toBeVisible();
 
-  await page.getByRole("link", { name: "New from this run" }).click();
+  await expect(
+    page.getByRole("link", { name: "New from this run" }),
+  ).toHaveCount(0);
+  await page.goto("/runs/new?from_run=run-created");
   await expect(ticker).toHaveValue("7203.T");
   await ticker.fill("MSFT");
   await page.getByRole("button", { name: /Queue research/ }).click();

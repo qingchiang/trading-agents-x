@@ -46,9 +46,12 @@ or portfolio rebalancing.
 - **Run Detail:** persistent event timeline, analyst reports, structured
   decision, collapsible audit details, token/tool metrics, cancellation,
   retry, restore, editable run templates, and export.
-- **Memory:** search complete decisions, outcomes, and reflections, expand
-  catalysts/risks/invalidation, see instrument names, and reopen the
-  originating run.
+- **Memory:** inspect separately persisted Outcome Observations, Reflection
+  lifecycle state, and versioned Feedback qualification/reasons; retry failed
+  Reflections, retire Feedback, expand decisions, and reopen the originating
+  run. A completed Observation may use its source Decision or linked Research
+  Revision cutoff as the market-local return baseline but must end later.
+  Historical unversioned qualification remains visibly unversioned.
 - **Settings:** read-only capabilities, safe defaults, and whether provider
   credentials are configured.
 - **Locales:** `en`, `zh-CN`, and `ja`; UI locale and report output language
@@ -161,7 +164,7 @@ flowchart LR
     SVC --> DB[("SQLite<br/>runs · evidence · artifacts · decisions · memory")]
     WORKER["Single worker"] --> DB
     WORKER --> GRAPH["Evidence-first LangGraph"]
-    GRAPH --> DATA["US · JP · CN · crypto dataflows"]
+    GRAPH --> DATA["US · JP · CN equity dataflows"]
     GRAPH --> DB
     WORKER --> OUTCOME["Five-interval outcome settlement"]
     OUTCOME --> DB
@@ -196,6 +199,29 @@ startup; the worker checks before claiming work and then every 24 hours,
 retrying failed maintenance after one hour. The default 30-day retention can
 be changed with `TRADINGAGENTS_TRASH_RETENTION_DAYS`; `0` disables permanent
 cleanup.
+
+Research Chain updates have an internal, manually triggered Japanese
+incremental-research experiment. It is `off` by default. `shadow` retains a
+bounded candidate while Full Analysis remains authoritative; `experimental`
+lets a fully covered No Material Change assessment advance any source-qualified
+supported `.T` equity without regenerating analyst reports or deliberation.
+Every material, incomplete, incompatible, invalid, novel, or uncertain result
+falls back to Full Analysis. US and mainland-China Research Chains remain
+manually updateable through Full Analysis only.
+
+Research Revision Role, Execution Strategy, and Change Conclusion are shown
+separately. A Full reassessment that remains inconclusive creates an
+Indeterminate, readable head; the server then requires the next update to use
+Full reassessment again.
+
+```dotenv
+TRADINGAGENTS_RESEARCH_UPDATE_MODE=experimental
+```
+
+See [the experiment guide](docs/incremental-research-experiment.md) for mode,
+source qualification, metrics, and opt-in live-validation details.
+This capability does not schedule updates, provide production automation, or
+produce account-specific advice.
 
 See [architecture.md](docs/architecture.md) for subsystem and data-integrity
 contracts.
@@ -269,6 +295,8 @@ POST /api/v1/runs/restore
 GET  /api/v1/runs/{id}/export
 GET  /api/v1/instruments/recent
 GET  /api/v1/memory
+POST /api/v1/outcome-observations/{outcome_id}/reflection/retry
+POST /api/v1/outcome-feedback/{feedback_id}/retire
 GET  /api/v1/capabilities
 GET  /api/v1/health
 ```
@@ -311,10 +339,10 @@ Internally, instruments use canonical Yahoo-compatible symbols. Examples:
 | US/default | `NVDA`, `SPY` | yfinance-based default route |
 | Japan | `7203.T` | J-Quants, EDINET, TDnet, Japanese news and macro sources |
 | China A-shares | `600519.SS`, `000001.SZ` | Tencent/AkShare, CNINFO, Sina, Eastmoney and China macro sources |
-| Crypto/FX | `BTC-USD`, `EURUSD=X` | compatible default route |
 
 Bare mainland codes and `.SH` aliases are normalized before routing.
-Unsupported or ambiguous symbols fail instead of silently taking the US route.
+Crypto, explicit non-equity, unsupported, or ambiguous symbols fail instead of
+silently taking the US route.
 
 Historical analysis uses the instrument market's local calendar. Evidence keeps
 its requested date, effective date, timezone-aware availability, actual source,
@@ -323,9 +351,17 @@ when the bundle is sealed. Missing coverage is unknown, not a neutral or bearish
 signal.
 
 After six common completed ticker/benchmark closes are available, the background
-worker forms five aligned trading intervals, stores raw return and alpha, and
-generates a short-term reflection. This outcome is feedback, not the sole truth
-for a long-horizon thesis or graph quality.
+worker forms five aligned trading intervals and first stores a versioned,
+market-local Observation with raw return, alpha, price-adjustment semantics,
+availability, and horizon limitations. Reflection runs independently and may be
+retried without recomputing the Observation. A generated Reflection becomes
+eligible Feedback only after deterministic PIT, schema, source, applicability,
+content, method, and horizon qualification under
+`outcome_feedback_qualification.v1`. Its `available_at` is the latest time of
+Observation data availability, Reflection generation, and qualification.
+Historical unversioned status is retained rather than recalculated. Research
+Chain analysis injects none of this historical feedback in the first
+experiment.
 
 ## Development and release gates
 
@@ -353,7 +389,8 @@ comparative model research quality, latency, or token improvement.
 - [Breaking migration guide](docs/migration-independent-platform.md)
 - Create a consistent online backup with
   `tradingagents db backup /path/to/backup.db`.
-- Reports, events, decisions, outcomes, and reflections are retained in SQLite.
+- Reports, events, decisions, Outcome Observations, Reflections, and qualified
+  Feedback are retained in SQLite.
 - Successful/cancelled checkpoints are removed automatically.
 - Legacy report directories remain read-only archives; they are not imported.
 - The first release of this architecture has no permanent-delete API.

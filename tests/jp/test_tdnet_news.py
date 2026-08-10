@@ -7,6 +7,7 @@ from urllib.parse import parse_qs
 import pytest
 
 from tradingagents.dataflows.jp import tdnet_news as td
+from tradingagents.provenance import extract_source_observations, extract_source_watermarks
 
 
 def _row(code="72030", title="2026年3月期決算短信", pdf="/inbs/140120260710590974.pdf",
@@ -196,6 +197,81 @@ class GetNewsTests(unittest.TestCase):
         with mock.patch.object(td.logger, "warning") as warn:
             self._run(html)
         warn.assert_not_called()
+
+    def test_exposes_pdf_native_identity_and_truncation_coverage(self):
+        html = _page(
+            _row(pdf="/inbs/140120260710590974.pdf", title="決算短信"),
+            count=5,
+        )
+
+        out = self._run(html)
+
+        observation = extract_source_observations(out)[0]
+        assert observation.record_id == "140120260710590974"
+        assert observation.version_id.startswith("tdnet:")
+        assert observation.available_at == "2026-07-10T16:00:00+09:00"
+        watermark = extract_source_watermarks(out)[0]
+        assert watermark.status == "limited"
+        assert watermark.returned_records == 1
+        assert watermark.reported_records == 5
+        assert "truncated" in watermark.limitations[0].lower()
+
+    def test_archive_clamp_is_explicit_in_watermark(self):
+        out = self._run(_page(), start="2026-01-01", end="2026-07-12")
+
+        watermark = extract_source_watermarks(out)[0]
+        assert watermark.scanned_start == "2026-06-12"
+        assert watermark.scanned_end == "2026-07-12"
+        assert watermark.status == "limited"
+        assert any("archive" in item.lower() for item in watermark.limitations)
+
+    def test_duplicate_retrieval_is_deduplicated_by_observed_version(self):
+        row = _row(pdf="/inbs/140120260710590974.pdf", title="決算短信")
+
+        out = self._run(_page(row, row))
+
+        assert out.count("### 決算短信") == 1
+        assert len(extract_source_observations(out)) == 1
+
+    def test_classifies_correction_withdrawal_and_replacement(self):
+        for title, status in (
+            ("（訂正）2026年3月期決算短信", "corrected"),
+            ("開示資料の撤回に関するお知らせ", "withdrawn"),
+            ("開示資料差し替えのお知らせ", "replaced"),
+        ):
+            with self.subTest(status=status):
+                out = self._run(_page(_row(title=title)))
+                assert extract_source_observations(out)[0].status == status
+
+    def test_links_explicit_revision_titles_to_the_prior_native_record(self):
+        for prefix, status in (
+            ("（訂正）", "corrected"),
+            ("（撤回）", "withdrawn"),
+            ("（差し替え）", "replaced"),
+        ):
+            with self.subTest(status=status):
+                out = self._run(
+                    _page(
+                        _row(
+                            title="2026年3月期決算短信",
+                            pdf="/inbs/140120260710590974.pdf",
+                            when="2026/07/10 16:00",
+                        ),
+                        _row(
+                            title=f"{prefix}2026年3月期決算短信",
+                            pdf="/inbs/140120260711590975.pdf",
+                            when="2026/07/11 09:00",
+                        ),
+                    )
+                )
+
+                observations = sorted(
+                    extract_source_observations(out), key=lambda item: item.available_at
+                )
+                assert observations[1].status == status
+                assert observations[1].record_id == observations[0].record_id
+                assert observations[1].version_id != observations[0].version_id
+                assert observations[1].replaces_version_id == observations[0].version_id
 
 
 @pytest.mark.unit

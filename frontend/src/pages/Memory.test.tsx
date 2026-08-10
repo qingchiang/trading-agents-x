@@ -10,10 +10,13 @@ vi.mock("../api/client", () => ({
   api: {
     memory: vi.fn(),
     recentInstruments: vi.fn(),
+    retryOutcomeReflection: vi.fn(),
+    retireOutcomeFeedback: vi.fn(),
   },
 }));
 
 const entry = {
+  outcome_id: 7,
   run_id: "legacy-run",
   ticker: "7203.T",
   instrument_name: "Toyota Motor Corporation",
@@ -42,14 +45,54 @@ const entry = {
   },
   outcome: {
     status: "resolved",
+    source_decision_id: 3,
+    source_revision_id: null,
     benchmark: "^N225",
+    market_timezone: "Asia/Tokyo",
+    method_category: "short_term_relative_return",
+    method_version: "short_term_relative_return.v1",
+    price_semantics: "exchange_local_daily_close",
+    adjustment_semantics: "split_and_dividend_adjusted",
+    horizon_limit:
+      "Five completed aligned intervals do not prove a long-horizon thesis.",
+    limitations: ["Short-term observation only."],
     observation_start: "2026-07-25",
     observation_end: "2026-08-01",
     holding_intervals: 5,
     raw_return: 0.03,
     alpha_return: 0.01,
+    data_available_at: "2026-08-01T20:00:00Z",
   },
   reflection: "### Imported reflection\n\n- Preserve the lesson.",
+  outcome_reflection: {
+    status: "generated",
+    generated_at: "2026-08-01T20:01:00Z",
+    last_attempted_at: "2026-08-01T20:01:00Z",
+    next_retry_at: null,
+    error_code: null,
+  },
+  outcome_feedback: {
+    id: 11,
+    status: "eligible",
+    qualification_policy_version: "outcome_feedback_qualification.v1",
+    reasons: [],
+    method_category: "short_term_relative_return",
+    horizon_limit:
+      "Five completed aligned intervals do not prove a long-horizon thesis.",
+    applicability: {
+      schema_version: "1",
+      scope: "instrument",
+      instrument: "7203.T",
+      market: "Asia/Tokyo",
+      research_stages: ["analysis_methodology"],
+      research_domains: ["cross_domain"],
+      method_category: "short_term_relative_return",
+      horizon: "short_term",
+    },
+    qualified_at: "2026-08-01T20:02:00Z",
+    available_at: "2026-08-01T20:02:00Z",
+    retired_at: null,
+  },
 } as MemoryEntry;
 
 beforeEach(async () => {
@@ -58,6 +101,8 @@ beforeEach(async () => {
   await i18n.changeLanguage("en");
   vi.mocked(api.memory).mockResolvedValue([entry]);
   vi.mocked(api.recentInstruments).mockResolvedValue([]);
+  vi.mocked(api.retryOutcomeReflection).mockResolvedValue({ status: "pending" });
+  vi.mocked(api.retireOutcomeFeedback).mockResolvedValue({ status: "retired" });
 });
 
 function renderMemory() {
@@ -84,6 +129,37 @@ test("renders imported thesis and reflection as sanitized Markdown", async () =>
     "title",
     "Bull / bear → judge → risk",
   );
+});
+
+test("shows lifecycle metadata and retires qualified feedback", async () => {
+  renderMemory();
+
+  expect(await screen.findByText(/short_term_relative_return\.v1/)).toBeVisible();
+  expect(
+    screen.getByText(/outcome_feedback_qualification\.v1/),
+  ).toBeVisible();
+  expect(screen.getByText(/Reflection status:/)).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Retire Feedback" }));
+
+  await waitFor(() =>
+    expect(api.retireOutcomeFeedback).toHaveBeenCalledWith(11, "retired_by_user"),
+  );
+});
+
+test("keeps historical feedback visibly unversioned", async () => {
+  vi.mocked(api.memory).mockResolvedValue([
+    {
+      ...entry,
+      outcome_feedback: {
+        ...entry.outcome_feedback!,
+        qualification_policy_version: null,
+      },
+    },
+  ]);
+
+  renderMemory();
+
+  expect(await screen.findByText(/Unversioned/)).toBeVisible();
 });
 
 test("uses recent ticker suggestions and stable autocomplete fields", async () => {

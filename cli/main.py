@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
+import subprocess
 import sys
 from datetime import date
 from enum import Enum
@@ -13,12 +15,18 @@ from typing import Annotated, Any
 
 import typer
 import uvicorn
+from pydantic import ValidationError
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.table import Table
 
 from tradingagents import AnalysisRequest, RunProfile, TradingAgents
 from tradingagents.application.contracts import RunEvent, RunStatus
+from tradingagents.application.live_thesis_validation import (
+    LiveThesisValidationError,
+    load_reviewed_scenarios,
+    validate_live_thesis,
+)
 from tradingagents.application.service import AnalysisService
 from tradingagents.application.settings import AppSettings
 from tradingagents.application.worker import AnalysisWorker
@@ -39,12 +47,15 @@ app = typer.Typer(
 )
 runs_app = typer.Typer(help="Inspect and control durable research runs.")
 db_app = typer.Typer(help="Maintain the local SQLite database.")
+research_app = typer.Typer(help="Run explicit maintainer Research Chain workflows.")
 app.add_typer(runs_app, name="runs")
 app.add_typer(db_app, name="db")
+app.add_typer(research_app, name="research")
 
 console = Console()
 event_console = Console(stderr=True)
 _ANALYSTS = ("market", "social", "news", "fundamentals")
+_LIVE_THESIS_MANIFEST_RELATIVE = Path("tmp/incremental-research/live-validation")
 
 
 class ExportFormat(str, Enum):
@@ -127,18 +138,22 @@ def run_command(
         if analysis_date
         else _market_local_date(ticker)
     )
-    request = AnalysisRequest(
-        ticker=ticker,
-        analysis_date=cutoff,
-        profile=profile,
-        analysts=selected,
-        llm_provider=provider,
-        quick_model=quick_model,
-        deep_model=deep_model,
-        quick_reasoning_effort=quick_reasoning,
-        deep_reasoning_effort=deep_reasoning,
-        output_language=output_language,
-    )
+    try:
+        request = AnalysisRequest(
+            ticker=ticker,
+            analysis_date=cutoff,
+            profile=profile,
+            analysts=selected,
+            llm_provider=provider,
+            quick_model=quick_model,
+            deep_model=deep_model,
+            quick_reasoning_effort=quick_reasoning,
+            deep_reasoning_effort=deep_reasoning,
+            output_language=output_language,
+        )
+    except ValidationError as exc:
+        message = exc.errors(include_url=False)[0]["msg"]
+        raise typer.BadParameter(message) from None
     application = _application()
     try:
         result = application.run(
@@ -386,6 +401,136 @@ def backup_database(
         event_console.print(f"[red]Database backup failed: {exc}[/red]")
         raise typer.Exit(code=1) from None
     console.print(f"Backup created at {created}")
+
+
+@research_app.command("validate-live-thesis")
+def validate_live_thesis_command(
+    cases: Annotated[
+        Path,
+        typer.Argument(exists=True, dir_okay=False, readable=True),
+    ],
+    backup: Annotated[
+        Path,
+        typer.Option("--backup", dir_okay=False, help="New ordinary SQLite backup path."),
+    ],
+    in_place_database: Annotated[
+        bool,
+        typer.Option(
+            "--in-place-database",
+            help="Explicitly authorize authoritative writes to the configured database.",
+        ),
+    ] = False,
+) -> None:
+    """Run the reviewed five-scenario Shadow set against the configured database."""
+    if not in_place_database:
+        raise typer.BadParameter("--in-place-database is required for this authoritative workflow")
+    try:
+        checkout_root, git_commit = _source_checkout()
+        scenarios = load_reviewed_scenarios(cases)
+        result = validate_live_thesis(
+            _service(),
+            scenarios,
+            backup_destination=backup,
+            manifest_root=checkout_root / _LIVE_THESIS_MANIFEST_RELATIVE,
+            git_commit=git_commit,
+            environ=os.environ,
+            in_place_database=in_place_database,
+            verify_source_checkout=lambda: _verify_source_checkout(
+                checkout_root, git_commit
+            ),
+        )
+    except LiveThesisValidationError as exc:
+        event_console.print(f"[red]Live Thesis validation refused: {exc}[/red]")
+        raise typer.Exit(code=1) from None
+    console.print(f"Sanitized manifest: {result.manifest_directory}")
+    for entry in result.entries:
+        console.print(f"{entry.scenario}: {entry.validation_verdict}")
+    if not result.passed:
+        raise typer.Exit(code=1)
+
+
+def _source_checkout() -> tuple[Path, str]:
+    source_root = Path(__file__).resolve().parents[1]
+    commit = _verify_source_checkout(source_root)
+    return source_root, commit
+
+
+def _verify_source_checkout(
+    source_root: Path,
+    expected_commit: str | None = None,
+) -> str:
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(source_root), "rev-parse", "--show-toplevel", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        root_text, initial_commit = completed.stdout.splitlines()
+        root = Path(root_text).resolve()
+        if root != source_root:
+            raise LiveThesisValidationError(
+                "executing source is not rooted at the detected Git checkout"
+            )
+        initial_status = _git_source_status(root)
+        subprocess.run(
+            [
+                "git",
+                "check-ignore",
+                "-q",
+                str(_LIVE_THESIS_MANIFEST_RELATIVE / "manifest-entry.json"),
+            ],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            timeout=5,
+        )
+        verified_commit = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).stdout
+        verified_status = _git_source_status(root)
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        raise LiveThesisValidationError(
+            "a Git checkout with an ignored Live Thesis experiment area is required"
+        ) from exc
+    if initial_status or verified_status:
+        raise LiveThesisValidationError(
+            "a clean source checkout is required; staged, modified, or "
+            "non-ignored untracked files are present"
+        )
+    commits = tuple(value.strip().lower() for value in (initial_commit, verified_commit))
+    if any(re.fullmatch(r"[0-9a-f]{40}", commit) is None for commit in commits):
+        raise LiveThesisValidationError("detected Git commit is invalid")
+    if commits[0] != commits[1] or (
+        expected_commit is not None and commits[1] != expected_commit
+    ):
+        raise LiveThesisValidationError(
+            "the Git commit changed during source verification"
+        )
+    return commits[1]
+
+
+def _git_source_status(root: Path) -> str:
+    return subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+            "--ignore-submodules=none",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=5,
+    ).stdout
 
 
 def _settings() -> AppSettings:

@@ -20,6 +20,7 @@ def web_settings(tmp_path: Path) -> AppSettings:
             "TRADINGAGENTS_HOME": str(tmp_path),
             "TRADINGAGENTS_DATABASE_PATH": str(tmp_path / "web.db"),
             "TRADINGAGENTS_CACHE_DIR": str(tmp_path / "cache"),
+            "TRADINGAGENTS_RESEARCH_UPDATE_MODE": "shadow",
         },
         load_env_files=False,
     )

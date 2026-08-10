@@ -39,6 +39,7 @@ from .contracts import (
     ResearchCase,
     ResearchDecision,
     ResearchRating,
+    ResearchUpdateAudit,
     ResearchWarning,
     RiskReview,
     RunAttemptView,
@@ -54,8 +55,11 @@ from .contracts import (
 from .database import (
     Base,
     DecisionRecord,
+    OutcomeFeedbackRecord,
     OutcomeRecord,
     ReflectionRecord,
+    ResearchChainRecord,
+    ResearchRevisionRecord,
     RunArtifactRecord,
     RunAttemptRecord,
     RunEventRecord,
@@ -64,9 +68,40 @@ from .database import (
     create_sqlite_engine,
 )
 from .metrics import merge_run_metrics
+from .outcome_feedback import (
+    ADJUSTMENT_SEMANTICS,
+    HORIZON_LIMIT,
+    METHOD_CATEGORY,
+    METHOD_VERSION,
+    OBSERVATION_LIMITATIONS,
+    PRICE_SEMANTICS,
+    FeedbackSource,
+    ObservationQualificationInput,
+    OutcomeFeedbackStatus,
+    OutcomeObservationStatus,
+    OutcomeReflectionStatus,
+    ReflectionQualificationInput,
+    qualify_reflection,
+    reflection_candidate_lesson,
+)
 from .outcome_schedule import earliest_outcome_check_at
 from .recoveries import rebuild_structured_recoveries
 from .reporting import order_reports
+from .research import (
+    CoverageAttestation,
+    CurrentResearchState,
+    EffectiveEvidenceSnapshot,
+    IndeterminateReason,
+    ResearchChain,
+    ResearchChangeConclusion,
+    ResearchExecutionStrategy,
+    ResearchRevision,
+    ResearchRevisionDraft,
+    ResearchRevisionRole,
+    RevisionDelta,
+    UpdateSummary,
+    evaluate_next_update_policy,
+)
 from .settings import AppSettings
 
 _SECRET_RE = re.compile(
@@ -91,6 +126,8 @@ def _numeric_audit_warning_message(
         "Optional numeric components were omitted because their audit failed"
         f"{omitted}. The qualitative decision remains audited."
     )
+
+
 _SAFE_METRIC_KEYS = {
     "llm_calls",
     "tool_calls",
@@ -162,6 +199,18 @@ class EvidenceNotSealedError(RuntimeError):
     pass
 
 
+class ResearchChainNotFoundError(LookupError):
+    pass
+
+
+class ResearchRevisionNotFoundError(LookupError):
+    pass
+
+
+class InvalidResearchBaselineError(ValueError):
+    """Raised when an update does not target the current Eligible Baseline."""
+
+
 class RunRepository:
     def __init__(self, settings: AppSettings):
         self.settings = settings
@@ -170,9 +219,7 @@ class RunRepository:
             settings.database_path,
             busy_timeout_ms=settings.busy_timeout_ms,
         )
-        self.sessions = sessionmaker(
-            self.engine, expire_on_commit=False, class_=Session
-        )
+        self.sessions = sessionmaker(self.engine, expire_on_commit=False, class_=Session)
 
     def create_schema(self) -> None:
         """Create the current schema for tests; production entry points run Alembic."""
@@ -185,6 +232,7 @@ class RunRepository:
         *,
         idempotency_key: str | None = None,
         source_run_id: str | None = None,
+        research_chain_requested: bool = False,
     ) -> tuple[RunView, bool]:
         now = _utc_naive()
         request_json = request.model_dump(mode="json")
@@ -193,18 +241,16 @@ class RunRepository:
                 session.connection().exec_driver_sql("BEGIN IMMEDIATE")
                 if idempotency_key:
                     existing = session.scalar(
-                        select(RunRecord).where(
-                            RunRecord.idempotency_key == idempotency_key
-                        )
+                        select(RunRecord).where(RunRecord.idempotency_key == idempotency_key)
                     )
                     if existing is not None:
                         if (
                             existing.request_json != request_json
                             or existing.source_run_id != source_run_id
+                            or existing.research_chain_requested != research_chain_requested
                         ):
                             raise IdempotencyConflictError(
-                                "idempotency key was already used for a "
-                                "different request"
+                                "idempotency key was already used for a different request"
                             )
                         return self._view(existing), False
                 if source_run_id is not None:
@@ -221,6 +267,7 @@ class RunRepository:
                     id=run_id,
                     source_run_id=source_run_id,
                     idempotency_key=idempotency_key,
+                    research_chain_requested=research_chain_requested,
                     status=RunStatus.QUEUED.value,
                     request_json=request_json,
                     config_json=_sanitize_payload(config_snapshot),
@@ -246,21 +293,129 @@ class RunRepository:
                 raise
             with self.sessions() as session:
                 existing = session.scalar(
-                    select(RunRecord).where(
-                        RunRecord.idempotency_key == idempotency_key
-                    )
+                    select(RunRecord).where(RunRecord.idempotency_key == idempotency_key)
                 )
                 if existing is None:
                     raise
                 if (
                     existing.request_json != request_json
                     or existing.source_run_id != source_run_id
+                    or existing.research_chain_requested != research_chain_requested
                 ):
                     raise IdempotencyConflictError(
                         "idempotency key was already used for a different request"
                     ) from exc
                 return self._view(existing), False
         return self.get_run(run_id), True
+
+    def create_chain_update(
+        self,
+        chain_id: str,
+        baseline_revision_id: str,
+        request: AnalysisRequest,
+        config_snapshot: dict[str, Any],
+        *,
+        execution_strategy: ResearchExecutionStrategy,
+        idempotency_key: str | None = None,
+    ) -> tuple[RunView, bool]:
+        """Atomically create or resolve one Full update for the current head."""
+        now = _utc_naive()
+        request_json = request.model_dump(mode="json")
+        with self.sessions.begin() as session:
+            session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            chain = session.get(ResearchChainRecord, chain_id)
+            if chain is None:
+                raise ResearchChainNotFoundError(chain_id)
+            baseline = session.get(ResearchRevisionRecord, baseline_revision_id)
+            if baseline is None or baseline.chain_id != chain.id:
+                raise InvalidResearchBaselineError(
+                    "update baseline must belong to the same Research Chain"
+                )
+            if request.ticker != chain.instrument:
+                raise InvalidResearchBaselineError(
+                    "update Instrument must match the Research Chain"
+                )
+            if request.analysis_date <= baseline.cutoff:
+                raise InvalidResearchBaselineError(
+                    "update cutoff must be strictly later than the Eligible Baseline"
+                )
+            existing_exact = session.scalar(
+                select(RunRecord)
+                .where(
+                    RunRecord.research_chain_id == chain.id,
+                    RunRecord.baseline_revision_id == baseline.id,
+                    RunRecord.request_json == request_json,
+                )
+                .order_by(RunRecord.created_at)
+            )
+            if existing_exact is not None:
+                return self._view(existing_exact), False
+            if chain.current_revision_id != baseline.id:
+                raise InvalidResearchBaselineError(
+                    "update must target the current Research Chain head"
+                )
+            active = session.scalar(
+                select(RunRecord).where(
+                    RunRecord.research_chain_id == chain.id,
+                    RunRecord.status.in_((RunStatus.QUEUED.value, RunStatus.RUNNING.value)),
+                )
+            )
+            if active is not None:
+                raise InvalidResearchBaselineError(
+                    "a queued or running update already exists for this Research Chain"
+                )
+            if idempotency_key:
+                reused = session.scalar(
+                    select(RunRecord).where(RunRecord.idempotency_key == idempotency_key)
+                )
+                if reused is not None:
+                    raise IdempotencyConflictError(
+                        "idempotency key was already used for a different request"
+                    )
+            run_id = str(uuid4())
+            record = RunRecord(
+                id=run_id,
+                idempotency_key=idempotency_key,
+                status=RunStatus.QUEUED.value,
+                research_chain_requested=False,
+                update_intent_id=str(uuid4()),
+                research_chain_id=chain.id,
+                baseline_revision_id=baseline.id,
+                research_execution_strategy=execution_strategy.value,
+                request_json=request_json,
+                config_json=_sanitize_payload(config_snapshot),
+                version=__version__,
+                current_attempt=1,
+                cancel_requested=False,
+                metrics_json=RunMetrics().model_dump(mode="json"),
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(record)
+            session.add(
+                RunAttemptRecord(
+                    run_id=run_id,
+                    attempt=1,
+                    status=RunStatus.QUEUED.value,
+                    checkpoint_thread_id=self.checkpoint_thread_id(run_id, 1),
+                    metrics_json=RunMetrics().model_dump(mode="json"),
+                )
+            )
+        return self.get_run(run_id), True
+
+    def set_research_update_audit(
+        self,
+        run_id: str,
+        audit: ResearchUpdateAudit,
+    ) -> None:
+        with self.sessions.begin() as session:
+            record = session.get(RunRecord, run_id)
+            if record is None:
+                raise RunNotFoundError(run_id)
+            if record.status != RunStatus.RUNNING.value:
+                raise InvalidRunTransitionError(record.status)
+            record.research_update_audit_json = audit.model_dump(mode="json")
+            record.updated_at = _utc_naive()
 
     @staticmethod
     def checkpoint_thread_id(run_id: str, attempt: int) -> str:
@@ -310,15 +465,11 @@ class RunRepository:
                         query,
                         autoescape=True,
                     ),
-                    func.lower(
-                        func.coalesce(RunRecord.instrument_name, "")
-                    ).contains(
+                    func.lower(func.coalesce(RunRecord.instrument_name, "")).contains(
                         query,
                         autoescape=True,
                     ),
-                    func.lower(
-                        func.coalesce(RunRecord.instrument_local_name, "")
-                    ).contains(
+                    func.lower(func.coalesce(RunRecord.instrument_local_name, "")).contains(
                         query,
                         autoescape=True,
                     ),
@@ -336,8 +487,7 @@ class RunRepository:
         with self.sessions() as session:
             return RunPage(
                 items=tuple(
-                    self._summary(record, rating)
-                    for record, rating in session.execute(stmt)
+                    self._summary(record, rating) for record, rating in session.execute(stmt)
                 ),
                 total=int(session.scalar(count_stmt) or 0),
                 limit=limit,
@@ -353,9 +503,7 @@ class RunRepository:
         with self.sessions.begin() as session:
             records = {
                 record.id: record
-                for record in session.scalars(
-                    select(RunRecord).where(RunRecord.id.in_(run_ids))
-                )
+                for record in session.scalars(select(RunRecord).where(RunRecord.id.in_(run_ids)))
             }
             missing = [run_id for run_id in run_ids if run_id not in records]
             if missing:
@@ -363,13 +511,11 @@ class RunRepository:
             invalid = [
                 record.id
                 for record in records.values()
-                if record.trashed_at is None
-                and record.status not in _TERMINAL_STATUSES
+                if record.trashed_at is None and record.status not in _TERMINAL_STATUSES
             ]
             if invalid:
                 raise InvalidRunTransitionError(
-                    "only terminal runs can be trashed: "
-                    + ", ".join(invalid)
+                    "only terminal runs can be trashed: " + ", ".join(invalid)
                 )
             changed = 0
             for run_id in run_ids:
@@ -391,9 +537,7 @@ class RunRepository:
         with self.sessions.begin() as session:
             records = {
                 record.id: record
-                for record in session.scalars(
-                    select(RunRecord).where(RunRecord.id.in_(run_ids))
-                )
+                for record in session.scalars(select(RunRecord).where(RunRecord.id.in_(run_ids)))
             }
             missing = [run_id for run_id in run_ids if run_id not in records]
             if missing:
@@ -438,8 +582,7 @@ class RunRepository:
         """Persist one cutoff-safe market-local display name when available."""
         normalized = (
             instrument_local_name.strip()[:300]
-            if isinstance(instrument_local_name, str)
-            and instrument_local_name.strip()
+            if isinstance(instrument_local_name, str) and instrument_local_name.strip()
             else None
         )
         if normalized is None:
@@ -573,34 +716,38 @@ class RunRepository:
         expires = now + timedelta(seconds=lease_seconds)
         with self.engine.connect() as connection:
             connection.exec_driver_sql("BEGIN IMMEDIATE")
-            candidate = connection.execute(
-                select(
-                    RunRecord.id,
-                    RunRecord.status,
-                    RunRecord.current_attempt,
-                    RunAttemptRecord.started_at.label("attempt_started_at"),
-                )
-                .join(
-                    RunAttemptRecord,
-                    and_(
-                        RunAttemptRecord.run_id == RunRecord.id,
-                        RunAttemptRecord.attempt == RunRecord.current_attempt,
-                    ),
-                )
-                .where(
-                    RunRecord.trashed_at.is_(None),
-                    or_(
-                        RunRecord.status == RunStatus.QUEUED.value,
+            candidate = (
+                connection.execute(
+                    select(
+                        RunRecord.id,
+                        RunRecord.status,
+                        RunRecord.current_attempt,
+                        RunAttemptRecord.started_at.label("attempt_started_at"),
+                    )
+                    .join(
+                        RunAttemptRecord,
                         and_(
-                            RunRecord.status == RunStatus.RUNNING.value,
-                            RunRecord.lease_expires_at < now,
-                            RunRecord.cancel_requested.is_(False),
+                            RunAttemptRecord.run_id == RunRecord.id,
+                            RunAttemptRecord.attempt == RunRecord.current_attempt,
                         ),
                     )
+                    .where(
+                        RunRecord.trashed_at.is_(None),
+                        or_(
+                            RunRecord.status == RunStatus.QUEUED.value,
+                            and_(
+                                RunRecord.status == RunStatus.RUNNING.value,
+                                RunRecord.lease_expires_at < now,
+                                RunRecord.cancel_requested.is_(False),
+                            ),
+                        ),
+                    )
+                    .order_by(RunRecord.created_at)
+                    .limit(1)
                 )
-                .order_by(RunRecord.created_at)
-                .limit(1)
-            ).mappings().first()
+                .mappings()
+                .first()
+            )
             if candidate is None:
                 connection.commit()
                 return None
@@ -635,9 +782,7 @@ class RunRepository:
             connection.commit()
         return self.get_run(candidate["id"])
 
-    def claim_run(
-        self, run_id: str, worker_id: str, lease_seconds: int
-    ) -> RunView:
+    def claim_run(self, run_id: str, worker_id: str, lease_seconds: int) -> RunView:
         """Claim a specific queued run for the synchronous Python API."""
         now = _utc_naive()
         expires = now + timedelta(seconds=lease_seconds)
@@ -646,13 +791,9 @@ class RunRepository:
             if record is None:
                 raise RunNotFoundError(run_id)
             if record.trashed_at is not None:
-                raise InvalidRunTransitionError(
-                    f"run {run_id} is trashed"
-                )
+                raise InvalidRunTransitionError(f"run {run_id} is trashed")
             if record.status != RunStatus.QUEUED.value:
-                raise InvalidRunTransitionError(
-                    f"run {run_id} is {record.status}, expected queued"
-                )
+                raise InvalidRunTransitionError(f"run {run_id} is {record.status}, expected queued")
             record.status = RunStatus.RUNNING.value
             record.lease_owner = worker_id
             record.lease_expires_at = expires
@@ -710,13 +851,8 @@ class RunRepository:
             record = session.get(RunRecord, run_id)
             if record is None:
                 raise RunNotFoundError(run_id)
-            if (
-                record.status != RunStatus.RUNNING.value
-                or record.lease_owner != worker_id
-            ):
-                raise InvalidRunTransitionError(
-                    f"run {run_id} is not claimed by {worker_id}"
-                )
+            if record.status != RunStatus.RUNNING.value or record.lease_owner != worker_id:
+                raise InvalidRunTransitionError(f"run {run_id} is not claimed by {worker_id}")
             record.status = RunStatus.QUEUED.value
             record.lease_owner = None
             record.lease_expires_at = None
@@ -735,9 +871,7 @@ class RunRepository:
             if record is None:
                 raise RunNotFoundError(run_id)
             if record.trashed_at is not None:
-                raise InvalidRunTransitionError(
-                    f"run {run_id} is trashed"
-                )
+                raise InvalidRunTransitionError(f"run {run_id} is trashed")
             if record.status == RunStatus.QUEUED.value:
                 record.status = RunStatus.CANCELLED.value
                 record.cancel_requested = True
@@ -758,9 +892,7 @@ class RunRepository:
 
     def cancel_requested(self, run_id: str) -> bool:
         with self.sessions() as session:
-            value = session.scalar(
-                select(RunRecord.cancel_requested).where(RunRecord.id == run_id)
-            )
+            value = session.scalar(select(RunRecord.cancel_requested).where(RunRecord.id == run_id))
             if value is None:
                 raise RunNotFoundError(run_id)
             return bool(value)
@@ -772,9 +904,7 @@ class RunRepository:
             if record is None:
                 raise RunNotFoundError(run_id)
             if record.trashed_at is not None:
-                raise InvalidRunTransitionError(
-                    f"run {run_id} is trashed"
-                )
+                raise InvalidRunTransitionError(f"run {run_id} is trashed")
             if record.status != RunStatus.FAILED.value:
                 raise InvalidRunTransitionError(
                     f"only failed runs can be retried, got {record.status}"
@@ -828,12 +958,11 @@ class RunRepository:
             if row is None:
                 connection.rollback()
                 raise RunNotFoundError(run_id)
-            sequence = (
-                connection.execute(
-                    select(func.coalesce(func.max(RunEventRecord.sequence), 0) + 1)
-                    .where(RunEventRecord.run_id == run_id)
-                ).scalar_one()
-            )
+            sequence = connection.execute(
+                select(func.coalesce(func.max(RunEventRecord.sequence), 0) + 1).where(
+                    RunEventRecord.run_id == run_id
+                )
+            ).scalar_one()
             connection.execute(
                 RunEventRecord.__table__.insert().values(
                     run_id=run_id,
@@ -964,9 +1093,7 @@ class RunRepository:
             if existing is not None:
                 if existing["content_hash"] != draft.content_hash:
                     connection.rollback()
-                    raise ArtifactConflictError(
-                        "artifact identity replayed with different content"
-                    )
+                    raise ArtifactConflictError("artifact identity replayed with different content")
                 connection.commit()
                 return self._artifact(existing), None
 
@@ -984,8 +1111,7 @@ class RunRepository:
                     prompt_version=draft.prompt_version,
                     generation_method=draft.generation_method.value,
                     generation_observations_json=[
-                        item.model_dump(mode="json")
-                        for item in draft.generation_observations
+                        item.model_dump(mode="json") for item in draft.generation_observations
                     ],
                     content_type=draft.content_type,
                     content_json=draft.content.model_dump(mode="json"),
@@ -994,8 +1120,9 @@ class RunRepository:
                 )
             )
             sequence = connection.execute(
-                select(func.coalesce(func.max(RunEventRecord.sequence), 0) + 1)
-                .where(RunEventRecord.run_id == run_id)
+                select(func.coalesce(func.max(RunEventRecord.sequence), 0) + 1).where(
+                    RunEventRecord.run_id == run_id
+                )
             ).scalar_one()
             payload = {
                 "artifact_id": artifact_id,
@@ -1007,8 +1134,7 @@ class RunRepository:
                 "prompt_version": draft.prompt_version,
                 "generation_method": draft.generation_method.value,
                 "generation_observations": [
-                    item.model_dump(mode="json")
-                    for item in draft.generation_observations
+                    item.model_dump(mode="json") for item in draft.generation_observations
                 ],
                 "content_type": draft.content_type,
             }
@@ -1093,18 +1219,12 @@ class RunRepository:
                 connection.rollback()
                 raise InvalidRunTransitionError(run_row.status)
             existing = (
-                connection.execute(
-                    select(table).where(table.c.run_id == run_id)
-                )
-                .mappings()
-                .first()
+                connection.execute(select(table).where(table.c.run_id == run_id)).mappings().first()
             )
             if existing is not None:
                 if existing["digest"] != digest:
                     connection.rollback()
-                    raise EvidenceConflictError(
-                        "evidence seal replayed with a different digest"
-                    )
+                    raise EvidenceConflictError("evidence seal replayed with a different digest")
                 connection.commit()
                 return self._evidence_view(existing), None
 
@@ -1121,8 +1241,9 @@ class RunRepository:
                 )
             )
             sequence = connection.execute(
-                select(func.coalesce(func.max(RunEventRecord.sequence), 0) + 1)
-                .where(RunEventRecord.run_id == run_id)
+                select(func.coalesce(func.max(RunEventRecord.sequence), 0) + 1).where(
+                    RunEventRecord.run_id == run_id
+                )
             ).scalar_one()
             payload = {
                 "attempt": attempt,
@@ -1166,17 +1287,13 @@ class RunRepository:
     def evidence_status(self, run_id: str) -> EvidenceSealView:
         with self.engine.connect() as connection:
             run_exists = connection.scalar(
-                select(func.count())
-                .select_from(RunRecord)
-                .where(RunRecord.id == run_id)
+                select(func.count()).select_from(RunRecord).where(RunRecord.id == run_id)
             )
             if not run_exists:
                 raise RunNotFoundError(run_id)
             record = (
                 connection.execute(
-                    select(RunEvidenceRecord.__table__).where(
-                        RunEvidenceRecord.run_id == run_id
-                    )
+                    select(RunEvidenceRecord.__table__).where(RunEvidenceRecord.run_id == run_id)
                 )
                 .mappings()
                 .first()
@@ -1203,9 +1320,12 @@ class RunRepository:
         *,
         evidence: EvidenceBundle,
         benchmark: str,
+        revision_draft: ResearchRevisionDraft | None = None,
     ) -> RunMetrics:
         now = _utc_naive()
         with self.sessions.begin() as session:
+            if revision_draft is not None:
+                session.connection().exec_driver_sql("BEGIN IMMEDIATE")
             record = session.get(RunRecord, run_id)
             if record is None:
                 raise RunNotFoundError(run_id)
@@ -1215,14 +1335,10 @@ class RunRepository:
             if sealed is None:
                 raise EvidenceNotSealedError(run_id)
             if sealed.digest != evidence.digest:
-                raise EvidenceConflictError(
-                    "completed result does not match the sealed evidence"
-                )
+                raise EvidenceConflictError("completed result does not match the sealed evidence")
             if result.decision is not None:
                 request = AnalysisRequest.model_validate(record.request_json)
-                market = self.market_bucket(
-                    request.ticker, request.asset_type.value
-                )
+                market = self.market_bucket(request.ticker)
                 decision = DecisionRecord(
                     run_id=run_id,
                     ticker=request.ticker,
@@ -1241,23 +1357,28 @@ class RunRepository:
                 )
                 session.add(decision)
                 session.flush()
-                session.add(
-                    OutcomeRecord(
-                        decision_id=decision.id,
-                        status="pending",
-                        benchmark=benchmark,
-                        holding_intervals=5,
-                        next_check_at=max(
-                            now,
-                            earliest_outcome_check_at(
-                                ticker=request.ticker,
-                                asset_type=request.asset_type.value,
-                                analysis_date=request.analysis_date,
-                                holding_intervals=5,
-                            ).replace(tzinfo=None),
-                        ),
-                    )
+                outcome = OutcomeRecord(
+                    decision_id=decision.id,
+                    status=OutcomeObservationStatus.PENDING.value,
+                    benchmark=benchmark,
+                    market_timezone=str(market_timezone(request.ticker)),
+                    method_category=METHOD_CATEGORY,
+                    method_version=METHOD_VERSION,
+                    price_semantics=PRICE_SEMANTICS,
+                    adjustment_semantics=ADJUSTMENT_SEMANTICS,
+                    horizon_limit=HORIZON_LIMIT,
+                    limitations_json=list(OBSERVATION_LIMITATIONS),
+                    holding_intervals=5,
+                    next_check_at=max(
+                        now,
+                        earliest_outcome_check_at(
+                            ticker=request.ticker,
+                            analysis_date=request.analysis_date,
+                            holding_intervals=5,
+                        ).replace(tzinfo=None),
+                    ),
                 )
+                session.add(outcome)
             record.status = RunStatus.SUCCEEDED.value
             record.finished_at = now
             record.updated_at = now
@@ -1269,6 +1390,34 @@ class RunRepository:
             attempt.lease_owner = None
             attempt.lease_expires_at = None
             aggregate = self._merge_metrics(record, attempt, result.metrics)
+            if record.research_chain_requested:
+                if revision_draft is None:
+                    raise ValueError("explicit Research Chain execution requires a Revision draft")
+                revision_id = self._create_initial_revision(
+                    session,
+                    record=record,
+                    draft=revision_draft,
+                    metrics=aggregate,
+                    created_at=now,
+                )
+                session.flush()
+                if result.decision is not None:
+                    outcome.research_revision_id = revision_id
+            elif record.research_chain_id is not None:
+                if revision_draft is None:
+                    raise ValueError("Research Chain update requires a Revision draft")
+                revision_id = self._advance_research_chain(
+                    session,
+                    record=record,
+                    draft=revision_draft,
+                    metrics=aggregate,
+                    created_at=now,
+                )
+                session.flush()
+                if result.decision is not None:
+                    outcome.research_revision_id = revision_id
+            elif revision_draft is not None:
+                raise ValueError("ordinary runs cannot create a Research Revision")
         return aggregate
 
     def fail(
@@ -1338,8 +1487,7 @@ class RunRepository:
             {
                 artifact.role: artifact.content
                 for artifact in artifacts
-                if artifact.stage == "analyst"
-                and isinstance(artifact.content, AnalystReport)
+                if artifact.stage == "analyst" and isinstance(artifact.content, AnalystReport)
             }
         )
         decision = (
@@ -1356,16 +1504,12 @@ class RunRepository:
             )
         )
         numeric_audit = (
-            DecisionNumericAuditAppendix.model_validate(
-                decision_record.numeric_audit_json
-            )
+            DecisionNumericAuditAppendix.model_validate(decision_record.numeric_audit_json)
             if decision_record and decision_record.numeric_audit_json
             else None
         )
         evidence = (
-            EvidenceBundle.model_validate(evidence_record.bundle_json)
-            if evidence_record
-            else None
+            EvidenceBundle.model_validate(evidence_record.bundle_json) if evidence_record else None
         )
         warnings = tuple(
             dict.fromkeys(
@@ -1380,12 +1524,9 @@ class RunRepository:
                         (
                             ResearchWarning(
                                 code=(
-                                    "decision.numeric_audit_"
-                                    f"{decision.numeric_audit_status.value}"
+                                    f"decision.numeric_audit_{decision.numeric_audit_status.value}"
                                 ),
-                                message=(
-                                    _numeric_audit_warning_message(numeric_audit)
-                                ),
+                                message=(_numeric_audit_warning_message(numeric_audit)),
                                 source="committee.final.serialize.numeric",
                             ),
                         )
@@ -1442,9 +1583,7 @@ class RunRepository:
     def _run_exists(self, run_id: str) -> bool:
         with self.engine.connect() as connection:
             return (
-                connection.execute(
-                    select(RunRecord.id).where(RunRecord.id == run_id)
-                ).first()
+                connection.execute(select(RunRecord.id).where(RunRecord.id == run_id)).first()
                 is not None
             )
 
@@ -1462,12 +1601,8 @@ class RunRepository:
         }
         model = content_models.get(record["content_type"])
         if model is None:
-            raise ValueError(
-                f"unsupported research artifact type: {record['content_type']}"
-            )
-        generation_method = ArtifactGenerationMethod(
-            record["generation_method"]
-        )
+            raise ValueError(f"unsupported research artifact type: {record['content_type']}")
+        generation_method = ArtifactGenerationMethod(record["generation_method"])
         generation_observations = tuple(
             ArtifactGenerationObservation.model_validate(item)
             for item in (record["generation_observations_json"] or ())
@@ -1509,16 +1644,36 @@ class RunRepository:
         if due.tzinfo is not None:
             due = due.astimezone(timezone.utc).replace(tzinfo=None)
         stmt = (
-            select(OutcomeRecord, DecisionRecord)
+            select(OutcomeRecord, DecisionRecord, ReflectionRecord)
             .join(DecisionRecord, OutcomeRecord.decision_id == DecisionRecord.id)
             .join(RunRecord, RunRecord.id == DecisionRecord.run_id)
+            .outerjoin(ReflectionRecord, ReflectionRecord.outcome_id == OutcomeRecord.id)
             .where(
-                OutcomeRecord.status == "pending",
                 RunRecord.trashed_at.is_(None),
-                OutcomeRecord.next_check_at.is_not(None),
-                OutcomeRecord.next_check_at <= due,
+                or_(
+                    and_(
+                        OutcomeRecord.status == OutcomeObservationStatus.PENDING.value,
+                        OutcomeRecord.next_check_at.is_not(None),
+                        OutcomeRecord.next_check_at <= due,
+                    ),
+                    and_(
+                        OutcomeRecord.status == OutcomeObservationStatus.RESOLVED.value,
+                        or_(
+                            ReflectionRecord.status == OutcomeReflectionStatus.PENDING.value,
+                            and_(
+                                ReflectionRecord.status
+                                == OutcomeReflectionStatus.RETRYABLE_FAILURE.value,
+                                ReflectionRecord.next_retry_at.is_not(None),
+                                ReflectionRecord.next_retry_at <= due,
+                            ),
+                        ),
+                    ),
+                ),
             )
-            .order_by(OutcomeRecord.next_check_at, DecisionRecord.analysis_date)
+            .order_by(
+                func.coalesce(OutcomeRecord.next_check_at, ReflectionRecord.next_retry_at),
+                DecisionRecord.analysis_date,
+            )
             .limit(limit)
         )
         with self.sessions() as session:
@@ -1531,9 +1686,20 @@ class RunRepository:
                     "benchmark": outcome.benchmark,
                     "holding_intervals": outcome.holding_intervals,
                     "decision": decision.decision_json,
-                    "next_check_at": _aware(outcome.next_check_at),
+                    "status": outcome.status,
+                    "observation_start": outcome.observation_start,
+                    "observation_end": outcome.observation_end,
+                    "raw_return": outcome.raw_return,
+                    "alpha_return": outcome.alpha_return,
+                    "market_timezone": outcome.market_timezone,
+                    "reflection_status": reflection.status if reflection else None,
+                    "next_check_at": _aware(
+                        outcome.next_check_at
+                        if outcome.status == OutcomeObservationStatus.PENDING.value
+                        else reflection.next_retry_at if reflection else None
+                    ),
                 }
-                for outcome, decision in session.execute(stmt)
+                for outcome, decision, reflection in session.execute(stmt)
             ]
 
     def mark_outcome_checked(
@@ -1547,9 +1713,7 @@ class RunRepository:
         if checked_at.tzinfo is not None:
             checked_at = checked_at.astimezone(timezone.utc).replace(tzinfo=None)
         if next_check_at.tzinfo is not None:
-            next_check_at = next_check_at.astimezone(timezone.utc).replace(
-                tzinfo=None
-            )
+            next_check_at = next_check_at.astimezone(timezone.utc).replace(tzinfo=None)
         with self.sessions.begin() as session:
             outcome = session.get(OutcomeRecord, outcome_id)
             if outcome is None:
@@ -1568,7 +1732,37 @@ class RunRepository:
         alpha_return: float,
         reflection: str,
     ) -> None:
-        now = _utc_naive()
+        now = _aware(_utc_naive())
+        from .outcomes import OutcomeObservation
+
+        self.persist_outcome_observation(
+            outcome_id,
+            observation=OutcomeObservation(
+                raw_return=raw_return,
+                alpha_return=alpha_return,
+                holding_intervals=5,
+                start_date=observation_start,
+                end_date=observation_end,
+            ),
+            observed_at=now,
+        )
+        self.persist_generated_reflection(
+            outcome_id,
+            reflection=reflection,
+            generated_at=now,
+            allow_legacy_unstructured=True,
+        )
+
+    def persist_outcome_observation(
+        self,
+        outcome_id: int,
+        *,
+        observation: Any,
+        observed_at: datetime,
+    ) -> None:
+        observed = observed_at
+        if observed.tzinfo is not None:
+            observed = observed.astimezone(timezone.utc).replace(tzinfo=None)
         with self.sessions.begin() as session:
             outcome = session.scalar(
                 select(OutcomeRecord)
@@ -1582,24 +1776,185 @@ class RunRepository:
                     RunRecord.trashed_at.is_(None),
                 )
             )
-            if outcome is None or outcome.status != "pending":
+            if outcome is None or outcome.status == OutcomeObservationStatus.RESOLVED.value:
                 return
-            outcome.status = "resolved"
-            outcome.observation_start = observation_start
-            outcome.observation_end = observation_end
-            outcome.raw_return = raw_return
-            outcome.alpha_return = alpha_return
-            outcome.last_checked_at = now
+            outcome.status = OutcomeObservationStatus.RESOLVED.value
+            outcome.observation_start = observation.start_date
+            outcome.observation_end = observation.end_date
+            outcome.holding_intervals = observation.holding_intervals
+            outcome.raw_return = observation.raw_return
+            outcome.alpha_return = observation.alpha_return
+            outcome.last_checked_at = observed
             outcome.next_check_at = None
-            outcome.resolved_at = now
+            outcome.resolved_at = observed
+            outcome.data_available_at = observed
             outcome.error_message = None
             session.add(
                 ReflectionRecord(
                     outcome_id=outcome.id,
-                    text=reflection,
-                    created_at=now,
+                    status=OutcomeReflectionStatus.PENDING.value,
+                    text=None,
+                    created_at=observed,
                 )
             )
+
+    def mark_reflection_failure(
+        self,
+        outcome_id: int,
+        *,
+        attempted_at: datetime,
+        next_retry_at: datetime,
+        error_code: str,
+    ) -> None:
+        attempted = (
+            attempted_at.astimezone(timezone.utc).replace(tzinfo=None)
+            if attempted_at.tzinfo is not None
+            else attempted_at
+        )
+        retry = (
+            next_retry_at.astimezone(timezone.utc).replace(tzinfo=None)
+            if next_retry_at.tzinfo is not None
+            else next_retry_at
+        )
+        with self.sessions.begin() as session:
+            reflection = session.scalar(
+                select(ReflectionRecord).where(ReflectionRecord.outcome_id == outcome_id)
+            )
+            if (
+                reflection is None
+                or reflection.status == OutcomeReflectionStatus.GENERATED.value
+            ):
+                return
+            reflection.status = OutcomeReflectionStatus.RETRYABLE_FAILURE.value
+            reflection.last_attempted_at = attempted
+            reflection.next_retry_at = retry
+            reflection.error_code = _sanitize_text(error_code, limit=80)
+
+    def persist_generated_reflection(
+        self,
+        outcome_id: int,
+        *,
+        reflection: str,
+        generated_at: datetime,
+        allow_legacy_unstructured: bool = False,
+    ) -> str | None:
+        generated = generated_at
+        if generated.tzinfo is not None:
+            generated = generated.astimezone(timezone.utc).replace(tzinfo=None)
+        text = reflection.strip() if isinstance(reflection, str) else ""
+        with self.sessions.begin() as session:
+            row = session.execute(
+                select(
+                    ReflectionRecord,
+                    OutcomeRecord,
+                    DecisionRecord,
+                    ResearchRevisionRecord,
+                )
+                .join(OutcomeRecord, OutcomeRecord.id == ReflectionRecord.outcome_id)
+                .join(DecisionRecord, DecisionRecord.id == OutcomeRecord.decision_id)
+                .outerjoin(
+                    ResearchRevisionRecord,
+                    ResearchRevisionRecord.id == OutcomeRecord.research_revision_id,
+                )
+                .where(OutcomeRecord.id == outcome_id)
+            ).first()
+            if row is None:
+                return None
+            reflection_record, outcome, decision, revision = row
+            if reflection_record.status == OutcomeReflectionStatus.GENERATED.value:
+                return OutcomeReflectionStatus.GENERATED.value
+            reflection_record.last_attempted_at = generated
+            reflection_record.next_retry_at = None
+            reflection_record.error_code = None
+            if (
+                not text
+                or len(text) > 12_000
+                or (
+                    not allow_legacy_unstructured
+                    and reflection_candidate_lesson(text) is None
+                )
+            ):
+                reflection_record.status = OutcomeReflectionStatus.INVALID.value
+                reflection_record.text = None
+                reflection_record.candidate_json = None
+                return OutcomeReflectionStatus.INVALID.value
+            if (
+                outcome.data_available_at is None
+                or outcome.observation_start is None
+                or outcome.observation_end is None
+            ):
+                raise ValueError("Outcome Observation is incomplete")
+            qualification_started_at = max(_utc_naive(), outcome.data_available_at, generated)
+            qualification = qualify_reflection(
+                source=FeedbackSource(
+                    decision_id=decision.id,
+                    revision_id=outcome.research_revision_id,
+                    decision_rating=decision.rating,
+                    decision_thesis=str(decision.decision_json.get("thesis") or ""),
+                    decision_cutoff=decision.analysis_date,
+                    revision_cutoff=revision.cutoff if revision is not None else None,
+                    ticker=decision.ticker,
+                    market=decision.market,
+                ),
+                observation=ObservationQualificationInput(
+                    start=outcome.observation_start,
+                    end=outcome.observation_end,
+                    data_available_at=outcome.data_available_at,
+                    method_category=outcome.method_category,
+                    horizon_limit=outcome.horizon_limit,
+                ),
+                reflection=ReflectionQualificationInput(
+                    text=text,
+                    generated_at=generated,
+                ),
+                qualified_at=qualification_started_at,
+            )
+            qualified_at = max(_utc_naive(), qualification_started_at)
+            reflection_record.status = OutcomeReflectionStatus.GENERATED.value
+            reflection_record.text = text
+            reflection_record.candidate_json = qualification.candidate
+            reflection_record.generated_at = generated
+            available_at = max(outcome.data_available_at, generated, qualified_at)
+            session.add(
+                OutcomeFeedbackRecord(
+                    reflection_id=reflection_record.id,
+                    status=qualification.status.value,
+                    qualification_policy_version=(
+                        qualification.qualification_policy_version
+                    ),
+                    reasons_json=list(qualification.reasons),
+                    method_category=outcome.method_category,
+                    horizon_limit=outcome.horizon_limit,
+                    applicability_json=qualification.applicability,
+                    qualified_at=qualified_at,
+                    available_at=available_at,
+                )
+            )
+            return OutcomeReflectionStatus.GENERATED.value
+
+    def retry_outcome_reflection(self, outcome_id: int) -> None:
+        with self.sessions.begin() as session:
+            reflection = session.scalar(
+                select(ReflectionRecord).where(ReflectionRecord.outcome_id == outcome_id)
+            )
+            if reflection is None or reflection.status not in {
+                OutcomeReflectionStatus.INVALID.value,
+                OutcomeReflectionStatus.RETRYABLE_FAILURE.value,
+            }:
+                return
+            reflection.status = OutcomeReflectionStatus.PENDING.value
+            reflection.next_retry_at = None
+            reflection.error_code = None
+
+    def retire_outcome_feedback(self, feedback_id: int, *, reason: str) -> None:
+        now = _utc_naive()
+        with self.sessions.begin() as session:
+            feedback = session.get(OutcomeFeedbackRecord, feedback_id)
+            if feedback is None or feedback.status == OutcomeFeedbackStatus.RETIRED.value:
+                return
+            feedback.status = OutcomeFeedbackStatus.RETIRED.value
+            feedback.reasons_json = [*feedback.reasons_json, _sanitize_text(reason) or "retired"]
+            feedback.retired_at = now
 
     def memory_context(
         self,
@@ -1609,7 +1964,7 @@ class RunRepository:
         same_limit: int = 5,
         cross_limit: int = 3,
     ) -> MemoryContext:
-        market = self.market_bucket(ticker, asset_type)
+        market = self.market_bucket(ticker)
         resolved = (
             select(
                 DecisionRecord,
@@ -1624,10 +1979,12 @@ class RunRepository:
             .join(RunRecord, RunRecord.id == DecisionRecord.run_id)
             .where(
                 RunRecord.trashed_at.is_(None),
-                OutcomeRecord.status == "resolved",
+                OutcomeRecord.status == OutcomeObservationStatus.RESOLVED.value,
                 OutcomeRecord.holding_intervals >= 5,
                 OutcomeRecord.raw_return.is_not(None),
                 OutcomeRecord.alpha_return.is_not(None),
+                ReflectionRecord.status == OutcomeReflectionStatus.GENERATED.value,
+                ReflectionRecord.text.is_not(None),
             )
             .order_by(
                 OutcomeRecord.resolved_at.desc(),
@@ -1641,13 +1998,11 @@ class RunRepository:
         ticker_key = ticker.casefold()
         asset_type_key = asset_type.casefold()
         for decision_record, outcome_record, reflection_record in rows:
-            reflection = reflection_record.text.strip()
+            reflection = (reflection_record.text or "").strip()
             if not reflection:
                 continue
             try:
-                decision = ResearchDecision.model_validate(
-                    decision_record.decision_json
-                )
+                decision = ResearchDecision.model_validate(decision_record.decision_json)
                 outcome = MemoryOutcome(
                     benchmark=outcome_record.benchmark,
                     observation_start=outcome_record.observation_start,
@@ -1658,10 +2013,7 @@ class RunRepository:
                 )
             except ValueError:
                 continue
-            if (
-                decision_record.ticker.casefold() == ticker_key
-                and len(same) < max(0, same_limit)
-            ):
+            if decision_record.ticker.casefold() == ticker_key and len(same) < max(0, same_limit):
                 same.append(
                     MemoryRecord(
                         ref=f"memory:{decision_record.run_id}",
@@ -1713,6 +2065,7 @@ class RunRepository:
                 DecisionRecord,
                 OutcomeRecord,
                 ReflectionRecord,
+                OutcomeFeedbackRecord,
                 RunRecord.instrument_name,
                 RunRecord.instrument_local_name,
                 RunRecord.request_json,
@@ -1722,6 +2075,10 @@ class RunRepository:
             .outerjoin(
                 ReflectionRecord,
                 ReflectionRecord.outcome_id == OutcomeRecord.id,
+            )
+            .outerjoin(
+                OutcomeFeedbackRecord,
+                OutcomeFeedbackRecord.reflection_id == ReflectionRecord.id,
             )
             .order_by(
                 DecisionRecord.created_at.desc(),
@@ -1765,21 +2122,15 @@ class RunRepository:
                         query,
                         autoescape=True,
                     ),
-                    func.lower(
-                        func.coalesce(RunRecord.instrument_name, "")
-                    ).contains(
+                    func.lower(func.coalesce(RunRecord.instrument_name, "")).contains(
                         query,
                         autoescape=True,
                     ),
-                    func.lower(
-                        func.coalesce(RunRecord.instrument_local_name, "")
-                    ).contains(
+                    func.lower(func.coalesce(RunRecord.instrument_local_name, "")).contains(
                         query,
                         autoescape=True,
                     ),
-                    func.lower(
-                        func.coalesce(DecisionRecord.market, "")
-                    ).contains(
+                    func.lower(func.coalesce(DecisionRecord.market, "")).contains(
                         query,
                         autoescape=True,
                     ),
@@ -1798,9 +2149,7 @@ class RunRepository:
                         )
                         for path in decision_fields
                     ),
-                    func.lower(
-                        func.coalesce(ReflectionRecord.text, "")
-                    ).contains(
+                    func.lower(func.coalesce(ReflectionRecord.text, "")).contains(
                         query,
                         autoescape=True,
                     ),
@@ -1812,6 +2161,7 @@ class RunRepository:
             return [
                 {
                     "run_id": decision.run_id,
+                    "outcome_id": outcome.id,
                     "ticker": decision.ticker,
                     "instrument_name": instrument_name,
                     "instrument_local_name": instrument_local_name,
@@ -1822,27 +2172,65 @@ class RunRepository:
                     "decision": decision.decision_json,
                     "outcome": {
                         "status": outcome.status,
+                        "source_decision_id": decision.id,
+                        "source_revision_id": outcome.research_revision_id,
                         "benchmark": outcome.benchmark,
+                        "market_timezone": outcome.market_timezone,
+                        "method_category": outcome.method_category,
+                        "method_version": outcome.method_version,
+                        "price_semantics": outcome.price_semantics,
+                        "adjustment_semantics": outcome.adjustment_semantics,
+                        "horizon_limit": outcome.horizon_limit,
+                        "limitations": outcome.limitations_json,
                         "observation_start": (
                             outcome.observation_start.isoformat()
                             if outcome.observation_start
                             else None
                         ),
                         "observation_end": (
-                            outcome.observation_end.isoformat()
-                            if outcome.observation_end
-                            else None
+                            outcome.observation_end.isoformat() if outcome.observation_end else None
                         ),
                         "holding_intervals": outcome.holding_intervals,
                         "raw_return": outcome.raw_return,
                         "alpha_return": outcome.alpha_return,
+                        "data_available_at": _aware(outcome.data_available_at),
                     },
                     "reflection": reflection.text if reflection else None,
+                    "outcome_reflection": (
+                        {
+                            "status": reflection.status,
+                            "generated_at": _aware(reflection.generated_at),
+                            "last_attempted_at": _aware(reflection.last_attempted_at),
+                            "next_retry_at": _aware(reflection.next_retry_at),
+                            "error_code": reflection.error_code,
+                        }
+                        if reflection
+                        else None
+                    ),
+                    "outcome_feedback": (
+                        {
+                            "id": feedback.id,
+                            "status": feedback.status,
+                            "qualification_policy_version": (
+                                feedback.qualification_policy_version
+                            ),
+                            "reasons": feedback.reasons_json,
+                            "method_category": feedback.method_category,
+                            "horizon_limit": feedback.horizon_limit,
+                            "applicability": feedback.applicability_json,
+                            "qualified_at": _aware(feedback.qualified_at),
+                            "available_at": _aware(feedback.available_at),
+                            "retired_at": _aware(feedback.retired_at),
+                        }
+                        if feedback
+                        else None
+                    ),
                 }
                 for (
                     decision,
                     outcome,
                     reflection,
+                    feedback,
                     instrument_name,
                     instrument_local_name,
                     request_json,
@@ -1863,10 +2251,261 @@ class RunRepository:
             source.close()
         return destination
 
+    def list_research_chains(
+        self,
+        *,
+        instrument: str | None = None,
+    ) -> tuple[ResearchChain, ...]:
+        stmt = select(ResearchChainRecord)
+        if instrument is not None:
+            stmt = stmt.where(ResearchChainRecord.instrument == instrument)
+        stmt = stmt.order_by(
+            ResearchChainRecord.is_primary.desc(),
+            ResearchChainRecord.created_at,
+        )
+        with self.sessions() as session:
+            records = tuple(session.scalars(stmt))
+            return tuple(self._research_chain(session, record) for record in records)
+
+    def get_research_chain(self, chain_id: str) -> ResearchChain:
+        with self.sessions() as session:
+            record = session.get(ResearchChainRecord, chain_id)
+            if record is None:
+                raise ResearchChainNotFoundError(chain_id)
+            return self._research_chain(session, record)
+
+    def get_research_revision(self, revision_id: str) -> ResearchRevision:
+        with self.sessions() as session:
+            record = session.get(ResearchRevisionRecord, revision_id)
+            if record is None:
+                raise ResearchRevisionNotFoundError(revision_id)
+            return self._research_revision(record)
+
     @staticmethod
-    def market_bucket(ticker: str, asset_type: str) -> str | None:
-        if asset_type == "crypto":
-            return "CRYPTO"
+    def _create_initial_revision(
+        session: Session,
+        *,
+        record: RunRecord,
+        draft: ResearchRevisionDraft,
+        metrics: RunMetrics,
+        created_at: datetime,
+    ) -> str:
+        existing = session.scalar(
+            select(ResearchRevisionRecord).where(
+                ResearchRevisionRecord.producing_run_id == record.id
+            )
+        )
+        if existing is not None:
+            return existing.id
+        request = AnalysisRequest.model_validate(record.request_json)
+        has_primary = session.scalar(
+            select(ResearchChainRecord.id).where(
+                ResearchChainRecord.instrument == request.ticker,
+                ResearchChainRecord.is_primary.is_(True),
+            )
+        )
+        chain_id = str(uuid4())
+        revision_id = str(uuid4())
+        chain = ResearchChainRecord(
+            id=chain_id,
+            instrument=request.ticker,
+            is_primary=has_primary is None,
+            current_revision_id=None,
+            created_at=created_at,
+            updated_at=created_at,
+        )
+        session.add(chain)
+        session.flush()
+        session.add(
+            RunRepository._revision_record(
+                revision_id=revision_id,
+                chain_id=chain_id,
+                sequence=1,
+                predecessor_revision_id=None,
+                producing_run_id=record.id,
+                draft=draft,
+                metrics=metrics,
+                created_at=created_at,
+            )
+        )
+        chain.current_revision_id = revision_id
+        return revision_id
+
+    @staticmethod
+    def _advance_research_chain(
+        session: Session,
+        *,
+        record: RunRecord,
+        draft: ResearchRevisionDraft,
+        metrics: RunMetrics,
+        created_at: datetime,
+    ) -> str:
+        chain = session.get(ResearchChainRecord, record.research_chain_id)
+        baseline = session.get(ResearchRevisionRecord, record.baseline_revision_id)
+        if (
+            chain is None
+            or baseline is None
+            or baseline.chain_id != chain.id
+            or chain.current_revision_id != baseline.id
+        ):
+            raise InvalidResearchBaselineError(
+                "Eligible Baseline is no longer the current Research Chain head"
+            )
+        request = AnalysisRequest.model_validate(record.request_json)
+        if request.ticker != chain.instrument or draft.current_state.instrument != chain.instrument:
+            raise InvalidResearchBaselineError(
+                "completed update Instrument does not match the Research Chain"
+            )
+        if draft.cutoff <= baseline.cutoff:
+            raise InvalidResearchBaselineError(
+                "completed update cutoff must be strictly later than the Eligible Baseline"
+            )
+        revision_id = str(uuid4())
+        session.add(
+            RunRepository._revision_record(
+                revision_id=revision_id,
+                chain_id=chain.id,
+                sequence=baseline.sequence + 1,
+                predecessor_revision_id=baseline.id,
+                producing_run_id=record.id,
+                draft=draft,
+                metrics=metrics,
+                created_at=created_at,
+            )
+        )
+        chain.current_revision_id = revision_id
+        chain.updated_at = created_at
+        return revision_id
+
+    @staticmethod
+    def _revision_record(
+        *,
+        revision_id: str,
+        chain_id: str,
+        sequence: int,
+        predecessor_revision_id: str | None,
+        producing_run_id: str,
+        draft: ResearchRevisionDraft,
+        metrics: RunMetrics,
+        created_at: datetime,
+    ) -> ResearchRevisionRecord:
+        return ResearchRevisionRecord(
+            id=revision_id,
+            chain_id=chain_id,
+            sequence=sequence,
+            predecessor_revision_id=predecessor_revision_id,
+            producing_run_id=producing_run_id,
+            cutoff=draft.cutoff,
+            role=draft.role.value,
+            execution_strategy=draft.execution_strategy.value,
+            legacy_outcome=(
+                "material_change"
+                if draft.change_conclusion is None
+                else "coverage_incomplete"
+                if draft.change_conclusion is ResearchChangeConclusion.INDETERMINATE
+                else draft.change_conclusion.value
+            ),
+            change_conclusion=(
+                draft.change_conclusion.value
+                if draft.change_conclusion is not None
+                else None
+            ),
+            indeterminate_reason=(
+                draft.indeterminate_reason.value
+                if draft.indeterminate_reason is not None
+                else None
+            ),
+            language=draft.current_state.language,
+            current_state_json=draft.current_state.model_dump(mode="json"),
+            delta_json=draft.delta.model_dump(mode="json"),
+            coverage_json=draft.coverage.model_dump(mode="json"),
+            update_summary_json=draft.update_summary.model_dump(mode="json"),
+            evidence_snapshot_json=draft.evidence_snapshot.model_dump(mode="json"),
+            research_update_audit_json=(
+                draft.research_update_audit.model_dump(mode="json")
+                if draft.research_update_audit is not None
+                else None
+            ),
+            metrics_json=metrics.model_dump(mode="json"),
+            created_at=created_at,
+        )
+
+    def _research_chain(
+        self,
+        session: Session,
+        record: ResearchChainRecord,
+    ) -> ResearchChain:
+        revisions = tuple(
+            self._research_revision(item)
+            for item in session.scalars(
+                select(ResearchRevisionRecord)
+                .where(ResearchRevisionRecord.chain_id == record.id)
+                .order_by(ResearchRevisionRecord.sequence)
+            )
+        )
+        current = next(
+            (item for item in revisions if item.id == record.current_revision_id),
+            None,
+        )
+        if current is None:
+            raise ValueError(f"Research Chain {record.id} has no current Revision")
+        evaluation = evaluate_next_update_policy(
+            current,
+            instrument=record.instrument,
+            mode=self.settings.research_update_mode,
+        )
+        return ResearchChain(
+            id=record.id,
+            instrument=record.instrument,
+            is_primary=record.is_primary,
+            current_revision_id=current.id,
+            current_revision=current,
+            revisions=revisions,
+            next_update_policy=evaluation.policy,
+            next_update_reason=evaluation.reason,
+            created_at=_aware(record.created_at),
+            updated_at=_aware(record.updated_at),
+        )
+
+    @staticmethod
+    def _research_revision(record: ResearchRevisionRecord) -> ResearchRevision:
+        return ResearchRevision(
+            id=record.id,
+            chain_id=record.chain_id,
+            sequence=record.sequence,
+            predecessor_revision_id=record.predecessor_revision_id,
+            producing_run_id=record.producing_run_id,
+            cutoff=record.cutoff,
+            role=ResearchRevisionRole(record.role),
+            execution_strategy=ResearchExecutionStrategy(record.execution_strategy),
+            change_conclusion=(
+                ResearchChangeConclusion(record.change_conclusion)
+                if record.change_conclusion is not None
+                else None
+            ),
+            indeterminate_reason=(
+                IndeterminateReason(record.indeterminate_reason)
+                if record.indeterminate_reason is not None
+                else None
+            ),
+            current_state=CurrentResearchState.model_validate(record.current_state_json),
+            delta=RevisionDelta.model_validate(record.delta_json),
+            coverage=CoverageAttestation.model_validate(record.coverage_json),
+            update_summary=UpdateSummary.model_validate(record.update_summary_json),
+            evidence_snapshot=EffectiveEvidenceSnapshot.model_validate(
+                record.evidence_snapshot_json
+            ),
+            research_update_audit=(
+                ResearchUpdateAudit.model_validate(record.research_update_audit_json)
+                if record.research_update_audit_json is not None
+                else None
+            ),
+            metrics=RunMetrics.model_validate(record.metrics_json),
+            created_at=_aware(record.created_at),
+        )
+
+    @staticmethod
+    def market_bucket(ticker: str) -> str | None:
         try:
             return str(market_timezone(ticker))
         except ValueError:
@@ -1908,6 +2547,16 @@ class RunRepository:
             source_run_id=record.source_run_id,
             instrument_name=record.instrument_name,
             instrument_local_name=record.instrument_local_name,
+            research_chain_requested=record.research_chain_requested,
+            update_intent_id=record.update_intent_id,
+            research_chain_id=record.research_chain_id,
+            baseline_revision_id=record.baseline_revision_id,
+            research_execution_strategy=record.research_execution_strategy,
+            research_update_audit=(
+                ResearchUpdateAudit.model_validate(record.research_update_audit_json)
+                if record.research_update_audit_json is not None
+                else None
+            ),
             status=RunStatus(record.status),
             request=AnalysisRequest.model_validate(record.request_json),
             config_snapshot=record.config_json,

@@ -60,6 +60,7 @@ from tradingagents.application.contracts import (
     ReportLanguage,
     ResearchCase,
     ResearchDecision,
+    ResearchQuestionSourceDependency,
     ResearchRating,
     ResearchScenario,
     ResearchScenarioKind,
@@ -245,6 +246,7 @@ class ResearchDecisionCoreDraft(BaseModel):
     risks: tuple[str, ...] = Field(min_length=1)
     invalidation_conditions: tuple[str, ...] = Field(min_length=1)
     unresolved_questions: tuple[str, ...] = ()
+    question_source_dependencies: tuple[ResearchQuestionSourceDependency, ...] = ()
     time_horizon: str = Field(min_length=1)
     scenarios: tuple[ResearchScenarioCoreDraft, ...] = Field(
         min_length=3,
@@ -1478,6 +1480,13 @@ def invoke_research_decision(
     def validate_core(
         result: ResearchDecisionCoreEnvelope,
     ) -> ResearchDecisionCoreEnvelope:
+        dependency_questions = tuple(
+            item.question for item in result.question_source_dependencies
+        )
+        if len(dependency_questions) != len(set(dependency_questions)):
+            raise OutputValidationError("decision.question_sources.duplicate_question")
+        if not set(dependency_questions).issubset(result.unresolved_questions):
+            raise OutputValidationError("decision.question_sources.unknown_question")
         scenario_kinds = tuple(item.kind for item in result.scenarios)
         if len(set(scenario_kinds)) != len(scenario_kinds):
             raise OutputValidationError("decision.scenarios.duplicate_kind")
@@ -1639,6 +1648,8 @@ def invoke_research_decision(
             "in catalysts, but do not annotate unresolved questions. Use paired "
             "range_low/range_high requirements with one display_group_id for a "
             "derived range. "
+            "Use question_source_dependencies only when an unresolved question "
+            "explicitly depends on a named source remaining available. "
             + percentage_rules
             + " "
             + display_scale_rules
@@ -1714,6 +1725,7 @@ def invoke_research_decision(
         risks=core_value.risks,
         invalidation_conditions=core_value.invalidation_conditions,
         unresolved_questions=core_value.unresolved_questions,
+        question_source_dependencies=core_value.question_source_dependencies,
         time_horizon=core_value.time_horizon,
         scenarios=tuple(scenario_values),
         valuation_assessment=numeric.valuation_assessment,

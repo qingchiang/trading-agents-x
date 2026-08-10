@@ -13,7 +13,14 @@ from tradingagents.agents.analysts.fundamentals_analyst import (
 from tradingagents.agents.analysts.market_analyst import create_market_analyst
 from tradingagents.dataflows.config import bind_config
 from tradingagents.graph.research_graph import _collect_evidence
-from tradingagents.provenance import ProvenanceRecord, attach_provenance
+from tradingagents.provenance import (
+    ProvenanceRecord,
+    SourceObservation,
+    SourceWatermark,
+    attach_provenance,
+    attach_source_observations,
+    attach_source_watermarks,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -140,3 +147,52 @@ def test_market_report_omits_appendix_by_default():
 
     assert result["market_report"] == "MODEL REPORT"
     assert result["messages"][0].content == "MODEL REPORT"
+
+
+@pytest.mark.unit
+def test_disclosure_source_records_and_watermarks_are_sealed_outside_narrative():
+    content = attach_provenance(
+        "DISCLOSURE",
+        ProvenanceRecord(
+            evidence="get_news",
+            source="EDINET",
+            requested="2026-07-01 to 2026-07-24",
+            effective="2026-07-01 to 2026-07-24",
+            timing="disclosure-date filtered",
+        ),
+    )
+    content = attach_source_observations(
+        content,
+        SourceObservation(
+            source="EDINET",
+            record_id="S100A",
+            version_id="edinet:S100B",
+            status="corrected",
+            published_at="2026-07-23 15:00",
+            available_at="2026-07-23T15:00:00+09:00",
+            title="訂正有価証券報告書",
+            replaces_version_id="edinet:S100A",
+        ),
+    )
+    content = attach_source_watermarks(
+        content,
+        SourceWatermark(
+            source="EDINET",
+            scanned_start="2026-07-01",
+            scanned_end="2026-07-24",
+            status="complete",
+            returned_records=1,
+            reported_records=1,
+        ),
+    )
+
+    item = _collect_evidence(
+        [ToolMessage(content=content, tool_call_id="call-1")],
+        "Report.",
+        requested_date=date(2026, 7, 24),
+        analyst="news",
+    )[0]
+
+    assert item.content == "DISCLOSURE"
+    assert item.provenance["source_records"][0]["version_id"] == "edinet:S100B"
+    assert item.provenance["source_watermarks"][0]["status"] == "complete"

@@ -121,7 +121,7 @@ class BuildInstrumentContextTests(unittest.TestCase):
 
     def test_injects_resolved_identity(self):
         context = build_instrument_context(
-            "TOTDY", "stock",
+            "TOTDY",
             {
                 "company_name": "TOTO LTD.",
                 "sector": "Industrials",
@@ -133,13 +133,6 @@ class BuildInstrumentContextTests(unittest.TestCase):
         self.assertIn("Industrials / Building Products & Equipment", context)
         self.assertIn("Exchange: PNK", context)
         self.assertIn("Do not substitute a different company", context)
-
-    def test_crypto_uses_name_label_and_keeps_hint(self):
-        context = build_instrument_context(
-            "BTC-USD", "crypto", {"company_name": "Bitcoin USD"}
-        )
-        self.assertIn("Name: Bitcoin USD", context)
-        self.assertIn("crypto asset rather than a company", context)
 
 @pytest.mark.unit
 class GetInstrumentContextFromStateTests(unittest.TestCase):
@@ -156,10 +149,5 @@ class GetInstrumentContextFromStateTests(unittest.TestCase):
         mock.assert_not_called()
         self.assertIn("NVDA", context)
 
-    def test_fallback_respects_asset_type(self):
-        context = get_instrument_context_from_state(
-            {"company_of_interest": "BTC-USD", "asset_type": "crypto"}
-        )
-        self.assertIn("crypto asset", context)
 if __name__ == "__main__":
     unittest.main()

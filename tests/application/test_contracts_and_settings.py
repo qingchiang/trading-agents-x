@@ -219,6 +219,41 @@ def test_trash_retention_defaults_can_be_disabled_and_reject_negatives(
         )
 
 
+def test_incremental_research_experiment_is_off_by_default_and_has_no_whitelist_surface(
+    tmp_path,
+) -> None:
+    defaults = AppSettings.from_env(
+        environ={"TRADINGAGENTS_HOME": str(tmp_path / "defaults")},
+        load_env_files=False,
+    )
+    enabled = AppSettings.from_env(
+        environ={
+            "TRADINGAGENTS_HOME": str(tmp_path / "enabled"),
+            "TRADINGAGENTS_RESEARCH_UPDATE_MODE": "experimental",
+            "TRADINGAGENTS_EXPERIMENTAL_NMC_JP_WHITELIST": " 6501.t,7203.T,6501.T ",
+        },
+        load_env_files=False,
+    )
+
+    assert defaults.research_update_mode == "off"
+    assert enabled.research_update_mode == "experimental"
+    assert "experimental_nmc_jp_whitelist" not in enabled.model_fields
+    assert "experimental_nmc_jp_whitelist" not in enabled.default_run_settings.snapshot()
+
+
+def test_old_run_snapshot_whitelist_is_readable_but_ignored() -> None:
+    restored = RunSettings.model_validate(
+        {
+            "research_update_mode": "experimental",
+            "experimental_nmc_jp_whitelist": ["6501.T"],
+            "data_config": {"news_article_limit": 30},
+        }
+    )
+
+    assert restored.research_update_mode == "experimental"
+    assert "experimental_nmc_jp_whitelist" not in restored.snapshot()
+
+
 def test_legacy_archive_retention_setting_fails_with_rename_guidance(
     tmp_path,
 ) -> None:
