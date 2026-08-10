@@ -60,6 +60,7 @@ def test_live_thesis_validation_refuses_before_backup_without_every_opt_in(
             environ=environ,
             in_place_database=in_place_database,
             verify_source_checkout=lambda: None,
+            validate_market_readiness=lambda _request: None,
         )
 
 
@@ -143,6 +144,60 @@ def test_reviewed_scenarios_require_all_full_change_conclusions(tmp_path: Path) 
         load_reviewed_scenarios(cases_path)
 
 
+def test_market_readiness_failure_prevents_backup_and_authoritative_execution(
+    tmp_path: Path,
+) -> None:
+    scenarios = _loaded_scenarios(tmp_path)
+    chains = {
+        scenario.chain_id: SimpleNamespace(
+            id=scenario.chain_id,
+            instrument="6501.T",
+            next_update_policy="incremental_allowed",
+            current_revision=SimpleNamespace(
+                id=f"baseline-{scenario.scenario}",
+                cutoff=date(2026, 8, 9),
+            ),
+        )
+        for scenario in scenarios
+    }
+
+    class ReadinessFailureService:
+        settings = SimpleNamespace(research_update_mode="shadow")
+
+        def get_research_chain(self, chain_id):
+            return chains[chain_id]
+
+        def backup_database(self, _destination: Path) -> Path:
+            raise AssertionError("backup must not run before market data is ready")
+
+        def run_chain_update(self, *_args, **_kwargs):
+            raise AssertionError("execution must not run before market data is ready")
+
+    checked = []
+
+    def validate_market_readiness(request):
+        checked.append(request)
+        raise RuntimeError("J-Quants daily bar is not ready")
+
+    with pytest.raises(LiveThesisValidationError, match="market data is not ready"):
+        validate_live_thesis(
+            ReadinessFailureService(),
+            scenarios,
+            backup_destination=tmp_path / "backup.db",
+            manifest_root=tmp_path / "manifest",
+            git_commit="a" * 40,
+            environ={"RUN_LIVE_DATA_TESTS": "1", "RUN_LIVE_LLM_TESTS": "1"},
+            in_place_database=True,
+            verify_source_checkout=lambda: None,
+            validate_market_readiness=validate_market_readiness,
+        )
+
+    assert len(checked) == 1
+    assert checked[0].ticker == "6501.T"
+    assert not (tmp_path / "backup.db").exists()
+    assert not (tmp_path / "manifest").exists()
+
+
 def test_backup_failure_prevents_authoritative_execution_and_manifest(
     tmp_path: Path,
 ) -> None:
@@ -186,6 +241,7 @@ def test_backup_failure_prevents_authoritative_execution_and_manifest(
             environ={"RUN_LIVE_DATA_TESTS": "1", "RUN_LIVE_LLM_TESTS": "1"},
             in_place_database=True,
             verify_source_checkout=lambda: None,
+            validate_market_readiness=lambda _request: None,
         )
 
     assert not manifest_root.exists()
@@ -232,6 +288,7 @@ def test_source_policy_rejection_prevents_backup_and_execution(tmp_path: Path) -
             environ={"RUN_LIVE_DATA_TESTS": "1", "RUN_LIVE_LLM_TESTS": "1"},
             in_place_database=True,
             verify_source_checkout=lambda: None,
+            validate_market_readiness=lambda _request: None,
         )
 
     assert not (tmp_path / "backup.db").exists()
@@ -285,6 +342,7 @@ def test_source_is_reverified_after_backup_before_each_execution(tmp_path: Path)
             environ={"RUN_LIVE_DATA_TESTS": "1", "RUN_LIVE_LLM_TESTS": "1"},
             in_place_database=True,
             verify_source_checkout=verify_source_checkout,
+            validate_market_readiness=lambda _request: None,
         )
 
     assert verification_count == 2
@@ -473,6 +531,7 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
         environ={"RUN_LIVE_DATA_TESTS": "1", "RUN_LIVE_LLM_TESTS": "1"},
         in_place_database=True,
         verify_source_checkout=verify_source_checkout,
+        validate_market_readiness=lambda _request: None,
     )
 
     assert result.passed
@@ -527,6 +586,7 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
         environ={"RUN_LIVE_DATA_TESTS": "1", "RUN_LIVE_LLM_TESTS": "1"},
         in_place_database=True,
         verify_source_checkout=lambda: None,
+        validate_market_readiness=lambda _request: None,
     )
     mismatch_entry = next(
         item for item in mismatch.entries if item.scenario == "threshold_crossing"

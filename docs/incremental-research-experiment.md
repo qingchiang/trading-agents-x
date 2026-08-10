@@ -182,6 +182,19 @@ authorize a live run. Before a separately approved run:
 ]
 ```
 
+For a current TSE trading date, wait until at least 17:00 Asia/Tokyo before the
+readiness check. J-Quants documents that equity daily OHLCV normally updates at
+approximately 16:30, while explicitly warning that the time is not guaranteed;
+see [J-Quants data update timing](https://jpx-jquants.com/ja/spec/data-update.md).
+The command therefore requires both the conservative time boundary and an
+actual returned bar for the expected completed TSE session. On a holiday, keep
+the requested analysis cutoff: the completed market scan reaches that cutoff,
+while the Market Source Record retains the prior completed session as its
+distinct effective date. A future cutoff, unfinished current session, or
+delayed/missing expected trading-session bar refuses the entire set before
+backup or Research Execution. Empty same-day responses are not retained in the
+process cache, so a later retry can observe a newly published bar.
+
 Keep the application in `shadow` mode. Supply the two existing live opt-ins and the separate
 `--in-place-database` confirmation. The `--backup` destination must not exist:
 Run the command from a clean Git checkout. Before it loads the cases, opens the

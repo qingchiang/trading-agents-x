@@ -167,6 +167,7 @@ def validate_live_thesis(
     environ: Mapping[str, str],
     in_place_database: bool,
     verify_source_checkout: Callable[[], None],
+    validate_market_readiness: Callable[[AnalysisRequest], Any],
 ) -> LiveThesisValidationResult:
     """Run the reviewed Shadow set after backup and retain only sanitized metadata."""
     if environ.get("RUN_LIVE_DATA_TESTS") != "1":
@@ -183,6 +184,7 @@ def validate_live_thesis(
     ):
         raise LiveThesisValidationError("git commit must be a full lowercase SHA-1")
     selected_chains: dict[str, Any] = {}
+    selected_requests: dict[str, AnalysisRequest] = {}
     for scenario in scenarios:
         try:
             chain = service.get_research_chain(scenario.chain_id)
@@ -200,6 +202,17 @@ def validate_live_thesis(
                 f"reviewed cutoff must be later than Research Chain {chain.id} head"
             )
         selected_chains[scenario.chain_id] = chain
+        selected_requests[scenario.chain_id] = AnalysisRequest(
+            ticker=chain.instrument,
+            analysis_date=scenario.analysis_date,
+        )
+    for scenario in scenarios:
+        try:
+            validate_market_readiness(selected_requests[scenario.chain_id])
+        except Exception as exc:
+            raise LiveThesisValidationError(
+                f"reviewed market data is not ready for {scenario.scenario}"
+            ) from exc
     verify_source_checkout()
     if backup_destination.exists():
         raise LiveThesisValidationError("backup destination already exists")
@@ -232,10 +245,7 @@ def validate_live_thesis(
             run, result = service.run_chain_update(
                 scenario.chain_id,
                 baseline.id,
-                AnalysisRequest(
-                    ticker=selected_chains[scenario.chain_id].instrument,
-                    analysis_date=scenario.analysis_date,
-                ),
+                selected_requests[scenario.chain_id],
                 idempotency_key=(
                     f"live-thesis:{manifest_directory.name}:{scenario.scenario}:{uuid4()}"
                 ),

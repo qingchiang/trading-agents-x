@@ -190,6 +190,7 @@ async def test_initial_research_chain_creation_read_and_export_surfaces(
         graph_factory=_FullResearchGraph,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
         local_name_resolver=lambda _ticker, _date, _config: None,
+        market_data_readiness_checker=lambda *_args: None,
         incremental_gate=lambda *_args: IncrementalGateResult(
             escalation_reason=IncrementalEscalationReason.THRESHOLD_CROSSING
         ),

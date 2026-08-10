@@ -275,8 +275,8 @@ unclassifiable differences across snapshots without conflating logical identity
 with an individual upstream disclosure. A latest visible disclosure more than
 180 days before the analysis cutoff marks the snapshot limited. Adjusted
 market history records its provider, adjustment contract, latest observation,
-unit, precision, and the actual returned warm-up interval rather than the
-requested interval. The Current Research
+unit, precision, and actual returned warm-up start separately from the requested
+scan cutoff. The Current Research
 State retains audited market reference levels, and a Revision delta records
 ordinary movement separately from a deterministic crossing of one of those
 levels. Provider, adjustment, or unit drift is an incompatible market signal,
@@ -370,6 +370,22 @@ Advisory. Required sources are derived from active Claims and open Questions;
 EDINET and TDnet remain Required for Japanese chains, and audited market
 reference levels require compatible adjusted-market coverage.
 
+For a Japanese Research Chain whose configured market route resolves
+`get_verified_market_snapshot` to J-Quants first, `AnalysisService` performs a
+daily-bar readiness preflight before constructing any LLM client. A current TSE
+session is not eligible before 17:00 Asia/Tokyo, a conservative buffer after
+J-Quants' documented approximately 16:30 daily OHLCV update. Time alone is not
+sufficient: the preflight also requires the API to return the requested
+completed TSE session. On a TSE holiday, the Revision cutoff and the completed
+market scan remain at the requested Thesis cutoff while the Market Source Record
+retains the prior completed session as its distinct effective date. Empty
+same-day J-Quants responses are not process-memoized because publication lag is
+transient. Future cutoffs, an unfinished current session, and provider
+publication lag fail the Research Execution before any model call rather than
+escalating a transient Market Clock condition into Full Analysis. Ordinary
+analyses retain configured router fallback behavior; this preflight is a
+Research Chain eligibility rule.
+
 Instrument/cutoff mismatches, incomplete or non-PIT Required coverage, newly
 observed corrections, withdrawals, replacements or source versions,
 fundamental changes, provider/adjustment/unit incompatibility, threshold
@@ -436,6 +452,11 @@ only one exclusive, sanitized metadata entry per scenario plus non-sensitive
 recovery-point metadata; application success and expectation agreement remain
 separate verdict dimensions. This is a manual, user-triggered experiment, not
 a scheduled or production automation facility.
+
+Before creating the backup, the command applies the same J-Quants daily-bar
+readiness preflight to every reviewed cutoff. One unfinished session or missing
+expected bar refuses the whole set before an authoritative Research Execution
+is queued.
 
 The internal research-update mode is persisted in each update's immutable
 settings snapshot. `off` routes every update through Full Analysis. `shadow`

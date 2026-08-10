@@ -24,14 +24,19 @@ import jpholiday
 _TOKYO = ZoneInfo("Asia/Tokyo")
 
 
-def tokyo_today(now: datetime | None = None) -> date:
-    """Return the current Tokyo calendar date, independent of host timezone."""
+def tokyo_now(now: datetime | None = None) -> datetime:
+    """Return an aware Tokyo datetime, independent of the host timezone."""
     current = now or datetime.now(_TOKYO)
     if current.tzinfo is None:
         current = current.replace(tzinfo=_TOKYO)
     else:
         current = current.astimezone(_TOKYO)
-    return current.date()
+    return current
+
+
+def tokyo_today(now: datetime | None = None) -> date:
+    """Return the current Tokyo calendar date, independent of host timezone."""
+    return tokyo_now(now).date()
 
 
 def is_tse_open(d: date) -> bool:
@@ -86,10 +91,7 @@ def add_business_days(d: date, n: int) -> date:
 
 def completed_market_date(d: date, now: datetime | None = None) -> date:
     """Return the latest completed TSE date, using 17:00 Tokyo as daily cutoff."""
-    current = now or datetime.now(_TOKYO)
-    current = (
-        current.replace(tzinfo=_TOKYO) if current.tzinfo is None else current.astimezone(_TOKYO)
-    )
+    current = tokyo_now(now)
     result = d
     if result == current.date() and current.time() < time(17):
         result -= timedelta(days=1)

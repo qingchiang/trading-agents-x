@@ -29,8 +29,6 @@ _WARMUP_DAYS = 400
 _MIN_WARMUP_ROWS = 200
 _MIN_WARMUP_SPAN_DAYS = 280
 _TOKYO = ZoneInfo("Asia/Tokyo")
-
-
 def get_indicator(symbol: str, indicator: str, curr_date: str, look_back_days: int) -> str:
     """Return a date->value window for ``indicator`` ending at ``curr_date``."""
     start = (
@@ -40,7 +38,11 @@ def get_indicator(symbol: str, indicator: str, curr_date: str, look_back_days: i
     return render_indicator_window(df, indicator, curr_date, look_back_days)
 
 
-def get_verified_market_snapshot(symbol: str, curr_date: str, look_back_days: int = 30) -> str:
+def get_verified_market_snapshot(
+    symbol: str,
+    curr_date: str,
+    look_back_days: int = 30,
+) -> str:
     """Return a J-Quants-backed deterministic market snapshot."""
     start = (
         datetime.strptime(curr_date, "%Y-%m-%d") - relativedelta(days=look_back_days + _WARMUP_DAYS)
@@ -109,7 +111,7 @@ def get_verified_market_snapshot(symbol: str, curr_date: str, look_back_days: in
     watermark = SourceWatermark(
         source="J-Quants adjusted OHLCV",
         scanned_start=first_date.strftime("%Y-%m-%d"),
-        scanned_end=latest_date,
+        scanned_end=curr_date,
         status="complete" if not limitations else "limited",
         limitations=limitations,
         returned_records=len(df),

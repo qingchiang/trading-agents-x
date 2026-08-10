@@ -6,6 +6,7 @@ All network calls are mocked — no credentials or connectivity needed.
 import copy
 import os
 import unittest
+from datetime import date, datetime, timedelta, timezone
 from io import StringIO
 from unittest import mock
 
@@ -14,6 +15,10 @@ import pytest
 import requests
 
 import tradingagents.default_config as default_config
+from tradingagents.application.market_readiness import (
+    MarketDataNotReadyError,
+    validate_jquants_daily_bar_ready,
+)
 from tradingagents.dataflows import interface
 from tradingagents.dataflows.config import bind_config
 from tradingagents.dataflows.errors import (
@@ -124,6 +129,21 @@ class StockFetchTests(unittest.TestCase):
         with self._patch_records([]), self.assertRaises(NoMarketDataError):
             get_stock("9984.T", "2026-06-20", "2026-06-23")
 
+    def test_empty_response_is_not_memoized(self):
+        mock_fetch = mock.Mock(
+            side_effect=[[], [_quote("2026-06-23", 100.0)]],
+        )
+        with mock.patch(
+            "tradingagents.dataflows.jp.jquants_common.fetch_records",
+            mock_fetch,
+        ):
+            with self.assertRaises(NoMarketDataError):
+                get_stock("9984.T", "2026-06-20", "2026-06-23")
+            out = get_stock("9984.T", "2026-06-20", "2026-06-23")
+
+        self.assertIn("2026-06-23", out)
+        self.assertEqual(mock_fetch.call_count, 2)
+
     def test_fetch_is_memoized_across_calls(self):
         # The get_indicators tool calls the vendor once per indicator over the
         # same window; only the first should hit the API.
@@ -174,7 +194,7 @@ class StockFetchTests(unittest.TestCase):
         assert watermark.scanned_start == dates[0].strftime("%Y-%m-%d")
         assert watermark.scanned_end == dates[-1].strftime("%Y-%m-%d")
 
-    def test_verified_snapshot_watermark_uses_returned_dates_not_requested_window(self):
+    def test_verified_snapshot_watermark_uses_returned_start_and_requested_cutoff(self):
         from tradingagents.dataflows.jp.jquants_indicator import get_verified_market_snapshot
 
         dates = pd.bdate_range(end="2026-06-23", periods=220)
@@ -186,6 +206,100 @@ class StockFetchTests(unittest.TestCase):
         assert watermark.status == "complete"
         assert watermark.scanned_start == dates[0].strftime("%Y-%m-%d")
         assert watermark.scanned_end == dates[-1].strftime("%Y-%m-%d")
+
+    def test_holiday_snapshot_separates_scan_cutoff_from_market_observation(self):
+        from tradingagents.dataflows.jp.jquants_indicator import get_verified_market_snapshot
+
+        dates = pd.bdate_range(end="2026-08-10", periods=220)
+        records = [_quote(d.strftime("%Y-%m-%d"), 100.0 + i) for i, d in enumerate(dates)]
+        with self._patch_records(records):
+            out = get_verified_market_snapshot(
+                "9984.T",
+                "2026-08-11",
+                30,
+            )
+
+        observation = extract_source_observations(out)[0]
+        watermark = extract_source_watermarks(out)[0]
+        assert observation.published_at == "2026-08-10"
+        assert watermark.scanned_end == "2026-08-11"
+
+    def test_daily_bar_readiness_accepts_holiday_cutoff_with_prior_session(self):
+        holiday_noon = datetime(
+            2026,
+            8,
+            11,
+            12,
+            0,
+            tzinfo=timezone(timedelta(hours=9)),
+        )
+        with self._patch_records([_quote("2026-08-10", 100.0)]):
+            readiness = validate_jquants_daily_bar_ready(
+                "9984.T",
+                date(2026, 8, 11),
+                now=holiday_noon,
+            )
+
+        assert readiness.requested_cutoff == date(2026, 8, 11)
+        assert readiness.market_effective_date == date(2026, 8, 10)
+        assert readiness.observed_bar_date == date(2026, 8, 10)
+
+    def test_daily_bar_readiness_refuses_current_session_before_conservative_cutoff(self):
+        before_ready = datetime(
+            2026,
+            8,
+            12,
+            16,
+            59,
+            tzinfo=timezone(timedelta(hours=9)),
+        )
+
+        with pytest.raises(MarketDataNotReadyError, match="17:00"):
+            validate_jquants_daily_bar_ready(
+                "9984.T",
+                date(2026, 8, 12),
+                now=before_ready,
+            )
+
+    def test_daily_bar_readiness_refuses_provider_lag_after_conservative_cutoff(self):
+        after_ready = datetime(
+            2026,
+            8,
+            12,
+            17,
+            1,
+            tzinfo=timezone(timedelta(hours=9)),
+        )
+        prior_bar = _quote("2026-08-10", 100.0)
+        with self._patch_records([prior_bar]), pytest.raises(
+            NoMarketDataError,
+            match="latest available daily bar is 2026-08-10",
+        ):
+            validate_jquants_daily_bar_ready(
+                "9984.T",
+                date(2026, 8, 12),
+                now=after_ready,
+            )
+
+    def test_daily_bar_readiness_accepts_actual_requested_session_after_cutoff(self):
+        after_ready = datetime(
+            2026,
+            8,
+            12,
+            17,
+            1,
+            tzinfo=timezone(timedelta(hours=9)),
+        )
+        with self._patch_records([_quote("2026-08-12", 101.0)]):
+            readiness = validate_jquants_daily_bar_ready(
+                "9984.T",
+                date(2026, 8, 12),
+                now=after_ready,
+            )
+
+        assert readiness.requested_cutoff == date(2026, 8, 12)
+        assert readiness.market_effective_date == date(2026, 8, 12)
+        assert readiness.observed_bar_date == date(2026, 8, 12)
 
     def test_verified_snapshot_marks_short_or_raw_fallback_history_limited(self):
         from tradingagents.dataflows.jp.jquants_indicator import get_verified_market_snapshot

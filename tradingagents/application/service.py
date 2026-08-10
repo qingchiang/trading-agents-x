@@ -6,6 +6,7 @@ import logging
 import threading
 from collections.abc import Callable
 from contextlib import contextmanager
+from datetime import date
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -17,7 +18,12 @@ from tradingagents.agents.utils.agent_utils import (
     resolve_instrument_identity,
 )
 from tradingagents.dataflows.config import use_config
-from tradingagents.dataflows.interface import validate_market_routing
+from tradingagents.dataflows.errors import NoMarketDataError
+from tradingagents.dataflows.interface import (
+    get_vendor,
+    parse_vendor_chain,
+    validate_market_routing,
+)
 from tradingagents.dataflows.symbol_utils import (
     match_exchange_suffix,
     normalize_symbol,
@@ -47,6 +53,11 @@ from .exporting import (
 from .incremental import assess_semantic_update, run_deterministic_incremental_gate
 from .instrument_names import resolve_local_instrument_name
 from .llms import RunLLMs, create_run_llms
+from .market_readiness import (
+    MarketDataNotReadyError,
+    MarketDataReadiness,
+    validate_jquants_daily_bar_ready,
+)
 from .metrics import MetricsCallback, merge_run_metrics
 from .question_disposition import run_full_question_disposition
 from .repository import InvalidResearchBaselineError, RunRepository, RunView
@@ -145,6 +156,9 @@ class AnalysisService:
             IncrementalGateResult,
         ]
         | None = None,
+        market_data_readiness_checker: Callable[
+            [str, date], MarketDataReadiness | None
+        ] = validate_jquants_daily_bar_ready,
     ):
         self.settings = settings
         if repository is None:
@@ -158,6 +172,49 @@ class AnalysisService:
         self.revision_comparator = revision_comparator
         self.question_dispositioner = question_dispositioner
         self.incremental_gate = incremental_gate or run_deterministic_incremental_gate
+        self.market_data_readiness_checker = market_data_readiness_checker
+
+    @staticmethod
+    def _uses_primary_jquants_market_route(
+        request: AnalysisRequest,
+        dataflow_config: dict[str, Any],
+    ) -> bool:
+        if not request.ticker.endswith(".T"):
+            return False
+        routes = dataflow_config.get("data_vendors_by_market", {})
+        suffix = match_exchange_suffix(request.ticker, routes)
+        raw_chain = get_vendor(
+            "technical_indicators",
+            "get_verified_market_snapshot",
+            suffix,
+            dataflow_config,
+        )
+        vendors = parse_vendor_chain(raw_chain)
+        return bool(vendors and vendors[0] == "jquants")
+
+    def validate_market_data_readiness(
+        self,
+        request: AnalysisRequest,
+        *,
+        run_settings: RunSettings | None = None,
+        dataflow_config: dict[str, Any] | None = None,
+    ) -> MarketDataReadiness | None:
+        """Validate source-qualified Japanese market data without constructing an LLM."""
+        resolved = run_settings or self.settings.resolve_run(request)
+        config = dataflow_config or resolved.dataflow_config(self.settings)
+        validate_market_routing(config)
+        if not self._uses_primary_jquants_market_route(request, config):
+            return None
+        with use_config(config):
+            try:
+                return self.market_data_readiness_checker(
+                    request.ticker,
+                    request.analysis_date,
+                )
+            except NoMarketDataError as exc:
+                raise MarketDataNotReadyError(
+                    f"J-Quants daily bar is not ready for {request.analysis_date}."
+                ) from exc
 
     def _present_chain(self, chain: ResearchChain) -> ResearchChain:
         revision = chain.current_revision
@@ -468,6 +525,30 @@ class AnalysisService:
         with self._heartbeat(run.id, worker_id):
             try:
                 with use_config(dataflow_config):
+                    if run.research_chain_requested or run.research_chain_id:
+                        readiness = self.validate_market_data_readiness(
+                            run.request,
+                            run_settings=run_settings,
+                            dataflow_config=dataflow_config,
+                        )
+                        if readiness is not None:
+                            self._emit(
+                                run.id,
+                                "research.market_data_ready",
+                                payload={
+                                    "source": "J-Quants daily OHLCV",
+                                    "requested_cutoff": (
+                                        readiness.requested_cutoff.isoformat()
+                                    ),
+                                    "market_effective_date": (
+                                        readiness.market_effective_date.isoformat()
+                                    ),
+                                    "observed_bar_date": (
+                                        readiness.observed_bar_date.isoformat()
+                                    ),
+                                },
+                                on_event=on_event,
+                            )
                     try:
                         identity = self.identity_resolver(
                             run.request.ticker,
