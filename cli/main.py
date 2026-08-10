@@ -473,21 +473,7 @@ def _verify_source_checkout(
             raise LiveThesisValidationError(
                 "executing source is not rooted at the detected Git checkout"
             )
-        status = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(root),
-                "status",
-                "--porcelain=v1",
-                "--untracked-files=all",
-                "--ignore-submodules=none",
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
+        initial_status = _git_source_status(root)
         subprocess.run(
             [
                 "git",
@@ -507,11 +493,12 @@ def _verify_source_checkout(
             text=True,
             timeout=5,
         ).stdout
+        verified_status = _git_source_status(root)
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         raise LiveThesisValidationError(
             "a Git checkout with an ignored Live Thesis experiment area is required"
         ) from exc
-    if status.stdout:
+    if initial_status or verified_status:
         raise LiveThesisValidationError(
             "a clean source checkout is required; staged, modified, or "
             "non-ignored untracked files are present"
@@ -526,6 +513,24 @@ def _verify_source_checkout(
             "the Git commit changed during source verification"
         )
     return commits[1]
+
+
+def _git_source_status(root: Path) -> str:
+    return subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+            "--ignore-submodules=none",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=5,
+    ).stdout
 
 
 def _settings() -> AppSettings:

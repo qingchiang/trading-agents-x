@@ -867,3 +867,46 @@ def test_live_thesis_validation_cli_refuses_head_change_during_source_check(
     assert result.exit_code == 1
     assert "Git commit changed" in result.output
     assert "verification" in result.output
+
+
+def test_live_thesis_validation_cli_refuses_dirty_change_during_source_check(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    checkout, cases, _commit = _git_checkout_for_live_validation(tmp_path)
+    tracked = checkout / "cli/main.py"
+    original_run = subprocess.run
+    status_calls = 0
+
+    def add_untracked_after_first_status(*args, **kwargs):
+        nonlocal status_calls
+        completed = original_run(*args, **kwargs)
+        command = args[0]
+        if "status" in command:
+            status_calls += 1
+            if status_calls == 1:
+                (checkout / "late-untracked.txt").write_text("source", encoding="utf-8")
+        return completed
+
+    monkeypatch.setattr(cli, "__file__", str(tracked))
+    monkeypatch.setattr(cli.subprocess, "run", add_untracked_after_first_status)
+    monkeypatch.setattr(
+        cli,
+        "load_reviewed_scenarios",
+        lambda _path: pytest.fail("cases must not load after the checkout becomes dirty"),
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "research",
+            "validate-live-thesis",
+            str(cases),
+            "--backup",
+            str(checkout / "new-backup.db"),
+            "--in-place-database",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "clean source checkout" in result.output
