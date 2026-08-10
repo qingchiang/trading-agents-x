@@ -826,6 +826,22 @@ def test_next_update_policy_rejects_future_scan_invalid_revision_and_missing_ove
         missing_overlap, instrument="6501.T", mode="experimental"
     ).reason == "required_source_coverage_incomplete"
 
+    wrong_baseline = candidate.model_copy(
+        update={
+            "evidence_snapshot": candidate.evidence_snapshot.model_copy(
+                update={
+                    "source_watermarks": tuple(
+                        item.model_copy(update={"baseline_cutoff": date(2026, 7, 1)})
+                        for item in candidate.evidence_snapshot.source_watermarks
+                    )
+                }
+            )
+        }
+    )
+    assert evaluate_next_update_policy(
+        wrong_baseline, instrument="6501.T", mode="experimental"
+    ).reason == "required_source_coverage_incomplete"
+
 
 def test_deterministic_incremental_gates_propose_quiet_candidate():
     baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence()

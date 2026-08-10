@@ -1133,13 +1133,17 @@ def _required_source_coverage_complete(
                 ordered, ordered[1:], strict=False
             )
         )
-        has_required_overlap = revision.role is ResearchRevisionRole.INITIAL or any(
-            item.baseline_cutoff is not None
-            and item.overlap_start is not None
-            and item.baseline_cutoff < revision.cutoff
-            and item.scanned_start <= item.overlap_start
-            and item.overlap_start <= item.baseline_cutoff <= item.scanned_end
-            for item in applicable
+        baseline_cutoff = revision.update_summary.baseline_cutoff
+        has_required_overlap = revision.role is ResearchRevisionRole.INITIAL or (
+            baseline_cutoff is not None
+            and baseline_cutoff < revision.cutoff
+            and any(
+                item.baseline_cutoff == baseline_cutoff
+                and item.overlap_start is not None
+                and item.scanned_start <= item.overlap_start
+                and item.overlap_start <= baseline_cutoff <= item.scanned_end
+                for item in applicable
+            )
         )
         if (
             not applicable
