@@ -418,10 +418,12 @@ opt-ins plus a separate in-place database confirmation. Before backup or
 execution it requires the executing Git checkout to have no staged changes,
 tracked modifications, or non-ignored untracked files; ignored credentials,
 databases, backups, reviewed cases, and experiment manifests remain outside
-that source-cleanliness decision. The full clean-checkout commit is the source
-provenance recorded in the sanitized manifest; repository contents and diffs
-are not copied there. The workflow reverifies that same clean commit before
-backup, at each execution boundary, and before recording each scenario. The
+that source-cleanliness decision. The full commit observed at the clean-checkout
+check is the procedural source identifier recorded in the sanitized manifest;
+repository contents and diffs are not copied there. The workflow reverifies
+the same HEAD and clean-worktree condition before backup, at each execution
+boundary, and before recording each scenario. This is a process attestation,
+not byte-for-byte proof of modules already loaded into the process. The
 command verifies an ordinary online backup before its first execution and
 rejects reused cases or heads whose server-derived,
 source-qualified next-update policy is not `incremental_allowed`. The five

@@ -843,6 +843,79 @@ def test_next_update_policy_rejects_future_scan_invalid_revision_and_missing_ove
     ).reason == "required_source_coverage_incomplete"
 
 
+def test_next_update_policy_rejects_mixed_current_and_future_source_watermarks():
+    baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    tdnet = next(
+        item
+        for item in baseline.evidence_snapshot.source_watermarks
+        if item.source == "TDnet"
+    )
+    mixed = baseline.model_copy(
+        update={
+            "evidence_snapshot": baseline.evidence_snapshot.model_copy(
+                update={
+                    "source_watermarks": (
+                        *baseline.evidence_snapshot.source_watermarks,
+                        tdnet.model_copy(update={"scanned_end": date(2026, 7, 25)}),
+                    )
+                }
+            )
+        }
+    )
+
+    result = evaluate_next_update_policy(
+        mixed,
+        instrument="6501.T",
+        mode="shadow",
+    )
+
+    assert result.reason == "required_source_coverage_incomplete"
+
+
+def test_next_update_policy_accepts_nested_contiguous_source_watermarks():
+    baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    edinet = next(
+        item
+        for item in baseline.evidence_snapshot.source_watermarks
+        if item.source == "EDINET"
+    )
+    nested_intervals = (
+        edinet.model_copy(
+            update={"scanned_start": date(2026, 7, 1), "scanned_end": date(2026, 7, 10)}
+        ),
+        edinet.model_copy(
+            update={"scanned_start": date(2026, 7, 2), "scanned_end": date(2026, 7, 3)}
+        ),
+        edinet.model_copy(
+            update={"scanned_start": date(2026, 7, 9), "scanned_end": date(2026, 7, 24)}
+        ),
+    )
+    nested = baseline.model_copy(
+        update={
+            "evidence_snapshot": baseline.evidence_snapshot.model_copy(
+                update={
+                    "source_watermarks": (
+                        *nested_intervals,
+                        *(
+                            item
+                            for item in baseline.evidence_snapshot.source_watermarks
+                            if item.source != "EDINET"
+                        ),
+                    )
+                }
+            )
+        }
+    )
+
+    result = evaluate_next_update_policy(
+        nested,
+        instrument="6501.T",
+        mode="shadow",
+    )
+
+    assert result.policy == "incremental_allowed"
+
+
 def test_deterministic_incremental_gates_propose_quiet_candidate():
     baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence()
 

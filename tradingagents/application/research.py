@@ -1127,12 +1127,14 @@ def _required_source_coverage_complete(
         ordered = sorted(
             (item.scanned_start, item.scanned_end) for item in source_watermarks
         )
-        has_gap = any(
-            current_start > previous_end + timedelta(days=1)
-            for (_, previous_end), (current_start, _) in zip(
-                ordered, ordered[1:], strict=False
-            )
-        )
+        has_gap = False
+        if ordered:
+            covered_end = ordered[0][1]
+            for current_start, current_end in ordered[1:]:
+                if current_start > covered_end + timedelta(days=1):
+                    has_gap = True
+                    break
+                covered_end = max(covered_end, current_end)
         baseline_cutoff = revision.update_summary.baseline_cutoff
         has_required_overlap = revision.role is ResearchRevisionRole.INITIAL or (
             baseline_cutoff is not None
@@ -1150,7 +1152,8 @@ def _required_source_coverage_complete(
             or not has_required_overlap
             or has_gap
             or any(
-                item.status is not CoverageStatus.COMPLETE
+                item.scanned_end > revision.cutoff
+                or item.status is not CoverageStatus.COMPLETE
                 or item.temporal_scope != "point_in_time"
                 or item.limitations
                 or (
