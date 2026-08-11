@@ -268,6 +268,12 @@ _Avoid_: Regenerated full report, status badge
 
 ## Outcome feedback
 
+**Research Review**:
+The product-facing view of a source Research Decision, its Outcome Observation,
+and any resulting Outcome Reflection or Outcome Feedback. It is an ex-post
+review surface, not longitudinal Research State or a memory input by itself.
+_Avoid_: Research Memory, longitudinal thesis
+
 **Outcome Observation**:
 A bounded ex-post observation associated with a Research Decision over an
 explicit market-local window and declared observation method. Its return
@@ -280,6 +286,12 @@ _Avoid_: Thesis result, current Evidence
 A limited methodological lesson derived from a Research Decision and its
 Outcome Observation. It is neither Prior Research nor Evidence.
 _Avoid_: Updated thesis, verified cause
+
+**Outcome Reflection Attempt**:
+An immutable record of one automatic generation, bounded repair, or
+user-requested regeneration of an Outcome Reflection. Later attempts and a
+successful Reflection do not erase earlier attempt outcomes.
+_Avoid_: Retry counter, mutable Reflection status history
 
 **Outcome Feedback**:
 A qualified, auditable methodological lesson associated with a Research

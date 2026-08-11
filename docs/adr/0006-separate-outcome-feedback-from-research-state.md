@@ -52,3 +52,6 @@ Implemented by the versioned `short_term_relative_return.v1` Observation,
 independent Reflection states, deterministic Feedback qualification and the
 explicit empty-memory boundary for Research Chain executions. Selection and
 injection of Outcome Feedback Context remain deferred.
+
+The product-facing Research Review and auditable Reflection lifecycle are
+specified further in [Research Review and Outcome Feedback lifecycle](../outcome-feedback-review.md).
