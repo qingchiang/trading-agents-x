@@ -416,12 +416,14 @@ export interface components {
       observation_start: string | null;
       price_semantics: string;
       raw_return: number | null;
+      resolved_at: string | null;
       source_decision_id: number;
       source_revision_id: string | null;
       status: components["schemas"]["OutcomeObservationStatus"];
     };
     OutcomeReflectionStatus: "pending" | "generated" | "invalid" | "retryable_failure";
     OutcomeReflectionView: {
+      created_at: string;
       error_code: string | null;
       generated_at: string | null;
       last_attempted_at: string | null;
@@ -491,6 +493,47 @@ export interface components {
       instrument_name?: string | null;
       last_used_at: string;
       ticker: string;
+    };
+    ReflectionAttemptUsageView: {
+      cache_hit_input_tokens: number | null;
+      cache_miss_input_tokens: number | null;
+      input_tokens: number | null;
+      llm_calls: number | null;
+      output_tokens: number | null;
+      provider_reported_cost_usd: number | null;
+      reasoning_output_tokens: number | null;
+      usage_status: "reported" | "not_reported" | "legacy_unknown";
+      wall_time_seconds: number | null;
+    };
+    ReflectionAttemptView: {
+      attempt_kind: string;
+      diagnostics: Record<string, string> | null;
+      finished_at: string | null;
+      generation_cycle_id: string;
+      id: number;
+      invalid_candidate: string | null;
+      invalid_candidate_digest: string | null;
+      invalid_candidate_length: number | null;
+      origin: string;
+      outcome: string | null;
+      schema_version: string | null;
+      sequence: number;
+      started_at: string;
+      trigger: string;
+      usage: components["schemas"]["ReflectionAttemptUsageView"];
+      validation_issues: string[] | null;
+    };
+    ReflectionUsageAggregateView: {
+      attempt_count: number;
+      cache_hit_input_tokens: number | null;
+      cache_miss_input_tokens: number | null;
+      input_tokens: number | null;
+      llm_calls: number | null;
+      output_tokens: number | null;
+      provider_reported_cost_usd: number | null;
+      reasoning_output_tokens: number | null;
+      usage_status: "reported" | "not_reported" | "legacy_unknown";
+      wall_time_seconds: number | null;
     };
     ReportAuditStatus: "complete" | "incomplete";
     ReportLanguage: "en" | "zh-CN" | "ja";
@@ -639,10 +682,15 @@ export interface components {
       outcome_id: number;
       outcome_reflection: components["schemas"]["OutcomeReflectionView"] | null;
       profile: components["schemas"]["RunProfile"];
-      reflection: string | null;
       review_status: "awaiting_observation" | "observation_delayed" | "awaiting_reflection" | "reflection_retry_scheduled" | "reflection_failed" | "reflection_invalid" | "feedback_available" | "feedback_ineligible" | "feedback_retired" | "lifecycle_inconsistent";
       run_id: string;
       ticker: string;
+    };
+    ResearchReviewAuditDetail: {
+      aggregate_usage: components["schemas"]["ReflectionUsageAggregateView"];
+      attempts: components["schemas"]["ReflectionAttemptView"][];
+      reflection: string | null;
+      review: components["schemas"]["ResearchReview"];
     };
     ResearchRevision: {
       chain_id: string;

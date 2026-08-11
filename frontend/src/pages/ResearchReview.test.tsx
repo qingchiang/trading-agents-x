@@ -7,7 +7,7 @@ import { Router } from "../router";
 import ResearchReviewPage from "./ResearchReview";
 
 vi.mock("../api/client", () => ({
-  api: { reviews: vi.fn(), recentInstruments: vi.fn() },
+  api: { reviews: vi.fn(), reviewAuditDetail: vi.fn(), recentInstruments: vi.fn() },
 }));
 
 const review = {
@@ -34,12 +34,12 @@ const review = {
     method_version: "short_term_relative_return.v1", price_semantics: "exchange_local_daily_close",
     adjustment_semantics: "split_and_dividend_adjusted", horizon_limit: "Full horizon limitation.", limitations: [],
     observation_start: "2026-07-25", observation_end: "2026-08-01", holding_intervals: 5,
-    raw_return: 0.03, alpha_return: 0.01, data_available_at: "2026-08-01T20:00:00Z",
+    raw_return: 0.03, alpha_return: 0.01, resolved_at: "2026-08-01T20:00:00Z", data_available_at: "2026-08-01T20:00:00Z",
     last_checked_at: "2026-08-01T20:00:00Z", next_check_at: null, error_message: null,
   },
   reflection: "Method lesson: Full generated reflection.",
   method_feedback: "Full generated reflection.",
-  outcome_reflection: { status: "generated", generated_at: "2026-08-01T20:01:00Z", last_attempted_at: "2026-08-01T20:01:00Z", next_retry_at: null, error_code: null },
+  outcome_reflection: { status: "generated", created_at: "2026-08-01T20:00:00Z", generated_at: "2026-08-01T20:01:00Z", last_attempted_at: "2026-08-01T20:01:00Z", next_retry_at: null, error_code: null },
   outcome_feedback: { id: 11, status: "eligible", qualification_policy_version: "outcome_feedback_qualification.v1", reasons: [], method_category: "short_term_relative_return", horizon_limit: "Full horizon limitation.", applicability: { schema_version: "1", scope: "instrument", instrument: "7203.T", market: "Asia/Tokyo", research_stages: [], research_domains: [], method_category: "short_term_relative_return", horizon: "short_term" }, qualified_at: "2026-08-01T20:02:00Z", available_at: "2026-08-01T20:02:00Z", retired_at: null },
 } as ResearchReview;
 
@@ -48,6 +48,23 @@ beforeEach(async () => {
   window.history.replaceState(null, "", "/reviews");
   await i18n.changeLanguage("en");
   vi.mocked(api.reviews).mockResolvedValue([review]);
+  vi.mocked(api.reviewAuditDetail).mockResolvedValue({
+    review,
+    reflection: "Method lesson: Full generated reflection.",
+    attempts: [],
+    aggregate_usage: {
+      usage_status: "not_reported",
+      attempt_count: 1,
+      llm_calls: 1,
+      input_tokens: null,
+      output_tokens: null,
+      cache_hit_input_tokens: null,
+      cache_miss_input_tokens: null,
+      reasoning_output_tokens: null,
+      wall_time_seconds: null,
+      provider_reported_cost_usd: null,
+    },
+  });
   vi.mocked(api.recentInstruments).mockResolvedValue([]);
 });
 
@@ -65,6 +82,7 @@ test("renders the source decision, observation, then qualified feedback", async 
   expect(screen.getByText("Five common trading intervals are short-term methodological feedback only.")).toBeVisible();
   expect(screen.queryByText("short_term_relative_return.v1")).toBeNull();
   fireEvent.click(screen.getByText("Method Reflection and audit details"));
+  await waitFor(() => expect(api.reviewAuditDetail).toHaveBeenCalledWith(7));
   expect(screen.getByText(/short_term_relative_return\.v1/)).toBeVisible();
 });
 

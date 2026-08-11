@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -57,6 +58,8 @@ from .database import (
     DecisionRecord,
     OutcomeFeedbackRecord,
     OutcomeRecord,
+    ReflectionAttemptRecord,
+    ReflectionGenerationCycleRecord,
     ReflectionRecord,
     ResearchChainRecord,
     ResearchRevisionRecord,
@@ -155,6 +158,17 @@ def _sanitize_text(value: str | None, limit: int = 2000) -> str | None:
         return None
     redacted = _SECRET_RE.sub(r"\1\2[REDACTED]", str(value))
     return redacted[:limit]
+
+
+def _invalid_candidate_audit(value: str | None) -> tuple[str | None, str | None, int | None]:
+    """Retain a bounded, redacted diagnostic copy without treating it as content."""
+    if not isinstance(value, str):
+        return None, None, None
+    return (
+        _sanitize_text(value, limit=4_000),
+        sha256(value.encode("utf-8")).hexdigest(),
+        len(value),
+    )
 
 
 def _sanitize_payload(value: Any, key: str = "") -> Any:
@@ -1799,6 +1813,149 @@ class RunRepository:
                 )
             )
 
+    def start_outcome_reflection_attempt(
+        self,
+        outcome_id: int,
+        *,
+        started_at: datetime,
+        trigger: str = "outcome_settlement",
+        origin: str = "automatic",
+        attempt_kind: str = "unstructured",
+    ) -> dict[str, int | str] | None:
+        """Reserve the sole active generation cycle before invoking an LLM."""
+        started = (
+            started_at.astimezone(timezone.utc).replace(tzinfo=None)
+            if started_at.tzinfo is not None
+            else started_at
+        )
+        with self.sessions.begin() as session:
+            reflection = session.scalar(
+                select(ReflectionRecord).where(ReflectionRecord.outcome_id == outcome_id)
+            )
+            if reflection is None or reflection.status == OutcomeReflectionStatus.GENERATED.value:
+                return None
+            existing = session.scalar(
+                select(ReflectionGenerationCycleRecord.id).where(
+                    ReflectionGenerationCycleRecord.outcome_id == outcome_id,
+                    ReflectionGenerationCycleRecord.status.in_(("queued", "running")),
+                )
+            )
+            if existing is not None:
+                return None
+            cycle = ReflectionGenerationCycleRecord(
+                id=str(uuid4()),
+                outcome_id=outcome_id,
+                status="running",
+                trigger=trigger,
+                origin=origin,
+                retry_ordinal=0,
+                queued_at=started,
+                started_at=started,
+            )
+            try:
+                with session.begin_nested():
+                    session.add(cycle)
+                    session.flush()
+            except IntegrityError:
+                return None
+            sequence = (
+                session.scalar(
+                    select(func.count())
+                    .select_from(ReflectionAttemptRecord)
+                    .where(ReflectionAttemptRecord.reflection_id == reflection.id)
+                )
+                or 0
+            ) + 1
+            attempt = ReflectionAttemptRecord(
+                reflection_id=reflection.id,
+                generation_cycle_id=cycle.id,
+                sequence=sequence,
+                trigger=trigger,
+                origin=origin,
+                attempt_kind=attempt_kind,
+                started_at=started,
+                usage_status="not_reported",
+                llm_calls=1,
+            )
+            session.add(attempt)
+            session.flush()
+            reflection.current_generation_cycle_id = cycle.id
+            reflection.last_attempted_at = started
+            return {"cycle_id": cycle.id, "attempt_id": attempt.id}
+
+    @staticmethod
+    def _finish_reflection_attempt(
+        session: Session,
+        *,
+        reflection: ReflectionRecord,
+        outcome_id: int,
+        finished_at: datetime,
+        attempt_ids: dict[str, int | str] | None,
+        result: str,
+        diagnostics: dict[str, str] | None = None,
+        invalid_candidate: str | None = None,
+        validation_issues: list[str] | None = None,
+        wall_time_seconds: float | None = None,
+    ) -> ReflectionAttemptRecord:
+        if attempt_ids is None:
+            cycle = ReflectionGenerationCycleRecord(
+                id=str(uuid4()),
+                outcome_id=outcome_id,
+                status="running",
+                trigger="repository_write",
+                origin="automatic",
+                retry_ordinal=0,
+                queued_at=finished_at,
+                started_at=finished_at,
+            )
+            session.add(cycle)
+            session.flush()
+            sequence = (
+                session.scalar(
+                    select(func.count())
+                    .select_from(ReflectionAttemptRecord)
+                    .where(ReflectionAttemptRecord.reflection_id == reflection.id)
+                )
+                or 0
+            ) + 1
+            attempt = ReflectionAttemptRecord(
+                reflection_id=reflection.id,
+                generation_cycle_id=cycle.id,
+                sequence=sequence,
+                trigger="repository_write",
+                origin="automatic",
+                attempt_kind="unstructured",
+                started_at=finished_at,
+                usage_status="not_reported",
+                llm_calls=1,
+            )
+            session.add(attempt)
+            reflection.current_generation_cycle_id = cycle.id
+        else:
+            attempt = session.get(ReflectionAttemptRecord, attempt_ids["attempt_id"])
+            if attempt is None or attempt.reflection_id != reflection.id:
+                raise ValueError("Reflection Attempt does not belong to Outcome")
+            cycle = session.get(
+                ReflectionGenerationCycleRecord, attempt_ids["cycle_id"]
+            )
+            if cycle is None:
+                raise ValueError("Reflection generation cycle is missing")
+        candidate, digest, length = _invalid_candidate_audit(invalid_candidate)
+        attempt.finished_at = finished_at
+        attempt.outcome = result
+        attempt.schema_version = "outcome_reflection_legacy_unstructured.v1"
+        attempt.diagnostics_json = diagnostics
+        attempt.wall_time_seconds = wall_time_seconds
+        attempt.invalid_candidate = candidate
+        attempt.invalid_candidate_digest = digest
+        attempt.invalid_candidate_length = length
+        attempt.validation_issues_json = validation_issues
+        cycle.status = {"generated": "succeeded", "invalid": "invalid"}.get(
+            result, "failed"
+        )
+        cycle.finished_at = finished_at
+        return attempt
+
     def mark_reflection_failure(
         self,
         outcome_id: int,
@@ -1806,6 +1963,8 @@ class RunRepository:
         attempted_at: datetime,
         next_retry_at: datetime,
         error_code: str,
+        attempt_ids: dict[str, int | str] | None = None,
+        wall_time_seconds: float | None = None,
     ) -> None:
         attempted = (
             attempted_at.astimezone(timezone.utc).replace(tzinfo=None)
@@ -1830,6 +1989,16 @@ class RunRepository:
             reflection.last_attempted_at = attempted
             reflection.next_retry_at = retry
             reflection.error_code = _sanitize_text(error_code, limit=80)
+            self._finish_reflection_attempt(
+                session,
+                reflection=reflection,
+                outcome_id=outcome_id,
+                finished_at=attempted,
+                attempt_ids=attempt_ids,
+                result="provider_failure",
+                diagnostics={"error_code": reflection.error_code or "unknown"},
+                wall_time_seconds=wall_time_seconds,
+            )
 
     def persist_generated_reflection(
         self,
@@ -1838,10 +2007,13 @@ class RunRepository:
         reflection: str,
         generated_at: datetime,
         allow_legacy_unstructured: bool = False,
+        attempt_ids: dict[str, int | str] | None = None,
+        wall_time_seconds: float | None = None,
     ) -> str | None:
         generated = generated_at
         if generated.tzinfo is not None:
             generated = generated.astimezone(timezone.utc).replace(tzinfo=None)
+        raw_candidate = reflection if isinstance(reflection, str) else None
         text = reflection.strip() if isinstance(reflection, str) else ""
         with self.sessions.begin() as session:
             row = session.execute(
@@ -1867,17 +2039,28 @@ class RunRepository:
             reflection_record.last_attempted_at = generated
             reflection_record.next_retry_at = None
             reflection_record.error_code = None
-            if (
-                not text
-                or len(text) > 12_000
-                or (
-                    not allow_legacy_unstructured
-                    and reflection_candidate_lesson(text) is None
-                )
-            ):
+            validation_issues: list[str] = []
+            if not text:
+                validation_issues.append("empty_candidate")
+            if len(text) > 12_000:
+                validation_issues.append("candidate_too_long")
+            if not allow_legacy_unstructured and reflection_candidate_lesson(text) is None:
+                validation_issues.append("missing_method_lesson")
+            if validation_issues:
                 reflection_record.status = OutcomeReflectionStatus.INVALID.value
                 reflection_record.text = None
                 reflection_record.candidate_json = None
+                self._finish_reflection_attempt(
+                    session,
+                    reflection=reflection_record,
+                    outcome_id=outcome_id,
+                    finished_at=generated,
+                    attempt_ids=attempt_ids,
+                    result="invalid",
+                    invalid_candidate=raw_candidate,
+                    validation_issues=validation_issues,
+                    wall_time_seconds=wall_time_seconds,
+                )
                 return OutcomeReflectionStatus.INVALID.value
             if (
                 outcome.data_available_at is None
@@ -1931,6 +2114,17 @@ class RunRepository:
                     available_at=available_at,
                 )
             )
+            attempt = self._finish_reflection_attempt(
+                session,
+                reflection=reflection_record,
+                outcome_id=outcome_id,
+                finished_at=generated,
+                attempt_ids=attempt_ids,
+                result="generated",
+                wall_time_seconds=wall_time_seconds,
+            )
+            session.flush()
+            reflection_record.successful_attempt_id = attempt.id
             return OutcomeReflectionStatus.GENERATED.value
 
     def retry_outcome_reflection(self, outcome_id: int) -> bool:
@@ -2099,6 +2293,7 @@ class RunRepository:
     def review_entries(
         self,
         *,
+        outcome_id: int | None = None,
         ticker: str | None = None,
         market: str | None = None,
         q: str | None = None,
@@ -2132,6 +2327,8 @@ class RunRepository:
             .where(RunRecord.trashed_at.is_(None))
             .limit(min(max(1, limit), 500))
         )
+        if outcome_id is not None:
+            stmt = stmt.where(OutcomeRecord.id == outcome_id)
         if ticker and (ticker_query := ticker.strip().casefold()):
             stmt = stmt.where(
                 func.lower(DecisionRecord.ticker).contains(
@@ -2259,12 +2456,12 @@ class RunRepository:
                         "holding_intervals": outcome.holding_intervals,
                         "raw_return": outcome.raw_return,
                         "alpha_return": outcome.alpha_return,
+                        "resolved_at": _aware(outcome.resolved_at),
                         "data_available_at": _aware(outcome.data_available_at),
                         "last_checked_at": _aware(outcome.last_checked_at),
                         "next_check_at": _aware(outcome.next_check_at),
                         "error_message": outcome.error_message,
                     },
-                    "reflection": reflection.text if reflection else None,
                     "method_feedback": (
                         reflection_candidate_lesson(reflection.text or "")
                         if review_status == "feedback_available" and reflection
@@ -2273,6 +2470,7 @@ class RunRepository:
                     "outcome_reflection": (
                         {
                             "status": reflection.status,
+                            "created_at": _aware(reflection.created_at),
                             "generated_at": _aware(reflection.generated_at),
                             "last_attempted_at": _aware(reflection.last_attempted_at),
                             "next_retry_at": _aware(reflection.next_retry_at),
@@ -2302,6 +2500,92 @@ class RunRepository:
                 }
                 )
             return reviews
+
+    def review_audit_detail(self, outcome_id: int) -> dict[str, Any] | None:
+        """Return progressively disclosed audit-only Reflection provenance."""
+        review = next(
+            (
+                item
+                for item in self.review_entries(outcome_id=outcome_id, limit=1)
+                if item["outcome_id"] == outcome_id
+            ),
+            None,
+        )
+        if review is None:
+            return None
+        with self.sessions() as session:
+            reflection = session.scalar(
+                select(ReflectionRecord)
+                .join(OutcomeRecord, OutcomeRecord.id == ReflectionRecord.outcome_id)
+                .join(DecisionRecord, DecisionRecord.id == OutcomeRecord.decision_id)
+                .join(RunRecord, RunRecord.id == DecisionRecord.run_id)
+                .where(
+                    OutcomeRecord.id == outcome_id,
+                    RunRecord.trashed_at.is_(None),
+                )
+            )
+            attempts = list(
+                session.scalars(
+                    select(ReflectionAttemptRecord)
+                    .where(ReflectionAttemptRecord.reflection_id == reflection.id)
+                    .order_by(ReflectionAttemptRecord.sequence, ReflectionAttemptRecord.id)
+                )
+            ) if reflection else []
+        metric_names = (
+            "llm_calls",
+            "input_tokens",
+            "output_tokens",
+            "cache_hit_input_tokens",
+            "cache_miss_input_tokens",
+            "reasoning_output_tokens",
+            "wall_time_seconds",
+            "provider_reported_cost_usd",
+        )
+        aggregate = {
+            name: (
+                sum(value for attempt in attempts if (value := getattr(attempt, name)) is not None)
+                if any(getattr(attempt, name) is not None for attempt in attempts)
+                else None
+            )
+            for name in metric_names
+        }
+        usage_status = (
+            "reported"
+            if any(attempt.usage_status == "reported" for attempt in attempts)
+            else "legacy_unknown"
+            if any(attempt.usage_status == "legacy_unknown" for attempt in attempts)
+            else "not_reported"
+        )
+        return {
+            "review": review,
+            "reflection": reflection.text if reflection else None,
+            "attempts": [
+                {
+                    "id": attempt.id,
+                    "generation_cycle_id": attempt.generation_cycle_id,
+                    "sequence": attempt.sequence,
+                    "trigger": attempt.trigger,
+                    "origin": attempt.origin,
+                    "attempt_kind": attempt.attempt_kind,
+                    "started_at": _aware(attempt.started_at),
+                    "finished_at": _aware(attempt.finished_at),
+                    "outcome": attempt.outcome,
+                    "schema_version": attempt.schema_version,
+                    "diagnostics": attempt.diagnostics_json,
+                    "usage": {name: getattr(attempt, name) for name in ("usage_status", *metric_names)},
+                    "invalid_candidate": attempt.invalid_candidate,
+                    "invalid_candidate_digest": attempt.invalid_candidate_digest,
+                    "invalid_candidate_length": attempt.invalid_candidate_length,
+                    "validation_issues": attempt.validation_issues_json,
+                }
+                for attempt in attempts
+            ],
+            "aggregate_usage": {
+                "usage_status": usage_status,
+                "attempt_count": len(attempts),
+                **aggregate,
+            },
+        }
 
     def backup(self, destination: Path) -> Path:
         destination = destination.expanduser().resolve()

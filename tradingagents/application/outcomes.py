@@ -7,6 +7,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+from time import monotonic
 from typing import Any
 
 import pandas as pd
@@ -110,7 +111,16 @@ class OutcomeSettlement:
                     observation=observation,
                     observed_at=self._now(),
                 )
+            attempt_ids = None
+            started_monotonic = None
             try:
+                attempt_ids = self.repository.start_outcome_reflection_attempt(
+                    item["outcome_id"],
+                    started_at=now,
+                )
+                if attempt_ids is None:
+                    continue
+                started_monotonic = monotonic()
                 reflection = self._reflection(
                     ticker=item["ticker"],
                     benchmark=item["benchmark"],
@@ -121,6 +131,8 @@ class OutcomeSettlement:
                     item["outcome_id"],
                     reflection=reflection,
                     generated_at=self._now(),
+                    attempt_ids=attempt_ids,
+                    wall_time_seconds=monotonic() - started_monotonic,
                 )
                 stats[
                     "failed"
@@ -139,6 +151,12 @@ class OutcomeSettlement:
                     attempted_at=attempted_at,
                     next_retry_at=attempted_at + ERROR_RECHECK_INTERVAL,
                     error_code=type(exc).__name__,
+                    attempt_ids=attempt_ids,
+                    wall_time_seconds=(
+                        monotonic() - started_monotonic
+                        if started_monotonic is not None
+                        else None
+                    ),
                 )
                 stats["failed"] += 1
         return stats

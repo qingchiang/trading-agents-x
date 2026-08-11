@@ -64,6 +64,14 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
         feedback_columns = {
             column["name"] for column in inspector.get_columns("outcome_feedback")
         }
+        generation_cycle_columns = {
+            column["name"]
+            for column in inspector.get_columns("reflection_generation_cycles")
+        }
+        reflection_attempt_columns = {
+            column["name"]
+            for column in inspector.get_columns("reflection_attempts")
+        }
         run_columns = {column["name"] for column in inspector.get_columns("runs")}
         run_indexes = {index["name"] for index in inspector.get_indexes("runs")}
         revision_columns = {
@@ -79,7 +87,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     finally:
         engine.dispose()
 
-    assert revision == "0010_outcome_feedback_policy"
+    assert revision == "0011_reflection_attempt_audit"
     assert {
         "id",
         "run_id",
@@ -163,7 +171,157 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
         "available_at",
         "retired_at",
     }.issubset(feedback_columns)
+    assert {
+        "id",
+        "outcome_id",
+        "status",
+        "trigger",
+        "origin",
+        "retry_ordinal",
+        "queued_at",
+        "started_at",
+        "finished_at",
+    }.issubset(generation_cycle_columns)
+    assert {
+        "id",
+        "reflection_id",
+        "generation_cycle_id",
+        "sequence",
+        "trigger",
+        "origin",
+        "attempt_kind",
+        "started_at",
+        "finished_at",
+        "outcome",
+        "schema_version",
+        "diagnostics_json",
+        "usage_status",
+        "llm_calls",
+        "input_tokens",
+        "output_tokens",
+        "cache_hit_input_tokens",
+        "cache_miss_input_tokens",
+        "reasoning_output_tokens",
+        "wall_time_seconds",
+        "provider_reported_cost_usd",
+        "invalid_candidate",
+        "invalid_candidate_digest",
+        "invalid_candidate_length",
+        "validation_issues_json",
+    }.issubset(reflection_attempt_columns)
     assert "numeric_audit_json" in decision_columns
+
+
+def test_reflection_attempt_migration_backfills_honest_legacy_provenance(
+    app_settings,
+) -> None:
+    app_settings.prepare_filesystem()
+    config = _alembic_config(app_settings)
+    command.upgrade(config, "0010_outcome_feedback_policy")
+    engine = create_sqlite_engine(app_settings.database_path)
+    now = datetime(2026, 8, 10, 12)
+    try:
+        with engine.begin() as connection:
+            for index, status in enumerate(
+                ("generated", "invalid", "retryable_failure", "pending"), start=1
+            ):
+                run_id = f"00000000-0000-0000-0000-{index:012d}"
+                connection.execute(
+                    text(
+                        "INSERT INTO runs (id, status, request_json, config_json, version, "
+                        "current_attempt, cancel_requested, metrics_json, created_at, updated_at) "
+                        "VALUES (:id, 'succeeded', '{}', '{}', 'test', 1, 0, '{}', :now, :now)"
+                    ),
+                    {"id": run_id, "now": now},
+                )
+                connection.execute(
+                    text(
+                        "INSERT INTO decisions (run_id, ticker, market, asset_type, analysis_date, "
+                        "rating, confidence, decision_json, created_at) "
+                        "VALUES (:run_id, 'NVDA', 'America/New_York', 'stock', '2026-07-24', "
+                        "'Hold', 0.5, '{}', :now)"
+                    ),
+                    {"run_id": run_id, "now": now},
+                )
+                decision_id = connection.scalar(
+                    text("SELECT id FROM decisions WHERE run_id = :run_id"),
+                    {"run_id": run_id},
+                )
+                connection.execute(
+                    text(
+                        "INSERT INTO outcomes (decision_id, status, benchmark, holding_intervals) "
+                        "VALUES (:decision_id, 'resolved', 'SPY', 5)"
+                    ),
+                    {"decision_id": decision_id},
+                )
+                outcome_id = connection.scalar(
+                    text("SELECT id FROM outcomes WHERE decision_id = :decision_id"),
+                    {"decision_id": decision_id},
+                )
+                connection.execute(
+                    text(
+                        "INSERT INTO reflections "
+                        "(outcome_id, status, text, created_at, generated_at, last_attempted_at, error_code) "
+                        "VALUES (:outcome_id, :status, :reflection, :now, :generated_at, :attempted_at, :error_code)"
+                    ),
+                    {
+                        "outcome_id": outcome_id,
+                        "status": status,
+                        "reflection": "legacy text" if status == "generated" else None,
+                        "now": now,
+                        "generated_at": now if status == "generated" else None,
+                        "attempted_at": now if status != "pending" else None,
+                        "error_code": "provider_timeout" if status == "retryable_failure" else None,
+                    },
+                )
+    finally:
+        engine.dispose()
+
+    command.upgrade(config, "head")
+    command.upgrade(config, "head")
+    engine = create_sqlite_engine(app_settings.database_path)
+    try:
+        with engine.connect() as connection:
+            rows = connection.execute(
+                text(
+                    "SELECT reflections.status, reflection_generation_cycles.status, "
+                    "reflection_attempts.outcome, reflection_attempts.attempt_kind, "
+                    "reflection_attempts.usage_status, reflection_attempts.diagnostics_json, "
+                    "reflection_attempts.validation_issues_json "
+                    "FROM reflections "
+                    "LEFT JOIN reflection_attempts ON reflection_attempts.reflection_id = reflections.id "
+                    "LEFT JOIN reflection_generation_cycles ON "
+                    "reflection_generation_cycles.id = reflection_attempts.generation_cycle_id "
+                    "ORDER BY reflections.id"
+                )
+            ).all()
+    finally:
+        engine.dispose()
+
+    assert rows[0][:5] == (
+        "generated",
+        "succeeded",
+        "generated",
+        "legacy_unstructured",
+        "legacy_unknown",
+    )
+    assert rows[1][:5] == (
+        "invalid",
+        "invalid",
+        "invalid",
+        "legacy_unstructured",
+        "legacy_unknown",
+    )
+    assert json.loads(rows[1][6]) == ["legacy_unknown_invalid_reason"]
+    assert rows[2][:5] == (
+        "retryable_failure",
+        "failed",
+        "provider_failure",
+        "legacy_unstructured",
+        "legacy_unknown",
+    )
+    assert json.loads(rows[2][5]) == {"error_code": "provider_timeout"}
+    assert rows[3] == ("pending", None, None, None, None, None, None)
 
 
 def test_revision_semantic_migration_does_not_invent_initial_change_conclusion(

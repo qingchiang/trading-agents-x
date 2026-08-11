@@ -488,6 +488,7 @@ async def test_openapi_contains_versioned_run_center_contract(
         "/api/v1/research-revisions/{revision_id}",
         "/api/v1/research-revisions/{revision_id}/export",
         "/api/v1/reviews",
+        "/api/v1/reviews/{outcome_id}",
         "/api/v1/capabilities",
         "/api/v1/providers/{provider}/models",
         "/api/v1/health",
@@ -548,6 +549,10 @@ async def test_openapi_contains_versioned_run_center_contract(
     assert "Observation data, Reflection, and qualification" in feedback["available_at"][
         "description"
     ]
+    review = schema["components"]["schemas"]["ResearchReview"]["properties"]
+    assert "reflection" not in review
+    detail = schema["components"]["schemas"]["ResearchReviewAuditDetail"]["properties"]
+    assert {"review", "reflection", "attempts", "aggregate_usage"} <= set(detail)
     delta = schema["components"]["schemas"]["RevisionDelta"]["properties"]
     assert delta["question_disposition"]["anyOf"][0]["$ref"].endswith("/QuestionDispositionAudit")
     chain = schema["components"]["schemas"]["ResearchChain"]["properties"]

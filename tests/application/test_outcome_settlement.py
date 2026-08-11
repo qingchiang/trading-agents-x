@@ -156,6 +156,10 @@ class _LifecycleRepository:
             }
         )
 
+    def start_outcome_reflection_attempt(self, outcome_id, *, started_at):
+        self.started_attempt = (outcome_id, started_at)
+        return {"cycle_id": "fixture-cycle", "attempt_id": 1}
+
     def mark_reflection_failure(self, outcome_id, **kwargs):
         self.failures.append((outcome_id, kwargs))
         self.item["reflection_status"] = "retryable_failure"

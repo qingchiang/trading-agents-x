@@ -55,6 +55,8 @@ from tradingagents.application.database import (
     DecisionRecord,
     OutcomeFeedbackRecord,
     OutcomeRecord,
+    ReflectionAttemptRecord,
+    ReflectionGenerationCycleRecord,
     ReflectionRecord,
     RunAttemptRecord,
     RunRecord,
@@ -920,11 +922,30 @@ def test_complete_persists_result_and_resolved_memory(
         )
         assert session.scalar(select(func.count()).select_from(ReflectionRecord)) == 1
         assert session.scalar(select(func.count()).select_from(OutcomeFeedbackRecord)) == 1
+        assert session.scalar(select(func.count()).select_from(ReflectionGenerationCycleRecord)) == 1
+        assert session.scalar(select(func.count()).select_from(ReflectionAttemptRecord)) == 1
 
     feedback_view = repository.review_entries()[0]["outcome_feedback"]
     assert feedback_view["qualification_policy_version"] == (
         "outcome_feedback_qualification.v1"
     )
+    assert "reflection" not in repository.review_entries()[0]
+    detail = repository.review_audit_detail(pending[0]["outcome_id"])
+    assert detail is not None
+    assert detail["reflection"] == "The thesis worked because earnings accelerated."
+    assert detail["aggregate_usage"] == {
+        "usage_status": "not_reported",
+        "attempt_count": 1,
+        "llm_calls": 1,
+        "input_tokens": None,
+        "output_tokens": None,
+        "cache_hit_input_tokens": None,
+        "cache_miss_input_tokens": None,
+        "reasoning_output_tokens": None,
+        "wall_time_seconds": None,
+        "provider_reported_cost_usd": None,
+    }
+    assert detail["attempts"][0]["attempt_kind"] == "unstructured"
 
     with repository.sessions() as session:
         record = session.scalar(

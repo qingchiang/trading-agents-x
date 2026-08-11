@@ -1,6 +1,10 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { api, type ResearchReview } from "../api/client";
+import {
+  api,
+  type ResearchReview,
+  type ResearchReviewAuditDetail,
+} from "../api/client";
 import {
   InstrumentIdentity,
   RecentInstrumentDatalist,
@@ -35,6 +39,9 @@ export default function ResearchReview() {
   );
   const [error, setError] = useState("");
   const [actionOutcomeId, setActionOutcomeId] = useState<number | null>(null);
+  const [auditDetails, setAuditDetails] = useState<
+    Record<number, ResearchReviewAuditDetail>
+  >({});
   const recentInstruments = useRecentInstruments();
 
   const load = async (query = "") => {
@@ -88,6 +95,15 @@ export default function ResearchReview() {
       setError(cause instanceof Error ? cause.message : t("error"));
     } finally {
       setActionOutcomeId(null);
+    }
+  };
+  const loadAuditDetail = async (outcomeId: number) => {
+    if (auditDetails[outcomeId]) return;
+    try {
+      const detail = await api.reviewAuditDetail(outcomeId);
+      setAuditDetails((current) => ({ ...current, [outcomeId]: detail }));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t("error"));
     }
   };
 
@@ -256,18 +272,36 @@ export default function ResearchReview() {
                 <p>{t("feedbackUnavailable")}</p>
               )}
             </section>
-            <details className="memory-decision-details">
+            <details
+              className="memory-decision-details"
+              onToggle={(event) => {
+                if (event.currentTarget.open) {
+                  void loadAuditDetail(review.outcome_id);
+                }
+              }}
+            >
               <summary>{t("methodReflectionAndAudit")}</summary>
-              {review.reflection && <Markdown>{review.reflection}</Markdown>}
+              {auditDetails[review.outcome_id]?.reflection && (
+                <Markdown>{String(auditDetails[review.outcome_id].reflection)}</Markdown>
+              )}
+              {!auditDetails[review.outcome_id] && <p>{t("loading")}</p>}
               <p className="memory-lifecycle-note">
                 {review.outcome.method_version} · {review.outcome.market_timezone} ·{" "}
                 {review.outcome.price_semantics} / {review.outcome.adjustment_semantics}
               </p>
               <p className="memory-lifecycle-note">{review.outcome.horizon_limit}</p>
+              {review.outcome.limitations.map((limitation) => (
+                <p className="memory-lifecycle-note" key={limitation}>
+                  {limitation}
+                </p>
+              ))}
               <p className="memory-lifecycle-note">
                 {review.outcome.status} · {review.outcome_reflection?.status ?? "—"} ·{" "}
                 {review.outcome_feedback?.status ?? "—"}
               </p>
+              {auditDetails[review.outcome_id] && (
+                <AuditAttempts detail={auditDetails[review.outcome_id]} />
+              )}
               {review.lifecycle_actions_allowed &&
               ["reflection_invalid", "reflection_failed"].includes(
                 review.review_status,
@@ -289,6 +323,31 @@ export default function ResearchReview() {
         )}
       </div>
     </section>
+  );
+}
+
+function AuditAttempts({ detail }: { detail: ResearchReviewAuditDetail }) {
+  return (
+    <div className="memory-lifecycle-note">
+      <p>
+        {detail.aggregate_usage.attempt_count} attempt(s) · {detail.aggregate_usage.usage_status}
+      </p>
+      <pre>{JSON.stringify(detail.aggregate_usage, null, 2)}</pre>
+      {detail.attempts.map((attempt) => (
+        <details key={attempt.id}>
+          <summary>
+            #{attempt.sequence} · {attempt.attempt_kind} · {attempt.outcome ?? "running"}
+          </summary>
+          <p>{attempt.schema_version ?? "—"}</p>
+          <p>
+            {attempt.started_at} · {attempt.finished_at ?? "running"}
+          </p>
+          <p>{JSON.stringify(attempt.diagnostics ?? {})}</p>
+          <p>{attempt.validation_issues?.join(", ") ?? "—"}</p>
+          {attempt.invalid_candidate && <pre>{attempt.invalid_candidate}</pre>}
+        </details>
+      ))}
+    </div>
   );
 }
 

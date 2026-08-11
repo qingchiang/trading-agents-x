@@ -74,6 +74,7 @@ from .models import (
     ProviderModelCatalog,
     ResearchChainUpdateRequest,
     ResearchReview,
+    ResearchReviewAuditDetail,
     RunBatchRequest,
     RunBatchResult,
     RunCreateRequest,
@@ -539,6 +540,16 @@ def create_app(
             status_group=status_group,
             limit=limit,
         )
+
+    @app.get(
+        f"{API_PREFIX}/reviews/{{outcome_id}}",
+        response_model=ResearchReviewAuditDetail,
+    )
+    def review_audit_detail(outcome_id: int):
+        detail = repository.review_audit_detail(outcome_id)
+        if detail is None:
+            raise HTTPException(status_code=404, detail="Review not found")
+        return detail
 
     @app.post(f"{API_PREFIX}/outcome-observations/{{outcome_id}}/reflection/retry")
     def retry_outcome_reflection(outcome_id: int):

@@ -172,6 +172,7 @@ class OutcomeObservationView(ApiModel):
     holding_intervals: int
     raw_return: float | None
     alpha_return: float | None
+    resolved_at: datetime | None
     data_available_at: datetime | None
     last_checked_at: datetime | None
     next_check_at: datetime | None
@@ -180,10 +181,46 @@ class OutcomeObservationView(ApiModel):
 
 class OutcomeReflectionView(ApiModel):
     status: OutcomeReflectionStatus
+    created_at: datetime
     generated_at: datetime | None
     last_attempted_at: datetime | None
     next_retry_at: datetime | None
     error_code: str | None
+
+
+class ReflectionAttemptUsageView(ApiModel):
+    usage_status: Literal["reported", "not_reported", "legacy_unknown"]
+    llm_calls: int | None
+    input_tokens: int | None
+    output_tokens: int | None
+    cache_hit_input_tokens: int | None
+    cache_miss_input_tokens: int | None
+    reasoning_output_tokens: int | None
+    wall_time_seconds: float | None
+    provider_reported_cost_usd: float | None
+
+
+class ReflectionAttemptView(ApiModel):
+    id: int
+    generation_cycle_id: str
+    sequence: int
+    trigger: str
+    origin: str
+    attempt_kind: str
+    started_at: datetime
+    finished_at: datetime | None
+    outcome: str | None
+    schema_version: str | None
+    diagnostics: dict[str, str] | None
+    usage: ReflectionAttemptUsageView
+    invalid_candidate: str | None
+    invalid_candidate_digest: str | None
+    invalid_candidate_length: int | None
+    validation_issues: list[str] | None
+
+
+class ReflectionUsageAggregateView(ReflectionAttemptUsageView):
+    attempt_count: int
 
 
 class OutcomeFeedbackApplicabilityView(ApiModel):
@@ -244,7 +281,13 @@ class ResearchReview(ApiModel):
     profile: RunProfile
     decision: ResearchDecision
     outcome: OutcomeObservationView
-    reflection: str | None
     method_feedback: str | None
     outcome_reflection: OutcomeReflectionView | None
     outcome_feedback: OutcomeFeedbackView | None
+
+
+class ResearchReviewAuditDetail(ApiModel):
+    review: ResearchReview
+    reflection: str | None
+    attempts: list[ReflectionAttemptView]
+    aggregate_usage: ReflectionUsageAggregateView

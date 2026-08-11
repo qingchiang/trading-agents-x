@@ -40,6 +40,8 @@ export type ProviderModelCatalog =
 export type DiscoveredModel = components["schemas"]["DiscoveredModelView"];
 export type Health = components["schemas"]["HealthResponse"];
 export type ResearchReview = components["schemas"]["ResearchReview"];
+export type ResearchReviewAuditDetail =
+  components["schemas"]["ResearchReviewAuditDetail"];
 export type RunMetrics = components["schemas"]["RunMetrics"];
 export type RunAttemptView = components["schemas"]["RunAttemptView"];
 export type StructuredRecoveryNotice =
@@ -155,6 +157,10 @@ export const api = {
     request<RunView>(`/api/v1/runs/${id}/${action}`, { method: "POST" }),
   reviews: (query = "") =>
     request<ResearchReview[]>(`/api/v1/reviews${query}`),
+  reviewAuditDetail: (outcomeId: number) =>
+    request<ResearchReviewAuditDetail>(
+      `/api/v1/reviews/${encodeURIComponent(outcomeId)}`,
+    ),
   retryOutcomeReflection: (outcomeId: number) =>
     request<{ status: string }>(
       `/api/v1/outcome-observations/${encodeURIComponent(outcomeId)}/reflection/retry`,

@@ -3009,6 +3009,18 @@
             ],
             "title": "Raw Return"
           },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
           "source_decision_id": {
             "title": "Source Decision Id",
             "type": "integer"
@@ -3045,6 +3057,7 @@
           "holding_intervals",
           "raw_return",
           "alpha_return",
+          "resolved_at",
           "data_available_at",
           "last_checked_at",
           "next_check_at",
@@ -3066,6 +3079,11 @@
       "OutcomeReflectionView": {
         "additionalProperties": false,
         "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
           "error_code": {
             "anyOf": [
               {
@@ -3119,6 +3137,7 @@
         },
         "required": [
           "status",
+          "created_at",
           "generated_at",
           "last_attempted_at",
           "next_retry_at",
@@ -3572,6 +3591,393 @@
           "last_used_at"
         ],
         "title": "RecentInstrument",
+        "type": "object"
+      },
+      "ReflectionAttemptUsageView": {
+        "additionalProperties": false,
+        "properties": {
+          "cache_hit_input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Hit Input Tokens"
+          },
+          "cache_miss_input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Miss Input Tokens"
+          },
+          "input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Tokens"
+          },
+          "llm_calls": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Calls"
+          },
+          "output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Tokens"
+          },
+          "provider_reported_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Reported Cost Usd"
+          },
+          "reasoning_output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Output Tokens"
+          },
+          "usage_status": {
+            "enum": [
+              "reported",
+              "not_reported",
+              "legacy_unknown"
+            ],
+            "title": "Usage Status",
+            "type": "string"
+          },
+          "wall_time_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wall Time Seconds"
+          }
+        },
+        "required": [
+          "usage_status",
+          "llm_calls",
+          "input_tokens",
+          "output_tokens",
+          "cache_hit_input_tokens",
+          "cache_miss_input_tokens",
+          "reasoning_output_tokens",
+          "wall_time_seconds",
+          "provider_reported_cost_usd"
+        ],
+        "title": "ReflectionAttemptUsageView",
+        "type": "object"
+      },
+      "ReflectionAttemptView": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt_kind": {
+            "title": "Attempt Kind",
+            "type": "string"
+          },
+          "diagnostics": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diagnostics"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "generation_cycle_id": {
+            "title": "Generation Cycle Id",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "invalid_candidate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invalid Candidate"
+          },
+          "invalid_candidate_digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invalid Candidate Digest"
+          },
+          "invalid_candidate_length": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invalid Candidate Length"
+          },
+          "origin": {
+            "title": "Origin",
+            "type": "string"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome"
+          },
+          "schema_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Version"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "trigger": {
+            "title": "Trigger",
+            "type": "string"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/ReflectionAttemptUsageView"
+          },
+          "validation_issues": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation Issues"
+          }
+        },
+        "required": [
+          "id",
+          "generation_cycle_id",
+          "sequence",
+          "trigger",
+          "origin",
+          "attempt_kind",
+          "started_at",
+          "finished_at",
+          "outcome",
+          "schema_version",
+          "diagnostics",
+          "usage",
+          "invalid_candidate",
+          "invalid_candidate_digest",
+          "invalid_candidate_length",
+          "validation_issues"
+        ],
+        "title": "ReflectionAttemptView",
+        "type": "object"
+      },
+      "ReflectionUsageAggregateView": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt_count": {
+            "title": "Attempt Count",
+            "type": "integer"
+          },
+          "cache_hit_input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Hit Input Tokens"
+          },
+          "cache_miss_input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Miss Input Tokens"
+          },
+          "input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Tokens"
+          },
+          "llm_calls": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Calls"
+          },
+          "output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Tokens"
+          },
+          "provider_reported_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Reported Cost Usd"
+          },
+          "reasoning_output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Output Tokens"
+          },
+          "usage_status": {
+            "enum": [
+              "reported",
+              "not_reported",
+              "legacy_unknown"
+            ],
+            "title": "Usage Status",
+            "type": "string"
+          },
+          "wall_time_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wall Time Seconds"
+          }
+        },
+        "required": [
+          "usage_status",
+          "llm_calls",
+          "input_tokens",
+          "output_tokens",
+          "cache_hit_input_tokens",
+          "cache_miss_input_tokens",
+          "reasoning_output_tokens",
+          "wall_time_seconds",
+          "provider_reported_cost_usd",
+          "attempt_count"
+        ],
+        "title": "ReflectionUsageAggregateView",
         "type": "object"
       },
       "ReportAuditStatus": {
@@ -4620,17 +5026,6 @@
           "profile": {
             "$ref": "#/components/schemas/RunProfile"
           },
-          "reflection": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reflection"
-          },
           "review_status": {
             "enum": [
               "awaiting_observation",
@@ -4668,12 +5063,48 @@
           "profile",
           "decision",
           "outcome",
-          "reflection",
           "method_feedback",
           "outcome_reflection",
           "outcome_feedback"
         ],
         "title": "ResearchReview",
+        "type": "object"
+      },
+      "ResearchReviewAuditDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "aggregate_usage": {
+            "$ref": "#/components/schemas/ReflectionUsageAggregateView"
+          },
+          "attempts": {
+            "items": {
+              "$ref": "#/components/schemas/ReflectionAttemptView"
+            },
+            "title": "Attempts",
+            "type": "array"
+          },
+          "reflection": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reflection"
+          },
+          "review": {
+            "$ref": "#/components/schemas/ResearchReview"
+          }
+        },
+        "required": [
+          "review",
+          "reflection",
+          "attempts",
+          "aggregate_usage"
+        ],
+        "title": "ResearchReviewAuditDetail",
         "type": "object"
       },
       "ResearchRevision": {
@@ -8475,6 +8906,45 @@
           }
         },
         "summary": "Reviews"
+      }
+    },
+    "/api/v1/reviews/{outcome_id}": {
+      "get": {
+        "operationId": "review_audit_detail_api_v1_reviews__outcome_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "outcome_id",
+            "required": true,
+            "schema": {
+              "title": "Outcome Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResearchReviewAuditDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Audit Detail"
       }
     },
     "/api/v1/runs": {
