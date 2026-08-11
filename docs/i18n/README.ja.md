@@ -246,8 +246,10 @@ truth です。
 ## API とセキュリティ
 
 バージョン化 API は run の作成・参照、event SSE、cancel/retry、
-export、Research Review 参照、Reflection の再試行、Feedback の廃止、capabilities、
-health を提供します。run 作成時に
+export、Research Review の一覧・監査詳細参照、Reflection のキュー再生成、Feedback の廃止、capabilities、
+health を提供します。Review 一覧には完全な Reflection、Attempt、診断、usage、無効候補を含めず、
+これらの監査フィールドは個別 Review 詳細だけで返します。旧 Reflection retry は一リリース限りの
+廃止予定の互換アダプターであり、Review 読み取りの別名ではありません。run 作成時に
 `Idempotency-Key` を送ることで、ブラウザ再送による重複を防げます。
 確認済みテンプレートからの作成では、終端 run の `source_run_id` も送信
 できます。OpenAPI は `/openapi.json` です。

@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   api,
@@ -51,11 +51,21 @@ export default function ResearchReview() {
   >("not_useful");
   const [retirementNote, setRetirementNote] = useState("");
   const [retirementError, setRetirementError] = useState("");
-  const [retirementSuccess, setRetirementSuccess] = useState("");
+  const [actionAnnouncement, setActionAnnouncement] = useState<{
+    outcomeId: number;
+    message: string;
+  } | null>(null);
   const [auditDetails, setAuditDetails] = useState<
     Record<number, ResearchReviewAuditDetail>
   >({});
   const recentInstruments = useRecentInstruments();
+  const reviewRefs = useRef<Record<number, HTMLElement | null>>({});
+  const retirementTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const retirementReasonRef = useRef<HTMLSelectElement | null>(null);
+
+  const focusReview = (outcomeId: number) => {
+    reviewRefs.current[outcomeId]?.focus();
+  };
 
   const load = async (query = "") => {
     try {
@@ -95,19 +105,33 @@ export default function ResearchReview() {
     try {
       await api.regenerateOutcomeReflection(outcomeId, crypto.randomUUID());
       await load(window.location.search);
+      focusReview(outcomeId);
     } catch (cause) {
       setReflectionActionError(cause instanceof Error ? cause.message : t("error"));
       setReflectionActionErrorOutcomeId(outcomeId);
+      focusReview(outcomeId);
     } finally {
       setActionOutcomeId(null);
     }
   };
-  const openRetirement = (feedbackId: number, outcomeId: number) => {
+  const openRetirement = (
+    feedbackId: number,
+    outcomeId: number,
+    trigger: HTMLButtonElement,
+  ) => {
+    retirementTriggerRef.current = trigger;
     setRetirement({ feedbackId, outcomeId });
     setRetirementReason("not_useful");
     setRetirementNote("");
     setRetirementError("");
   };
+  const closeRetirement = () => {
+    setRetirement(null);
+    retirementTriggerRef.current?.focus();
+  };
+  useEffect(() => {
+    if (retirement) retirementReasonRef.current?.focus();
+  }, [retirement]);
   const retireFeedback = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!retirement) return;
@@ -119,8 +143,12 @@ export default function ResearchReview() {
         note: retirementNote.trim() || null,
       });
       setRetirement(null);
-      setRetirementSuccess(t("retirementSuccess"));
       await load(window.location.search);
+      setActionAnnouncement({
+        outcomeId: retirement.outcomeId,
+        message: t("retirementSuccess"),
+      });
+      focusReview(retirement.outcomeId);
     } catch (cause) {
       setRetirementError(cause instanceof Error ? cause.message : t("error"));
     } finally {
@@ -200,13 +228,15 @@ export default function ResearchReview() {
         <button className="button primary">{t("apply")}</button>
       </form>
       {error && <div className="alert">{error}</div>}
-      {retirementSuccess && <div className="notice" role="status">{retirementSuccess}</div>}
       <div className="memory-list">
         {reviews.map((review) => (
           <article
             className="panel memory-card"
             id={`review-${review.run_id}`}
             key={review.run_id}
+            ref={(element) => {
+              reviewRefs.current[review.outcome_id] = element;
+            }}
             tabIndex={-1}
           >
             <div className="memory-meta">
@@ -232,6 +262,11 @@ export default function ResearchReview() {
               </div>
               <StatusBadge status={review.review_status} />
             </div>
+            {actionAnnouncement?.outcomeId === review.outcome_id && (
+              <p className="review-action-announcement" role="status">
+                {actionAnnouncement.message}
+              </p>
+            )}
             {review.review_status === "lifecycle_inconsistent" && (
               <div className="alert" role="alert">
                 {t("reviewLifecycleInconsistent")}
@@ -282,10 +317,11 @@ export default function ResearchReview() {
                       <button
                         className="button compact-button danger"
                         disabled={actionOutcomeId === review.outcome_id}
-                        onClick={() =>
+                        onClick={(event) =>
                           openRetirement(
-                          review.outcome_feedback!.id,
-                          review.outcome_id,
+                            review.outcome_feedback!.id,
+                            review.outcome_id,
+                            event.currentTarget,
                           )
                         }
                         type="button"
@@ -296,9 +332,10 @@ export default function ResearchReview() {
                   )}
                 </>
               ) : review.review_status === "feedback_ineligible" ? (
-                <p>
-                  {t("feedbackIneligible")}: {review.outcome_feedback?.reasons.join(", ") || "—"}
-                </p>
+                <>
+                  <p>{t("feedbackIneligible")}</p>
+                  <p className="memory-lifecycle-note">{t("feedbackIneligibleReason")}</p>
+                </>
               ) : review.review_status === "feedback_retired" ? (
                 <p>{t("feedbackRetired")}</p>
               ) : (
@@ -309,7 +346,10 @@ export default function ResearchReview() {
             ["reflection_invalid", "reflection_failed"].includes(
               review.review_status,
             ) ? (
-              <section aria-labelledby={`reflection-failure-${review.outcome_id}`}>
+              <section
+                aria-labelledby={`reflection-failure-${review.outcome_id}`}
+                className="reflection-regeneration-action"
+              >
                 <h2 id={`reflection-failure-${review.outcome_id}`}>
                   {t("methodReflection")}
                 </h2>
@@ -317,9 +357,20 @@ export default function ResearchReview() {
                   {review.outcome_reflection?.error_code || t("reflectionFailure")}
                 </p>
                 {reflectionActionError && reflectionActionErrorOutcomeId === review.outcome_id && (
-                  <div className="alert" role="alert">{reflectionActionError}</div>
+                  <div
+                    className="alert"
+                    id={`reflection-action-error-${review.outcome_id}`}
+                    role="alert"
+                  >
+                    {reflectionActionError}
+                  </div>
                 )}
                 <button
+                  aria-describedby={
+                    reflectionActionErrorOutcomeId === review.outcome_id
+                      ? `reflection-action-error-${review.outcome_id}`
+                      : undefined
+                  }
                   className="button compact-button"
                   disabled={actionOutcomeId === review.outcome_id}
                   onClick={() => void regenerateReflection(review.outcome_id)}
@@ -361,6 +412,12 @@ export default function ResearchReview() {
                 {review.outcome.status} · {review.outcome_reflection?.status ?? "—"} ·{" "}
                 {review.outcome_feedback?.status ?? "—"}
               </p>
+              {review.outcome_feedback && (
+                <p className="memory-lifecycle-note">
+                  {review.outcome_feedback.qualification_policy_version} ·{" "}
+                  {review.outcome_feedback.reasons.join(", ") || "—"}
+                </p>
+              )}
               {auditDetails[review.outcome_id] && (
                 <AuditAttempts detail={auditDetails[review.outcome_id]} />
               )}
@@ -374,22 +431,39 @@ export default function ResearchReview() {
       {retirement && (
         <div className="retirement-dialog-layer">
           <form
+            aria-describedby="retirement-confirmation"
             aria-labelledby="retirement-dialog-title"
             aria-modal="true"
             className="retirement-dialog"
             onKeyDown={(event) => {
               if (event.key === "Escape" && actionOutcomeId === null) {
-                setRetirement(null);
+                closeRetirement();
+              }
+              if (event.key === "Tab") {
+                const focusable = Array.from(
+                  event.currentTarget.querySelectorAll<HTMLElement>(
+                    "button:not([disabled]), select:not([disabled]), textarea:not([disabled])",
+                  ),
+                );
+                const currentIndex = focusable.indexOf(document.activeElement as HTMLElement);
+                const nextIndex = event.shiftKey
+                  ? (currentIndex <= 0 ? focusable.length - 1 : currentIndex - 1)
+                  : (currentIndex === focusable.length - 1 ? 0 : currentIndex + 1);
+                if (currentIndex !== -1) {
+                  event.preventDefault();
+                  focusable[nextIndex]?.focus();
+                }
               }
             }}
             onSubmit={(event) => void retireFeedback(event)}
             role="dialog"
           >
             <h2 id="retirement-dialog-title">{t("retireMethodFeedback")}</h2>
-            <p>{t("retirementConfirmation")}</p>
+            <p id="retirement-confirmation">{t("retirementConfirmation")}</p>
             <label>
               {t("retirementReason")}
               <select
+                ref={retirementReasonRef}
                 onChange={(event) => setRetirementReason(
                   event.target.value as OutcomeFeedbackRetireRequest["reason"],
                 )}
@@ -410,18 +484,19 @@ export default function ResearchReview() {
                 value={retirementNote}
               />
             </label>
-            {retirementError && <div className="alert" role="alert">{retirementError}</div>}
+            {retirementError && <div className="alert" id="retirement-action-error" role="alert">{retirementError}</div>}
             <div className="retirement-dialog-actions">
               <button
                 className="button"
                 disabled={actionOutcomeId !== null}
-                onClick={() => setRetirement(null)}
+                onClick={closeRetirement}
                 type="button"
               >
                 {t("cancel")}
               </button>
               <button
                 className="button danger"
+                aria-describedby={retirementError ? "retirement-action-error" : undefined}
                 disabled={actionOutcomeId !== null}
                 type="submit"
               >

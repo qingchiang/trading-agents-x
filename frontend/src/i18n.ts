@@ -588,6 +588,8 @@ const en = {
     observationAwaiting: "Outcome Observation is awaiting settlement.",
     feedbackUnavailable: "No Method Feedback is available yet.",
     feedbackIneligible: "Method Feedback is ineligible",
+    feedbackIneligibleReason:
+      "It did not meet the recorded qualification policy. See audit details for the recorded reasons.",
     feedbackRetired: "Method Feedback has been retired.",
     reviewLifecycleInconsistent:
       "This Research Review has inconsistent lifecycle data. Actions are unavailable.",
@@ -1215,6 +1217,7 @@ const zhCN = {
     observationAwaiting: "结果观察正在等待结算。",
     feedbackUnavailable: "尚无可用的方法反馈。",
     feedbackIneligible: "方法反馈不合格",
+    feedbackIneligibleReason: "它不符合已记录的资格政策。请在审计详情中查看记录的原因。",
     feedbackRetired: "方法反馈已停用。",
     reviewLifecycleInconsistent: "此研究复核存在不一致的生命周期数据，无法执行操作。",
     reviewStatus: "复核状态",
@@ -1856,6 +1859,8 @@ const ja = {
     observationAwaiting: "結果観測は決済待ちです。",
     feedbackUnavailable: "利用可能な方法フィードバックはまだありません。",
     feedbackIneligible: "方法フィードバックは不適格です",
+    feedbackIneligibleReason:
+      "記録済みの適格性ポリシーを満たしていません。記録された理由は監査詳細で確認できます。",
     feedbackRetired: "方法フィードバックは廃止されました。",
     reviewLifecycleInconsistent:
       "このリサーチレビューには不整合なライフサイクルデータがあり、操作できません。",

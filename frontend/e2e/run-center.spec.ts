@@ -720,12 +720,14 @@ test("runs, legacy templates, trash, and restores local research", async ({
   await page.getByRole("tab", { name: "Reports" }).click();
   await expect(page.getByRole("heading", { name: "Market report" })).toBeVisible();
 
-  await page.goto("/reviews");
+  await page.getByRole("link", { name: "Research Review", exact: true }).click();
+  await expect(page).toHaveURL(/\/reviews$/);
   await expect(page.getByText("NVIDIA Corporation")).toBeVisible();
-  await page.getByText("Decision details").click();
+  await page.getByText("Decision details").focus();
+  await page.keyboard.press("Enter");
   await expect(page.getByText("Demand improves").first()).toBeVisible();
   await page
-    .getByRole("link", { name: "Open research decision", exact: true })
+    .getByRole("link", { name: /^Open research decision/ })
     .click();
   await expect(page).toHaveURL(/\/runs\/run-report\?view=decision/);
 

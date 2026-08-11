@@ -839,6 +839,24 @@ New structured Reflections are qualified under
 rows retain their persisted policy version and status and are never
 recalculated.
 
+The product-facing audit surface is Research Review: `/reviews` and the
+`/api/v1/reviews` collection plus per-Outcome detail. The collection is a
+summary read model; full Reflection text, append-only Reflection Attempts,
+usage, diagnostics, and sanitized invalid candidates are returned only by the
+detail surface. Review status is derived, never persisted, from the three
+authoritative lifecycles and fails closed for an inconsistent record. The
+legacy browser and read-API Memory aliases are absent; retained
+`memory:<run-id>` values are durable identifiers, not routes.
+
+Each initial generation, one permitted schema repair, automatic retry, and
+manual regeneration is an immutable Outcome Reflection Attempt owned by a
+generation cycle. Attempt usage is separate from the completed Run metrics.
+Invalid candidates are bounded, sensitive-data-sanitized plain text for closed
+audit disclosure only; they are neither Feedback nor later research input.
+Eligible Feedback may be retired irreversibly with a typed reason. These
+post-Run lifecycle records share their source Run's permanent-deletion cascade
+and do not extend Run export schemas.
+
 ## Data routing and point-in-time contracts
 
 ### Symbols and market dates

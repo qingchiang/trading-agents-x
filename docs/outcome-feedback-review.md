@@ -146,10 +146,11 @@ structured consistency error.
 ### Actions
 
 The Reflection section owns its regeneration action. When regeneration is
-allowed, `Regenerate Method Reflection` appears in the section header on wider
-screens and below its error explanation at full available width on narrow
-screens. Once accepted, the action remains in place, reads `Queued`, and is
-disabled. It never shares an inline text flow with lifecycle copy.
+allowed, `Regenerate Method Reflection` occupies its own stable action row
+below the failure explanation. On narrow screens it expands to the available
+width with a touch target of at least 44 CSS pixels. Once accepted, the action
+remains in place, reads `Queued`, and is disabled. It never shares an inline
+text flow with lifecycle copy.
 
 The Feedback section owns its retirement action. `Retire this Method Feedback`
 is a low-emphasis destructive action in a consistently aligned section action
@@ -159,13 +160,13 @@ not offer retirement.
 ### Accessibility and responsive behavior
 
 - Lifecycle changes are announced through an appropriate `aria-live` region.
-- An error explanation and the action that addresses it share one semantic
-  section.
+- An error explanation is programmatically associated with the action that
+  addresses it, and both share one semantic section.
 - Disclosures are keyboard operable, and no state relies on color alone.
 - Focus remains within the affected Review section after an action result.
+- Retirement confirmation traps focus while open and restores it to its trigger
+  when dismissed. Reduced-motion preferences disable smooth deep-link scrolling.
 - Narrow layouts retain stable action placement and adequate touch targets.
-- The retirement confirmation traps focus and returns it to its trigger.
-- Motion honors the user's reduced-motion preference.
 
 ### Filtering and ordering
 

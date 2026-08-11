@@ -221,7 +221,9 @@ Markdown/JSON 只作为显式导出格式；SQLite 是唯一事实源。
 ## API 与安全
 
 版本化 API 覆盖 run 创建/查询、事件 SSE、cancel/retry、export、
-Research Review 查询、Reflection 重试、Feedback 停用、capabilities 与 health。
+Research Review 列表/审计详情查询、Reflection 排队重新生成、Feedback 停用、capabilities 与 health。
+Review 列表不会返回完整 Reflection、Attempt、诊断、用量或无效候选；这些审计字段只会通过单个
+Review 详情返回。旧的 Reflection retry 是一个即将移除的一版兼容适配，不是 Review 读取别名。
 创建 run 时可发送 `Idempotency-Key`，
 避免浏览器重复提交；也可在用户确认模板表单后发送终态 run 的
 `source_run_id`。OpenAPI 位于 `/openapi.json`。

@@ -2233,6 +2233,26 @@ label small {
   border-top: 1px solid var(--line);
 }
 
+.reflection-regeneration-action {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.reflection-regeneration-action > .button,
+.feedback-retirement-action > .button {
+  min-height: 40px;
+}
+
+.review-action-announcement {
+  margin: -6px 0 12px;
+  color: var(--green);
+  font-size: 13px;
+  font-weight: 650;
+}
+
 .retirement-dialog-layer {
   position: fixed;
   z-index: 20;
@@ -2698,6 +2718,25 @@ label small {
 
   .memory-decision-grid {
     grid-template-columns: 1fr;
+  }
+
+  .feedback-retirement-action {
+    justify-content: stretch;
+  }
+
+  .reflection-regeneration-action > .button,
+  .feedback-retirement-action > .button {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .retirement-dialog-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .retirement-dialog-actions .button {
+    min-height: 44px;
   }
 }
 

@@ -295,7 +295,8 @@ POST /api/v1/runs/restore
 GET  /api/v1/runs/{id}/export
 GET  /api/v1/instruments/recent
 GET  /api/v1/reviews
-POST /api/v1/outcome-observations/{outcome_id}/reflection/retry
+GET  /api/v1/reviews/{outcome_id}
+POST /api/v1/outcome-observations/{outcome_id}/reflection-regenerations
 POST /api/v1/outcome-feedback/{feedback_id}/retire
 GET  /api/v1/capabilities
 GET  /api/v1/health
@@ -303,6 +304,11 @@ GET  /api/v1/health
 
 `POST /api/v1/runs` accepts an optional terminal `source_run_id`; the Web UI
 uses it only after the user reviews and submits the prefilled New Run form.
+Review collection responses intentionally omit complete Reflections, Attempts,
+diagnostics, usage, and invalid candidates; those audit fields are available
+only from the individual Review detail endpoint. The legacy Reflection retry
+endpoint is a deprecated one-release compatibility adapter, not a Review read
+alias.
 
 Send `Idempotency-Key` when creating a run from a retryable client. FastAPI
 serves its OpenAPI document at `/openapi.json`; generated TypeScript API types

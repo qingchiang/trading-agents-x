@@ -221,3 +221,119 @@ test("localizes Feedback retirement reasons and confirmation in every supported 
   }
   await i18n.changeLanguage("en");
 });
+
+test("keeps invalid candidates closed, escaped, and inside audit details", async () => {
+  const invalidCandidate = '<img src=x onerror="alert(1)"> prompt-like text';
+  vi.mocked(api.reviews).mockResolvedValue([
+    {
+      ...review,
+      review_status: "reflection_invalid",
+      method_feedback: null,
+      outcome_reflection: { ...review.outcome_reflection!, status: "invalid" },
+      outcome_feedback: null,
+    },
+  ]);
+  vi.mocked(api.reviewAuditDetail).mockResolvedValue({
+    review: {
+      ...review,
+      review_status: "reflection_invalid",
+      method_feedback: null,
+      outcome_reflection: { ...review.outcome_reflection!, status: "invalid" },
+      outcome_feedback: null,
+    },
+    reflection: null,
+    aggregate_usage: {
+      usage_status: "not_reported",
+      attempt_count: 1,
+      llm_calls: 1,
+      input_tokens: null,
+      output_tokens: null,
+      cache_hit_input_tokens: null,
+      cache_miss_input_tokens: null,
+      reasoning_output_tokens: null,
+      wall_time_seconds: null,
+      provider_reported_cost_usd: null,
+    },
+    attempts: [{
+      id: 1,
+      sequence: 1,
+      attempt_kind: "initial",
+      generation_cycle_id: "cycle-1",
+      origin: "automatic",
+      trigger: "initial_generation",
+      outcome: "invalid",
+      schema_version: "outcome_reflection.v1",
+      started_at: "2026-08-01T20:00:00Z",
+      finished_at: "2026-08-01T20:01:00Z",
+      diagnostics: { code: "schema_invalid" },
+      validation_issues: ["method_lesson is required"],
+      invalid_candidate: invalidCandidate,
+      invalid_candidate_digest: "abc123",
+      invalid_candidate_length: invalidCandidate.length,
+      usage: {
+        usage_status: "not_reported",
+        llm_calls: 1,
+        input_tokens: null,
+        output_tokens: null,
+        cache_hit_input_tokens: null,
+        cache_miss_input_tokens: null,
+        reasoning_output_tokens: null,
+        wall_time_seconds: null,
+        provider_reported_cost_usd: null,
+      },
+    }],
+  });
+
+  const { container } = renderReviews();
+  await screen.findByRole("heading", { name: "Method Feedback" });
+  expect(screen.queryByText(invalidCandidate)).toBeNull();
+
+  fireEvent.click(screen.getByText("Method Reflection and audit details"));
+  await waitFor(() => expect(api.reviewAuditDetail).toHaveBeenCalledWith(7));
+  fireEvent.click(screen.getByText(/#1 · initial · invalid/));
+
+  expect(await screen.findByText(invalidCandidate)).toBeVisible();
+  expect(container.querySelector("img")).toBeNull();
+});
+
+test("associates regeneration errors with the action and keeps focus in its Review", async () => {
+  const failed = {
+    ...review,
+    review_status: "reflection_failed" as const,
+    method_feedback: null,
+    outcome_reflection: {
+      ...review.outcome_reflection!,
+      status: "retryable_failure" as const,
+      error_code: "TransportError",
+      generation_cycle: null,
+    },
+    outcome_feedback: null,
+  };
+  vi.mocked(api.reviews).mockResolvedValue([failed]);
+  vi.mocked(api.regenerateOutcomeReflection).mockRejectedValueOnce(new Error("network unavailable"));
+  const { container } = renderReviews();
+
+  const action = await screen.findByRole("button", { name: "Regenerate Method Reflection" });
+  fireEvent.click(action);
+
+  const error = await screen.findByRole("alert");
+  expect(error).toHaveTextContent("network unavailable");
+  expect(action).toHaveAttribute("aria-describedby", error.id);
+  expect(container.querySelector("#review-legacy-run")).toHaveFocus();
+});
+
+test("traps and restores focus for Feedback retirement confirmation", async () => {
+  renderReviews();
+  const trigger = await screen.findByRole("button", { name: "Retire Feedback" });
+  trigger.focus();
+  fireEvent.click(trigger);
+
+  const dialog = screen.getByRole("dialog", { name: "Retire Method Feedback" });
+  const reason = within(dialog).getByLabelText("Reason");
+  await waitFor(() => expect(reason).toHaveFocus());
+  fireEvent.keyDown(reason, { key: "Tab", shiftKey: true });
+  expect(within(dialog).getByRole("button", { name: "Retire Feedback" })).toHaveFocus();
+  fireEvent.keyDown(dialog, { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(trigger).toHaveFocus();
+});
