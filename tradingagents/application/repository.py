@@ -89,6 +89,7 @@ from .outcome_feedback import (
 )
 from .outcome_schedule import earliest_outcome_check_at
 from .recoveries import rebuild_structured_recoveries
+from .reflection import OUTCOME_REFLECTION_SCHEMA_VERSION, OutcomeReflectionDraft
 from .reporting import order_reports
 from .research import (
     CoverageAttestation,
@@ -158,6 +159,10 @@ def _sanitize_text(value: str | None, limit: int = 2000) -> str | None:
         return None
     redacted = _SECRET_RE.sub(r"\1\2[REDACTED]", str(value))
     return redacted[:limit]
+
+
+def _usage_int(value: object) -> int | None:
+    return value if isinstance(value, int) and value >= 0 else None
 
 
 def _invalid_candidate_audit(value: str | None) -> tuple[str | None, str | None, int | None]:
@@ -1820,7 +1825,7 @@ class RunRepository:
         started_at: datetime,
         trigger: str = "outcome_settlement",
         origin: str = "automatic",
-        attempt_kind: str = "unstructured",
+        attempt_kind: str = "initial",
     ) -> dict[str, int | str] | None:
         """Reserve the sole active generation cycle before invoking an LLM."""
         started = (
@@ -1883,6 +1888,54 @@ class RunRepository:
             reflection.last_attempted_at = started
             return {"cycle_id": cycle.id, "attempt_id": attempt.id}
 
+    def start_outcome_reflection_repair_attempt(
+        self,
+        outcome_id: int,
+        *,
+        attempt_ids: dict[str, int | str],
+        started_at: datetime,
+    ) -> dict[str, int | str]:
+        """Append the sole permitted schema repair to an active generation cycle."""
+        started = (
+            started_at.astimezone(timezone.utc).replace(tzinfo=None)
+            if started_at.tzinfo is not None
+            else started_at
+        )
+        with self.sessions.begin() as session:
+            reflection = session.scalar(
+                select(ReflectionRecord).where(ReflectionRecord.outcome_id == outcome_id)
+            )
+            if reflection is None:
+                raise ValueError("Outcome Reflection is missing")
+            cycle = session.get(
+                ReflectionGenerationCycleRecord, attempt_ids["cycle_id"]
+            )
+            if cycle is None or cycle.outcome_id != outcome_id or cycle.status != "running":
+                raise ValueError("Outcome Reflection generation cycle is not active")
+            sequence = (
+                session.scalar(
+                    select(func.count())
+                    .select_from(ReflectionAttemptRecord)
+                    .where(ReflectionAttemptRecord.reflection_id == reflection.id)
+                )
+                or 0
+            ) + 1
+            attempt = ReflectionAttemptRecord(
+                reflection_id=reflection.id,
+                generation_cycle_id=cycle.id,
+                sequence=sequence,
+                trigger=cycle.trigger,
+                origin=cycle.origin,
+                attempt_kind="repair",
+                started_at=started,
+                usage_status="not_reported",
+                llm_calls=1,
+            )
+            session.add(attempt)
+            reflection.last_attempted_at = started
+            session.flush()
+            return {"cycle_id": cycle.id, "attempt_id": attempt.id}
+
     @staticmethod
     def _finish_reflection_attempt(
         session: Session,
@@ -1896,6 +1949,9 @@ class RunRepository:
         invalid_candidate: str | None = None,
         validation_issues: list[str] | None = None,
         wall_time_seconds: float | None = None,
+        schema_version: str = "outcome_reflection_legacy_unstructured.v1",
+        finish_cycle: bool = True,
+        usage: dict[str, int | float | None] | None = None,
     ) -> ReflectionAttemptRecord:
         if attempt_ids is None:
             cycle = ReflectionGenerationCycleRecord(
@@ -1943,17 +1999,35 @@ class RunRepository:
         candidate, digest, length = _invalid_candidate_audit(invalid_candidate)
         attempt.finished_at = finished_at
         attempt.outcome = result
-        attempt.schema_version = "outcome_reflection_legacy_unstructured.v1"
+        attempt.schema_version = schema_version
         attempt.diagnostics_json = diagnostics
         attempt.wall_time_seconds = wall_time_seconds
         attempt.invalid_candidate = candidate
         attempt.invalid_candidate_digest = digest
         attempt.invalid_candidate_length = length
         attempt.validation_issues_json = validation_issues
-        cycle.status = {"generated": "succeeded", "invalid": "invalid"}.get(
-            result, "failed"
-        )
-        cycle.finished_at = finished_at
+        if usage and any(value is not None for value in usage.values()):
+            attempt.usage_status = "reported"
+            attempt.input_tokens = _usage_int(usage.get("input_tokens"))
+            attempt.output_tokens = _usage_int(usage.get("output_tokens"))
+            attempt.cache_hit_input_tokens = _usage_int(
+                usage.get("cache_hit_input_tokens")
+            )
+            attempt.cache_miss_input_tokens = _usage_int(
+                usage.get("cache_miss_input_tokens")
+            )
+            attempt.reasoning_output_tokens = _usage_int(
+                usage.get("reasoning_output_tokens")
+            )
+            cost = usage.get("provider_reported_cost_usd")
+            attempt.provider_reported_cost_usd = (
+                float(cost) if isinstance(cost, (int, float)) and cost >= 0 else None
+            )
+        if finish_cycle:
+            cycle.status = {"generated": "succeeded", "invalid": "invalid"}.get(
+                result, "failed"
+            )
+            cycle.finished_at = finished_at
         return attempt
 
     def mark_reflection_failure(
@@ -2004,17 +2078,21 @@ class RunRepository:
         self,
         outcome_id: int,
         *,
-        reflection: str,
+        reflection: str | None = None,
+        draft: OutcomeReflectionDraft | None = None,
         generated_at: datetime,
         allow_legacy_unstructured: bool = False,
         attempt_ids: dict[str, int | str] | None = None,
         wall_time_seconds: float | None = None,
+        terminal_invalid: bool = True,
+        validation_issues: list[str] | None = None,
+        usage: dict[str, int | float | None] | None = None,
     ) -> str | None:
         generated = generated_at
         if generated.tzinfo is not None:
             generated = generated.astimezone(timezone.utc).replace(tzinfo=None)
         raw_candidate = reflection if isinstance(reflection, str) else None
-        text = reflection.strip() if isinstance(reflection, str) else ""
+        text = draft.readable_text if draft is not None else (reflection or "").strip()
         with self.sessions.begin() as session:
             row = session.execute(
                 select(
@@ -2039,14 +2117,14 @@ class RunRepository:
             reflection_record.last_attempted_at = generated
             reflection_record.next_retry_at = None
             reflection_record.error_code = None
-            validation_issues: list[str] = []
+            structural_issues = list(validation_issues or ())
             if not text:
-                validation_issues.append("empty_candidate")
+                structural_issues.append("empty_candidate")
             if len(text) > 12_000:
-                validation_issues.append("candidate_too_long")
-            if not allow_legacy_unstructured and reflection_candidate_lesson(text) is None:
-                validation_issues.append("missing_method_lesson")
-            if validation_issues:
+                structural_issues.append("candidate_too_long")
+            if not allow_legacy_unstructured and draft is None:
+                structural_issues.append("missing_structured_draft")
+            if structural_issues:
                 reflection_record.status = OutcomeReflectionStatus.INVALID.value
                 reflection_record.text = None
                 reflection_record.candidate_json = None
@@ -2058,9 +2136,14 @@ class RunRepository:
                     attempt_ids=attempt_ids,
                     result="invalid",
                     invalid_candidate=raw_candidate,
-                    validation_issues=validation_issues,
+                    validation_issues=list(dict.fromkeys(structural_issues)),
                     wall_time_seconds=wall_time_seconds,
+                    schema_version=OUTCOME_REFLECTION_SCHEMA_VERSION,
+                    finish_cycle=terminal_invalid,
+                    usage=usage,
                 )
+                if not terminal_invalid:
+                    reflection_record.status = OutcomeReflectionStatus.PENDING.value
                 return OutcomeReflectionStatus.INVALID.value
             if (
                 outcome.data_available_at is None
@@ -2088,7 +2171,11 @@ class RunRepository:
                     horizon_limit=outcome.horizon_limit,
                 ),
                 reflection=ReflectionQualificationInput(
-                    text=text,
+                    method_lesson=(
+                        draft.method_lesson
+                        if draft is not None
+                        else reflection_candidate_lesson(text) or ""
+                    ),
                     generated_at=generated,
                 ),
                 qualified_at=qualification_started_at,
@@ -2096,7 +2183,9 @@ class RunRepository:
             qualified_at = max(_utc_naive(), qualification_started_at)
             reflection_record.status = OutcomeReflectionStatus.GENERATED.value
             reflection_record.text = text
-            reflection_record.candidate_json = qualification.candidate
+            reflection_record.candidate_json = (
+                draft.audit_candidate() if draft is not None else qualification.candidate
+            )
             reflection_record.generated_at = generated
             available_at = max(outcome.data_available_at, generated, qualified_at)
             session.add(
@@ -2104,7 +2193,9 @@ class RunRepository:
                     reflection_id=reflection_record.id,
                     status=qualification.status.value,
                     qualification_policy_version=(
-                        qualification.qualification_policy_version
+                        "outcome_feedback_qualification.v1"
+                        if allow_legacy_unstructured
+                        else qualification.qualification_policy_version
                     ),
                     reasons_json=list(qualification.reasons),
                     method_category=outcome.method_category,
@@ -2122,6 +2213,12 @@ class RunRepository:
                 attempt_ids=attempt_ids,
                 result="generated",
                 wall_time_seconds=wall_time_seconds,
+                schema_version=(
+                    OUTCOME_REFLECTION_SCHEMA_VERSION
+                    if draft is not None
+                    else "outcome_reflection_legacy_unstructured.v1"
+                ),
+                usage=draft.usage if draft is not None else usage,
             )
             session.flush()
             reflection_record.successful_attempt_id = attempt.id
@@ -2463,7 +2560,9 @@ class RunRepository:
                         "error_message": outcome.error_message,
                     },
                     "method_feedback": (
-                        reflection_candidate_lesson(reflection.text or "")
+                        reflection_candidate_lesson(
+                            reflection.text or "", reflection.candidate_json
+                        )
                         if review_status == "feedback_available" and reflection
                         else None
                     ),

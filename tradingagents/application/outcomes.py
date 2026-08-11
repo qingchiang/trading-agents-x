@@ -18,7 +18,7 @@ from tradingagents.dataflows.symbol_utils import market_today, normalize_symbol
 from .contracts import report_language_prompt_label
 from .llms import create_run_llms
 from .outcome_feedback import OutcomeReflectionStatus
-from .reflection import OutcomeReflector
+from .reflection import OutcomeReflector, ReflectionDraftValidationError
 from .repository import RunRepository
 from .settings import AppSettings
 
@@ -121,7 +121,7 @@ class OutcomeSettlement:
                 if attempt_ids is None:
                     continue
                 started_monotonic = monotonic()
-                reflection = self._reflection(
+                draft = self._reflection(
                     ticker=item["ticker"],
                     benchmark=item["benchmark"],
                     decision=item["decision"],
@@ -129,16 +129,81 @@ class OutcomeSettlement:
                 )
                 reflection_status = self.repository.persist_generated_reflection(
                     item["outcome_id"],
-                    reflection=reflection,
+                    draft=draft,
                     generated_at=self._now(),
                     attempt_ids=attempt_ids,
                     wall_time_seconds=monotonic() - started_monotonic,
+                    usage=draft.usage,
                 )
                 stats[
                     "failed"
                     if reflection_status == OutcomeReflectionStatus.INVALID.value
                     else "resolved"
                 ] += 1
+            except ReflectionDraftValidationError as exc:
+                first_finished = self._now()
+                repair_ids = None
+                repair_started = None
+                self.repository.persist_generated_reflection(
+                    item["outcome_id"],
+                    reflection=exc.candidate,
+                    generated_at=first_finished,
+                    attempt_ids=attempt_ids,
+                    wall_time_seconds=monotonic() - started_monotonic,
+                    terminal_invalid=False,
+                    validation_issues=list(exc.validation_issues),
+                    usage=exc.usage,
+                )
+                try:
+                    repair_ids = self.repository.start_outcome_reflection_repair_attempt(
+                        item["outcome_id"],
+                        attempt_ids=attempt_ids,
+                        started_at=first_finished,
+                    )
+                    repair_started = monotonic()
+                    draft = self._repair_reflection(
+                        ticker=item["ticker"],
+                        benchmark=item["benchmark"],
+                        decision=item["decision"],
+                        observation=observation,
+                        candidate=exc.candidate,
+                        validation_issues=exc.validation_issues,
+                    )
+                    self.repository.persist_generated_reflection(
+                        item["outcome_id"],
+                        draft=draft,
+                        generated_at=self._now(),
+                        attempt_ids=repair_ids,
+                        wall_time_seconds=monotonic() - repair_started,
+                        usage=draft.usage,
+                    )
+                    stats["resolved"] += 1
+                except ReflectionDraftValidationError as repair_error:
+                    self.repository.persist_generated_reflection(
+                        item["outcome_id"],
+                        reflection=repair_error.candidate,
+                        generated_at=self._now(),
+                        attempt_ids=repair_ids,
+                        wall_time_seconds=monotonic() - repair_started,
+                        validation_issues=list(repair_error.validation_issues),
+                        usage=repair_error.usage,
+                    )
+                    stats["failed"] += 1
+                except Exception as repair_exception:
+                    attempted_at = self._now()
+                    self.repository.mark_reflection_failure(
+                        item["outcome_id"],
+                        attempted_at=attempted_at,
+                        next_retry_at=attempted_at + ERROR_RECHECK_INTERVAL,
+                        error_code=type(repair_exception).__name__,
+                        attempt_ids=repair_ids or attempt_ids,
+                        wall_time_seconds=(
+                            monotonic() - repair_started
+                            if repair_started is not None
+                            else None
+                        ),
+                    )
+                    stats["failed"] += 1
             except Exception as exc:
                 attempted_at = self._now()
                 logger.warning(
@@ -238,7 +303,7 @@ class OutcomeSettlement:
         benchmark: str,
         decision: dict[str, Any],
         observation: OutcomeObservation,
-    ) -> str:
+    ) -> Any:
         reflector = self._reflector
         if reflector is None:
             quick, _ = create_run_llms(self.settings.default_run_settings)
@@ -258,4 +323,37 @@ class OutcomeSettlement:
             holding_intervals=observation.holding_intervals,
             observation_start=observation.start_date.isoformat(),
             observation_end=observation.end_date.isoformat(),
+        )
+
+    def _repair_reflection(
+        self,
+        *,
+        ticker: str,
+        benchmark: str,
+        decision: dict[str, Any],
+        observation: OutcomeObservation,
+        candidate: str | None,
+        validation_issues: tuple[str, ...],
+    ) -> Any:
+        reflector = self._reflector
+        if reflector is None:
+            quick, _ = create_run_llms(self.settings.default_run_settings)
+            reflector = OutcomeReflector(
+                quick,
+                output_language=report_language_prompt_label(
+                    self.settings.default_run_settings.output_language
+                ),
+            )
+            self._reflector = reflector
+        return reflector.repair(
+            ticker=ticker,
+            benchmark=benchmark,
+            decision=json.dumps(decision, ensure_ascii=False, sort_keys=True),
+            raw_return=observation.raw_return,
+            alpha_return=observation.alpha_return,
+            holding_intervals=observation.holding_intervals,
+            observation_start=observation.start_date.isoformat(),
+            observation_end=observation.end_date.isoformat(),
+            candidate=candidate,
+            validation_issues=validation_issues,
         )

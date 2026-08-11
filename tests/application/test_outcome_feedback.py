@@ -41,7 +41,7 @@ def _qualify(reflection: str, **updates):
         horizon_limit=values.pop("horizon_limit", HORIZON_LIMIT),
     )
     reflection_input = ReflectionQualificationInput(
-        text=reflection,
+        method_lesson=reflection,
         generated_at=values.pop("generated_at", datetime(2026, 8, 1, 20, 1)),
     )
     qualified_at = values.pop("qualified_at", datetime(2026, 8, 1, 20, 2))
@@ -56,13 +56,13 @@ def _qualify(reflection: str, **updates):
 
 def test_qualification_records_explicit_scope_and_short_horizon() -> None:
     result = _qualify(
-        "Directional consistency was mixed.\nMethod lesson: Compare the original "
-        "method assumptions with a bounded short-window check."
+        "Compare the original method assumptions with a bounded short-window check."
     )
 
     assert result.status is OutcomeFeedbackStatus.ELIGIBLE
     assert result.qualification_policy_version == QUALIFICATION_POLICY_VERSION
     assert result.reasons == ()
+    assert result.qualification_policy_version == "outcome_feedback_qualification.v2"
     assert result.candidate["source_decision_id"] == 7
     assert result.candidate["source_revision_id"] == "revision-1"
     assert result.applicability == {
@@ -79,8 +79,7 @@ def test_qualification_records_explicit_scope_and_short_horizon() -> None:
 
 def test_qualification_rejects_research_claims_and_execution_advice() -> None:
     result = _qualify(
-        "Directional consistency was mixed.\nMethod lesson: Evidence proves the old "
-        "Hold rating, so buy now at the stated price target."
+        "Evidence proves the old Hold rating, so buy now at the stated price target."
     )
 
     assert result.status is OutcomeFeedbackStatus.INELIGIBLE
@@ -95,8 +94,7 @@ def test_qualification_rejects_research_claims_and_execution_advice() -> None:
 
 def test_qualification_accepts_decision_cutoff_as_return_baseline() -> None:
     result = _qualify(
-        "Directional consistency was mixed.\nMethod lesson: Use a bounded "
-        "methodological check.",
+        "Use a bounded methodological check.",
         observation_start=date(2026, 7, 24),
     )
 
@@ -106,8 +104,7 @@ def test_qualification_accepts_decision_cutoff_as_return_baseline() -> None:
 
 def test_qualification_uses_linked_revision_cutoff() -> None:
     result = _qualify(
-        "Directional consistency was mixed.\nMethod lesson: Use a bounded "
-        "methodological check.",
+        "Use a bounded methodological check.",
         revision_cutoff=date(2026, 7, 25),
         observation_start=date(2026, 7, 24),
     )
@@ -118,8 +115,7 @@ def test_qualification_uses_linked_revision_cutoff() -> None:
 
 def test_qualification_fails_closed_when_availability_is_not_pit() -> None:
     result = _qualify(
-        "Directional consistency was mixed.\nMethod lesson: Use a bounded "
-        "methodological check.",
+        "Use a bounded methodological check.",
         observation_start=date(2026, 7, 24),
         data_available_at=datetime(2026, 8, 2),
     )
@@ -141,8 +137,7 @@ def test_qualification_rejects_invalid_market_local_observation_windows(
     observation_end: date,
 ) -> None:
     result = _qualify(
-        "Directional consistency was mixed.\nMethod lesson: Use a bounded "
-        "methodological check.",
+        "Use a bounded methodological check.",
         observation_start=observation_start,
         observation_end=observation_end,
     )
@@ -153,7 +148,7 @@ def test_qualification_rejects_invalid_market_local_observation_windows(
 
 def test_qualification_rejects_copied_thesis_fragments() -> None:
     result = _qualify(
-        "Method lesson: Recheck demand durability remains uncertain before reuse."
+        "Recheck demand durability remains uncertain before reuse."
     )
 
     assert result.status is OutcomeFeedbackStatus.INELIGIBLE

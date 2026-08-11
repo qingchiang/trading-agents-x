@@ -12,6 +12,18 @@ from tradingagents.application.outcomes import (
     OutcomeObservation,
     OutcomeSettlement,
 )
+from tradingagents.application.reflection import (
+    OutcomeReflectionDraft,
+    ReflectionDraftValidationError,
+)
+
+
+def _draft() -> OutcomeReflectionDraft:
+    return OutcomeReflectionDraft(
+        directional_assessment="mixed",
+        source_decision_evidence_lesson="Compare the stored decision evidence.",
+        method_lesson="Use explicit short-window checks when reviewing methodology.",
+    )
 
 
 class _Ticker:
@@ -160,14 +172,19 @@ class _LifecycleRepository:
         self.started_attempt = (outcome_id, started_at)
         return {"cycle_id": "fixture-cycle", "attempt_id": 1}
 
+    def start_outcome_reflection_repair_attempt(self, outcome_id, *, attempt_ids, started_at):
+        self.repair_attempt = (outcome_id, attempt_ids, started_at)
+        return {"cycle_id": "fixture-cycle", "attempt_id": 2}
+
     def mark_reflection_failure(self, outcome_id, **kwargs):
         self.failures.append((outcome_id, kwargs))
         self.item["reflection_status"] = "retryable_failure"
 
     def persist_generated_reflection(self, outcome_id, **kwargs):
         self.reflections.append((outcome_id, kwargs))
-        status = "generated" if kwargs["reflection"].strip() else "invalid"
-        self.item["reflection_status"] = status
+        status = "generated" if kwargs.get("draft") is not None else "invalid"
+        if kwargs.get("terminal_invalid", True):
+            self.item["reflection_status"] = status
         return status
 
 
@@ -213,7 +230,7 @@ def test_observation_survives_reflection_failure_and_retry_does_not_reobserve(
         reflection_calls += 1
         if reflection_calls == 1:
             raise RuntimeError("sensitive provider detail")
-        return "Use explicit short-window checks when reviewing methodology."
+        return _draft()
 
     monkeypatch.setattr(settlement, "observe", observe)
     monkeypatch.setattr(settlement, "_reflection", reflect)
@@ -226,7 +243,7 @@ def test_observation_survives_reflection_failure_and_retry_does_not_reobserve(
     assert observe_calls == 1
     assert len(repository.observations) == 1
     assert repository.failures[0][1]["error_code"] == "RuntimeError"
-    assert repository.reflections[0][1]["reflection"].startswith("Use explicit")
+    assert repository.reflections[0][1]["draft"].method_lesson.startswith("Use explicit")
 
 
 def test_invalid_reflection_does_not_recompute_completed_observation(
@@ -255,13 +272,66 @@ def test_invalid_reflection_does_not_recompute_completed_observation(
         "observe",
         lambda *_args, **_kwargs: pytest.fail("Observation was recomputed"),
     )
-    monkeypatch.setattr(settlement, "_reflection", lambda **_kwargs: "   ")
+    invalid = ReflectionDraftValidationError(
+        candidate="{}", validation_issues=("directional_assessment",)
+    )
+    monkeypatch.setattr(settlement, "_reflection", lambda **_kwargs: (_ for _ in ()).throw(invalid))
+    monkeypatch.setattr(settlement, "_repair_reflection", lambda **_kwargs: (_ for _ in ()).throw(invalid))
 
     stats = settlement.settle_once()
 
     assert stats == {"checked": 1, "resolved": 0, "pending": 0, "failed": 1}
     assert repository.observations == []
     assert repository.item["reflection_status"] == "invalid"
+    assert repository.repair_attempt[1] == {"cycle_id": "fixture-cycle", "attempt_id": 1}
+    assert [entry[1]["attempt_ids"]["attempt_id"] for entry in repository.reflections] == [
+        1,
+        2,
+    ]
+
+
+def test_invalid_initial_draft_is_repaired_once_without_reobserving(
+    app_settings,
+    monkeypatch,
+) -> None:
+    now = datetime(2026, 8, 5, 0, tzinfo=timezone.utc)
+    item = {
+        **_pending_item(),
+        "status": "resolved",
+        "reflection_status": "pending",
+        "observation_start": date(2026, 7, 29),
+        "observation_end": date(2026, 8, 5),
+        "raw_return": 0.10,
+        "alpha_return": 0.04,
+    }
+    repository = _LifecycleRepository(item)
+    settlement = OutcomeSettlement(
+        app_settings, repository, reflector=object(), utc_clock=lambda: now
+    )
+    invalid = ReflectionDraftValidationError(
+        candidate='<script>bad</script>', validation_issues=("method_lesson",)
+    )
+    monkeypatch.setattr(
+        settlement,
+        "observe",
+        lambda *_args, **_kwargs: pytest.fail("Observation was recomputed"),
+    )
+    monkeypatch.setattr(
+        settlement, "_reflection", lambda **_kwargs: (_ for _ in ()).throw(invalid)
+    )
+    monkeypatch.setattr(settlement, "_repair_reflection", lambda **_kwargs: _draft())
+
+    assert settlement.settle_once() == {
+        "checked": 1,
+        "resolved": 1,
+        "pending": 0,
+        "failed": 0,
+    }
+    assert repository.item["reflection_status"] == "generated"
+    assert [entry[1]["attempt_ids"]["attempt_id"] for entry in repository.reflections] == [
+        1,
+        2,
+    ]
 
 
 def test_lifecycle_timestamps_are_captured_after_each_phase(
@@ -302,7 +372,7 @@ def test_lifecycle_timestamps_are_captured_after_each_phase(
     monkeypatch.setattr(
         settlement,
         "_reflection",
-        lambda **_kwargs: "Method lesson: Keep the method bounded.",
+        lambda **_kwargs: _draft(),
     )
 
     settlement.settle_once()

@@ -37,6 +37,7 @@ from tradingagents.application.live_thesis_validation import (
 from tradingagents.application.llms import RunLLMs
 from tradingagents.application.market_readiness import MarketDataNotReadyError
 from tradingagents.application.outcomes import OutcomeObservation, OutcomeSettlement
+from tradingagents.application.reflection import OutcomeReflectionDraft
 from tradingagents.application.repository import InvalidResearchBaselineError, RunRepository
 from tradingagents.application.research import (
     ClaimChange,
@@ -834,7 +835,11 @@ def test_feedback_failure_cannot_change_research_revision(
     with pytest.raises(RuntimeError, match="qualification failed"):
         repository.persist_generated_reflection(
             outcome["outcome_id"],
-            reflection="Method lesson: Use a bounded methodological check.",
+            draft=OutcomeReflectionDraft(
+                directional_assessment="mixed",
+                source_decision_evidence_lesson="Compare stored decision evidence.",
+                method_lesson="Use a bounded methodological check.",
+            ),
             generated_at=datetime(2026, 8, 1, 20, 1, tzinfo=timezone.utc),
         )
 
@@ -887,7 +892,11 @@ def test_settlement_qualifies_decision_cutoff_as_versioned_feedback(
     monkeypatch.setattr(
         settlement,
         "_reflection",
-        lambda **_kwargs: "Method lesson: Use a bounded methodological check.",
+        lambda **_kwargs: OutcomeReflectionDraft(
+            directional_assessment="mixed",
+            source_decision_evidence_lesson="Compare stored decision evidence.",
+            method_lesson="Use a bounded methodological check.",
+        ),
     )
 
     stats = settlement.settle_once()
@@ -896,7 +905,10 @@ def test_settlement_qualifies_decision_cutoff_as_versioned_feedback(
     assert stats == {"checked": 1, "resolved": 1, "pending": 0, "failed": 0}
     assert feedback["status"] == "eligible"
     assert feedback["qualification_policy_version"] == (
-        "outcome_feedback_qualification.v1"
+        "outcome_feedback_qualification.v2"
+    )
+    assert repository.review_entries(ticker="NVDA")[0]["method_feedback"] == (
+        "Use a bounded methodological check."
     )
     assert repository.get_run(result.run_id).status is RunStatus.SUCCEEDED
     assert repository.get_research_chain(chain.id).current_revision == revision_before

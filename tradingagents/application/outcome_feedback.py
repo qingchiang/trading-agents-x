@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import Enum
@@ -10,7 +11,7 @@ from typing import Any
 
 METHOD_CATEGORY = "short_term_relative_return"
 METHOD_VERSION = "short_term_relative_return.v1"
-QUALIFICATION_POLICY_VERSION = "outcome_feedback_qualification.v1"
+QUALIFICATION_POLICY_VERSION = "outcome_feedback_qualification.v2"
 PRICE_SEMANTICS = "exchange_local_daily_close"
 ADJUSTMENT_SEMANTICS = "split_and_dividend_adjusted"
 HORIZON_LIMIT = (
@@ -93,11 +94,18 @@ class ObservationQualificationInput:
 
 @dataclass(frozen=True)
 class ReflectionQualificationInput:
-    text: str
+    method_lesson: str
     generated_at: datetime
 
 
-def reflection_candidate_lesson(reflection: str) -> str | None:
+def reflection_candidate_lesson(
+    reflection: str,
+    candidate: Mapping[str, Any] | None = None,
+) -> str | None:
+    """Read a prospective typed lesson, with legacy marker compatibility only."""
+    if candidate and candidate.get("schema_version") == "outcome_reflection.v1":
+        lesson = candidate.get("method_lesson")
+        return lesson.strip() if isinstance(lesson, str) and lesson.strip() else None
     match = _METHOD_LESSON_RE.search(reflection.strip())
     if match is None:
         return None
@@ -139,10 +147,9 @@ def qualify_reflection(
     qualified_at: datetime,
 ) -> FeedbackQualification:
     """Qualify a generated lesson without treating its prose as research truth."""
-    reflection_text = reflection.text.strip()
-    text = reflection_candidate_lesson(reflection_text) or ""
+    text = reflection.method_lesson.strip()
     candidate = {
-        "schema_version": "1",
+        "schema_version": "2",
         "lesson": text,
         "source_decision_id": source.decision_id,
         "source_revision_id": source.revision_id,
@@ -160,7 +167,7 @@ def qualify_reflection(
         "horizon": "short_term",
     }
     reasons: list[str] = []
-    if not reflection_text or len(reflection_text) > 12_000 or not text:
+    if not text or len(text) > 1_200:
         reasons.append("schema_invalid")
     if source.decision_id <= 0:
         reasons.append("source_decision_missing")
