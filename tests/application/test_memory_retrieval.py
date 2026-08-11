@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date, datetime, timedelta
+from threading import Barrier
 
 import pytest
 from sqlalchemy import select
@@ -16,10 +18,15 @@ from tradingagents.application.contracts import (
 )
 from tradingagents.application.database import (
     DecisionRecord,
+    OutcomeFeedbackRecord,
     OutcomeRecord,
+    ReflectionGenerationCycleRecord,
     ReflectionRecord,
 )
-from tradingagents.application.repository import RunRepository
+from tradingagents.application.repository import (
+    OutcomeReflectionRegenerationConflictError,
+    RunRepository,
+)
 
 
 def _seed_memory(
@@ -102,6 +109,128 @@ def _seed_memory(
             reflection=reflection,
         )
     return run.id
+
+
+def test_reflection_regeneration_is_idempotent_and_auto_retries_are_bounded(
+    repository: RunRepository,
+) -> None:
+    run_id = _seed_memory(
+        repository,
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 24),
+        reflection="Method lesson: legacy fixture.",
+        thesis="Fixture thesis for manual regeneration.",
+    )
+    with repository.sessions.begin() as session:
+        outcome = session.scalar(
+            select(OutcomeRecord)
+            .join(DecisionRecord)
+            .where(DecisionRecord.run_id == run_id)
+        )
+        assert outcome is not None
+        reflection = session.scalar(
+            select(ReflectionRecord).where(ReflectionRecord.outcome_id == outcome.id)
+        )
+        feedback = session.scalar(
+            select(OutcomeFeedbackRecord).where(
+                OutcomeFeedbackRecord.reflection_id == reflection.id
+            )
+        )
+        assert reflection is not None and feedback is not None
+        session.delete(feedback)
+        reflection.status = "invalid"
+        reflection.next_retry_at = None
+        outcome_id = outcome.id
+
+    queued_at = datetime(2026, 8, 5, 0, 0)
+    first = repository.enqueue_outcome_reflection_regeneration(
+        outcome_id, idempotency_key="manual-retry-1", queued_at=queued_at
+    )
+    same = repository.enqueue_outcome_reflection_regeneration(
+        outcome_id, idempotency_key="manual-retry-1", queued_at=queued_at
+    )
+    assert first["id"] == same["id"]
+    assert first["status"] == "queued"
+    with pytest.raises(OutcomeReflectionRegenerationConflictError) as conflict:
+        repository.enqueue_outcome_reflection_regeneration(
+            outcome_id, idempotency_key="manual-retry-2", queued_at=queued_at
+        )
+    assert conflict.value.active_cycle_id == first["id"]
+
+    attempt_ids = repository.start_outcome_reflection_attempt(
+        outcome_id, started_at=queued_at
+    )
+    assert attempt_ids is not None
+    repository.mark_reflection_failure(
+        outcome_id,
+        attempted_at=queued_at,
+        error_code="TransportError",
+        attempt_ids=attempt_ids,
+    )
+    with repository.sessions() as session:
+        cycle = session.get(ReflectionGenerationCycleRecord, first["id"])
+        assert cycle is not None and cycle.status == "failed"
+        reflection = session.scalar(
+            select(ReflectionRecord).where(ReflectionRecord.outcome_id == outcome_id)
+        )
+        assert reflection is not None
+        assert reflection.next_retry_at is None
+
+    with repository.sessions.begin() as session:
+        reflection = session.scalar(
+            select(ReflectionRecord).where(ReflectionRecord.outcome_id == outcome_id)
+        )
+        assert reflection is not None
+        reflection.status = "pending"
+        reflection.current_generation_cycle_id = None
+    delays = []
+    started_at = queued_at
+    for _ in range(4):
+        automatic_attempt = repository.start_outcome_reflection_attempt(
+            outcome_id, started_at=started_at
+        )
+        assert automatic_attempt is not None
+        repository.mark_reflection_failure(
+            outcome_id,
+            attempted_at=started_at,
+            error_code="TransportError",
+            attempt_ids=automatic_attempt,
+        )
+        with repository.sessions() as session:
+            reflection = session.scalar(
+                select(ReflectionRecord).where(ReflectionRecord.outcome_id == outcome_id)
+            )
+            assert reflection is not None
+            if reflection.next_retry_at is not None:
+                delays.append(reflection.next_retry_at - started_at)
+                started_at = reflection.next_retry_at
+    assert delays == [
+        timedelta(hours=1),
+        timedelta(hours=6),
+        timedelta(hours=24),
+    ]
+    assert repository.review_entries(outcome_id=outcome_id)[0]["review_status"] == "reflection_failed"
+
+    with repository.sessions.begin() as session:
+        reflection = session.scalar(
+            select(ReflectionRecord).where(ReflectionRecord.outcome_id == outcome_id)
+        )
+        assert reflection is not None
+        reflection.status = "pending"
+        reflection.current_generation_cycle_id = None
+    barrier = Barrier(2)
+
+    def claim(worker: str):
+        barrier.wait(timeout=5)
+        return repository.start_outcome_reflection_attempt(
+            outcome_id,
+            started_at=started_at,
+            trigger=worker,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        claims = list(executor.map(claim, ("worker-a", "worker-b")))
+    assert len([claim for claim in claims if claim is not None]) == 1
 
 
 def test_memory_context_uses_deterministic_same_and_cross_ticker_limits(

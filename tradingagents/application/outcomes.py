@@ -190,18 +190,22 @@ class OutcomeSettlement:
                     )
                     stats["failed"] += 1
                 except Exception as repair_exception:
-                    attempted_at = self._now()
-                    self.repository.mark_reflection_failure(
+                    # A cycle that started with schema-invalid output has consumed
+                    # its sole repair; a repair transport failure must not turn it
+                    # into an unbounded provider-retry path.
+                    self.repository.persist_generated_reflection(
                         item["outcome_id"],
-                        attempted_at=attempted_at,
-                        next_retry_at=attempted_at + ERROR_RECHECK_INTERVAL,
-                        error_code=type(repair_exception).__name__,
+                        generated_at=self._now(),
                         attempt_ids=repair_ids or attempt_ids,
                         wall_time_seconds=(
                             monotonic() - repair_started
                             if repair_started is not None
                             else None
                         ),
+                        validation_issues=[
+                            "repair_provider_failure",
+                            type(repair_exception).__name__,
+                        ],
                     )
                     stats["failed"] += 1
             except Exception as exc:

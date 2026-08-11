@@ -426,6 +426,7 @@ export interface components {
       created_at: string;
       error_code: string | null;
       generated_at: string | null;
+      generation_cycle?: components["schemas"]["ReflectionGenerationCycleView"] | null;
       last_attempted_at: string | null;
       next_retry_at: string | null;
       status: components["schemas"]["OutcomeReflectionStatus"];
@@ -522,6 +523,19 @@ export interface components {
       trigger: string;
       usage: components["schemas"]["ReflectionAttemptUsageView"];
       validation_issues: string[] | null;
+    };
+    ReflectionGenerationCycleView: {
+      due_at: string | null;
+      id: string;
+      origin: "automatic" | "manual" | "legacy";
+      outcome_id: number;
+      queued_at: string;
+      retry_ordinal: number;
+      status: "queued" | "running" | "succeeded" | "failed" | "invalid";
+      trigger: string;
+    };
+    ReflectionRegenerationAccepted: {
+      cycle: components["schemas"]["ReflectionGenerationCycleView"];
     };
     ReflectionUsageAggregateView: {
       attempt_count: number;

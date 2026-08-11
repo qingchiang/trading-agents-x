@@ -7,7 +7,10 @@ import { Router } from "../router";
 import ResearchReviewPage from "./ResearchReview";
 
 vi.mock("../api/client", () => ({
-  api: { reviews: vi.fn(), reviewAuditDetail: vi.fn(), recentInstruments: vi.fn() },
+  api: {
+    reviews: vi.fn(), reviewAuditDetail: vi.fn(), recentInstruments: vi.fn(),
+    regenerateOutcomeReflection: vi.fn(),
+  },
 }));
 
 const review = {
@@ -65,6 +68,13 @@ beforeEach(async () => {
       provider_reported_cost_usd: null,
     },
   });
+  vi.mocked(api.regenerateOutcomeReflection).mockResolvedValue({
+    cycle: {
+      id: "cycle-1", outcome_id: 7, status: "queued", origin: "manual",
+      trigger: "user_regeneration", retry_ordinal: 0,
+      queued_at: "2026-08-05T00:00:00Z", due_at: "2026-08-05T00:00:00Z",
+    },
+  });
   vi.mocked(api.recentInstruments).mockResolvedValue([]);
 });
 
@@ -105,4 +115,38 @@ test("does not present feedback for lifecycle-inconsistent data", async () => {
   renderReviews();
   expect(await screen.findByText(/inconsistent lifecycle data/)).toBeVisible();
   expect(screen.getByText("No Method Feedback is available yet.")).toBeVisible();
+});
+
+test("queues one regeneration in the Reflection failure section", async () => {
+  const baseReflection = review.outcome_reflection!;
+  const failed = {
+    ...review,
+    review_status: "reflection_failed" as const,
+    method_feedback: null,
+    outcome_reflection: {
+      ...baseReflection,
+      status: "retryable_failure" as const,
+      error_code: "TransportError",
+      generation_cycle: null,
+    },
+    outcome_feedback: null,
+  };
+  const queued = {
+    ...failed,
+    review_status: "awaiting_reflection" as const,
+    outcome_reflection: {
+      ...failed.outcome_reflection,
+      status: "pending" as const,
+      generation_cycle: {
+        id: "cycle-1", outcome_id: 7, status: "queued" as const, origin: "manual" as const,
+        trigger: "user_regeneration", retry_ordinal: 0,
+        queued_at: "2026-08-05T00:00:00Z", due_at: "2026-08-05T00:00:00Z",
+      },
+    },
+  };
+  vi.mocked(api.reviews).mockResolvedValueOnce([failed]).mockResolvedValueOnce([queued]);
+  renderReviews();
+  fireEvent.click(await screen.findByRole("button", { name: "Regenerate Method Reflection" }));
+  await waitFor(() => expect(api.regenerateOutcomeReflection).toHaveBeenCalledWith(7, expect.any(String)));
+  expect(await screen.findByText("Reflection regeneration is queued.")).toBeVisible();
 });

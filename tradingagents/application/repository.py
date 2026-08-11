@@ -117,6 +117,7 @@ _TERMINAL_STATUSES = {
     RunStatus.FAILED.value,
     RunStatus.CANCELLED.value,
 }
+_REFLECTION_RETRY_DELAYS = (timedelta(hours=1), timedelta(hours=6), timedelta(hours=24))
 
 
 def _numeric_audit_warning_message(
@@ -229,6 +230,16 @@ class ResearchRevisionNotFoundError(LookupError):
 
 class InvalidResearchBaselineError(ValueError):
     """Raised when an update does not target the current Eligible Baseline."""
+
+
+class OutcomeReflectionRegenerationNotFoundError(LookupError):
+    pass
+
+
+class OutcomeReflectionRegenerationConflictError(RuntimeError):
+    def __init__(self, message: str, *, active_cycle_id: str | None = None):
+        super().__init__(message)
+        self.active_cycle_id = active_cycle_id
 
 
 class RunRepository:
@@ -1834,35 +1845,47 @@ class RunRepository:
             else started_at
         )
         with self.sessions.begin() as session:
+            session.connection().exec_driver_sql("BEGIN IMMEDIATE")
             reflection = session.scalar(
                 select(ReflectionRecord).where(ReflectionRecord.outcome_id == outcome_id)
             )
             if reflection is None or reflection.status == OutcomeReflectionStatus.GENERATED.value:
                 return None
             existing = session.scalar(
-                select(ReflectionGenerationCycleRecord.id).where(
+                select(ReflectionGenerationCycleRecord).where(
                     ReflectionGenerationCycleRecord.outcome_id == outcome_id,
                     ReflectionGenerationCycleRecord.status.in_(("queued", "running")),
                 )
             )
             if existing is not None:
-                return None
-            cycle = ReflectionGenerationCycleRecord(
-                id=str(uuid4()),
-                outcome_id=outcome_id,
-                status="running",
-                trigger=trigger,
-                origin=origin,
-                retry_ordinal=0,
-                queued_at=started,
-                started_at=started,
-            )
-            try:
-                with session.begin_nested():
-                    session.add(cycle)
-                    session.flush()
-            except IntegrityError:
-                return None
+                if (
+                    existing.status != "queued"
+                    or (existing.due_at is not None and existing.due_at > started)
+                ):
+                    return None
+                cycle = existing
+                cycle.status = "running"
+                cycle.started_at = started
+            else:
+                if reflection.status != OutcomeReflectionStatus.PENDING.value:
+                    return None
+                cycle = ReflectionGenerationCycleRecord(
+                    id=str(uuid4()),
+                    outcome_id=outcome_id,
+                    status="running",
+                    trigger=trigger,
+                    origin=origin,
+                    retry_ordinal=0,
+                    queued_at=started,
+                    due_at=started,
+                    started_at=started,
+                )
+                try:
+                    with session.begin_nested():
+                        session.add(cycle)
+                        session.flush()
+                except IntegrityError:
+                    return None
             sequence = (
                 session.scalar(
                     select(func.count())
@@ -2035,7 +2058,7 @@ class RunRepository:
         outcome_id: int,
         *,
         attempted_at: datetime,
-        next_retry_at: datetime,
+        next_retry_at: datetime | None = None,
         error_code: str,
         attempt_ids: dict[str, int | str] | None = None,
         wall_time_seconds: float | None = None,
@@ -2047,7 +2070,7 @@ class RunRepository:
         )
         retry = (
             next_retry_at.astimezone(timezone.utc).replace(tzinfo=None)
-            if next_retry_at.tzinfo is not None
+            if next_retry_at is not None and next_retry_at.tzinfo is not None
             else next_retry_at
         )
         with self.sessions.begin() as session:
@@ -2061,7 +2084,6 @@ class RunRepository:
                 return
             reflection.status = OutcomeReflectionStatus.RETRYABLE_FAILURE.value
             reflection.last_attempted_at = attempted
-            reflection.next_retry_at = retry
             reflection.error_code = _sanitize_text(error_code, limit=80)
             self._finish_reflection_attempt(
                 session,
@@ -2073,6 +2095,32 @@ class RunRepository:
                 diagnostics={"error_code": reflection.error_code or "unknown"},
                 wall_time_seconds=wall_time_seconds,
             )
+            cycle = (
+                session.get(ReflectionGenerationCycleRecord, attempt_ids["cycle_id"])
+                if attempt_ids is not None
+                else None
+            )
+            if (
+                cycle is not None
+                and cycle.origin == "automatic"
+                and cycle.retry_ordinal < len(_REFLECTION_RETRY_DELAYS)
+            ):
+                retry = attempted + _REFLECTION_RETRY_DELAYS[cycle.retry_ordinal]
+                scheduled = ReflectionGenerationCycleRecord(
+                    id=str(uuid4()),
+                    outcome_id=outcome_id,
+                    status="queued",
+                    trigger="outcome_settlement",
+                    origin="automatic",
+                    retry_ordinal=cycle.retry_ordinal + 1,
+                    queued_at=attempted,
+                    due_at=retry,
+                )
+                session.add(scheduled)
+                reflection.current_generation_cycle_id = scheduled.id
+                reflection.next_retry_at = retry
+            else:
+                reflection.next_retry_at = None
 
     def persist_generated_reflection(
         self,
@@ -2224,11 +2272,41 @@ class RunRepository:
             reflection_record.successful_attempt_id = attempt.id
             return OutcomeReflectionStatus.GENERATED.value
 
-    def retry_outcome_reflection(self, outcome_id: int) -> bool:
+    def enqueue_outcome_reflection_regeneration(
+        self,
+        outcome_id: int,
+        *,
+        idempotency_key: str,
+        queued_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Create or replay the one manual Reflection cycle allowed by the lifecycle."""
+        key = idempotency_key.strip()
+        if not key:
+            raise OutcomeReflectionRegenerationConflictError(
+                "Idempotency-Key is required"
+            )
+        if len(key) > 200:
+            raise OutcomeReflectionRegenerationConflictError(
+                "Idempotency-Key is too long"
+            )
+        queued = queued_at or _aware(_utc_naive())
+        if queued.tzinfo is not None:
+            queued = queued.astimezone(timezone.utc).replace(tzinfo=None)
         with self.sessions.begin() as session:
+            session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            existing_key = session.scalar(
+                select(ReflectionGenerationCycleRecord).where(
+                    ReflectionGenerationCycleRecord.outcome_id == outcome_id,
+                    ReflectionGenerationCycleRecord.idempotency_key == key,
+                )
+            )
+            if existing_key is not None:
+                return self._generation_cycle_view(existing_key)
             row = session.execute(
                 select(OutcomeRecord, ReflectionRecord, OutcomeFeedbackRecord)
-                .join(ReflectionRecord, ReflectionRecord.outcome_id == OutcomeRecord.id)
+                .outerjoin(
+                    ReflectionRecord, ReflectionRecord.outcome_id == OutcomeRecord.id
+                )
                 .outerjoin(
                     OutcomeFeedbackRecord,
                     OutcomeFeedbackRecord.reflection_id == ReflectionRecord.id,
@@ -2236,28 +2314,91 @@ class RunRepository:
                 .where(OutcomeRecord.id == outcome_id)
             ).first()
             if row is None:
-                return True
+                raise OutcomeReflectionRegenerationNotFoundError(str(outcome_id))
             outcome, reflection, feedback = row
-            if (
-                derive_review_status(
-                    outcome_status=outcome.status,
-                    outcome_error=outcome.error_message,
-                    reflection_status=reflection.status,
-                    reflection_next_retry_at=reflection.next_retry_at,
-                    feedback_status=feedback.status if feedback else None,
+            review_status = derive_review_status(
+                outcome_status=outcome.status,
+                outcome_error=outcome.error_message,
+                reflection_status=reflection.status if reflection else None,
+                reflection_next_retry_at=reflection.next_retry_at if reflection else None,
+                feedback_status=feedback.status if feedback else None,
+            )
+            if review_status == "lifecycle_inconsistent":
+                raise OutcomeReflectionRegenerationConflictError(
+                    "Review lifecycle is inconsistent"
                 )
-                == "lifecycle_inconsistent"
+            active = session.scalar(
+                select(ReflectionGenerationCycleRecord).where(
+                    ReflectionGenerationCycleRecord.outcome_id == outcome_id,
+                    ReflectionGenerationCycleRecord.status.in_(("queued", "running")),
+                )
+            )
+            if active is not None:
+                raise OutcomeReflectionRegenerationConflictError(
+                    "Outcome Reflection generation is already active",
+                    active_cycle_id=active.id,
+                )
+            if (
+                outcome.status != OutcomeObservationStatus.RESOLVED.value
+                or reflection is None
+                or reflection.status == OutcomeReflectionStatus.GENERATED.value
+                or feedback is not None
             ):
-                return False
-            if reflection is None or reflection.status not in {
-                OutcomeReflectionStatus.INVALID.value,
-                OutcomeReflectionStatus.RETRYABLE_FAILURE.value,
-            }:
-                return True
+                raise OutcomeReflectionRegenerationConflictError(
+                    "Outcome Reflection cannot be regenerated from this lifecycle state"
+                )
+            retry_exhausted = (
+                reflection.status == OutcomeReflectionStatus.RETRYABLE_FAILURE.value
+                and reflection.next_retry_at is None
+            )
+            if reflection.status != OutcomeReflectionStatus.INVALID.value and not retry_exhausted:
+                raise OutcomeReflectionRegenerationConflictError(
+                    "Outcome Reflection is not eligible for regeneration"
+                )
+            cycle = ReflectionGenerationCycleRecord(
+                id=str(uuid4()),
+                outcome_id=outcome_id,
+                status="queued",
+                trigger="user_regeneration",
+                origin="manual",
+                retry_ordinal=0,
+                idempotency_key=key,
+                queued_at=queued,
+                due_at=queued,
+            )
+            session.add(cycle)
             reflection.status = OutcomeReflectionStatus.PENDING.value
             reflection.next_retry_at = None
             reflection.error_code = None
+            reflection.current_generation_cycle_id = cycle.id
+            session.flush()
+            return self._generation_cycle_view(cycle)
+
+    @staticmethod
+    def _generation_cycle_view(cycle: ReflectionGenerationCycleRecord) -> dict[str, Any]:
+        return {
+            "id": cycle.id,
+            "outcome_id": cycle.outcome_id,
+            "status": cycle.status,
+            "origin": cycle.origin,
+            "trigger": cycle.trigger,
+            "retry_ordinal": cycle.retry_ordinal,
+            "queued_at": _aware(cycle.queued_at),
+            "due_at": _aware(cycle.due_at),
+        }
+
+    def retry_outcome_reflection(self, outcome_id: int) -> bool:
+        """Deprecated compatibility adapter for one release cycle."""
+        try:
+            self.enqueue_outcome_reflection_regeneration(
+                outcome_id,
+                idempotency_key=f"legacy-reflection-retry:{outcome_id}",
+            )
+        except OutcomeReflectionRegenerationNotFoundError:
             return True
+        except OutcomeReflectionRegenerationConflictError:
+            return False
+        return True
 
     def retire_outcome_feedback(self, feedback_id: int, *, reason: str) -> bool:
         now = _utc_naive()
@@ -2516,6 +2657,14 @@ class RunRepository:
                 )
                 if not review_status_in_group(review_status, status_group):
                     continue
+                generation_cycle = (
+                    session.get(
+                        ReflectionGenerationCycleRecord,
+                        reflection.current_generation_cycle_id,
+                    )
+                    if reflection and reflection.current_generation_cycle_id
+                    else None
+                )
                 reviews.append(
                     {
                     "run_id": decision.run_id,
@@ -2574,6 +2723,10 @@ class RunRepository:
                             "last_attempted_at": _aware(reflection.last_attempted_at),
                             "next_retry_at": _aware(reflection.next_retry_at),
                             "error_code": reflection.error_code,
+                            "generation_cycle": (
+                                self._generation_cycle_view(generation_cycle)
+                                if generation_cycle is not None else None
+                            ),
                         }
                         if reflection
                         else None

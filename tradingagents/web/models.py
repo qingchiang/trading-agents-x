@@ -186,6 +186,22 @@ class OutcomeReflectionView(ApiModel):
     last_attempted_at: datetime | None
     next_retry_at: datetime | None
     error_code: str | None
+    generation_cycle: ReflectionGenerationCycleView | None = None
+
+
+class ReflectionGenerationCycleView(ApiModel):
+    id: str
+    outcome_id: int
+    status: Literal["queued", "running", "succeeded", "failed", "invalid"]
+    origin: Literal["automatic", "manual", "legacy"]
+    trigger: str
+    retry_ordinal: int
+    queued_at: datetime
+    due_at: datetime | None
+
+
+class ReflectionRegenerationAccepted(ApiModel):
+    cycle: ReflectionGenerationCycleView
 
 
 class ReflectionAttemptUsageView(ApiModel):

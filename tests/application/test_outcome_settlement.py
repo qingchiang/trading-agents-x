@@ -334,6 +334,50 @@ def test_invalid_initial_draft_is_repaired_once_without_reobserving(
     ]
 
 
+def test_schema_invalid_cycle_does_not_schedule_provider_retry_after_repair_failure(
+    app_settings,
+    monkeypatch,
+) -> None:
+    now = datetime(2026, 8, 5, 0, tzinfo=timezone.utc)
+    item = {
+        **_pending_item(),
+        "status": "resolved",
+        "reflection_status": "pending",
+        "observation_start": date(2026, 7, 29),
+        "observation_end": date(2026, 8, 5),
+        "raw_return": 0.10,
+        "alpha_return": 0.04,
+    }
+    repository = _LifecycleRepository(item)
+    settlement = OutcomeSettlement(
+        app_settings, repository, reflector=object(), utc_clock=lambda: now
+    )
+    invalid = ReflectionDraftValidationError(
+        candidate="{}", validation_issues=("method_lesson",)
+    )
+    monkeypatch.setattr(
+        settlement, "_reflection", lambda **_kwargs: (_ for _ in ()).throw(invalid)
+    )
+    monkeypatch.setattr(
+        settlement,
+        "_repair_reflection",
+        lambda **_kwargs: (_ for _ in ()).throw(ConnectionError("provider unavailable")),
+    )
+
+    assert settlement.settle_once() == {
+        "checked": 1,
+        "resolved": 0,
+        "pending": 0,
+        "failed": 1,
+    }
+    assert repository.failures == []
+    assert repository.item["reflection_status"] == "invalid"
+    assert repository.reflections[-1][1]["validation_issues"] == [
+        "repair_provider_failure",
+        "ConnectionError",
+    ]
+
+
 def test_lifecycle_timestamps_are_captured_after_each_phase(
     app_settings,
     monkeypatch,

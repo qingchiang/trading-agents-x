@@ -23,6 +23,10 @@ from tradingagents.application.contracts import (
     ResearchArtifactDraft,
     RunStatus,
 )
+from tradingagents.application.repository import (
+    OutcomeReflectionRegenerationConflictError,
+    OutcomeReflectionRegenerationNotFoundError,
+)
 from tradingagents.application.research import (
     IncrementalEscalationReason,
     IncrementalGateResult,
@@ -676,6 +680,71 @@ async def test_review_lifecycle_actions_delegate_without_exposing_errors(
     assert retire_response.json() == {"status": "retired"}
     assert retried == [7]
     assert retired == [(11, "Superseded methodology")]
+
+
+@pytest.mark.anyio
+async def test_reflection_regeneration_requires_idempotency_and_returns_cycle(
+    web_client: httpx.AsyncClient,
+    web_repository,
+    monkeypatch,
+) -> None:
+    calls = []
+    monkeypatch.setattr(
+        web_repository,
+        "enqueue_outcome_reflection_regeneration",
+        lambda outcome_id, *, idempotency_key: calls.append((outcome_id, idempotency_key))
+        or {
+            "id": "cycle-1", "outcome_id": outcome_id, "status": "queued",
+            "origin": "manual", "trigger": "user_regeneration", "retry_ordinal": 0,
+            "queued_at": "2026-08-05T00:00:00Z", "due_at": "2026-08-05T00:00:00Z",
+        },
+    )
+    missing = await web_client.post(
+        "/api/v1/outcome-observations/7/reflection/regenerations"
+    )
+    accepted = await web_client.post(
+        "/api/v1/outcome-observations/7/reflection/regenerations",
+        headers={"Idempotency-Key": "retry-1"},
+    )
+    assert missing.status_code == 422
+    assert accepted.status_code == 202
+    assert accepted.json()["cycle"]["id"] == "cycle-1"
+    assert calls == [(7, "retry-1")]
+
+
+@pytest.mark.anyio
+async def test_reflection_regeneration_returns_typed_not_found_and_active_conflict(
+    web_client: httpx.AsyncClient,
+    web_repository,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        web_repository,
+        "enqueue_outcome_reflection_regeneration",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            OutcomeReflectionRegenerationNotFoundError("7")
+        ),
+    )
+    missing = await web_client.post(
+        "/api/v1/outcome-observations/7/reflection/regenerations",
+        headers={"Idempotency-Key": "retry-1"},
+    )
+    assert missing.status_code == 404
+    monkeypatch.setattr(
+        web_repository,
+        "enqueue_outcome_reflection_regeneration",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            OutcomeReflectionRegenerationConflictError(
+                "active", active_cycle_id="cycle-active"
+            )
+        ),
+    )
+    conflict = await web_client.post(
+        "/api/v1/outcome-observations/7/reflection/regenerations",
+        headers={"Idempotency-Key": "retry-2"},
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["active_cycle_id"] == "cycle-active"
 
 
 @pytest.mark.anyio

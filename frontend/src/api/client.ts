@@ -42,6 +42,8 @@ export type Health = components["schemas"]["HealthResponse"];
 export type ResearchReview = components["schemas"]["ResearchReview"];
 export type ResearchReviewAuditDetail =
   components["schemas"]["ResearchReviewAuditDetail"];
+export type ReflectionRegenerationAccepted =
+  components["schemas"]["ReflectionRegenerationAccepted"];
 export type RunMetrics = components["schemas"]["RunMetrics"];
 export type RunAttemptView = components["schemas"]["RunAttemptView"];
 export type StructuredRecoveryNotice =
@@ -161,10 +163,14 @@ export const api = {
     request<ResearchReviewAuditDetail>(
       `/api/v1/reviews/${encodeURIComponent(outcomeId)}`,
     ),
-  retryOutcomeReflection: (outcomeId: number) =>
-    request<{ status: string }>(
-      `/api/v1/outcome-observations/${encodeURIComponent(outcomeId)}/reflection/retry`,
-      { method: "POST", body: "{}" },
+  regenerateOutcomeReflection: (outcomeId: number, idempotencyKey: string) =>
+    request<ReflectionRegenerationAccepted>(
+      `/api/v1/outcome-observations/${encodeURIComponent(outcomeId)}/reflection/regenerations`,
+      {
+        method: "POST",
+        headers: { "Idempotency-Key": idempotencyKey },
+        body: "{}",
+      },
     ),
   retireOutcomeFeedback: (feedbackId: number, reason: string) =>
     request<{ status: string }>(

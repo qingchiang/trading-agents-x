@@ -342,7 +342,9 @@ class ReflectionGenerationCycleRecord(Base):
     trigger: Mapped[str] = mapped_column(String(40), nullable=False)
     origin: Mapped[str] = mapped_column(String(20), nullable=False)
     retry_ordinal: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    idempotency_key: Mapped[str | None] = mapped_column(String(200), nullable=True)
     queued_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -352,6 +354,9 @@ class ReflectionGenerationCycleRecord(Base):
             "outcome_id",
             unique=True,
             sqlite_where=text("status IN ('queued', 'running')"),
+        ),
+        UniqueConstraint(
+            "outcome_id", "idempotency_key", name="uq_reflection_generation_cycle_idempotency"
         ),
     )
 

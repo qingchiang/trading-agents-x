@@ -38,6 +38,8 @@ export default function ResearchReview() {
     () => initialParams.get("status_group") ?? "all",
   );
   const [error, setError] = useState("");
+  const [reflectionActionError, setReflectionActionError] = useState("");
+  const [reflectionActionErrorOutcomeId, setReflectionActionErrorOutcomeId] = useState<number | null>(null);
   const [actionOutcomeId, setActionOutcomeId] = useState<number | null>(null);
   const [auditDetails, setAuditDetails] = useState<
     Record<number, ResearchReviewAuditDetail>
@@ -75,13 +77,16 @@ export default function ResearchReview() {
     window.history.replaceState(null, "", `/reviews${query}`);
     void load(query);
   };
-  const retryReflection = async (outcomeId: number) => {
+  const regenerateReflection = async (outcomeId: number) => {
     setActionOutcomeId(outcomeId);
+    setReflectionActionError("");
+    setReflectionActionErrorOutcomeId(null);
     try {
-      await api.retryOutcomeReflection(outcomeId);
+      await api.regenerateOutcomeReflection(outcomeId, crypto.randomUUID());
       await load(window.location.search);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("error"));
+      setReflectionActionError(cause instanceof Error ? cause.message : t("error"));
+      setReflectionActionErrorOutcomeId(outcomeId);
     } finally {
       setActionOutcomeId(null);
     }
@@ -272,6 +277,35 @@ export default function ResearchReview() {
                 <p>{t("feedbackUnavailable")}</p>
               )}
             </section>
+            {review.lifecycle_actions_allowed &&
+            ["reflection_invalid", "reflection_failed"].includes(
+              review.review_status,
+            ) ? (
+              <section aria-labelledby={`reflection-failure-${review.outcome_id}`}>
+                <h2 id={`reflection-failure-${review.outcome_id}`}>
+                  {t("methodReflection")}
+                </h2>
+                <p>
+                  {review.outcome_reflection?.error_code || t("reflectionFailure")}
+                </p>
+                {reflectionActionError && reflectionActionErrorOutcomeId === review.outcome_id && (
+                  <div className="alert" role="alert">{reflectionActionError}</div>
+                )}
+                <button
+                  className="button compact-button"
+                  disabled={actionOutcomeId === review.outcome_id}
+                  onClick={() => void regenerateReflection(review.outcome_id)}
+                  type="button"
+                >
+                  {t("regenerateReflection")}
+                </button>
+              </section>
+            ) : review.outcome_reflection?.generation_cycle?.status === "queued" ? (
+              <section aria-live="polite">
+                <h2>{t("methodReflection")}</h2>
+                <p>{t("reflectionQueued")}</p>
+              </section>
+            ) : null}
             <details
               className="memory-decision-details"
               onToggle={(event) => {
@@ -301,19 +335,6 @@ export default function ResearchReview() {
               </p>
               {auditDetails[review.outcome_id] && (
                 <AuditAttempts detail={auditDetails[review.outcome_id]} />
-              )}
-              {review.lifecycle_actions_allowed &&
-              ["reflection_invalid", "reflection_failed"].includes(
-                review.review_status,
-              ) && (
-                <button
-                  className="button compact-button"
-                  disabled={actionOutcomeId === review.outcome_id}
-                  onClick={() => void retryReflection(review.outcome_id)}
-                  type="button"
-                >
-                  {t("retryReflection")}
-                </button>
               )}
             </details>
           </article>

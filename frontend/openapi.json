@@ -3107,6 +3107,16 @@
             ],
             "title": "Generated At"
           },
+          "generation_cycle": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReflectionGenerationCycleView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "last_attempted_at": {
             "anyOf": [
               {
@@ -3858,6 +3868,89 @@
           "validation_issues"
         ],
         "title": "ReflectionAttemptView",
+        "type": "object"
+      },
+      "ReflectionGenerationCycleView": {
+        "additionalProperties": false,
+        "properties": {
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "origin": {
+            "enum": [
+              "automatic",
+              "manual",
+              "legacy"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "outcome_id": {
+            "title": "Outcome Id",
+            "type": "integer"
+          },
+          "queued_at": {
+            "format": "date-time",
+            "title": "Queued At",
+            "type": "string"
+          },
+          "retry_ordinal": {
+            "title": "Retry Ordinal",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed",
+              "invalid"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "trigger": {
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "outcome_id",
+          "status",
+          "origin",
+          "trigger",
+          "retry_ordinal",
+          "queued_at",
+          "due_at"
+        ],
+        "title": "ReflectionGenerationCycleView",
+        "type": "object"
+      },
+      "ReflectionRegenerationAccepted": {
+        "additionalProperties": false,
+        "properties": {
+          "cycle": {
+            "$ref": "#/components/schemas/ReflectionGenerationCycleView"
+          }
+        },
+        "required": [
+          "cycle"
+        ],
+        "title": "ReflectionRegenerationAccepted",
         "type": "object"
       },
       "ReflectionUsageAggregateView": {
@@ -8402,8 +8495,64 @@
         "summary": "Retire Outcome Feedback"
       }
     },
+    "/api/v1/outcome-observations/{outcome_id}/reflection/regenerations": {
+      "post": {
+        "operationId": "regenerate_outcome_reflection_api_v1_outcome_observations__outcome_id__reflection_regenerations_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "outcome_id",
+            "required": true,
+            "schema": {
+              "title": "Outcome Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReflectionRegenerationAccepted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Regenerate Outcome Reflection"
+      }
+    },
     "/api/v1/outcome-observations/{outcome_id}/reflection/retry": {
       "post": {
+        "deprecated": true,
         "operationId": "retry_outcome_reflection_api_v1_outcome_observations__outcome_id__reflection_retry_post",
         "parameters": [
           {

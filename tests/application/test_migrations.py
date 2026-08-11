@@ -87,7 +87,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     finally:
         engine.dispose()
 
-    assert revision == "0011_reflection_attempt_audit"
+    assert revision == "0012_operate_reflection_cycles"
     assert {
         "id",
         "run_id",
@@ -178,7 +178,9 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
         "trigger",
         "origin",
         "retry_ordinal",
+        "idempotency_key",
         "queued_at",
+        "due_at",
         "started_at",
         "finished_at",
     }.issubset(generation_cycle_columns)
