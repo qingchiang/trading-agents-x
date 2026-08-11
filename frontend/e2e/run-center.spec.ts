@@ -504,7 +504,7 @@ test("runs, legacy templates, trash, and restores local research", async ({
         json: { runs: ids.flatMap((id) => runs.get(id) ?? []), changed },
       });
     }
-    if (path === "/api/v1/memory") {
+    if (path === "/api/v1/reviews") {
       const report = runs.get("run-report");
       if (!report || report.trashed_at || purged.has(report.id)) {
         return route.fulfill({ json: [] });
@@ -512,6 +512,9 @@ test("runs, legacy templates, trash, and restores local research", async ({
       return route.fulfill({
         json: [
           {
+            outcome_id: 1,
+            review_status: "feedback_available",
+            lifecycle_actions_allowed: true,
             run_id: report.id,
             ticker: report.request.ticker,
             instrument_name: report.instrument_name,
@@ -523,14 +526,30 @@ test("runs, legacy templates, trash, and restores local research", async ({
             decision: result(report.id).decision,
             outcome: {
               status: "resolved",
+              source_decision_id: 1,
+              source_revision_id: null,
               benchmark: "SPY",
+              market_timezone: "America/New_York",
+              method_category: "short_term_relative_return",
+              method_version: "short_term_relative_return.v1",
+              price_semantics: "exchange_local_daily_close",
+              adjustment_semantics: "split_and_dividend_adjusted",
+              horizon_limit: "Five common trading intervals are short-term methodological feedback only.",
+              limitations: [],
               observation_start: "2026-07-25",
               observation_end: "2026-08-01",
               holding_intervals: 5,
               raw_return: 0.08,
               alpha_return: 0.03,
+              data_available_at: timestamp,
+              last_checked_at: timestamp,
+              next_check_at: null,
+              error_message: null,
             },
             reflection: "The evidence was directionally useful.",
+            method_feedback: "The evidence was directionally useful.",
+            outcome_reflection: null,
+            outcome_feedback: null,
           },
         ],
       });
@@ -701,7 +720,7 @@ test("runs, legacy templates, trash, and restores local research", async ({
   await page.getByRole("tab", { name: "Reports" }).click();
   await expect(page.getByRole("heading", { name: "Market report" })).toBeVisible();
 
-  await page.goto("/memory");
+  await page.goto("/reviews");
   await expect(page.getByText("NVIDIA Corporation")).toBeVisible();
   await page.getByText("Decision details").click();
   await expect(page.getByText("Demand improves").first()).toBeVisible();
@@ -709,6 +728,10 @@ test("runs, legacy templates, trash, and restores local research", async ({
     .getByRole("link", { name: "Open research decision", exact: true })
     .click();
   await expect(page).toHaveURL(/\/runs\/run-report\?view=decision/);
+
+  await page.goto("/memory");
+  await expect(page).toHaveURL(/\/memory$/);
+  await expect(page.getByRole("heading", { name: "Research Review" })).toHaveCount(0);
 
   await page.goto("/runs");
   const reportRow = page.getByRole("row").filter({ hasText: "NVDA" });
@@ -723,8 +746,8 @@ test("runs, legacy templates, trash, and restores local research", async ({
     .click();
   await expect(page.getByText("Moved 1 run(s) to Trash.")).toBeVisible();
 
-  await page.goto("/memory");
-  await expect(page.getByText("No memory entries.")).toBeVisible();
+  await page.goto("/reviews");
+  await expect(page.getByText("No Research Reviews.")).toBeVisible();
 
   await page.goto("/runs?trash_state=trashed");
   await expect(page.getByText("Trash retention")).toBeVisible();
@@ -732,7 +755,7 @@ test("runs, legacy templates, trash, and restores local research", async ({
   await trashedRow.getByRole("checkbox").check();
   await page.getByRole("button", { name: "Restore selected (1)" }).click();
   await expect(page.getByText("Restored 1 run(s).")).toBeVisible();
-  await page.goto("/memory");
+  await page.goto("/reviews");
   await expect(page.getByText("NVIDIA Corporation")).toBeVisible();
 
   const restored = runs.get("run-report")!;

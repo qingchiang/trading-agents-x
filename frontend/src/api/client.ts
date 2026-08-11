@@ -39,7 +39,7 @@ export type ProviderModelCatalog =
   components["schemas"]["ProviderModelCatalog"];
 export type DiscoveredModel = components["schemas"]["DiscoveredModelView"];
 export type Health = components["schemas"]["HealthResponse"];
-export type MemoryEntry = components["schemas"]["MemoryEntry"];
+export type ResearchReview = components["schemas"]["ResearchReview"];
 export type RunMetrics = components["schemas"]["RunMetrics"];
 export type RunAttemptView = components["schemas"]["RunAttemptView"];
 export type StructuredRecoveryNotice =
@@ -153,8 +153,8 @@ export const api = {
     }),
   action: (id: string, action: "cancel" | "retry") =>
     request<RunView>(`/api/v1/runs/${id}/${action}`, { method: "POST" }),
-  memory: (query = "") =>
-    request<MemoryEntry[]>(`/api/v1/memory${query}`),
+  reviews: (query = "") =>
+    request<ResearchReview[]>(`/api/v1/reviews${query}`),
   retryOutcomeReflection: (outcomeId: number) =>
     request<{ status: string }>(
       `/api/v1/outcome-observations/${encodeURIComponent(outcomeId)}/reflection/retry`,

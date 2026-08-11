@@ -173,6 +173,9 @@ class OutcomeObservationView(ApiModel):
     raw_return: float | None
     alpha_return: float | None
     data_available_at: datetime | None
+    last_checked_at: datetime | None
+    next_check_at: datetime | None
+    error_message: str | None
 
 
 class OutcomeReflectionView(ApiModel):
@@ -216,8 +219,21 @@ class OutcomeFeedbackView(ApiModel):
     retired_at: datetime | None
 
 
-class MemoryEntry(ApiModel):
+class ResearchReview(ApiModel):
     outcome_id: int
+    review_status: Literal[
+        "awaiting_observation",
+        "observation_delayed",
+        "awaiting_reflection",
+        "reflection_retry_scheduled",
+        "reflection_failed",
+        "reflection_invalid",
+        "feedback_available",
+        "feedback_ineligible",
+        "feedback_retired",
+        "lifecycle_inconsistent",
+    ]
+    lifecycle_actions_allowed: bool
     run_id: str
     ticker: str
     instrument_name: str | None = None
@@ -229,5 +245,6 @@ class MemoryEntry(ApiModel):
     decision: ResearchDecision
     outcome: OutcomeObservationView
     reflection: str | None
+    method_feedback: str | None
     outcome_reflection: OutcomeReflectionView | None
     outcome_feedback: OutcomeFeedbackView | None

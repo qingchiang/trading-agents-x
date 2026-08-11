@@ -762,16 +762,10 @@ class AnalysisService:
                             on_event=on_event,
                         )
                         metrics = MetricsCallback()
-                    if run.research_chain_requested or run.research_chain_id:
-                        memory = MemoryContext(
-                            instrument=run.request.ticker,
-                            market=self.repository.market_bucket(run.request.ticker),
-                        )
-                    else:
-                        memory = self.repository.memory_context(
-                            run.request.ticker,
-                            run.request.asset_type.value,
-                        )
+                    memory = MemoryContext(
+                        instrument=run.request.ticker,
+                        market=self.repository.market_bucket(run.request.ticker),
+                    )
                     llms = self.llm_factory(
                         run_settings,
                         callbacks=[metrics],

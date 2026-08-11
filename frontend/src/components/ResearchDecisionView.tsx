@@ -119,7 +119,7 @@ export function ResearchDecisionContent({
             evidenceIndex={evidenceIndex}
             onEvidence={onEvidence}
           />
-          <MemoryLinks refs={decision.memory_refs ?? []} />
+          <ReviewLinks refs={decision.memory_refs ?? []} />
         </div>
       </header>
 
@@ -468,20 +468,20 @@ export function ResearchDecisionContent({
   );
 }
 
-function MemoryLinks({ refs }: { refs: string[] }) {
+function ReviewLinks({ refs }: { refs: string[] }) {
   const { t } = useTranslation();
   if (refs.length === 0) return null;
   return (
     <div className="evidence-ref-group memory-ref-group">
-      <strong>{t("memoryRefs")}</strong>
+      <strong>{t("reviewRefs")}</strong>
       <div className="evidence-chips">
         {refs.map((ref) => {
           const runId = ref.startsWith("memory:") ? ref.slice(7) : ref;
           const encoded = encodeURIComponent(runId);
           return (
             <a
-              href={`/memory?q=${encoded}#memory-${encoded}`}
-              aria-label={`${t("openMemory")} ${ref}`}
+              href={`/reviews?q=${encoded}#review-${encoded}`}
+              aria-label={`${t("openReview")} ${ref}`}
               key={ref}
             >
               <code>{ref}</code>

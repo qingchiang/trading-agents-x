@@ -487,11 +487,12 @@ async def test_openapi_contains_versioned_run_center_contract(
         "/api/v1/research-chains/{chain_id}/updates",
         "/api/v1/research-revisions/{revision_id}",
         "/api/v1/research-revisions/{revision_id}/export",
-        "/api/v1/memory",
+        "/api/v1/reviews",
         "/api/v1/capabilities",
         "/api/v1/providers/{provider}/models",
         "/api/v1/health",
     } <= set(paths)
+    assert "/api/v1/memory" not in paths
     assert "/api/v1/runs/{run_id}/rerun" not in paths
     assert "provenance" not in schema["components"]["schemas"]["AnalysisRequest"]["properties"]
     assert "provenance" not in schema["components"]["schemas"]["CapabilityDefaults"]["properties"]
@@ -597,26 +598,26 @@ async def test_removed_provenance_request_is_rejected(
 
 
 @pytest.mark.anyio
-async def test_memory_api_forwards_audited_search_filters(
+async def test_reviews_api_forwards_audited_search_and_status_group_filters(
     web_client: httpx.AsyncClient,
     web_repository,
     monkeypatch,
 ) -> None:
     captured = {}
 
-    def memory_entries(**filters):
+    def review_entries(**filters):
         captured.update(filters)
         return []
 
-    monkeypatch.setattr(web_repository, "memory_entries", memory_entries)
+    monkeypatch.setattr(web_repository, "review_entries", review_entries)
 
     response = await web_client.get(
-        "/api/v1/memory",
+        "/api/v1/reviews",
         params={
             "q": "demand lesson",
             "ticker": "vd",
             "market": "america/new",
-            "status": "resolved",
+            "status_group": "in_progress",
             "limit": 25,
         },
     )
@@ -627,13 +628,20 @@ async def test_memory_api_forwards_audited_search_filters(
         "q": "demand lesson",
         "ticker": "vd",
         "market": "america/new",
-        "status": "resolved",
+        "status_group": "in_progress",
         "limit": 25,
     }
 
 
 @pytest.mark.anyio
-async def test_memory_lifecycle_actions_delegate_without_exposing_errors(
+async def test_legacy_memory_read_api_is_absent(web_client: httpx.AsyncClient) -> None:
+    response = await web_client.get("/api/v1/memory")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_review_lifecycle_actions_delegate_without_exposing_errors(
     web_client: httpx.AsyncClient,
     web_repository,
     monkeypatch,
@@ -663,6 +671,29 @@ async def test_memory_lifecycle_actions_delegate_without_exposing_errors(
     assert retire_response.json() == {"status": "retired"}
     assert retried == [7]
     assert retired == [(11, "Superseded methodology")]
+
+
+@pytest.mark.anyio
+async def test_inconsistent_review_rejects_lifecycle_actions(
+    web_client: httpx.AsyncClient,
+    web_repository,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(web_repository, "retry_outcome_reflection", lambda _id: False)
+    monkeypatch.setattr(
+        web_repository,
+        "retire_outcome_feedback",
+        lambda _id, *, reason: False,
+    )
+
+    retry = await web_client.post("/api/v1/outcome-observations/7/reflection/retry")
+    retire = await web_client.post(
+        "/api/v1/outcome-feedback/11/retire",
+        json={"reason": "retired_by_user"},
+    )
+
+    assert retry.status_code == 409
+    assert retire.status_code == 409
 
 
 @pytest.mark.anyio

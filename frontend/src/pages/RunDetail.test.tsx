@@ -616,11 +616,11 @@ test("restores deliberation and resolves evidence references across run views", 
   expect(referenceTable).toHaveTextContent("Live snapshot");
   expect(
     screen.getByRole("link", {
-      name: "Open memory memory:legacy-run",
+      name: "Open Research Review memory:legacy-run",
     }),
   ).toHaveAttribute(
     "href",
-    "/memory?q=legacy-run#memory-legacy-run",
+    "/reviews?q=legacy-run#review-legacy-run",
   );
 
   const artifactEvent = {

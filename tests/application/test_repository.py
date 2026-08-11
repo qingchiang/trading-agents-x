@@ -855,7 +855,7 @@ def test_complete_persists_result_and_resolved_memory(
     pending = repository.pending_outcomes(due_at=due_at)
     repository.trash_runs((run.id,))
     assert repository.pending_outcomes(due_at=due_at) == []
-    assert repository.memory_entries() == []
+    assert repository.review_entries() == []
     repository.restore_runs((run.id,))
     assert repository.pending_outcomes(due_at=due_at)[0]["outcome_id"] == (
         pending[0]["outcome_id"]
@@ -890,7 +890,7 @@ def test_complete_persists_result_and_resolved_memory(
     assert "appendix_only_marker" not in context.prompt_text()
     repository.trash_runs((run.id,))
     assert repository.memory_context("NVDA", "stock").items == ()
-    assert repository.memory_entries() == []
+    assert repository.review_entries() == []
     repository.restore_runs((run.id,))
     assert repository.memory_context("NVDA", "stock").items[0].run_id == run.id
 
@@ -921,7 +921,7 @@ def test_complete_persists_result_and_resolved_memory(
         assert session.scalar(select(func.count()).select_from(ReflectionRecord)) == 1
         assert session.scalar(select(func.count()).select_from(OutcomeFeedbackRecord)) == 1
 
-    feedback_view = repository.memory_entries()[0]["outcome_feedback"]
+    feedback_view = repository.review_entries()[0]["outcome_feedback"]
     assert feedback_view["qualification_policy_version"] == (
         "outcome_feedback_qualification.v1"
     )

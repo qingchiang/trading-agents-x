@@ -70,10 +70,10 @@ from .models import (
     CapabilitiesResponse,
     HealthResponse,
     LoginRequest,
-    MemoryEntry,
     OutcomeFeedbackRetireRequest,
     ProviderModelCatalog,
     ResearchChainUpdateRequest,
+    ResearchReview,
     RunBatchRequest,
     RunBatchResult,
     RunCreateRequest,
@@ -518,25 +518,32 @@ def create_app(
             },
         )
 
-    @app.get(f"{API_PREFIX}/memory", response_model=list[MemoryEntry])
-    def memory(
+    @app.get(f"{API_PREFIX}/reviews", response_model=list[ResearchReview])
+    def reviews(
         ticker: str | None = None,
         market: str | None = None,
         q: Annotated[str | None, Query(max_length=500)] = None,
-        status: Literal["pending", "resolved"] | None = None,
+        status_group: Literal[
+            "needs_attention",
+            "in_progress",
+            "feedback_available",
+            "feedback_ineligible_or_retired",
+            "all",
+        ] | None = None,
         limit: Annotated[int, Query(ge=1, le=500)] = 100,
     ):
-        return repository.memory_entries(
+        return repository.review_entries(
             ticker=ticker,
             market=market,
             q=q,
-            status=status,
+            status_group=status_group,
             limit=limit,
         )
 
     @app.post(f"{API_PREFIX}/outcome-observations/{{outcome_id}}/reflection/retry")
     def retry_outcome_reflection(outcome_id: int):
-        repository.retry_outcome_reflection(outcome_id)
+        if repository.retry_outcome_reflection(outcome_id) is False:
+            raise HTTPException(status_code=409, detail="Review lifecycle is inconsistent")
         return {"status": "pending"}
 
     @app.post(f"{API_PREFIX}/outcome-feedback/{{feedback_id}}/retire")
@@ -544,7 +551,8 @@ def create_app(
         feedback_id: int,
         payload: OutcomeFeedbackRetireRequest,
     ):
-        repository.retire_outcome_feedback(feedback_id, reason=payload.reason)
+        if repository.retire_outcome_feedback(feedback_id, reason=payload.reason) is False:
+            raise HTTPException(status_code=409, detail="Review lifecycle is inconsistent")
         return {"status": "retired"}
 
     @app.get(

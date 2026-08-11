@@ -80,7 +80,7 @@ test("closes the mobile drawer after navigation, backdrop, or Escape", () => {
 
   open();
   expect(shell).toHaveClass("sidebar-open");
-  fireEvent.click(screen.getByRole("link", { name: "Memory" }));
+  fireEvent.click(screen.getByRole("link", { name: "Research Review" }));
   expect(shell).not.toHaveClass("sidebar-open");
 
   open();

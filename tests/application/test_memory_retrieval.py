@@ -343,7 +343,7 @@ def test_memory_context_skips_malformed_decisions_and_empty_reflections(
     assert repository.memory_context("NVDA", "stock").items == ()
 
 
-def test_memory_entries_support_fuzzy_filters_and_full_field_search(
+def test_review_entries_support_fuzzy_filters_and_full_field_search(
     repository: RunRepository,
 ) -> None:
     nvda_run_id = _seed_memory(
@@ -383,18 +383,25 @@ def test_memory_entries_support_fuzzy_filters_and_full_field_search(
         resolved=False,
     )
 
+    assert [entry["ticker"] for entry in repository.review_entries()] == [
+        "MSFT",
+        "7203.T",
+        "AAPL",
+        "NVDA",
+    ]
+
     assert [
-        entry["ticker"] for entry in repository.memory_entries(ticker="vd")
+        entry["ticker"] for entry in repository.review_entries(ticker="vd")
     ] == ["NVDA"]
     assert {
         entry["ticker"]
-        for entry in repository.memory_entries(market="america/new")
+        for entry in repository.review_entries(market="america/new")
     } == {"NVDA", "AAPL", "MSFT"}
     assert [
         entry["ticker"]
-        for entry in repository.memory_entries(q="DATA CENTER")
+        for entry in repository.review_entries(q="DATA CENTER")
     ] == ["NVDA"]
-    by_name = repository.memory_entries(q="nvidia")
+    by_name = repository.review_entries(q="nvidia")
     assert [entry["ticker"] for entry in by_name] == ["NVDA"]
     assert by_name[0]["instrument_name"] == "NVIDIA"
     assert by_name[0]["instrument_local_name"] == "英伟达"
@@ -403,7 +410,7 @@ def test_memory_entries_support_fuzzy_filters_and_full_field_search(
     assert run_page.items[0].research_rating is ResearchRating.OVERWEIGHT
     assert [
         entry["ticker"]
-        for entry in repository.memory_entries(q="valuation LESSON")
+        for entry in repository.review_entries(q="valuation LESSON")
     ] == ["NVDA"]
     for decision_query in (
         "overweight",
@@ -415,19 +422,19 @@ def test_memory_entries_support_fuzzy_filters_and_full_field_search(
     ):
         assert [
             entry["ticker"]
-            for entry in repository.memory_entries(q=decision_query)
+            for entry in repository.review_entries(q=decision_query)
         ] == ["NVDA"]
     assert [
         entry["ticker"]
-        for entry in repository.memory_entries(q=nvda_run_id[:12])
+        for entry in repository.review_entries(q=nvda_run_id[:12])
     ] == ["NVDA"]
     assert [
         entry["ticker"]
-        for entry in repository.memory_entries(q="asia/tokyo")
+        for entry in repository.review_entries(q="asia/tokyo")
     ] == ["7203.T"]
     assert [
         entry["ticker"]
-        for entry in repository.memory_entries(status="pending")
+        for entry in repository.review_entries(status_group="in_progress")
     ] == ["MSFT"]
-    assert repository.memory_entries(q="pending cloud", status="resolved") == []
-    assert repository.memory_entries(q="%") == []
+    assert repository.review_entries(q="pending cloud", status_group="feedback_available") == []
+    assert repository.review_entries(q="%") == []

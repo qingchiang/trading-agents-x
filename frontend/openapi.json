@@ -2179,120 +2179,6 @@
         "title": "MeasurementKind",
         "type": "string"
       },
-      "MemoryEntry": {
-        "additionalProperties": false,
-        "properties": {
-          "analysis_date": {
-            "title": "Analysis Date",
-            "type": "string"
-          },
-          "asset_type": {
-            "title": "Asset Type",
-            "type": "string"
-          },
-          "decision": {
-            "$ref": "#/components/schemas/ResearchDecision"
-          },
-          "instrument_local_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Instrument Local Name"
-          },
-          "instrument_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Instrument Name"
-          },
-          "market": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Market"
-          },
-          "outcome": {
-            "$ref": "#/components/schemas/OutcomeObservationView"
-          },
-          "outcome_feedback": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/OutcomeFeedbackView"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "outcome_id": {
-            "title": "Outcome Id",
-            "type": "integer"
-          },
-          "outcome_reflection": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/OutcomeReflectionView"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "profile": {
-            "$ref": "#/components/schemas/RunProfile"
-          },
-          "reflection": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reflection"
-          },
-          "run_id": {
-            "title": "Run Id",
-            "type": "string"
-          },
-          "ticker": {
-            "title": "Ticker",
-            "type": "string"
-          }
-        },
-        "required": [
-          "outcome_id",
-          "run_id",
-          "ticker",
-          "market",
-          "asset_type",
-          "analysis_date",
-          "profile",
-          "decision",
-          "outcome",
-          "reflection",
-          "outcome_reflection",
-          "outcome_feedback"
-        ],
-        "title": "MemoryEntry",
-        "type": "object"
-      },
       "ModelDiscoveryWarningView": {
         "additionalProperties": false,
         "properties": {
@@ -3022,6 +2908,17 @@
             ],
             "title": "Data Available At"
           },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
           "holding_intervals": {
             "title": "Holding Intervals",
             "type": "integer"
@@ -3029,6 +2926,18 @@
           "horizon_limit": {
             "title": "Horizon Limit",
             "type": "string"
+          },
+          "last_checked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Checked At"
           },
           "limitations": {
             "items": {
@@ -3048,6 +2957,18 @@
           "method_version": {
             "title": "Method Version",
             "type": "string"
+          },
+          "next_check_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Check At"
           },
           "observation_end": {
             "anyOf": [
@@ -3124,7 +3045,10 @@
           "holding_intervals",
           "raw_return",
           "alpha_return",
-          "data_available_at"
+          "data_available_at",
+          "last_checked_at",
+          "next_check_at",
+          "error_message"
         ],
         "title": "OutcomeObservationView",
         "type": "object"
@@ -4603,6 +4527,154 @@
         ],
         "title": "ResearchRating",
         "type": "string"
+      },
+      "ResearchReview": {
+        "additionalProperties": false,
+        "properties": {
+          "analysis_date": {
+            "title": "Analysis Date",
+            "type": "string"
+          },
+          "asset_type": {
+            "title": "Asset Type",
+            "type": "string"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/ResearchDecision"
+          },
+          "instrument_local_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Local Name"
+          },
+          "instrument_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Name"
+          },
+          "lifecycle_actions_allowed": {
+            "title": "Lifecycle Actions Allowed",
+            "type": "boolean"
+          },
+          "market": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market"
+          },
+          "method_feedback": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Method Feedback"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/OutcomeObservationView"
+          },
+          "outcome_feedback": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OutcomeFeedbackView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "outcome_id": {
+            "title": "Outcome Id",
+            "type": "integer"
+          },
+          "outcome_reflection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OutcomeReflectionView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "profile": {
+            "$ref": "#/components/schemas/RunProfile"
+          },
+          "reflection": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reflection"
+          },
+          "review_status": {
+            "enum": [
+              "awaiting_observation",
+              "observation_delayed",
+              "awaiting_reflection",
+              "reflection_retry_scheduled",
+              "reflection_failed",
+              "reflection_invalid",
+              "feedback_available",
+              "feedback_ineligible",
+              "feedback_retired",
+              "lifecycle_inconsistent"
+            ],
+            "title": "Review Status",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome_id",
+          "review_status",
+          "lifecycle_actions_allowed",
+          "run_id",
+          "ticker",
+          "market",
+          "asset_type",
+          "analysis_date",
+          "profile",
+          "decision",
+          "outcome",
+          "reflection",
+          "method_feedback",
+          "outcome_reflection",
+          "outcome_feedback"
+        ],
+        "title": "ResearchReview",
+        "type": "object"
       },
       "ResearchRevision": {
         "additionalProperties": false,
@@ -7852,121 +7924,6 @@
         "summary": "Recent Instruments"
       }
     },
-    "/api/v1/memory": {
-      "get": {
-        "operationId": "memory_api_v1_memory_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "ticker",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Ticker"
-            }
-          },
-          {
-            "in": "query",
-            "name": "market",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Market"
-            }
-          },
-          {
-            "in": "query",
-            "name": "q",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 500,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Q"
-            }
-          },
-          {
-            "in": "query",
-            "name": "status",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "pending",
-                    "resolved"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Status"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 100,
-              "maximum": 500,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/MemoryEntry"
-                  },
-                  "title": "Response Memory Api V1 Memory Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Memory"
-      }
-    },
     "/api/v1/outcome-feedback/{feedback_id}/retire": {
       "post": {
         "operationId": "retire_outcome_feedback_api_v1_outcome_feedback__feedback_id__retire_post",
@@ -8400,6 +8357,124 @@
           }
         },
         "summary": "Export Research Revision"
+      }
+    },
+    "/api/v1/reviews": {
+      "get": {
+        "operationId": "reviews_api_v1_reviews_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "ticker",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ticker"
+            }
+          },
+          {
+            "in": "query",
+            "name": "market",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Market"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status_group",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "needs_attention",
+                    "in_progress",
+                    "feedback_available",
+                    "feedback_ineligible_or_retired",
+                    "all"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status Group"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ResearchReview"
+                  },
+                  "title": "Response Reviews Api V1 Reviews Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reviews"
       }
     },
     "/api/v1/runs": {

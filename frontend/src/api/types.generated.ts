@@ -307,22 +307,6 @@ export interface components {
       value: number;
     };
     MeasurementKind: "currency" | "percent" | "ratio" | "index" | "quantity" | "count" | "basis_points" | "unitless" | "unknown";
-    MemoryEntry: {
-      analysis_date: string;
-      asset_type: string;
-      decision: components["schemas"]["ResearchDecision"];
-      instrument_local_name?: string | null;
-      instrument_name?: string | null;
-      market: string | null;
-      outcome: components["schemas"]["OutcomeObservationView"];
-      outcome_feedback: components["schemas"]["OutcomeFeedbackView"] | null;
-      outcome_id: number;
-      outcome_reflection: components["schemas"]["OutcomeReflectionView"] | null;
-      profile: components["schemas"]["RunProfile"];
-      reflection: string | null;
-      run_id: string;
-      ticker: string;
-    };
     ModelDiscoveryWarningView: {
       code: string;
       message: string;
@@ -419,12 +403,15 @@ export interface components {
       alpha_return: number | null;
       benchmark: string;
       data_available_at: string | null;
+      error_message: string | null;
       holding_intervals: number;
       horizon_limit: string;
+      last_checked_at: string | null;
       limitations: string[];
       market_timezone: string;
       method_category: string;
       method_version: string;
+      next_check_at: string | null;
       observation_end: string | null;
       observation_start: string | null;
       price_semantics: string;
@@ -638,6 +625,25 @@ export interface components {
       required_sources: string[];
     };
     ResearchRating: "Buy" | "Overweight" | "Hold" | "Underweight" | "Sell";
+    ResearchReview: {
+      analysis_date: string;
+      asset_type: string;
+      decision: components["schemas"]["ResearchDecision"];
+      instrument_local_name?: string | null;
+      instrument_name?: string | null;
+      lifecycle_actions_allowed: boolean;
+      market: string | null;
+      method_feedback: string | null;
+      outcome: components["schemas"]["OutcomeObservationView"];
+      outcome_feedback: components["schemas"]["OutcomeFeedbackView"] | null;
+      outcome_id: number;
+      outcome_reflection: components["schemas"]["OutcomeReflectionView"] | null;
+      profile: components["schemas"]["RunProfile"];
+      reflection: string | null;
+      review_status: "awaiting_observation" | "observation_delayed" | "awaiting_reflection" | "reflection_retry_scheduled" | "reflection_failed" | "reflection_invalid" | "feedback_available" | "feedback_ineligible" | "feedback_retired" | "lifecycle_inconsistent";
+      run_id: string;
+      ticker: string;
+    };
     ResearchRevision: {
       chain_id: string;
       change_conclusion?: components["schemas"]["ResearchChangeConclusion"] | null;

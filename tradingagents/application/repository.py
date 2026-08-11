@@ -102,6 +102,7 @@ from .research import (
     UpdateSummary,
     evaluate_next_update_policy,
 )
+from .research_review import derive_review_status, review_status_in_group
 from .settings import AppSettings
 
 _SECRET_RE = re.compile(
@@ -1932,29 +1933,73 @@ class RunRepository:
             )
             return OutcomeReflectionStatus.GENERATED.value
 
-    def retry_outcome_reflection(self, outcome_id: int) -> None:
+    def retry_outcome_reflection(self, outcome_id: int) -> bool:
         with self.sessions.begin() as session:
-            reflection = session.scalar(
-                select(ReflectionRecord).where(ReflectionRecord.outcome_id == outcome_id)
-            )
+            row = session.execute(
+                select(OutcomeRecord, ReflectionRecord, OutcomeFeedbackRecord)
+                .join(ReflectionRecord, ReflectionRecord.outcome_id == OutcomeRecord.id)
+                .outerjoin(
+                    OutcomeFeedbackRecord,
+                    OutcomeFeedbackRecord.reflection_id == ReflectionRecord.id,
+                )
+                .where(OutcomeRecord.id == outcome_id)
+            ).first()
+            if row is None:
+                return True
+            outcome, reflection, feedback = row
+            if (
+                derive_review_status(
+                    outcome_status=outcome.status,
+                    outcome_error=outcome.error_message,
+                    reflection_status=reflection.status,
+                    reflection_next_retry_at=reflection.next_retry_at,
+                    feedback_status=feedback.status if feedback else None,
+                )
+                == "lifecycle_inconsistent"
+            ):
+                return False
             if reflection is None or reflection.status not in {
                 OutcomeReflectionStatus.INVALID.value,
                 OutcomeReflectionStatus.RETRYABLE_FAILURE.value,
             }:
-                return
+                return True
             reflection.status = OutcomeReflectionStatus.PENDING.value
             reflection.next_retry_at = None
             reflection.error_code = None
+            return True
 
-    def retire_outcome_feedback(self, feedback_id: int, *, reason: str) -> None:
+    def retire_outcome_feedback(self, feedback_id: int, *, reason: str) -> bool:
         now = _utc_naive()
         with self.sessions.begin() as session:
-            feedback = session.get(OutcomeFeedbackRecord, feedback_id)
-            if feedback is None or feedback.status == OutcomeFeedbackStatus.RETIRED.value:
-                return
+            row = session.execute(
+                select(OutcomeRecord, ReflectionRecord, OutcomeFeedbackRecord)
+                .join(ReflectionRecord, ReflectionRecord.outcome_id == OutcomeRecord.id)
+                .join(
+                    OutcomeFeedbackRecord,
+                    OutcomeFeedbackRecord.reflection_id == ReflectionRecord.id,
+                )
+                .where(OutcomeFeedbackRecord.id == feedback_id)
+            ).first()
+            if row is None:
+                return True
+            outcome, reflection, feedback = row
+            if (
+                derive_review_status(
+                    outcome_status=outcome.status,
+                    outcome_error=outcome.error_message,
+                    reflection_status=reflection.status,
+                    reflection_next_retry_at=reflection.next_retry_at,
+                    feedback_status=feedback.status,
+                )
+                == "lifecycle_inconsistent"
+            ):
+                return False
+            if feedback.status != OutcomeFeedbackStatus.ELIGIBLE.value:
+                return True
             feedback.status = OutcomeFeedbackStatus.RETIRED.value
             feedback.reasons_json = [*feedback.reasons_json, _sanitize_text(reason) or "retired"]
             feedback.retired_at = now
+            return True
 
     def memory_context(
         self,
@@ -2051,13 +2096,13 @@ class RunRepository:
             items=(*same, *cross),
         )
 
-    def memory_entries(
+    def review_entries(
         self,
         *,
         ticker: str | None = None,
         market: str | None = None,
         q: str | None = None,
-        status: str | None = None,
+        status_group: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         stmt = (
@@ -2155,13 +2200,34 @@ class RunRepository:
                     ),
                 )
             )
-        if status:
-            stmt = stmt.where(OutcomeRecord.status == status)
         with self.sessions() as session:
-            return [
-                {
+            reviews = []
+            for (
+                decision,
+                outcome,
+                reflection,
+                feedback,
+                instrument_name,
+                instrument_local_name,
+                request_json,
+            ) in session.execute(stmt):
+                review_status = derive_review_status(
+                    outcome_status=outcome.status,
+                    outcome_error=outcome.error_message,
+                    reflection_status=reflection.status if reflection else None,
+                    reflection_next_retry_at=(
+                        reflection.next_retry_at if reflection else None
+                    ),
+                    feedback_status=feedback.status if feedback else None,
+                )
+                if not review_status_in_group(review_status, status_group):
+                    continue
+                reviews.append(
+                    {
                     "run_id": decision.run_id,
                     "outcome_id": outcome.id,
+                    "review_status": review_status,
+                    "lifecycle_actions_allowed": review_status != "lifecycle_inconsistent",
                     "ticker": decision.ticker,
                     "instrument_name": instrument_name,
                     "instrument_local_name": instrument_local_name,
@@ -2194,8 +2260,16 @@ class RunRepository:
                         "raw_return": outcome.raw_return,
                         "alpha_return": outcome.alpha_return,
                         "data_available_at": _aware(outcome.data_available_at),
+                        "last_checked_at": _aware(outcome.last_checked_at),
+                        "next_check_at": _aware(outcome.next_check_at),
+                        "error_message": outcome.error_message,
                     },
                     "reflection": reflection.text if reflection else None,
+                    "method_feedback": (
+                        reflection_candidate_lesson(reflection.text or "")
+                        if review_status == "feedback_available" and reflection
+                        else None
+                    ),
                     "outcome_reflection": (
                         {
                             "status": reflection.status,
@@ -2226,16 +2300,8 @@ class RunRepository:
                         else None
                     ),
                 }
-                for (
-                    decision,
-                    outcome,
-                    reflection,
-                    feedback,
-                    instrument_name,
-                    instrument_local_name,
-                    request_json,
-                ) in session.execute(stmt)
-            ]
+                )
+            return reviews
 
     def backup(self, destination: Path) -> Path:
         destination = destination.expanduser().resolve()

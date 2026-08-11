@@ -721,6 +721,36 @@ def test_initial_research_chain_does_not_load_or_inject_legacy_memory(
     assert _MemoryCapturingGraph.memories[0].items == ()
 
 
+def test_ordinary_analysis_does_not_load_or_inject_legacy_memory(
+    app_settings,
+    repository,
+    monkeypatch,
+) -> None:
+    _MemoryCapturingGraph.memories = []
+
+    def legacy_memory_must_not_load(*_args, **_kwargs):
+        raise AssertionError("Ordinary execution loaded legacy memory")
+
+    monkeypatch.setattr(repository, "memory_context", legacy_memory_must_not_load)
+    service = _service(
+        app_settings,
+        repository,
+        graph_factory=_MemoryCapturingGraph,
+    )
+
+    result = service.run(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+
+    assert result.status is RunStatus.SUCCEEDED
+    assert len(_MemoryCapturingGraph.memories) == 1
+    assert _MemoryCapturingGraph.memories[0].items == ()
+
+
 def test_research_chain_update_and_full_comparison_do_not_load_legacy_memory(
     app_settings,
     repository,
@@ -862,7 +892,7 @@ def test_settlement_qualifies_decision_cutoff_as_versioned_feedback(
 
     stats = settlement.settle_once()
 
-    feedback = repository.memory_entries(ticker="NVDA")[0]["outcome_feedback"]
+    feedback = repository.review_entries(ticker="NVDA")[0]["outcome_feedback"]
     assert stats == {"checked": 1, "resolved": 1, "pending": 0, "failed": 0}
     assert feedback["status"] == "eligible"
     assert feedback["qualification_policy_version"] == (
