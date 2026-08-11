@@ -26,6 +26,11 @@ class _MustNotRunService:
         raise AssertionError("backup must not run before every opt-in is present")
 
 
+class _MarketReadyService:
+    def validate_market_data_readiness(self, _request):
+        return None
+
+
 def _loaded_scenarios(tmp_path: Path):
     cases_path = tmp_path / "cases.json"
     cases_path.write_text(json.dumps(_reviewed_payload()), encoding="utf-8")
@@ -60,7 +65,6 @@ def test_live_thesis_validation_refuses_before_backup_without_every_opt_in(
             environ=environ,
             in_place_database=in_place_database,
             verify_source_checkout=lambda: None,
-            validate_market_readiness=lambda _request: None,
         )
 
 
@@ -161,23 +165,23 @@ def test_market_readiness_failure_prevents_backup_and_authoritative_execution(
         for scenario in scenarios
     }
 
+    checked = []
+
     class ReadinessFailureService:
         settings = SimpleNamespace(research_update_mode="shadow")
 
         def get_research_chain(self, chain_id):
             return chains[chain_id]
 
+        def validate_market_data_readiness(self, request):
+            checked.append(request)
+            raise RuntimeError("J-Quants daily bar is not ready")
+
         def backup_database(self, _destination: Path) -> Path:
             raise AssertionError("backup must not run before market data is ready")
 
         def run_chain_update(self, *_args, **_kwargs):
             raise AssertionError("execution must not run before market data is ready")
-
-    checked = []
-
-    def validate_market_readiness(request):
-        checked.append(request)
-        raise RuntimeError("J-Quants daily bar is not ready")
 
     with pytest.raises(LiveThesisValidationError, match="market data is not ready"):
         validate_live_thesis(
@@ -189,7 +193,6 @@ def test_market_readiness_failure_prevents_backup_and_authoritative_execution(
             environ={"RUN_LIVE_DATA_TESTS": "1", "RUN_LIVE_LLM_TESTS": "1"},
             in_place_database=True,
             verify_source_checkout=lambda: None,
-            validate_market_readiness=validate_market_readiness,
         )
 
     assert len(checked) == 1
@@ -214,7 +217,7 @@ def test_backup_failure_prevents_authoritative_execution_and_manifest(
         for item in _reviewed_payload()
     }
 
-    class BackupFailureService:
+    class BackupFailureService(_MarketReadyService):
         settings = SimpleNamespace(
             research_update_mode="shadow",
             database_path=tmp_path / "tradingagents.db",
@@ -241,7 +244,6 @@ def test_backup_failure_prevents_authoritative_execution_and_manifest(
             environ={"RUN_LIVE_DATA_TESTS": "1", "RUN_LIVE_LLM_TESTS": "1"},
             in_place_database=True,
             verify_source_checkout=lambda: None,
-            validate_market_readiness=lambda _request: None,
         )
 
     assert not manifest_root.exists()
@@ -288,7 +290,6 @@ def test_source_policy_rejection_prevents_backup_and_execution(tmp_path: Path) -
             environ={"RUN_LIVE_DATA_TESTS": "1", "RUN_LIVE_LLM_TESTS": "1"},
             in_place_database=True,
             verify_source_checkout=lambda: None,
-            validate_market_readiness=lambda _request: None,
         )
 
     assert not (tmp_path / "backup.db").exists()
@@ -317,7 +318,7 @@ def test_source_is_reverified_after_backup_before_each_execution(tmp_path: Path)
         if verification_count == 2:
             raise LiveThesisValidationError("source checkout changed")
 
-    class SourceChangedService:
+    class SourceChangedService(_MarketReadyService):
         settings = SimpleNamespace(research_update_mode="shadow")
 
         def get_research_chain(self, chain_id):
@@ -342,7 +343,6 @@ def test_source_is_reverified_after_backup_before_each_execution(tmp_path: Path)
             environ={"RUN_LIVE_DATA_TESTS": "1", "RUN_LIVE_LLM_TESTS": "1"},
             in_place_database=True,
             verify_source_checkout=verify_source_checkout,
-            validate_market_readiness=lambda _request: None,
         )
 
     assert verification_count == 2
@@ -392,7 +392,7 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
         def get_run(self, run_id):
             return runs[run_id]
 
-    class MainDatabaseService:
+    class MainDatabaseService(_MarketReadyService):
         settings = SimpleNamespace(
             research_update_mode="shadow",
             database_path=database_path,
@@ -531,7 +531,6 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
         environ={"RUN_LIVE_DATA_TESTS": "1", "RUN_LIVE_LLM_TESTS": "1"},
         in_place_database=True,
         verify_source_checkout=verify_source_checkout,
-        validate_market_readiness=lambda _request: None,
     )
 
     assert result.passed
@@ -586,7 +585,6 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
         environ={"RUN_LIVE_DATA_TESTS": "1", "RUN_LIVE_LLM_TESTS": "1"},
         in_place_database=True,
         verify_source_checkout=lambda: None,
-        validate_market_readiness=lambda _request: None,
     )
     mismatch_entry = next(
         item for item in mismatch.entries if item.scenario == "threshold_crossing"

@@ -167,7 +167,6 @@ def validate_live_thesis(
     environ: Mapping[str, str],
     in_place_database: bool,
     verify_source_checkout: Callable[[], None],
-    validate_market_readiness: Callable[[AnalysisRequest], Any],
 ) -> LiveThesisValidationResult:
     """Run the reviewed Shadow set after backup and retain only sanitized metadata."""
     if environ.get("RUN_LIVE_DATA_TESTS") != "1":
@@ -208,7 +207,9 @@ def validate_live_thesis(
         )
     for scenario in scenarios:
         try:
-            validate_market_readiness(selected_requests[scenario.chain_id])
+            service.validate_market_data_readiness(
+                selected_requests[scenario.chain_id]
+            )
         except Exception as exc:
             raise LiveThesisValidationError(
                 f"reviewed market data is not ready for {scenario.scenario}"

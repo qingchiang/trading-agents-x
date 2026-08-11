@@ -2891,7 +2891,6 @@ def test_controlled_live_thesis_validation_advances_five_distinct_main_database_
         environ={"RUN_LIVE_DATA_TESTS": "1", "RUN_LIVE_LLM_TESTS": "1"},
         in_place_database=True,
         verify_source_checkout=lambda: None,
-        validate_market_readiness=lambda _request: None,
     )
 
     assert result.passed

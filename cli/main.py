@@ -439,7 +439,6 @@ def validate_live_thesis_command(
             verify_source_checkout=lambda: _verify_source_checkout(
                 checkout_root, git_commit
             ),
-            validate_market_readiness=service.validate_market_data_readiness,
         )
     except LiveThesisValidationError as exc:
         event_console.print(f"[red]Live Thesis validation refused: {exc}[/red]")

@@ -691,6 +691,7 @@ def test_live_thesis_validation_cli_requires_explicit_in_place_flag_and_reports_
     assert refused.exit_code == 2
     assert completed.exit_code == 0
     assert captured["service"] is service
+    assert "validate_market_readiness" not in captured
     assert captured["in_place_database"] is True
     assert captured["git_commit"] == "a" * 40
     assert captured["manifest_root"] == (
