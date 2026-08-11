@@ -37,7 +37,11 @@ def web_service(
     web_settings: AppSettings,
     web_repository: RunRepository,
 ) -> AnalysisService:
-    return AnalysisService(web_settings, repository=web_repository)
+    return AnalysisService(
+        web_settings,
+        repository=web_repository,
+        market_data_readiness_checker=lambda *_args: None,
+    )
 
 
 @pytest.fixture

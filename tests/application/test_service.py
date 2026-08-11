@@ -35,6 +35,7 @@ from tradingagents.application.live_thesis_validation import (
     validate_live_thesis,
 )
 from tradingagents.application.llms import RunLLMs
+from tradingagents.application.market_readiness import MarketDataNotReadyError
 from tradingagents.application.outcomes import OutcomeObservation, OutcomeSettlement
 from tradingagents.application.repository import InvalidResearchBaselineError, RunRepository
 from tradingagents.application.research import (
@@ -66,6 +67,7 @@ from tradingagents.application.research import (
 from tradingagents.application.runtime import RunCancelled, WorkerShutdown
 from tradingagents.application.service import AnalysisService, ChainUpdateExecutionError
 from tradingagents.dataflows.config import get_config
+from tradingagents.dataflows.errors import NoMarketDataError
 from tradingagents.graph.research_graph import GraphExecution
 from tradingagents.provenance import SourceWatermark, attach_source_watermarks
 
@@ -457,10 +459,14 @@ def _service(
             escalation_reason=IncrementalEscalationReason.COVERAGE_INCOMPLETE
         ),
     )
+    kwargs.setdefault("market_data_readiness_checker", lambda *_args: None)
     return AnalysisService(
         app_settings,
         repository=repository,
-        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        llm_factory=kwargs.pop(
+            "llm_factory",
+            lambda *_args, **_kwargs: (object(), object()),
+        ),
         graph_factory=graph_factory,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
         local_name_resolver=lambda _ticker, _date, _config: None,
@@ -504,6 +510,130 @@ def test_service_persists_events_before_callback_and_result(
     assert events[0].event_type == "run.queued"
     assert events[-1].event_type == "run.succeeded"
     assert events[2].payload["api_key"] == "[REDACTED]"
+
+
+def test_research_chain_market_readiness_fails_before_llm_or_graph(
+    app_settings,
+    repository,
+) -> None:
+    llm_calls = 0
+
+    def llm_factory(*_args, **_kwargs):
+        nonlocal llm_calls
+        llm_calls += 1
+        return (object(), object())
+
+    def not_ready(*_args):
+        raise RuntimeError("J-Quants daily bar is not ready")
+
+    service = _service(
+        app_settings,
+        repository,
+        llm_factory=llm_factory,
+        market_data_readiness_checker=not_ready,
+    )
+    queued = service.enqueue_initial_chain(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-08-12",
+            analysts=("market",),
+        )
+    )
+    claimed = repository.claim_run(queued.id, "worker", 30)
+
+    with pytest.raises(RuntimeError, match="daily bar is not ready"):
+        service.execute_claimed(claimed, worker_id="worker")
+
+    failed = repository.get_run(queued.id)
+    assert failed.status is RunStatus.FAILED
+    assert failed.metrics.llm_calls == 0
+    assert llm_calls == 0
+
+
+def test_research_chain_without_market_analyst_still_checks_jquants_readiness(
+    app_settings,
+    repository,
+) -> None:
+    readiness_calls = 0
+
+    def not_ready(*_args):
+        nonlocal readiness_calls
+        readiness_calls += 1
+        raise MarketDataNotReadyError("J-Quants daily bar is not ready")
+
+    service = _service(
+        app_settings,
+        repository,
+        market_data_readiness_checker=not_ready,
+    )
+    queued = service.enqueue_initial_chain(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-08-12",
+            analysts=("fundamentals",),
+        )
+    )
+    claimed = repository.claim_run(queued.id, "worker", 30)
+
+    with pytest.raises(MarketDataNotReadyError, match="daily bar is not ready"):
+        service.execute_claimed(claimed, worker_id="worker")
+
+    assert readiness_calls == 1
+    assert repository.get_run(queued.id).status is RunStatus.FAILED
+
+
+def test_service_translates_vendor_no_data_to_market_readiness_failure(
+    app_settings,
+    repository,
+) -> None:
+    def no_data(symbol, _cutoff):
+        raise NoMarketDataError(symbol, detail="expected market bar is missing")
+
+    service = _service(
+        app_settings,
+        repository,
+        market_data_readiness_checker=no_data,
+    )
+
+    with pytest.raises(MarketDataNotReadyError, match="not ready") as raised:
+        service.validate_market_data_readiness(
+            AnalysisRequest(
+                ticker="6501.T",
+                analysis_date="2026-08-12",
+                analysts=("fundamentals",),
+            )
+        )
+
+    assert isinstance(raised.value.__cause__, NoMarketDataError)
+
+
+def test_ordinary_analysis_does_not_require_jquants_chain_readiness(
+    app_settings,
+    repository,
+) -> None:
+    readiness_calls = 0
+
+    def readiness(*_args):
+        nonlocal readiness_calls
+        readiness_calls += 1
+        raise AssertionError("ordinary analysis must not run chain readiness")
+
+    service = _service(
+        app_settings,
+        repository,
+        market_data_readiness_checker=readiness,
+    )
+
+    result = service.run(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-08-12",
+            analysts=("market",),
+        )
+    )
+
+    assert result.status is RunStatus.SUCCEEDED
+    assert readiness_calls == 0
 
 
 def test_successful_explicit_full_analysis_creates_primary_research_chain(
@@ -1478,6 +1608,7 @@ def test_default_shadow_collection_runs_before_any_full_llm_client(
         state_assembler=_eligible_state_assembler,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
         local_name_resolver=lambda _ticker, _date, _config: None,
+        market_data_readiness_checker=lambda *_args: None,
     )
     service.run_initial_chain(
         AnalysisRequest(ticker="6501.T", analysis_date="2026-07-24", analysts=("market",))
@@ -1560,6 +1691,7 @@ def test_default_shadow_semantic_assessment_is_audited_before_independent_full(
         state_assembler=_eligible_state_assembler,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
         local_name_resolver=lambda _ticker, _date, _config: None,
+        market_data_readiness_checker=lambda *_args: None,
     )
     queued = service.enqueue_chain_update(
         chain.id,
@@ -1655,6 +1787,7 @@ def test_cancelled_after_partial_bounded_collection_retains_progress_and_metrics
         state_assembler=_eligible_state_assembler,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
         local_name_resolver=lambda _ticker, _date, _config: None,
+        market_data_readiness_checker=lambda *_args: None,
     )
     queued = shadow_service.enqueue_chain_update(
         chain.id,

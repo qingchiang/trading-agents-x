@@ -137,5 +137,9 @@ def memoized_fetch(cache: dict, key, path: str, params: dict, data_key: str) -> 
     if cached is not None:
         return cached
     records = fetch_records(path, params, data_key)
-    cache[key] = records
+    # Empty results can mean that a same-day dataset has not been published
+    # yet. Do not pin that transient absence for the life of a Web/worker
+    # process; successful immutable responses remain memoized.
+    if records:
+        cache[key] = records
     return records

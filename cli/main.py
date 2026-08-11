@@ -427,8 +427,9 @@ def validate_live_thesis_command(
     try:
         checkout_root, git_commit = _source_checkout()
         scenarios = load_reviewed_scenarios(cases)
+        service = _service()
         result = validate_live_thesis(
-            _service(),
+            service,
             scenarios,
             backup_destination=backup,
             manifest_root=checkout_root / _LIVE_THESIS_MANIFEST_RELATIVE,

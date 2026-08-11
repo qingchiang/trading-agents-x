@@ -26,6 +26,11 @@ class _MustNotRunService:
         raise AssertionError("backup must not run before every opt-in is present")
 
 
+class _MarketReadyService:
+    def validate_market_data_readiness(self, _request):
+        return None
+
+
 def _loaded_scenarios(tmp_path: Path):
     cases_path = tmp_path / "cases.json"
     cases_path.write_text(json.dumps(_reviewed_payload()), encoding="utf-8")
@@ -143,6 +148,59 @@ def test_reviewed_scenarios_require_all_full_change_conclusions(tmp_path: Path) 
         load_reviewed_scenarios(cases_path)
 
 
+def test_market_readiness_failure_prevents_backup_and_authoritative_execution(
+    tmp_path: Path,
+) -> None:
+    scenarios = _loaded_scenarios(tmp_path)
+    chains = {
+        scenario.chain_id: SimpleNamespace(
+            id=scenario.chain_id,
+            instrument="6501.T",
+            next_update_policy="incremental_allowed",
+            current_revision=SimpleNamespace(
+                id=f"baseline-{scenario.scenario}",
+                cutoff=date(2026, 8, 9),
+            ),
+        )
+        for scenario in scenarios
+    }
+
+    checked = []
+
+    class ReadinessFailureService:
+        settings = SimpleNamespace(research_update_mode="shadow")
+
+        def get_research_chain(self, chain_id):
+            return chains[chain_id]
+
+        def validate_market_data_readiness(self, request):
+            checked.append(request)
+            raise RuntimeError("J-Quants daily bar is not ready")
+
+        def backup_database(self, _destination: Path) -> Path:
+            raise AssertionError("backup must not run before market data is ready")
+
+        def run_chain_update(self, *_args, **_kwargs):
+            raise AssertionError("execution must not run before market data is ready")
+
+    with pytest.raises(LiveThesisValidationError, match="market data is not ready"):
+        validate_live_thesis(
+            ReadinessFailureService(),
+            scenarios,
+            backup_destination=tmp_path / "backup.db",
+            manifest_root=tmp_path / "manifest",
+            git_commit="a" * 40,
+            environ={"RUN_LIVE_DATA_TESTS": "1", "RUN_LIVE_LLM_TESTS": "1"},
+            in_place_database=True,
+            verify_source_checkout=lambda: None,
+        )
+
+    assert len(checked) == 1
+    assert checked[0].ticker == "6501.T"
+    assert not (tmp_path / "backup.db").exists()
+    assert not (tmp_path / "manifest").exists()
+
+
 def test_backup_failure_prevents_authoritative_execution_and_manifest(
     tmp_path: Path,
 ) -> None:
@@ -159,7 +217,7 @@ def test_backup_failure_prevents_authoritative_execution_and_manifest(
         for item in _reviewed_payload()
     }
 
-    class BackupFailureService:
+    class BackupFailureService(_MarketReadyService):
         settings = SimpleNamespace(
             research_update_mode="shadow",
             database_path=tmp_path / "tradingagents.db",
@@ -260,7 +318,7 @@ def test_source_is_reverified_after_backup_before_each_execution(tmp_path: Path)
         if verification_count == 2:
             raise LiveThesisValidationError("source checkout changed")
 
-    class SourceChangedService:
+    class SourceChangedService(_MarketReadyService):
         settings = SimpleNamespace(research_update_mode="shadow")
 
         def get_research_chain(self, chain_id):
@@ -334,7 +392,7 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
         def get_run(self, run_id):
             return runs[run_id]
 
-    class MainDatabaseService:
+    class MainDatabaseService(_MarketReadyService):
         settings = SimpleNamespace(
             research_update_mode="shadow",
             database_path=database_path,

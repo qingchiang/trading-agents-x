@@ -183,6 +183,7 @@ def validate_live_thesis(
     ):
         raise LiveThesisValidationError("git commit must be a full lowercase SHA-1")
     selected_chains: dict[str, Any] = {}
+    selected_requests: dict[str, AnalysisRequest] = {}
     for scenario in scenarios:
         try:
             chain = service.get_research_chain(scenario.chain_id)
@@ -200,6 +201,19 @@ def validate_live_thesis(
                 f"reviewed cutoff must be later than Research Chain {chain.id} head"
             )
         selected_chains[scenario.chain_id] = chain
+        selected_requests[scenario.chain_id] = AnalysisRequest(
+            ticker=chain.instrument,
+            analysis_date=scenario.analysis_date,
+        )
+    for scenario in scenarios:
+        try:
+            service.validate_market_data_readiness(
+                selected_requests[scenario.chain_id]
+            )
+        except Exception as exc:
+            raise LiveThesisValidationError(
+                f"reviewed market data is not ready for {scenario.scenario}"
+            ) from exc
     verify_source_checkout()
     if backup_destination.exists():
         raise LiveThesisValidationError("backup destination already exists")
@@ -232,10 +246,7 @@ def validate_live_thesis(
             run, result = service.run_chain_update(
                 scenario.chain_id,
                 baseline.id,
-                AnalysisRequest(
-                    ticker=selected_chains[scenario.chain_id].instrument,
-                    analysis_date=scenario.analysis_date,
-                ),
+                selected_requests[scenario.chain_id],
                 idempotency_key=(
                     f"live-thesis:{manifest_directory.name}:{scenario.scenario}:{uuid4()}"
                 ),

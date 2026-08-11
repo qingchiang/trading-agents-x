@@ -1,11 +1,12 @@
 """TSE trading-day calendar used by the look-ahead-safe publication lags."""
 import unittest
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
 from tradingagents.dataflows.jp.calendar import (
     add_business_days,
+    completed_market_date,
     is_tse_open,
     tokyo_today,
 )
@@ -43,6 +44,28 @@ class TseCalendarTests(unittest.TestCase):
 
     def test_add_zero_business_days_is_identity(self):
         self.assertEqual(add_business_days(date(2026, 7, 7), 0), date(2026, 7, 7))
+
+    def test_completed_market_date_waits_until_conservative_daily_bar_cutoff(self):
+        tokyo = timezone(timedelta(hours=9))
+        before_ready = datetime(2026, 8, 12, 16, 59, tzinfo=tokyo)
+        at_ready = datetime(2026, 8, 12, 17, 0, tzinfo=tokyo)
+
+        self.assertEqual(
+            completed_market_date(date(2026, 8, 12), before_ready),
+            date(2026, 8, 10),
+        )
+        self.assertEqual(
+            completed_market_date(date(2026, 8, 12), at_ready),
+            date(2026, 8, 12),
+        )
+
+    def test_completed_market_date_keeps_holiday_cutoff_on_prior_session(self):
+        holiday = datetime(2026, 8, 11, 12, 0, tzinfo=timezone(timedelta(hours=9)))
+
+        self.assertEqual(
+            completed_market_date(date(2026, 8, 11), holiday),
+            date(2026, 8, 10),
+        )
 
 
 if __name__ == "__main__":

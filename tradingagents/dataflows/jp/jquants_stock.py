@@ -3,7 +3,7 @@ market analyst's raw price view."""
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 import pandas as pd
 
@@ -88,6 +88,11 @@ def _fetch_ohlcv_frame(symbol: str, start_date: str, end_date: str) -> pd.DataFr
         else "mixed adjusted/raw J-Quants OHLCV v2"
     )
     return df
+
+
+def fetch_latest_daily_bar_date(symbol: str, start_date: str, end_date: str) -> date:
+    """Return the latest actual J-Quants daily-bar date in a requested window."""
+    return _fetch_ohlcv_frame(symbol, start_date, end_date).iloc[-1]["Date"].date()
 
 
 # TOPIX index daily OHLC (/indices/bars/daily/topix): the market-portfolio proxy

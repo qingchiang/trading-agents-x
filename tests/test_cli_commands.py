@@ -649,7 +649,8 @@ def test_live_thesis_validation_cli_requires_explicit_in_place_flag_and_reports_
     cases.write_text("[]", encoding="utf-8")
     captured = {}
     monkeypatch.setattr(cli, "load_reviewed_scenarios", lambda path: (str(path),))
-    monkeypatch.setattr(cli, "_service", lambda: "service")
+    service = SimpleNamespace(validate_market_data_readiness=lambda _request: None)
+    monkeypatch.setattr(cli, "_service", lambda: service)
     monkeypatch.setattr(
         cli,
         "_source_checkout",
@@ -689,7 +690,8 @@ def test_live_thesis_validation_cli_requires_explicit_in_place_flag_and_reports_
 
     assert refused.exit_code == 2
     assert completed.exit_code == 0
-    assert captured["service"] == "service"
+    assert captured["service"] is service
+    assert "validate_market_readiness" not in captured
     assert captured["in_place_database"] is True
     assert captured["git_commit"] == "a" * 40
     assert captured["manifest_root"] == (
@@ -742,7 +744,11 @@ def test_live_thesis_validation_cli_accepts_clean_checkout_with_ignored_runtime_
     captured = {}
     monkeypatch.setattr(cli, "__file__", str(checkout / "cli/main.py"))
     monkeypatch.setattr(cli, "load_reviewed_scenarios", lambda _path: ())
-    monkeypatch.setattr(cli, "_service", lambda: "service")
+    monkeypatch.setattr(
+        cli,
+        "_service",
+        lambda: SimpleNamespace(validate_market_data_readiness=lambda _request: None),
+    )
 
     def validate(_service, _scenarios, **kwargs):
         captured.update(kwargs)
