@@ -67,6 +67,13 @@ class OutcomeFeedbackStatus(str, Enum):
     RETIRED = "retired"
 
 
+class OutcomeFeedbackRetirementReason(str, Enum):
+    NOT_USEFUL = "not_useful"
+    TOO_SPECIFIC = "too_specific"
+    MISLEADING = "misleading"
+    OTHER = "other"
+
+
 @dataclass(frozen=True)
 class FeedbackSource:
     decision_id: int

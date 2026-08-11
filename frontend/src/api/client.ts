@@ -44,6 +44,10 @@ export type ResearchReviewAuditDetail =
   components["schemas"]["ResearchReviewAuditDetail"];
 export type ReflectionRegenerationAccepted =
   components["schemas"]["ReflectionRegenerationAccepted"];
+export type OutcomeFeedbackRetireRequest =
+  components["schemas"]["OutcomeFeedbackRetireRequest"];
+export type OutcomeFeedbackRetireResponse =
+  components["schemas"]["OutcomeFeedbackRetireResponse"];
 export type RunMetrics = components["schemas"]["RunMetrics"];
 export type RunAttemptView = components["schemas"]["RunAttemptView"];
 export type StructuredRecoveryNotice =
@@ -172,10 +176,13 @@ export const api = {
         body: "{}",
       },
     ),
-  retireOutcomeFeedback: (feedbackId: number, reason: string) =>
-    request<{ status: string }>(
+  retireOutcomeFeedback: (
+    feedbackId: number,
+    payload: OutcomeFeedbackRetireRequest,
+  ) =>
+    request<OutcomeFeedbackRetireResponse>(
       `/api/v1/outcome-feedback/${encodeURIComponent(feedbackId)}/retire`,
-      { method: "POST", body: JSON.stringify({ reason }) },
+      { method: "POST", body: JSON.stringify(payload) },
     ),
   login: (token: string) =>
     request<{ authenticated: boolean }>("/api/v1/auth/login", {

@@ -17,6 +17,7 @@ from tradingagents.application.contracts import (
     RunView,
 )
 from tradingagents.application.outcome_feedback import (
+    OutcomeFeedbackRetirementReason,
     OutcomeFeedbackStatus,
     OutcomeObservationStatus,
     OutcomeReflectionStatus,
@@ -76,7 +77,22 @@ class RunBatchResult(ApiModel):
 
 
 class OutcomeFeedbackRetireRequest(ApiModel):
-    reason: str = Field(min_length=1, max_length=500)
+    reason: OutcomeFeedbackRetirementReason
+    note: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("note")
+    @classmethod
+    def normalize_note(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
+
+
+class OutcomeFeedbackRetireResponse(ApiModel):
+    status: Literal["retired"]
+    retirement_reason: OutcomeFeedbackRetirementReason | None
+    retirement_note: str | None
+    retired_at: datetime | None
 
 
 class ExportQuery(ApiModel):
@@ -269,6 +285,8 @@ class OutcomeFeedbackView(ApiModel):
             "Latest availability time of the Observation data, Reflection, and qualification."
         )
     )
+    retirement_reason: OutcomeFeedbackRetirementReason | None
+    retirement_note: str | None
     retired_at: datetime | None
 
 

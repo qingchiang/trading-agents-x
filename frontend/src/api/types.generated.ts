@@ -382,8 +382,16 @@ export interface components {
       scope: "instrument" | "market";
     };
     OutcomeFeedbackRetireRequest: {
-      reason: string;
+      note?: string | null;
+      reason: components["schemas"]["OutcomeFeedbackRetirementReason"];
     };
+    OutcomeFeedbackRetireResponse: {
+      retired_at: string | null;
+      retirement_note: string | null;
+      retirement_reason: components["schemas"]["OutcomeFeedbackRetirementReason"] | null;
+      status: string;
+    };
+    OutcomeFeedbackRetirementReason: "not_useful" | "too_specific" | "misleading" | "other";
     OutcomeFeedbackStatus: "eligible" | "ineligible" | "retired";
     OutcomeFeedbackView: {
       applicability: components["schemas"]["OutcomeFeedbackApplicabilityView"];
@@ -395,6 +403,8 @@ export interface components {
       qualified_at: string;
       reasons: string[];
       retired_at: string | null;
+      retirement_note: string | null;
+      retirement_reason: components["schemas"]["OutcomeFeedbackRetirementReason"] | null;
       status: components["schemas"]["OutcomeFeedbackStatus"];
     };
     OutcomeObservationStatus: "pending" | "resolved";

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import { api, type ResearchReview } from "../api/client";
@@ -10,6 +10,7 @@ vi.mock("../api/client", () => ({
   api: {
     reviews: vi.fn(), reviewAuditDetail: vi.fn(), recentInstruments: vi.fn(),
     regenerateOutcomeReflection: vi.fn(),
+    retireOutcomeFeedback: vi.fn(),
   },
 }));
 
@@ -43,7 +44,7 @@ const review = {
   reflection: "Method lesson: Full generated reflection.",
   method_feedback: "Full generated reflection.",
   outcome_reflection: { status: "generated", created_at: "2026-08-01T20:00:00Z", generated_at: "2026-08-01T20:01:00Z", last_attempted_at: "2026-08-01T20:01:00Z", next_retry_at: null, error_code: null },
-  outcome_feedback: { id: 11, status: "eligible", qualification_policy_version: "outcome_feedback_qualification.v1", reasons: [], method_category: "short_term_relative_return", horizon_limit: "Full horizon limitation.", applicability: { schema_version: "1", scope: "instrument", instrument: "7203.T", market: "Asia/Tokyo", research_stages: [], research_domains: [], method_category: "short_term_relative_return", horizon: "short_term" }, qualified_at: "2026-08-01T20:02:00Z", available_at: "2026-08-01T20:02:00Z", retired_at: null },
+  outcome_feedback: { id: 11, status: "eligible", qualification_policy_version: "outcome_feedback_qualification.v1", reasons: [], method_category: "short_term_relative_return", horizon_limit: "Full horizon limitation.", applicability: { schema_version: "1", scope: "instrument", instrument: "7203.T", market: "Asia/Tokyo", research_stages: [], research_domains: [], method_category: "short_term_relative_return", horizon: "short_term" }, qualified_at: "2026-08-01T20:02:00Z", available_at: "2026-08-01T20:02:00Z", retirement_reason: null, retirement_note: null, retired_at: null },
 } as ResearchReview;
 
 beforeEach(async () => {
@@ -74,6 +75,12 @@ beforeEach(async () => {
       trigger: "user_regeneration", retry_ordinal: 0,
       queued_at: "2026-08-05T00:00:00Z", due_at: "2026-08-05T00:00:00Z",
     },
+  });
+  vi.mocked(api.retireOutcomeFeedback).mockResolvedValue({
+    status: "retired",
+    retirement_reason: "not_useful",
+    retirement_note: null,
+    retired_at: "2026-08-12T00:00:00Z",
   });
   vi.mocked(api.recentInstruments).mockResolvedValue([]);
 });
@@ -149,4 +156,68 @@ test("queues one regeneration in the Reflection failure section", async () => {
   fireEvent.click(await screen.findByRole("button", { name: "Regenerate Method Reflection" }));
   await waitFor(() => expect(api.regenerateOutcomeReflection).toHaveBeenCalledWith(7, expect.any(String)));
   expect(await screen.findByText("Reflection regeneration is queued.")).toBeVisible();
+});
+
+test("confirms a typed, auditable Feedback retirement outside its prose", async () => {
+  const retired = {
+    ...review,
+    review_status: "feedback_retired" as const,
+    method_feedback: null,
+    outcome_feedback: {
+      ...review.outcome_feedback!,
+      status: "retired" as const,
+      retirement_reason: "misleading" as const,
+      retirement_note: "It overstates a one-off result.",
+      retired_at: "2026-08-12T00:00:00Z",
+    },
+  };
+  vi.mocked(api.reviews).mockResolvedValueOnce([review]).mockResolvedValueOnce([retired]);
+  renderReviews();
+
+  fireEvent.click(await screen.findByRole("button", { name: "Retire Feedback" }));
+  const dialog = screen.getByRole("dialog", { name: "Retire Method Feedback" });
+  expect(within(dialog).getByText(/irreversible/)).toBeVisible();
+  expect(within(dialog).getByText(/does not disable future settlement/)).toBeVisible();
+  fireEvent.change(within(dialog).getByLabelText("Reason"), {
+    target: { value: "misleading" },
+  });
+  fireEvent.change(within(dialog).getByLabelText("Optional note"), {
+    target: { value: "It overstates a one-off result." },
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Retire Feedback" }));
+
+  await waitFor(() => expect(api.retireOutcomeFeedback).toHaveBeenCalledWith(11, {
+    reason: "misleading",
+    note: "It overstates a one-off result.",
+  }));
+  expect(await screen.findByRole("status")).toHaveTextContent("Method Feedback retired.");
+  expect(screen.getByText("Method Feedback has been retired.")).toBeVisible();
+});
+
+test("allows cancellation and keeps retirement errors with the confirmation", async () => {
+  vi.mocked(api.retireOutcomeFeedback).mockRejectedValueOnce(new Error("not eligible"));
+  renderReviews();
+
+  fireEvent.click(await screen.findByRole("button", { name: "Retire Feedback" }));
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(api.retireOutcomeFeedback).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole("button", { name: "Retire Feedback" }));
+  const dialog = screen.getByRole("dialog", { name: "Retire Method Feedback" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Retire Feedback" }));
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent("not eligible");
+  expect(screen.getByRole("dialog", { name: "Retire Method Feedback" })).toBeVisible();
+});
+
+test("localizes Feedback retirement reasons and confirmation in every supported language", async () => {
+  for (const [language, reason] of [
+    ["en", "Misleading"],
+    ["zh-CN", "具有误导性"],
+    ["ja", "誤解を招く"],
+  ] as const) {
+    await i18n.changeLanguage(language);
+    expect(i18n.t("retirementReasonOptions.misleading")).toBe(reason);
+    expect(i18n.t("retirementConfirmation")).not.toContain("retirementConfirmation");
+  }
+  await i18n.changeLanguage("en");
 });

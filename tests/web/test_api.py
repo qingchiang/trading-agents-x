@@ -24,6 +24,8 @@ from tradingagents.application.contracts import (
     RunStatus,
 )
 from tradingagents.application.repository import (
+    OutcomeFeedbackRetirementConflictError,
+    OutcomeFeedbackRetirementNotFoundError,
     OutcomeReflectionRegenerationConflictError,
     OutcomeReflectionRegenerationNotFoundError,
 )
@@ -665,7 +667,13 @@ async def test_review_lifecycle_actions_delegate_without_exposing_errors(
     monkeypatch.setattr(
         web_repository,
         "retire_outcome_feedback",
-        lambda feedback_id, *, reason: retired.append((feedback_id, reason)),
+        lambda feedback_id, *, reason, note: retired.append((feedback_id, reason, note))
+        or {
+            "status": "retired",
+            "retirement_reason": reason,
+            "retirement_note": note,
+            "retired_at": "2026-08-12T00:00:00Z",
+        },
     )
 
     retry_response = await web_client.post(
@@ -673,13 +681,89 @@ async def test_review_lifecycle_actions_delegate_without_exposing_errors(
     )
     retire_response = await web_client.post(
         "/api/v1/outcome-feedback/11/retire",
-        json={"reason": "Superseded methodology"},
+        json={"reason": "misleading", "note": "It overstates the result."},
     )
 
     assert retry_response.json() == {"status": "pending"}
-    assert retire_response.json() == {"status": "retired"}
+    assert retire_response.json() == {
+        "status": "retired",
+        "retirement_reason": "misleading",
+        "retirement_note": "It overstates the result.",
+        "retired_at": "2026-08-12T00:00:00Z",
+    }
     assert retried == [7]
-    assert retired == [(11, "Superseded methodology")]
+    assert retired == [(11, "misleading", "It overstates the result.")]
+
+
+@pytest.mark.anyio
+async def test_feedback_retirement_api_validates_typed_requests_and_transitions(
+    web_client: httpx.AsyncClient,
+    web_repository,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        web_repository,
+        "retire_outcome_feedback",
+        lambda _id, *, reason, note: {
+            "status": "retired",
+            "retirement_reason": reason,
+            "retirement_note": note,
+            "retired_at": "2026-08-12T00:00:00Z",
+        },
+    )
+    invalid_reason = await web_client.post(
+        "/api/v1/outcome-feedback/11/retire",
+        json={"reason": "retired_by_user"},
+    )
+    overlong_note = await web_client.post(
+        "/api/v1/outcome-feedback/11/retire",
+        json={"reason": "other", "note": "x" * 1001},
+    )
+    retired = await web_client.post(
+        "/api/v1/outcome-feedback/11/retire",
+        json={"reason": "other", "note": "  kept for audit  "},
+    )
+
+    assert invalid_reason.status_code == 422
+    assert overlong_note.status_code == 422
+    assert retired.status_code == 200
+    assert retired.json() == {
+        "status": "retired",
+        "retirement_reason": "other",
+        "retirement_note": "kept for audit",
+        "retired_at": "2026-08-12T00:00:00Z",
+    }
+
+    monkeypatch.setattr(
+        web_repository,
+        "retire_outcome_feedback",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            OutcomeFeedbackRetirementNotFoundError("11")
+        ),
+    )
+    missing = await web_client.post(
+        "/api/v1/outcome-feedback/11/retire",
+        json={"reason": "not_useful"},
+    )
+    assert missing.status_code == 404
+    assert missing.json()["detail"]["code"] == "outcome_feedback_not_found"
+
+    monkeypatch.setattr(
+        web_repository,
+        "retire_outcome_feedback",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            OutcomeFeedbackRetirementConflictError("not eligible")
+        ),
+    )
+    conflict = await web_client.post(
+        "/api/v1/outcome-feedback/11/retire",
+        json={"reason": "not_useful"},
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"] == {
+        "code": "outcome_feedback_retirement_conflict",
+        "message": "not eligible",
+    }
 
 
 @pytest.mark.anyio
@@ -757,13 +841,15 @@ async def test_inconsistent_review_rejects_lifecycle_actions(
     monkeypatch.setattr(
         web_repository,
         "retire_outcome_feedback",
-        lambda _id, *, reason: False,
+        lambda _id, *, reason, note: (_ for _ in ()).throw(
+            OutcomeFeedbackRetirementConflictError("Review lifecycle is inconsistent")
+        ),
     )
 
     retry = await web_client.post("/api/v1/outcome-observations/7/reflection/retry")
     retire = await web_client.post(
         "/api/v1/outcome-feedback/11/retire",
-        json={"reason": "retired_by_user"},
+        json={"reason": "not_useful"},
     )
 
     assert retry.status_code == 409

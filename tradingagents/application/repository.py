@@ -80,6 +80,7 @@ from .outcome_feedback import (
     PRICE_SEMANTICS,
     FeedbackSource,
     ObservationQualificationInput,
+    OutcomeFeedbackRetirementReason,
     OutcomeFeedbackStatus,
     OutcomeObservationStatus,
     OutcomeReflectionStatus,
@@ -240,6 +241,14 @@ class OutcomeReflectionRegenerationConflictError(RuntimeError):
     def __init__(self, message: str, *, active_cycle_id: str | None = None):
         super().__init__(message)
         self.active_cycle_id = active_cycle_id
+
+
+class OutcomeFeedbackRetirementNotFoundError(LookupError):
+    pass
+
+
+class OutcomeFeedbackRetirementConflictError(RuntimeError):
+    pass
 
 
 class RunRepository:
@@ -2400,9 +2409,15 @@ class RunRepository:
             return False
         return True
 
-    def retire_outcome_feedback(self, feedback_id: int, *, reason: str) -> bool:
-        now = _utc_naive()
+    def retire_outcome_feedback(
+        self,
+        feedback_id: int,
+        *,
+        reason: OutcomeFeedbackRetirementReason,
+        note: str | None,
+    ) -> dict[str, Any]:
         with self.sessions.begin() as session:
+            session.connection().exec_driver_sql("BEGIN IMMEDIATE")
             row = session.execute(
                 select(OutcomeRecord, ReflectionRecord, OutcomeFeedbackRecord)
                 .join(ReflectionRecord, ReflectionRecord.outcome_id == OutcomeRecord.id)
@@ -2413,7 +2428,7 @@ class RunRepository:
                 .where(OutcomeFeedbackRecord.id == feedback_id)
             ).first()
             if row is None:
-                return True
+                raise OutcomeFeedbackRetirementNotFoundError(str(feedback_id))
             outcome, reflection, feedback = row
             if (
                 derive_review_status(
@@ -2425,13 +2440,32 @@ class RunRepository:
                 )
                 == "lifecycle_inconsistent"
             ):
-                return False
+                raise OutcomeFeedbackRetirementConflictError(
+                    "Review lifecycle is inconsistent"
+                )
+            if feedback.status == OutcomeFeedbackStatus.RETIRED.value:
+                return self._outcome_feedback_retirement_view(feedback)
             if feedback.status != OutcomeFeedbackStatus.ELIGIBLE.value:
-                return True
+                raise OutcomeFeedbackRetirementConflictError(
+                    "Outcome Feedback is not eligible for retirement"
+                )
             feedback.status = OutcomeFeedbackStatus.RETIRED.value
-            feedback.reasons_json = [*feedback.reasons_json, _sanitize_text(reason) or "retired"]
-            feedback.retired_at = now
-            return True
+            feedback.retirement_reason = reason.value
+            feedback.retirement_note = note
+            feedback.retired_at = _utc_naive()
+            session.flush()
+            return self._outcome_feedback_retirement_view(feedback)
+
+    @staticmethod
+    def _outcome_feedback_retirement_view(
+        feedback: OutcomeFeedbackRecord,
+    ) -> dict[str, Any]:
+        return {
+            "status": feedback.status,
+            "retirement_reason": feedback.retirement_reason,
+            "retirement_note": feedback.retirement_note,
+            "retired_at": _aware(feedback.retired_at),
+        }
 
     def memory_context(
         self,
@@ -2744,6 +2778,8 @@ class RunRepository:
                             "applicability": feedback.applicability_json,
                             "qualified_at": _aware(feedback.qualified_at),
                             "available_at": _aware(feedback.available_at),
+                            "retirement_reason": feedback.retirement_reason,
+                            "retirement_note": feedback.retirement_note,
                             "retired_at": _aware(feedback.retired_at),
                         }
                         if feedback

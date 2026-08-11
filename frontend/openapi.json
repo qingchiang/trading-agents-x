@@ -2765,11 +2765,20 @@
       "OutcomeFeedbackRetireRequest": {
         "additionalProperties": false,
         "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
           "reason": {
-            "maxLength": 500,
-            "minLength": 1,
-            "title": "Reason",
-            "type": "string"
+            "$ref": "#/components/schemas/OutcomeFeedbackRetirementReason"
           }
         },
         "required": [
@@ -2777,6 +2786,67 @@
         ],
         "title": "OutcomeFeedbackRetireRequest",
         "type": "object"
+      },
+      "OutcomeFeedbackRetireResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "retired_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retired At"
+          },
+          "retirement_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retirement Note"
+          },
+          "retirement_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OutcomeFeedbackRetirementReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "const": "retired",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "retirement_reason",
+          "retirement_note",
+          "retired_at"
+        ],
+        "title": "OutcomeFeedbackRetireResponse",
+        "type": "object"
+      },
+      "OutcomeFeedbackRetirementReason": {
+        "enum": [
+          "not_useful",
+          "too_specific",
+          "misleading",
+          "other"
+        ],
+        "title": "OutcomeFeedbackRetirementReason",
+        "type": "string"
       },
       "OutcomeFeedbackStatus": {
         "enum": [
@@ -2847,6 +2917,27 @@
             ],
             "title": "Retired At"
           },
+          "retirement_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retirement Note"
+          },
+          "retirement_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OutcomeFeedbackRetirementReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "status": {
             "$ref": "#/components/schemas/OutcomeFeedbackStatus"
           }
@@ -2861,6 +2952,8 @@
           "applicability",
           "qualified_at",
           "available_at",
+          "retirement_reason",
+          "retirement_note",
           "retired_at"
         ],
         "title": "OutcomeFeedbackView",
@@ -8476,7 +8569,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/OutcomeFeedbackRetireResponse"
+                }
               }
             },
             "description": "Successful Response"

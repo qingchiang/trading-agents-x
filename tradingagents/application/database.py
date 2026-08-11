@@ -421,6 +421,8 @@ class OutcomeFeedbackRecord(Base):
     applicability_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     qualified_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     available_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    retirement_reason: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    retirement_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     retired_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 

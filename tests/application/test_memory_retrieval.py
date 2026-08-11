@@ -23,7 +23,10 @@ from tradingagents.application.database import (
     ReflectionGenerationCycleRecord,
     ReflectionRecord,
 )
+from tradingagents.application.outcome_feedback import OutcomeFeedbackRetirementReason
 from tradingagents.application.repository import (
+    OutcomeFeedbackRetirementConflictError,
+    OutcomeFeedbackRetirementNotFoundError,
     OutcomeReflectionRegenerationConflictError,
     RunRepository,
 )
@@ -109,6 +112,112 @@ def _seed_memory(
             reflection=reflection,
         )
     return run.id
+
+
+def _feedback_for_run(repository: RunRepository, run_id: str) -> tuple[int, int]:
+    with repository.sessions() as session:
+        outcome = session.scalar(
+            select(OutcomeRecord)
+            .join(DecisionRecord)
+            .where(DecisionRecord.run_id == run_id)
+        )
+        assert outcome is not None
+        reflection = session.scalar(
+            select(ReflectionRecord).where(ReflectionRecord.outcome_id == outcome.id)
+        )
+        assert reflection is not None
+        feedback = session.scalar(
+            select(OutcomeFeedbackRecord).where(
+                OutcomeFeedbackRecord.reflection_id == reflection.id
+            )
+        )
+        assert feedback is not None
+        return outcome.id, feedback.id
+
+
+def test_retire_eligible_feedback_is_auditable_and_idempotent(
+    repository: RunRepository,
+) -> None:
+    run_id = _seed_memory(
+        repository,
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 24),
+        reflection="Method lesson: Compare the method limits before reuse.",
+        thesis="Fixture thesis for Feedback retirement.",
+    )
+    outcome_id, feedback_id = _feedback_for_run(repository, run_id)
+    with repository.sessions.begin() as session:
+        feedback = session.get(OutcomeFeedbackRecord, feedback_id)
+        assert feedback is not None
+        feedback.status = "eligible"
+        feedback.reasons_json = []
+
+    retired = repository.retire_outcome_feedback(
+        feedback_id,
+        reason=OutcomeFeedbackRetirementReason.MISLEADING,
+        note="It generalizes a one-off result.",
+    )
+    repeated = repository.retire_outcome_feedback(
+        feedback_id,
+        reason=OutcomeFeedbackRetirementReason.NOT_USEFUL,
+        note="A retry must retain the original audit record.",
+    )
+
+    assert repeated == retired
+    assert retired["status"] == "retired"
+    assert retired["retirement_reason"] == "misleading"
+    assert retired["retirement_note"] == "It generalizes a one-off result."
+    review = repository.review_entries(outcome_id=outcome_id)[0]
+    assert review["review_status"] == "feedback_retired"
+    feedback_view = review["outcome_feedback"]
+    assert feedback_view is not None
+    assert feedback_view["status"] == "retired"
+    assert feedback_view["retirement_reason"] == "misleading"
+    assert feedback_view["retirement_note"] == "It generalizes a one-off result."
+    assert feedback_view["reasons"] == []
+
+
+def test_retire_feedback_rejects_missing_ineligible_and_inconsistent_lifecycles(
+    repository: RunRepository,
+) -> None:
+    with pytest.raises(OutcomeFeedbackRetirementNotFoundError):
+        repository.retire_outcome_feedback(
+            999,
+            reason=OutcomeFeedbackRetirementReason.NOT_USEFUL,
+            note=None,
+        )
+
+    run_id = _seed_memory(
+        repository,
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 24),
+        reflection="Method lesson: Use a different market window.",
+        thesis="Fixture thesis for forbidden Feedback retirement.",
+    )
+    _outcome_id, feedback_id = _feedback_for_run(repository, run_id)
+    with repository.sessions.begin() as session:
+        feedback = session.get(OutcomeFeedbackRecord, feedback_id)
+        assert feedback is not None
+        feedback.status = "ineligible"
+    with pytest.raises(OutcomeFeedbackRetirementConflictError):
+        repository.retire_outcome_feedback(
+            feedback_id,
+            reason=OutcomeFeedbackRetirementReason.TOO_SPECIFIC,
+            note=None,
+        )
+
+    with repository.sessions.begin() as session:
+        feedback = session.get(OutcomeFeedbackRecord, feedback_id)
+        reflection = session.get(ReflectionRecord, feedback.reflection_id) if feedback else None
+        assert feedback is not None and reflection is not None
+        feedback.status = "eligible"
+        reflection.status = "invalid"
+    with pytest.raises(OutcomeFeedbackRetirementConflictError):
+        repository.retire_outcome_feedback(
+            feedback_id,
+            reason=OutcomeFeedbackRetirementReason.OTHER,
+            note=None,
+        )
 
 
 def test_reflection_regeneration_is_idempotent_and_auto_retries_are_bounded(

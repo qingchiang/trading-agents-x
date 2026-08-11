@@ -48,6 +48,8 @@ from tradingagents.application.repository import (
     IdempotencyConflictError,
     InvalidResearchBaselineError,
     InvalidRunTransitionError,
+    OutcomeFeedbackRetirementConflictError,
+    OutcomeFeedbackRetirementNotFoundError,
     OutcomeReflectionRegenerationConflictError,
     OutcomeReflectionRegenerationNotFoundError,
     ResearchChainNotFoundError,
@@ -73,6 +75,7 @@ from .models import (
     HealthResponse,
     LoginRequest,
     OutcomeFeedbackRetireRequest,
+    OutcomeFeedbackRetireResponse,
     ProviderModelCatalog,
     ReflectionRegenerationAccepted,
     ResearchChainUpdateRequest,
@@ -588,14 +591,33 @@ def create_app(
             raise HTTPException(status_code=409, detail="Review lifecycle is inconsistent")
         return {"status": "pending"}
 
-    @app.post(f"{API_PREFIX}/outcome-feedback/{{feedback_id}}/retire")
+    @app.post(
+        f"{API_PREFIX}/outcome-feedback/{{feedback_id}}/retire",
+        response_model=OutcomeFeedbackRetireResponse,
+    )
     def retire_outcome_feedback(
         feedback_id: int,
         payload: OutcomeFeedbackRetireRequest,
     ):
-        if repository.retire_outcome_feedback(feedback_id, reason=payload.reason) is False:
-            raise HTTPException(status_code=409, detail="Review lifecycle is inconsistent")
-        return {"status": "retired"}
+        try:
+            return repository.retire_outcome_feedback(
+                feedback_id,
+                reason=payload.reason,
+                note=payload.note,
+            )
+        except OutcomeFeedbackRetirementNotFoundError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "outcome_feedback_not_found", "message": str(exc)},
+            ) from None
+        except OutcomeFeedbackRetirementConflictError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "outcome_feedback_retirement_conflict",
+                    "message": str(exc),
+                },
+            ) from None
 
     @app.get(
         f"{API_PREFIX}/capabilities",

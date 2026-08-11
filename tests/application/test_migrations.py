@@ -87,7 +87,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     finally:
         engine.dispose()
 
-    assert revision == "0012_operate_reflection_cycles"
+    assert revision == "0013_retire_qualified_feedback"
     assert {
         "id",
         "run_id",
@@ -169,6 +169,8 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
         "applicability_json",
         "qualified_at",
         "available_at",
+        "retirement_reason",
+        "retirement_note",
         "retired_at",
     }.issubset(feedback_columns)
     assert {
