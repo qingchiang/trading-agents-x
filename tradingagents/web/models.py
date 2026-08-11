@@ -23,6 +23,19 @@ from tradingagents.application.outcome_feedback import (
     OutcomeReflectionStatus,
 )
 
+ResearchReviewStatus = Literal[
+    "awaiting_observation",
+    "observation_delayed",
+    "awaiting_reflection",
+    "reflection_retry_scheduled",
+    "reflection_failed",
+    "reflection_invalid",
+    "feedback_available",
+    "feedback_ineligible",
+    "feedback_retired",
+    "lifecycle_inconsistent",
+]
+
 
 class ApiModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -90,6 +103,7 @@ class OutcomeFeedbackRetireRequest(ApiModel):
 
 class OutcomeFeedbackRetireResponse(ApiModel):
     status: Literal["retired"]
+    review_status: Literal["feedback_retired"]
     retirement_reason: OutcomeFeedbackRetirementReason | None
     retirement_note: str | None
     retired_at: datetime | None
@@ -218,6 +232,8 @@ class ReflectionGenerationCycleView(ApiModel):
 
 class ReflectionRegenerationAccepted(ApiModel):
     cycle: ReflectionGenerationCycleView
+    review_status: ResearchReviewStatus
+    reflection_status: OutcomeReflectionStatus | None
 
 
 class ReflectionAttemptUsageView(ApiModel):
@@ -242,7 +258,8 @@ class ReflectionAttemptView(ApiModel):
     started_at: datetime
     finished_at: datetime | None
     outcome: str | None
-    schema_version: str | None
+    attempt_schema_version: Literal["outcome_reflection_attempt.v1"]
+    candidate_schema_version: str | None
     diagnostics: dict[str, str] | None
     usage: ReflectionAttemptUsageView
     invalid_candidate: str | None
@@ -292,18 +309,7 @@ class OutcomeFeedbackView(ApiModel):
 
 class ResearchReview(ApiModel):
     outcome_id: int
-    review_status: Literal[
-        "awaiting_observation",
-        "observation_delayed",
-        "awaiting_reflection",
-        "reflection_retry_scheduled",
-        "reflection_failed",
-        "reflection_invalid",
-        "feedback_available",
-        "feedback_ineligible",
-        "feedback_retired",
-        "lifecycle_inconsistent",
-    ]
+    review_status: ResearchReviewStatus
     lifecycle_actions_allowed: bool
     run_id: str
     ticker: str

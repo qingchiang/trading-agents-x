@@ -196,7 +196,7 @@ instead of parsing an exact marker from free text. Its required bounded fields
 are:
 
 - `directional_assessment`
-- `decision_evidence_lesson`
+- `source_decision_evidence_lesson`
 - `method_lesson`
 
 The application, not the model, owns the fixed short-horizon limitation. The
@@ -204,8 +204,10 @@ model is not asked to self-certify compliance with a boolean field. One bounded
 repair is allowed after an invalid initial candidate; a still-invalid repair
 ends the generation cycle as invalid.
 
-The structured contract is versioned as `outcome_reflection.v1`. Its immutable
-Attempt records use `outcome_reflection_attempt.v1`. Observation remains
+The structured candidate contract is versioned as `outcome_reflection.v1`. Its
+immutable Attempt envelope independently uses `outcome_reflection_attempt.v1`;
+audit responses expose these as candidate and Attempt schema versions rather
+than conflating them. Observation remains
 `short_term_relative_return.v1`. Because qualification now consumes a typed
 lesson rather than extracting an exact free-text marker, newly generated
 Feedback uses `outcome_feedback_qualification.v2`. Existing v1 and legacy
@@ -240,7 +242,9 @@ without losing the per-Attempt breakdown.
 Usage has an explicit `reported`, `not_reported`, or `legacy_unknown` status.
 Unknown token values are null, not zero. Zero is valid only when explicitly
 reported. The Attempt kind may establish that an LLM call occurred even when
-the provider supplied no token metadata.
+the provider supplied no token metadata. An aggregate metric is null when any
+included Attempt lacks that metric; the UI never presents a partial sum as a
+complete total.
 
 ### Generation cycles and retry budget
 
@@ -279,6 +283,11 @@ cycle identifier. A missing Outcome receives `404`; an unresolved Observation
 receives `409`. The legacy retry endpoint remains as a deprecated compatibility
 surface for one release cycle.
 
+Lifecycle mutation responses carry the resulting backend-derived Review and
+resource statuses needed to update the affected card. The client applies those
+authoritative fields rather than re-deriving status. Any loaded or in-flight
+audit detail is invalidated and refreshed before being shown again.
+
 ### Feedback retirement API
 
 Only eligible Feedback may transition irreversibly to retired. Retirement
@@ -313,6 +322,9 @@ Existing Reflection rows are represented honestly:
 - generated rows receive `legacy_unstructured_generated` Attempts;
 - invalid rows receive `legacy_invalid_reason_unknown` Attempts;
 - retryable failures preserve their existing sanitized error code;
+- retryable failures with a legacy `next_retry_at` receive a queued automatic
+  generation cycle at that due time so the preserved schedule remains
+  claimable after upgrade;
 - pending rows with no known model call receive no Attempt.
 
 Missing candidates, validation issues, and usage remain null with

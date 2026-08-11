@@ -153,6 +153,8 @@ class OutcomeSettlement:
                     terminal_invalid=False,
                     validation_issues=list(exc.validation_issues),
                     usage=exc.usage,
+                    invalid_candidate_digest=exc.candidate_digest,
+                    invalid_candidate_length=exc.candidate_length,
                 )
                 try:
                     repair_ids = self.repository.start_outcome_reflection_repair_attempt(
@@ -187,6 +189,8 @@ class OutcomeSettlement:
                         wall_time_seconds=monotonic() - repair_started,
                         validation_issues=list(repair_error.validation_issues),
                         usage=repair_error.usage,
+                        invalid_candidate_digest=repair_error.candidate_digest,
+                        invalid_candidate_length=repair_error.candidate_length,
                     )
                     stats["failed"] += 1
                 except Exception as repair_exception:

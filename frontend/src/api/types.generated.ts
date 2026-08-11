@@ -389,6 +389,7 @@ export interface components {
       retired_at: string | null;
       retirement_note: string | null;
       retirement_reason: components["schemas"]["OutcomeFeedbackRetirementReason"] | null;
+      review_status: string;
       status: string;
     };
     OutcomeFeedbackRetirementReason: "not_useful" | "too_specific" | "misleading" | "other";
@@ -518,6 +519,8 @@ export interface components {
     };
     ReflectionAttemptView: {
       attempt_kind: string;
+      attempt_schema_version: string;
+      candidate_schema_version: string | null;
       diagnostics: Record<string, string> | null;
       finished_at: string | null;
       generation_cycle_id: string;
@@ -527,7 +530,6 @@ export interface components {
       invalid_candidate_length: number | null;
       origin: string;
       outcome: string | null;
-      schema_version: string | null;
       sequence: number;
       started_at: string;
       trigger: string;
@@ -546,6 +548,8 @@ export interface components {
     };
     ReflectionRegenerationAccepted: {
       cycle: components["schemas"]["ReflectionGenerationCycleView"];
+      reflection_status: components["schemas"]["OutcomeReflectionStatus"] | null;
+      review_status: "awaiting_observation" | "observation_delayed" | "awaiting_reflection" | "reflection_retry_scheduled" | "reflection_failed" | "reflection_invalid" | "feedback_available" | "feedback_ineligible" | "feedback_retired" | "lifecycle_inconsistent";
     };
     ReflectionUsageAggregateView: {
       attempt_count: number;

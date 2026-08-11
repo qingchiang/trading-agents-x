@@ -1907,8 +1907,8 @@ class RunRepository:
                 reflection_id=reflection.id,
                 generation_cycle_id=cycle.id,
                 sequence=sequence,
-                trigger=trigger,
-                origin=origin,
+                trigger=cycle.trigger,
+                origin=cycle.origin,
                 attempt_kind=attempt_kind,
                 started_at=started,
                 usage_status="not_reported",
@@ -1979,6 +1979,8 @@ class RunRepository:
         result: str,
         diagnostics: dict[str, str] | None = None,
         invalid_candidate: str | None = None,
+        invalid_candidate_digest: str | None = None,
+        invalid_candidate_length: int | None = None,
         validation_issues: list[str] | None = None,
         wall_time_seconds: float | None = None,
         schema_version: str = "outcome_reflection_legacy_unstructured.v1",
@@ -2029,9 +2031,13 @@ class RunRepository:
             if cycle is None:
                 raise ValueError("Reflection generation cycle is missing")
         candidate, digest, length = _invalid_candidate_audit(invalid_candidate)
+        if invalid_candidate_digest is not None:
+            digest = invalid_candidate_digest
+        if invalid_candidate_length is not None:
+            length = invalid_candidate_length
         attempt.finished_at = finished_at
         attempt.outcome = result
-        attempt.schema_version = schema_version
+        attempt.candidate_schema_version = schema_version
         attempt.diagnostics_json = diagnostics
         attempt.wall_time_seconds = wall_time_seconds
         attempt.invalid_candidate = candidate
@@ -2144,6 +2150,8 @@ class RunRepository:
         terminal_invalid: bool = True,
         validation_issues: list[str] | None = None,
         usage: dict[str, int | float | None] | None = None,
+        invalid_candidate_digest: str | None = None,
+        invalid_candidate_length: int | None = None,
     ) -> str | None:
         generated = generated_at
         if generated.tzinfo is not None:
@@ -2193,6 +2201,8 @@ class RunRepository:
                     attempt_ids=attempt_ids,
                     result="invalid",
                     invalid_candidate=raw_candidate,
+                    invalid_candidate_digest=invalid_candidate_digest,
+                    invalid_candidate_length=invalid_candidate_length,
                     validation_issues=list(dict.fromkeys(structural_issues)),
                     wall_time_seconds=wall_time_seconds,
                     schema_version=OUTCOME_REFLECTION_SCHEMA_VERSION,
@@ -2303,14 +2313,6 @@ class RunRepository:
             queued = queued.astimezone(timezone.utc).replace(tzinfo=None)
         with self.sessions.begin() as session:
             session.connection().exec_driver_sql("BEGIN IMMEDIATE")
-            existing_key = session.scalar(
-                select(ReflectionGenerationCycleRecord).where(
-                    ReflectionGenerationCycleRecord.outcome_id == outcome_id,
-                    ReflectionGenerationCycleRecord.idempotency_key == key,
-                )
-            )
-            if existing_key is not None:
-                return self._generation_cycle_view(existing_key)
             row = session.execute(
                 select(OutcomeRecord, ReflectionRecord, OutcomeFeedbackRecord)
                 .outerjoin(
@@ -2332,6 +2334,18 @@ class RunRepository:
                 reflection_next_retry_at=reflection.next_retry_at if reflection else None,
                 feedback_status=feedback.status if feedback else None,
             )
+            existing_key = session.scalar(
+                select(ReflectionGenerationCycleRecord).where(
+                    ReflectionGenerationCycleRecord.outcome_id == outcome_id,
+                    ReflectionGenerationCycleRecord.idempotency_key == key,
+                )
+            )
+            if existing_key is not None:
+                return {
+                    "cycle": self._generation_cycle_view(existing_key),
+                    "review_status": review_status,
+                    "reflection_status": reflection.status if reflection else None,
+                }
             if review_status == "lifecycle_inconsistent":
                 raise OutcomeReflectionRegenerationConflictError(
                     "Review lifecycle is inconsistent"
@@ -2381,7 +2395,17 @@ class RunRepository:
             reflection.error_code = None
             reflection.current_generation_cycle_id = cycle.id
             session.flush()
-            return self._generation_cycle_view(cycle)
+            return {
+                "cycle": self._generation_cycle_view(cycle),
+                "review_status": derive_review_status(
+                    outcome_status=outcome.status,
+                    outcome_error=outcome.error_message,
+                    reflection_status=reflection.status,
+                    reflection_next_retry_at=reflection.next_retry_at,
+                    feedback_status=feedback.status if feedback else None,
+                ),
+                "reflection_status": reflection.status,
+            }
 
     @staticmethod
     def _generation_cycle_view(cycle: ReflectionGenerationCycleRecord) -> dict[str, Any]:
@@ -2444,7 +2468,16 @@ class RunRepository:
                     "Review lifecycle is inconsistent"
                 )
             if feedback.status == OutcomeFeedbackStatus.RETIRED.value:
-                return self._outcome_feedback_retirement_view(feedback)
+                return {
+                    **self._outcome_feedback_retirement_view(feedback),
+                    "review_status": derive_review_status(
+                        outcome_status=outcome.status,
+                        outcome_error=outcome.error_message,
+                        reflection_status=reflection.status,
+                        reflection_next_retry_at=reflection.next_retry_at,
+                        feedback_status=feedback.status,
+                    ),
+                }
             if feedback.status != OutcomeFeedbackStatus.ELIGIBLE.value:
                 raise OutcomeFeedbackRetirementConflictError(
                     "Outcome Feedback is not eligible for retirement"
@@ -2454,7 +2487,16 @@ class RunRepository:
             feedback.retirement_note = note
             feedback.retired_at = _utc_naive()
             session.flush()
-            return self._outcome_feedback_retirement_view(feedback)
+            return {
+                **self._outcome_feedback_retirement_view(feedback),
+                "review_status": derive_review_status(
+                    outcome_status=outcome.status,
+                    outcome_error=outcome.error_message,
+                    reflection_status=reflection.status,
+                    reflection_next_retry_at=reflection.next_retry_at,
+                    feedback_status=feedback.status,
+                ),
+            }
 
     @staticmethod
     def _outcome_feedback_retirement_view(
@@ -2572,6 +2614,8 @@ class RunRepository:
         status_group: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
+        bounded_limit = min(max(1, limit), 500)
+        filters_by_derived_status = status_group not in {None, "", "all"}
         stmt = (
             select(
                 DecisionRecord,
@@ -2597,8 +2641,9 @@ class RunRepository:
                 DecisionRecord.id.desc(),
             )
             .where(RunRecord.trashed_at.is_(None))
-            .limit(min(max(1, limit), 500))
         )
+        if not filters_by_derived_status:
+            stmt = stmt.limit(bounded_limit)
         if outcome_id is not None:
             stmt = stmt.where(OutcomeRecord.id == outcome_id)
         if ticker and (ticker_query := ticker.strip().casefold()):
@@ -2787,6 +2832,8 @@ class RunRepository:
                     ),
                 }
                 )
+                if filters_by_derived_status and len(reviews) >= bounded_limit:
+                    break
             return reviews
 
     def review_audit_detail(self, outcome_id: int) -> dict[str, Any] | None:
@@ -2831,17 +2878,20 @@ class RunRepository:
         )
         aggregate = {
             name: (
-                sum(value for attempt in attempts if (value := getattr(attempt, name)) is not None)
-                if any(getattr(attempt, name) is not None for attempt in attempts)
+                sum(getattr(attempt, name) for attempt in attempts)
+                if attempts
+                and all(getattr(attempt, name) is not None for attempt in attempts)
                 else None
             )
             for name in metric_names
         }
         usage_status = (
-            "reported"
-            if any(attempt.usage_status == "reported" for attempt in attempts)
-            else "legacy_unknown"
+            "legacy_unknown"
             if any(attempt.usage_status == "legacy_unknown" for attempt in attempts)
+            else "not_reported"
+            if any(attempt.usage_status == "not_reported" for attempt in attempts)
+            else "reported"
+            if attempts
             else "not_reported"
         )
         return {
@@ -2858,7 +2908,8 @@ class RunRepository:
                     "started_at": _aware(attempt.started_at),
                     "finished_at": _aware(attempt.finished_at),
                     "outcome": attempt.outcome,
-                    "schema_version": attempt.schema_version,
+                    "attempt_schema_version": attempt.attempt_schema_version,
+                    "candidate_schema_version": attempt.candidate_schema_version,
                     "diagnostics": attempt.diagnostics_json,
                     "usage": {name: getattr(attempt, name) for name in ("usage_status", *metric_names)},
                     "invalid_candidate": attempt.invalid_candidate,

@@ -87,7 +87,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     finally:
         engine.dispose()
 
-    assert revision == "0013_retire_qualified_feedback"
+    assert revision == "0014_research_review_audit_fixes"
     assert {
         "id",
         "run_id",
@@ -198,6 +198,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
         "finished_at",
         "outcome",
         "schema_version",
+        "attempt_schema_version",
         "diagnostics_json",
         "usage_status",
         "llm_calls",
@@ -265,8 +266,8 @@ def test_reflection_attempt_migration_backfills_honest_legacy_provenance(
                 connection.execute(
                     text(
                         "INSERT INTO reflections "
-                        "(outcome_id, status, text, created_at, generated_at, last_attempted_at, error_code) "
-                        "VALUES (:outcome_id, :status, :reflection, :now, :generated_at, :attempted_at, :error_code)"
+                        "(outcome_id, status, text, created_at, generated_at, last_attempted_at, next_retry_at, error_code) "
+                        "VALUES (:outcome_id, :status, :reflection, :now, :generated_at, :attempted_at, :next_retry_at, :error_code)"
                     ),
                     {
                         "outcome_id": outcome_id,
@@ -275,6 +276,7 @@ def test_reflection_attempt_migration_backfills_honest_legacy_provenance(
                         "now": now,
                         "generated_at": now if status == "generated" else None,
                         "attempted_at": now if status != "pending" else None,
+                        "next_retry_at": now if status == "retryable_failure" else None,
                         "error_code": "provider_timeout" if status == "retryable_failure" else None,
                     },
                 )
@@ -299,6 +301,17 @@ def test_reflection_attempt_migration_backfills_honest_legacy_provenance(
                     "ORDER BY reflections.id"
                 )
             ).all()
+            scheduled_retry = connection.execute(
+                text(
+                    "SELECT reflection_generation_cycles.status, "
+                    "reflection_generation_cycles.origin, "
+                    "reflection_generation_cycles.retry_ordinal, "
+                    "reflection_generation_cycles.due_at "
+                    "FROM reflections JOIN reflection_generation_cycles ON "
+                    "reflection_generation_cycles.id = reflections.current_generation_cycle_id "
+                    "WHERE reflections.status = 'retryable_failure'"
+                )
+            ).one()
     finally:
         engine.dispose()
 
@@ -325,7 +338,75 @@ def test_reflection_attempt_migration_backfills_honest_legacy_provenance(
         "legacy_unknown",
     )
     assert json.loads(rows[2][5]) == {"error_code": "provider_timeout"}
+    assert scheduled_retry[:3] == ("queued", "automatic", 1)
+    assert datetime.fromisoformat(scheduled_retry[3]) == now
     assert rows[3] == ("pending", None, None, None, None, None, None)
+
+    repository = RunRepository(app_settings)
+    retryable = repository.pending_outcomes(due_at=now)
+    scheduled = next(item for item in retryable if item["outcome_id"] == 3)
+    attempt_ids = repository.start_outcome_reflection_attempt(
+        scheduled["outcome_id"],
+        started_at=now,
+    )
+    assert attempt_ids is not None
+    with repository.sessions() as session:
+        attempt = session.execute(
+            text(
+                "SELECT reflection_attempts.origin, reflection_attempts.trigger, "
+                "reflection_generation_cycles.status "
+                "FROM reflection_attempts JOIN reflection_generation_cycles ON "
+                "reflection_generation_cycles.id = reflection_attempts.generation_cycle_id "
+                "WHERE reflection_attempts.id = :attempt_id"
+            ),
+            {"attempt_id": attempt_ids["attempt_id"]},
+        ).one()
+    assert attempt == ("automatic", "legacy_retry_schedule", "running")
+
+    command.downgrade(config, "0013_retire_qualified_feedback")
+    engine = create_sqlite_engine(app_settings.database_path)
+    try:
+        with engine.connect() as connection:
+            preserved = connection.execute(
+                text(
+                    "SELECT reflections.current_generation_cycle_id, "
+                    "reflection_generation_cycles.status, "
+                    "reflection_attempts.id FROM reflections "
+                    "JOIN reflection_generation_cycles ON "
+                    "reflection_generation_cycles.id = reflections.current_generation_cycle_id "
+                    "JOIN reflection_attempts ON reflection_attempts.generation_cycle_id = "
+                    "reflection_generation_cycles.id "
+                    "WHERE reflections.outcome_id = 3"
+                )
+            ).one()
+    finally:
+        engine.dispose()
+    assert preserved == ("legacy-retry-3", "running", attempt_ids["attempt_id"])
+
+    command.upgrade(config, "head")
+    engine = create_sqlite_engine(app_settings.database_path)
+    try:
+        with engine.connect() as connection:
+            restored = connection.execute(
+                text(
+                    "SELECT reflections.current_generation_cycle_id, "
+                    "reflection_generation_cycles.status, "
+                    "reflection_attempts.attempt_schema_version FROM reflections "
+                    "JOIN reflection_generation_cycles ON "
+                    "reflection_generation_cycles.id = reflections.current_generation_cycle_id "
+                    "JOIN reflection_attempts ON reflection_attempts.generation_cycle_id = "
+                    "reflection_generation_cycles.id "
+                    "WHERE reflections.outcome_id = 3 AND reflection_attempts.id = :attempt_id"
+                ),
+                {"attempt_id": attempt_ids["attempt_id"]},
+            ).one()
+    finally:
+        engine.dispose()
+    assert restored == (
+        "legacy-retry-3",
+        "running",
+        "outcome_reflection_attempt.v1",
+    )
 
 
 def test_revision_semantic_migration_does_not_invent_initial_change_conclusion(

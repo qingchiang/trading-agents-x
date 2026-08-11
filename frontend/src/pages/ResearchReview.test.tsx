@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 
-import { api, type ResearchReview } from "../api/client";
+import { api, type ResearchReview, type ResearchReviewAuditDetail } from "../api/client";
 import i18n from "../i18n";
 import { Router } from "../router";
 import ResearchReviewPage from "./ResearchReview";
@@ -75,9 +75,12 @@ beforeEach(async () => {
       trigger: "user_regeneration", retry_ordinal: 0,
       queued_at: "2026-08-05T00:00:00Z", due_at: "2026-08-05T00:00:00Z",
     },
+    review_status: "awaiting_reflection",
+    reflection_status: "pending",
   });
   vi.mocked(api.retireOutcomeFeedback).mockResolvedValue({
     status: "retired",
+    review_status: "feedback_retired",
     retirement_reason: "not_useful",
     retirement_note: null,
     retired_at: "2026-08-12T00:00:00Z",
@@ -89,6 +92,14 @@ function renderReviews() {
   return render(<Router><ResearchReviewPage /></Router>);
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 test("renders the source decision, observation, then qualified feedback", async () => {
   renderReviews();
   expect(await screen.findByRole("heading", { name: "Source Research Decision" })).toBeVisible();
@@ -98,6 +109,11 @@ test("renders the source decision, observation, then qualified feedback", async 
   expect(screen.getByText("Full generated reflection.")).toBeVisible();
   expect(screen.getByText("Five common trading intervals are short-term methodological feedback only.")).toBeVisible();
   expect(screen.queryByText("short_term_relative_return.v1")).toBeNull();
+  fireEvent.click(screen.getByText("Decision details"));
+  expect(screen.getByText("6-12 months")).toBeVisible();
+  expect(screen.getByText("base outcome")).toBeVisible();
+  expect(screen.getByText("bull outcome")).toBeVisible();
+  expect(screen.getByText("bear outcome")).toBeVisible();
   fireEvent.click(screen.getByText("Method Reflection and audit details"));
   await waitFor(() => expect(api.reviewAuditDetail).toHaveBeenCalledWith(7));
   expect(screen.getByText(/short_term_relative_return\.v1/)).toBeVisible();
@@ -125,6 +141,7 @@ test("does not present feedback for lifecycle-inconsistent data", async () => {
 });
 
 test("queues one regeneration in the Reflection failure section", async () => {
+  window.history.replaceState(null, "", "/reviews?status_group=needs_attention");
   const baseReflection = review.outcome_reflection!;
   const failed = {
     ...review,
@@ -138,28 +155,75 @@ test("queues one regeneration in the Reflection failure section", async () => {
     },
     outcome_feedback: null,
   };
-  const queued = {
-    ...failed,
-    review_status: "awaiting_reflection" as const,
-    outcome_reflection: {
-      ...failed.outcome_reflection,
-      status: "pending" as const,
-      generation_cycle: {
-        id: "cycle-1", outcome_id: 7, status: "queued" as const, origin: "manual" as const,
-        trigger: "user_regeneration", retry_ordinal: 0,
-        queued_at: "2026-08-05T00:00:00Z", due_at: "2026-08-05T00:00:00Z",
-      },
-    },
-  };
-  vi.mocked(api.reviews).mockResolvedValueOnce([failed]).mockResolvedValueOnce([queued]);
+  vi.mocked(api.reviews).mockResolvedValueOnce([failed]);
   renderReviews();
   fireEvent.click(await screen.findByRole("button", { name: "Regenerate Method Reflection" }));
   await waitFor(() => expect(api.regenerateOutcomeReflection).toHaveBeenCalledWith(7, expect.any(String)));
-  expect(await screen.findByText("Reflection regeneration is queued.")).toBeVisible();
+  expect(await screen.findByRole("status")).toHaveTextContent("Reflection regeneration is queued.");
+  expect(screen.getByRole("button", { name: "Queued" })).toBeDisabled();
+  expect(screen.getByRole("article")).toHaveFocus();
+  expect(api.reviews).toHaveBeenCalledTimes(1);
+});
+
+test("ignores an audit response started before regeneration", async () => {
+  const failed = {
+    ...review,
+    review_status: "reflection_failed" as const,
+    method_feedback: null,
+    outcome_reflection: {
+      ...review.outcome_reflection!,
+      status: "retryable_failure" as const,
+      error_code: "TransportError",
+      generation_cycle: null,
+    },
+    outcome_feedback: null,
+  };
+  const stale = deferred<ResearchReviewAuditDetail>();
+  const fresh = deferred<ResearchReviewAuditDetail>();
+  const aggregateUsage = {
+    usage_status: "not_reported" as const,
+    attempt_count: 1,
+    llm_calls: 1,
+    input_tokens: null,
+    output_tokens: null,
+    cache_hit_input_tokens: null,
+    cache_miss_input_tokens: null,
+    reasoning_output_tokens: null,
+    wall_time_seconds: null,
+    provider_reported_cost_usd: null,
+  };
+  vi.mocked(api.reviews).mockResolvedValueOnce([failed]);
+  vi.mocked(api.reviewAuditDetail)
+    .mockReset()
+    .mockReturnValueOnce(stale.promise)
+    .mockReturnValueOnce(fresh.promise);
+  renderReviews();
+
+  fireEvent.click(await screen.findByText("Method Reflection and audit details"));
+  await waitFor(() => expect(api.reviewAuditDetail).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole("button", { name: "Regenerate Method Reflection" }));
+  await waitFor(() => expect(api.reviewAuditDetail).toHaveBeenCalledTimes(2));
+
+  fresh.resolve({
+    review: failed,
+    reflection: "Fresh audit detail.",
+    attempts: [],
+    aggregate_usage: aggregateUsage,
+  });
+  expect(await screen.findByText("Fresh audit detail.")).toBeVisible();
+  stale.resolve({
+    review: failed,
+    reflection: "Stale audit detail.",
+    attempts: [],
+    aggregate_usage: aggregateUsage,
+  });
+  await waitFor(() => expect(screen.queryByText("Stale audit detail.")).toBeNull());
 });
 
 test("confirms a typed, auditable Feedback retirement outside its prose", async () => {
-  const retired = {
+  window.history.replaceState(null, "", "/reviews?status_group=feedback_available");
+  vi.mocked(api.reviews).mockResolvedValueOnce([review]);
+  const retiredReview = {
     ...review,
     review_status: "feedback_retired" as const,
     method_feedback: null,
@@ -171,8 +235,43 @@ test("confirms a typed, auditable Feedback retirement outside its prose", async 
       retired_at: "2026-08-12T00:00:00Z",
     },
   };
-  vi.mocked(api.reviews).mockResolvedValueOnce([review]).mockResolvedValueOnce([retired]);
+  vi.mocked(api.retireOutcomeFeedback).mockResolvedValueOnce({
+    status: "retired",
+    review_status: "feedback_retired",
+    retirement_reason: "misleading",
+    retirement_note: "It overstates a one-off result.",
+    retired_at: "2026-08-12T00:00:00Z",
+  });
+  vi.mocked(api.reviewAuditDetail)
+    .mockResolvedValueOnce({
+      review,
+      reflection: "Method lesson: Full generated reflection.",
+      attempts: [],
+      aggregate_usage: {
+        usage_status: "not_reported", attempt_count: 1, llm_calls: 1,
+        input_tokens: null, output_tokens: null, cache_hit_input_tokens: null,
+        cache_miss_input_tokens: null, reasoning_output_tokens: null,
+        wall_time_seconds: null, provider_reported_cost_usd: null,
+      },
+    })
+    .mockResolvedValueOnce({
+      review: retiredReview,
+      reflection: "Method lesson: Full generated reflection.",
+      attempts: [],
+      aggregate_usage: {
+        usage_status: "not_reported", attempt_count: 1, llm_calls: 1,
+        input_tokens: null, output_tokens: null, cache_hit_input_tokens: null,
+        cache_miss_input_tokens: null, reasoning_output_tokens: null,
+        wall_time_seconds: null, provider_reported_cost_usd: null,
+      },
+  });
   renderReviews();
+
+  const auditSummary = await screen.findByText("Method Reflection and audit details");
+  const auditDisclosure = auditSummary.closest("details");
+  expect(auditDisclosure).not.toBeNull();
+  fireEvent.click(auditSummary);
+  await screen.findByText("Method lesson: Full generated reflection.");
 
   fireEvent.click(await screen.findByRole("button", { name: "Retire Feedback" }));
   const dialog = screen.getByRole("dialog", { name: "Retire Method Feedback" });
@@ -191,7 +290,14 @@ test("confirms a typed, auditable Feedback retirement outside its prose", async 
     note: "It overstates a one-off result.",
   }));
   expect(await screen.findByRole("status")).toHaveTextContent("Method Feedback retired.");
+  await waitFor(() => expect(api.reviewAuditDetail).toHaveBeenCalledTimes(2));
+  expect(
+    await within(auditDisclosure!).findByText(/2026-08-12T00:00:00Z/),
+  ).toBeVisible();
   expect(screen.getByText("Method Feedback has been retired.")).toBeVisible();
+  expect(screen.getByText(/Reason: Misleading/)).toBeVisible();
+  expect(screen.getByText(/Optional note: It overstates a one-off result\./)).toBeVisible();
+  expect(api.reviews).toHaveBeenCalledTimes(1);
 });
 
 test("allows cancellation and keeps retirement errors with the confirmation", async () => {
@@ -262,7 +368,8 @@ test("keeps invalid candidates closed, escaped, and inside audit details", async
       origin: "automatic",
       trigger: "initial_generation",
       outcome: "invalid",
-      schema_version: "outcome_reflection.v1",
+      attempt_schema_version: "outcome_reflection_attempt.v1",
+      candidate_schema_version: "outcome_reflection.v1",
       started_at: "2026-08-01T20:00:00Z",
       finished_at: "2026-08-01T20:01:00Z",
       diagnostics: { code: "schema_invalid" },
@@ -297,6 +404,21 @@ test("keeps invalid candidates closed, escaped, and inside audit details", async
   expect(screen.getByText(/Observation:/)).toBeVisible();
   expect(screen.getByText(/Reflection:/)).toBeVisible();
   expect(container.querySelector("img")).toBeNull();
+});
+
+test("localizes Review audit labels in every supported language", async () => {
+  for (const language of ["en", "zh-CN", "ja"] as const) {
+    await i18n.changeLanguage(language);
+    for (const key of [
+      "reviewAttemptCount",
+      "outcomeObservation",
+      "methodReflection",
+      "methodFeedback",
+    ]) {
+      expect(i18n.t(key, { count: 2 })).not.toContain(key);
+    }
+  }
+  await i18n.changeLanguage("en");
 });
 
 test("associates regeneration errors with the action and keeps focus in its Review", async () => {

@@ -20,6 +20,7 @@ from tradingagents.application.database import (
     DecisionRecord,
     OutcomeFeedbackRecord,
     OutcomeRecord,
+    ReflectionAttemptRecord,
     ReflectionGenerationCycleRecord,
     ReflectionRecord,
 )
@@ -258,18 +259,27 @@ def test_reflection_regeneration_is_idempotent_and_auto_retries_are_bounded(
     same = repository.enqueue_outcome_reflection_regeneration(
         outcome_id, idempotency_key="manual-retry-1", queued_at=queued_at
     )
-    assert first["id"] == same["id"]
-    assert first["status"] == "queued"
+    assert first["cycle"]["id"] == same["cycle"]["id"]
+    assert first["cycle"]["status"] == "queued"
+    assert first["review_status"] == "awaiting_reflection"
+    assert first["reflection_status"] == "pending"
     with pytest.raises(OutcomeReflectionRegenerationConflictError) as conflict:
         repository.enqueue_outcome_reflection_regeneration(
             outcome_id, idempotency_key="manual-retry-2", queued_at=queued_at
         )
-    assert conflict.value.active_cycle_id == first["id"]
+    assert conflict.value.active_cycle_id == first["cycle"]["id"]
 
     attempt_ids = repository.start_outcome_reflection_attempt(
         outcome_id, started_at=queued_at
     )
     assert attempt_ids is not None
+    with repository.sessions() as session:
+        manual_attempt = session.get(
+            ReflectionAttemptRecord, attempt_ids["attempt_id"]
+        )
+        assert manual_attempt is not None
+        assert manual_attempt.origin == "manual"
+        assert manual_attempt.trigger == "user_regeneration"
     repository.mark_reflection_failure(
         outcome_id,
         attempted_at=queued_at,
@@ -277,7 +287,7 @@ def test_reflection_regeneration_is_idempotent_and_auto_retries_are_bounded(
         attempt_ids=attempt_ids,
     )
     with repository.sessions() as session:
-        cycle = session.get(ReflectionGenerationCycleRecord, first["id"])
+        cycle = session.get(ReflectionGenerationCycleRecord, first["cycle"]["id"])
         assert cycle is not None and cycle.status == "failed"
         reflection = session.scalar(
             select(ReflectionRecord).where(ReflectionRecord.outcome_id == outcome_id)
@@ -676,3 +686,35 @@ def test_review_entries_support_fuzzy_filters_and_full_field_search(
     ] == ["MSFT"]
     assert repository.review_entries(q="pending cloud", status_group="feedback_available") == []
     assert repository.review_entries(q="%") == []
+
+
+def test_review_entries_applies_derived_status_filter_before_limit(
+    repository: RunRepository,
+) -> None:
+    available_run_id = _seed_memory(
+        repository,
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 1),
+        reflection="Method lesson: Keep the older qualifying Review visible.",
+        thesis="Older Review with available Feedback.",
+    )
+    _seed_memory(
+        repository,
+        ticker="MSFT",
+        analysis_date=date(2026, 7, 2),
+        reflection="Unused pending Reflection.",
+        thesis="Newer Review still in progress.",
+        resolved=False,
+    )
+    _outcome_id, feedback_id = _feedback_for_run(repository, available_run_id)
+    with repository.sessions.begin() as session:
+        feedback = session.get(OutcomeFeedbackRecord, feedback_id)
+        assert feedback is not None
+        feedback.status = "eligible"
+
+    reviews = repository.review_entries(
+        status_group="feedback_available",
+        limit=1,
+    )
+
+    assert [review["ticker"] for review in reviews] == ["NVDA"]

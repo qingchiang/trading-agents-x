@@ -445,9 +445,34 @@ test("keeps retained Review references, actions, and motion preferences usable i
     },
   };
   const baseReview = review();
+  const failedReview = {
+    ...baseReview,
+    review_status: "reflection_failed",
+    reflection: null,
+    method_feedback: null,
+    outcome_reflection: {
+      ...baseReview.outcome_reflection,
+      status: "retryable_failure",
+      error_code: "provider_timeout",
+    },
+    outcome_feedback: null,
+  };
   const reviewQueries: string[] = [];
   let feedbackRetired = false;
+  let reflectionRegenerationRequested = false;
   let retirementPayload: Record<string, unknown> | null = null;
+  const retiredReview = () => ({
+    ...baseReview,
+    review_status: "feedback_retired",
+    method_feedback: null,
+    outcome_feedback: {
+      ...baseReview.outcome_feedback,
+      status: "retired",
+      retirement_reason: "too_specific",
+      retirement_note: null,
+      retired_at: timestamp,
+    },
+  });
 
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
@@ -473,21 +498,35 @@ test("keeps retained Review references, actions, and motion preferences usable i
     }
     if (path === "/api/v1/reviews") {
       reviewQueries.push(url.search);
-      const currentReview = feedbackRetired
-        ? {
-            ...baseReview,
-            review_status: "feedback_retired",
-            method_feedback: null,
-            outcome_feedback: {
-              ...baseReview.outcome_feedback,
-              status: "retired",
-              retirement_reason: "too_specific",
-              retirement_note: null,
-              retired_at: timestamp,
-            },
-          }
-        : baseReview;
+      let currentReview = baseReview;
+      if (url.searchParams.get("status_group") === "needs_attention") {
+        currentReview = failedReview;
+      } else if (feedbackRetired) {
+        currentReview = retiredReview();
+      }
       return route.fulfill({ json: [currentReview] });
+    }
+    if (
+      path === "/api/v1/outcome-observations/7/reflection-regenerations" &&
+      request.method() === "POST"
+    ) {
+      reflectionRegenerationRequested = true;
+      return route.fulfill({
+        json: {
+          cycle: {
+            id: "cycle-manual",
+            outcome_id: 7,
+            status: "queued",
+            origin: "manual",
+            trigger: "user_regeneration",
+            retry_ordinal: 0,
+            queued_at: timestamp,
+            due_at: timestamp,
+          },
+          review_status: "awaiting_reflection",
+          reflection_status: "pending",
+        },
+      });
     }
     if (path === "/api/v1/outcome-feedback/17/retire" && request.method() === "POST") {
       retirementPayload = request.postDataJSON() as Record<string, unknown>;
@@ -495,6 +534,7 @@ test("keeps retained Review references, actions, and motion preferences usable i
       return route.fulfill({
         json: {
           status: "retired",
+          review_status: "feedback_retired",
           retirement_reason: "too_specific",
           retirement_note: null,
           retired_at: timestamp,
@@ -526,6 +566,15 @@ test("keeps retained Review references, actions, and motion preferences usable i
   await page.getByRole("button", { name: "Apply" }).click();
   await expect(page).toHaveURL(/\/reviews\?q=Toyota&status_group=needs_attention$/);
   await expect.poll(() => reviewQueries).toContain("?q=Toyota&status_group=needs_attention");
+  await page.getByRole("button", { name: "Regenerate Method Reflection" }).click();
+  await expect.poll(() => reflectionRegenerationRequested).toBe(true);
+  await expect(page.getByRole("status")).toHaveText("Reflection regeneration is queued.");
+  await expect(page.getByRole("button", { name: "Queued" })).toBeDisabled();
+  await expect(page.locator("#review-legacy-run")).toBeFocused();
+
+  await page.getByLabel("Review status").selectOption("feedback_available");
+  await page.getByRole("button", { name: "Apply" }).click();
+  await expect(page).toHaveURL(/\/reviews\?q=Toyota&status_group=feedback_available$/);
 
   await page.setViewportSize({ width: 390, height: 844 });
   const retireTrigger = page.getByRole("button", { name: "Retire Feedback" });

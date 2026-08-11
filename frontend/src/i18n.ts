@@ -582,6 +582,7 @@ const en = {
     methodReflection: "Method Reflection",
     reflectionFailure: "Reflection generation failed.",
     reflectionQueued: "Reflection regeneration is queued.",
+    reviewAttemptCount: "{{count}} Reflection Attempt(s)",
     regenerateReflection: "Regenerate Method Reflection",
     shortTermReviewWarning:
       "Five common trading intervals are short-term methodological feedback only.",
@@ -1212,6 +1213,7 @@ const zhCN = {
     methodReflection: "方法反思",
     reflectionFailure: "方法反思生成失败。",
     reflectionQueued: "方法反思重新生成已排队。",
+    reviewAttemptCount: "{{count}} 次方法反思尝试",
     regenerateReflection: "重新生成方法反思",
     shortTermReviewWarning: "五个共同交易区间仅构成短期方法反馈。",
     observationAwaiting: "结果观察正在等待结算。",
@@ -1853,6 +1855,7 @@ const ja = {
     methodReflection: "方法の振り返り",
     reflectionFailure: "方法の振り返りの生成に失敗しました。",
     reflectionQueued: "方法の振り返りの再生成は待機中です。",
+    reviewAttemptCount: "方法の振り返り試行 {{count}} 件",
     regenerateReflection: "方法の振り返りを再生成",
     shortTermReviewWarning:
       "共通の5取引区間は短期の方法論的フィードバックにすぎません。",

@@ -60,6 +60,7 @@ export default function ResearchReview() {
   >({});
   const recentInstruments = useRecentInstruments();
   const reviewRefs = useRef<Record<number, HTMLElement | null>>({});
+  const auditRequestVersionsRef = useRef<Record<number, number>>({});
   const retirementTriggerRef = useRef<HTMLButtonElement | null>(null);
   const retirementReasonRef = useRef<HTMLSelectElement | null>(null);
 
@@ -103,13 +104,53 @@ export default function ResearchReview() {
     window.history.replaceState(null, "", `/reviews${query}`);
     void load(query);
   };
+  const loadAuditDetail = async (outcomeId: number, force = false) => {
+    if (!force && auditDetails[outcomeId]) return;
+    const requestVersion = (auditRequestVersionsRef.current[outcomeId] ?? 0) + 1;
+    auditRequestVersionsRef.current[outcomeId] = requestVersion;
+    try {
+      const detail = await api.reviewAuditDetail(outcomeId);
+      if (auditRequestVersionsRef.current[outcomeId] !== requestVersion) return;
+      setAuditDetails((current) => ({ ...current, [outcomeId]: detail }));
+    } catch (cause) {
+      if (auditRequestVersionsRef.current[outcomeId] !== requestVersion) return;
+      setError(cause instanceof Error ? cause.message : t("error"));
+    }
+  };
+  const refreshRequestedAuditDetail = (outcomeId: number) => {
+    if (auditRequestVersionsRef.current[outcomeId] === undefined) return;
+    auditRequestVersionsRef.current[outcomeId] += 1;
+    setAuditDetails((current) => {
+      const next = { ...current };
+      delete next[outcomeId];
+      return next;
+    });
+    void loadAuditDetail(outcomeId, true);
+  };
   const regenerateReflection = async (outcomeId: number) => {
     setActionOutcomeId(outcomeId);
     setReflectionActionError("");
     setReflectionActionErrorOutcomeId(null);
     try {
-      await api.regenerateOutcomeReflection(outcomeId, crypto.randomUUID());
-      await load(window.location.search);
+      const accepted = await api.regenerateOutcomeReflection(
+        outcomeId,
+        crypto.randomUUID(),
+      );
+      setReviews((current) => current.map((review) =>
+        review.outcome_id === outcomeId && review.outcome_reflection
+          ? {
+              ...review,
+              review_status: accepted.review_status,
+              outcome_reflection: {
+                ...review.outcome_reflection,
+                status: accepted.reflection_status ?? review.outcome_reflection.status,
+                generation_cycle: accepted.cycle,
+              },
+            }
+          : review
+      ));
+      refreshRequestedAuditDetail(outcomeId);
+      setActionAnnouncement({ outcomeId, message: t("reflectionQueued") });
       focusReview(outcomeId);
     } catch (cause) {
       setReflectionActionError(cause instanceof Error ? cause.message : t("error"));
@@ -143,12 +184,29 @@ export default function ResearchReview() {
     setActionOutcomeId(retirement.outcomeId);
     setRetirementError("");
     try {
-      await api.retireOutcomeFeedback(retirement.feedbackId, {
+      const retired = await api.retireOutcomeFeedback(retirement.feedbackId, {
         reason: retirementReason,
         note: retirementNote.trim() || null,
       });
       setRetirement(null);
-      await load(window.location.search);
+      setReviews((current) => current.map((review) =>
+        review.outcome_id === retirement.outcomeId && review.outcome_feedback
+          ? {
+              ...review,
+              review_status: retired.review_status as ResearchReview["review_status"],
+              outcome_feedback: {
+                ...review.outcome_feedback,
+                status: retired.status as NonNullable<
+                  ResearchReview["outcome_feedback"]
+                >["status"],
+                retirement_reason: retired.retirement_reason,
+                retirement_note: retired.retirement_note,
+                retired_at: retired.retired_at,
+              },
+            }
+          : review
+      ));
+      refreshRequestedAuditDetail(retirement.outcomeId);
       setActionAnnouncement({
         outcomeId: retirement.outcomeId,
         message: t("retirementSuccess"),
@@ -160,16 +218,6 @@ export default function ResearchReview() {
       setActionOutcomeId(null);
     }
   };
-  const loadAuditDetail = async (outcomeId: number) => {
-    if (auditDetails[outcomeId]) return;
-    try {
-      const detail = await api.reviewAuditDetail(outcomeId);
-      setAuditDetails((current) => ({ ...current, [outcomeId]: detail }));
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("error"));
-    }
-  };
-
   return (
     <section>
       <header className="page-header">
@@ -342,7 +390,21 @@ export default function ResearchReview() {
                   <p className="memory-lifecycle-note">{t("feedbackIneligibleReason")}</p>
                 </>
               ) : review.review_status === "feedback_retired" ? (
-                <p>{t("feedbackRetired")}</p>
+                <>
+                  <p>{t("feedbackRetired")}</p>
+                  {review.outcome_feedback?.retirement_reason && (
+                    <p className="memory-lifecycle-note">
+                      {t("retirementReason")}: {t(
+                        `retirementReasonOptions.${review.outcome_feedback.retirement_reason}`,
+                      )}
+                    </p>
+                  )}
+                  {review.outcome_feedback?.retirement_note && (
+                    <p className="memory-lifecycle-note">
+                      {t("retirementNote")}: {review.outcome_feedback.retirement_note}
+                    </p>
+                  )}
+                </>
               ) : (
                 <p>{t("feedbackUnavailable")}</p>
               )}
@@ -385,9 +447,17 @@ export default function ResearchReview() {
                 </button>
               </section>
             ) : review.outcome_reflection?.generation_cycle?.status === "queued" ? (
-              <section aria-live="polite">
-                <h2>{t("methodReflection")}</h2>
+              <section
+                aria-labelledby={`reflection-queued-${review.outcome_id}`}
+                className="reflection-regeneration-action"
+              >
+                <h2 id={`reflection-queued-${review.outcome_id}`}>
+                  {t("methodReflection")}
+                </h2>
                 <p>{t("reflectionQueued")}</p>
+                <button className="button compact-button" disabled type="button">
+                  {t("statusQueued")}
+                </button>
               </section>
             ) : null}
             <details
@@ -517,20 +587,21 @@ export default function ResearchReview() {
 }
 
 function AuditAttempts({ detail }: { detail: ResearchReviewAuditDetail }) {
+  const { t } = useTranslation();
   return (
     <div className="memory-lifecycle-note">
       <p>
-        {detail.aggregate_usage.attempt_count} attempt(s) · {detail.aggregate_usage.usage_status}
+        {t("reviewAttemptCount", { count: detail.aggregate_usage.attempt_count })} · {detail.aggregate_usage.usage_status}
       </p>
       <pre>{JSON.stringify(detail.aggregate_usage, null, 2)}</pre>
       {detail.attempts.map((attempt) => (
         <details key={attempt.id}>
           <summary>
-            #{attempt.sequence} · {attempt.attempt_kind} · {attempt.outcome ?? "running"}
+            #{attempt.sequence} · {attempt.attempt_kind} · {attempt.outcome ?? t("statusRunning")}
           </summary>
-          <p>{attempt.schema_version ?? "—"}</p>
+          <p>{attempt.attempt_schema_version} · {attempt.candidate_schema_version ?? "—"}</p>
           <p>
-            {attempt.started_at} · {attempt.finished_at ?? "running"}
+            {attempt.started_at} · {attempt.finished_at ?? t("statusRunning")}
           </p>
           <pre>{JSON.stringify(attempt.usage, null, 2)}</pre>
           <p>{JSON.stringify(attempt.diagnostics ?? {})}</p>
@@ -543,11 +614,12 @@ function AuditAttempts({ detail }: { detail: ResearchReviewAuditDetail }) {
 }
 
 function AuditLifecycle({ detail }: { detail: ResearchReviewAuditDetail }) {
+  const { t } = useTranslation();
   const { outcome, outcome_feedback: feedback, outcome_reflection: reflection } = detail.review;
   return <>
-    <p className="memory-lifecycle-note">Observation: {outcome.resolved_at ?? "—"} · {outcome.data_available_at ?? "—"} · {outcome.last_checked_at ?? "—"}</p>
-    {reflection && <p className="memory-lifecycle-note">Reflection: {reflection.created_at} · {reflection.generated_at ?? "—"} · {reflection.last_attempted_at ?? "—"}</p>}
-    {feedback && <p className="memory-lifecycle-note">Feedback: {feedback.qualified_at} · {feedback.available_at} · {feedback.retired_at ?? "—"}</p>}
+    <p className="memory-lifecycle-note">{t("outcomeObservation")}: {outcome.resolved_at ?? "—"} · {outcome.data_available_at ?? "—"} · {outcome.last_checked_at ?? "—"}</p>
+    {reflection && <p className="memory-lifecycle-note">{t("methodReflection")}: {reflection.created_at} · {reflection.generated_at ?? "—"} · {reflection.last_attempted_at ?? "—"}</p>}
+    {feedback && <p className="memory-lifecycle-note">{t("methodFeedback")}: {feedback.qualified_at} · {feedback.available_at} · {feedback.retired_at ?? "—"}</p>}
   </>;
 }
 
@@ -556,6 +628,26 @@ function DecisionDetails({ review }: { review: ResearchReview }) {
   return (
     <div className="memory-decision-details-body">
       <div className="memory-decision-grid">
+        <div className="memory-decision-field">
+          <strong>{t("horizon")}</strong>
+          <Markdown>{review.decision.time_horizon}</Markdown>
+        </div>
+        <div className="memory-decision-field">
+          <strong>{t("scenarios")}</strong>
+          {review.decision.scenarios.map((scenario) => (
+            <div key={scenario.kind}>
+              <strong>{t(`${scenario.kind}Scenario`)}</strong>
+              <Markdown>{scenario.outcome}</Markdown>
+              {scenario.core_assumptions.length > 0 && (
+                <ul>
+                  {scenario.core_assumptions.map((assumption) => (
+                    <li key={assumption}><Markdown>{assumption}</Markdown></li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ))}
+        </div>
         <DecisionList
           title={t("catalysts")}
           items={review.decision.catalysts ?? []}

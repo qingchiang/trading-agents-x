@@ -169,7 +169,7 @@ export const api = {
     ),
   regenerateOutcomeReflection: (outcomeId: number, idempotencyKey: string) =>
     request<ReflectionRegenerationAccepted>(
-      `/api/v1/outcome-observations/${encodeURIComponent(outcomeId)}/reflection/regenerations`,
+      `/api/v1/outcome-observations/${encodeURIComponent(outcomeId)}/reflection-regenerations`,
       {
         method: "POST",
         headers: { "Idempotency-Key": idempotencyKey },

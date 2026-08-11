@@ -273,7 +273,10 @@ def test_invalid_reflection_does_not_recompute_completed_observation(
         lambda *_args, **_kwargs: pytest.fail("Observation was recomputed"),
     )
     invalid = ReflectionDraftValidationError(
-        candidate="{}", validation_issues=("directional_assessment",)
+        candidate="{}",
+        validation_issues=("missing:directional_assessment",),
+        candidate_digest="digest-1",
+        candidate_length=5_001,
     )
     monkeypatch.setattr(settlement, "_reflection", lambda **_kwargs: (_ for _ in ()).throw(invalid))
     monkeypatch.setattr(settlement, "_repair_reflection", lambda **_kwargs: (_ for _ in ()).throw(invalid))
@@ -288,6 +291,8 @@ def test_invalid_reflection_does_not_recompute_completed_observation(
         1,
         2,
     ]
+    assert repository.reflections[0][1]["invalid_candidate_digest"] == "digest-1"
+    assert repository.reflections[0][1]["invalid_candidate_length"] == 5_001
 
 
 def test_invalid_initial_draft_is_repaired_once_without_reobserving(

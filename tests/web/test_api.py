@@ -495,11 +495,13 @@ async def test_openapi_contains_versioned_run_center_contract(
         "/api/v1/research-revisions/{revision_id}/export",
         "/api/v1/reviews",
         "/api/v1/reviews/{outcome_id}",
+        "/api/v1/outcome-observations/{outcome_id}/reflection-regenerations",
         "/api/v1/capabilities",
         "/api/v1/providers/{provider}/models",
         "/api/v1/health",
     } <= set(paths)
     assert "/api/v1/memory" not in paths
+    assert "/api/v1/outcome-observations/{outcome_id}/reflection/regenerations" not in paths
     assert "/api/v1/runs/{run_id}/rerun" not in paths
     assert "provenance" not in schema["components"]["schemas"]["AnalysisRequest"]["properties"]
     assert "provenance" not in schema["components"]["schemas"]["CapabilityDefaults"]["properties"]
@@ -670,6 +672,7 @@ async def test_review_lifecycle_actions_delegate_without_exposing_errors(
         lambda feedback_id, *, reason, note: retired.append((feedback_id, reason, note))
         or {
             "status": "retired",
+            "review_status": "feedback_retired",
             "retirement_reason": reason,
             "retirement_note": note,
             "retired_at": "2026-08-12T00:00:00Z",
@@ -687,6 +690,7 @@ async def test_review_lifecycle_actions_delegate_without_exposing_errors(
     assert retry_response.json() == {"status": "pending"}
     assert retire_response.json() == {
         "status": "retired",
+        "review_status": "feedback_retired",
         "retirement_reason": "misleading",
         "retirement_note": "It overstates the result.",
         "retired_at": "2026-08-12T00:00:00Z",
@@ -706,6 +710,7 @@ async def test_feedback_retirement_api_validates_typed_requests_and_transitions(
         "retire_outcome_feedback",
         lambda _id, *, reason, note: {
             "status": "retired",
+            "review_status": "feedback_retired",
             "retirement_reason": reason,
             "retirement_note": note,
             "retired_at": "2026-08-12T00:00:00Z",
@@ -729,6 +734,7 @@ async def test_feedback_retirement_api_validates_typed_requests_and_transitions(
     assert retired.status_code == 200
     assert retired.json() == {
         "status": "retired",
+        "review_status": "feedback_retired",
         "retirement_reason": "other",
         "retirement_note": "kept for audit",
         "retired_at": "2026-08-12T00:00:00Z",
@@ -778,21 +784,31 @@ async def test_reflection_regeneration_requires_idempotency_and_returns_cycle(
         "enqueue_outcome_reflection_regeneration",
         lambda outcome_id, *, idempotency_key: calls.append((outcome_id, idempotency_key))
         or {
-            "id": "cycle-1", "outcome_id": outcome_id, "status": "queued",
-            "origin": "manual", "trigger": "user_regeneration", "retry_ordinal": 0,
-            "queued_at": "2026-08-05T00:00:00Z", "due_at": "2026-08-05T00:00:00Z",
+            "cycle": {
+                "id": "cycle-1", "outcome_id": outcome_id, "status": "queued",
+                "origin": "manual", "trigger": "user_regeneration", "retry_ordinal": 0,
+                "queued_at": "2026-08-05T00:00:00Z", "due_at": "2026-08-05T00:00:00Z",
+            },
+            "review_status": "awaiting_reflection",
+            "reflection_status": "pending",
         },
     )
     missing = await web_client.post(
-        "/api/v1/outcome-observations/7/reflection/regenerations"
+        "/api/v1/outcome-observations/7/reflection-regenerations"
     )
     accepted = await web_client.post(
+        "/api/v1/outcome-observations/7/reflection-regenerations",
+        headers={"Idempotency-Key": "retry-1"},
+    )
+    legacy_shape = await web_client.post(
         "/api/v1/outcome-observations/7/reflection/regenerations",
         headers={"Idempotency-Key": "retry-1"},
     )
     assert missing.status_code == 422
     assert accepted.status_code == 202
+    assert legacy_shape.status_code == 405
     assert accepted.json()["cycle"]["id"] == "cycle-1"
+    assert accepted.json()["review_status"] == "awaiting_reflection"
     assert calls == [(7, "retry-1")]
 
 
@@ -810,7 +826,7 @@ async def test_reflection_regeneration_returns_typed_not_found_and_active_confli
         ),
     )
     missing = await web_client.post(
-        "/api/v1/outcome-observations/7/reflection/regenerations",
+        "/api/v1/outcome-observations/7/reflection-regenerations",
         headers={"Idempotency-Key": "retry-1"},
     )
     assert missing.status_code == 404
@@ -824,7 +840,7 @@ async def test_reflection_regeneration_returns_typed_not_found_and_active_confli
         ),
     )
     conflict = await web_client.post(
-        "/api/v1/outcome-observations/7/reflection/regenerations",
+        "/api/v1/outcome-observations/7/reflection-regenerations",
         headers={"Idempotency-Key": "retry-2"},
     )
     assert conflict.status_code == 409

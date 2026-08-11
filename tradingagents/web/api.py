@@ -558,7 +558,7 @@ def create_app(
         return detail
 
     @app.post(
-        f"{API_PREFIX}/outcome-observations/{{outcome_id}}/reflection/regenerations",
+        f"{API_PREFIX}/outcome-observations/{{outcome_id}}/reflection-regenerations",
         response_model=ReflectionRegenerationAccepted,
         status_code=202,
     )
@@ -569,7 +569,7 @@ def create_app(
         if not idempotency_key:
             raise HTTPException(status_code=422, detail="Idempotency-Key is required")
         try:
-            cycle = repository.enqueue_outcome_reflection_regeneration(
+            accepted = repository.enqueue_outcome_reflection_regeneration(
                 outcome_id,
                 idempotency_key=idempotency_key,
             )
@@ -580,7 +580,7 @@ def create_app(
             if exc.active_cycle_id:
                 detail["active_cycle_id"] = exc.active_cycle_id
             raise HTTPException(status_code=409, detail=detail) from None
-        return {"cycle": cycle}
+        return accepted
 
     @app.post(
         f"{API_PREFIX}/outcome-observations/{{outcome_id}}/reflection/retry",

@@ -2823,6 +2823,11 @@
               }
             ]
           },
+          "review_status": {
+            "const": "feedback_retired",
+            "title": "Review Status",
+            "type": "string"
+          },
           "status": {
             "const": "retired",
             "title": "Status",
@@ -2831,6 +2836,7 @@
         },
         "required": [
           "status",
+          "review_status",
           "retirement_reason",
           "retirement_note",
           "retired_at"
@@ -3818,6 +3824,22 @@
             "title": "Attempt Kind",
             "type": "string"
           },
+          "attempt_schema_version": {
+            "const": "outcome_reflection_attempt.v1",
+            "title": "Attempt Schema Version",
+            "type": "string"
+          },
+          "candidate_schema_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Schema Version"
+          },
           "diagnostics": {
             "anyOf": [
               {
@@ -3900,17 +3922,6 @@
             ],
             "title": "Outcome"
           },
-          "schema_version": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Schema Version"
-          },
           "sequence": {
             "title": "Sequence",
             "type": "integer"
@@ -3952,7 +3963,8 @@
           "started_at",
           "finished_at",
           "outcome",
-          "schema_version",
+          "attempt_schema_version",
+          "candidate_schema_version",
           "diagnostics",
           "usage",
           "invalid_candidate",
@@ -4038,10 +4050,38 @@
         "properties": {
           "cycle": {
             "$ref": "#/components/schemas/ReflectionGenerationCycleView"
+          },
+          "reflection_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OutcomeReflectionStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "review_status": {
+            "enum": [
+              "awaiting_observation",
+              "observation_delayed",
+              "awaiting_reflection",
+              "reflection_retry_scheduled",
+              "reflection_failed",
+              "reflection_invalid",
+              "feedback_available",
+              "feedback_ineligible",
+              "feedback_retired",
+              "lifecycle_inconsistent"
+            ],
+            "title": "Review Status",
+            "type": "string"
           }
         },
         "required": [
-          "cycle"
+          "cycle",
+          "review_status",
+          "reflection_status"
         ],
         "title": "ReflectionRegenerationAccepted",
         "type": "object"
@@ -8590,7 +8630,7 @@
         "summary": "Retire Outcome Feedback"
       }
     },
-    "/api/v1/outcome-observations/{outcome_id}/reflection/regenerations": {
+    "/api/v1/outcome-observations/{outcome_id}/reflection-regenerations": {
       "post": {
         "operationId": "regenerate_outcome_reflection_api_v1_outcome_observations__outcome_id__reflection_regenerations_post",
         "parameters": [

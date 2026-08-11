@@ -946,6 +946,52 @@ def test_complete_persists_result_and_resolved_memory(
         "provider_reported_cost_usd": None,
     }
     assert detail["attempts"][0]["attempt_kind"] == "unstructured"
+    assert detail["attempts"][0]["attempt_schema_version"] == (
+        "outcome_reflection_attempt.v1"
+    )
+    assert detail["attempts"][0]["candidate_schema_version"] == (
+        "outcome_reflection_legacy_unstructured.v1"
+    )
+
+    with repository.sessions.begin() as session:
+        reflection = session.scalar(select(ReflectionRecord))
+        cycle = session.scalar(select(ReflectionGenerationCycleRecord))
+        assert reflection is not None
+        assert cycle is not None
+        session.add(
+            ReflectionAttemptRecord(
+                reflection_id=reflection.id,
+                generation_cycle_id=cycle.id,
+                sequence=2,
+                trigger="repair",
+                origin="automatic",
+                attempt_kind="repair",
+                started_at=datetime(2026, 8, 2),
+                finished_at=datetime(2026, 8, 2, 0, 0, 1),
+                outcome="generated",
+                candidate_schema_version="outcome_reflection.v1",
+                usage_status="reported",
+                llm_calls=1,
+                input_tokens=10,
+                output_tokens=4,
+                wall_time_seconds=1.0,
+            )
+        )
+
+    mixed_usage = repository.review_audit_detail(pending[0]["outcome_id"])
+    assert mixed_usage is not None
+    assert mixed_usage["aggregate_usage"] == {
+        "usage_status": "not_reported",
+        "attempt_count": 2,
+        "llm_calls": 2,
+        "input_tokens": None,
+        "output_tokens": None,
+        "cache_hit_input_tokens": None,
+        "cache_miss_input_tokens": None,
+        "reasoning_output_tokens": None,
+        "wall_time_seconds": None,
+        "provider_reported_cost_usd": None,
+    }
 
     with repository.sessions() as session:
         record = session.scalar(

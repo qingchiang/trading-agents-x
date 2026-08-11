@@ -380,7 +380,12 @@ class ReflectionAttemptRecord(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     outcome: Mapped[str | None] = mapped_column(String(30), nullable=True)
-    schema_version: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    attempt_schema_version: Mapped[str] = mapped_column(
+        String(80), nullable=False, default="outcome_reflection_attempt.v1"
+    )
+    candidate_schema_version: Mapped[str | None] = mapped_column(
+        "schema_version", String(80), nullable=True
+    )
     diagnostics_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     usage_status: Mapped[str] = mapped_column(String(20), nullable=False)
     llm_calls: Mapped[int | None] = mapped_column(Integer, nullable=True)

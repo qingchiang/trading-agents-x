@@ -530,8 +530,10 @@ Alembic manages application tables:
 | `research_chains` | one Instrument's linear lineage, Primary designation, and current head |
 | `research_revisions` | immutable complete state, coverage, summary, Evidence snapshot, producing execution, bounded experiment finding, and metrics |
 | `outcomes` | versioned Observation method, source Decision/optional Revision, market-local window, benchmark, semantics, returns, availability and limitations |
-| `reflections` | independent pending/generated/invalid/retryable-failure Reflection lifecycle and sanitized candidate |
-| `outcome_feedback` | qualification status/reasons, applicability, horizon and PIT availability |
+| `reflections` | aggregate pending/generated/invalid/retryable-failure Reflection lifecycle and current/successful Attempt pointers |
+| `reflection_generation_cycles` | queued/running/terminal generation state, retry ordinal, due time, and manual idempotency |
+| `reflection_attempts` | append-only generation/repair provenance, diagnostics, sanitized invalid candidate, and independently owned usage |
+| `outcome_feedback` | qualification status/reasons, applicability, horizon, PIT availability, and irreversible retirement audit |
 
 LangGraph saver tables live in the same database file but remain owned by its
 saver. Application code does not treat them as domain tables.
@@ -833,8 +835,8 @@ data availability, Reflection generation, and qualification completion.
 For the versioned five-completed-interval policy, an Observation may begin on
 the source Decision's or linked Research Revision's market-local cutoff date
 but never before it, and must end strictly after that cutoff. When a linked
-Revision exists, its cutoff is the effective source cutoff. Newly qualified
-New structured Reflections are qualified under
+Revision exists, its cutoff is the effective source cutoff. New structured
+Reflections are qualified under
 `outcome_feedback_qualification.v2`; v1, pre-policy, and legacy-unqualified
 rows retain their persisted policy version and status and are never
 recalculated.
