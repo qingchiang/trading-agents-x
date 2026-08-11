@@ -239,6 +239,79 @@ function artifacts(id: string) {
   ];
 }
 
+function review(runId = "legacy-run") {
+  return {
+    outcome_id: 7,
+    review_status: "feedback_available",
+    lifecycle_actions_allowed: true,
+    run_id: runId,
+    ticker: "7203.T",
+    instrument_name: "Toyota Motor Corporation",
+    instrument_local_name: null,
+    market: "Asia/Tokyo",
+    asset_type: "stock",
+    analysis_date: "2026-07-24",
+    profile: "standard",
+    decision: result(runId).decision,
+    outcome: {
+      status: "resolved",
+      source_decision_id: 1,
+      source_revision_id: null,
+      benchmark: "1321.T",
+      market_timezone: "Asia/Tokyo",
+      method_category: "short_term_relative_return",
+      method_version: "short_term_relative_return.v1",
+      price_semantics: "exchange_local_daily_close",
+      adjustment_semantics: "split_and_dividend_adjusted",
+      horizon_limit: "Five common trading intervals are short-term methodological feedback only.",
+      limitations: [],
+      observation_start: "2026-07-25",
+      observation_end: "2026-08-01",
+      holding_intervals: 5,
+      raw_return: 0.08,
+      alpha_return: 0.03,
+      data_available_at: timestamp,
+      last_checked_at: timestamp,
+      next_check_at: null,
+      error_message: null,
+    },
+    reflection: "The evidence was directionally useful.",
+    method_feedback: "The evidence was directionally useful.",
+    outcome_reflection: {
+      status: "generated",
+      created_at: timestamp,
+      generated_at: timestamp,
+      last_attempted_at: timestamp,
+      next_retry_at: null,
+      error_code: null,
+      generation_cycle: null,
+    },
+    outcome_feedback: {
+      id: 17,
+      status: "eligible",
+      qualification_policy_version: "outcome_feedback_qualification.v1",
+      reasons: [],
+      method_category: "short_term_relative_return",
+      horizon_limit: "Five common trading intervals are short-term methodological feedback only.",
+      applicability: {
+        schema_version: "1",
+        scope: "instrument",
+        instrument: "7203.T",
+        market: "Asia/Tokyo",
+        research_stages: [],
+        research_domains: [],
+        method_category: "short_term_relative_return",
+        horizon: "short_term",
+      },
+      qualified_at: timestamp,
+      available_at: timestamp,
+      retirement_reason: null,
+      retirement_note: null,
+      retired_at: null,
+    },
+  };
+}
+
 test("updates the Primary Research Chain through a Full-only Indeterminate head", async ({
   page,
 }) => {
@@ -325,6 +398,163 @@ test("updates the Primary Research Chain through a Full-only Indeterminate head"
     analysis_date: "2026-07-25",
     execution_strategy: "full",
   });
+});
+
+test("keeps retained Review references, actions, and motion preferences usable in Chromium", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("tradingagents-locale", "en");
+    const key = "__reviewScrollCalls";
+    const calls = (window as unknown as Record<string, Array<{ id: string; behavior: string }>>)[key] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function scrollIntoView(options) {
+      calls.push({
+        id: this.id,
+        behavior: typeof options === "object" && options?.behavior
+          ? options.behavior
+          : "auto",
+      });
+      original.call(this, options);
+    };
+  });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+
+  const sourceRun = makeRun("review-source", "succeeded", {
+    ticker: "7203.T",
+    instrumentName: "Toyota Motor Corporation",
+  });
+  const sourceResult = {
+    ...result(sourceRun.id),
+    decision: {
+      ...result(sourceRun.id).decision,
+      memory_refs: ["memory:legacy-run"],
+    },
+  };
+  const sourceDetail = {
+    run: sourceRun,
+    result: sourceResult,
+    attempts: [],
+    evidence_status: {
+      status: "sealed",
+      digest: sourceResult.evidence.digest,
+      item_count: sourceResult.evidence.items.length,
+      table_count: sourceResult.evidence.tables.length,
+      sealed_attempt: 1,
+      sealed_at: timestamp,
+    },
+  };
+  const baseReview = review();
+  const reviewQueries: string[] = [];
+  let feedbackRetired = false;
+  let retirementPayload: Record<string, unknown> | null = null;
+
+  await page.route("**/api/v1/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const path = url.pathname;
+    if (path === "/api/v1/instruments/recent") {
+      return route.fulfill({ json: [] });
+    }
+    if (path === "/api/v1/runs/review-source") {
+      return route.fulfill({ json: sourceDetail });
+    }
+    if (path === "/api/v1/runs/review-source/artifacts") {
+      return route.fulfill({ json: [] });
+    }
+    if (path === "/api/v1/runs/review-source/evidence") {
+      return route.fulfill({ json: sourceResult.evidence });
+    }
+    if (path === "/api/v1/runs/review-source/events") {
+      return route.fulfill({
+        headers: { "Content-Type": "text/event-stream" },
+        body: "",
+      });
+    }
+    if (path === "/api/v1/reviews") {
+      reviewQueries.push(url.search);
+      const currentReview = feedbackRetired
+        ? {
+            ...baseReview,
+            review_status: "feedback_retired",
+            method_feedback: null,
+            outcome_feedback: {
+              ...baseReview.outcome_feedback,
+              status: "retired",
+              retirement_reason: "too_specific",
+              retirement_note: null,
+              retired_at: timestamp,
+            },
+          }
+        : baseReview;
+      return route.fulfill({ json: [currentReview] });
+    }
+    if (path === "/api/v1/outcome-feedback/17/retire" && request.method() === "POST") {
+      retirementPayload = request.postDataJSON() as Record<string, unknown>;
+      feedbackRetired = true;
+      return route.fulfill({
+        json: {
+          status: "retired",
+          retirement_reason: "too_specific",
+          retirement_note: null,
+          retired_at: timestamp,
+        },
+      });
+    }
+    return route.fulfill({ status: 404, json: { detail: "Not found" } });
+  });
+
+  await page.goto("/runs/review-source?view=decision");
+  const historicalReference = page.getByRole("link", {
+    name: "Open Research Review memory:legacy-run",
+  });
+  await expect(historicalReference).toHaveAttribute(
+    "href",
+    "/reviews?q=legacy-run#review-legacy-run",
+  );
+  await historicalReference.click();
+  await expect(page).toHaveURL(/\/reviews\?q=legacy-run#review-legacy-run$/);
+  await expect(page.locator("#review-legacy-run")).toBeFocused();
+  await expect.poll(async () => page.evaluate(() => (
+    (window as unknown as Record<string, Array<{ id: string; behavior: string }>>)
+      .__reviewScrollCalls
+      .find((call) => call.id === "review-legacy-run")?.behavior
+  ))).toBe("auto");
+
+  await page.getByLabel("Keyword search").fill("Toyota");
+  await page.getByLabel("Review status").selectOption("needs_attention");
+  await page.getByRole("button", { name: "Apply" }).click();
+  await expect(page).toHaveURL(/\/reviews\?q=Toyota&status_group=needs_attention$/);
+  await expect.poll(() => reviewQueries).toContain("?q=Toyota&status_group=needs_attention");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const retireTrigger = page.getByRole("button", { name: "Retire Feedback" });
+  await expect(retireTrigger).toHaveCSS("min-height", "44px");
+  expect(await retireTrigger.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+
+  await retireTrigger.focus();
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "Retire Method Feedback" });
+  const reason = dialog.getByLabel("Reason");
+  await expect(reason).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(dialog.getByRole("button", { name: "Retire Feedback" })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(reason).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(retireTrigger).toBeFocused();
+
+  await page.keyboard.press("Enter");
+  await expect(reason).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await expect(dialog.getByRole("button", { name: "Retire Feedback" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect.poll(() => retirementPayload).toEqual({ reason: "too_specific", note: null });
+  await expect(page.getByRole("status")).toHaveText("Method Feedback retired.");
 });
 
 test("runs, legacy templates, trash, and restores local research", async ({

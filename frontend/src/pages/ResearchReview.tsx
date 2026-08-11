@@ -84,7 +84,12 @@ export default function ResearchReview() {
       decodeURIComponent(window.location.hash.slice(1)),
     );
     target?.focus();
-    target?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+    target?.scrollIntoView?.({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth",
+      block: "center",
+    });
   }, [reviews]);
 
   const submit = (event: FormEvent) => {
