@@ -398,6 +398,7 @@ export default function ResearchReview() {
                 <Markdown>{String(auditDetails[review.outcome_id].reflection)}</Markdown>
               )}
               {!auditDetails[review.outcome_id] && <p>{t("loading")}</p>}
+              {auditDetails[review.outcome_id] && <AuditLifecycle detail={auditDetails[review.outcome_id]} />}
               <p className="memory-lifecycle-note">
                 {review.outcome.method_version} · {review.outcome.market_timezone} ·{" "}
                 {review.outcome.price_semantics} / {review.outcome.adjustment_semantics}
@@ -526,6 +527,7 @@ function AuditAttempts({ detail }: { detail: ResearchReviewAuditDetail }) {
           <p>
             {attempt.started_at} · {attempt.finished_at ?? "running"}
           </p>
+          <pre>{JSON.stringify(attempt.usage, null, 2)}</pre>
           <p>{JSON.stringify(attempt.diagnostics ?? {})}</p>
           <p>{attempt.validation_issues?.join(", ") ?? "—"}</p>
           {attempt.invalid_candidate && <pre>{attempt.invalid_candidate}</pre>}
@@ -533,6 +535,15 @@ function AuditAttempts({ detail }: { detail: ResearchReviewAuditDetail }) {
       ))}
     </div>
   );
+}
+
+function AuditLifecycle({ detail }: { detail: ResearchReviewAuditDetail }) {
+  const { outcome, outcome_feedback: feedback, outcome_reflection: reflection } = detail.review;
+  return <>
+    <p className="memory-lifecycle-note">Observation: {outcome.resolved_at ?? "—"} · {outcome.data_available_at ?? "—"} · {outcome.last_checked_at ?? "—"}</p>
+    {reflection && <p className="memory-lifecycle-note">Reflection: {reflection.created_at} · {reflection.generated_at ?? "—"} · {reflection.last_attempted_at ?? "—"}</p>}
+    {feedback && <p className="memory-lifecycle-note">Feedback: {feedback.qualified_at} · {feedback.available_at} · {feedback.retired_at ?? "—"}</p>}
+  </>;
 }
 
 function DecisionDetails({ review }: { review: ResearchReview }) {

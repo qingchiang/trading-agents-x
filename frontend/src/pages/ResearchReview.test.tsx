@@ -293,6 +293,9 @@ test("keeps invalid candidates closed, escaped, and inside audit details", async
   fireEvent.click(screen.getByText(/#1 · initial · invalid/));
 
   expect(await screen.findByText(invalidCandidate)).toBeVisible();
+  expect(screen.getAllByText(/"llm_calls": 1/)).toHaveLength(2);
+  expect(screen.getByText(/Observation:/)).toBeVisible();
+  expect(screen.getByText(/Reflection:/)).toBeVisible();
   expect(container.querySelector("img")).toBeNull();
 });
 
