@@ -21,6 +21,8 @@ from tradingagents.application.database import (
     DecisionRecord,
     OutcomeFeedbackRecord,
     OutcomeRecord,
+    ReflectionAttemptRecord,
+    ReflectionGenerationCycleRecord,
     ReflectionRecord,
     RunArtifactRecord,
     RunAttemptRecord,
@@ -198,6 +200,14 @@ def test_trash_maintenance_purges_owned_data_and_detaches_child_runs(
         )
         assert (
             session.scalar(select(func.count()).select_from(ReflectionRecord))
+            == 0
+        )
+        assert (
+            session.scalar(select(func.count()).select_from(ReflectionGenerationCycleRecord))
+            == 0
+        )
+        assert (
+            session.scalar(select(func.count()).select_from(ReflectionAttemptRecord))
             == 0
         )
         assert (

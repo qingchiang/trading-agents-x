@@ -307,22 +307,6 @@ export interface components {
       value: number;
     };
     MeasurementKind: "currency" | "percent" | "ratio" | "index" | "quantity" | "count" | "basis_points" | "unitless" | "unknown";
-    MemoryEntry: {
-      analysis_date: string;
-      asset_type: string;
-      decision: components["schemas"]["ResearchDecision"];
-      instrument_local_name?: string | null;
-      instrument_name?: string | null;
-      market: string | null;
-      outcome: components["schemas"]["OutcomeObservationView"];
-      outcome_feedback: components["schemas"]["OutcomeFeedbackView"] | null;
-      outcome_id: number;
-      outcome_reflection: components["schemas"]["OutcomeReflectionView"] | null;
-      profile: components["schemas"]["RunProfile"];
-      reflection: string | null;
-      run_id: string;
-      ticker: string;
-    };
     ModelDiscoveryWarningView: {
       code: string;
       message: string;
@@ -398,8 +382,17 @@ export interface components {
       scope: "instrument" | "market";
     };
     OutcomeFeedbackRetireRequest: {
-      reason: string;
+      note?: string | null;
+      reason: components["schemas"]["OutcomeFeedbackRetirementReason"];
     };
+    OutcomeFeedbackRetireResponse: {
+      retired_at: string | null;
+      retirement_note: string | null;
+      retirement_reason: components["schemas"]["OutcomeFeedbackRetirementReason"] | null;
+      review_status: string;
+      status: string;
+    };
+    OutcomeFeedbackRetirementReason: "not_useful" | "too_specific" | "misleading" | "other";
     OutcomeFeedbackStatus: "eligible" | "ineligible" | "retired";
     OutcomeFeedbackView: {
       applicability: components["schemas"]["OutcomeFeedbackApplicabilityView"];
@@ -411,6 +404,8 @@ export interface components {
       qualified_at: string;
       reasons: string[];
       retired_at: string | null;
+      retirement_note: string | null;
+      retirement_reason: components["schemas"]["OutcomeFeedbackRetirementReason"] | null;
       status: components["schemas"]["OutcomeFeedbackStatus"];
     };
     OutcomeObservationStatus: "pending" | "resolved";
@@ -419,24 +414,30 @@ export interface components {
       alpha_return: number | null;
       benchmark: string;
       data_available_at: string | null;
+      error_message: string | null;
       holding_intervals: number;
       horizon_limit: string;
+      last_checked_at: string | null;
       limitations: string[];
       market_timezone: string;
       method_category: string;
       method_version: string;
+      next_check_at: string | null;
       observation_end: string | null;
       observation_start: string | null;
       price_semantics: string;
       raw_return: number | null;
+      resolved_at: string | null;
       source_decision_id: number;
       source_revision_id: string | null;
       status: components["schemas"]["OutcomeObservationStatus"];
     };
     OutcomeReflectionStatus: "pending" | "generated" | "invalid" | "retryable_failure";
     OutcomeReflectionView: {
+      created_at: string;
       error_code: string | null;
       generated_at: string | null;
+      generation_cycle?: components["schemas"]["ReflectionGenerationCycleView"] | null;
       last_attempted_at: string | null;
       next_retry_at: string | null;
       status: components["schemas"]["OutcomeReflectionStatus"];
@@ -504,6 +505,63 @@ export interface components {
       instrument_name?: string | null;
       last_used_at: string;
       ticker: string;
+    };
+    ReflectionAttemptUsageView: {
+      cache_hit_input_tokens: number | null;
+      cache_miss_input_tokens: number | null;
+      input_tokens: number | null;
+      llm_calls: number | null;
+      output_tokens: number | null;
+      provider_reported_cost_usd: number | null;
+      reasoning_output_tokens: number | null;
+      usage_status: "reported" | "not_reported" | "legacy_unknown";
+      wall_time_seconds: number | null;
+    };
+    ReflectionAttemptView: {
+      attempt_kind: string;
+      attempt_schema_version: string;
+      candidate_schema_version: string | null;
+      diagnostics: Record<string, string> | null;
+      finished_at: string | null;
+      generation_cycle_id: string;
+      id: number;
+      invalid_candidate: string | null;
+      invalid_candidate_digest: string | null;
+      invalid_candidate_length: number | null;
+      origin: string;
+      outcome: string | null;
+      sequence: number;
+      started_at: string;
+      trigger: string;
+      usage: components["schemas"]["ReflectionAttemptUsageView"];
+      validation_issues: string[] | null;
+    };
+    ReflectionGenerationCycleView: {
+      due_at: string | null;
+      id: string;
+      origin: "automatic" | "manual" | "legacy";
+      outcome_id: number;
+      queued_at: string;
+      retry_ordinal: number;
+      status: "queued" | "running" | "succeeded" | "failed" | "invalid";
+      trigger: string;
+    };
+    ReflectionRegenerationAccepted: {
+      cycle: components["schemas"]["ReflectionGenerationCycleView"];
+      reflection_status: components["schemas"]["OutcomeReflectionStatus"] | null;
+      review_status: "awaiting_observation" | "observation_delayed" | "awaiting_reflection" | "reflection_retry_scheduled" | "reflection_failed" | "reflection_invalid" | "feedback_available" | "feedback_ineligible" | "feedback_retired" | "lifecycle_inconsistent";
+    };
+    ReflectionUsageAggregateView: {
+      attempt_count: number;
+      cache_hit_input_tokens: number | null;
+      cache_miss_input_tokens: number | null;
+      input_tokens: number | null;
+      llm_calls: number | null;
+      output_tokens: number | null;
+      provider_reported_cost_usd: number | null;
+      reasoning_output_tokens: number | null;
+      usage_status: "reported" | "not_reported" | "legacy_unknown";
+      wall_time_seconds: number | null;
     };
     ReportAuditStatus: "complete" | "incomplete";
     ReportLanguage: "en" | "zh-CN" | "ja";
@@ -638,6 +696,30 @@ export interface components {
       required_sources: string[];
     };
     ResearchRating: "Buy" | "Overweight" | "Hold" | "Underweight" | "Sell";
+    ResearchReview: {
+      analysis_date: string;
+      asset_type: string;
+      decision: components["schemas"]["ResearchDecision"];
+      instrument_local_name?: string | null;
+      instrument_name?: string | null;
+      lifecycle_actions_allowed: boolean;
+      market: string | null;
+      method_feedback: string | null;
+      outcome: components["schemas"]["OutcomeObservationView"];
+      outcome_feedback: components["schemas"]["OutcomeFeedbackView"] | null;
+      outcome_id: number;
+      outcome_reflection: components["schemas"]["OutcomeReflectionView"] | null;
+      profile: components["schemas"]["RunProfile"];
+      review_status: "awaiting_observation" | "observation_delayed" | "awaiting_reflection" | "reflection_retry_scheduled" | "reflection_failed" | "reflection_invalid" | "feedback_available" | "feedback_ineligible" | "feedback_retired" | "lifecycle_inconsistent";
+      run_id: string;
+      ticker: string;
+    };
+    ResearchReviewAuditDetail: {
+      aggregate_usage: components["schemas"]["ReflectionUsageAggregateView"];
+      attempts: components["schemas"]["ReflectionAttemptView"][];
+      reflection: string | null;
+      review: components["schemas"]["ResearchReview"];
+    };
     ResearchRevision: {
       chain_id: string;
       change_conclusion?: components["schemas"]["ResearchChangeConclusion"] | null;

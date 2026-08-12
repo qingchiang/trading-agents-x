@@ -57,35 +57,71 @@ export function InstrumentIdentity({
   instrumentLocalName?: string | null;
   prominent?: boolean;
 }) {
-  const names = distinctNames(instrumentLocalName, instrumentName);
+  const [primaryName, secondaryName] = distinctNames(
+    instrumentLocalName,
+    instrumentName,
+  );
   if (prominent) {
     return (
-      <div className="instrument-identity prominent">
-        <h1 className="ticker">{ticker}</h1>
-        <InstrumentNames names={names} />
+      <div
+        className={`instrument-identity prominent${primaryName ? " has-names" : ""}`}
+      >
+        {primaryName ? (
+          <>
+            <div className="instrument-names">
+              <h1 className="instrument-primary-name" title={primaryName}>
+                {primaryName}
+              </h1>
+              {secondaryName && (
+                <span
+                  className="instrument-secondary-name"
+                  title={secondaryName}
+                >
+                  {secondaryName}
+                </span>
+              )}
+            </div>
+            <span className="ticker">{ticker}</span>
+          </>
+        ) : (
+          <h1 className="ticker">{ticker}</h1>
+        )}
       </div>
     );
   }
   return (
-    <span className="instrument-identity">
-      <strong className="ticker">{ticker}</strong>
-      <InstrumentNames names={names} />
+    <span className={`instrument-identity${primaryName ? " has-names" : ""}`}>
+      {primaryName && (
+        <span className="instrument-names">
+          <strong className="instrument-primary-name" title={primaryName}>
+            {primaryName}
+          </strong>
+          {secondaryName && (
+            <span className="instrument-secondary-name" title={secondaryName}>
+              {secondaryName}
+            </span>
+          )}
+        </span>
+      )}
+      {primaryName ? (
+        <span className="ticker">{ticker}</span>
+      ) : (
+        <strong className="ticker">{ticker}</strong>
+      )}
     </span>
   );
 }
 
-function InstrumentNames({ names }: { names: string[] }) {
-  if (names.length === 0) return null;
-  return (
-    <span className="instrument-name">
-      {names.map((name, index) => (
-        <span key={name}>
-          {index > 0 && <i aria-hidden="true"> · </i>}
-          <span>{name}</span>
-        </span>
-      ))}
-    </span>
+export function instrumentAccessibleName(
+  ticker: string,
+  instrumentLocalName?: string | null,
+  instrumentName?: string | null,
+): string {
+  const [primaryName, secondaryName] = distinctNames(
+    instrumentLocalName,
+    instrumentName,
   );
+  return [primaryName, ticker, secondaryName].filter(Boolean).join(" · ");
 }
 
 function instrumentLabel(

@@ -323,6 +323,87 @@ class ReflectionRecord(Base):
     last_attempted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    current_generation_cycle_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True, index=True
+    )
+    successful_attempt_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, index=True
+    )
+
+
+class ReflectionGenerationCycleRecord(Base):
+    __tablename__ = "reflection_generation_cycles"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    outcome_id: Mapped[int] = mapped_column(
+        ForeignKey("outcomes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    trigger: Mapped[str] = mapped_column(String(40), nullable=False)
+    origin: Mapped[str] = mapped_column(String(20), nullable=False)
+    retry_ordinal: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    idempotency_key: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    queued_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index(
+            "uq_reflection_generation_cycle_active_outcome",
+            "outcome_id",
+            unique=True,
+            sqlite_where=text("status IN ('queued', 'running')"),
+        ),
+        UniqueConstraint(
+            "outcome_id", "idempotency_key", name="uq_reflection_generation_cycle_idempotency"
+        ),
+    )
+
+
+class ReflectionAttemptRecord(Base):
+    __tablename__ = "reflection_attempts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    reflection_id: Mapped[int] = mapped_column(
+        ForeignKey("reflections.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    generation_cycle_id: Mapped[str] = mapped_column(
+        ForeignKey("reflection_generation_cycles.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    trigger: Mapped[str] = mapped_column(String(40), nullable=False)
+    origin: Mapped[str] = mapped_column(String(20), nullable=False)
+    attempt_kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    outcome: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    attempt_schema_version: Mapped[str] = mapped_column(
+        String(80), nullable=False, default="outcome_reflection_attempt.v1"
+    )
+    candidate_schema_version: Mapped[str | None] = mapped_column(
+        "schema_version", String(80), nullable=True
+    )
+    diagnostics_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    usage_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    llm_calls: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cache_hit_input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cache_miss_input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reasoning_output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    wall_time_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    provider_reported_cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    invalid_candidate: Mapped[str | None] = mapped_column(Text, nullable=True)
+    invalid_candidate_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    invalid_candidate_length: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    validation_issues_json: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("generation_cycle_id", "sequence", name="uq_reflection_attempt_sequence"),
+    )
 
 
 class OutcomeFeedbackRecord(Base):
@@ -345,6 +426,8 @@ class OutcomeFeedbackRecord(Base):
     applicability_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     qualified_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     available_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    retirement_reason: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    retirement_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     retired_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 

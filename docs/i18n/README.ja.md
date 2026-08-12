@@ -33,7 +33,7 @@ invalidation conditions、time horizon が含まれます。ポジション比�
 - **Run Detail:** 永続イベントタイムライン、レポート、構造化 decision、
   折りたたみ可能な監査詳細、token/tool/wall-time 指標、cancel/retry、
   アーカイブ復元、現在の run をもとにした新規作成、export。
-- **Memory:** 永続化済み Outcome Observation、Reflection の lifecycle、
+- **Research Review:** 永続化済み Outcome Observation、Reflection の lifecycle、
   バージョン付き Feedback の適格性と理由を個別に確認する。失敗した Reflection
   の再試行、Feedback の廃止、decision の展開、元の run への移動も行える。
   完了した Observation は、source Decision または紐づく Research Revision の
@@ -139,7 +139,7 @@ Markdown と軽量な検証済み audit navigation を使用します。Trader n
 
 ## アーキテクチャと lifecycle
 
-`AnalysisService` が request 正規化、run 作成、memory 検索、graph 実行、
+`AnalysisService` が request 正規化、run 作成、明示的な空コンテキスト準備、graph 実行、
 event/report/decision 永続化、checkpoint cleanup、outcome scheduling を
 一元管理します。Graph node はファイルや application table を直接書きません。
 
@@ -158,7 +158,7 @@ worker は database lease で run を原子的に claim します。lease が期
 - success/cancel 後は checkpoint を削除し、failure 時は次の判断まで保持。
 
 終端状態の run は Runs ページからゴミ箱へ移動・復元できます。移動後は
-Dashboard、Memory、outcome 評価、最近の銘柄候補から直ちに除外されます。
+Dashboard、Research Review、outcome 評価、最近の銘柄候補から直ちに除外されます。
 Web 起動時に一度、worker は work claim 前と成功後 24 時間ごとに期限切れを
 確認し、失敗時は 1 時間後に再試行します。既定の保持期間は 30 日で、
 `TRADINGAGENTS_TRASH_RETENTION_DAYS=0` にすると完全削除を無効化します。
@@ -246,8 +246,10 @@ truth です。
 ## API とセキュリティ
 
 バージョン化 API は run の作成・参照、event SSE、cancel/retry、
-export、memory 参照、Reflection の再試行、Feedback の廃止、capabilities、
-health を提供します。run 作成時に
+export、Research Review の一覧・監査詳細参照、Reflection のキュー再生成、Feedback の廃止、capabilities、
+health を提供します。Review 一覧には完全な Reflection、Attempt、診断、usage、無効候補を含めず、
+これらの監査フィールドは個別 Review 詳細だけで返します。旧 Reflection retry は一リリース限りの
+廃止予定の互換アダプターであり、Review 読み取りの別名ではありません。run 作成時に
 `Idempotency-Key` を送ることで、ブラウザ再送による重複を防げます。
 確認済みテンプレートからの作成では、終端 run の `source_run_id` も送信
 できます。OpenAPI は `/openapi.json` です。

@@ -9,7 +9,7 @@ const nav = [
   { to: "/runs/new", key: "newRun", icon: "+" },
   { to: "/runs", key: "runManagement", icon: "≡" },
   { to: "/research", key: "researchChains", icon: "⌇" },
-  { to: "/memory", key: "memory", icon: "◫" },
+  { to: "/reviews", key: "researchReview", icon: "◫" },
   { to: "/settings", key: "settings", icon: "◇" },
 ];
 

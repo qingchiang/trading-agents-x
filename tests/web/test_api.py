@@ -23,6 +23,12 @@ from tradingagents.application.contracts import (
     ResearchArtifactDraft,
     RunStatus,
 )
+from tradingagents.application.repository import (
+    OutcomeFeedbackRetirementConflictError,
+    OutcomeFeedbackRetirementNotFoundError,
+    OutcomeReflectionRegenerationConflictError,
+    OutcomeReflectionRegenerationNotFoundError,
+)
 from tradingagents.application.research import (
     IncrementalEscalationReason,
     IncrementalGateResult,
@@ -487,11 +493,15 @@ async def test_openapi_contains_versioned_run_center_contract(
         "/api/v1/research-chains/{chain_id}/updates",
         "/api/v1/research-revisions/{revision_id}",
         "/api/v1/research-revisions/{revision_id}/export",
-        "/api/v1/memory",
+        "/api/v1/reviews",
+        "/api/v1/reviews/{outcome_id}",
+        "/api/v1/outcome-observations/{outcome_id}/reflection-regenerations",
         "/api/v1/capabilities",
         "/api/v1/providers/{provider}/models",
         "/api/v1/health",
     } <= set(paths)
+    assert "/api/v1/memory" not in paths
+    assert "/api/v1/outcome-observations/{outcome_id}/reflection/regenerations" not in paths
     assert "/api/v1/runs/{run_id}/rerun" not in paths
     assert "provenance" not in schema["components"]["schemas"]["AnalysisRequest"]["properties"]
     assert "provenance" not in schema["components"]["schemas"]["CapabilityDefaults"]["properties"]
@@ -547,6 +557,10 @@ async def test_openapi_contains_versioned_run_center_contract(
     assert "Observation data, Reflection, and qualification" in feedback["available_at"][
         "description"
     ]
+    review = schema["components"]["schemas"]["ResearchReview"]["properties"]
+    assert "reflection" not in review
+    detail = schema["components"]["schemas"]["ResearchReviewAuditDetail"]["properties"]
+    assert {"review", "reflection", "attempts", "aggregate_usage"} <= set(detail)
     delta = schema["components"]["schemas"]["RevisionDelta"]["properties"]
     assert delta["question_disposition"]["anyOf"][0]["$ref"].endswith("/QuestionDispositionAudit")
     chain = schema["components"]["schemas"]["ResearchChain"]["properties"]
@@ -597,26 +611,26 @@ async def test_removed_provenance_request_is_rejected(
 
 
 @pytest.mark.anyio
-async def test_memory_api_forwards_audited_search_filters(
+async def test_reviews_api_forwards_audited_search_and_status_group_filters(
     web_client: httpx.AsyncClient,
     web_repository,
     monkeypatch,
 ) -> None:
     captured = {}
 
-    def memory_entries(**filters):
+    def review_entries(**filters):
         captured.update(filters)
         return []
 
-    monkeypatch.setattr(web_repository, "memory_entries", memory_entries)
+    monkeypatch.setattr(web_repository, "review_entries", review_entries)
 
     response = await web_client.get(
-        "/api/v1/memory",
+        "/api/v1/reviews",
         params={
             "q": "demand lesson",
             "ticker": "vd",
             "market": "america/new",
-            "status": "resolved",
+            "status_group": "in_progress",
             "limit": 25,
         },
     )
@@ -627,13 +641,20 @@ async def test_memory_api_forwards_audited_search_filters(
         "q": "demand lesson",
         "ticker": "vd",
         "market": "america/new",
-        "status": "resolved",
+        "status_group": "in_progress",
         "limit": 25,
     }
 
 
 @pytest.mark.anyio
-async def test_memory_lifecycle_actions_delegate_without_exposing_errors(
+async def test_legacy_memory_read_api_is_absent(web_client: httpx.AsyncClient) -> None:
+    response = await web_client.get("/api/v1/memory")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_review_lifecycle_actions_delegate_without_exposing_errors(
     web_client: httpx.AsyncClient,
     web_repository,
     monkeypatch,
@@ -648,7 +669,14 @@ async def test_memory_lifecycle_actions_delegate_without_exposing_errors(
     monkeypatch.setattr(
         web_repository,
         "retire_outcome_feedback",
-        lambda feedback_id, *, reason: retired.append((feedback_id, reason)),
+        lambda feedback_id, *, reason, note: retired.append((feedback_id, reason, note))
+        or {
+            "status": "retired",
+            "review_status": "feedback_retired",
+            "retirement_reason": reason,
+            "retirement_note": note,
+            "retired_at": "2026-08-12T00:00:00Z",
+        },
     )
 
     retry_response = await web_client.post(
@@ -656,13 +684,192 @@ async def test_memory_lifecycle_actions_delegate_without_exposing_errors(
     )
     retire_response = await web_client.post(
         "/api/v1/outcome-feedback/11/retire",
-        json={"reason": "Superseded methodology"},
+        json={"reason": "misleading", "note": "It overstates the result."},
     )
 
     assert retry_response.json() == {"status": "pending"}
-    assert retire_response.json() == {"status": "retired"}
+    assert retire_response.json() == {
+        "status": "retired",
+        "review_status": "feedback_retired",
+        "retirement_reason": "misleading",
+        "retirement_note": "It overstates the result.",
+        "retired_at": "2026-08-12T00:00:00Z",
+    }
     assert retried == [7]
-    assert retired == [(11, "Superseded methodology")]
+    assert retired == [(11, "misleading", "It overstates the result.")]
+
+
+@pytest.mark.anyio
+async def test_feedback_retirement_api_validates_typed_requests_and_transitions(
+    web_client: httpx.AsyncClient,
+    web_repository,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        web_repository,
+        "retire_outcome_feedback",
+        lambda _id, *, reason, note: {
+            "status": "retired",
+            "review_status": "feedback_retired",
+            "retirement_reason": reason,
+            "retirement_note": note,
+            "retired_at": "2026-08-12T00:00:00Z",
+        },
+    )
+    invalid_reason = await web_client.post(
+        "/api/v1/outcome-feedback/11/retire",
+        json={"reason": "retired_by_user"},
+    )
+    overlong_note = await web_client.post(
+        "/api/v1/outcome-feedback/11/retire",
+        json={"reason": "other", "note": "x" * 1001},
+    )
+    retired = await web_client.post(
+        "/api/v1/outcome-feedback/11/retire",
+        json={"reason": "other", "note": "  kept for audit  "},
+    )
+
+    assert invalid_reason.status_code == 422
+    assert overlong_note.status_code == 422
+    assert retired.status_code == 200
+    assert retired.json() == {
+        "status": "retired",
+        "review_status": "feedback_retired",
+        "retirement_reason": "other",
+        "retirement_note": "kept for audit",
+        "retired_at": "2026-08-12T00:00:00Z",
+    }
+
+    monkeypatch.setattr(
+        web_repository,
+        "retire_outcome_feedback",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            OutcomeFeedbackRetirementNotFoundError("11")
+        ),
+    )
+    missing = await web_client.post(
+        "/api/v1/outcome-feedback/11/retire",
+        json={"reason": "not_useful"},
+    )
+    assert missing.status_code == 404
+    assert missing.json()["detail"]["code"] == "outcome_feedback_not_found"
+
+    monkeypatch.setattr(
+        web_repository,
+        "retire_outcome_feedback",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            OutcomeFeedbackRetirementConflictError("not eligible")
+        ),
+    )
+    conflict = await web_client.post(
+        "/api/v1/outcome-feedback/11/retire",
+        json={"reason": "not_useful"},
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"] == {
+        "code": "outcome_feedback_retirement_conflict",
+        "message": "not eligible",
+    }
+
+
+@pytest.mark.anyio
+async def test_reflection_regeneration_requires_idempotency_and_returns_cycle(
+    web_client: httpx.AsyncClient,
+    web_repository,
+    monkeypatch,
+) -> None:
+    calls = []
+    monkeypatch.setattr(
+        web_repository,
+        "enqueue_outcome_reflection_regeneration",
+        lambda outcome_id, *, idempotency_key: calls.append((outcome_id, idempotency_key))
+        or {
+            "cycle": {
+                "id": "cycle-1", "outcome_id": outcome_id, "status": "queued",
+                "origin": "manual", "trigger": "user_regeneration", "retry_ordinal": 0,
+                "queued_at": "2026-08-05T00:00:00Z", "due_at": "2026-08-05T00:00:00Z",
+            },
+            "review_status": "awaiting_reflection",
+            "reflection_status": "pending",
+        },
+    )
+    missing = await web_client.post(
+        "/api/v1/outcome-observations/7/reflection-regenerations"
+    )
+    accepted = await web_client.post(
+        "/api/v1/outcome-observations/7/reflection-regenerations",
+        headers={"Idempotency-Key": "retry-1"},
+    )
+    legacy_shape = await web_client.post(
+        "/api/v1/outcome-observations/7/reflection/regenerations",
+        headers={"Idempotency-Key": "retry-1"},
+    )
+    assert missing.status_code == 422
+    assert accepted.status_code == 202
+    assert legacy_shape.status_code == 405
+    assert accepted.json()["cycle"]["id"] == "cycle-1"
+    assert accepted.json()["review_status"] == "awaiting_reflection"
+    assert calls == [(7, "retry-1")]
+
+
+@pytest.mark.anyio
+async def test_reflection_regeneration_returns_typed_not_found_and_active_conflict(
+    web_client: httpx.AsyncClient,
+    web_repository,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        web_repository,
+        "enqueue_outcome_reflection_regeneration",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            OutcomeReflectionRegenerationNotFoundError("7")
+        ),
+    )
+    missing = await web_client.post(
+        "/api/v1/outcome-observations/7/reflection-regenerations",
+        headers={"Idempotency-Key": "retry-1"},
+    )
+    assert missing.status_code == 404
+    monkeypatch.setattr(
+        web_repository,
+        "enqueue_outcome_reflection_regeneration",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            OutcomeReflectionRegenerationConflictError(
+                "active", active_cycle_id="cycle-active"
+            )
+        ),
+    )
+    conflict = await web_client.post(
+        "/api/v1/outcome-observations/7/reflection-regenerations",
+        headers={"Idempotency-Key": "retry-2"},
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["active_cycle_id"] == "cycle-active"
+
+
+@pytest.mark.anyio
+async def test_inconsistent_review_rejects_lifecycle_actions(
+    web_client: httpx.AsyncClient,
+    web_repository,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(web_repository, "retry_outcome_reflection", lambda _id: False)
+    monkeypatch.setattr(
+        web_repository,
+        "retire_outcome_feedback",
+        lambda _id, *, reason, note: (_ for _ in ()).throw(
+            OutcomeFeedbackRetirementConflictError("Review lifecycle is inconsistent")
+        ),
+    )
+
+    retry = await web_client.post("/api/v1/outcome-observations/7/reflection/retry")
+    retire = await web_client.post(
+        "/api/v1/outcome-feedback/11/retire",
+        json={"reason": "not_useful"},
+    )
+
+    assert retry.status_code == 409
+    assert retire.status_code == 409
 
 
 @pytest.mark.anyio

@@ -28,7 +28,7 @@ TradingAgentsX 是一个面向本地单用户的投资研究运行中心。它�
 - **Run Detail：** 可恢复的事件时间线、报告 tabs、结构化决策、warning、
   可折叠审计详情、token/tool/wall-time 指标，以及取消、retry、
   恢复归档、基于当前运行新建和导出。
-- **Memory：** 分别查看已持久化的 Outcome Observation、Reflection 生命周期和
+- **Research Review：** 分别查看已持久化的 Outcome Observation、Reflection 生命周期和
   带版本的 Feedback 资格/原因；可重试失败的 Reflection、停用 Feedback、展开
   decision，并返回对应运行的研究结论。已完成 Observation 可以把来源 Decision 或
   关联 Research Revision 的市场本地 cutoff 作为收益基准，但必须在之后结束。历史
@@ -123,7 +123,7 @@ Deep 只有在仍存在重要开放争议，并且新增证据、因果机制或
 
 ## 架构与运行生命周期
 
-`AnalysisService` 统一负责请求规范化、run 创建、memory 检索、graph 执行、
+`AnalysisService` 统一负责请求规范化、run 创建、显式空上下文准备、graph 执行、
 事件/报告/决策持久化、checkpoint 清理和 outcome 调度。Graph node 不直接
 写文件或应用数据库表。
 
@@ -141,7 +141,7 @@ checkpoint 恢复：
 - 成功或取消后删除 checkpoint，失败时保留到后续处理。
 
 终态运行可在 Runs 页面移入回收站和恢复。移入后会立即退出 Dashboard、
-Memory、outcome 结算和近期标的建议。Web 启动时检查一次到期回收站记录；
+Research Review、outcome 结算和近期标的建议。Web 启动时检查一次到期回收站记录；
 worker 在领取任务前检查，并在成功后每 24 小时再次执行，失败则 1 小时后
 重试。默认 30 天后永久清理，可通过
 `TRADINGAGENTS_TRASH_RETENTION_DAYS` 修改；设为 `0` 时关闭
@@ -221,7 +221,9 @@ Markdown/JSON 只作为显式导出格式；SQLite 是唯一事实源。
 ## API 与安全
 
 版本化 API 覆盖 run 创建/查询、事件 SSE、cancel/retry、export、
-memory 查询、Reflection 重试、Feedback 停用、capabilities 与 health。
+Research Review 列表/审计详情查询、Reflection 排队重新生成、Feedback 停用、capabilities 与 health。
+Review 列表不会返回完整 Reflection、Attempt、诊断、用量或无效候选；这些审计字段只会通过单个
+Review 详情返回。旧的 Reflection retry 是一个即将移除的一版兼容适配，不是 Review 读取别名。
 创建 run 时可发送 `Idempotency-Key`，
 避免浏览器重复提交；也可在用户确认模板表单后发送终态 run 的
 `source_run_id`。OpenAPI 位于 `/openapi.json`。

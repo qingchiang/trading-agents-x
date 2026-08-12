@@ -48,6 +48,10 @@ from tradingagents.application.repository import (
     IdempotencyConflictError,
     InvalidResearchBaselineError,
     InvalidRunTransitionError,
+    OutcomeFeedbackRetirementConflictError,
+    OutcomeFeedbackRetirementNotFoundError,
+    OutcomeReflectionRegenerationConflictError,
+    OutcomeReflectionRegenerationNotFoundError,
     ResearchChainNotFoundError,
     ResearchRevisionNotFoundError,
     RunNotFoundError,
@@ -70,10 +74,13 @@ from .models import (
     CapabilitiesResponse,
     HealthResponse,
     LoginRequest,
-    MemoryEntry,
     OutcomeFeedbackRetireRequest,
+    OutcomeFeedbackRetireResponse,
     ProviderModelCatalog,
+    ReflectionRegenerationAccepted,
     ResearchChainUpdateRequest,
+    ResearchReview,
+    ResearchReviewAuditDetail,
     RunBatchRequest,
     RunBatchResult,
     RunCreateRequest,
@@ -518,34 +525,99 @@ def create_app(
             },
         )
 
-    @app.get(f"{API_PREFIX}/memory", response_model=list[MemoryEntry])
-    def memory(
+    @app.get(f"{API_PREFIX}/reviews", response_model=list[ResearchReview])
+    def reviews(
         ticker: str | None = None,
         market: str | None = None,
         q: Annotated[str | None, Query(max_length=500)] = None,
-        status: Literal["pending", "resolved"] | None = None,
+        status_group: Literal[
+            "needs_attention",
+            "in_progress",
+            "feedback_available",
+            "feedback_ineligible_or_retired",
+            "all",
+        ] | None = None,
         limit: Annotated[int, Query(ge=1, le=500)] = 100,
     ):
-        return repository.memory_entries(
+        return repository.review_entries(
             ticker=ticker,
             market=market,
             q=q,
-            status=status,
+            status_group=status_group,
             limit=limit,
         )
 
-    @app.post(f"{API_PREFIX}/outcome-observations/{{outcome_id}}/reflection/retry")
+    @app.get(
+        f"{API_PREFIX}/reviews/{{outcome_id}}",
+        response_model=ResearchReviewAuditDetail,
+    )
+    def review_audit_detail(outcome_id: int):
+        detail = repository.review_audit_detail(outcome_id)
+        if detail is None:
+            raise HTTPException(status_code=404, detail="Review not found")
+        return detail
+
+    @app.post(
+        f"{API_PREFIX}/outcome-observations/{{outcome_id}}/reflection-regenerations",
+        response_model=ReflectionRegenerationAccepted,
+        status_code=202,
+    )
+    def regenerate_outcome_reflection(
+        outcome_id: int,
+        idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+    ):
+        if not idempotency_key:
+            raise HTTPException(status_code=422, detail="Idempotency-Key is required")
+        try:
+            accepted = repository.enqueue_outcome_reflection_regeneration(
+                outcome_id,
+                idempotency_key=idempotency_key,
+            )
+        except OutcomeReflectionRegenerationNotFoundError:
+            raise HTTPException(status_code=404, detail="Outcome Observation not found") from None
+        except OutcomeReflectionRegenerationConflictError as exc:
+            detail = {"code": "reflection_regeneration_conflict", "message": str(exc)}
+            if exc.active_cycle_id:
+                detail["active_cycle_id"] = exc.active_cycle_id
+            raise HTTPException(status_code=409, detail=detail) from None
+        return accepted
+
+    @app.post(
+        f"{API_PREFIX}/outcome-observations/{{outcome_id}}/reflection/retry",
+        deprecated=True,
+    )
     def retry_outcome_reflection(outcome_id: int):
-        repository.retry_outcome_reflection(outcome_id)
+        if repository.retry_outcome_reflection(outcome_id) is False:
+            raise HTTPException(status_code=409, detail="Review lifecycle is inconsistent")
         return {"status": "pending"}
 
-    @app.post(f"{API_PREFIX}/outcome-feedback/{{feedback_id}}/retire")
+    @app.post(
+        f"{API_PREFIX}/outcome-feedback/{{feedback_id}}/retire",
+        response_model=OutcomeFeedbackRetireResponse,
+    )
     def retire_outcome_feedback(
         feedback_id: int,
         payload: OutcomeFeedbackRetireRequest,
     ):
-        repository.retire_outcome_feedback(feedback_id, reason=payload.reason)
-        return {"status": "retired"}
+        try:
+            return repository.retire_outcome_feedback(
+                feedback_id,
+                reason=payload.reason,
+                note=payload.note,
+            )
+        except OutcomeFeedbackRetirementNotFoundError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "outcome_feedback_not_found", "message": str(exc)},
+            ) from None
+        except OutcomeFeedbackRetirementConflictError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "outcome_feedback_retirement_conflict",
+                    "message": str(exc),
+                },
+            ) from None
 
     @app.get(
         f"{API_PREFIX}/capabilities",

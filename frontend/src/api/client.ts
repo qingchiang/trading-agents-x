@@ -39,7 +39,15 @@ export type ProviderModelCatalog =
   components["schemas"]["ProviderModelCatalog"];
 export type DiscoveredModel = components["schemas"]["DiscoveredModelView"];
 export type Health = components["schemas"]["HealthResponse"];
-export type MemoryEntry = components["schemas"]["MemoryEntry"];
+export type ResearchReview = components["schemas"]["ResearchReview"];
+export type ResearchReviewAuditDetail =
+  components["schemas"]["ResearchReviewAuditDetail"];
+export type ReflectionRegenerationAccepted =
+  components["schemas"]["ReflectionRegenerationAccepted"];
+export type OutcomeFeedbackRetireRequest =
+  components["schemas"]["OutcomeFeedbackRetireRequest"];
+export type OutcomeFeedbackRetireResponse =
+  components["schemas"]["OutcomeFeedbackRetireResponse"];
 export type RunMetrics = components["schemas"]["RunMetrics"];
 export type RunAttemptView = components["schemas"]["RunAttemptView"];
 export type StructuredRecoveryNotice =
@@ -153,17 +161,28 @@ export const api = {
     }),
   action: (id: string, action: "cancel" | "retry") =>
     request<RunView>(`/api/v1/runs/${id}/${action}`, { method: "POST" }),
-  memory: (query = "") =>
-    request<MemoryEntry[]>(`/api/v1/memory${query}`),
-  retryOutcomeReflection: (outcomeId: number) =>
-    request<{ status: string }>(
-      `/api/v1/outcome-observations/${encodeURIComponent(outcomeId)}/reflection/retry`,
-      { method: "POST", body: "{}" },
+  reviews: (query = "") =>
+    request<ResearchReview[]>(`/api/v1/reviews${query}`),
+  reviewAuditDetail: (outcomeId: number) =>
+    request<ResearchReviewAuditDetail>(
+      `/api/v1/reviews/${encodeURIComponent(outcomeId)}`,
     ),
-  retireOutcomeFeedback: (feedbackId: number, reason: string) =>
-    request<{ status: string }>(
+  regenerateOutcomeReflection: (outcomeId: number, idempotencyKey: string) =>
+    request<ReflectionRegenerationAccepted>(
+      `/api/v1/outcome-observations/${encodeURIComponent(outcomeId)}/reflection-regenerations`,
+      {
+        method: "POST",
+        headers: { "Idempotency-Key": idempotencyKey },
+        body: "{}",
+      },
+    ),
+  retireOutcomeFeedback: (
+    feedbackId: number,
+    payload: OutcomeFeedbackRetireRequest,
+  ) =>
+    request<OutcomeFeedbackRetireResponse>(
       `/api/v1/outcome-feedback/${encodeURIComponent(feedbackId)}/retire`,
-      { method: "POST", body: JSON.stringify({ reason }) },
+      { method: "POST", body: JSON.stringify(payload) },
     ),
   login: (token: string) =>
     request<{ authenticated: boolean }>("/api/v1/auth/login", {

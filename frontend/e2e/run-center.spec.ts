@@ -10,6 +10,7 @@ function makeRun(
   options: {
     ticker?: string;
     instrumentName?: string;
+    instrumentLocalName?: string;
     trashedAt?: string | null;
     sourceRunId?: string | null;
   } = {},
@@ -18,7 +19,7 @@ function makeRun(
     id,
     source_run_id: options.sourceRunId ?? null,
     instrument_name: options.instrumentName ?? null,
-    instrument_local_name: null,
+    instrument_local_name: options.instrumentLocalName ?? null,
     research_rating: status === "succeeded" ? "Hold" : null,
     trashed_at: options.trashedAt ?? null,
     status,
@@ -239,6 +240,79 @@ function artifacts(id: string) {
   ];
 }
 
+function review(runId = "legacy-run") {
+  return {
+    outcome_id: 7,
+    review_status: "feedback_available",
+    lifecycle_actions_allowed: true,
+    run_id: runId,
+    ticker: "7203.T",
+    instrument_name: "Toyota Motor Corporation",
+    instrument_local_name: "トヨタ自動車",
+    market: "Asia/Tokyo",
+    asset_type: "stock",
+    analysis_date: "2026-07-24",
+    profile: "standard",
+    decision: result(runId).decision,
+    outcome: {
+      status: "resolved",
+      source_decision_id: 1,
+      source_revision_id: null,
+      benchmark: "1321.T",
+      market_timezone: "Asia/Tokyo",
+      method_category: "short_term_relative_return",
+      method_version: "short_term_relative_return.v1",
+      price_semantics: "exchange_local_daily_close",
+      adjustment_semantics: "split_and_dividend_adjusted",
+      horizon_limit: "Five common trading intervals are short-term methodological feedback only.",
+      limitations: [],
+      observation_start: "2026-07-25",
+      observation_end: "2026-08-01",
+      holding_intervals: 5,
+      raw_return: 0.08,
+      alpha_return: 0.03,
+      data_available_at: timestamp,
+      last_checked_at: timestamp,
+      next_check_at: null,
+      error_message: null,
+    },
+    reflection: "The evidence was directionally useful.",
+    method_feedback: "The evidence was directionally useful.",
+    outcome_reflection: {
+      status: "generated",
+      created_at: timestamp,
+      generated_at: timestamp,
+      last_attempted_at: timestamp,
+      next_retry_at: null,
+      error_code: null,
+      generation_cycle: null,
+    },
+    outcome_feedback: {
+      id: 17,
+      status: "eligible",
+      qualification_policy_version: "outcome_feedback_qualification.v1",
+      reasons: [],
+      method_category: "short_term_relative_return",
+      horizon_limit: "Five common trading intervals are short-term methodological feedback only.",
+      applicability: {
+        schema_version: "1",
+        scope: "instrument",
+        instrument: "7203.T",
+        market: "Asia/Tokyo",
+        research_stages: [],
+        research_domains: [],
+        method_category: "short_term_relative_return",
+        horizon: "short_term",
+      },
+      qualified_at: timestamp,
+      available_at: timestamp,
+      retirement_reason: null,
+      retirement_note: null,
+      retired_at: null,
+    },
+  };
+}
+
 test("updates the Primary Research Chain through a Full-only Indeterminate head", async ({
   page,
 }) => {
@@ -327,6 +401,392 @@ test("updates the Primary Research Chain through a Full-only Indeterminate head"
   });
 });
 
+test("keeps retained Review references, actions, and motion preferences usable in Chromium", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("tradingagents-locale", "en");
+    const key = "__reviewScrollCalls";
+    const calls = (window as unknown as Record<string, Array<{ id: string; behavior: string }>>)[key] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function scrollIntoView(options) {
+      calls.push({
+        id: this.id,
+        behavior: typeof options === "object" && options?.behavior
+          ? options.behavior
+          : "auto",
+      });
+      original.call(this, options);
+    };
+  });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+
+  const sourceRun = makeRun("review-source", "succeeded", {
+    ticker: "7203.T",
+    instrumentName: "Toyota Motor Corporation",
+  });
+  const sourceResult = {
+    ...result(sourceRun.id),
+    decision: {
+      ...result(sourceRun.id).decision,
+      memory_refs: ["memory:legacy-run"],
+    },
+  };
+  const sourceDetail = {
+    run: sourceRun,
+    result: sourceResult,
+    attempts: [],
+    evidence_status: {
+      status: "sealed",
+      digest: sourceResult.evidence.digest,
+      item_count: sourceResult.evidence.items.length,
+      table_count: sourceResult.evidence.tables.length,
+      sealed_attempt: 1,
+      sealed_at: timestamp,
+    },
+  };
+  const baseReview = review();
+  const failedReview = {
+    ...baseReview,
+    review_status: "reflection_failed",
+    reflection: null,
+    method_feedback: null,
+    outcome_reflection: {
+      ...baseReview.outcome_reflection,
+      status: "retryable_failure",
+      error_code: "provider_timeout",
+    },
+    outcome_feedback: null,
+  };
+  const reviewQueries: string[] = [];
+  const paletteStatuses = [
+    "awaiting_observation",
+    "awaiting_reflection",
+    "observation_delayed",
+    "reflection_retry_scheduled",
+    "feedback_ineligible",
+    "reflection_failed",
+    "reflection_invalid",
+    "lifecycle_inconsistent",
+    "feedback_available",
+    "feedback_retired",
+  ] as const;
+  let feedbackRetired = false;
+  let reflectionRegenerationRequested = false;
+  let retirementPayload: Record<string, unknown> | null = null;
+  const retiredReview = () => ({
+    ...baseReview,
+    review_status: "feedback_retired",
+    method_feedback: null,
+    outcome_feedback: {
+      ...baseReview.outcome_feedback,
+      status: "retired",
+      retirement_reason: "too_specific",
+      retirement_note: null,
+      retired_at: timestamp,
+    },
+  });
+
+  await page.route("**/api/v1/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const path = url.pathname;
+    if (path === "/api/v1/instruments/recent") {
+      return route.fulfill({ json: [] });
+    }
+    if (path === "/api/v1/runs/review-source") {
+      return route.fulfill({ json: sourceDetail });
+    }
+    if (path === "/api/v1/runs/review-source/artifacts") {
+      return route.fulfill({ json: [] });
+    }
+    if (path === "/api/v1/runs/review-source/evidence") {
+      return route.fulfill({ json: sourceResult.evidence });
+    }
+    if (path === "/api/v1/runs/review-source/events") {
+      return route.fulfill({
+        headers: { "Content-Type": "text/event-stream" },
+        body: "",
+      });
+    }
+    if (path === "/api/v1/reviews") {
+      reviewQueries.push(url.search);
+      if (url.searchParams.get("q") === "status-palette") {
+        return route.fulfill({
+          json: paletteStatuses.map((status, index) => ({
+            ...baseReview,
+            outcome_id: 100 + index,
+            run_id: `palette-${status}`,
+            review_status: status,
+            lifecycle_actions_allowed: false,
+          })),
+        });
+      }
+      let currentReview = baseReview;
+      if (url.searchParams.get("status_group") === "needs_attention") {
+        currentReview = failedReview;
+      } else if (feedbackRetired) {
+        currentReview = retiredReview();
+      }
+      return route.fulfill({ json: [currentReview] });
+    }
+    if (path === "/api/v1/reviews/7") {
+      return route.fulfill({
+        json: {
+          review: feedbackRetired ? retiredReview() : baseReview,
+          reflection: [
+            "Directional assessment: mixed",
+            "Source-decision evidence lesson: The source decision left an evidence gap.",
+            "Method lesson",
+            "Separate absolute price performance from relative alpha.",
+          ].join("\n"),
+          attempts: [],
+          aggregate_usage: {
+            usage_status: "reported",
+            attempt_count: 1,
+            llm_calls: 1,
+            input_tokens: 120,
+            output_tokens: 40,
+            cache_hit_input_tokens: 20,
+            cache_miss_input_tokens: 100,
+            reasoning_output_tokens: 12,
+            wall_time_seconds: 1.4,
+            provider_reported_cost_usd: 0.004,
+          },
+        },
+      });
+    }
+    if (
+      path === "/api/v1/outcome-observations/7/reflection-regenerations" &&
+      request.method() === "POST"
+    ) {
+      reflectionRegenerationRequested = true;
+      return route.fulfill({
+        json: {
+          cycle: {
+            id: "cycle-manual",
+            outcome_id: 7,
+            status: "queued",
+            origin: "manual",
+            trigger: "user_regeneration",
+            retry_ordinal: 0,
+            queued_at: timestamp,
+            due_at: timestamp,
+          },
+          review_status: "awaiting_reflection",
+          reflection_status: "pending",
+        },
+      });
+    }
+    if (path === "/api/v1/outcome-feedback/17/retire" && request.method() === "POST") {
+      retirementPayload = request.postDataJSON() as Record<string, unknown>;
+      feedbackRetired = true;
+      return route.fulfill({
+        json: {
+          status: "retired",
+          review_status: "feedback_retired",
+          retirement_reason: "too_specific",
+          retirement_note: null,
+          retired_at: timestamp,
+        },
+      });
+    }
+    return route.fulfill({ status: 404, json: { detail: "Not found" } });
+  });
+
+  await page.goto("/runs/review-source?view=decision");
+  const historicalReference = page.getByRole("link", {
+    name: "Open Research Review memory:legacy-run",
+  });
+  await expect(historicalReference).toHaveAttribute(
+    "href",
+    "/reviews?q=legacy-run#review-legacy-run",
+  );
+  await historicalReference.click();
+  await expect(page).toHaveURL(/\/reviews\?q=legacy-run#review-legacy-run$/);
+  await expect(page.locator("#review-legacy-run")).toBeFocused();
+  await expect.poll(async () => page.evaluate(() => (
+    (window as unknown as Record<string, Array<{ id: string; behavior: string }>>)
+      .__reviewScrollCalls
+      .find((call) => call.id === "review-legacy-run")?.behavior
+  ))).toBe("auto");
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const reviewCard = page.locator("#review-legacy-run");
+  await expect(reviewCard.locator(".memory-profile")).toHaveCSS(
+    "background-color",
+    "rgb(237, 243, 255)",
+  );
+  await expect(reviewCard.locator(".ticker")).toHaveCSS("font-size", "13px");
+  await expect(reviewCard.locator(".instrument-primary-name")).toHaveText(
+    "トヨタ自動車",
+  );
+  await expect(reviewCard.locator(".instrument-primary-name")).toHaveCSS(
+    "font-size",
+    "18px",
+  );
+  await expect(reviewCard.locator(".instrument-secondary-name")).toHaveText(
+    "Toyota Motor Corporation",
+  );
+  const [reviewTickerBox, reviewPrimaryNameBox, reviewSecondaryNameBox] =
+    await Promise.all([
+      reviewCard.locator(".ticker").boundingBox(),
+      reviewCard.locator(".instrument-primary-name").boundingBox(),
+      reviewCard.locator(".instrument-secondary-name").boundingBox(),
+    ]);
+  expect(reviewTickerBox).not.toBeNull();
+  expect(reviewPrimaryNameBox).not.toBeNull();
+  expect(reviewSecondaryNameBox).not.toBeNull();
+  expect(reviewSecondaryNameBox!.x).toBeGreaterThan(
+    reviewPrimaryNameBox!.x + reviewPrimaryNameBox!.width,
+  );
+  expect(
+    Math.abs(
+      reviewSecondaryNameBox!.y + reviewSecondaryNameBox!.height -
+        (reviewPrimaryNameBox!.y + reviewPrimaryNameBox!.height),
+    ),
+  ).toBeLessThanOrEqual(2);
+  expect(reviewTickerBox!.x).toBe(reviewPrimaryNameBox!.x);
+  expect(reviewTickerBox!.y).toBeGreaterThan(
+    reviewPrimaryNameBox!.y + reviewPrimaryNameBox!.height,
+  );
+  await expect(reviewCard.locator(".status-feedback_available")).toHaveCSS(
+    "background-color",
+    "rgb(234, 248, 240)",
+  );
+  expect(await reviewCard.locator(".review-confidence").evaluate(
+    (element) => element.scrollWidth <= element.clientWidth,
+  )).toBe(true);
+  const [ratingBox, confidenceBox, thesisBox] = await Promise.all([
+    reviewCard.locator(".review-rating").boundingBox(),
+    reviewCard.locator(".review-confidence").boundingBox(),
+    reviewCard.locator(".review-decision-copy > .markdown").boundingBox(),
+  ]);
+  expect(ratingBox).not.toBeNull();
+  expect(confidenceBox).not.toBeNull();
+  expect(thesisBox).not.toBeNull();
+  expect(confidenceBox!.y).toBeGreaterThan(ratingBox!.y + ratingBox!.height);
+  expect(thesisBox!.x).toBeGreaterThan(ratingBox!.x + ratingBox!.width);
+  await expect(reviewCard.getByRole("heading", { name: "Source Research Decision" })).toHaveCSS(
+    "font-size",
+    "16px",
+  );
+  const horizonSummary = reviewCard.locator(".review-decision-horizon");
+  await expect(horizonSummary).toContainText("6-12 months");
+  expect(
+    await horizonSummary.evaluate(
+      (element) => element.getBoundingClientRect().height,
+    ),
+  ).toBeLessThanOrEqual(40);
+  expect(
+    await reviewCard
+      .locator(".memory-decision-details")
+      .first()
+      .getByText("6-12 months")
+      .count(),
+  ).toBe(0);
+  await reviewCard.getByText("Decision details").click();
+  const detailsWidth = await reviewCard.locator(".memory-decision-details").first().evaluate(
+    (element) => element.getBoundingClientRect().width,
+  );
+  const cardWidth = await reviewCard.evaluate((element) => element.getBoundingClientRect().width);
+  expect(detailsWidth / cardWidth).toBeGreaterThan(0.9);
+  expect(await reviewCard.locator(".memory-scenario-grid").evaluate(
+    (element) => getComputedStyle(element).gridTemplateColumns.split(" ").length,
+  )).toBe(3);
+  await reviewCard.getByText("Full Reflection Analysis").click();
+  await expect(reviewCard.getByText("Directional assessment")).toBeVisible();
+  await expect(reviewCard.getByText("Mixed")).toBeVisible();
+  await expect(reviewCard.getByText("Source-decision evidence lesson")).toBeVisible();
+  await expect(reviewCard.getByText("Method lesson", { exact: true })).toBeVisible();
+  await reviewCard.getByText("Generation and audit details").click();
+  await expect(reviewCard.getByRole("heading", { name: "Usage summary" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  const [mobileMetaBox, mobileThesisBox] = await Promise.all([
+    reviewCard.locator(".review-decision-meta").boundingBox(),
+    reviewCard.locator(".review-decision-copy > .markdown").boundingBox(),
+  ]);
+  expect(mobileMetaBox).not.toBeNull();
+  expect(mobileThesisBox).not.toBeNull();
+  expect(mobileThesisBox!.y).toBeGreaterThan(mobileMetaBox!.y + mobileMetaBox!.height);
+  expect(await reviewCard.locator(".memory-scenario-grid").evaluate(
+    (element) => getComputedStyle(element).gridTemplateColumns.split(" ").length,
+  )).toBe(1);
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  await page.getByLabel("Keyword search").fill("Toyota");
+  await page.getByLabel("Review status").selectOption("needs_attention");
+  await page.getByRole("button", { name: "Apply" }).click();
+  await expect(page).toHaveURL(/\/reviews\?q=Toyota&status_group=needs_attention$/);
+  await expect.poll(() => reviewQueries).toContain("?q=Toyota&status_group=needs_attention");
+  const regenerationButton = page.getByRole("button", { name: "Regenerate Reflection Analysis" });
+  expect(await regenerationButton.evaluate((element) => element.getBoundingClientRect().width)).toBeLessThan(cardWidth / 2);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await regenerationButton.evaluate((element) => {
+    const section = element.closest("section")!;
+    return Math.abs(element.getBoundingClientRect().width - section.getBoundingClientRect().width) < 2;
+  })).toBe(true);
+  expect(await page.locator(".memory-scenario-grid").evaluate(
+    (element) => getComputedStyle(element).gridTemplateColumns.split(" ").length,
+  )).toBe(1);
+  await regenerationButton.click();
+  await expect.poll(() => reflectionRegenerationRequested).toBe(true);
+  await expect(page.getByRole("status")).toContainText("Reflection Analysis is queued.");
+  await expect(page.getByRole("button", { name: "Queued" })).toBeDisabled();
+  await expect(page.locator("#review-legacy-run")).toBeFocused();
+
+  await page.getByLabel("Review status").selectOption("feedback_available");
+  await page.getByRole("button", { name: "Apply" }).click();
+  await expect(page).toHaveURL(/\/reviews\?q=Toyota&status_group=feedback_available$/);
+
+  const retireTrigger = page.getByRole("button", { name: "Retire Method Lesson" });
+  await expect(retireTrigger).toHaveCSS("min-height", "44px");
+  expect(await retireTrigger.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+
+  await retireTrigger.focus();
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "Retire Reusable Method Lesson" });
+  const reason = dialog.getByLabel("Reason");
+  await expect(reason).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(dialog.getByRole("button", { name: "Retire Method Lesson" })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(reason).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(retireTrigger).toBeFocused();
+
+  await page.keyboard.press("Enter");
+  await expect(reason).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await expect(dialog.getByRole("button", { name: "Retire Method Lesson" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect.poll(() => retirementPayload).toEqual({ reason: "too_specific", note: null });
+  await expect(page.getByRole("status")).toHaveText("Reusable method lesson retired.");
+
+  await page.goto("/reviews?q=status-palette");
+  const toneBackgrounds = {
+    awaiting_observation: "rgb(237, 243, 255)",
+    awaiting_reflection: "rgb(237, 243, 255)",
+    observation_delayed: "rgb(255, 245, 223)",
+    reflection_retry_scheduled: "rgb(255, 245, 223)",
+    feedback_ineligible: "rgb(255, 245, 223)",
+    reflection_failed: "rgb(255, 240, 242)",
+    reflection_invalid: "rgb(255, 240, 242)",
+    lifecycle_inconsistent: "rgb(255, 240, 242)",
+    feedback_available: "rgb(234, 248, 240)",
+    feedback_retired: "rgb(241, 243, 246)",
+  } as const;
+  for (const [status, background] of Object.entries(toneBackgrounds)) {
+    await expect(page.locator(`.status-${status}`)).toHaveCSS("background-color", background);
+  }
+});
+
 test("runs, legacy templates, trash, and restores local research", async ({
   page,
 }) => {
@@ -337,6 +797,7 @@ test("runs, legacy templates, trash, and restores local research", async ({
       makeRun("run-report", "succeeded", {
         ticker: "NVDA",
         instrumentName: "NVIDIA Corporation",
+        instrumentLocalName: "英伟达",
       }),
     ],
   ]);
@@ -425,6 +886,7 @@ test("runs, legacy templates, trash, and restores local research", async ({
         json: active.map((run) => ({
           ticker: run.request.ticker,
           instrument_name: run.instrument_name,
+          instrument_local_name: run.instrument_local_name,
           last_used_at: run.updated_at,
         })),
       });
@@ -504,7 +966,7 @@ test("runs, legacy templates, trash, and restores local research", async ({
         json: { runs: ids.flatMap((id) => runs.get(id) ?? []), changed },
       });
     }
-    if (path === "/api/v1/memory") {
+    if (path === "/api/v1/reviews") {
       const report = runs.get("run-report");
       if (!report || report.trashed_at || purged.has(report.id)) {
         return route.fulfill({ json: [] });
@@ -512,6 +974,9 @@ test("runs, legacy templates, trash, and restores local research", async ({
       return route.fulfill({
         json: [
           {
+            outcome_id: 1,
+            review_status: "feedback_available",
+            lifecycle_actions_allowed: true,
             run_id: report.id,
             ticker: report.request.ticker,
             instrument_name: report.instrument_name,
@@ -523,14 +988,30 @@ test("runs, legacy templates, trash, and restores local research", async ({
             decision: result(report.id).decision,
             outcome: {
               status: "resolved",
+              source_decision_id: 1,
+              source_revision_id: null,
               benchmark: "SPY",
+              market_timezone: "America/New_York",
+              method_category: "short_term_relative_return",
+              method_version: "short_term_relative_return.v1",
+              price_semantics: "exchange_local_daily_close",
+              adjustment_semantics: "split_and_dividend_adjusted",
+              horizon_limit: "Five common trading intervals are short-term methodological feedback only.",
+              limitations: [],
               observation_start: "2026-07-25",
               observation_end: "2026-08-01",
               holding_intervals: 5,
               raw_return: 0.08,
               alpha_return: 0.03,
+              data_available_at: timestamp,
+              last_checked_at: timestamp,
+              next_check_at: null,
+              error_message: null,
             },
             reflection: "The evidence was directionally useful.",
+            method_feedback: "The evidence was directionally useful.",
+            outcome_reflection: null,
+            outcome_feedback: null,
           },
         ],
       });
@@ -652,6 +1133,18 @@ test("runs, legacy templates, trash, and restores local research", async ({
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "运行概览" })).toBeVisible();
   await expect(page.getByText("NVIDIA Corporation")).toBeVisible();
+  const dashboardIdentity = page
+    .locator("tbody .instrument-identity")
+    .filter({ hasText: "NVDA" });
+  await expect(dashboardIdentity.locator(".ticker")).toHaveCSS("font-size", "12.5px");
+  await expect(dashboardIdentity.locator(".instrument-primary-name")).toHaveText("英伟达");
+  await expect(dashboardIdentity.locator(".instrument-primary-name")).toHaveCSS(
+    "font-size",
+    "15px",
+  );
+  await expect(dashboardIdentity.locator(".instrument-secondary-name")).toHaveText(
+    "NVIDIA Corporation",
+  );
   await page.getByLabel("界面语言").selectOption("en");
 
   await page.getByRole("link", { name: "New run", exact: true }).click();
@@ -680,6 +1173,21 @@ test("runs, legacy templates, trash, and restores local research", async ({
   });
 
   await page.goto("/runs/run-report?view=deliberation");
+  const runIdentity = page.locator(".run-title .instrument-identity");
+  await expect(runIdentity.getByRole("heading", { level: 1 })).toHaveText("英伟达");
+  await expect(runIdentity.locator(".instrument-primary-name")).toHaveText("英伟达");
+  await expect(runIdentity.locator(".instrument-primary-name")).toHaveCSS(
+    "font-size",
+    "38px",
+  );
+  await expect(runIdentity.locator(".instrument-secondary-name")).toHaveText(
+    "NVIDIA Corporation",
+  );
+  await expect(runIdentity.locator(".instrument-secondary-name")).toHaveCSS(
+    "font-size",
+    "14px",
+  );
+  await expect(runIdentity.locator(".ticker")).toHaveCSS("font-size", "13px");
   await expect(
     page.getByRole("heading", { name: "Bull and bear cases" }),
   ).toBeVisible();
@@ -701,17 +1209,27 @@ test("runs, legacy templates, trash, and restores local research", async ({
   await page.getByRole("tab", { name: "Reports" }).click();
   await expect(page.getByRole("heading", { name: "Market report" })).toBeVisible();
 
-  await page.goto("/memory");
+  await page.getByRole("link", { name: "Research Review", exact: true }).click();
+  await expect(page).toHaveURL(/\/reviews$/);
   await expect(page.getByText("NVIDIA Corporation")).toBeVisible();
-  await page.getByText("Decision details").click();
+  await page.getByText("Decision details").focus();
+  await page.keyboard.press("Enter");
   await expect(page.getByText("Demand improves").first()).toBeVisible();
   await page
-    .getByRole("link", { name: "Open research decision", exact: true })
+    .getByRole("link", { name: /^Open research decision/ })
     .click();
   await expect(page).toHaveURL(/\/runs\/run-report\?view=decision/);
 
+  await page.goto("/memory");
+  await expect(page).toHaveURL(/\/memory$/);
+  await expect(page.getByRole("heading", { name: "Research Review" })).toHaveCount(0);
+
   await page.goto("/runs");
   const reportRow = page.getByRole("row").filter({ hasText: "NVDA" });
+  await expect(reportRow.locator(".instrument-primary-name")).toHaveText("英伟达");
+  await expect(reportRow.locator(".instrument-secondary-name")).toHaveText(
+    "NVIDIA Corporation",
+  );
   await reportRow.getByRole("checkbox").check();
   await page.getByRole("button", { name: "Move to Trash (1)" }).click();
   const trashDialog = page.getByRole("alertdialog", {
@@ -723,8 +1241,8 @@ test("runs, legacy templates, trash, and restores local research", async ({
     .click();
   await expect(page.getByText("Moved 1 run(s) to Trash.")).toBeVisible();
 
-  await page.goto("/memory");
-  await expect(page.getByText("No memory entries.")).toBeVisible();
+  await page.goto("/reviews");
+  await expect(page.getByText("No Research Reviews.")).toBeVisible();
 
   await page.goto("/runs?trash_state=trashed");
   await expect(page.getByText("Trash retention")).toBeVisible();
@@ -732,7 +1250,7 @@ test("runs, legacy templates, trash, and restores local research", async ({
   await trashedRow.getByRole("checkbox").check();
   await page.getByRole("button", { name: "Restore selected (1)" }).click();
   await expect(page.getByText("Restored 1 run(s).")).toBeVisible();
-  await page.goto("/memory");
+  await page.goto("/reviews");
   await expect(page.getByText("NVIDIA Corporation")).toBeVisible();
 
   const restored = runs.get("run-report")!;
@@ -796,6 +1314,15 @@ test("runs, legacy templates, trash, and restores local research", async ({
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/runs/run-report?view=reports&report=market");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await expect(page.locator(".run-title .instrument-primary-name")).toHaveText("英伟达");
+  await expect(page.locator(".run-title .instrument-secondary-name")).toHaveText(
+    "NVIDIA Corporation",
+  );
   await expect(page.getByLabel("Jump to section")).toBeVisible();
   await expect(
     page.getByRole("navigation", { name: "Report section navigation" }),

@@ -464,7 +464,10 @@ test("restores deliberation and resolves evidence references across run views", 
     </Router>,
   );
 
-  expect(await screen.findByRole("heading", { name: "NVDA" })).toBeVisible();
+  expect(
+    await screen.findByRole("heading", { name: "NVIDIA Corporation" }),
+  ).toBeVisible();
+  expect(screen.getByText("NVDA")).toBeVisible();
   expect(
     FakeEventSource.instance.listeners.has(
       "decision.numeric_display_scale_normalized",
@@ -616,11 +619,11 @@ test("restores deliberation and resolves evidence references across run views", 
   expect(referenceTable).toHaveTextContent("Live snapshot");
   expect(
     screen.getByRole("link", {
-      name: "Open memory memory:legacy-run",
+      name: "Open Research Review memory:legacy-run",
     }),
   ).toHaveAttribute(
     "href",
-    "/memory?q=legacy-run#memory-legacy-run",
+    "/reviews?q=legacy-run#review-legacy-run",
   );
 
   const artifactEvent = {
@@ -925,7 +928,10 @@ test("labels runs that have no recorded artifacts", async () => {
     </Router>,
   );
 
-  expect(await screen.findByRole("heading", { name: "NVDA" })).toBeVisible();
+  expect(
+    await screen.findByRole("heading", { name: "NVIDIA Corporation" }),
+  ).toBeVisible();
+  expect(screen.getByText("NVDA")).toBeVisible();
   fireEvent.click(screen.getByRole("tab", { name: "Deliberation" }));
 
   expect(
@@ -950,7 +956,10 @@ test("groups metrics by role and expands phase observations", async () => {
     </Router>,
   );
 
-  expect(await screen.findByRole("heading", { name: "NVDA" })).toBeVisible();
+  expect(
+    await screen.findByRole("heading", { name: "NVIDIA Corporation" }),
+  ).toBeVisible();
+  expect(screen.getByText("NVDA")).toBeVisible();
   const roleMetricsTitle = screen.getByText("Metrics by role");
   const roleMetrics = roleMetricsTitle.closest("details");
   expect(roleMetrics).not.toHaveAttribute("open");

@@ -7,6 +7,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+from time import monotonic
 from typing import Any
 
 import pandas as pd
@@ -17,7 +18,7 @@ from tradingagents.dataflows.symbol_utils import market_today, normalize_symbol
 from .contracts import report_language_prompt_label
 from .llms import create_run_llms
 from .outcome_feedback import OutcomeReflectionStatus
-from .reflection import OutcomeReflector
+from .reflection import OutcomeReflector, ReflectionDraftValidationError
 from .repository import RunRepository
 from .settings import AppSettings
 
@@ -110,8 +111,17 @@ class OutcomeSettlement:
                     observation=observation,
                     observed_at=self._now(),
                 )
+            attempt_ids = None
+            started_monotonic = None
             try:
-                reflection = self._reflection(
+                attempt_ids = self.repository.start_outcome_reflection_attempt(
+                    item["outcome_id"],
+                    started_at=now,
+                )
+                if attempt_ids is None:
+                    continue
+                started_monotonic = monotonic()
+                draft = self._reflection(
                     ticker=item["ticker"],
                     benchmark=item["benchmark"],
                     decision=item["decision"],
@@ -119,14 +129,89 @@ class OutcomeSettlement:
                 )
                 reflection_status = self.repository.persist_generated_reflection(
                     item["outcome_id"],
-                    reflection=reflection,
+                    draft=draft,
                     generated_at=self._now(),
+                    attempt_ids=attempt_ids,
+                    wall_time_seconds=monotonic() - started_monotonic,
+                    usage=draft.usage,
                 )
                 stats[
                     "failed"
                     if reflection_status == OutcomeReflectionStatus.INVALID.value
                     else "resolved"
                 ] += 1
+            except ReflectionDraftValidationError as exc:
+                first_finished = self._now()
+                repair_ids = None
+                repair_started = None
+                self.repository.persist_generated_reflection(
+                    item["outcome_id"],
+                    reflection=exc.candidate,
+                    generated_at=first_finished,
+                    attempt_ids=attempt_ids,
+                    wall_time_seconds=monotonic() - started_monotonic,
+                    terminal_invalid=False,
+                    validation_issues=list(exc.validation_issues),
+                    usage=exc.usage,
+                    invalid_candidate_digest=exc.candidate_digest,
+                    invalid_candidate_length=exc.candidate_length,
+                )
+                try:
+                    repair_ids = self.repository.start_outcome_reflection_repair_attempt(
+                        item["outcome_id"],
+                        attempt_ids=attempt_ids,
+                        started_at=first_finished,
+                    )
+                    repair_started = monotonic()
+                    draft = self._repair_reflection(
+                        ticker=item["ticker"],
+                        benchmark=item["benchmark"],
+                        decision=item["decision"],
+                        observation=observation,
+                        candidate=exc.candidate,
+                        validation_issues=exc.validation_issues,
+                    )
+                    self.repository.persist_generated_reflection(
+                        item["outcome_id"],
+                        draft=draft,
+                        generated_at=self._now(),
+                        attempt_ids=repair_ids,
+                        wall_time_seconds=monotonic() - repair_started,
+                        usage=draft.usage,
+                    )
+                    stats["resolved"] += 1
+                except ReflectionDraftValidationError as repair_error:
+                    self.repository.persist_generated_reflection(
+                        item["outcome_id"],
+                        reflection=repair_error.candidate,
+                        generated_at=self._now(),
+                        attempt_ids=repair_ids,
+                        wall_time_seconds=monotonic() - repair_started,
+                        validation_issues=list(repair_error.validation_issues),
+                        usage=repair_error.usage,
+                        invalid_candidate_digest=repair_error.candidate_digest,
+                        invalid_candidate_length=repair_error.candidate_length,
+                    )
+                    stats["failed"] += 1
+                except Exception as repair_exception:
+                    # A cycle that started with schema-invalid output has consumed
+                    # its sole repair; a repair transport failure must not turn it
+                    # into an unbounded provider-retry path.
+                    self.repository.persist_generated_reflection(
+                        item["outcome_id"],
+                        generated_at=self._now(),
+                        attempt_ids=repair_ids or attempt_ids,
+                        wall_time_seconds=(
+                            monotonic() - repair_started
+                            if repair_started is not None
+                            else None
+                        ),
+                        validation_issues=[
+                            "repair_provider_failure",
+                            type(repair_exception).__name__,
+                        ],
+                    )
+                    stats["failed"] += 1
             except Exception as exc:
                 attempted_at = self._now()
                 logger.warning(
@@ -139,6 +224,12 @@ class OutcomeSettlement:
                     attempted_at=attempted_at,
                     next_retry_at=attempted_at + ERROR_RECHECK_INTERVAL,
                     error_code=type(exc).__name__,
+                    attempt_ids=attempt_ids,
+                    wall_time_seconds=(
+                        monotonic() - started_monotonic
+                        if started_monotonic is not None
+                        else None
+                    ),
                 )
                 stats["failed"] += 1
         return stats
@@ -220,7 +311,7 @@ class OutcomeSettlement:
         benchmark: str,
         decision: dict[str, Any],
         observation: OutcomeObservation,
-    ) -> str:
+    ) -> Any:
         reflector = self._reflector
         if reflector is None:
             quick, _ = create_run_llms(self.settings.default_run_settings)
@@ -240,4 +331,37 @@ class OutcomeSettlement:
             holding_intervals=observation.holding_intervals,
             observation_start=observation.start_date.isoformat(),
             observation_end=observation.end_date.isoformat(),
+        )
+
+    def _repair_reflection(
+        self,
+        *,
+        ticker: str,
+        benchmark: str,
+        decision: dict[str, Any],
+        observation: OutcomeObservation,
+        candidate: str | None,
+        validation_issues: tuple[str, ...],
+    ) -> Any:
+        reflector = self._reflector
+        if reflector is None:
+            quick, _ = create_run_llms(self.settings.default_run_settings)
+            reflector = OutcomeReflector(
+                quick,
+                output_language=report_language_prompt_label(
+                    self.settings.default_run_settings.output_language
+                ),
+            )
+            self._reflector = reflector
+        return reflector.repair(
+            ticker=ticker,
+            benchmark=benchmark,
+            decision=json.dumps(decision, ensure_ascii=False, sort_keys=True),
+            raw_return=observation.raw_return,
+            alpha_return=observation.alpha_return,
+            holding_intervals=observation.holding_intervals,
+            observation_start=observation.start_date.isoformat(),
+            observation_end=observation.end_date.isoformat(),
+            candidate=candidate,
+            validation_issues=validation_issues,
         )

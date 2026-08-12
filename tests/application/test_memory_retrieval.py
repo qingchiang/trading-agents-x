@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date, datetime, timedelta
+from threading import Barrier
 
 import pytest
 from sqlalchemy import select
@@ -16,10 +18,19 @@ from tradingagents.application.contracts import (
 )
 from tradingagents.application.database import (
     DecisionRecord,
+    OutcomeFeedbackRecord,
     OutcomeRecord,
+    ReflectionAttemptRecord,
+    ReflectionGenerationCycleRecord,
     ReflectionRecord,
 )
-from tradingagents.application.repository import RunRepository
+from tradingagents.application.outcome_feedback import OutcomeFeedbackRetirementReason
+from tradingagents.application.repository import (
+    OutcomeFeedbackRetirementConflictError,
+    OutcomeFeedbackRetirementNotFoundError,
+    OutcomeReflectionRegenerationConflictError,
+    RunRepository,
+)
 
 
 def _seed_memory(
@@ -102,6 +113,243 @@ def _seed_memory(
             reflection=reflection,
         )
     return run.id
+
+
+def _feedback_for_run(repository: RunRepository, run_id: str) -> tuple[int, int]:
+    with repository.sessions() as session:
+        outcome = session.scalar(
+            select(OutcomeRecord)
+            .join(DecisionRecord)
+            .where(DecisionRecord.run_id == run_id)
+        )
+        assert outcome is not None
+        reflection = session.scalar(
+            select(ReflectionRecord).where(ReflectionRecord.outcome_id == outcome.id)
+        )
+        assert reflection is not None
+        feedback = session.scalar(
+            select(OutcomeFeedbackRecord).where(
+                OutcomeFeedbackRecord.reflection_id == reflection.id
+            )
+        )
+        assert feedback is not None
+        return outcome.id, feedback.id
+
+
+def test_retire_eligible_feedback_is_auditable_and_idempotent(
+    repository: RunRepository,
+) -> None:
+    run_id = _seed_memory(
+        repository,
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 24),
+        reflection="Method lesson: Compare the method limits before reuse.",
+        thesis="Fixture thesis for Feedback retirement.",
+    )
+    outcome_id, feedback_id = _feedback_for_run(repository, run_id)
+    with repository.sessions.begin() as session:
+        feedback = session.get(OutcomeFeedbackRecord, feedback_id)
+        assert feedback is not None
+        feedback.status = "eligible"
+        feedback.reasons_json = []
+
+    retired = repository.retire_outcome_feedback(
+        feedback_id,
+        reason=OutcomeFeedbackRetirementReason.MISLEADING,
+        note="It generalizes a one-off result.",
+    )
+    repeated = repository.retire_outcome_feedback(
+        feedback_id,
+        reason=OutcomeFeedbackRetirementReason.NOT_USEFUL,
+        note="A retry must retain the original audit record.",
+    )
+
+    assert repeated == retired
+    assert retired["status"] == "retired"
+    assert retired["retirement_reason"] == "misleading"
+    assert retired["retirement_note"] == "It generalizes a one-off result."
+    review = repository.review_entries(outcome_id=outcome_id)[0]
+    assert review["review_status"] == "feedback_retired"
+    feedback_view = review["outcome_feedback"]
+    assert feedback_view is not None
+    assert feedback_view["status"] == "retired"
+    assert feedback_view["retirement_reason"] == "misleading"
+    assert feedback_view["retirement_note"] == "It generalizes a one-off result."
+    assert feedback_view["reasons"] == []
+
+
+def test_retire_feedback_rejects_missing_ineligible_and_inconsistent_lifecycles(
+    repository: RunRepository,
+) -> None:
+    with pytest.raises(OutcomeFeedbackRetirementNotFoundError):
+        repository.retire_outcome_feedback(
+            999,
+            reason=OutcomeFeedbackRetirementReason.NOT_USEFUL,
+            note=None,
+        )
+
+    run_id = _seed_memory(
+        repository,
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 24),
+        reflection="Method lesson: Use a different market window.",
+        thesis="Fixture thesis for forbidden Feedback retirement.",
+    )
+    _outcome_id, feedback_id = _feedback_for_run(repository, run_id)
+    with repository.sessions.begin() as session:
+        feedback = session.get(OutcomeFeedbackRecord, feedback_id)
+        assert feedback is not None
+        feedback.status = "ineligible"
+    with pytest.raises(OutcomeFeedbackRetirementConflictError):
+        repository.retire_outcome_feedback(
+            feedback_id,
+            reason=OutcomeFeedbackRetirementReason.TOO_SPECIFIC,
+            note=None,
+        )
+
+    with repository.sessions.begin() as session:
+        feedback = session.get(OutcomeFeedbackRecord, feedback_id)
+        reflection = session.get(ReflectionRecord, feedback.reflection_id) if feedback else None
+        assert feedback is not None and reflection is not None
+        feedback.status = "eligible"
+        reflection.status = "invalid"
+    with pytest.raises(OutcomeFeedbackRetirementConflictError):
+        repository.retire_outcome_feedback(
+            feedback_id,
+            reason=OutcomeFeedbackRetirementReason.OTHER,
+            note=None,
+        )
+
+
+def test_reflection_regeneration_is_idempotent_and_auto_retries_are_bounded(
+    repository: RunRepository,
+) -> None:
+    run_id = _seed_memory(
+        repository,
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 24),
+        reflection="Method lesson: legacy fixture.",
+        thesis="Fixture thesis for manual regeneration.",
+    )
+    with repository.sessions.begin() as session:
+        outcome = session.scalar(
+            select(OutcomeRecord)
+            .join(DecisionRecord)
+            .where(DecisionRecord.run_id == run_id)
+        )
+        assert outcome is not None
+        reflection = session.scalar(
+            select(ReflectionRecord).where(ReflectionRecord.outcome_id == outcome.id)
+        )
+        feedback = session.scalar(
+            select(OutcomeFeedbackRecord).where(
+                OutcomeFeedbackRecord.reflection_id == reflection.id
+            )
+        )
+        assert reflection is not None and feedback is not None
+        session.delete(feedback)
+        reflection.status = "invalid"
+        reflection.next_retry_at = None
+        outcome_id = outcome.id
+
+    queued_at = datetime(2026, 8, 5, 0, 0)
+    first = repository.enqueue_outcome_reflection_regeneration(
+        outcome_id, idempotency_key="manual-retry-1", queued_at=queued_at
+    )
+    same = repository.enqueue_outcome_reflection_regeneration(
+        outcome_id, idempotency_key="manual-retry-1", queued_at=queued_at
+    )
+    assert first["cycle"]["id"] == same["cycle"]["id"]
+    assert first["cycle"]["status"] == "queued"
+    assert first["review_status"] == "awaiting_reflection"
+    assert first["reflection_status"] == "pending"
+    with pytest.raises(OutcomeReflectionRegenerationConflictError) as conflict:
+        repository.enqueue_outcome_reflection_regeneration(
+            outcome_id, idempotency_key="manual-retry-2", queued_at=queued_at
+        )
+    assert conflict.value.active_cycle_id == first["cycle"]["id"]
+
+    attempt_ids = repository.start_outcome_reflection_attempt(
+        outcome_id, started_at=queued_at
+    )
+    assert attempt_ids is not None
+    with repository.sessions() as session:
+        manual_attempt = session.get(
+            ReflectionAttemptRecord, attempt_ids["attempt_id"]
+        )
+        assert manual_attempt is not None
+        assert manual_attempt.origin == "manual"
+        assert manual_attempt.trigger == "user_regeneration"
+    repository.mark_reflection_failure(
+        outcome_id,
+        attempted_at=queued_at,
+        error_code="TransportError",
+        attempt_ids=attempt_ids,
+    )
+    with repository.sessions() as session:
+        cycle = session.get(ReflectionGenerationCycleRecord, first["cycle"]["id"])
+        assert cycle is not None and cycle.status == "failed"
+        reflection = session.scalar(
+            select(ReflectionRecord).where(ReflectionRecord.outcome_id == outcome_id)
+        )
+        assert reflection is not None
+        assert reflection.next_retry_at is None
+
+    with repository.sessions.begin() as session:
+        reflection = session.scalar(
+            select(ReflectionRecord).where(ReflectionRecord.outcome_id == outcome_id)
+        )
+        assert reflection is not None
+        reflection.status = "pending"
+        reflection.current_generation_cycle_id = None
+    delays = []
+    started_at = queued_at
+    for _ in range(4):
+        automatic_attempt = repository.start_outcome_reflection_attempt(
+            outcome_id, started_at=started_at
+        )
+        assert automatic_attempt is not None
+        repository.mark_reflection_failure(
+            outcome_id,
+            attempted_at=started_at,
+            error_code="TransportError",
+            attempt_ids=automatic_attempt,
+        )
+        with repository.sessions() as session:
+            reflection = session.scalar(
+                select(ReflectionRecord).where(ReflectionRecord.outcome_id == outcome_id)
+            )
+            assert reflection is not None
+            if reflection.next_retry_at is not None:
+                delays.append(reflection.next_retry_at - started_at)
+                started_at = reflection.next_retry_at
+    assert delays == [
+        timedelta(hours=1),
+        timedelta(hours=6),
+        timedelta(hours=24),
+    ]
+    assert repository.review_entries(outcome_id=outcome_id)[0]["review_status"] == "reflection_failed"
+
+    with repository.sessions.begin() as session:
+        reflection = session.scalar(
+            select(ReflectionRecord).where(ReflectionRecord.outcome_id == outcome_id)
+        )
+        assert reflection is not None
+        reflection.status = "pending"
+        reflection.current_generation_cycle_id = None
+    barrier = Barrier(2)
+
+    def claim(worker: str):
+        barrier.wait(timeout=5)
+        return repository.start_outcome_reflection_attempt(
+            outcome_id,
+            started_at=started_at,
+            trigger=worker,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        claims = list(executor.map(claim, ("worker-a", "worker-b")))
+    assert len([claim for claim in claims if claim is not None]) == 1
 
 
 def test_memory_context_uses_deterministic_same_and_cross_ticker_limits(
@@ -343,7 +591,7 @@ def test_memory_context_skips_malformed_decisions_and_empty_reflections(
     assert repository.memory_context("NVDA", "stock").items == ()
 
 
-def test_memory_entries_support_fuzzy_filters_and_full_field_search(
+def test_review_entries_support_fuzzy_filters_and_full_field_search(
     repository: RunRepository,
 ) -> None:
     nvda_run_id = _seed_memory(
@@ -383,18 +631,25 @@ def test_memory_entries_support_fuzzy_filters_and_full_field_search(
         resolved=False,
     )
 
+    assert [entry["ticker"] for entry in repository.review_entries()] == [
+        "MSFT",
+        "7203.T",
+        "AAPL",
+        "NVDA",
+    ]
+
     assert [
-        entry["ticker"] for entry in repository.memory_entries(ticker="vd")
+        entry["ticker"] for entry in repository.review_entries(ticker="vd")
     ] == ["NVDA"]
     assert {
         entry["ticker"]
-        for entry in repository.memory_entries(market="america/new")
+        for entry in repository.review_entries(market="america/new")
     } == {"NVDA", "AAPL", "MSFT"}
     assert [
         entry["ticker"]
-        for entry in repository.memory_entries(q="DATA CENTER")
+        for entry in repository.review_entries(q="DATA CENTER")
     ] == ["NVDA"]
-    by_name = repository.memory_entries(q="nvidia")
+    by_name = repository.review_entries(q="nvidia")
     assert [entry["ticker"] for entry in by_name] == ["NVDA"]
     assert by_name[0]["instrument_name"] == "NVIDIA"
     assert by_name[0]["instrument_local_name"] == "英伟达"
@@ -403,7 +658,7 @@ def test_memory_entries_support_fuzzy_filters_and_full_field_search(
     assert run_page.items[0].research_rating is ResearchRating.OVERWEIGHT
     assert [
         entry["ticker"]
-        for entry in repository.memory_entries(q="valuation LESSON")
+        for entry in repository.review_entries(q="valuation LESSON")
     ] == ["NVDA"]
     for decision_query in (
         "overweight",
@@ -415,19 +670,51 @@ def test_memory_entries_support_fuzzy_filters_and_full_field_search(
     ):
         assert [
             entry["ticker"]
-            for entry in repository.memory_entries(q=decision_query)
+            for entry in repository.review_entries(q=decision_query)
         ] == ["NVDA"]
     assert [
         entry["ticker"]
-        for entry in repository.memory_entries(q=nvda_run_id[:12])
+        for entry in repository.review_entries(q=nvda_run_id[:12])
     ] == ["NVDA"]
     assert [
         entry["ticker"]
-        for entry in repository.memory_entries(q="asia/tokyo")
+        for entry in repository.review_entries(q="asia/tokyo")
     ] == ["7203.T"]
     assert [
         entry["ticker"]
-        for entry in repository.memory_entries(status="pending")
+        for entry in repository.review_entries(status_group="in_progress")
     ] == ["MSFT"]
-    assert repository.memory_entries(q="pending cloud", status="resolved") == []
-    assert repository.memory_entries(q="%") == []
+    assert repository.review_entries(q="pending cloud", status_group="feedback_available") == []
+    assert repository.review_entries(q="%") == []
+
+
+def test_review_entries_applies_derived_status_filter_before_limit(
+    repository: RunRepository,
+) -> None:
+    available_run_id = _seed_memory(
+        repository,
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 1),
+        reflection="Method lesson: Keep the older qualifying Review visible.",
+        thesis="Older Review with available Feedback.",
+    )
+    _seed_memory(
+        repository,
+        ticker="MSFT",
+        analysis_date=date(2026, 7, 2),
+        reflection="Unused pending Reflection.",
+        thesis="Newer Review still in progress.",
+        resolved=False,
+    )
+    _outcome_id, feedback_id = _feedback_for_run(repository, available_run_id)
+    with repository.sessions.begin() as session:
+        feedback = session.get(OutcomeFeedbackRecord, feedback_id)
+        assert feedback is not None
+        feedback.status = "eligible"
+
+    reviews = repository.review_entries(
+        status_group="feedback_available",
+        limit=1,
+    )
+
+    assert [review["ticker"] for review in reviews] == ["NVDA"]

@@ -46,7 +46,7 @@ or portfolio rebalancing.
 - **Run Detail:** persistent event timeline, analyst reports, structured
   decision, collapsible audit details, token/tool metrics, cancellation,
   retry, restore, editable run templates, and export.
-- **Memory:** inspect separately persisted Outcome Observations, Reflection
+- **Research Review:** inspect separately persisted Outcome Observations, Reflection
   lifecycle state, and versioned Feedback qualification/reasons; retry failed
   Reflections, retire Feedback, expand decisions, and reopen the originating
   run. A completed Observation may use its source Decision or linked Research
@@ -161,7 +161,7 @@ flowchart LR
     PY["Python API"] --> SVC["AnalysisService"]
     CLI["Non-interactive CLI"] --> SVC
     API --> SVC
-    SVC --> DB[("SQLite<br/>runs · evidence · artifacts · decisions · memory")]
+    SVC --> DB[("SQLite<br/>runs · evidence · artifacts · decisions · reviews")]
     WORKER["Single worker"] --> DB
     WORKER --> GRAPH["Evidence-first LangGraph"]
     GRAPH --> DATA["US · JP · CN equity dataflows"]
@@ -172,7 +172,7 @@ flowchart LR
     SSE --> UI
 ```
 
-`AnalysisService` owns request normalization, run creation, memory retrieval,
+`AnalysisService` owns request normalization, run creation, explicit empty-context preparation,
 graph execution, event/report/decision persistence, checkpoint cleanup, and
 outcome scheduling. Graph nodes do not write reports or application tables.
 
@@ -193,7 +193,7 @@ Successful and cancelled runs delete their checkpoints; failed runs retain
 them for retry or later trash cleanup.
 
 Terminal runs can be moved to Trash and restored from the Runs page. Trashed
-data is immediately excluded from the Dashboard, Memory, outcome settlement,
+data is immediately excluded from the Dashboard, Research Review, outcome settlement,
 and recent-instrument suggestions. The Web process checks for expired trash at
 startup; the worker checks before claiming work and then every 24 hours,
 retrying failed maintenance after one hour. The default 30-day retention can
@@ -294,8 +294,9 @@ POST /api/v1/runs/trash
 POST /api/v1/runs/restore
 GET  /api/v1/runs/{id}/export
 GET  /api/v1/instruments/recent
-GET  /api/v1/memory
-POST /api/v1/outcome-observations/{outcome_id}/reflection/retry
+GET  /api/v1/reviews
+GET  /api/v1/reviews/{outcome_id}
+POST /api/v1/outcome-observations/{outcome_id}/reflection-regenerations
 POST /api/v1/outcome-feedback/{feedback_id}/retire
 GET  /api/v1/capabilities
 GET  /api/v1/health
@@ -303,6 +304,11 @@ GET  /api/v1/health
 
 `POST /api/v1/runs` accepts an optional terminal `source_run_id`; the Web UI
 uses it only after the user reviews and submits the prefilled New Run form.
+Review collection responses intentionally omit complete Reflections, Attempts,
+diagnostics, usage, and invalid candidates; those audit fields are available
+only from the individual Review detail endpoint. The legacy Reflection retry
+endpoint is a deprecated one-release compatibility adapter, not a Review read
+alias.
 
 Send `Idempotency-Key` when creating a run from a retryable client. FastAPI
 serves its OpenAPI document at `/openapi.json`; generated TypeScript API types

@@ -174,8 +174,9 @@ settings must remain isolated even if worker concurrency changes in the future.
 1. normalizes and validates `AnalysisRequest`;
 2. resolves and redacts run configuration;
 3. creates or idempotently returns a run;
-4. retrieves deterministic legacy decision memory for ordinary runs; Research
-   Chain executions receive an explicit empty `MemoryContext`;
+4. prepares an explicit empty `MemoryContext`; neither ordinary nor Research
+   Chain executions retrieve legacy Decision memory while Outcome Feedback
+   Context remains deferred;
 5. builds per-run LLM clients and `RunContext`;
 6. executes or resumes the graph;
 7. persists events, reports, evidence, decision, metrics, and warnings and,
@@ -493,7 +494,7 @@ partially advance the chain.
 
 Only terminal runs can be moved to Trash. A trashed run remains readable and
 exportable, but is excluded immediately from default run listings, Dashboard
-summaries, Memory and `MemoryContext`, pending outcome settlement, and
+summaries, Research Review, pending outcome settlement, and
 recent-instrument suggestions. Restore is idempotent and re-enables those
 consumers.
 
@@ -529,8 +530,10 @@ Alembic manages application tables:
 | `research_chains` | one Instrument's linear lineage, Primary designation, and current head |
 | `research_revisions` | immutable complete state, coverage, summary, Evidence snapshot, producing execution, bounded experiment finding, and metrics |
 | `outcomes` | versioned Observation method, source Decision/optional Revision, market-local window, benchmark, semantics, returns, availability and limitations |
-| `reflections` | independent pending/generated/invalid/retryable-failure Reflection lifecycle and sanitized candidate |
-| `outcome_feedback` | qualification status/reasons, applicability, horizon and PIT availability |
+| `reflections` | aggregate pending/generated/invalid/retryable-failure Reflection lifecycle and current/successful Attempt pointers |
+| `reflection_generation_cycles` | queued/running/terminal generation state, retry ordinal, due time, and manual idempotency |
+| `reflection_attempts` | append-only generation/repair provenance, diagnostics, sanitized invalid candidate, and independently owned usage |
+| `outcome_feedback` | qualification status/reasons, applicability, horizon, PIT availability, and irreversible retirement audit |
 
 LangGraph saver tables live in the same database file but remain owned by its
 saver. Application code does not treat them as domain tables.
@@ -779,7 +782,7 @@ collapsible views.
 ## Decision memory and outcomes
 
 The repository retains the original deterministic Decision-memory selector for
-ordinary non-chain runs only:
+historical-record inspection only; research executions do not call it:
 
 - up to five most recent resolved full entries for the same ticker;
 - up to three most recent resolved reflection-only entries for a different
@@ -789,8 +792,8 @@ ordinary non-chain runs only:
 No vector database is used. This avoids introducing an unmeasured semantic
 similarity feedback loop.
 
-Initial and updated Research Chain executions do not call that selector and do
-not inject historical Decisions, Reflections, `MemoryContext`, or Outcome
+Ordinary, initial, and updated Research Chain executions do not call that
+selector and do not inject historical Decisions, Reflections, `MemoryContext`, or Outcome
 Feedback into collection, analysis, deliberation, the Judge, Final Committee,
 state assembly, Change Assessment, or Full comparison. There is no Outcome
 Feedback Context selector in the first experiment.
@@ -832,10 +835,29 @@ data availability, Reflection generation, and qualification completion.
 For the versioned five-completed-interval policy, an Observation may begin on
 the source Decision's or linked Research Revision's market-local cutoff date
 but never before it, and must end strictly after that cutoff. When a linked
-Revision exists, its cutoff is the effective source cutoff. Newly qualified
-Feedback records `outcome_feedback_qualification.v1`; pre-policy and
-legacy-unqualified rows keep an explicit null policy version and their persisted
-status is never recalculated.
+Revision exists, its cutoff is the effective source cutoff. New structured
+Reflections are qualified under
+`outcome_feedback_qualification.v2`; v1, pre-policy, and legacy-unqualified
+rows retain their persisted policy version and status and are never
+recalculated.
+
+The product-facing audit surface is Research Review: `/reviews` and the
+`/api/v1/reviews` collection plus per-Outcome detail. The collection is a
+summary read model; full Reflection text, append-only Reflection Attempts,
+usage, diagnostics, and sanitized invalid candidates are returned only by the
+detail surface. Review status is derived, never persisted, from the three
+authoritative lifecycles and fails closed for an inconsistent record. The
+legacy browser and read-API Memory aliases are absent; retained
+`memory:<run-id>` values are durable identifiers, not routes.
+
+Each initial generation, one permitted schema repair, automatic retry, and
+manual regeneration is an immutable Outcome Reflection Attempt owned by a
+generation cycle. Attempt usage is separate from the completed Run metrics.
+Invalid candidates are bounded, sensitive-data-sanitized plain text for closed
+audit disclosure only; they are neither Feedback nor later research input.
+Eligible Feedback may be retired irreversibly with a typed reason. These
+post-Run lifecycle records share their source Run's permanent-deletion cascade
+and do not extend Run export schemas.
 
 ## Data routing and point-in-time contracts
 
@@ -914,8 +936,8 @@ roles, tenant isolation, or Internet-facing hardening.
 
 The default suite is offline. It covers configuration isolation, lifecycle
 transitions, lease recovery, event ordering, checkpoint resume/cleanup,
-SSE replay, cancellation/retry/run templates, SQLite backup, migration, memory
-selection, point-in-time evidence sealing, API security, frontend behavior,
+SSE replay, cancellation/retry/run templates, SQLite backup, migration,
+legacy-selector containment, point-in-time evidence sealing, API security, frontend behavior,
 wheel contents, and Docker startup.
 
 These offline checks validate product contracts but do not measure comparative

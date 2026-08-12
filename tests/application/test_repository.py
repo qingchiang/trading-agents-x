@@ -55,6 +55,8 @@ from tradingagents.application.database import (
     DecisionRecord,
     OutcomeFeedbackRecord,
     OutcomeRecord,
+    ReflectionAttemptRecord,
+    ReflectionGenerationCycleRecord,
     ReflectionRecord,
     RunAttemptRecord,
     RunRecord,
@@ -306,7 +308,10 @@ def test_events_are_monotonic_replayable_and_redacted(
     first = repository.append_event(
         run.id,
         "run.queued",
-        payload={"api_key": "private", "message": "token=private"},
+        payload={
+            "api_key": "private",
+            "message": "Authorization: Bearer private-token",
+        },
     )
     second = repository.append_event(run.id, "run.started", node="market")
 
@@ -317,7 +322,7 @@ def test_events_are_monotonic_replayable_and_redacted(
     assert [event.sequence for event in replay] == [2]
     stored = repository.list_events(run.id)[0].payload
     assert stored["api_key"] == "[REDACTED]"
-    assert "private" not in stored["message"]
+    assert stored["message"] == "Authorization: [REDACTED]"
 
 
 def test_trash_restore_filters_are_atomic_and_idempotent(
@@ -855,7 +860,7 @@ def test_complete_persists_result_and_resolved_memory(
     pending = repository.pending_outcomes(due_at=due_at)
     repository.trash_runs((run.id,))
     assert repository.pending_outcomes(due_at=due_at) == []
-    assert repository.memory_entries() == []
+    assert repository.review_entries() == []
     repository.restore_runs((run.id,))
     assert repository.pending_outcomes(due_at=due_at)[0]["outcome_id"] == (
         pending[0]["outcome_id"]
@@ -890,7 +895,7 @@ def test_complete_persists_result_and_resolved_memory(
     assert "appendix_only_marker" not in context.prompt_text()
     repository.trash_runs((run.id,))
     assert repository.memory_context("NVDA", "stock").items == ()
-    assert repository.memory_entries() == []
+    assert repository.review_entries() == []
     repository.restore_runs((run.id,))
     assert repository.memory_context("NVDA", "stock").items[0].run_id == run.id
 
@@ -920,11 +925,76 @@ def test_complete_persists_result_and_resolved_memory(
         )
         assert session.scalar(select(func.count()).select_from(ReflectionRecord)) == 1
         assert session.scalar(select(func.count()).select_from(OutcomeFeedbackRecord)) == 1
+        assert session.scalar(select(func.count()).select_from(ReflectionGenerationCycleRecord)) == 1
+        assert session.scalar(select(func.count()).select_from(ReflectionAttemptRecord)) == 1
 
-    feedback_view = repository.memory_entries()[0]["outcome_feedback"]
+    feedback_view = repository.review_entries()[0]["outcome_feedback"]
     assert feedback_view["qualification_policy_version"] == (
         "outcome_feedback_qualification.v1"
     )
+    assert "reflection" not in repository.review_entries()[0]
+    detail = repository.review_audit_detail(pending[0]["outcome_id"])
+    assert detail is not None
+    assert detail["reflection"] == "The thesis worked because earnings accelerated."
+    assert detail["aggregate_usage"] == {
+        "usage_status": "not_reported",
+        "attempt_count": 1,
+        "llm_calls": 1,
+        "input_tokens": None,
+        "output_tokens": None,
+        "cache_hit_input_tokens": None,
+        "cache_miss_input_tokens": None,
+        "reasoning_output_tokens": None,
+        "wall_time_seconds": None,
+        "provider_reported_cost_usd": None,
+    }
+    assert detail["attempts"][0]["attempt_kind"] == "unstructured"
+    assert detail["attempts"][0]["attempt_schema_version"] == (
+        "outcome_reflection_attempt.v1"
+    )
+    assert detail["attempts"][0]["candidate_schema_version"] == (
+        "outcome_reflection_legacy_unstructured.v1"
+    )
+
+    with repository.sessions.begin() as session:
+        reflection = session.scalar(select(ReflectionRecord))
+        cycle = session.scalar(select(ReflectionGenerationCycleRecord))
+        assert reflection is not None
+        assert cycle is not None
+        session.add(
+            ReflectionAttemptRecord(
+                reflection_id=reflection.id,
+                generation_cycle_id=cycle.id,
+                sequence=2,
+                trigger="repair",
+                origin="automatic",
+                attempt_kind="repair",
+                started_at=datetime(2026, 8, 2),
+                finished_at=datetime(2026, 8, 2, 0, 0, 1),
+                outcome="generated",
+                candidate_schema_version="outcome_reflection.v1",
+                usage_status="reported",
+                llm_calls=1,
+                input_tokens=10,
+                output_tokens=4,
+                wall_time_seconds=1.0,
+            )
+        )
+
+    mixed_usage = repository.review_audit_detail(pending[0]["outcome_id"])
+    assert mixed_usage is not None
+    assert mixed_usage["aggregate_usage"] == {
+        "usage_status": "not_reported",
+        "attempt_count": 2,
+        "llm_calls": 2,
+        "input_tokens": None,
+        "output_tokens": None,
+        "cache_hit_input_tokens": None,
+        "cache_miss_input_tokens": None,
+        "reasoning_output_tokens": None,
+        "wall_time_seconds": None,
+        "provider_reported_cost_usd": None,
+    }
 
     with repository.sessions() as session:
         record = session.scalar(

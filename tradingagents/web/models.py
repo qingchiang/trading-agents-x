@@ -17,10 +17,24 @@ from tradingagents.application.contracts import (
     RunView,
 )
 from tradingagents.application.outcome_feedback import (
+    OutcomeFeedbackRetirementReason,
     OutcomeFeedbackStatus,
     OutcomeObservationStatus,
     OutcomeReflectionStatus,
 )
+
+ResearchReviewStatus = Literal[
+    "awaiting_observation",
+    "observation_delayed",
+    "awaiting_reflection",
+    "reflection_retry_scheduled",
+    "reflection_failed",
+    "reflection_invalid",
+    "feedback_available",
+    "feedback_ineligible",
+    "feedback_retired",
+    "lifecycle_inconsistent",
+]
 
 
 class ApiModel(BaseModel):
@@ -76,7 +90,23 @@ class RunBatchResult(ApiModel):
 
 
 class OutcomeFeedbackRetireRequest(ApiModel):
-    reason: str = Field(min_length=1, max_length=500)
+    reason: OutcomeFeedbackRetirementReason
+    note: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("note")
+    @classmethod
+    def normalize_note(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
+
+
+class OutcomeFeedbackRetireResponse(ApiModel):
+    status: Literal["retired"]
+    review_status: Literal["feedback_retired"]
+    retirement_reason: OutcomeFeedbackRetirementReason | None
+    retirement_note: str | None
+    retired_at: datetime | None
 
 
 class ExportQuery(ApiModel):
@@ -172,15 +202,74 @@ class OutcomeObservationView(ApiModel):
     holding_intervals: int
     raw_return: float | None
     alpha_return: float | None
+    resolved_at: datetime | None
     data_available_at: datetime | None
+    last_checked_at: datetime | None
+    next_check_at: datetime | None
+    error_message: str | None
 
 
 class OutcomeReflectionView(ApiModel):
     status: OutcomeReflectionStatus
+    created_at: datetime
     generated_at: datetime | None
     last_attempted_at: datetime | None
     next_retry_at: datetime | None
     error_code: str | None
+    generation_cycle: ReflectionGenerationCycleView | None = None
+
+
+class ReflectionGenerationCycleView(ApiModel):
+    id: str
+    outcome_id: int
+    status: Literal["queued", "running", "succeeded", "failed", "invalid"]
+    origin: Literal["automatic", "manual", "legacy"]
+    trigger: str
+    retry_ordinal: int
+    queued_at: datetime
+    due_at: datetime | None
+
+
+class ReflectionRegenerationAccepted(ApiModel):
+    cycle: ReflectionGenerationCycleView
+    review_status: ResearchReviewStatus
+    reflection_status: OutcomeReflectionStatus | None
+
+
+class ReflectionAttemptUsageView(ApiModel):
+    usage_status: Literal["reported", "not_reported", "legacy_unknown"]
+    llm_calls: int | None
+    input_tokens: int | None
+    output_tokens: int | None
+    cache_hit_input_tokens: int | None
+    cache_miss_input_tokens: int | None
+    reasoning_output_tokens: int | None
+    wall_time_seconds: float | None
+    provider_reported_cost_usd: float | None
+
+
+class ReflectionAttemptView(ApiModel):
+    id: int
+    generation_cycle_id: str
+    sequence: int
+    trigger: str
+    origin: str
+    attempt_kind: str
+    started_at: datetime
+    finished_at: datetime | None
+    outcome: str | None
+    attempt_schema_version: Literal["outcome_reflection_attempt.v1"]
+    candidate_schema_version: str | None
+    diagnostics: dict[str, str] | None
+    usage: ReflectionAttemptUsageView
+    invalid_candidate: str | None
+    invalid_candidate_digest: str | None
+    invalid_candidate_length: int | None
+    validation_issues: list[str] | None
+
+
+class ReflectionUsageAggregateView(ReflectionAttemptUsageView):
+    attempt_count: int
 
 
 class OutcomeFeedbackApplicabilityView(ApiModel):
@@ -213,11 +302,15 @@ class OutcomeFeedbackView(ApiModel):
             "Latest availability time of the Observation data, Reflection, and qualification."
         )
     )
+    retirement_reason: OutcomeFeedbackRetirementReason | None
+    retirement_note: str | None
     retired_at: datetime | None
 
 
-class MemoryEntry(ApiModel):
+class ResearchReview(ApiModel):
     outcome_id: int
+    review_status: ResearchReviewStatus
+    lifecycle_actions_allowed: bool
     run_id: str
     ticker: str
     instrument_name: str | None = None
@@ -228,6 +321,13 @@ class MemoryEntry(ApiModel):
     profile: RunProfile
     decision: ResearchDecision
     outcome: OutcomeObservationView
-    reflection: str | None
+    method_feedback: str | None
     outcome_reflection: OutcomeReflectionView | None
     outcome_feedback: OutcomeFeedbackView | None
+
+
+class ResearchReviewAuditDetail(ApiModel):
+    review: ResearchReview
+    reflection: str | None
+    attempts: list[ReflectionAttemptView]
+    aggregate_usage: ReflectionUsageAggregateView

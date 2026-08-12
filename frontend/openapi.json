@@ -2179,120 +2179,6 @@
         "title": "MeasurementKind",
         "type": "string"
       },
-      "MemoryEntry": {
-        "additionalProperties": false,
-        "properties": {
-          "analysis_date": {
-            "title": "Analysis Date",
-            "type": "string"
-          },
-          "asset_type": {
-            "title": "Asset Type",
-            "type": "string"
-          },
-          "decision": {
-            "$ref": "#/components/schemas/ResearchDecision"
-          },
-          "instrument_local_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Instrument Local Name"
-          },
-          "instrument_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Instrument Name"
-          },
-          "market": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Market"
-          },
-          "outcome": {
-            "$ref": "#/components/schemas/OutcomeObservationView"
-          },
-          "outcome_feedback": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/OutcomeFeedbackView"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "outcome_id": {
-            "title": "Outcome Id",
-            "type": "integer"
-          },
-          "outcome_reflection": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/OutcomeReflectionView"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "profile": {
-            "$ref": "#/components/schemas/RunProfile"
-          },
-          "reflection": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reflection"
-          },
-          "run_id": {
-            "title": "Run Id",
-            "type": "string"
-          },
-          "ticker": {
-            "title": "Ticker",
-            "type": "string"
-          }
-        },
-        "required": [
-          "outcome_id",
-          "run_id",
-          "ticker",
-          "market",
-          "asset_type",
-          "analysis_date",
-          "profile",
-          "decision",
-          "outcome",
-          "reflection",
-          "outcome_reflection",
-          "outcome_feedback"
-        ],
-        "title": "MemoryEntry",
-        "type": "object"
-      },
       "ModelDiscoveryWarningView": {
         "additionalProperties": false,
         "properties": {
@@ -2879,11 +2765,20 @@
       "OutcomeFeedbackRetireRequest": {
         "additionalProperties": false,
         "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
           "reason": {
-            "maxLength": 500,
-            "minLength": 1,
-            "title": "Reason",
-            "type": "string"
+            "$ref": "#/components/schemas/OutcomeFeedbackRetirementReason"
           }
         },
         "required": [
@@ -2891,6 +2786,73 @@
         ],
         "title": "OutcomeFeedbackRetireRequest",
         "type": "object"
+      },
+      "OutcomeFeedbackRetireResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "retired_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retired At"
+          },
+          "retirement_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retirement Note"
+          },
+          "retirement_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OutcomeFeedbackRetirementReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "review_status": {
+            "const": "feedback_retired",
+            "title": "Review Status",
+            "type": "string"
+          },
+          "status": {
+            "const": "retired",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "review_status",
+          "retirement_reason",
+          "retirement_note",
+          "retired_at"
+        ],
+        "title": "OutcomeFeedbackRetireResponse",
+        "type": "object"
+      },
+      "OutcomeFeedbackRetirementReason": {
+        "enum": [
+          "not_useful",
+          "too_specific",
+          "misleading",
+          "other"
+        ],
+        "title": "OutcomeFeedbackRetirementReason",
+        "type": "string"
       },
       "OutcomeFeedbackStatus": {
         "enum": [
@@ -2961,6 +2923,27 @@
             ],
             "title": "Retired At"
           },
+          "retirement_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retirement Note"
+          },
+          "retirement_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OutcomeFeedbackRetirementReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "status": {
             "$ref": "#/components/schemas/OutcomeFeedbackStatus"
           }
@@ -2975,6 +2958,8 @@
           "applicability",
           "qualified_at",
           "available_at",
+          "retirement_reason",
+          "retirement_note",
           "retired_at"
         ],
         "title": "OutcomeFeedbackView",
@@ -3022,6 +3007,17 @@
             ],
             "title": "Data Available At"
           },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
           "holding_intervals": {
             "title": "Holding Intervals",
             "type": "integer"
@@ -3029,6 +3025,18 @@
           "horizon_limit": {
             "title": "Horizon Limit",
             "type": "string"
+          },
+          "last_checked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Checked At"
           },
           "limitations": {
             "items": {
@@ -3048,6 +3056,18 @@
           "method_version": {
             "title": "Method Version",
             "type": "string"
+          },
+          "next_check_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Check At"
           },
           "observation_end": {
             "anyOf": [
@@ -3088,6 +3108,18 @@
             ],
             "title": "Raw Return"
           },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
           "source_decision_id": {
             "title": "Source Decision Id",
             "type": "integer"
@@ -3124,7 +3156,11 @@
           "holding_intervals",
           "raw_return",
           "alpha_return",
-          "data_available_at"
+          "resolved_at",
+          "data_available_at",
+          "last_checked_at",
+          "next_check_at",
+          "error_message"
         ],
         "title": "OutcomeObservationView",
         "type": "object"
@@ -3142,6 +3178,11 @@
       "OutcomeReflectionView": {
         "additionalProperties": false,
         "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
           "error_code": {
             "anyOf": [
               {
@@ -3164,6 +3205,16 @@
               }
             ],
             "title": "Generated At"
+          },
+          "generation_cycle": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReflectionGenerationCycleView"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "last_attempted_at": {
             "anyOf": [
@@ -3195,6 +3246,7 @@
         },
         "required": [
           "status",
+          "created_at",
           "generated_at",
           "last_attempted_at",
           "next_retry_at",
@@ -3648,6 +3700,510 @@
           "last_used_at"
         ],
         "title": "RecentInstrument",
+        "type": "object"
+      },
+      "ReflectionAttemptUsageView": {
+        "additionalProperties": false,
+        "properties": {
+          "cache_hit_input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Hit Input Tokens"
+          },
+          "cache_miss_input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Miss Input Tokens"
+          },
+          "input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Tokens"
+          },
+          "llm_calls": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Calls"
+          },
+          "output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Tokens"
+          },
+          "provider_reported_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Reported Cost Usd"
+          },
+          "reasoning_output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Output Tokens"
+          },
+          "usage_status": {
+            "enum": [
+              "reported",
+              "not_reported",
+              "legacy_unknown"
+            ],
+            "title": "Usage Status",
+            "type": "string"
+          },
+          "wall_time_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wall Time Seconds"
+          }
+        },
+        "required": [
+          "usage_status",
+          "llm_calls",
+          "input_tokens",
+          "output_tokens",
+          "cache_hit_input_tokens",
+          "cache_miss_input_tokens",
+          "reasoning_output_tokens",
+          "wall_time_seconds",
+          "provider_reported_cost_usd"
+        ],
+        "title": "ReflectionAttemptUsageView",
+        "type": "object"
+      },
+      "ReflectionAttemptView": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt_kind": {
+            "title": "Attempt Kind",
+            "type": "string"
+          },
+          "attempt_schema_version": {
+            "const": "outcome_reflection_attempt.v1",
+            "title": "Attempt Schema Version",
+            "type": "string"
+          },
+          "candidate_schema_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Schema Version"
+          },
+          "diagnostics": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diagnostics"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "generation_cycle_id": {
+            "title": "Generation Cycle Id",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "invalid_candidate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invalid Candidate"
+          },
+          "invalid_candidate_digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invalid Candidate Digest"
+          },
+          "invalid_candidate_length": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invalid Candidate Length"
+          },
+          "origin": {
+            "title": "Origin",
+            "type": "string"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "trigger": {
+            "title": "Trigger",
+            "type": "string"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/ReflectionAttemptUsageView"
+          },
+          "validation_issues": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation Issues"
+          }
+        },
+        "required": [
+          "id",
+          "generation_cycle_id",
+          "sequence",
+          "trigger",
+          "origin",
+          "attempt_kind",
+          "started_at",
+          "finished_at",
+          "outcome",
+          "attempt_schema_version",
+          "candidate_schema_version",
+          "diagnostics",
+          "usage",
+          "invalid_candidate",
+          "invalid_candidate_digest",
+          "invalid_candidate_length",
+          "validation_issues"
+        ],
+        "title": "ReflectionAttemptView",
+        "type": "object"
+      },
+      "ReflectionGenerationCycleView": {
+        "additionalProperties": false,
+        "properties": {
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "origin": {
+            "enum": [
+              "automatic",
+              "manual",
+              "legacy"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "outcome_id": {
+            "title": "Outcome Id",
+            "type": "integer"
+          },
+          "queued_at": {
+            "format": "date-time",
+            "title": "Queued At",
+            "type": "string"
+          },
+          "retry_ordinal": {
+            "title": "Retry Ordinal",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed",
+              "invalid"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "trigger": {
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "outcome_id",
+          "status",
+          "origin",
+          "trigger",
+          "retry_ordinal",
+          "queued_at",
+          "due_at"
+        ],
+        "title": "ReflectionGenerationCycleView",
+        "type": "object"
+      },
+      "ReflectionRegenerationAccepted": {
+        "additionalProperties": false,
+        "properties": {
+          "cycle": {
+            "$ref": "#/components/schemas/ReflectionGenerationCycleView"
+          },
+          "reflection_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OutcomeReflectionStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "review_status": {
+            "enum": [
+              "awaiting_observation",
+              "observation_delayed",
+              "awaiting_reflection",
+              "reflection_retry_scheduled",
+              "reflection_failed",
+              "reflection_invalid",
+              "feedback_available",
+              "feedback_ineligible",
+              "feedback_retired",
+              "lifecycle_inconsistent"
+            ],
+            "title": "Review Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cycle",
+          "review_status",
+          "reflection_status"
+        ],
+        "title": "ReflectionRegenerationAccepted",
+        "type": "object"
+      },
+      "ReflectionUsageAggregateView": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt_count": {
+            "title": "Attempt Count",
+            "type": "integer"
+          },
+          "cache_hit_input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Hit Input Tokens"
+          },
+          "cache_miss_input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Miss Input Tokens"
+          },
+          "input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Tokens"
+          },
+          "llm_calls": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Calls"
+          },
+          "output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Tokens"
+          },
+          "provider_reported_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Reported Cost Usd"
+          },
+          "reasoning_output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Output Tokens"
+          },
+          "usage_status": {
+            "enum": [
+              "reported",
+              "not_reported",
+              "legacy_unknown"
+            ],
+            "title": "Usage Status",
+            "type": "string"
+          },
+          "wall_time_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wall Time Seconds"
+          }
+        },
+        "required": [
+          "usage_status",
+          "llm_calls",
+          "input_tokens",
+          "output_tokens",
+          "cache_hit_input_tokens",
+          "cache_miss_input_tokens",
+          "reasoning_output_tokens",
+          "wall_time_seconds",
+          "provider_reported_cost_usd",
+          "attempt_count"
+        ],
+        "title": "ReflectionUsageAggregateView",
         "type": "object"
       },
       "ReportAuditStatus": {
@@ -4603,6 +5159,179 @@
         ],
         "title": "ResearchRating",
         "type": "string"
+      },
+      "ResearchReview": {
+        "additionalProperties": false,
+        "properties": {
+          "analysis_date": {
+            "title": "Analysis Date",
+            "type": "string"
+          },
+          "asset_type": {
+            "title": "Asset Type",
+            "type": "string"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/ResearchDecision"
+          },
+          "instrument_local_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Local Name"
+          },
+          "instrument_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Name"
+          },
+          "lifecycle_actions_allowed": {
+            "title": "Lifecycle Actions Allowed",
+            "type": "boolean"
+          },
+          "market": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market"
+          },
+          "method_feedback": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Method Feedback"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/OutcomeObservationView"
+          },
+          "outcome_feedback": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OutcomeFeedbackView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "outcome_id": {
+            "title": "Outcome Id",
+            "type": "integer"
+          },
+          "outcome_reflection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OutcomeReflectionView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "profile": {
+            "$ref": "#/components/schemas/RunProfile"
+          },
+          "review_status": {
+            "enum": [
+              "awaiting_observation",
+              "observation_delayed",
+              "awaiting_reflection",
+              "reflection_retry_scheduled",
+              "reflection_failed",
+              "reflection_invalid",
+              "feedback_available",
+              "feedback_ineligible",
+              "feedback_retired",
+              "lifecycle_inconsistent"
+            ],
+            "title": "Review Status",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome_id",
+          "review_status",
+          "lifecycle_actions_allowed",
+          "run_id",
+          "ticker",
+          "market",
+          "asset_type",
+          "analysis_date",
+          "profile",
+          "decision",
+          "outcome",
+          "method_feedback",
+          "outcome_reflection",
+          "outcome_feedback"
+        ],
+        "title": "ResearchReview",
+        "type": "object"
+      },
+      "ResearchReviewAuditDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "aggregate_usage": {
+            "$ref": "#/components/schemas/ReflectionUsageAggregateView"
+          },
+          "attempts": {
+            "items": {
+              "$ref": "#/components/schemas/ReflectionAttemptView"
+            },
+            "title": "Attempts",
+            "type": "array"
+          },
+          "reflection": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reflection"
+          },
+          "review": {
+            "$ref": "#/components/schemas/ResearchReview"
+          }
+        },
+        "required": [
+          "review",
+          "reflection",
+          "attempts",
+          "aggregate_usage"
+        ],
+        "title": "ResearchReviewAuditDetail",
+        "type": "object"
       },
       "ResearchRevision": {
         "additionalProperties": false,
@@ -7852,121 +8581,6 @@
         "summary": "Recent Instruments"
       }
     },
-    "/api/v1/memory": {
-      "get": {
-        "operationId": "memory_api_v1_memory_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "ticker",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Ticker"
-            }
-          },
-          {
-            "in": "query",
-            "name": "market",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Market"
-            }
-          },
-          {
-            "in": "query",
-            "name": "q",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 500,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Q"
-            }
-          },
-          {
-            "in": "query",
-            "name": "status",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "pending",
-                    "resolved"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Status"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 100,
-              "maximum": 500,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/MemoryEntry"
-                  },
-                  "title": "Response Memory Api V1 Memory Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Memory"
-      }
-    },
     "/api/v1/outcome-feedback/{feedback_id}/retire": {
       "post": {
         "operationId": "retire_outcome_feedback_api_v1_outcome_feedback__feedback_id__retire_post",
@@ -7995,7 +8609,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/OutcomeFeedbackRetireResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -8014,8 +8630,64 @@
         "summary": "Retire Outcome Feedback"
       }
     },
+    "/api/v1/outcome-observations/{outcome_id}/reflection-regenerations": {
+      "post": {
+        "operationId": "regenerate_outcome_reflection_api_v1_outcome_observations__outcome_id__reflection_regenerations_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "outcome_id",
+            "required": true,
+            "schema": {
+              "title": "Outcome Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReflectionRegenerationAccepted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Regenerate Outcome Reflection"
+      }
+    },
     "/api/v1/outcome-observations/{outcome_id}/reflection/retry": {
       "post": {
+        "deprecated": true,
         "operationId": "retry_outcome_reflection_api_v1_outcome_observations__outcome_id__reflection_retry_post",
         "parameters": [
           {
@@ -8400,6 +9072,163 @@
           }
         },
         "summary": "Export Research Revision"
+      }
+    },
+    "/api/v1/reviews": {
+      "get": {
+        "operationId": "reviews_api_v1_reviews_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "ticker",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ticker"
+            }
+          },
+          {
+            "in": "query",
+            "name": "market",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Market"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status_group",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "needs_attention",
+                    "in_progress",
+                    "feedback_available",
+                    "feedback_ineligible_or_retired",
+                    "all"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status Group"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ResearchReview"
+                  },
+                  "title": "Response Reviews Api V1 Reviews Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reviews"
+      }
+    },
+    "/api/v1/reviews/{outcome_id}": {
+      "get": {
+        "operationId": "review_audit_detail_api_v1_reviews__outcome_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "outcome_id",
+            "required": true,
+            "schema": {
+              "title": "Outcome Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResearchReviewAuditDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Audit Detail"
       }
     },
     "/api/v1/runs": {
