@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   api,
@@ -61,6 +61,7 @@ export default function ResearchReview() {
   const recentInstruments = useRecentInstruments();
   const reviewRefs = useRef<Record<number, HTMLElement | null>>({});
   const auditRequestVersionsRef = useRef<Record<number, number>>({});
+  const auditLoadingRef = useRef<Record<number, boolean>>({});
   const retirementTriggerRef = useRef<HTMLButtonElement | null>(null);
   const retirementReasonRef = useRef<HTMLSelectElement | null>(null);
 
@@ -106,8 +107,10 @@ export default function ResearchReview() {
   };
   const loadAuditDetail = async (outcomeId: number, force = false) => {
     if (!force && auditDetails[outcomeId]) return;
+    if (!force && auditLoadingRef.current[outcomeId]) return;
     const requestVersion = (auditRequestVersionsRef.current[outcomeId] ?? 0) + 1;
     auditRequestVersionsRef.current[outcomeId] = requestVersion;
+    auditLoadingRef.current[outcomeId] = true;
     try {
       const detail = await api.reviewAuditDetail(outcomeId);
       if (auditRequestVersionsRef.current[outcomeId] !== requestVersion) return;
@@ -115,6 +118,10 @@ export default function ResearchReview() {
     } catch (cause) {
       if (auditRequestVersionsRef.current[outcomeId] !== requestVersion) return;
       setError(cause instanceof Error ? cause.message : t("error"));
+    } finally {
+      if (auditRequestVersionsRef.current[outcomeId] === requestVersion) {
+        auditLoadingRef.current[outcomeId] = false;
+      }
     }
   };
   const refreshRequestedAuditDetail = (outcomeId: number) => {
@@ -281,6 +288,13 @@ export default function ResearchReview() {
         <button className="button primary">{t("apply")}</button>
       </form>
       {error && <div className="alert">{error}</div>}
+      <p
+        aria-live="polite"
+        className="review-action-announcement"
+        role="status"
+      >
+        {actionAnnouncement?.message ?? ""}
+      </p>
       <div className="memory-list">
         {reviews.map((review) => (
           <article
@@ -308,35 +322,38 @@ export default function ResearchReview() {
                 <div className="memory-run-context">
                   <span>{review.analysis_date}</span>
                   <span>{review.market || "—"}</span>
-                  <span title={t(profileDescriptionKey(review.profile))}>
+                  <span
+                    aria-label={`${t("profile")}: ${t(review.profile)}`}
+                    className="memory-profile"
+                    title={t(profileDescriptionKey(review.profile))}
+                  >
                     {t(review.profile)}
                   </span>
                 </div>
               </div>
               <StatusBadge status={review.review_status} />
             </div>
-            {actionAnnouncement?.outcomeId === review.outcome_id && (
-              <p className="review-action-announcement" role="status">
-                {actionAnnouncement.message}
-              </p>
-            )}
             {review.review_status === "lifecycle_inconsistent" && (
               <div className="alert" role="alert">
                 {t("reviewLifecycleInconsistent")}
               </div>
             )}
-            <section className="memory-decision">
-              <h2>{t("sourceResearchDecision")}</h2>
-              <strong>{review.decision.rating}</strong>
-              <span>{Math.round(review.decision.confidence * 100)}%</span>
-              <Markdown>{review.decision.thesis}</Markdown>
+            <section className="review-section">
+              <h2 className="review-section-title">{t("sourceResearchDecision")}</h2>
+              <div className="memory-decision">
+                <strong className="review-rating">{review.decision.rating}</strong>
+                <span className="review-confidence">
+                  {t("confidence")} {Math.round(review.decision.confidence * 100)}%
+                </span>
+                <Markdown>{review.decision.thesis}</Markdown>
+              </div>
               <details className="memory-decision-details">
                 <summary>{t("decisionDetails")}</summary>
                 <DecisionDetails review={review} />
               </details>
             </section>
-            <section>
-              <h2>{t("outcomeObservation")}</h2>
+            <section className="review-section">
+              <h2 className="review-section-title">{t("outcomeObservation")}</h2>
               {review.outcome.status === "resolved" ? (
                 <>
                   <div className="returns">
@@ -359,8 +376,8 @@ export default function ResearchReview() {
                 <p>{t("observationAwaiting")}</p>
               )}
             </section>
-            <section>
-              <h2>{t("methodFeedback")}</h2>
+            <section className="review-section">
+              <h2 className="review-section-title">{t("methodFeedback")}</h2>
               {review.review_status === "feedback_available" &&
               review.method_feedback ? (
                 <>
@@ -406,7 +423,7 @@ export default function ResearchReview() {
                   )}
                 </>
               ) : (
-                <p>{t("feedbackUnavailable")}</p>
+                <p>{t(feedbackStateMessageKey(review.review_status))}</p>
               )}
             </section>
             {review.lifecycle_actions_allowed &&
@@ -415,9 +432,9 @@ export default function ResearchReview() {
             ) ? (
               <section
                 aria-labelledby={`reflection-failure-${review.outcome_id}`}
-                className="reflection-regeneration-action"
+                className="review-section reflection-regeneration-action"
               >
-                <h2 id={`reflection-failure-${review.outcome_id}`}>
+                <h2 className="review-section-title" id={`reflection-failure-${review.outcome_id}`}>
                   {t("methodReflection")}
                 </h2>
                 <p>
@@ -449,9 +466,9 @@ export default function ResearchReview() {
             ) : review.outcome_reflection?.generation_cycle?.status === "queued" ? (
               <section
                 aria-labelledby={`reflection-queued-${review.outcome_id}`}
-                className="reflection-regeneration-action"
+                className="review-section reflection-regeneration-action"
               >
-                <h2 id={`reflection-queued-${review.outcome_id}`}>
+                <h2 className="review-section-title" id={`reflection-queued-${review.outcome_id}`}>
                   {t("methodReflection")}
                 </h2>
                 <p>{t("reflectionQueued")}</p>
@@ -460,44 +477,28 @@ export default function ResearchReview() {
                 </button>
               </section>
             ) : null}
-            <details
-              className="memory-decision-details"
-              onToggle={(event) => {
-                if (event.currentTarget.open) {
-                  void loadAuditDetail(review.outcome_id);
-                }
-              }}
+            <ReviewDetailDisclosure
+              className="review-reflection-details"
+              detail={auditDetails[review.outcome_id]}
+              loadingLabel={t("loading")}
+              onOpen={() => void loadAuditDetail(review.outcome_id)}
+              summary={t("fullReflectionAnalysis")}
             >
-              <summary>{t("methodReflectionAndAudit")}</summary>
-              {auditDetails[review.outcome_id]?.reflection && (
-                <Markdown>{String(auditDetails[review.outcome_id].reflection)}</Markdown>
+              {(detail) => detail.reflection ? (
+                <Markdown>{String(detail.reflection)}</Markdown>
+              ) : (
+                <p>{t("reflectionUnavailable")}</p>
               )}
-              {!auditDetails[review.outcome_id] && <p>{t("loading")}</p>}
-              {auditDetails[review.outcome_id] && <AuditLifecycle detail={auditDetails[review.outcome_id]} />}
-              <p className="memory-lifecycle-note">
-                {review.outcome.method_version} · {review.outcome.market_timezone} ·{" "}
-                {review.outcome.price_semantics} / {review.outcome.adjustment_semantics}
-              </p>
-              <p className="memory-lifecycle-note">{review.outcome.horizon_limit}</p>
-              {review.outcome.limitations.map((limitation) => (
-                <p className="memory-lifecycle-note" key={limitation}>
-                  {limitation}
-                </p>
-              ))}
-              <p className="memory-lifecycle-note">
-                {review.outcome.status} · {review.outcome_reflection?.status ?? "—"} ·{" "}
-                {review.outcome_feedback?.status ?? "—"}
-              </p>
-              {review.outcome_feedback && (
-                <p className="memory-lifecycle-note">
-                  {review.outcome_feedback.qualification_policy_version} ·{" "}
-                  {review.outcome_feedback.reasons.join(", ") || "—"}
-                </p>
-              )}
-              {auditDetails[review.outcome_id] && (
-                <AuditAttempts detail={auditDetails[review.outcome_id]} />
-              )}
-            </details>
+            </ReviewDetailDisclosure>
+            <ReviewDetailDisclosure
+              className="review-audit-details"
+              detail={auditDetails[review.outcome_id]}
+              loadingLabel={t("loading")}
+              onOpen={() => void loadAuditDetail(review.outcome_id)}
+              summary={t("generationAndAuditDetails")}
+            >
+              {(detail) => <AuditDetail detail={detail} />}
+            </ReviewDetailDisclosure>
           </article>
         ))}
         {reviews.length === 0 && (
@@ -586,67 +587,243 @@ export default function ResearchReview() {
   );
 }
 
-function AuditAttempts({ detail }: { detail: ResearchReviewAuditDetail }) {
-  const { t } = useTranslation();
+function ReviewDetailDisclosure({
+  children,
+  className,
+  detail,
+  loadingLabel,
+  onOpen,
+  summary,
+}: {
+  children: (detail: ResearchReviewAuditDetail) => ReactNode;
+  className: string;
+  detail: ResearchReviewAuditDetail | undefined;
+  loadingLabel: string;
+  onOpen: () => void;
+  summary: string;
+}) {
   return (
-    <div className="memory-lifecycle-note">
-      <p>
-        {t("reviewAttemptCount", { count: detail.aggregate_usage.attempt_count })} · {detail.aggregate_usage.usage_status}
-      </p>
-      <pre>{JSON.stringify(detail.aggregate_usage, null, 2)}</pre>
+    <details
+      className={`memory-decision-details ${className}`}
+      onToggle={(event) => {
+        if (event.currentTarget.open) onOpen();
+      }}
+    >
+      <summary>{summary}</summary>
+      <div className="review-disclosure-body">
+        {detail ? children(detail) : <p>{loadingLabel}</p>}
+      </div>
+    </details>
+  );
+}
+
+function AuditAttempts({ detail }: { detail: ResearchReviewAuditDetail }) {
+  const { t, i18n } = useTranslation();
+  return (
+    <section className="review-audit-section">
+      <h3>{t("reflectionAttempts")}</h3>
+      {detail.attempts.length === 0 && <p>{t("noReflectionAttempts")}</p>}
       {detail.attempts.map((attempt) => (
-        <details key={attempt.id}>
+        <details className="review-attempt" key={attempt.id}>
           <summary>
             #{attempt.sequence} · {attempt.attempt_kind} · {attempt.outcome ?? t("statusRunning")}
           </summary>
-          <p>{attempt.attempt_schema_version} · {attempt.candidate_schema_version ?? "—"}</p>
-          <p>
-            {attempt.started_at} · {attempt.finished_at ?? t("statusRunning")}
-          </p>
-          <pre>{JSON.stringify(attempt.usage, null, 2)}</pre>
-          <p>{JSON.stringify(attempt.diagnostics ?? {})}</p>
-          <p>{attempt.validation_issues?.join(", ") ?? "—"}</p>
-          {attempt.invalid_candidate && <pre>{attempt.invalid_candidate}</pre>}
+          <div className="review-attempt-body">
+            <KeyValueTable rows={[
+              [t("attemptSchema"), attempt.attempt_schema_version],
+              [t("candidateSchema"), attempt.candidate_schema_version],
+              [t("origin"), attempt.origin],
+              [t("trigger"), attempt.trigger],
+              [t("startedAt"), <AuditTime locale={i18n.language} value={attempt.started_at} />],
+              [t("finishedAt"), <AuditTime locale={i18n.language} value={attempt.finished_at} />],
+            ]} />
+            <UsageTable usage={attempt.usage} />
+            {attempt.diagnostics && Object.keys(attempt.diagnostics).length > 0 && (
+              <div className="review-audit-subsection">
+                <h4>{t("diagnostics")}</h4>
+                <KeyValueTable rows={Object.entries(attempt.diagnostics)} />
+              </div>
+            )}
+            {attempt.validation_issues && attempt.validation_issues.length > 0 && (
+              <div className="review-audit-subsection">
+                <h4>{t("validationIssues")}</h4>
+                <ul>{attempt.validation_issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>
+              </div>
+            )}
+            {attempt.invalid_candidate && (
+              <details className="review-invalid-candidate">
+                <summary>{t("invalidGeneratedCandidate")}</summary>
+                <p>
+                  {t("digest")}: {attempt.invalid_candidate_digest ?? "—"} ·{" "}
+                  {t("length")}: {formatAuditNumber(i18n.language, attempt.invalid_candidate_length)}
+                </p>
+                <pre>{attempt.invalid_candidate}</pre>
+              </details>
+            )}
+          </div>
         </details>
       ))}
-    </div>
+    </section>
   );
 }
 
 function AuditLifecycle({ detail }: { detail: ResearchReviewAuditDetail }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { outcome, outcome_feedback: feedback, outcome_reflection: reflection } = detail.review;
-  return <>
-    <p className="memory-lifecycle-note">{t("outcomeObservation")}: {outcome.resolved_at ?? "—"} · {outcome.data_available_at ?? "—"} · {outcome.last_checked_at ?? "—"}</p>
-    {reflection && <p className="memory-lifecycle-note">{t("methodReflection")}: {reflection.created_at} · {reflection.generated_at ?? "—"} · {reflection.last_attempted_at ?? "—"}</p>}
-    {feedback && <p className="memory-lifecycle-note">{t("methodFeedback")}: {feedback.qualified_at} · {feedback.available_at} · {feedback.retired_at ?? "—"}</p>}
-  </>;
+  return (
+    <section className="review-audit-section">
+      <h3>{t("lifecycle")}</h3>
+      <div className="review-table-scroll">
+        <table className="review-audit-table">
+          <thead><tr>
+            <th>{t("stage")}</th><th>{t("status")}</th><th>{t("createdOrResolved")}</th>
+            <th>{t("availableOrCompleted")}</th><th>{t("lastUpdated")}</th>
+          </tr></thead>
+          <tbody>
+            <tr>
+              <th scope="row">{t("outcomeObservation")}</th><td>{outcome.status}</td>
+              <td><AuditTime locale={i18n.language} value={outcome.resolved_at} /></td>
+              <td><AuditTime locale={i18n.language} value={outcome.data_available_at} /></td>
+              <td><AuditTime locale={i18n.language} value={outcome.last_checked_at} /></td>
+            </tr>
+            <tr>
+              <th scope="row">{t("methodReflection")}</th><td>{reflection?.status ?? "—"}</td>
+              <td><AuditTime locale={i18n.language} value={reflection?.created_at} /></td>
+              <td><AuditTime locale={i18n.language} value={reflection?.generated_at} /></td>
+              <td><AuditTime locale={i18n.language} value={reflection?.last_attempted_at} /></td>
+            </tr>
+            <tr>
+              <th scope="row">{t("methodFeedback")}</th><td>{feedback?.status ?? "—"}</td>
+              <td><AuditTime locale={i18n.language} value={feedback?.qualified_at} /></td>
+              <td><AuditTime locale={i18n.language} value={feedback?.available_at} /></td>
+              <td><AuditTime locale={i18n.language} value={feedback?.retired_at} /></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function AuditDetail({ detail }: { detail: ResearchReviewAuditDetail }) {
+  const { t } = useTranslation();
+  const review = detail.review;
+  const provenanceRows: Array<[string, ReactNode]> = [
+    [t("observationMethod"), review.outcome.method_category],
+    [t("version"), review.outcome.method_version],
+    [t("marketTimezone"), review.outcome.market_timezone],
+    [t("priceSemantics"), review.outcome.price_semantics],
+    [t("adjustmentSemantics"), review.outcome.adjustment_semantics],
+    [t("horizonLimit"), review.outcome.horizon_limit],
+    [t("qualificationPolicy"), review.outcome_feedback?.qualification_policy_version],
+    [t("qualificationReasons"), review.outcome_feedback?.reasons.join(", ")],
+    [t("limitations"), review.outcome.limitations.join(" · ")],
+  ];
+  return (
+    <div className="review-audit-content">
+      <AuditLifecycle detail={detail} />
+      <section className="review-audit-section">
+        <h3>{t("generationProvenance")}</h3>
+        <KeyValueTable rows={provenanceRows} />
+      </section>
+      <section className="review-audit-section">
+        <h3>{t("usageSummary")}</h3>
+        <UsageTable attemptCount={detail.aggregate_usage.attempt_count} usage={detail.aggregate_usage} />
+      </section>
+      <AuditAttempts detail={detail} />
+    </div>
+  );
+}
+
+type UsageView = ResearchReviewAuditDetail["attempts"][number]["usage"];
+
+function UsageTable({
+  attemptCount,
+  usage,
+}: {
+  attemptCount?: number;
+  usage: UsageView;
+}) {
+  const { t, i18n } = useTranslation();
+  const fields: Array<[string, number | string | null | undefined]> = [
+    ...(attemptCount === undefined ? [] : [[t("attempts"), attemptCount] as [string, number]]),
+    [t("usageStatus"), usage.usage_status],
+    [t("llmCalls"), usage.llm_calls],
+    [t("inputTokens"), usage.input_tokens],
+    [t("outputTokens"), usage.output_tokens],
+    [t("cacheHitInputTokens"), usage.cache_hit_input_tokens],
+    [t("cacheMissInputTokens"), usage.cache_miss_input_tokens],
+    [t("reasoningOutputTokens"), usage.reasoning_output_tokens],
+    [t("wallTime"), usage.wall_time_seconds],
+    [t("providerCostUsd"), usage.provider_reported_cost_usd],
+  ];
+  return (
+    <div className="review-table-scroll">
+      <table className="review-audit-table review-usage-table">
+        <thead><tr>{fields.map(([label]) => <th key={label}>{label}</th>)}</tr></thead>
+        <tbody><tr>{fields.map(([label, value]) => (
+          <td key={label}>{formatAuditNumber(i18n.language, value)}</td>
+        ))}</tr></tbody>
+      </table>
+    </div>
+  );
+}
+
+function KeyValueTable({ rows }: { rows: Array<[string, ReactNode]> }) {
+  return (
+    <div className="review-table-scroll">
+      <table className="review-audit-table review-key-value-table">
+        <tbody>{rows.map(([label, value]) => (
+          <tr key={label}><th scope="row">{label}</th><td>{value || "—"}</td></tr>
+        ))}</tbody>
+      </table>
+    </div>
+  );
+}
+
+function AuditTime({ locale, value }: { locale: string; value: string | null | undefined }) {
+  if (!value) return <>—</>;
+  const date = new Date(value);
+  const label = Number.isNaN(date.valueOf())
+    ? value
+    : new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(date);
+  return <time dateTime={value} title={value}>{label}</time>;
+}
+
+function formatAuditNumber(locale: string, value: number | string | null | undefined): string {
+  if (value === null || value === undefined || value === "") return "—";
+  return typeof value === "number" ? new Intl.NumberFormat(locale, { maximumFractionDigits: 4 }).format(value) : value;
 }
 
 function DecisionDetails({ review }: { review: ResearchReview }) {
   const { t } = useTranslation();
   return (
     <div className="memory-decision-details-body">
+      <div className="memory-scenarios">
+        <h3>{t("scenarios")}</h3>
+        <div className="memory-scenario-grid">
+          {review.decision.scenarios.map((scenario) => (
+            <div className={`memory-scenario scenario-${scenario.kind}`} key={scenario.kind}>
+              <strong>{t(`${scenario.kind}Scenario`)}</strong>
+              <Markdown>{scenario.outcome}</Markdown>
+              {scenario.core_assumptions.length > 0 && (
+                <div className="memory-decision-field">
+                  <strong>{t("coreAssumptions")}</strong>
+                  <ul>
+                    {scenario.core_assumptions.map((assumption) => (
+                      <li key={assumption}><Markdown>{assumption}</Markdown></li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
       <div className="memory-decision-grid">
         <div className="memory-decision-field">
           <strong>{t("horizon")}</strong>
           <Markdown>{review.decision.time_horizon}</Markdown>
-        </div>
-        <div className="memory-decision-field">
-          <strong>{t("scenarios")}</strong>
-          {review.decision.scenarios.map((scenario) => (
-            <div key={scenario.kind}>
-              <strong>{t(`${scenario.kind}Scenario`)}</strong>
-              <Markdown>{scenario.outcome}</Markdown>
-              {scenario.core_assumptions.length > 0 && (
-                <ul>
-                  {scenario.core_assumptions.map((assumption) => (
-                    <li key={assumption}><Markdown>{assumption}</Markdown></li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          ))}
         </div>
         <DecisionList
           title={t("catalysts")}
@@ -687,6 +864,21 @@ function DecisionList({ title, items }: { title: string; items: string[] }) {
 
 function percent(value: number | null) {
   return value == null ? "—" : `${value >= 0 ? "+" : ""}${(value * 100).toFixed(1)}%`;
+}
+
+function feedbackStateMessageKey(status: ResearchReview["review_status"]): string {
+  return {
+    awaiting_observation: "feedbackAwaitingObservation",
+    observation_delayed: "feedbackAwaitingObservation",
+    awaiting_reflection: "feedbackAwaitingReflection",
+    reflection_retry_scheduled: "feedbackRetryScheduled",
+    reflection_failed: "feedbackGenerationFailed",
+    reflection_invalid: "feedbackGenerationFailed",
+    feedback_available: "feedbackUnavailable",
+    feedback_ineligible: "feedbackUnavailable",
+    feedback_retired: "feedbackUnavailable",
+    lifecycle_inconsistent: "feedbackUnavailable",
+  }[status];
 }
 
 function runDecisionPath(runId: string): string {

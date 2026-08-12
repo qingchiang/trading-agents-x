@@ -458,6 +458,18 @@ test("keeps retained Review references, actions, and motion preferences usable i
     outcome_feedback: null,
   };
   const reviewQueries: string[] = [];
+  const paletteStatuses = [
+    "awaiting_observation",
+    "awaiting_reflection",
+    "observation_delayed",
+    "reflection_retry_scheduled",
+    "feedback_ineligible",
+    "reflection_failed",
+    "reflection_invalid",
+    "lifecycle_inconsistent",
+    "feedback_available",
+    "feedback_retired",
+  ] as const;
   let feedbackRetired = false;
   let reflectionRegenerationRequested = false;
   let retirementPayload: Record<string, unknown> | null = null;
@@ -498,6 +510,17 @@ test("keeps retained Review references, actions, and motion preferences usable i
     }
     if (path === "/api/v1/reviews") {
       reviewQueries.push(url.search);
+      if (url.searchParams.get("q") === "status-palette") {
+        return route.fulfill({
+          json: paletteStatuses.map((status, index) => ({
+            ...baseReview,
+            outcome_id: 100 + index,
+            run_id: `palette-${status}`,
+            review_status: status,
+            lifecycle_actions_allowed: false,
+          })),
+        });
+      }
       let currentReview = baseReview;
       if (url.searchParams.get("status_group") === "needs_attention") {
         currentReview = failedReview;
@@ -505,6 +528,27 @@ test("keeps retained Review references, actions, and motion preferences usable i
         currentReview = retiredReview();
       }
       return route.fulfill({ json: [currentReview] });
+    }
+    if (path === "/api/v1/reviews/7") {
+      return route.fulfill({
+        json: {
+          review: feedbackRetired ? retiredReview() : baseReview,
+          reflection: "Directional assessment: useful. Method lesson: Prefer relative evidence.",
+          attempts: [],
+          aggregate_usage: {
+            usage_status: "reported",
+            attempt_count: 1,
+            llm_calls: 1,
+            input_tokens: 120,
+            output_tokens: 40,
+            cache_hit_input_tokens: 20,
+            cache_miss_input_tokens: 100,
+            reasoning_output_tokens: 12,
+            wall_time_seconds: 1.4,
+            provider_reported_cost_usd: 0.004,
+          },
+        },
+      });
     }
     if (
       path === "/api/v1/outcome-observations/7/reflection-regenerations" &&
@@ -561,14 +605,56 @@ test("keeps retained Review references, actions, and motion preferences usable i
       .find((call) => call.id === "review-legacy-run")?.behavior
   ))).toBe("auto");
 
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const reviewCard = page.locator("#review-legacy-run");
+  await expect(reviewCard.locator(".memory-profile")).toHaveCSS(
+    "background-color",
+    "rgb(237, 243, 255)",
+  );
+  await expect(reviewCard.locator(".status-feedback_available")).toHaveCSS(
+    "background-color",
+    "rgb(234, 248, 240)",
+  );
+  expect(await reviewCard.locator(".review-confidence").evaluate(
+    (element) => element.scrollWidth <= element.clientWidth,
+  )).toBe(true);
+  await reviewCard.getByText("Decision details").click();
+  const detailsWidth = await reviewCard.locator(".memory-decision-details").first().evaluate(
+    (element) => element.getBoundingClientRect().width,
+  );
+  const cardWidth = await reviewCard.evaluate((element) => element.getBoundingClientRect().width);
+  expect(detailsWidth / cardWidth).toBeGreaterThan(0.9);
+  expect(await reviewCard.locator(".memory-scenario-grid").evaluate(
+    (element) => getComputedStyle(element).gridTemplateColumns.split(" ").length,
+  )).toBe(3);
+  await reviewCard.getByText("Generation and audit details").click();
+  await expect(reviewCard.getByRole("heading", { name: "Usage summary" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  expect(await reviewCard.locator(".memory-scenario-grid").evaluate(
+    (element) => getComputedStyle(element).gridTemplateColumns.split(" ").length,
+  )).toBe(1);
+  await page.setViewportSize({ width: 1280, height: 900 });
+
   await page.getByLabel("Keyword search").fill("Toyota");
   await page.getByLabel("Review status").selectOption("needs_attention");
   await page.getByRole("button", { name: "Apply" }).click();
   await expect(page).toHaveURL(/\/reviews\?q=Toyota&status_group=needs_attention$/);
   await expect.poll(() => reviewQueries).toContain("?q=Toyota&status_group=needs_attention");
-  await page.getByRole("button", { name: "Regenerate Method Reflection" }).click();
+  const regenerationButton = page.getByRole("button", { name: "Regenerate Reflection Analysis" });
+  expect(await regenerationButton.evaluate((element) => element.getBoundingClientRect().width)).toBeLessThan(cardWidth / 2);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await regenerationButton.evaluate((element) => {
+    const section = element.closest("section")!;
+    return Math.abs(element.getBoundingClientRect().width - section.getBoundingClientRect().width) < 2;
+  })).toBe(true);
+  expect(await page.locator(".memory-scenario-grid").evaluate(
+    (element) => getComputedStyle(element).gridTemplateColumns.split(" ").length,
+  )).toBe(1);
+  await regenerationButton.click();
   await expect.poll(() => reflectionRegenerationRequested).toBe(true);
-  await expect(page.getByRole("status")).toHaveText("Reflection regeneration is queued.");
+  await expect(page.getByRole("status")).toContainText("Reflection Analysis is queued.");
   await expect(page.getByRole("button", { name: "Queued" })).toBeDisabled();
   await expect(page.locator("#review-legacy-run")).toBeFocused();
 
@@ -576,18 +662,17 @@ test("keeps retained Review references, actions, and motion preferences usable i
   await page.getByRole("button", { name: "Apply" }).click();
   await expect(page).toHaveURL(/\/reviews\?q=Toyota&status_group=feedback_available$/);
 
-  await page.setViewportSize({ width: 390, height: 844 });
-  const retireTrigger = page.getByRole("button", { name: "Retire Feedback" });
+  const retireTrigger = page.getByRole("button", { name: "Retire Method Lesson" });
   await expect(retireTrigger).toHaveCSS("min-height", "44px");
   expect(await retireTrigger.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
 
   await retireTrigger.focus();
   await page.keyboard.press("Enter");
-  const dialog = page.getByRole("dialog", { name: "Retire Method Feedback" });
+  const dialog = page.getByRole("dialog", { name: "Retire Reusable Method Lesson" });
   const reason = dialog.getByLabel("Reason");
   await expect(reason).toBeFocused();
   await page.keyboard.press("Shift+Tab");
-  await expect(dialog.getByRole("button", { name: "Retire Feedback" })).toBeFocused();
+  await expect(dialog.getByRole("button", { name: "Retire Method Lesson" })).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(reason).toBeFocused();
   await page.keyboard.press("Escape");
@@ -600,10 +685,27 @@ test("keeps retained Review references, actions, and motion preferences usable i
   await page.keyboard.press("Tab");
   await page.keyboard.press("Tab");
   await page.keyboard.press("Tab");
-  await expect(dialog.getByRole("button", { name: "Retire Feedback" })).toBeFocused();
+  await expect(dialog.getByRole("button", { name: "Retire Method Lesson" })).toBeFocused();
   await page.keyboard.press("Enter");
   await expect.poll(() => retirementPayload).toEqual({ reason: "too_specific", note: null });
-  await expect(page.getByRole("status")).toHaveText("Method Feedback retired.");
+  await expect(page.getByRole("status")).toHaveText("Reusable method lesson retired.");
+
+  await page.goto("/reviews?q=status-palette");
+  const toneBackgrounds = {
+    awaiting_observation: "rgb(237, 243, 255)",
+    awaiting_reflection: "rgb(237, 243, 255)",
+    observation_delayed: "rgb(255, 245, 223)",
+    reflection_retry_scheduled: "rgb(255, 245, 223)",
+    feedback_ineligible: "rgb(255, 245, 223)",
+    reflection_failed: "rgb(255, 240, 242)",
+    reflection_invalid: "rgb(255, 240, 242)",
+    lifecycle_inconsistent: "rgb(255, 240, 242)",
+    feedback_available: "rgb(234, 248, 240)",
+    feedback_retired: "rgb(241, 243, 246)",
+  } as const;
+  for (const [status, background] of Object.entries(toneBackgrounds)) {
+    await expect(page.locator(`.status-${status}`)).toHaveCSS("background-color", background);
+  }
 });
 
 test("runs, legacy templates, trash, and restores local research", async ({
