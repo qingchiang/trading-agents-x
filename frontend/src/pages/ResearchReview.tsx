@@ -347,7 +347,13 @@ export default function ResearchReview() {
                     {t("confidence")} {Math.round(review.decision.confidence * 100)}%
                   </span>
                 </div>
-                <Markdown>{review.decision.thesis}</Markdown>
+                <div className="review-decision-copy">
+                  <Markdown>{review.decision.thesis}</Markdown>
+                  <div className="review-decision-horizon">
+                    <strong>{t("horizon")}</strong>
+                    <Markdown>{review.decision.time_horizon}</Markdown>
+                  </div>
+                </div>
               </div>
               <details className="memory-decision-details">
                 <summary>{t("decisionDetails")}</summary>
@@ -857,10 +863,6 @@ function DecisionDetails({ review }: { review: ResearchReview }) {
         </div>
       </div>
       <div className="memory-decision-grid">
-        <div className="memory-decision-field">
-          <strong>{t("horizon")}</strong>
-          <Markdown>{review.decision.time_horizon}</Markdown>
-        </div>
         <DecisionList
           title={t("catalysts")}
           items={review.decision.catalysts ?? []}

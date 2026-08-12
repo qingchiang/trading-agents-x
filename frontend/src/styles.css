@@ -2204,12 +2204,39 @@ label small {
   line-height: 1.55;
 }
 
-.memory-decision > .markdown {
+.review-decision-copy {
+  display: grid;
+  gap: 9px;
   min-width: 0;
 }
 
 .memory-decision .markdown p {
   margin: 0;
+}
+
+.review-decision-horizon {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: baseline;
+  color: var(--muted-2);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.review-decision-horizon > strong {
+  flex: 0 0 auto;
+  color: #4b576a;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.review-decision-horizon > .markdown {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
 }
 
 .memory-decision-details {

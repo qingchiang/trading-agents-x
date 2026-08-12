@@ -127,11 +127,17 @@ test("restores the decision hierarchy and distinguishes reflection analysis from
   expect(
     screen.getByText("Prefer relative evidence over a single absolute return."),
   ).toBeVisible();
+  const horizon = screen.getByText("6-12 months");
+  expect(horizon).toBeVisible();
+  expect(horizon.closest(".review-decision-horizon")).not.toBeNull();
+  expect(
+    screen.getByText("Decision details").closest("details"),
+  ).not.toContainElement(horizon);
   expect(screen.queryByText("The source decision left an evidence gap.")).toBeNull();
   expect(screen.getByText(/cannot by itself confirm or invalidate the source research conclusion/)).toBeVisible();
   expect(screen.queryByText("short_term_relative_return.v1")).toBeNull();
   fireEvent.click(screen.getByText("Decision details"));
-  expect(screen.getByText("6-12 months")).toBeVisible();
+  expect(screen.getAllByText("6-12 months")).toHaveLength(1);
   expect(screen.getByText("base outcome")).toBeVisible();
   expect(screen.getByText("bull outcome")).toBeVisible();
   expect(screen.getByText("bear outcome")).toBeVisible();

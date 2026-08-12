@@ -660,7 +660,7 @@ test("keeps retained Review references, actions, and motion preferences usable i
   const [ratingBox, confidenceBox, thesisBox] = await Promise.all([
     reviewCard.locator(".review-rating").boundingBox(),
     reviewCard.locator(".review-confidence").boundingBox(),
-    reviewCard.locator(".memory-decision > .markdown").boundingBox(),
+    reviewCard.locator(".review-decision-copy > .markdown").boundingBox(),
   ]);
   expect(ratingBox).not.toBeNull();
   expect(confidenceBox).not.toBeNull();
@@ -671,6 +671,20 @@ test("keeps retained Review references, actions, and motion preferences usable i
     "font-size",
     "16px",
   );
+  const horizonSummary = reviewCard.locator(".review-decision-horizon");
+  await expect(horizonSummary).toContainText("6-12 months");
+  expect(
+    await horizonSummary.evaluate(
+      (element) => element.getBoundingClientRect().height,
+    ),
+  ).toBeLessThanOrEqual(40);
+  expect(
+    await reviewCard
+      .locator(".memory-decision-details")
+      .first()
+      .getByText("6-12 months")
+      .count(),
+  ).toBe(0);
   await reviewCard.getByText("Decision details").click();
   const detailsWidth = await reviewCard.locator(".memory-decision-details").first().evaluate(
     (element) => element.getBoundingClientRect().width,
@@ -692,7 +706,7 @@ test("keeps retained Review references, actions, and motion preferences usable i
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   const [mobileMetaBox, mobileThesisBox] = await Promise.all([
     reviewCard.locator(".review-decision-meta").boundingBox(),
-    reviewCard.locator(".memory-decision > .markdown").boundingBox(),
+    reviewCard.locator(".review-decision-copy > .markdown").boundingBox(),
   ]);
   expect(mobileMetaBox).not.toBeNull();
   expect(mobileThesisBox).not.toBeNull();
