@@ -493,6 +493,14 @@ tbody tr:hover {
 }
 
 .ticker {
+  color: var(--muted-2);
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: 0.025em;
+}
+
+.instrument-identity:not(.has-names):not(.prominent) .ticker {
   color: var(--ink);
   font-size: 15px;
   font-weight: 800;
@@ -500,32 +508,40 @@ tbody tr:hover {
 }
 
 .instrument-identity {
-  display: inline-grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 2px 8px;
+  display: inline-flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
   max-width: 100%;
+}
+
+.instrument-names {
+  display: flex;
+  gap: 8px;
   align-items: baseline;
+  min-width: 0;
+  max-width: 300px;
 }
 
 .instrument-primary-name,
 .instrument-secondary-name {
   min-width: 0;
-  max-width: 300px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .instrument-primary-name {
-  color: #4b576a;
-  font-size: 13px;
-  font-weight: 650;
+  flex: 0 1 auto;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 800;
   line-height: 1.35;
 }
 
 .instrument-secondary-name {
-  grid-column: 2;
+  flex: 1 1 auto;
   color: var(--muted-2);
   font-size: 12px;
   font-weight: 500;
@@ -533,18 +549,28 @@ tbody tr:hover {
 }
 
 .instrument-identity.prominent {
-  gap: 3px 11px;
+  gap: 3px;
+}
+
+.instrument-identity.prominent .instrument-names {
+  max-width: min(720px, 72vw);
 }
 
 .instrument-identity.prominent .instrument-primary-name {
-  max-width: min(520px, 58vw);
-  font-size: 15px;
-  font-weight: 700;
+  margin: 0;
+  font-size: clamp(28px, 3vw, 38px);
+  font-weight: 720;
+  line-height: 1.1;
+  letter-spacing: -0.045em;
 }
 
 .instrument-identity.prominent .instrument-secondary-name {
-  max-width: min(520px, 58vw);
+  font-size: 14px;
+}
+
+.instrument-identity.prominent.has-names .ticker {
   font-size: 13px;
+  font-weight: 750;
 }
 
 .research-rating-badge {
@@ -2066,22 +2092,25 @@ label small {
 }
 
 .memory-title-link .ticker {
-  font-size: 18px;
-  letter-spacing: 0.01em;
+  font-size: 13px;
+  letter-spacing: 0.025em;
+}
+
+.memory-title-link .instrument-names {
+  max-width: min(360px, 42vw);
 }
 
 .memory-title-link .instrument-primary-name {
-  max-width: min(360px, 42vw);
-  font-size: 14px;
-  font-weight: 700;
+  font-size: 18px;
+  font-weight: 800;
 }
 
 .memory-title-link .instrument-secondary-name {
-  max-width: min(360px, 42vw);
   font-size: 12.5px;
 }
 
-.memory-title-link:hover .ticker {
+.memory-title-link:hover .instrument-primary-name,
+.memory-title-link:hover .instrument-identity:not(.has-names) .ticker {
   color: var(--blue);
 }
 

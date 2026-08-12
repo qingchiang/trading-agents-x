@@ -617,13 +617,13 @@ test("keeps retained Review references, actions, and motion preferences usable i
     "background-color",
     "rgb(237, 243, 255)",
   );
-  await expect(reviewCard.locator(".ticker")).toHaveCSS("font-size", "18px");
+  await expect(reviewCard.locator(".ticker")).toHaveCSS("font-size", "13px");
   await expect(reviewCard.locator(".instrument-primary-name")).toHaveText(
     "トヨタ自動車",
   );
   await expect(reviewCard.locator(".instrument-primary-name")).toHaveCSS(
     "font-size",
-    "14px",
+    "18px",
   );
   await expect(reviewCard.locator(".instrument-secondary-name")).toHaveText(
     "Toyota Motor Corporation",
@@ -637,9 +637,19 @@ test("keeps retained Review references, actions, and motion preferences usable i
   expect(reviewTickerBox).not.toBeNull();
   expect(reviewPrimaryNameBox).not.toBeNull();
   expect(reviewSecondaryNameBox).not.toBeNull();
-  expect(reviewPrimaryNameBox!.x).toBeGreaterThan(reviewTickerBox!.x + reviewTickerBox!.width);
-  expect(reviewSecondaryNameBox!.x).toBe(reviewPrimaryNameBox!.x);
-  expect(reviewSecondaryNameBox!.y).toBeGreaterThan(reviewPrimaryNameBox!.y);
+  expect(reviewSecondaryNameBox!.x).toBeGreaterThan(
+    reviewPrimaryNameBox!.x + reviewPrimaryNameBox!.width,
+  );
+  expect(
+    Math.abs(
+      reviewSecondaryNameBox!.y + reviewSecondaryNameBox!.height -
+        (reviewPrimaryNameBox!.y + reviewPrimaryNameBox!.height),
+    ),
+  ).toBeLessThanOrEqual(2);
+  expect(reviewTickerBox!.x).toBe(reviewPrimaryNameBox!.x);
+  expect(reviewTickerBox!.y).toBeGreaterThan(
+    reviewPrimaryNameBox!.y + reviewPrimaryNameBox!.height,
+  );
   await expect(reviewCard.locator(".status-feedback_available")).toHaveCSS(
     "background-color",
     "rgb(234, 248, 240)",
@@ -1112,8 +1122,12 @@ test("runs, legacy templates, trash, and restores local research", async ({
   const dashboardIdentity = page
     .locator("tbody .instrument-identity")
     .filter({ hasText: "NVDA" });
-  await expect(dashboardIdentity.locator(".ticker")).toHaveCSS("font-size", "15px");
+  await expect(dashboardIdentity.locator(".ticker")).toHaveCSS("font-size", "12.5px");
   await expect(dashboardIdentity.locator(".instrument-primary-name")).toHaveText("英伟达");
+  await expect(dashboardIdentity.locator(".instrument-primary-name")).toHaveCSS(
+    "font-size",
+    "15px",
+  );
   await expect(dashboardIdentity.locator(".instrument-secondary-name")).toHaveText(
     "NVIDIA Corporation",
   );
@@ -1146,18 +1160,20 @@ test("runs, legacy templates, trash, and restores local research", async ({
 
   await page.goto("/runs/run-report?view=deliberation");
   const runIdentity = page.locator(".run-title .instrument-identity");
+  await expect(runIdentity.getByRole("heading", { level: 1 })).toHaveText("英伟达");
   await expect(runIdentity.locator(".instrument-primary-name")).toHaveText("英伟达");
   await expect(runIdentity.locator(".instrument-primary-name")).toHaveCSS(
     "font-size",
-    "15px",
+    "38px",
   );
   await expect(runIdentity.locator(".instrument-secondary-name")).toHaveText(
     "NVIDIA Corporation",
   );
   await expect(runIdentity.locator(".instrument-secondary-name")).toHaveCSS(
     "font-size",
-    "13px",
+    "14px",
   );
+  await expect(runIdentity.locator(".ticker")).toHaveCSS("font-size", "13px");
   await expect(
     page.getByRole("heading", { name: "Bull and bear cases" }),
   ).toBeVisible();

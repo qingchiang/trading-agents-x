@@ -61,29 +61,55 @@ export function InstrumentIdentity({
     instrumentLocalName,
     instrumentName,
   );
-  const content = (
-    <>
-      {prominent ? (
-        <h1 className="ticker">{ticker}</h1>
+  if (prominent) {
+    return (
+      <div
+        className={`instrument-identity prominent${primaryName ? " has-names" : ""}`}
+      >
+        {primaryName ? (
+          <>
+            <div className="instrument-names">
+              <h1 className="instrument-primary-name" title={primaryName}>
+                {primaryName}
+              </h1>
+              {secondaryName && (
+                <span
+                  className="instrument-secondary-name"
+                  title={secondaryName}
+                >
+                  {secondaryName}
+                </span>
+              )}
+            </div>
+            <span className="ticker">{ticker}</span>
+          </>
+        ) : (
+          <h1 className="ticker">{ticker}</h1>
+        )}
+      </div>
+    );
+  }
+  return (
+    <span className={`instrument-identity${primaryName ? " has-names" : ""}`}>
+      {primaryName && (
+        <span className="instrument-names">
+          <strong className="instrument-primary-name" title={primaryName}>
+            {primaryName}
+          </strong>
+          {secondaryName && (
+            <span className="instrument-secondary-name" title={secondaryName}>
+              {secondaryName}
+            </span>
+          )}
+        </span>
+      )}
+      {primaryName ? (
+        <span className="ticker">{ticker}</span>
       ) : (
         <strong className="ticker">{ticker}</strong>
       )}
-      {primaryName && (
-        <span className="instrument-primary-name" title={primaryName}>
-          {primaryName}
-        </span>
-      )}
-      {secondaryName && (
-        <span className="instrument-secondary-name" title={secondaryName}>
-          {secondaryName}
-        </span>
-      )}
-    </>
+    </span>
   );
-  if (prominent) {
-    return <div className="instrument-identity prominent">{content}</div>;
-  }
-  return <span className="instrument-identity">{content}</span>;
 }
 
 function instrumentLabel(
