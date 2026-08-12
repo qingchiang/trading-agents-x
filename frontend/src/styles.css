@@ -2054,9 +2054,9 @@ label small {
 
 .memory-decision {
   display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr);
-  gap: 12px;
-  align-items: baseline;
+  grid-template-columns: minmax(112px, auto) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
 }
 
 .review-section {
@@ -2072,7 +2072,7 @@ label small {
 .review-section-title {
   margin: 0 0 8px;
   color: #4b576a;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 800;
   line-height: 1.35;
 }
@@ -2101,7 +2101,14 @@ label small {
   padding-left: 20px;
 }
 
-.memory-decision > strong {
+.review-decision-meta {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.review-decision-meta > strong {
   color: var(--blue);
   font-size: 15px;
 }
@@ -2115,7 +2122,7 @@ label small {
   border-radius: 999px;
 }
 
-.memory-decision > span {
+.review-decision-meta > span {
   color: var(--muted-2);
   font-size: 13px;
 }
@@ -2157,6 +2164,53 @@ label small {
   padding: 14px;
   overflow: hidden;
   border-top: 1px solid var(--line-soft);
+}
+
+.reflection-analysis {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+}
+
+.reflection-analysis > div {
+  display: grid;
+  gap: 6px;
+}
+
+.reflection-analysis dt {
+  color: #4b576a;
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.reflection-analysis dd {
+  margin: 0;
+  color: #455165;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.reflection-analysis .markdown {
+  max-height: none;
+  padding: 0;
+  overflow: visible;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.reflection-analysis .markdown > :first-child,
+.reflection-analysis .markdown > :last-child {
+  margin-block: 0;
+}
+
+.reflection-assessment {
+  width: fit-content;
+  padding: 2px 8px;
+  background: var(--surface);
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  font-weight: 750;
 }
 
 .review-disclosure-body > .markdown {
@@ -2944,11 +2998,8 @@ label small {
   }
 
   .memory-decision {
-    grid-template-columns: auto auto;
-  }
-
-  .memory-decision > .markdown {
-    grid-column: 1 / -1;
+    grid-template-columns: 1fr;
+    gap: 10px;
   }
 
   .memory-meta {

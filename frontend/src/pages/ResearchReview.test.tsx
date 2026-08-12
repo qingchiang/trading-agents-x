@@ -47,6 +47,13 @@ const review = {
   outcome_feedback: { id: 11, status: "eligible", qualification_policy_version: "outcome_feedback_qualification.v1", reasons: [], method_category: "short_term_relative_return", horizon_limit: "Full horizon limitation.", applicability: { schema_version: "1", scope: "instrument", instrument: "7203.T", market: "Asia/Tokyo", research_stages: [], research_domains: [], method_category: "short_term_relative_return", horizon: "short_term" }, qualified_at: "2026-08-01T20:02:00Z", available_at: "2026-08-01T20:02:00Z", retirement_reason: null, retirement_note: null, retired_at: null },
 } as ResearchReview;
 
+const structuredReflection = [
+  "Directional assessment: mixed",
+  "Source-decision evidence lesson: The source decision left an evidence gap.",
+  "Method lesson",
+  "Separate absolute price performance from relative alpha.",
+].join("\n");
+
 beforeEach(async () => {
   vi.resetAllMocks();
   window.history.replaceState(null, "", "/reviews");
@@ -54,7 +61,7 @@ beforeEach(async () => {
   vi.mocked(api.reviews).mockResolvedValue([review]);
   vi.mocked(api.reviewAuditDetail).mockResolvedValue({
     review,
-    reflection: "Method lesson: Full generated reflection.",
+    reflection: structuredReflection,
     attempts: [],
     aggregate_usage: {
       usage_status: "not_reported",
@@ -110,13 +117,17 @@ test("restores the decision hierarchy and distinguishes reflection analysis from
     "title",
     "Bull / bear → judge → risk",
   );
-  expect(screen.getByText("Hold")).toHaveClass("review-rating");
-  expect(screen.getByText("Confidence 60%")).toBeVisible();
+  const rating = screen.getByText("Hold");
+  expect(rating).toHaveClass("review-rating");
+  const decisionMeta = rating.closest(".review-decision-meta");
+  expect(decisionMeta).not.toBeNull();
+  expect(within(decisionMeta as HTMLElement).getByText("Confidence 60%")).toBeVisible();
+  expect(within(decisionMeta as HTMLElement).queryByText("Imported thesis")).toBeNull();
   expect(screen.getByText("Imported thesis")).toBeVisible();
   expect(
     screen.getByText("Prefer relative evidence over a single absolute return."),
   ).toBeVisible();
-  expect(screen.queryByText("Method lesson: Full generated reflection.")).toBeNull();
+  expect(screen.queryByText("The source decision left an evidence gap.")).toBeNull();
   expect(screen.getByText(/cannot by itself confirm or invalidate the source research conclusion/)).toBeVisible();
   expect(screen.queryByText("short_term_relative_return.v1")).toBeNull();
   fireEvent.click(screen.getByText("Decision details"));
@@ -127,7 +138,12 @@ test("restores the decision hierarchy and distinguishes reflection analysis from
   expect(screen.getByText("Decision details").closest("details")).not.toHaveClass("memory-decision");
   fireEvent.click(screen.getByText("Full Reflection Analysis"));
   await waitFor(() => expect(api.reviewAuditDetail).toHaveBeenCalledWith(7));
-  expect(screen.getByText("Method lesson: Full generated reflection.")).toBeVisible();
+  expect(screen.getByText("Directional assessment")).toBeVisible();
+  expect(screen.getByText("Mixed")).toBeVisible();
+  expect(screen.getByText("Source-decision evidence lesson")).toBeVisible();
+  expect(screen.getByText("The source decision left an evidence gap.")).toBeVisible();
+  expect(screen.getByText("Method lesson")).toBeVisible();
+  expect(screen.getByText("Separate absolute price performance from relative alpha.")).toBeVisible();
   fireEvent.click(screen.getByText("Generation and audit details"));
   expect(api.reviewAuditDetail).toHaveBeenCalledTimes(1);
   expect(screen.getByText(/short_term_relative_return\.v1/)).toBeVisible();
@@ -485,6 +501,10 @@ test("localizes Review audit labels in every supported language", async () => {
       "outcomeObservation",
       "methodReflection",
       "methodFeedback",
+      "directionalAssessment",
+      "sourceDecisionEvidenceLesson",
+      "methodLesson",
+      "directionalAssessmentValues.mixed",
     ]) {
       expect(i18n.t(key, { count: 2 })).not.toContain(key);
     }

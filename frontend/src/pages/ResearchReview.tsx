@@ -341,10 +341,12 @@ export default function ResearchReview() {
             <section className="review-section">
               <h2 className="review-section-title">{t("sourceResearchDecision")}</h2>
               <div className="memory-decision">
-                <strong className="review-rating">{review.decision.rating}</strong>
-                <span className="review-confidence">
-                  {t("confidence")} {Math.round(review.decision.confidence * 100)}%
-                </span>
+                <div className="review-decision-meta">
+                  <strong className="review-rating">{review.decision.rating}</strong>
+                  <span className="review-confidence">
+                    {t("confidence")} {Math.round(review.decision.confidence * 100)}%
+                  </span>
+                </div>
                 <Markdown>{review.decision.thesis}</Markdown>
               </div>
               <details className="memory-decision-details">
@@ -485,7 +487,7 @@ export default function ResearchReview() {
               summary={t("fullReflectionAnalysis")}
             >
               {(detail) => detail.reflection ? (
-                <Markdown>{String(detail.reflection)}</Markdown>
+                <ReflectionAnalysis reflection={String(detail.reflection)} />
               ) : (
                 <p>{t("reflectionUnavailable")}</p>
               )}
@@ -584,6 +586,40 @@ export default function ResearchReview() {
         </div>
       )}
     </section>
+  );
+}
+
+function ReflectionAnalysis({ reflection }: { reflection: string }) {
+  const { t } = useTranslation();
+  const match = reflection.trim().match(
+    /^Directional assessment:\s*([^\n]+)\nSource-decision evidence lesson:\s*([\s\S]*?)\nMethod lesson(?::\s*|\s*\n)([\s\S]+)$/,
+  );
+
+  if (!match) return <Markdown>{reflection}</Markdown>;
+
+  const assessment = match[1].trim().toLowerCase();
+  const isKnownAssessment = ["consistent", "mixed", "inconsistent"].includes(assessment);
+  const assessmentKey = isKnownAssessment
+    ? `directionalAssessmentValues.${assessment}`
+    : null;
+
+  return (
+    <dl className="reflection-analysis">
+      <div>
+        <dt>{t("directionalAssessment")}</dt>
+        <dd className={`reflection-assessment${isKnownAssessment ? ` reflection-assessment-${assessment}` : ""}`}>
+          {assessmentKey ? t(assessmentKey) : match[1].trim()}
+        </dd>
+      </div>
+      <div>
+        <dt>{t("sourceDecisionEvidenceLesson")}</dt>
+        <dd><Markdown>{match[2].trim()}</Markdown></dd>
+      </div>
+      <div>
+        <dt>{t("methodLesson")}</dt>
+        <dd><Markdown>{match[3].trim()}</Markdown></dd>
+      </div>
+    </dl>
   );
 }
 

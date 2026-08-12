@@ -533,7 +533,12 @@ test("keeps retained Review references, actions, and motion preferences usable i
       return route.fulfill({
         json: {
           review: feedbackRetired ? retiredReview() : baseReview,
-          reflection: "Directional assessment: useful. Method lesson: Prefer relative evidence.",
+          reflection: [
+            "Directional assessment: mixed",
+            "Source-decision evidence lesson: The source decision left an evidence gap.",
+            "Method lesson",
+            "Separate absolute price performance from relative alpha.",
+          ].join("\n"),
           attempts: [],
           aggregate_usage: {
             usage_status: "reported",
@@ -618,6 +623,20 @@ test("keeps retained Review references, actions, and motion preferences usable i
   expect(await reviewCard.locator(".review-confidence").evaluate(
     (element) => element.scrollWidth <= element.clientWidth,
   )).toBe(true);
+  const [ratingBox, confidenceBox, thesisBox] = await Promise.all([
+    reviewCard.locator(".review-rating").boundingBox(),
+    reviewCard.locator(".review-confidence").boundingBox(),
+    reviewCard.locator(".memory-decision > .markdown").boundingBox(),
+  ]);
+  expect(ratingBox).not.toBeNull();
+  expect(confidenceBox).not.toBeNull();
+  expect(thesisBox).not.toBeNull();
+  expect(confidenceBox!.y).toBeGreaterThan(ratingBox!.y + ratingBox!.height);
+  expect(thesisBox!.x).toBeGreaterThan(ratingBox!.x + ratingBox!.width);
+  await expect(reviewCard.getByRole("heading", { name: "Source Research Decision" })).toHaveCSS(
+    "font-size",
+    "16px",
+  );
   await reviewCard.getByText("Decision details").click();
   const detailsWidth = await reviewCard.locator(".memory-decision-details").first().evaluate(
     (element) => element.getBoundingClientRect().width,
@@ -627,11 +646,23 @@ test("keeps retained Review references, actions, and motion preferences usable i
   expect(await reviewCard.locator(".memory-scenario-grid").evaluate(
     (element) => getComputedStyle(element).gridTemplateColumns.split(" ").length,
   )).toBe(3);
+  await reviewCard.getByText("Full Reflection Analysis").click();
+  await expect(reviewCard.getByText("Directional assessment")).toBeVisible();
+  await expect(reviewCard.getByText("Mixed")).toBeVisible();
+  await expect(reviewCard.getByText("Source-decision evidence lesson")).toBeVisible();
+  await expect(reviewCard.getByText("Method lesson", { exact: true })).toBeVisible();
   await reviewCard.getByText("Generation and audit details").click();
   await expect(reviewCard.getByRole("heading", { name: "Usage summary" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  const [mobileMetaBox, mobileThesisBox] = await Promise.all([
+    reviewCard.locator(".review-decision-meta").boundingBox(),
+    reviewCard.locator(".memory-decision > .markdown").boundingBox(),
+  ]);
+  expect(mobileMetaBox).not.toBeNull();
+  expect(mobileThesisBox).not.toBeNull();
+  expect(mobileThesisBox!.y).toBeGreaterThan(mobileMetaBox!.y + mobileMetaBox!.height);
   expect(await reviewCard.locator(".memory-scenario-grid").evaluate(
     (element) => getComputedStyle(element).gridTemplateColumns.split(" ").length,
   )).toBe(1);
