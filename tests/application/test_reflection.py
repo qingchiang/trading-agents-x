@@ -155,7 +155,10 @@ def test_reflector_returns_a_versioned_structured_draft() -> None:
 
 def test_reflector_exposes_typed_invalid_candidate_for_one_bounded_repair() -> None:
     reflector = OutcomeReflector(
-        _RecordingLLM('{"method_lesson":"missing fields","api_key":"secret"}')
+        _RecordingLLM(
+            '{"method_lesson":"missing fields","api_key":"secret",'
+            '"note":"Authorization: Bearer private-token"}'
+        )
     )
 
     with pytest.raises(ReflectionDraftValidationError) as error:
@@ -171,7 +174,10 @@ def test_reflector_exposes_typed_invalid_candidate_for_one_bounded_repair() -> N
         )
 
     assert error.value.validation_issues
-    assert error.value.candidate == '{"method_lesson":"missing fields","api_key":"[REDACTED]"}'
+    assert error.value.candidate == (
+        '{"method_lesson":"missing fields","api_key":"[REDACTED]",'
+        '"note":"Authorization: [REDACTED]"}'
+    )
 
 
 def test_reflector_keeps_provider_usage_separate_from_the_draft() -> None:

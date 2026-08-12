@@ -112,6 +112,18 @@ export function InstrumentIdentity({
   );
 }
 
+export function instrumentAccessibleName(
+  ticker: string,
+  instrumentLocalName?: string | null,
+  instrumentName?: string | null,
+): string {
+  const [primaryName, secondaryName] = distinctNames(
+    instrumentLocalName,
+    instrumentName,
+  );
+  return [primaryName, ticker, secondaryName].filter(Boolean).join(" · ");
+}
+
 function instrumentLabel(
   localName?: string | null,
   generalName?: string | null,

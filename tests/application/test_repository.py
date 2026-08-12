@@ -308,7 +308,10 @@ def test_events_are_monotonic_replayable_and_redacted(
     first = repository.append_event(
         run.id,
         "run.queued",
-        payload={"api_key": "private", "message": "token=private"},
+        payload={
+            "api_key": "private",
+            "message": "Authorization: Bearer private-token",
+        },
     )
     second = repository.append_event(run.id, "run.started", node="market")
 
@@ -319,7 +322,7 @@ def test_events_are_monotonic_replayable_and_redacted(
     assert [event.sequence for event in replay] == [2]
     stored = repository.list_events(run.id)[0].payload
     assert stored["api_key"] == "[REDACTED]"
-    assert "private" not in stored["message"]
+    assert stored["message"] == "Authorization: [REDACTED]"
 
 
 def test_trash_restore_filters_are_atomic_and_idempotent(

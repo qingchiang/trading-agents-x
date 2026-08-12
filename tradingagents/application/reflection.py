@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass, field
 from hashlib import sha256
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+
+from .sanitization import sanitize_text
 
 _LANGUAGE_INSTRUCTIONS = {
     "English (en)": "Write every text field in English.",
@@ -20,12 +21,6 @@ _LANGUAGE_INSTRUCTIONS = {
 }
 
 OUTCOME_REFLECTION_SCHEMA_VERSION = "outcome_reflection.v1"
-_SECRET_RE = re.compile(
-    r"(?i)(api[_-]?key|authorization|bearer|token|password)(\s*[:=]\s*)[^\s,;]+"
-)
-_JSON_SECRET_RE = re.compile(
-    r'(?i)("(?:api[_-]?key|authorization|bearer|token|password)"\s*:\s*")[^"]*(")'
-)
 
 
 class OutcomeReflectionDraft(BaseModel):
@@ -268,5 +263,4 @@ def _usage_float(metadata: Any, *keys: str) -> float | None:
 
 
 def _sanitize_candidate(value: str, *, limit: int = 4_000) -> str:
-    redacted = _JSON_SECRET_RE.sub(r"\1[REDACTED]\2", value)
-    return _SECRET_RE.sub(r"\1\2[REDACTED]", redacted)[:limit]
+    return sanitize_text(value, limit=limit)

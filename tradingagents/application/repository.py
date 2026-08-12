@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
@@ -108,11 +107,9 @@ from .research import (
     evaluate_next_update_policy,
 )
 from .research_review import derive_review_status, review_status_in_group
+from .sanitization import sanitize_text
 from .settings import AppSettings
 
-_SECRET_RE = re.compile(
-    r"(?i)(api[-_ ]?key|authorization|bearer|password|secret|token)(\s*[:=]\s*)(\S+)"
-)
 _TERMINAL_STATUSES = {
     RunStatus.SUCCEEDED.value,
     RunStatus.FAILED.value,
@@ -159,8 +156,7 @@ def _aware(value: datetime | None) -> datetime | None:
 def _sanitize_text(value: str | None, limit: int = 2000) -> str | None:
     if value is None:
         return None
-    redacted = _SECRET_RE.sub(r"\1\2[REDACTED]", str(value))
-    return redacted[:limit]
+    return sanitize_text(str(value), limit=limit)
 
 
 def _usage_int(value: object) -> int | None:

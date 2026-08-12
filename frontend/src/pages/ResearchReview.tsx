@@ -9,6 +9,7 @@ import {
 import {
   InstrumentIdentity,
   RecentInstrumentDatalist,
+  instrumentAccessibleName,
   recentInstrumentListId,
   useRecentInstruments,
 } from "../components/Instruments";
@@ -311,7 +312,11 @@ export default function ResearchReview() {
                 <Link
                   className="memory-title-link"
                   to={runDecisionPath(review.run_id)}
-                  aria-label={`${t("openResearchDecision")} ${review.ticker}`}
+                  aria-label={`${t("openResearchDecision")} ${instrumentAccessibleName(
+                    review.ticker,
+                    review.instrument_local_name,
+                    review.instrument_name,
+                  )}`}
                 >
                   <InstrumentIdentity
                     ticker={review.ticker}
@@ -446,7 +451,11 @@ export default function ResearchReview() {
                   {t("methodReflection")}
                 </h2>
                 <p>
-                  {review.outcome_reflection?.error_code || t("reflectionFailure")}
+                  {t(
+                    review.review_status === "reflection_invalid"
+                      ? "reflectionInvalid"
+                      : "reflectionFailure",
+                  )}
                 </p>
                 {reflectionActionError && reflectionActionErrorOutcomeId === review.outcome_id && (
                   <div
@@ -672,6 +681,7 @@ function AuditAttempts({ detail }: { detail: ResearchReviewAuditDetail }) {
           </summary>
           <div className="review-attempt-body">
             <KeyValueTable rows={[
+              [t("generationCycleId"), attempt.generation_cycle_id],
               [t("attemptSchema"), attempt.attempt_schema_version],
               [t("candidateSchema"), attempt.candidate_schema_version],
               [t("origin"), attempt.origin],
@@ -712,6 +722,7 @@ function AuditAttempts({ detail }: { detail: ResearchReviewAuditDetail }) {
 function AuditLifecycle({ detail }: { detail: ResearchReviewAuditDetail }) {
   const { t, i18n } = useTranslation();
   const { outcome, outcome_feedback: feedback, outcome_reflection: reflection } = detail.review;
+  const cycle = reflection?.generation_cycle;
   return (
     <section className="review-audit-section">
       <h3>{t("lifecycle")}</h3>
@@ -740,8 +751,35 @@ function AuditLifecycle({ detail }: { detail: ResearchReviewAuditDetail }) {
               <td><AuditTime locale={i18n.language} value={feedback?.available_at} /></td>
               <td><AuditTime locale={i18n.language} value={feedback?.retired_at} /></td>
             </tr>
+            {cycle && (
+              <tr>
+                <th scope="row">{t("generationCycle")}</th><td>{cycle.status}</td>
+                <td><AuditTime locale={i18n.language} value={cycle.queued_at} /></td>
+                <td><AuditTime locale={i18n.language} value={cycle.due_at} /></td>
+                <td>—</td>
+              </tr>
+            )}
           </tbody>
         </table>
+      </div>
+      <div className="review-audit-subsection">
+        <h4>{t("lifecycleDiagnostics")}</h4>
+        <KeyValueTable
+          rows={[
+            [
+              t("nextObservationCheck"),
+              <AuditTime locale={i18n.language} value={outcome.next_check_at} />,
+            ],
+            [t("observationError"), outcome.error_message],
+            [
+              t("nextReflectionRetry"),
+              <AuditTime locale={i18n.language} value={reflection?.next_retry_at} />,
+            ],
+            [t("reflectionError"), reflection?.error_code],
+            [t("generationCycleId"), cycle?.id],
+            [t("retryOrdinal"), cycle?.retry_ordinal],
+          ]}
+        />
       </div>
     </section>
   );
@@ -816,7 +854,10 @@ function KeyValueTable({ rows }: { rows: Array<[string, ReactNode]> }) {
     <div className="review-table-scroll">
       <table className="review-audit-table review-key-value-table">
         <tbody>{rows.map(([label, value]) => (
-          <tr key={label}><th scope="row">{label}</th><td>{value || "—"}</td></tr>
+          <tr key={label}>
+            <th scope="row">{label}</th>
+            <td>{value === null || value === undefined || value === "" ? "—" : value}</td>
+          </tr>
         ))}</tbody>
       </table>
     </div>

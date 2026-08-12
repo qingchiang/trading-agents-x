@@ -110,6 +110,9 @@ function deferred<T>() {
 test("restores the decision hierarchy and distinguishes reflection analysis from reusable lessons", async () => {
   renderReviews();
   expect(await screen.findByRole("heading", { name: "Source Research Decision" })).toBeVisible();
+  expect(screen.getByRole("link", {
+    name: "Open research decision トヨタ自動車 · 7203.T · Toyota Motor Corporation",
+  })).toBeVisible();
   expect(screen.getByRole("heading", { name: "Outcome Observation" })).toBeVisible();
   expect(screen.getByRole("heading", { name: "Reusable Method Lesson" })).toBeVisible();
   expect(screen.getByText("Standard")).toHaveClass("memory-profile");
@@ -217,6 +220,8 @@ test("queues one regeneration in the Reflection failure section", async () => {
   };
   vi.mocked(api.reviews).mockResolvedValueOnce([failed]);
   renderReviews();
+  expect(await screen.findByText("Reflection Analysis generation failed.")).toBeVisible();
+  expect(screen.queryByText("TransportError")).toBeNull();
   fireEvent.click(await screen.findByRole("button", { name: "Regenerate Reflection Analysis" }));
   await waitFor(() => expect(api.regenerateOutcomeReflection).toHaveBeenCalledWith(7, expect.any(String)));
   expect(await screen.findByRole("status")).toHaveTextContent("Reflection Analysis is queued.");
@@ -224,6 +229,101 @@ test("queues one regeneration in the Reflection failure section", async () => {
   expect(screen.getByRole("button", { name: "Queued" })).toBeDisabled();
   expect(screen.getByRole("article")).toHaveFocus();
   expect(api.reviews).toHaveBeenCalledTimes(1);
+});
+
+test("shows complete retry and generation-cycle provenance only in audit details", async () => {
+  const nextCheckAt = "2026-08-02T20:00:00Z";
+  const nextRetryAt = "2026-08-02T21:00:00Z";
+  const cycleId = "cycle-retry-1";
+  const retryReview = {
+    ...review,
+    review_status: "reflection_retry_scheduled" as const,
+    outcome: {
+      ...review.outcome,
+      next_check_at: nextCheckAt,
+      error_message: "market_data_delayed",
+    },
+    outcome_reflection: {
+      ...review.outcome_reflection!,
+      status: "retryable_failure" as const,
+      next_retry_at: nextRetryAt,
+      error_code: "provider_timeout",
+      generation_cycle: {
+        id: cycleId,
+        outcome_id: 7,
+        status: "queued" as const,
+        origin: "automatic" as const,
+        trigger: "outcome_settlement",
+        retry_ordinal: 1,
+        queued_at: "2026-08-02T20:01:00Z",
+        due_at: nextRetryAt,
+      },
+    },
+    method_feedback: null,
+    outcome_feedback: null,
+  };
+  vi.mocked(api.reviews).mockResolvedValueOnce([retryReview]);
+  vi.mocked(api.reviewAuditDetail).mockResolvedValueOnce({
+    review: retryReview,
+    reflection: null,
+    attempts: [{
+      id: 31,
+      generation_cycle_id: cycleId,
+      sequence: 1,
+      trigger: "outcome_settlement",
+      origin: "automatic",
+      attempt_kind: "initial",
+      started_at: "2026-08-02T20:00:00Z",
+      finished_at: "2026-08-02T20:00:05Z",
+      outcome: "provider_failure",
+      attempt_schema_version: "outcome_reflection_attempt.v1",
+      candidate_schema_version: null,
+      diagnostics: { error_code: "provider_timeout" },
+      usage: {
+        usage_status: "not_reported",
+        llm_calls: 1,
+        input_tokens: null,
+        output_tokens: null,
+        cache_hit_input_tokens: null,
+        cache_miss_input_tokens: null,
+        reasoning_output_tokens: null,
+        wall_time_seconds: 5,
+        provider_reported_cost_usd: null,
+      },
+      invalid_candidate: null,
+      invalid_candidate_digest: null,
+      invalid_candidate_length: null,
+      validation_issues: null,
+    }],
+    aggregate_usage: {
+      usage_status: "not_reported",
+      attempt_count: 1,
+      llm_calls: 1,
+      input_tokens: null,
+      output_tokens: null,
+      cache_hit_input_tokens: null,
+      cache_miss_input_tokens: null,
+      reasoning_output_tokens: null,
+      wall_time_seconds: 5,
+      provider_reported_cost_usd: null,
+    },
+  });
+
+  renderReviews();
+  expect(await screen.findByText(/scheduled for retry/)).toBeVisible();
+  expect(screen.queryByText("provider_timeout")).toBeNull();
+  fireEvent.click(screen.getByText("Generation and audit details"));
+  await screen.findByRole("heading", { name: "Lifecycle" });
+
+  expect(screen.getByText("Next observation check")).toBeVisible();
+  expect(screen.getByText("Observation error")).toBeVisible();
+  expect(screen.getByText("Next reflection retry")).toBeVisible();
+  expect(screen.getAllByText("provider_timeout").length).toBeGreaterThan(0);
+  expect(screen.getByRole("row", { name: /Generation cycle queued/ })).toBeVisible();
+  fireEvent.click(screen.getByText(/#1 · initial · provider_failure/));
+  const attempt = screen.getByText(/#1 · initial · provider_failure/).closest("details");
+  expect(within(attempt as HTMLElement).getByText("Generation cycle ID")).toBeVisible();
+  expect(within(attempt as HTMLElement).getByText(cycleId)).toBeVisible();
 });
 
 test("ignores an audit response started before regeneration", async () => {
