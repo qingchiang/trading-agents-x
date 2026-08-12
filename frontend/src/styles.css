@@ -494,39 +494,57 @@ tbody tr:hover {
 
 .ticker {
   color: var(--ink);
-  font-size: 14px;
+  font-size: 15px;
+  font-weight: 800;
   letter-spacing: 0.015em;
 }
 
 .instrument-identity {
   display: inline-grid;
-  gap: 3px;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 8px;
   min-width: 0;
+  max-width: 100%;
+  align-items: baseline;
 }
 
-.instrument-name {
-  max-width: 280px;
+.instrument-primary-name,
+.instrument-secondary-name {
+  min-width: 0;
+  max-width: 300px;
   overflow: hidden;
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.instrument-name i {
-  font-style: normal;
+.instrument-primary-name {
+  color: #4b576a;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.instrument-secondary-name {
+  grid-column: 2;
+  color: var(--muted-2);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
 }
 
 .instrument-identity.prominent {
-  gap: 1px;
+  gap: 3px 11px;
 }
 
-.instrument-identity.prominent .instrument-name {
+.instrument-identity.prominent .instrument-primary-name {
   max-width: min(520px, 58vw);
   font-size: 15px;
-  font-weight: 650;
+  font-weight: 700;
+}
+
+.instrument-identity.prominent .instrument-secondary-name {
+  max-width: min(520px, 58vw);
+  font-size: 13px;
 }
 
 .research-rating-badge {
@@ -2009,6 +2027,10 @@ label small {
   margin-bottom: 16px;
 }
 
+.memory-meta > div {
+  min-width: 0;
+}
+
 .memory-run-context {
   display: flex;
   flex-wrap: wrap;
@@ -2039,7 +2061,24 @@ label small {
 
 .memory-title-link {
   display: inline-flex;
+  max-width: 100%;
   border-radius: 5px;
+}
+
+.memory-title-link .ticker {
+  font-size: 18px;
+  letter-spacing: 0.01em;
+}
+
+.memory-title-link .instrument-primary-name {
+  max-width: min(360px, 42vw);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.memory-title-link .instrument-secondary-name {
+  max-width: min(360px, 42vw);
+  font-size: 12.5px;
 }
 
 .memory-title-link:hover .ticker {

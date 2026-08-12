@@ -10,6 +10,7 @@ function makeRun(
   options: {
     ticker?: string;
     instrumentName?: string;
+    instrumentLocalName?: string;
     trashedAt?: string | null;
     sourceRunId?: string | null;
   } = {},
@@ -18,7 +19,7 @@ function makeRun(
     id,
     source_run_id: options.sourceRunId ?? null,
     instrument_name: options.instrumentName ?? null,
-    instrument_local_name: null,
+    instrument_local_name: options.instrumentLocalName ?? null,
     research_rating: status === "succeeded" ? "Hold" : null,
     trashed_at: options.trashedAt ?? null,
     status,
@@ -247,7 +248,7 @@ function review(runId = "legacy-run") {
     run_id: runId,
     ticker: "7203.T",
     instrument_name: "Toyota Motor Corporation",
-    instrument_local_name: null,
+    instrument_local_name: "トヨタ自動車",
     market: "Asia/Tokyo",
     asset_type: "stock",
     analysis_date: "2026-07-24",
@@ -616,6 +617,29 @@ test("keeps retained Review references, actions, and motion preferences usable i
     "background-color",
     "rgb(237, 243, 255)",
   );
+  await expect(reviewCard.locator(".ticker")).toHaveCSS("font-size", "18px");
+  await expect(reviewCard.locator(".instrument-primary-name")).toHaveText(
+    "トヨタ自動車",
+  );
+  await expect(reviewCard.locator(".instrument-primary-name")).toHaveCSS(
+    "font-size",
+    "14px",
+  );
+  await expect(reviewCard.locator(".instrument-secondary-name")).toHaveText(
+    "Toyota Motor Corporation",
+  );
+  const [reviewTickerBox, reviewPrimaryNameBox, reviewSecondaryNameBox] =
+    await Promise.all([
+      reviewCard.locator(".ticker").boundingBox(),
+      reviewCard.locator(".instrument-primary-name").boundingBox(),
+      reviewCard.locator(".instrument-secondary-name").boundingBox(),
+    ]);
+  expect(reviewTickerBox).not.toBeNull();
+  expect(reviewPrimaryNameBox).not.toBeNull();
+  expect(reviewSecondaryNameBox).not.toBeNull();
+  expect(reviewPrimaryNameBox!.x).toBeGreaterThan(reviewTickerBox!.x + reviewTickerBox!.width);
+  expect(reviewSecondaryNameBox!.x).toBe(reviewPrimaryNameBox!.x);
+  expect(reviewSecondaryNameBox!.y).toBeGreaterThan(reviewPrimaryNameBox!.y);
   await expect(reviewCard.locator(".status-feedback_available")).toHaveCSS(
     "background-color",
     "rgb(234, 248, 240)",
@@ -749,6 +773,7 @@ test("runs, legacy templates, trash, and restores local research", async ({
       makeRun("run-report", "succeeded", {
         ticker: "NVDA",
         instrumentName: "NVIDIA Corporation",
+        instrumentLocalName: "英伟达",
       }),
     ],
   ]);
@@ -837,6 +862,7 @@ test("runs, legacy templates, trash, and restores local research", async ({
         json: active.map((run) => ({
           ticker: run.request.ticker,
           instrument_name: run.instrument_name,
+          instrument_local_name: run.instrument_local_name,
           last_used_at: run.updated_at,
         })),
       });
@@ -1083,6 +1109,14 @@ test("runs, legacy templates, trash, and restores local research", async ({
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "运行概览" })).toBeVisible();
   await expect(page.getByText("NVIDIA Corporation")).toBeVisible();
+  const dashboardIdentity = page
+    .locator("tbody .instrument-identity")
+    .filter({ hasText: "NVDA" });
+  await expect(dashboardIdentity.locator(".ticker")).toHaveCSS("font-size", "15px");
+  await expect(dashboardIdentity.locator(".instrument-primary-name")).toHaveText("英伟达");
+  await expect(dashboardIdentity.locator(".instrument-secondary-name")).toHaveText(
+    "NVIDIA Corporation",
+  );
   await page.getByLabel("界面语言").selectOption("en");
 
   await page.getByRole("link", { name: "New run", exact: true }).click();
@@ -1111,6 +1145,19 @@ test("runs, legacy templates, trash, and restores local research", async ({
   });
 
   await page.goto("/runs/run-report?view=deliberation");
+  const runIdentity = page.locator(".run-title .instrument-identity");
+  await expect(runIdentity.locator(".instrument-primary-name")).toHaveText("英伟达");
+  await expect(runIdentity.locator(".instrument-primary-name")).toHaveCSS(
+    "font-size",
+    "15px",
+  );
+  await expect(runIdentity.locator(".instrument-secondary-name")).toHaveText(
+    "NVIDIA Corporation",
+  );
+  await expect(runIdentity.locator(".instrument-secondary-name")).toHaveCSS(
+    "font-size",
+    "13px",
+  );
   await expect(
     page.getByRole("heading", { name: "Bull and bear cases" }),
   ).toBeVisible();
@@ -1149,6 +1196,10 @@ test("runs, legacy templates, trash, and restores local research", async ({
 
   await page.goto("/runs");
   const reportRow = page.getByRole("row").filter({ hasText: "NVDA" });
+  await expect(reportRow.locator(".instrument-primary-name")).toHaveText("英伟达");
+  await expect(reportRow.locator(".instrument-secondary-name")).toHaveText(
+    "NVIDIA Corporation",
+  );
   await reportRow.getByRole("checkbox").check();
   await page.getByRole("button", { name: "Move to Trash (1)" }).click();
   const trashDialog = page.getByRole("alertdialog", {
@@ -1233,6 +1284,15 @@ test("runs, legacy templates, trash, and restores local research", async ({
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/runs/run-report?view=reports&report=market");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await expect(page.locator(".run-title .instrument-primary-name")).toHaveText("英伟达");
+  await expect(page.locator(".run-title .instrument-secondary-name")).toHaveText(
+    "NVIDIA Corporation",
+  );
   await expect(page.getByLabel("Jump to section")).toBeVisible();
   await expect(
     page.getByRole("navigation", { name: "Report section navigation" }),

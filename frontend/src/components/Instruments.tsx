@@ -57,35 +57,33 @@ export function InstrumentIdentity({
   instrumentLocalName?: string | null;
   prominent?: boolean;
 }) {
-  const names = distinctNames(instrumentLocalName, instrumentName);
-  if (prominent) {
-    return (
-      <div className="instrument-identity prominent">
+  const [primaryName, secondaryName] = distinctNames(
+    instrumentLocalName,
+    instrumentName,
+  );
+  const content = (
+    <>
+      {prominent ? (
         <h1 className="ticker">{ticker}</h1>
-        <InstrumentNames names={names} />
-      </div>
-    );
-  }
-  return (
-    <span className="instrument-identity">
-      <strong className="ticker">{ticker}</strong>
-      <InstrumentNames names={names} />
-    </span>
-  );
-}
-
-function InstrumentNames({ names }: { names: string[] }) {
-  if (names.length === 0) return null;
-  return (
-    <span className="instrument-name">
-      {names.map((name, index) => (
-        <span key={name}>
-          {index > 0 && <i aria-hidden="true"> · </i>}
-          <span>{name}</span>
+      ) : (
+        <strong className="ticker">{ticker}</strong>
+      )}
+      {primaryName && (
+        <span className="instrument-primary-name" title={primaryName}>
+          {primaryName}
         </span>
-      ))}
-    </span>
+      )}
+      {secondaryName && (
+        <span className="instrument-secondary-name" title={secondaryName}>
+          {secondaryName}
+        </span>
+      )}
+    </>
   );
+  if (prominent) {
+    return <div className="instrument-identity prominent">{content}</div>;
+  }
+  return <span className="instrument-identity">{content}</span>;
 }
 
 function instrumentLabel(
