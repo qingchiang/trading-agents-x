@@ -27,10 +27,11 @@ the real filing time.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from tradingagents.provenance import (
+    SourceInterval,
     SourceObservation,
     SourceWatermark,
     attach_source_observations,
@@ -51,39 +52,56 @@ logger = logging.getLogger(__name__)
 _TOKYO = ZoneInfo("Asia/Tokyo")
 
 
-def _observation(record: dict) -> SourceObservation | None:
+def _observation(record: dict) -> tuple[SourceObservation | None, str | None]:
     doc_id = str(record.get("docID") or "").strip()
     if not doc_id:
-        return None
+        return None, "EDINET returned a document without a native document identifier."
     parent_id = str(record.get("parentDocID") or "").strip()
     submitted = str(record.get("submitDateTime") or "").strip()
-    try:
-        available_at = datetime.fromisoformat(submitted).replace(tzinfo=_TOKYO).isoformat()
-    except ValueError:
-        return None
     withdrawn = str(
         record.get("withdrawalStatus") or record.get("withdrawStatus") or ""
     ).strip()
     corrected = str(record.get("docInfoEditStatus") or "").strip()
+    operation_at = str(record.get("opeDateTime") or "").strip()
+    is_operation = withdrawn not in {"", "0"} or corrected not in {"", "0"}
+    if is_operation and not operation_at:
+        return (
+            None,
+            f"EDINET document {doc_id} has an operation without a safe availability "
+            "timestamp.",
+        )
+    availability_text = operation_at if is_operation else submitted
+    try:
+        available = datetime.fromisoformat(availability_text)
+    except ValueError:
+        return None, f"EDINET document {doc_id} has an invalid availability timestamp."
+    if available.utcoffset() is None:
+        available = available.replace(tzinfo=_TOKYO)
     title = str(record.get("docDescription") or record.get("docTypeCode") or "Disclosure")
     if withdrawn not in {"", "0"}:
         status = "withdrawn"
     elif "訂正" in title or corrected not in {"", "0"}:
         status = "corrected"
-    elif parent_id:
-        status = "replaced"
     else:
         status = "published"
-    return SourceObservation(
-        source="EDINET",
-        record_id=parent_id or doc_id,
-        version_id=f"edinet:{doc_id}",
-        status=status,
-        published_at=submitted,
-        available_at=available_at,
-        title=title,
-        url=f"https://disclosure2.edinet-fsa.go.jp/WEEK0010.aspx?docID={doc_id}",
-        replaces_version_id=(f"edinet:{parent_id}" if parent_id else None),
+    return (
+        SourceObservation(
+            source="EDINET",
+            record_id=parent_id or doc_id,
+            version_id=f"edinet:{doc_id}",
+            status=status,
+            published_at=submitted,
+            available_at=available.isoformat(),
+            title=title,
+            availability_basis=(
+                "EDINET operation timestamp"
+                if is_operation
+                else "EDINET submission timestamp"
+            ),
+            url=f"https://disclosure2.edinet-fsa.go.jp/WEEK0010.aspx?docID={doc_id}",
+            native_record_id=doc_id,
+        ),
+        None,
     )
 
 
@@ -96,7 +114,13 @@ def _format_filing(record: dict) -> str:
     return f"{line}\n{detail}" if detail else line
 
 
-def get_news(ticker: str, start_date: str, end_date: str) -> str:
+def get_news(
+    ticker: str,
+    start_date: str,
+    end_date: str,
+    *,
+    information_frontier: str | None = None,
+) -> str:
     """Return EDINET disclosures for ``ticker`` in ``[start_date, end_date]``.
 
     Iterates the window day by day, keeping filings whose securities code matches
@@ -122,7 +146,7 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
         for record in documents_on(date_str)
         if tokyo_securities_base(record.get("secCode")) == code
     ]
-    matches = list(
+    reported_matches = list(
         {
             str(record.get("docID") or (
                 record.get("submitDateTime"),
@@ -133,8 +157,40 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
         }.values()
     )
 
-    observations = tuple(
-        item for item in (_observation(record) for record in matches) if item is not None
+    observation_results = tuple(
+        (record, *_observation(record)) for record in reported_matches
+    )
+    boundary = date.fromisoformat(end_date)
+    frontier = datetime.fromisoformat(information_frontier) if information_frontier else None
+    if frontier is not None:
+        if frontier.utcoffset() is None:
+            raise ValueError("EDINET Information Frontier requires a timezone")
+        frontier = frontier.astimezone(_TOKYO)
+    visible = tuple(
+        (record, observation)
+        for record, observation, _ in observation_results
+        if observation is not None
+        and (
+            observed_at := datetime.fromisoformat(observation.available_at).astimezone(
+                _TOKYO
+            )
+        ).date()
+        <= boundary
+        and (frontier is None or observed_at <= frontier)
+    )
+    matches = [record for record, _ in visible]
+    observations = tuple(observation for _, observation in visible)
+    limitations = tuple(
+        dict.fromkeys(
+            (
+                *limitations,
+                *(
+                    reason
+                    for _, _, reason in observation_results
+                    if reason is not None
+                ),
+            )
+        )
     )
     watermark = SourceWatermark(
         source="EDINET",
@@ -143,7 +199,10 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
         status="limited" if limitations else "complete",
         limitations=limitations,
         returned_records=len(matches),
-        reported_records=len(matches),
+        reported_records=len(reported_matches),
+        requested_interval=SourceInterval(start=start_date, end=end_date),
+        limitation_kind="partial" if limitations else None,
+        information_frontier=information_frontier,
     )
     if not matches:
         body = (

@@ -37,6 +37,7 @@ from urllib.request import Request
 from zoneinfo import ZoneInfo
 
 from tradingagents.provenance import (
+    SourceInterval,
     SourceObservation,
     SourceWatermark,
     attach_source_observations,
@@ -150,7 +151,14 @@ def _parse_timestamp(raw: str) -> datetime | None:
     return None
 
 
-def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0) -> str:
+def get_news(
+    ticker: str,
+    start_date: str,
+    end_date: str,
+    timeout: float = 10.0,
+    *,
+    information_frontier: str | None = None,
+) -> str:
     """Return TDnet timely disclosures for ``ticker`` in ``[start_date, end_date]``.
 
     One keyless search request (server-side filtered by code and date), then a
@@ -183,6 +191,8 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0)
                 scanned_end=end_date,
                 status="unavailable",
                 limitations=("Requested interval is outside the TDnet rolling archive.",),
+                requested_interval=SourceInterval(start=start_date, end=end_date),
+                limitation_kind="archive_truncation",
             ),
         )
 
@@ -200,9 +210,19 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0)
     # Re-check server-side filters locally: exact code (``q`` is a free-word match)
     # and the disclosure date within the window (the search accepts loose/reversed
     # ranges, so look-ahead safety must be enforced here, not trusted to it).
+    frontier = datetime.fromisoformat(information_frontier) if information_frontier else None
+    if frontier is not None:
+        if frontier.utcoffset() is None:
+            raise ValueError("TDnet Information Frontier requires a timezone")
+        frontier = frontier.astimezone(_TOKYO)
     filtered_matches = [
         r for r in rows
-        if tokyo_securities_base(r["code"]) == code and start <= r["at"].date() <= end
+        if tokyo_securities_base(r["code"]) == code
+        and start <= r["at"].date() <= end
+        and (
+            frontier is None
+            or r["at"].replace(tzinfo=_TOKYO) <= frontier
+        )
     ]
     matches = list({_observation(row).version_id: row for row in filtered_matches}.values())
     limitations = []
@@ -220,6 +240,19 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0)
         limitations=tuple(limitations),
         returned_records=len(matches),
         reported_records=reported,
+        requested_interval=SourceInterval(
+            start=requested_start.isoformat(), end=end_date
+        ),
+        limitation_kind=(
+            "unavailable"
+            if page is None
+            else "archive_truncation"
+            if start > requested_start
+            else "partial"
+            if limitations
+            else None
+        ),
+        information_frontier=(None if page is None else information_frontier),
     )
     if not matches:
         return attach_source_watermarks(

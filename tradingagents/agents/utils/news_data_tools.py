@@ -22,6 +22,11 @@ def get_news(
     ticker: Annotated[str, "Ticker symbol"],
     start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
     end_date: Annotated[str, "End date in yyyy-mm-dd format"],
+    *,
+    information_frontier: Annotated[
+        str | None,
+        InjectedState("information_frontier"),
+    ],
 ) -> str:
     """
     Retrieve news data for a given ticker symbol.
@@ -33,8 +38,15 @@ def get_news(
     Returns:
         str: A formatted string containing news data
     """
+    route_kwargs = {"_provenance": True}
+    if information_frontier is not None:
+        route_kwargs["information_frontier"] = information_frontier
     return route_to_vendor(
-        "get_news", ticker, start_date, end_date, _provenance=True
+        "get_news",
+        ticker,
+        start_date,
+        end_date,
+        **route_kwargs,
     )
 
 
@@ -64,8 +76,20 @@ def get_news_for_analysis(
             if window == "extended"
             else recent_start_date
         )
+        route_kwargs = {"_provenance": True}
+        information_frontier = getattr(
+            runtime.context,
+            "information_frontier",
+            None,
+        )
+        if information_frontier is not None:
+            route_kwargs["information_frontier"] = information_frontier.isoformat()
         return route_to_vendor(
-            "get_news", ticker, start_date, cutoff, _provenance=True
+            "get_news",
+            ticker,
+            start_date,
+            cutoff,
+            **route_kwargs,
         )
 
 @tool

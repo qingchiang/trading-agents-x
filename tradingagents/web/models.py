@@ -68,6 +68,7 @@ class ResearchChainUpdateRequest(ApiModel):
     baseline_revision_id: str = Field(min_length=1, max_length=36)
     analysis_date: date
     execution_strategy: Literal["full", "incremental"] | None = None
+    anchor_readiness: Literal["required", "allow_non_anchor"] = "required"
 
 
 class RunBatchRequest(ApiModel):

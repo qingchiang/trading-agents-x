@@ -7,7 +7,7 @@ import operator
 import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated, Any, Literal
 
 from langchain_core.messages import HumanMessage, ToolMessage
@@ -30,6 +30,10 @@ from tradingagents.agents.utils.fundamental_data_tools import (
     get_cashflow_for_analysis,
     get_fundamentals_for_analysis,
     get_income_statement_for_analysis,
+)
+from tradingagents.agents.utils.information_frontier import (
+    filter_evidence_content_at_information_frontier,
+    frontier_omission_content,
 )
 from tradingagents.agents.utils.macro_data_tools import (
     get_macro_indicators_for_analysis,
@@ -113,6 +117,78 @@ from tradingagents.provenance import (
 )
 
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+def _filter_tool_output_at_information_frontier(
+    output: dict[str, Any],
+    information_frontier: datetime | None,
+) -> dict[str, Any]:
+    """Keep post-frontier source payloads out of analyst conversations."""
+
+    if information_frontier is None:
+        return output
+    messages = []
+    for message in output.get("messages", ()):
+        if not isinstance(message, ToolMessage):
+            messages.append(message)
+            continue
+        content = message.content if isinstance(message.content, str) else str(message.content)
+        artifact = getattr(message, "artifact", None)
+        artifact_scope = (
+            artifact.get("temporal_scope")
+            if is_evidence_tool_artifact(artifact)
+            else None
+        )
+        frontier_date = information_frontier.date()
+        filtered_content, should_omit = filter_evidence_content_at_information_frontier(
+            content,
+            information_frontier,
+            fallback_source=message.name or "unknown",
+            temporal_scope=artifact_scope,
+            external_attestation=artifact_scope is not None,
+        )
+        if is_evidence_tool_artifact(artifact):
+            effective_dates = [
+                date.fromisoformat(value)
+                for record in artifact_records(artifact)
+                for value in _DATE_RE.findall(record.effective)
+            ]
+            should_omit = should_omit or (
+                not effective_dates or max(effective_dates) >= frontier_date
+            )
+        if should_omit:
+            message = message.model_copy(
+                update={
+                    "content": (
+                        filtered_content
+                        if filtered_content != content
+                        else frontier_omission_content(
+                            content,
+                            information_frontier,
+                            fallback_source=message.name or "unknown",
+                        )
+                    ),
+                    "artifact": None,
+                }
+            )
+        messages.append(message)
+    return {**output, "messages": messages}
+
+
+class _InformationFrontierToolNode(ToolNode):
+    """Tool node that filters source payloads before the analyst sees them."""
+
+    def _func(self, input, config, runtime):
+        output = super()._func(input, config, runtime)
+        return _filter_tool_output_at_information_frontier(
+            output,
+            runtime.context.information_frontier,
+        )
+
+    async def _afunc(self, input, config, runtime):
+        output = await super()._afunc(input, config, runtime)
+        return _filter_tool_output_at_information_frontier(
+            output,
+            runtime.context.information_frontier,
+        )
 
 
 def _merge_dicts(
@@ -335,15 +411,15 @@ class ResearchGraph:
             "fundamentals": lambda: create_fundamentals_analyst(self.quick_llm),
         }
         tool_nodes = {
-            "market": ToolNode(
+            "market": _InformationFrontierToolNode(
                 [
                     get_stock_data_for_analysis,
                     get_indicators_for_analysis,
                     get_verified_market_snapshot_for_analysis,
                 ]
             ),
-            "social": ToolNode([get_news]),
-            "news": ToolNode(
+            "social": _InformationFrontierToolNode([get_news]),
+            "news": _InformationFrontierToolNode(
                 [
                     get_news_for_analysis,
                     get_global_news_for_analysis,
@@ -351,7 +427,7 @@ class ResearchGraph:
                     get_prediction_markets_for_analysis,
                 ]
             ),
-            "fundamentals": ToolNode(
+            "fundamentals": _InformationFrontierToolNode(
                 [
                     get_fundamentals_for_analysis,
                     get_balance_sheet_for_analysis,
@@ -508,6 +584,11 @@ class ResearchGraph:
                 "fundamentals_report": "",
                 "sentiment_confidence": None,
                 "prefetched_evidence": [],
+                "information_frontier": (
+                    context.information_frontier.isoformat()
+                    if context.information_frontier is not None
+                    else None
+                ),
             }
             with use_config(dict(context.dataflow_config)):
                 result = self._analyst_subgraphs[analyst].invoke(
@@ -527,6 +608,15 @@ class ResearchGraph:
                 analyst=analyst,
                 prefetched_blocks=result.get("prefetched_evidence", []),
             )
+            if context.information_frontier is not None:
+                evidence = list(
+                    EvidenceBundle(
+                        instrument=context.request.ticker,
+                        analysis_date=context.request.analysis_date,
+                        information_frontier=context.information_frontier,
+                        items=tuple(evidence),
+                    ).items
+                )
             evidence_warnings = _evidence_warnings(evidence)
             synthesis_metadata = {
                 "confidence_override": (
@@ -580,6 +670,7 @@ class ResearchGraph:
             analyst_bundle = EvidenceBundle(
                 instrument=sealed_bundle.instrument,
                 analysis_date=sealed_bundle.analysis_date,
+                information_frontier=sealed_bundle.information_frontier,
                 items=analyst_items,
                 tables=tuple(
                     table
@@ -666,6 +757,7 @@ class ResearchGraph:
         bundle = EvidenceBundle(
             instrument=state["ticker"],
             analysis_date=date.fromisoformat(state["analysis_date"]),
+            information_frontier=runtime.context.information_frontier,
             items=tuple(deduped.values()),
             tables=extract_evidence_tables(tuple(deduped.values())),
         )

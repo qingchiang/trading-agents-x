@@ -421,7 +421,7 @@ def validate_live_thesis_command(
         ),
     ] = False,
 ) -> None:
-    """Run the reviewed five-scenario Shadow set against the configured database."""
+    """Run a reviewed Shadow pilot against the configured database."""
     if not in_place_database:
         raise typer.BadParameter("--in-place-database is required for this authoritative workflow")
     try:

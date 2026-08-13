@@ -6,7 +6,8 @@ import logging
 import threading
 from collections.abc import Callable
 from contextlib import contextmanager
-from datetime import date
+from dataclasses import replace
+from datetime import date, datetime, time, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -22,15 +23,22 @@ from tradingagents.dataflows.errors import NoMarketDataError
 from tradingagents.dataflows.interface import (
     get_vendor,
     parse_vendor_chain,
+    route_to_vendor,
     validate_market_routing,
 )
 from tradingagents.dataflows.symbol_utils import (
+    market_timezone,
     match_exchange_suffix,
     normalize_symbol,
 )
 from tradingagents.graph.research_graph import GraphExecution, ResearchGraph
 from tradingagents.persistence import upgrade_database
 
+from .anchor_readiness import (
+    AnchorReadinessError,
+    AnchorReadinessResult,
+    validate_japanese_anchor_readiness,
+)
 from .contracts import (
     AnalysisRequest,
     AnalysisResult,
@@ -41,6 +49,7 @@ from .contracts import (
     ResearchUpdateAudit,
     ResearchUpdateCandidate,
     ResearchUpdateSemanticAssessment,
+    ResearchUpdateTransitionCoverage,
     RunEvent,
     RunExport,
     RunMetrics,
@@ -62,6 +71,8 @@ from .metrics import MetricsCallback, merge_run_metrics
 from .question_disposition import run_full_question_disposition
 from .repository import InvalidResearchBaselineError, RunRepository, RunView
 from .research import (
+    AnchorQualificationReason,
+    IncrementalEscalationReason,
     IncrementalGateResult,
     ResearchChain,
     ResearchExecutionStrategy,
@@ -70,12 +81,14 @@ from .research import (
     RevisionExport,
     assemble_full_revision,
     assemble_full_update,
+    bind_information_frontier,
     close_revision_over_update_candidate,
     derive_shadow_comparison,
     evaluate_next_update_policy,
     prepare_experimental_nmc_revision,
     render_revision_export_markdown,
     render_revision_export_package,
+    transition_coverage_is_complete,
     validate_experimental_nmc_candidate,
 )
 from .runtime import RunCancelled, RunContext, WorkerShutdown
@@ -98,6 +111,7 @@ def _segment_metrics(
     incremental_result: IncrementalGateResult | None,
     update_audit: ResearchUpdateAudit | None,
     metrics: MetricsCallback,
+    readiness_metrics: RunMetrics | None = None,
 ):
     full_metrics = metrics.snapshot()
     bounded_metrics = (
@@ -107,7 +121,10 @@ def _segment_metrics(
         if update_audit is not None
         else None
     )
-    return merge_run_metrics(bounded_metrics, full_metrics) if bounded_metrics else full_metrics
+    segments = tuple(
+        item for item in (readiness_metrics, bounded_metrics, full_metrics) if item is not None
+    )
+    return merge_run_metrics(*segments)
 
 
 def _instrument_display_name(identity: Any) -> str | None:
@@ -159,6 +176,10 @@ class AnalysisService:
         market_data_readiness_checker: Callable[
             [str, date], MarketDataReadiness | None
         ] = validate_jquants_daily_bar_ready,
+        anchor_readiness_checker: Callable[..., AnchorReadinessResult] = (
+            validate_japanese_anchor_readiness
+        ),
+        utc_clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     ):
         self.settings = settings
         if repository is None:
@@ -173,6 +194,36 @@ class AnalysisService:
         self.question_dispositioner = question_dispositioner
         self.incremental_gate = incremental_gate or run_deterministic_incremental_gate
         self.market_data_readiness_checker = market_data_readiness_checker
+        self.anchor_readiness_checker = anchor_readiness_checker
+        self.utc_clock = utc_clock
+
+    def _target_information_frontier(self, request: AnalysisRequest) -> datetime:
+        current = self.utc_clock()
+        if current.utcoffset() is None:
+            raise ValueError("Information Frontier clock requires a timezone")
+        market_tz = market_timezone(request.ticker)
+        market_now = current.astimezone(market_tz)
+        if request.analysis_date > market_now.date():
+            raise MarketDataNotReadyError(
+                f"Research cutoff {request.analysis_date} is in the future in {market_tz}."
+            )
+        return (
+            datetime.combine(request.analysis_date, time.max, tzinfo=market_tz)
+            if request.analysis_date < market_now.date()
+            else market_now
+        )
+
+    def _freeze_information_frontier(
+        self,
+        run: RunView,
+        frontier: datetime | None = None,
+    ) -> datetime:
+        if run.information_frontier is not None:
+            return run.information_frontier
+        return self.repository.freeze_information_frontier(
+            run.id,
+            frontier or self._target_information_frontier(run.request),
+        )
 
     @staticmethod
     def _uses_primary_jquants_market_route(
@@ -216,6 +267,48 @@ class AnalysisService:
                     f"J-Quants daily bar is not ready for {request.analysis_date}."
                 ) from exc
 
+    def validate_anchor_readiness(
+        self,
+        request: AnalysisRequest,
+        *,
+        run_settings: RunSettings | None = None,
+        dataflow_config: dict[str, Any] | None = None,
+        information_frontier: datetime | None = None,
+        anchor_frontier: datetime | None = None,
+    ) -> AnchorReadinessResult | None:
+        """Check Japanese minimum anchor capabilities without constructing an LLM."""
+        if not request.ticker.endswith(".T"):
+            return None
+        resolved = run_settings or self.settings.resolve_run(request)
+        config = dataflow_config or resolved.dataflow_config(self.settings)
+        validate_market_routing(config)
+        frontier = information_frontier or self._target_information_frontier(request)
+
+        def collect_news(ticker, start, end, *, information_frontier):
+            return route_to_vendor(
+                "get_news",
+                ticker,
+                start,
+                end,
+                _provenance=True,
+                information_frontier=information_frontier,
+            )
+
+        market_checker = (
+            self.market_data_readiness_checker
+            if self._uses_primary_jquants_market_route(request, config)
+            else lambda _ticker, _cutoff: None
+        )
+
+        with use_config(config):
+            return self.anchor_readiness_checker(
+                request,
+                information_frontier=frontier,
+                market_checker=market_checker,
+                news_collector=collect_news,
+                anchor_frontier=anchor_frontier,
+            )
+
     def _present_chain(self, chain: ResearchChain) -> ResearchChain:
         revision = chain.current_revision
         if revision is None:
@@ -227,6 +320,9 @@ class AnalysisService:
         )
         return chain.model_copy(
             update={
+                "forward_research_anchor": (
+                    revision.coverage.anchor_qualification or chain.forward_research_anchor
+                ),
                 "next_update_policy": evaluation.policy,
                 "next_update_reason": evaluation.reason,
             }
@@ -308,7 +404,7 @@ class AnalysisService:
             and evaluation.policy != "incremental_allowed"
         ):
             raise InvalidResearchBaselineError(
-                "Eligible Baseline does not allow Incremental Execution: "
+                "Forward Research Anchor does not allow Incremental Execution: "
                 f"{evaluation.reason.value if evaluation.reason is not None else 'full_required'}"
             )
         selected_strategy = execution_strategy or (
@@ -384,6 +480,7 @@ class AnalysisService:
         request: AnalysisRequest,
         *,
         idempotency_key: str | None = None,
+        information_frontier: datetime | None = None,
         on_event: EventHandler | None = None,
     ) -> tuple[RunView, AnalysisResult]:
         """Own one synchronous Research Chain update from enqueue through completion."""
@@ -393,6 +490,8 @@ class AnalysisService:
             request,
             idempotency_key=idempotency_key,
         )
+        if information_frontier is not None:
+            self._freeze_information_frontier(view, information_frontier)
         worker_id = f"python-chain-update:{uuid4()}"
         try:
             claimed = self.repository.claim_run(
@@ -430,6 +529,8 @@ class AnalysisService:
             on_event=on_event,
         )
         metrics = MetricsCallback()
+        readiness_metrics: RunMetrics | None = None
+        full_analysis_executed = False
         incremental_result: IncrementalGateResult | None = None
         update_audit: ResearchUpdateAudit | None = None
         prior_update_audit = run.research_update_audit
@@ -447,6 +548,9 @@ class AnalysisService:
             bounded_snapshot = result.evidence_snapshot or (
                 candidate.evidence_snapshot if candidate is not None else None
             )
+            transition_coverage_incomplete = (
+                candidate is not None and not incremental_transition_is_complete(result)
+            )
             update_audit = ResearchUpdateAudit(
                 mode=(
                     "experimental"
@@ -456,7 +560,13 @@ class AnalysisService:
                 candidate=(
                     ResearchUpdateCandidate(
                         change_conclusion=candidate.change_conclusion.value,
-                        coverage=candidate.coverage.model_dump(mode="json"),
+                        coverage={
+                            **candidate.coverage.model_dump(
+                                mode="json",
+                                exclude={"anchor_qualification"},
+                            ),
+                            "schema_version": "1",
+                        },
                         update_summary=candidate.update_summary.model_dump(mode="json"),
                         evidence_snapshot=candidate.evidence_snapshot.model_dump(mode="json"),
                     )
@@ -464,7 +574,13 @@ class AnalysisService:
                     else None
                 ),
                 coverage=(
-                    bounded_coverage.model_dump(mode="json")
+                    {
+                        **bounded_coverage.model_dump(
+                            mode="json",
+                            exclude={"anchor_qualification"},
+                        ),
+                        "schema_version": "1",
+                    }
                     if bounded_coverage is not None
                     else None
                 ),
@@ -474,6 +590,13 @@ class AnalysisService:
                     )
                     if bounded_snapshot is not None
                     else ()
+                ),
+                transition_coverage=(
+                    ResearchUpdateTransitionCoverage.model_validate(
+                        result.transition_coverage.model_dump(mode="json")
+                    )
+                    if result.transition_coverage is not None
+                    else None
                 ),
                 evidence_lineage=(
                     tuple(item.model_dump(mode="json") for item in bounded_snapshot.lineage)
@@ -487,8 +610,13 @@ class AnalysisService:
                     if result.semantic_assessment is not None
                     else None
                 ),
+                baseline_information_frontier=baseline.information_frontier,
                 escalation_reason=(
-                    result.escalation_reason.value if result.escalation_reason is not None else None
+                    IncrementalEscalationReason.COVERAGE_INCOMPLETE.value
+                    if transition_coverage_incomplete
+                    else result.escalation_reason.value
+                    if result.escalation_reason is not None
+                    else None
                 ),
                 comparison="not_applicable",
                 bounded_metrics=merge_run_metrics(
@@ -508,6 +636,18 @@ class AnalysisService:
             self.repository.set_research_update_audit(run.id, update_audit)
             return update_audit
 
+        def incremental_transition_is_complete(result: IncrementalGateResult) -> bool:
+            return (
+                baseline.information_frontier is not None
+                and information_frontier is not None
+                and transition_coverage_is_complete(
+                    baseline,
+                    result.transition_coverage,
+                    anchor_frontier=baseline.information_frontier,
+                    update_frontier=information_frontier,
+                )
+            )
+
         def persist_partial_full_metrics() -> None:
             nonlocal update_audit
             if update_audit is None:
@@ -522,10 +662,75 @@ class AnalysisService:
             )
             self.repository.set_research_update_audit(run.id, update_audit)
 
+        def ensure_anchor_readiness_for_full() -> None:
+            nonlocal full_analysis_executed, information_frontier, readiness_metrics
+            if full_analysis_executed:
+                return
+            baseline_for_readiness = (
+                self.repository.get_research_revision(run.baseline_revision_id)
+                if run.baseline_revision_id is not None
+                else None
+            )
+            if run.request.anchor_readiness == "required":
+                readiness = self.validate_anchor_readiness(
+                    run.request,
+                    run_settings=run_settings,
+                    dataflow_config=dataflow_config,
+                    information_frontier=run.information_frontier,
+                    anchor_frontier=(
+                        baseline_for_readiness.information_frontier
+                        if baseline_for_readiness is not None
+                        else None
+                    ),
+                )
+                if readiness is not None:
+                    readiness_metrics = readiness.metrics
+                    if not readiness.ready:
+                        self._emit(
+                            run.id,
+                            "research.anchor_readiness_failed",
+                            payload=readiness.model_dump(mode="json"),
+                            on_event=on_event,
+                        )
+                        raise AnchorReadinessError(readiness)
+                    self._emit(
+                        run.id,
+                        "research.anchor_readiness_succeeded",
+                        payload=readiness.model_dump(mode="json"),
+                        on_event=on_event,
+                    )
+                    information_frontier = self._freeze_information_frontier(
+                        run,
+                        readiness.information_frontier,
+                    )
+                else:
+                    information_frontier = self._freeze_information_frontier(run)
+            else:
+                self._emit(
+                    run.id,
+                    "research.anchor_readiness_not_required",
+                    payload={
+                        "anchor_readiness": "allow_non_anchor",
+                        "next_update_policy_if_unqualified": "full_required",
+                    },
+                    on_event=on_event,
+                )
+                information_frontier = self._freeze_information_frontier(run)
+            full_analysis_executed = True
+
         with self._heartbeat(run.id, worker_id):
             try:
                 with use_config(dataflow_config):
-                    if run.research_chain_requested or run.research_chain_id:
+                    planned_full_analysis = run.research_chain_requested or (
+                        run.research_chain_id is not None
+                        and run.research_execution_strategy == "full"
+                    ) or (
+                        run.research_chain_id is not None
+                        and run_settings.research_update_mode == "shadow"
+                    )
+                    if planned_full_analysis:
+                        ensure_anchor_readiness_for_full()
+                    elif run.research_chain_id:
                         readiness = self.validate_market_data_readiness(
                             run.request,
                             run_settings=run_settings,
@@ -537,18 +742,17 @@ class AnalysisService:
                                 "research.market_data_ready",
                                 payload={
                                     "source": "J-Quants daily OHLCV",
-                                    "requested_cutoff": (
-                                        readiness.requested_cutoff.isoformat()
-                                    ),
+                                    "requested_cutoff": (readiness.requested_cutoff.isoformat()),
                                     "market_effective_date": (
                                         readiness.market_effective_date.isoformat()
                                     ),
-                                    "observed_bar_date": (
-                                        readiness.observed_bar_date.isoformat()
-                                    ),
+                                    "observed_bar_date": (readiness.observed_bar_date.isoformat()),
                                 },
                                 on_event=on_event,
                             )
+                        information_frontier = self._freeze_information_frontier(run)
+                    else:
+                        information_frontier = None
                     try:
                         identity = self.identity_resolver(
                             run.request.ticker,
@@ -609,6 +813,7 @@ class AnalysisService:
                                     "research_update_mode": run_settings.research_update_mode,
                                 },
                                 lambda: self.repository.cancel_requested(run.id),
+                                information_frontier=information_frontier,
                                 on_progress=persist_incremental_audit,
                             )
                             if incremental_result.candidate is not None:
@@ -645,6 +850,20 @@ class AnalysisService:
                         if (
                             candidate is not None
                             and run_settings.research_update_mode == "experimental"
+                            and not incremental_transition_is_complete(incremental_result)
+                        ):
+                            incremental_result = incremental_result.model_copy(
+                                update={
+                                    "candidate": None,
+                                    "escalation_reason": (
+                                        IncrementalEscalationReason.COVERAGE_INCOMPLETE
+                                    ),
+                                }
+                            )
+                            candidate = None
+                        if (
+                            candidate is not None
+                            and run_settings.research_update_mode == "experimental"
                         ):
                             invalid_reason = validate_experimental_nmc_candidate(
                                 baseline,
@@ -671,6 +890,11 @@ class AnalysisService:
                                 "escalation_reason": update_audit.escalation_reason,
                                 "metrics": incremental_result.metrics.model_dump(mode="json"),
                                 "checked_windows": update_audit.checked_windows,
+                                "transition_coverage": (
+                                    update_audit.transition_coverage.model_dump(mode="json")
+                                    if update_audit.transition_coverage is not None
+                                    else None
+                                ),
                                 "coverage": (
                                     update_audit.coverage.model_dump(mode="json")
                                     if update_audit.coverage is not None
@@ -707,6 +931,10 @@ class AnalysisService:
                                 baseline,
                                 candidate,
                                 update_audit,
+                            )
+                            revision_draft = bind_information_frontier(
+                                revision_draft,
+                                information_frontier,
                             )
                             evidence = revision_draft.evidence_snapshot.bundle
                             self._persist_evidence(run.id, evidence, on_event)
@@ -748,6 +976,7 @@ class AnalysisService:
                                 on_event=on_event,
                             )
                             return result
+                        ensure_anchor_readiness_for_full()
                         self._emit(
                             run.id,
                             (
@@ -796,6 +1025,7 @@ class AnalysisService:
                     memory=memory,
                     instrument_context=instrument_context,
                     cancel_requested=lambda: self.repository.cancel_requested(run.id),
+                    information_frontier=information_frontier,
                     shutdown_requested=shutdown_requested or (lambda: False),
                     artifact_writer=lambda artifact: self._persist_artifact(
                         run.id,
@@ -829,6 +1059,17 @@ class AnalysisService:
                             resume=resume,
                             on_event=lambda raw: self._persist_graph_event(run.id, raw, on_event),
                         )
+                    if information_frontier is not None:
+                        execution = replace(
+                            execution,
+                            evidence=EvidenceBundle.model_validate(
+                                {
+                                    **execution.evidence.model_dump(mode="python"),
+                                    "information_frontier": information_frontier,
+                                    "digest": None,
+                                }
+                            ),
+                        )
                     # Production graphs seal before deliberation. This
                     # idempotent application boundary also protects custom
                     # graph implementations from completing without durable
@@ -845,6 +1086,15 @@ class AnalysisService:
                         instrument_name=instrument_name,
                         instrument_local_name=instrument_local_name,
                     )
+                    if readiness_metrics is not None:
+                        result = result.model_copy(
+                            update={
+                                "metrics": merge_run_metrics(
+                                    readiness_metrics,
+                                    result.metrics,
+                                )
+                            }
+                        )
                     benchmark = self._benchmark(
                         run.request.ticker,
                         dataflow_config,
@@ -852,6 +1102,10 @@ class AnalysisService:
                     revision_draft = None
                     if run.research_chain_requested or run.research_chain_id:
                         revision_draft = self.state_assembler(run.request, execution)
+                        revision_draft = bind_information_frontier(
+                            revision_draft,
+                            information_frontier,
+                        )
                     if run.research_chain_id and revision_draft is not None:
                         if run.baseline_revision_id is None:
                             raise ValueError("Research Chain update has no baseline")
@@ -866,7 +1120,20 @@ class AnalysisService:
                             )
                             if self.repository.cancel_requested(run.id):
                                 raise RunCancelled("cancelled after Question Disposition")
-                            result = result.model_copy(update={"metrics": metrics.snapshot()})
+                            result = result.model_copy(
+                                update={
+                                    "metrics": merge_run_metrics(
+                                        *(
+                                            item
+                                            for item in (
+                                                readiness_metrics,
+                                                metrics.snapshot(),
+                                            )
+                                            if item is not None
+                                        )
+                                    )
+                                }
+                            )
                             disposition = revision_draft.delta.question_disposition
                             self._emit(
                                 run.id,
@@ -936,12 +1203,19 @@ class AnalysisService:
                         result = result.model_copy(
                             update={
                                 "metrics": merge_run_metrics(
-                                    (
-                                        incremental_result.metrics
-                                        if incremental_result is not None
-                                        else RunMetrics()
-                                    ),
-                                    current_full_metrics,
+                                    *(
+                                        item
+                                        for item in (
+                                            readiness_metrics,
+                                            (
+                                                incremental_result.metrics
+                                                if incremental_result is not None
+                                                else RunMetrics()
+                                            ),
+                                            current_full_metrics,
+                                        )
+                                        if item is not None
+                                    )
                                 )
                             }
                         )
@@ -962,6 +1236,33 @@ class AnalysisService:
                             },
                             on_event=on_event,
                         )
+                    if revision_draft is not None:
+                        revision_draft = bind_information_frontier(
+                            revision_draft,
+                            information_frontier,
+                        )
+                        if (
+                            full_analysis_executed
+                            and run.request.anchor_readiness == "allow_non_anchor"
+                            and revision_draft.coverage.anchor_qualification is not None
+                        ):
+                            qualification = revision_draft.coverage.anchor_qualification
+                            revision_draft = revision_draft.model_copy(
+                                update={
+                                    "coverage": revision_draft.coverage.model_copy(
+                                        update={
+                                            "anchor_qualification": qualification.model_copy(
+                                                update={
+                                                    "is_forward_research_anchor": False,
+                                                    "reasons": (
+                                                        AnchorQualificationReason.ANCHOR_READINESS_NOT_REQUIRED,
+                                                    ),
+                                                }
+                                            )
+                                        }
+                                    )
+                                }
+                            )
                     aggregate_metrics = self.repository.complete(
                         run.id,
                         result,
@@ -980,7 +1281,12 @@ class AnalysisService:
                 return result
             except RunCancelled:
                 persist_partial_full_metrics()
-                segment_metrics = _segment_metrics(incremental_result, update_audit, metrics)
+                segment_metrics = _segment_metrics(
+                    incremental_result,
+                    update_audit,
+                    metrics,
+                    readiness_metrics,
+                )
                 aggregate_metrics = self.repository.finish_cancel(
                     run.id,
                     metrics=segment_metrics,
@@ -1006,7 +1312,12 @@ class AnalysisService:
                 )
             except WorkerShutdown:
                 persist_partial_full_metrics()
-                segment_metrics = _segment_metrics(incremental_result, update_audit, metrics)
+                segment_metrics = _segment_metrics(
+                    incremental_result,
+                    update_audit,
+                    metrics,
+                    readiness_metrics,
+                )
                 released = self.repository.release_claim(
                     run.id,
                     worker_id,
@@ -1024,7 +1335,12 @@ class AnalysisService:
                 raise
             except Exception as exc:
                 persist_partial_full_metrics()
-                segment_metrics = _segment_metrics(incremental_result, update_audit, metrics)
+                segment_metrics = _segment_metrics(
+                    incremental_result,
+                    update_audit,
+                    metrics,
+                    readiness_metrics,
+                )
                 try:
                     aggregate_metrics = self.repository.fail(
                         run.id,

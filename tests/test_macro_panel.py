@@ -394,7 +394,13 @@ class NewsPanelInjectionTests(unittest.TestCase):
     def setUp(self):
         bind_config(deepcopy(default_config.DEFAULT_CONFIG), merge=False)
 
-    def _run(self, panel_text="PANEL_XYZ", ticker="NVDA", market_flows=""):
+    def _run(
+        self,
+        panel_text="PANEL_XYZ",
+        ticker="NVDA",
+        market_flows="",
+        information_frontier=None,
+    ):
         captured = {}
 
         def _bind(tools):
@@ -413,6 +419,7 @@ class NewsPanelInjectionTests(unittest.TestCase):
             "trade_date": "2026-01-15",
             "asset_type": "stock",
             "messages": [],
+            "information_frontier": information_frontier,
         }
         with (
             mock.patch.object(news_analyst, "get_global_macro_panel", return_value=panel_text),
@@ -472,6 +479,33 @@ class NewsPanelInjectionTests(unittest.TestCase):
             {"FRED", "e-Stat", "BOJ", "China macro"},
         )
         self.assertNotIn("## Data Provenance", result["news_report"])
+
+    def test_post_frontier_panel_is_excluded_before_first_model_call(self):
+        panel = attach_provenance(
+            "POST_FRONTIER_MACRO",
+            ProvenanceRecord(
+                evidence="global macro panel",
+                source="fixture",
+                requested="2026-01-15",
+                effective="2026-01-15",
+                timing="point-in-time filtered",
+                retrieved_at="2026-01-15T12:01:00+00:00",
+            ),
+        )
+
+        captured, result, _ = self._run(
+            panel,
+            information_frontier="2026-01-15T12:00:00+00:00",
+        )
+
+        self.assertNotIn("POST_FRONTIER_MACRO", captured["prompt"])
+        panel_block = next(
+            block
+            for block in result["prefetched_evidence"]
+            if block["records"][0]["evidence"] == "global macro panel"
+        )
+        self.assertIsNone(panel_block["content"])
+        self.assertEqual(panel_block["source_watermarks"][0]["status"], "unavailable")
 
     def test_macro_indicators_tool_still_bound(self):
         captured, _, _ = self._run()

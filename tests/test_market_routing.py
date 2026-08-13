@@ -122,6 +122,27 @@ class MarketRoutingTests(unittest.TestCase):
             )
         self.assertEqual(result, "YF FALLBACK")
 
+    def test_source_frontier_kwarg_does_not_break_an_unsupported_fallback(self):
+        def primary(_symbol, _cutoff, _lookback, *, information_frontier=None):
+            raise VendorNotConfiguredError("missing key")
+
+        def fallback(_symbol, _cutoff, _lookback):
+            return "YF FALLBACK"
+
+        with self._route(
+            "get_verified_market_snapshot",
+            {"jquants": primary, "yfinance": fallback},
+        ):
+            result = interface.route_to_vendor(
+                "get_verified_market_snapshot",
+                "9984.T",
+                "2026-07-15",
+                30,
+                information_frontier="2026-07-15T18:00:00+09:00",
+            )
+
+        self.assertEqual(result, "YF FALLBACK")
+
     def test_empty_market_map_preserves_default_routing(self):
         # With no configured routes, even a ".T" ticker stays on the default chain
         # (byte-for-byte pre-feature behavior).

@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 from dateutil.relativedelta import relativedelta
 
 from tradingagents.provenance import (
+    SourceInterval,
     SourceObservation,
     SourceWatermark,
     attach_source_observations,
@@ -42,6 +43,8 @@ def get_verified_market_snapshot(
     symbol: str,
     curr_date: str,
     look_back_days: int = 30,
+    *,
+    information_frontier: str | None = None,
 ) -> str:
     """Return a J-Quants-backed deterministic market snapshot."""
     start = (
@@ -76,16 +79,28 @@ def get_verified_market_snapshot(
             :20
         ]
     )
+    conservative_available_at = datetime.fromisoformat(f"{latest_date}T23:59:59").replace(
+        tzinfo=_TOKYO
+    )
+    availability_basis = "conservative market-date end; source has no intraday availability"
+    if information_frontier is not None:
+        collected_at = datetime.fromisoformat(information_frontier)
+        if collected_at.utcoffset() is None:
+            raise ValueError("J-Quants Information Frontier requires a timezone")
+        collected_at = collected_at.astimezone(_TOKYO)
+        if collected_at.date().isoformat() == latest_date:
+            conservative_available_at = collected_at
+            availability_basis = (
+                "observed in successful bounded collection at Information Frontier"
+            )
     observation = SourceObservation(
         source="J-Quants adjusted OHLCV",
         record_id=f"jquants-market:{symbol.upper()}",
         version_id=version_id,
         status="published",
         published_at=latest_date,
-        available_at=datetime.fromisoformat(f"{latest_date}T23:59:59")
-        .replace(tzinfo=_TOKYO)
-        .isoformat(),
-        availability_basis="conservative market-date end; source has no intraday availability",
+        available_at=conservative_available_at.isoformat(),
+        availability_basis=availability_basis,
         title=f"Adjusted market history through {latest_date}",
         record_kind="market",
         adjustment=adjustment,
@@ -115,5 +130,8 @@ def get_verified_market_snapshot(
         status="complete" if not limitations else "limited",
         limitations=limitations,
         returned_records=len(df),
+        requested_interval=SourceInterval(start=start, end=curr_date),
+        limitation_kind="partial" if limitations else None,
+        information_frontier=information_frontier,
     )
     return attach_source_watermarks(attach_source_observations(body, observation), watermark)

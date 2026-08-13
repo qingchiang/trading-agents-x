@@ -33,6 +33,7 @@ from datetime import datetime, timedelta
 
 from tradingagents.provenance import (
     ProvenanceRecord,
+    SourceInterval,
     SourceWatermark,
     attach_provenance,
     attach_source_observations,
@@ -149,7 +150,14 @@ def _merge_blocks(blocks: list[str], limit: int) -> tuple[list[str], list[_Merge
     return merged, counts
 
 
-def _safe_feed(source: str, fetch, ticker: str, start_date: str, end_date: str) -> str:
+def _safe_feed(
+    source: str,
+    fetch,
+    ticker: str,
+    start_date: str,
+    end_date: str,
+    information_frontier: str | None,
+) -> str:
     """Run one sub-feed, degrading any failure to an availability note.
 
     An unguarded EDINET error (e.g. ``EDINET_API_KEY`` unset — expected on a
@@ -157,6 +165,13 @@ def _safe_feed(source: str, fetch, ticker: str, start_date: str, end_date: str) 
     hide the keyless Google-News media feed entirely.
     """
     try:
+        if source in {"EDINET", "TDnet"} and information_frontier is not None:
+            return fetch(
+                ticker,
+                start_date,
+                end_date,
+                information_frontier=information_frontier,
+            )
         return fetch(ticker, start_date, end_date)
     except Exception as exc:
         logger.warning(
@@ -188,7 +203,13 @@ def _edinet_start_date(start_date: str, end_date: str) -> str:
     return min(start, end - timedelta(days=_EDINET_OVERLAP_DAYS)).strftime("%Y-%m-%d")
 
 
-def get_news(ticker: str, start_date: str, end_date: str) -> str:
+def get_news(
+    ticker: str,
+    start_date: str,
+    end_date: str,
+    *,
+    information_frontier: str | None = None,
+) -> str:
     """Return EDINET + TDnet disclosures + Google-News media for ``ticker``.
 
     Combines whichever sub-feeds have data (statutory filings, then timely
@@ -208,7 +229,14 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
     # order, so the rendered blocks keep that statutory → timely → media order.
     with ThreadPoolExecutor(max_workers=len(feed_requests)) as pool:
         rendered = pool.map(
-            lambda request: _safe_feed(request[0], request[1], ticker, request[2], request[3]),
+            lambda request: _safe_feed(
+                request[0],
+                request[1],
+                ticker,
+                request[2],
+                request[3],
+                information_frontier,
+            ),
             feed_requests,
         )
     rendered = list(rendered)
@@ -275,6 +303,14 @@ def get_news(ticker: str, start_date: str, end_date: str) -> str:
                     ),
                     returned_records=returned,
                     reported_records=returned,
+                    requested_interval=SourceInterval(start=start_date, end=end_date),
+                    limitation_kind=(
+                        "live_only"
+                        if source == "Google News"
+                        else "unavailable"
+                        if block.startswith(_NOTE_PREFIX)
+                        else None
+                    ),
                 ),
             )
         if block.startswith(_NOTE_PREFIX):

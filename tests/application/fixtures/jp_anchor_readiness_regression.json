@@ -1,0 +1,39 @@
+{
+  "source_observations": [
+    {
+      "source": "EDINET",
+      "record_id": "edinet-parent-P100",
+      "version_id": "edinet-doc-S100",
+      "status": "published",
+      "published_at": "2026-08-10T15:00:00+09:00",
+      "available_at": "2026-08-10T15:00:00+09:00",
+      "availability_basis": "EDINET submission timestamp",
+      "title": "Sanitized annual filing",
+      "native_record_id": "S100"
+    }
+  ],
+  "source_watermarks": [
+    {
+      "source": "EDINET",
+      "scanned_start": "2026-05-13",
+      "scanned_end": "2026-08-10",
+      "status": "complete",
+      "returned_records": 1,
+      "reported_records": 1,
+      "requested_interval": {"start": "2026-05-13", "end": "2026-08-10"},
+      "information_frontier": "2026-08-10T23:59:59.999999+09:00"
+    },
+    {
+      "source": "TDnet",
+      "scanned_start": "2026-07-11",
+      "scanned_end": "2026-08-10",
+      "status": "limited",
+      "limitations": ["Requested interval was truncated by the TDnet rolling archive."],
+      "returned_records": 0,
+      "reported_records": 0,
+      "requested_interval": {"start": "2026-05-13", "end": "2026-08-10"},
+      "limitation_kind": "archive_truncation",
+      "information_frontier": "2026-08-10T23:59:59.999999+09:00"
+    }
+  ]
+}

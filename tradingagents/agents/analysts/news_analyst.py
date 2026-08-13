@@ -8,6 +8,10 @@ from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
 )
+from tradingagents.agents.utils.information_frontier import (
+    filter_evidence_content_at_information_frontier,
+    information_frontier_from_state,
+)
 from tradingagents.agents.utils.macro_data_tools import (
     get_macro_indicators_for_analysis,
 )
@@ -33,6 +37,7 @@ from tradingagents.provenance import (
 def create_news_analyst(llm):
     def news_analyst_node(state):
         current_date = state["trade_date"]
+        information_frontier = information_frontier_from_state(state)
         ticker = state["company_of_interest"]
         instrument_context = get_instrument_context_from_state(state)
         ticker_news_lookback_days = get_config()["ticker_news_lookback_days"]
@@ -61,10 +66,20 @@ def create_news_analyst(llm):
         # market-agnostic. get_macro_indicators stays available as a microscope
         # for drilling into a specific series beyond the panel. Never raises.
         macro_panel = get_global_macro_panel(current_date)
+        macro_panel, _ = filter_evidence_content_at_information_frontier(
+            macro_panel,
+            information_frontier,
+            fallback_source="global macro panel",
+        )
         market_flow_context = (
             get_market_investor_flows(ticker, current_date)
             if is_tokyo_ticker(ticker)
             else ""
+        )
+        market_flow_context, _ = filter_evidence_content_at_information_frontier(
+            market_flow_context,
+            information_frontier,
+            fallback_source="J-Quants investor-types",
         )
         market_flow_section = ""
         if market_flow_context:

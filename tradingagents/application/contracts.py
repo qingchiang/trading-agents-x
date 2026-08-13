@@ -660,6 +660,7 @@ class EvidenceBundle(FrozenModel):
     version: Literal["8"] = "8"
     instrument: str
     analysis_date: date
+    information_frontier: datetime | None = None
     items: tuple[EvidenceItem, ...]
     tables: tuple[EvidenceTable, ...] = ()
     sealed_at: datetime = Field(default_factory=utc_now)
@@ -667,6 +668,29 @@ class EvidenceBundle(FrozenModel):
 
     @model_validator(mode="after")
     def validate_bundle(self) -> EvidenceBundle:
+        if (
+            self.information_frontier is not None
+            and self.information_frontier.utcoffset() is None
+        ):
+            raise ValueError("information_frontier must include a timezone")
+        if self.information_frontier is not None:
+            visible_items = tuple(
+                item
+                for item in self.items
+                if item.available_at is None
+                or item.available_at <= self.information_frontier
+            )
+            visible_refs = {item.ref for item in visible_items}
+            object.__setattr__(self, "items", visible_items)
+            object.__setattr__(
+                self,
+                "tables",
+                tuple(
+                    table
+                    for table in self.tables
+                    if set(table.evidence_refs).issubset(visible_refs)
+                ),
+            )
         refs = [item.ref for item in self.items]
         if len(refs) != len(set(refs)):
             raise ValueError("evidence refs must be unique")
@@ -689,11 +713,14 @@ class EvidenceBundle(FrozenModel):
             if not set(table.evidence_refs).issubset(valid_refs):
                 raise ValueError(f"{table.id} contains refs outside this evidence bundle")
         serialized_items = [item.model_dump(mode="json") for item in self.items]
+        digest_payload = {
+            "items": serialized_items,
+            "tables": [table.model_dump(mode="json") for table in self.tables],
+        }
+        if self.information_frontier is not None:
+            digest_payload["information_frontier"] = self.information_frontier.isoformat()
         canonical = json.dumps(
-            {
-                "items": serialized_items,
-                "tables": [table.model_dump(mode="json") for table in self.tables],
-            },
+            digest_payload,
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
@@ -704,7 +731,6 @@ class EvidenceBundle(FrozenModel):
         elif self.digest != calculated:
             raise ValueError("evidence bundle digest does not match its items")
         return self
-
 
 class AnalystClaimType(str, Enum):
     OBSERVATION = "observation"
@@ -1692,6 +1718,19 @@ class ResearchUpdateSourceRecordSnapshotItem(FrozenModel):
     source_revision_id: str | None = None
 
 
+class ResearchUpdateSourceObservationInterval(FrozenModel):
+    start: date
+    end: date
+
+
+class ResearchUpdateSourceCoverageLimitation(FrozenModel):
+    kind: Literal["partial", "unavailable", "archive_truncation", "live_only", "unknown"]
+    temporal_scope: Literal["point_in_time", "live_only", "unknown"]
+    requested_interval: ResearchUpdateSourceObservationInterval
+    observed_intervals: tuple[ResearchUpdateSourceObservationInterval, ...] = ()
+    presentation_text: str
+
+
 class ResearchUpdateSourceWatermarkSnapshot(FrozenModel):
     source: str
     scanned_start: date
@@ -1703,10 +1742,14 @@ class ResearchUpdateSourceWatermarkSnapshot(FrozenModel):
     reported_records: int | None = Field(default=None, ge=0)
     baseline_cutoff: date | None = None
     overlap_start: date | None = None
+    information_frontier: datetime | None = None
+    requested_interval: ResearchUpdateSourceObservationInterval | None = None
+    observed_intervals: tuple[ResearchUpdateSourceObservationInterval, ...] = ()
+    structured_limitations: tuple[ResearchUpdateSourceCoverageLimitation, ...] = ()
 
 
 class ResearchUpdateEvidenceSnapshot(FrozenModel):
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["1", "2"] = "2"
     bundle: EvidenceBundle
     lineage: tuple[ResearchUpdateEvidenceSnapshotItem, ...]
     source_records: tuple[ResearchUpdateSourceRecordVersion, ...] = ()
@@ -1800,6 +1843,46 @@ class ResearchUpdateCheckedWindow(FrozenModel):
     reported_records: int | None = Field(default=None, ge=0)
     baseline_cutoff: date | None = None
     overlap_start: date | None = None
+    information_frontier: datetime | None = None
+    requested_interval: ResearchUpdateSourceObservationInterval | None = None
+    observed_intervals: tuple[ResearchUpdateSourceObservationInterval, ...] = ()
+    structured_limitations: tuple[ResearchUpdateSourceCoverageLimitation, ...] = ()
+
+
+class ResearchUpdateTransitionLimitation(FrozenModel):
+    kind: Literal["partial", "unavailable", "archive_truncation", "live_only", "unknown"]
+    scope: Literal["pre_anchor", "transition"]
+    temporal_scope: Literal["point_in_time", "live_only", "unknown"]
+    source: str
+    requested_interval: ResearchUpdateSourceObservationInterval
+    observed_intervals: tuple[ResearchUpdateSourceObservationInterval, ...] = ()
+    presentation_text: str
+
+
+class ResearchUpdateTransitionCapability(FrozenModel):
+    capability: Literal[
+        "official_filing",
+        "timely_disclosure",
+        "fundamentals",
+        "market_observation",
+        "media",
+        "social_sentiment",
+        "macro",
+    ]
+    required: bool = True
+    complete: bool
+    sources: tuple[str, ...] = ()
+    checked_intervals: tuple[ResearchUpdateSourceObservationInterval, ...] = ()
+    gaps: tuple[ResearchUpdateSourceObservationInterval, ...] = ()
+    limitations: tuple[ResearchUpdateTransitionLimitation, ...] = ()
+
+
+class ResearchUpdateTransitionCoverage(FrozenModel):
+    schema_version: Literal["1"] = "1"
+    anchor_frontier: datetime
+    update_frontier: datetime
+    complete: bool
+    capabilities: tuple[ResearchUpdateTransitionCapability, ...] = ()
 
 
 class ResearchUpdateEvidenceLineage(FrozenModel):
@@ -1811,13 +1894,15 @@ class ResearchUpdateEvidenceLineage(FrozenModel):
 class ResearchUpdateAudit(FrozenModel):
     """Durable phase attribution and finding for one Research Chain update."""
 
-    schema_version: Literal["2"] = "2"
+    schema_version: Literal["2", "3"] = "3"
     mode: Literal["shadow", "experimental"] = "shadow"
     candidate: ResearchUpdateCandidate | None = None
     coverage: ResearchUpdateCoverageAttestation | None = None
     checked_windows: tuple[ResearchUpdateCheckedWindow, ...] = ()
+    transition_coverage: ResearchUpdateTransitionCoverage | None = None
     evidence_lineage: tuple[ResearchUpdateEvidenceLineage, ...] = ()
     semantic_assessment: ResearchUpdateSemanticAssessment | None = None
+    baseline_information_frontier: datetime | None = None
     authoritative_strategy: Literal["full", "incremental"] = "full"
     escalation_reason: ResearchUpdateEscalationReason | None = None
     comparison: Literal["agreement", "disagreement", "inconclusive", "not_applicable"]
@@ -1842,6 +1927,13 @@ class AnalysisRequest(FrozenModel):
     quick_reasoning_effort: str | None = None
     deep_reasoning_effort: str | None = None
     output_language: OutputLanguage | None = None
+    anchor_readiness: Literal["required", "allow_non_anchor"] = Field(
+        default="required",
+        description=(
+            "Require deterministic Forward Research Anchor readiness, or explicitly "
+            "allow a Full-only non-anchor Research Chain."
+        ),
+    )
 
     @field_validator("ticker")
     @classmethod
@@ -1967,6 +2059,7 @@ class RunView(FrozenModel):
     baseline_revision_id: str | None = None
     research_execution_strategy: Literal["full", "incremental"] | None = None
     research_update_audit: ResearchUpdateAudit | None = None
+    information_frontier: datetime | None = None
     status: RunStatus
     request: AnalysisRequest
     config_snapshot: dict[str, Any]
