@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
+from tradingagents.application.anchor_readiness import (
+    AnchorReadinessReason,
+    AnchorReadinessResult,
+)
 from tradingagents.application.contracts import RunMetrics, RunStatus
 from tradingagents.application.live_thesis_validation import (
     LiveThesisValidationError,
@@ -17,6 +21,7 @@ from tradingagents.application.live_thesis_validation import (
 )
 from tradingagents.application.metrics import merge_run_metrics
 from tradingagents.application.research import ResearchChangeConclusion
+from tradingagents.application.service import ChainUpdateExecutionError
 
 
 class _MustNotRunService:
@@ -27,8 +32,18 @@ class _MustNotRunService:
 
 
 class _MarketReadyService:
-    def validate_market_data_readiness(self, _request):
-        return None
+    def validate_anchor_readiness(self, request, **_kwargs):
+        return _ready_result(request)
+
+
+def _ready_result(request) -> AnchorReadinessResult:
+    return AnchorReadinessResult(
+        ready=True,
+        requested_cutoff=request.analysis_date,
+        information_frontier=datetime(2026, 8, 12, 8, 30, tzinfo=timezone.utc),
+        profile_id="jp-listed-equity-v1",
+        metrics=RunMetrics(tool_calls=2, wall_time_seconds=0.25),
+    )
 
 
 def _loaded_scenarios(tmp_path: Path):
@@ -125,6 +140,16 @@ def test_reviewed_scenarios_require_exact_set_distinct_chains_and_strict_fields(
         load_reviewed_scenarios(cases_path)
 
 
+def test_reviewed_scenarios_support_initial_two_equity_pilot(tmp_path: Path) -> None:
+    cases_path = tmp_path / "cases.json"
+    cases_path.write_text(json.dumps(_reviewed_payload()[:2]), encoding="utf-8")
+
+    scenarios = load_reviewed_scenarios(cases_path)
+
+    assert len(scenarios) == 2
+    assert {item.chain_id for item in scenarios} == {"chain-quiet", "chain-material"}
+
+
 def test_reviewed_scenarios_reject_unreviewed_result_for_scenario(
     tmp_path: Path,
 ) -> None:
@@ -137,15 +162,16 @@ def test_reviewed_scenarios_reject_unreviewed_result_for_scenario(
         load_reviewed_scenarios(cases_path)
 
 
-def test_reviewed_scenarios_require_all_full_change_conclusions(tmp_path: Path) -> None:
+def test_reviewed_scenarios_do_not_require_all_full_change_conclusions(
+    tmp_path: Path,
+) -> None:
     payload = _reviewed_payload()
     for item in payload:
         item["expected_full_change_conclusion"] = "material_change"
     cases_path = tmp_path / "cases.json"
     cases_path.write_text(json.dumps(payload), encoding="utf-8")
 
-    with pytest.raises(LiveThesisValidationError, match="every Full Change Conclusion"):
-        load_reviewed_scenarios(cases_path)
+    assert len(load_reviewed_scenarios(cases_path)) == 5
 
 
 def test_market_readiness_failure_prevents_backup_and_authoritative_execution(
@@ -160,6 +186,7 @@ def test_market_readiness_failure_prevents_backup_and_authoritative_execution(
             current_revision=SimpleNamespace(
                 id=f"baseline-{scenario.scenario}",
                 cutoff=date(2026, 8, 9),
+                information_frontier=datetime(2026, 8, 9, 8, 30, tzinfo=timezone.utc),
             ),
         )
         for scenario in scenarios
@@ -173,9 +200,16 @@ def test_market_readiness_failure_prevents_backup_and_authoritative_execution(
         def get_research_chain(self, chain_id):
             return chains[chain_id]
 
-        def validate_market_data_readiness(self, request):
-            checked.append(request)
-            raise RuntimeError("J-Quants daily bar is not ready")
+        def validate_anchor_readiness(self, request, *, anchor_frontier):
+            checked.append((request, anchor_frontier))
+            return AnchorReadinessResult(
+                ready=False,
+                requested_cutoff=request.analysis_date,
+                information_frontier=datetime(2026, 8, 12, 8, 30, tzinfo=timezone.utc),
+                profile_id="jp-listed-equity-v1",
+                reasons=(AnchorReadinessReason.MISSING_MARKET_OBSERVATION,),
+                metrics=RunMetrics(tool_calls=1),
+            )
 
         def backup_database(self, _destination: Path) -> Path:
             raise AssertionError("backup must not run before market data is ready")
@@ -183,7 +217,10 @@ def test_market_readiness_failure_prevents_backup_and_authoritative_execution(
         def run_chain_update(self, *_args, **_kwargs):
             raise AssertionError("execution must not run before market data is ready")
 
-    with pytest.raises(LiveThesisValidationError, match="market data is not ready"):
+    with pytest.raises(
+        LiveThesisValidationError,
+        match="missing_market_observation",
+    ):
         validate_live_thesis(
             ReadinessFailureService(),
             scenarios,
@@ -196,9 +233,98 @@ def test_market_readiness_failure_prevents_backup_and_authoritative_execution(
         )
 
     assert len(checked) == 1
-    assert checked[0].ticker == "6501.T"
+    assert checked[0][0].ticker == "6501.T"
+    assert checked[0][1] == datetime(2026, 8, 9, 8, 30, tzinfo=timezone.utc)
     assert not (tmp_path / "backup.db").exists()
     assert not (tmp_path / "manifest").exists()
+
+
+@pytest.mark.parametrize(
+    ("event_type", "ready", "reasons"),
+    [
+        (
+            "research.anchor_readiness_failed",
+            False,
+            (AnchorReadinessReason.REQUIRED_CAPABILITY_UNAVAILABLE,),
+        ),
+        ("research.anchor_readiness_succeeded", True, ()),
+    ],
+)
+def test_failed_run_manifest_uses_the_execution_readiness_typed_outcome(
+    tmp_path: Path,
+    event_type: str,
+    ready: bool,
+    reasons: tuple[AnchorReadinessReason, ...],
+) -> None:
+    scenarios = _loaded_scenarios(tmp_path)[:2]
+    chains = {
+        scenario.chain_id: SimpleNamespace(
+            id=scenario.chain_id,
+            instrument="6501.T",
+            next_update_policy="incremental_allowed",
+            current_revision=SimpleNamespace(
+                id=f"baseline-{scenario.scenario}",
+                cutoff=date(2026, 8, 9),
+                information_frontier=datetime(2026, 8, 9, 8, 30, tzinfo=timezone.utc),
+            ),
+        )
+        for scenario in scenarios
+    }
+    runs = {}
+
+    class ReadinessChangedService(_MarketReadyService):
+        settings = SimpleNamespace(research_update_mode="shadow")
+
+        def get_research_chain(self, chain_id):
+            return chains[chain_id]
+
+        def backup_database(self, destination):
+            with sqlite3.connect(destination) as connection:
+                connection.execute("CREATE TABLE alembic_version (version_num TEXT NOT NULL)")
+                connection.execute("INSERT INTO alembic_version VALUES ('fixture')")
+            return destination
+
+        def run_chain_update(self, chain_id, *_args, **_kwargs):
+            run = SimpleNamespace(
+                id=f"run-{chain_id}",
+                status=RunStatus.FAILED,
+                research_update_audit=None,
+            )
+            runs[run.id] = run
+            raise ChainUpdateExecutionError(run.id)
+
+        repository = SimpleNamespace(
+            get_run=runs.__getitem__,
+            list_events=lambda run_id: [
+                SimpleNamespace(
+                    event_type=event_type,
+                    payload=AnchorReadinessResult(
+                        ready=ready,
+                        requested_cutoff=date(2026, 8, 10),
+                        information_frontier=datetime(
+                            2026, 8, 12, 8, 30, tzinfo=timezone.utc
+                        ),
+                        profile_id="jp-listed-equity-v1",
+                        reasons=reasons,
+                        metrics=RunMetrics(tool_calls=2),
+                    ).model_dump(mode="json"),
+                )
+            ],
+        )
+
+    result = validate_live_thesis(
+        ReadinessChangedService(),
+        scenarios,
+        backup_destination=tmp_path / "backup.db",
+        manifest_root=tmp_path / "manifest",
+        git_commit="a" * 40,
+        environ={"RUN_LIVE_DATA_TESTS": "1", "RUN_LIVE_LLM_TESTS": "1"},
+        in_place_database=True,
+        verify_source_checkout=lambda: None,
+    )
+
+    assert all(entry.anchor_readiness.ready is ready for entry in result.entries)
+    assert all(entry.anchor_readiness.reasons == reasons for entry in result.entries)
 
 
 def test_backup_failure_prevents_authoritative_execution_and_manifest(
@@ -212,6 +338,7 @@ def test_backup_failure_prevents_authoritative_execution_and_manifest(
             current_revision=SimpleNamespace(
                 id=f"revision-{item['scenario']}",
                 cutoff=date(2026, 8, 9),
+                information_frontier=datetime(2026, 8, 9, 8, 30, tzinfo=timezone.utc),
             ),
         )
         for item in _reviewed_payload()
@@ -263,6 +390,7 @@ def test_source_policy_rejection_prevents_backup_and_execution(tmp_path: Path) -
             current_revision=SimpleNamespace(
                 id=f"baseline-{scenario.scenario}",
                 cutoff=date(2026, 8, 9),
+                information_frontier=datetime(2026, 8, 9, 8, 30, tzinfo=timezone.utc),
             ),
         )
         for scenario in scenarios
@@ -280,7 +408,10 @@ def test_source_policy_rejection_prevents_backup_and_execution(tmp_path: Path) -
         def run_chain_update(self, *_args, **_kwargs):
             raise AssertionError("execution must not run for a source-ineligible head")
 
-    with pytest.raises(LiveThesisValidationError, match="not an Eligible Baseline"):
+    with pytest.raises(
+        LiveThesisValidationError,
+        match="has no qualifying Forward Research Anchor",
+    ):
         validate_live_thesis(
             SourcePolicyFailureService(),
             scenarios,
@@ -306,6 +437,7 @@ def test_source_is_reverified_after_backup_before_each_execution(tmp_path: Path)
             current_revision=SimpleNamespace(
                 id=f"baseline-{scenario.scenario}",
                 cutoff=date(2026, 8, 9),
+                information_frontier=datetime(2026, 8, 9, 8, 30, tzinfo=timezone.utc),
             ),
         )
         for scenario in scenarios
@@ -372,6 +504,7 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
             current_revision=SimpleNamespace(
                 id=f"baseline-{scenario.scenario}",
                 cutoff=date(2026, 8, 9),
+                information_frontier=datetime(2026, 8, 9, 8, 30, tzinfo=timezone.utc),
             ),
         )
         for scenario in scenarios
@@ -392,6 +525,22 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
         def get_run(self, run_id):
             return runs[run_id]
 
+        def list_events(self, run_id):
+            scenario = by_chain[runs[run_id].chain_id]
+            execution_readiness = _ready_result(
+                SimpleNamespace(analysis_date=scenario.analysis_date)
+            ).model_copy(
+                update={
+                    "metrics": RunMetrics(tool_calls=2, wall_time_seconds=0.5)
+                }
+            )
+            return [
+                SimpleNamespace(
+                    event_type="research.anchor_readiness_succeeded",
+                    payload=execution_readiness.model_dump(mode="json"),
+                )
+            ]
+
     class MainDatabaseService(_MarketReadyService):
         settings = SimpleNamespace(
             research_update_mode="shadow",
@@ -410,7 +559,9 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
             request,
             *,
             idempotency_key,
+            information_frontier,
         ):
+            assert information_frontier == _ready_result(request).information_frontier
             scenario = by_chain[chain_id]
             if scenario.scenario in enqueue_failures:
                 raise RuntimeError("fixture enqueue failure")
@@ -469,7 +620,12 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
                 cost_usd=0.04,
                 wall_time_seconds=0.75,
             )
-            metrics = merge_run_metrics(bounded, full)
+            readiness_metrics = RunMetrics(tool_calls=2, wall_time_seconds=0.5)
+            metrics = merge_run_metrics(
+                readiness_metrics,
+                bounded,
+                full,
+            )
             is_candidate = scenario.expected_bounded_result == "no_material_change"
             actual_conclusion = actual_full_conclusions[scenario.scenario]
             comparison = (
@@ -508,6 +664,9 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
                 change_conclusion=actual_conclusion,
                 metrics=metrics,
                 cutoff=scenario.analysis_date,
+                information_frontier=datetime(
+                    2026, 8, 12, 8, 30, tzinfo=timezone.utc
+                ),
             )
             chains[run.chain_id].current_revision = revision
             run.status = RunStatus.SUCCEEDED
@@ -550,7 +709,9 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
     assert len(manifest_files) == 6
     entry_payload = json.loads(manifest_files[1].read_text(encoding="utf-8"))
     assert entry_payload["git_commit"] == "a" * 40
+    assert entry_payload["schema_version"] == "2"
     assert set(entry_payload) == {
+        "anchor_readiness",
         "application_status",
         "chain_id",
         "expected_bounded_result",
@@ -565,7 +726,6 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
     serialized_manifest = "\n".join(path.read_text(encoding="utf-8") for path in manifest_files)
     assert "Fixture Evidence" not in serialized_manifest
     assert "secret prompt" not in serialized_manifest
-    assert "metrics" not in serialized_manifest
     assert "diff" not in serialized_manifest
 
     actual_full_conclusions["threshold_crossing"] = ResearchChangeConclusion.NO_MATERIAL_CHANGE

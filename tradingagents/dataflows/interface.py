@@ -1,6 +1,7 @@
 import logging
 import re
 from datetime import datetime, timedelta, timezone
+from inspect import Parameter, signature
 
 from tradingagents.provenance import (
     ProvenanceRecord,
@@ -619,9 +620,19 @@ def route_to_vendor(method: str, *args, _provenance: bool = False, **kwargs):
     for vendor_index, vendor in enumerate(vendor_chain):
         vendor_impl = VENDOR_METHODS[method][vendor]
         impl_func = vendor_impl[0] if isinstance(vendor_impl, list) else vendor_impl
+        vendor_kwargs = kwargs
+        if "information_frontier" in kwargs:
+            parameters = signature(impl_func).parameters
+            supports_frontier = "information_frontier" in parameters or any(
+                item.kind is Parameter.VAR_KEYWORD for item in parameters.values()
+            )
+            if not supports_frontier:
+                vendor_kwargs = {
+                    key: value for key, value in kwargs.items() if key != "information_frontier"
+                }
 
         try:
-            result = impl_func(*args, **kwargs)
+            result = impl_func(*args, **vendor_kwargs)
             if _provenance and isinstance(result, str):
                 existing_records = extract_provenance(result)
                 record = (

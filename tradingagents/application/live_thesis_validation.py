@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from .anchor_readiness import AnchorReadinessResult
 from .contracts import AnalysisRequest, RunStatus
 from .metrics import merge_run_metrics
 from .research import (
@@ -29,13 +30,6 @@ ValidationScenario = Literal[
     "threshold_crossing",
 ]
 
-_REQUIRED_SCENARIOS = {
-    "quiet_interval",
-    "material_event",
-    "source_integrity",
-    "missing_coverage",
-    "threshold_crossing",
-}
 _SCENARIO_BOUNDED_RESULTS = {
     "quiet_interval": {"no_material_change"},
     "material_event": {
@@ -99,7 +93,7 @@ class LiveThesisManifestEntry(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["2"] = "2"
     git_commit: str
     scenario: ValidationScenario
     expected_bounded_result: str
@@ -109,6 +103,7 @@ class LiveThesisManifestEntry(BaseModel):
     run_id: str | None
     chain_id: str
     revision_id: str | None
+    anchor_readiness: AnchorReadinessResult
 
 
 class LiveThesisValidationResult(BaseModel):
@@ -126,7 +121,7 @@ class LiveThesisValidationResult(BaseModel):
 
 
 def load_reviewed_scenarios(path: Path) -> tuple[ReviewedLiveThesisScenario, ...]:
-    """Load the strict five-case maintainer review set without secret fields."""
+    """Load a reviewed pilot or broader scenario set without secret fields."""
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(raw, list):
@@ -142,16 +137,12 @@ def _validate_reviewed_scenarios(
     scenarios: Sequence[ReviewedLiveThesisScenario],
 ) -> None:
     names = [item.scenario for item in scenarios]
-    if len(names) != len(_REQUIRED_SCENARIOS) or set(names) != _REQUIRED_SCENARIOS:
-        raise LiveThesisValidationError("exactly one of each reviewed scenario is required")
+    if len(names) < 2:
+        raise LiveThesisValidationError("at least two reviewed scenarios are required")
+    if len(names) != len(set(names)):
+        raise LiveThesisValidationError("reviewed scenario names must be distinct")
     if len({item.chain_id for item in scenarios}) != len(scenarios):
         raise LiveThesisValidationError("every scenario requires a distinct Research Chain")
-    if {item.expected_full_change_conclusion for item in scenarios} != set(
-        ResearchChangeConclusion
-    ):
-        raise LiveThesisValidationError(
-            "reviewed scenarios must include every Full Change Conclusion"
-        )
     for item in scenarios:
         if item.expected_bounded_result not in _SCENARIO_BOUNDED_RESULTS[item.scenario]:
             raise LiveThesisValidationError(f"bounded result is not reviewed for {item.scenario}")
@@ -184,6 +175,7 @@ def validate_live_thesis(
         raise LiveThesisValidationError("git commit must be a full lowercase SHA-1")
     selected_chains: dict[str, Any] = {}
     selected_requests: dict[str, AnalysisRequest] = {}
+    selected_readiness: dict[str, AnchorReadinessResult] = {}
     for scenario in scenarios:
         try:
             chain = service.get_research_chain(scenario.chain_id)
@@ -191,7 +183,7 @@ def validate_live_thesis(
             raise LiveThesisValidationError("reviewed Research Chain was not found") from exc
         if chain.next_update_policy != "incremental_allowed":
             raise LiveThesisValidationError(
-                f"reviewed Research Chain {chain.id} is not an Eligible Baseline"
+                f"reviewed Research Chain {chain.id} has no qualifying Forward Research Anchor"
             )
         if (
             chain.current_revision is None
@@ -207,13 +199,27 @@ def validate_live_thesis(
         )
     for scenario in scenarios:
         try:
-            service.validate_market_data_readiness(
-                selected_requests[scenario.chain_id]
+            readiness = service.validate_anchor_readiness(
+                selected_requests[scenario.chain_id],
+                anchor_frontier=(
+                    selected_chains[scenario.chain_id].current_revision.information_frontier
+                ),
             )
         except Exception as exc:
             raise LiveThesisValidationError(
-                f"reviewed market data is not ready for {scenario.scenario}"
+                f"anchor readiness could not be established for {scenario.scenario}"
             ) from exc
+        if readiness is None or not readiness.ready:
+            typed_reasons = (
+                ",".join(
+                    item.value for item in (readiness.reasons if readiness is not None else ())
+                )
+                or "required_capability_unavailable"
+            )
+            raise LiveThesisValidationError(
+                f"anchor readiness failed for {scenario.scenario}: {typed_reasons}"
+            )
+        selected_readiness[scenario.chain_id] = readiness
     verify_source_checkout()
     if backup_destination.exists():
         raise LiveThesisValidationError("backup destination already exists")
@@ -250,6 +256,9 @@ def validate_live_thesis(
                 idempotency_key=(
                     f"live-thesis:{manifest_directory.name}:{scenario.scenario}:{uuid4()}"
                 ),
+                information_frontier=selected_readiness[
+                    scenario.chain_id
+                ].information_frontier,
             )
             run_id = run.id
             entry = (
@@ -259,6 +268,7 @@ def validate_live_thesis(
                     baseline_revision_id=baseline.id,
                     run_id=run_id,
                     git_commit=git_commit,
+                    anchor_readiness=selected_readiness[scenario.chain_id],
                 )
                 if result.status is RunStatus.SUCCEEDED
                 else _failed_entry(
@@ -266,13 +276,26 @@ def validate_live_thesis(
                     scenario,
                     run_id=run_id,
                     git_commit=git_commit,
+                    anchor_readiness=selected_readiness[scenario.chain_id],
                 )
             )
         except ChainUpdateExecutionError as exc:
             run_id = exc.run_id
-            entry = _failed_entry(service, scenario, run_id=run_id, git_commit=git_commit)
+            entry = _failed_entry(
+                service,
+                scenario,
+                run_id=run_id,
+                git_commit=git_commit,
+                anchor_readiness=selected_readiness[scenario.chain_id],
+            )
         except Exception:
-            entry = _failed_entry(service, scenario, run_id=run_id, git_commit=git_commit)
+            entry = _failed_entry(
+                service,
+                scenario,
+                run_id=run_id,
+                git_commit=git_commit,
+                anchor_readiness=selected_readiness[scenario.chain_id],
+            )
         verify_source_checkout()
         _write_json_exclusive(
             manifest_directory
@@ -336,11 +359,22 @@ def _successful_entry(
     baseline_revision_id: str,
     run_id: str,
     git_commit: str,
+    anchor_readiness: AnchorReadinessResult,
 ) -> LiveThesisManifestEntry:
     completed = service.repository.get_run(run_id)
     chain = service.repository.get_research_chain(scenario.chain_id)
     revision = chain.current_revision
     audit = completed.research_update_audit
+    readiness_events = tuple(
+        event
+        for event in service.repository.list_events(run_id)
+        if event.event_type == "research.anchor_readiness_succeeded"
+    )
+    execution_readiness = (
+        AnchorReadinessResult.model_validate(readiness_events[-1].payload)
+        if readiness_events
+        else None
+    )
     bounded_result = None
     if audit is not None:
         bounded_result = (
@@ -358,7 +392,13 @@ def _successful_entry(
         candidate_present=bounded_result == "no_material_change",
     )
     reconciled_metrics = (
-        merge_run_metrics(audit.bounded_metrics, audit.full_metrics) if audit is not None else None
+        merge_run_metrics(
+            execution_readiness.metrics,
+            audit.bounded_metrics,
+            audit.full_metrics,
+        )
+        if audit is not None and execution_readiness is not None
+        else None
     )
     passed = all(
         (
@@ -389,6 +429,7 @@ def _successful_entry(
         run_id=run_id,
         chain_id=scenario.chain_id,
         revision_id=revision.id,
+        anchor_readiness=execution_readiness or anchor_readiness,
     )
 
 
@@ -398,8 +439,10 @@ def _failed_entry(
     *,
     run_id: str | None,
     git_commit: str,
+    anchor_readiness: AnchorReadinessResult,
 ) -> LiveThesisManifestEntry:
     status: Literal["failed", "cancelled"] = "failed"
+    execution_readiness: AnchorReadinessResult | None = None
     if run_id is not None:
         try:
             completed = service.repository.get_run(run_id)
@@ -408,6 +451,22 @@ def _failed_entry(
         else:
             if completed.status is RunStatus.CANCELLED:
                 status = "cancelled"
+        try:
+            readiness_events = tuple(
+                event
+                for event in service.repository.list_events(run_id)
+                if event.event_type
+                in {
+                    "research.anchor_readiness_succeeded",
+                    "research.anchor_readiness_failed",
+                }
+            )
+            if readiness_events:
+                execution_readiness = AnchorReadinessResult.model_validate(
+                    readiness_events[-1].payload
+                )
+        except Exception:
+            execution_readiness = None
     return LiveThesisManifestEntry(
         git_commit=git_commit,
         scenario=scenario.scenario,
@@ -418,4 +477,5 @@ def _failed_entry(
         run_id=run_id,
         chain_id=scenario.chain_id,
         revision_id=None,
+        anchor_readiness=execution_readiness or anchor_readiness,
     )

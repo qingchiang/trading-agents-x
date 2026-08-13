@@ -174,6 +174,12 @@ A coherent area of investigation, such as market data, fundamentals, company
 announcements, news, social sentiment, or macro conditions.
 _Avoid_: Analyst role, provider
 
+**Market Research Capability**:
+A source-independent kind of Evidence coverage that a market can prove, such
+as official filings, timely disclosures, fundamentals, or market observations.
+One capability may require complementary sources or allow equivalent sources.
+_Avoid_: Vendor name, analyst role
+
 **Required Domain**:
 A Research Domain that must be checked because an active Claim or open Question
 depends on it.
@@ -189,6 +195,24 @@ An explicit record of which Claims, Questions, and Research Domains were
 checked for a Research Revision, together with gaps and limitations.
 _Avoid_: Completeness guarantee, completion flag
 
+**Research Cutoff**:
+The market-local date through which a Research Revision assesses the
+Instrument's market observation horizon. It is distinct from the execution
+time and does not imply that every source was observed through local midnight.
+_Avoid_: Execution date, Information Frontier
+
+**Information Frontier**:
+The point-in-time boundary through which a Research Revision, and each source
+within it, can claim observed knowledge. It cannot extend beyond the end of a
+historical Research Cutoff.
+_Avoid_: Research Cutoff, retrieval date
+
+**Anchor Coverage**:
+The minimum point-in-time coverage needed for a Research Revision to establish
+a usable Current Research State at its cutoff. It may retain disclosed
+historical limitations and does not assert exhaustive history.
+_Avoid_: Complete history, Transition Coverage
+
 **Source Watermark**:
 A source-specific boundary describing how far collection examined Source
 Records; it is not simply the prior analysis date or retrieval time.
@@ -201,13 +225,19 @@ _Avoid_: Sentiment label, Claim Change
 
 ## Research updates
 
-**Eligible Baseline**:
-The current Revision of a Research Chain when it contains enough state,
-Evidence closure, Required Source coverage, and compatible semantics to support
-a bounded update under the declared market capability. Eligibility is
-independent of its Change Conclusion; an Indeterminate Revision is never
-eligible.
-_Avoid_: Latest run, same-ticker result
+**Forward Research Anchor**:
+The current Revision of a Research Chain when it contains valid state, Evidence
+closure, Anchor Coverage, and compatible semantics sufficient to anchor future
+comparison. Its qualification is independent of what the Revision concluded
+about change from its predecessor.
+_Avoid_: Eligible Baseline, latest run, same-ticker result
+
+**Transition Coverage**:
+The source-aware proof that the interval after a Forward Research Anchor's
+Information Frontier through an update's Information Frontier was examined
+without a decision-relevant gap. Historical gaps wholly before the anchor do
+not make this transition incomplete.
+_Avoid_: Anchor Coverage, complete history
 
 **Update Intent**:
 A request to produce the next Research Revision from a Research Chain's current
@@ -226,7 +256,7 @@ _Avoid_: Objective completeness, default rerun
 
 **Incremental Execution**:
 An update strategy that examines new or changed Evidence relative to an
-Eligible Baseline and may escalate to Full Analysis.
+Forward Research Anchor and may escalate to Full Analysis.
 _Avoid_: Shorter date window, incremental report
 
 **Change Assessment**:
@@ -257,8 +287,8 @@ _Avoid_: No-op, copied revision
 
 **Indeterminate**:
 A Change Conclusion used when an update cannot justify either Material Change
-or No Material Change. The Revision advances the chain but is not an Eligible
-Baseline.
+or No Material Change. It does not by itself determine whether the resulting
+Revision can qualify as a Forward Research Anchor.
 _Avoid_: Coverage incomplete, failed execution
 
 **Update Summary**:

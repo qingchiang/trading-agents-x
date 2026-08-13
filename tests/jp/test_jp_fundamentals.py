@@ -281,6 +281,43 @@ class JPFundamentalsTests(unittest.TestCase):
         self.assertIn("1yr growth -9.0%", out)
         self.assertNotIn("PEG: -", out)
 
+    def test_valuation_uses_the_same_information_frontier_as_official_summary(self):
+        frontier = "2026-07-27T18:00:00+09:00"
+        fetch_periods = mock.Mock(return_value=("7011.T", [_FY]))
+        with mock.patch.object(
+            jp_fundamentals.jqf,
+            "get_fundamentals",
+            return_value="BASE-OVERVIEW",
+        ) as overview, mock.patch.object(
+            jp_fundamentals.jqf,
+            "fetch_periods",
+            fetch_periods,
+        ), mock.patch.object(
+            jp_fundamentals,
+            "_fetch_ohlcv_frame",
+            return_value=_price_df(3567.0, 5208.0, 3171.0),
+        ), mock.patch.object(
+            jp_fundamentals,
+            "fetch_topix_closes",
+            return_value=_price_df(3567.0, 5208.0, 3171.0),
+        ):
+            jp_fundamentals.get_fundamentals(
+                "7011.T",
+                "2026-07-27",
+                information_frontier=frontier,
+            )
+
+        overview.assert_called_once_with(
+            "7011.T",
+            "2026-07-27",
+            information_frontier=frontier,
+        )
+        fetch_periods.assert_called_once_with(
+            "7011.T",
+            "2026-07-27",
+            information_frontier=frontier,
+        )
+
     def test_no_statements_notes_unavailable_but_keeps_summary(self):
         # Only a forecast-revision row (no actual results) → valuation note, but
         # the base overview is preserved.

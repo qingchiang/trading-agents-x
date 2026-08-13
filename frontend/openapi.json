@@ -28,6 +28,16 @@
             "title": "Analysts",
             "type": "array"
           },
+          "anchor_readiness": {
+            "default": "required",
+            "description": "Require deterministic Forward Research Anchor readiness, or explicitly allow a Full-only non-anchor Research Chain.",
+            "enum": [
+              "required",
+              "allow_non_anchor"
+            ],
+            "title": "Anchor Readiness",
+            "type": "string"
+          },
           "asset_type": {
             "anyOf": [
               {
@@ -321,6 +331,24 @@
         "title": "AnalystReport",
         "type": "object"
       },
+      "AnchorQualificationReason": {
+        "enum": [
+          "anchor_readiness_not_required",
+          "legacy_anchor_coverage_unproven",
+          "unsupported_market_profile",
+          "not_full_research",
+          "information_frontier_missing",
+          "full_audit_incomplete",
+          "current_state_unusable",
+          "evidence_closure_invalid",
+          "point_in_time_invalid",
+          "required_capability_missing",
+          "required_domain_missing",
+          "incompatible_market_semantics"
+        ],
+        "title": "AnchorQualificationReason",
+        "type": "string"
+      },
       "ArtifactGenerationMethod": {
         "description": "Auditable method that produced a typed research artifact.",
         "enum": [
@@ -598,6 +626,45 @@
         "title": "CapabilitiesResponse",
         "type": "object"
       },
+      "CapabilityAttestation": {
+        "additionalProperties": false,
+        "properties": {
+          "capability": {
+            "$ref": "#/components/schemas/MarketResearchCapability"
+          },
+          "limitations": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "required": {
+            "default": true,
+            "title": "Required",
+            "type": "boolean"
+          },
+          "satisfied": {
+            "title": "Satisfied",
+            "type": "boolean"
+          },
+          "sources": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Sources",
+            "type": "array"
+          }
+        },
+        "required": [
+          "capability",
+          "satisfied"
+        ],
+        "title": "CapabilityAttestation",
+        "type": "object"
+      },
       "CapabilityDefaults": {
         "additionalProperties": false,
         "properties": {
@@ -745,6 +812,16 @@
       "CoverageAttestation": {
         "additionalProperties": false,
         "properties": {
+          "anchor_qualification": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ForwardResearchAnchorQualification"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "claims": {
             "items": {
               "$ref": "#/components/schemas/ResearchObjectCoverage"
@@ -776,8 +853,11 @@
             "type": "array"
           },
           "schema_version": {
-            "const": "1",
             "default": "1",
+            "enum": [
+              "1",
+              "2"
+            ],
             "title": "Schema Version",
             "type": "string"
           },
@@ -1158,8 +1238,11 @@
             "type": "array"
           },
           "schema_version": {
-            "const": "1",
-            "default": "1",
+            "default": "2",
+            "enum": [
+              "1",
+              "2"
+            ],
             "title": "Schema Version",
             "type": "string"
           },
@@ -1223,6 +1306,18 @@
               }
             ],
             "title": "Digest"
+          },
+          "information_frontier": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Information Frontier"
           },
           "instrument": {
             "title": "Instrument",
@@ -1837,6 +1932,53 @@
         "title": "EvidenceValueLocator",
         "type": "object"
       },
+      "ForwardResearchAnchorQualification": {
+        "additionalProperties": false,
+        "properties": {
+          "capabilities": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CapabilityAttestation"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "is_forward_research_anchor": {
+            "title": "Is Forward Research Anchor",
+            "type": "boolean"
+          },
+          "profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Id"
+          },
+          "reasons": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AnchorQualificationReason"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "1",
+            "default": "1",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "is_forward_research_anchor"
+        ],
+        "title": "ForwardResearchAnchorQualification",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -2163,6 +2305,19 @@
         "title": "MarketReferenceLevel",
         "type": "object"
       },
+      "MarketResearchCapability": {
+        "enum": [
+          "official_filing",
+          "timely_disclosure",
+          "fundamentals",
+          "market_observation",
+          "media",
+          "social_sentiment",
+          "macro"
+        ],
+        "title": "MarketResearchCapability",
+        "type": "string"
+      },
       "MeasurementKind": {
         "description": "Semantic measurement family owned by deterministic data producers.",
         "enum": [
@@ -2202,6 +2357,8 @@
         "enum": [
           "experiment_mode_off",
           "unsupported_incremental_market",
+          "legacy_anchor_coverage_unproven",
+          "anchor_coverage_incomplete",
           "required_source_coverage_incomplete",
           "indeterminate_head",
           "coverage_incomplete",
@@ -4420,6 +4577,10 @@
             "title": "Current Revision Id",
             "type": "string"
           },
+          "forward_research_anchor": {
+            "$ref": "#/components/schemas/ForwardResearchAnchorQualification",
+            "description": "Content-derived qualification of the current Revision for future bounded comparison, independent of its Change Conclusion."
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -4434,7 +4595,7 @@
           },
           "next_update_policy": {
             "default": "full_required",
-            "description": "Server-derived policy: bounded Incremental Execution is allowed only for a source-qualified supported Japanese head in an enabled experiment mode.",
+            "description": "Server-derived policy: bounded Incremental Execution starts only from a qualifying Forward Research Anchor for a supported Japanese Instrument in an enabled experiment mode; otherwise the current head requires Full Analysis.",
             "enum": [
               "incremental_allowed",
               "full_required"
@@ -4484,6 +4645,15 @@
           "analysis_date": {
             "format": "date",
             "title": "Analysis Date",
+            "type": "string"
+          },
+          "anchor_readiness": {
+            "default": "required",
+            "enum": [
+              "required",
+              "allow_non_anchor"
+            ],
+            "title": "Anchor Readiness",
             "type": "string"
           },
           "baseline_revision_id": {
@@ -5389,6 +5559,18 @@
               }
             ]
           },
+          "information_frontier": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Information Frontier"
+          },
           "metrics": {
             "$ref": "#/components/schemas/RunMetrics"
           },
@@ -5580,6 +5762,18 @@
             "title": "Authoritative Strategy",
             "type": "string"
           },
+          "baseline_information_frontier": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Information Frontier"
+          },
           "bounded_metrics": {
             "$ref": "#/components/schemas/RunMetrics"
           },
@@ -5674,8 +5868,11 @@
             "type": "string"
           },
           "schema_version": {
-            "const": "2",
-            "default": "2",
+            "default": "3",
+            "enum": [
+              "2",
+              "3"
+            ],
             "title": "Schema Version",
             "type": "string"
           },
@@ -5683,6 +5880,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/ResearchUpdateSemanticAssessment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "transition_coverage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchUpdateTransitionCoverage"
               },
               {
                 "type": "null"
@@ -5745,12 +5952,32 @@
             ],
             "title": "Baseline Cutoff"
           },
+          "information_frontier": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Information Frontier"
+          },
           "limitations": {
             "default": [],
             "items": {
               "type": "string"
             },
             "title": "Limitations",
+            "type": "array"
+          },
+          "observed_intervals": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchUpdateSourceObservationInterval"
+            },
+            "title": "Observed Intervals",
             "type": "array"
           },
           "overlap_start": {
@@ -5776,6 +6003,16 @@
               }
             ],
             "title": "Reported Records"
+          },
+          "requested_interval": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchUpdateSourceObservationInterval"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "returned_records": {
             "default": 0,
@@ -5805,6 +6042,14 @@
             ],
             "title": "Status",
             "type": "string"
+          },
+          "structured_limitations": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchUpdateSourceCoverageLimitation"
+            },
+            "title": "Structured Limitations",
+            "type": "array"
           },
           "temporal_scope": {
             "default": "point_in_time",
@@ -5986,8 +6231,11 @@
             "type": "array"
           },
           "schema_version": {
-            "const": "1",
-            "default": "1",
+            "default": "2",
+            "enum": [
+              "1",
+              "2"
+            ],
             "title": "Schema Version",
             "type": "string"
           },
@@ -6194,6 +6442,75 @@
           "relationship"
         ],
         "title": "ResearchUpdateSemanticRelationship",
+        "type": "object"
+      },
+      "ResearchUpdateSourceCoverageLimitation": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "partial",
+              "unavailable",
+              "archive_truncation",
+              "live_only",
+              "unknown"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "observed_intervals": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchUpdateSourceObservationInterval"
+            },
+            "title": "Observed Intervals",
+            "type": "array"
+          },
+          "presentation_text": {
+            "title": "Presentation Text",
+            "type": "string"
+          },
+          "requested_interval": {
+            "$ref": "#/components/schemas/ResearchUpdateSourceObservationInterval"
+          },
+          "temporal_scope": {
+            "enum": [
+              "point_in_time",
+              "live_only",
+              "unknown"
+            ],
+            "title": "Temporal Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "temporal_scope",
+          "requested_interval",
+          "presentation_text"
+        ],
+        "title": "ResearchUpdateSourceCoverageLimitation",
+        "type": "object"
+      },
+      "ResearchUpdateSourceObservationInterval": {
+        "additionalProperties": false,
+        "properties": {
+          "end": {
+            "format": "date",
+            "title": "End",
+            "type": "string"
+          },
+          "start": {
+            "format": "date",
+            "title": "Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "end"
+        ],
+        "title": "ResearchUpdateSourceObservationInterval",
         "type": "object"
       },
       "ResearchUpdateSourceRecordSnapshotItem": {
@@ -6451,12 +6768,32 @@
             ],
             "title": "Baseline Cutoff"
           },
+          "information_frontier": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Information Frontier"
+          },
           "limitations": {
             "default": [],
             "items": {
               "type": "string"
             },
             "title": "Limitations",
+            "type": "array"
+          },
+          "observed_intervals": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchUpdateSourceObservationInterval"
+            },
+            "title": "Observed Intervals",
             "type": "array"
           },
           "overlap_start": {
@@ -6482,6 +6819,16 @@
               }
             ],
             "title": "Reported Records"
+          },
+          "requested_interval": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchUpdateSourceObservationInterval"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "returned_records": {
             "default": 0,
@@ -6511,6 +6858,14 @@
             ],
             "title": "Status",
             "type": "string"
+          },
+          "structured_limitations": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchUpdateSourceCoverageLimitation"
+            },
+            "title": "Structured Limitations",
+            "type": "array"
           },
           "temporal_scope": {
             "default": "point_in_time",
@@ -6634,6 +6989,173 @@
           "checked_domains"
         ],
         "title": "ResearchUpdateSummaryContract",
+        "type": "object"
+      },
+      "ResearchUpdateTransitionCapability": {
+        "additionalProperties": false,
+        "properties": {
+          "capability": {
+            "enum": [
+              "official_filing",
+              "timely_disclosure",
+              "fundamentals",
+              "market_observation",
+              "media",
+              "social_sentiment",
+              "macro"
+            ],
+            "title": "Capability",
+            "type": "string"
+          },
+          "checked_intervals": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchUpdateSourceObservationInterval"
+            },
+            "title": "Checked Intervals",
+            "type": "array"
+          },
+          "complete": {
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "gaps": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchUpdateSourceObservationInterval"
+            },
+            "title": "Gaps",
+            "type": "array"
+          },
+          "limitations": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchUpdateTransitionLimitation"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "required": {
+            "default": true,
+            "title": "Required",
+            "type": "boolean"
+          },
+          "sources": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Sources",
+            "type": "array"
+          }
+        },
+        "required": [
+          "capability",
+          "complete"
+        ],
+        "title": "ResearchUpdateTransitionCapability",
+        "type": "object"
+      },
+      "ResearchUpdateTransitionCoverage": {
+        "additionalProperties": false,
+        "properties": {
+          "anchor_frontier": {
+            "format": "date-time",
+            "title": "Anchor Frontier",
+            "type": "string"
+          },
+          "capabilities": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchUpdateTransitionCapability"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "complete": {
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "schema_version": {
+            "const": "1",
+            "default": "1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "update_frontier": {
+            "format": "date-time",
+            "title": "Update Frontier",
+            "type": "string"
+          }
+        },
+        "required": [
+          "anchor_frontier",
+          "update_frontier",
+          "complete"
+        ],
+        "title": "ResearchUpdateTransitionCoverage",
+        "type": "object"
+      },
+      "ResearchUpdateTransitionLimitation": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "partial",
+              "unavailable",
+              "archive_truncation",
+              "live_only",
+              "unknown"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "observed_intervals": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResearchUpdateSourceObservationInterval"
+            },
+            "title": "Observed Intervals",
+            "type": "array"
+          },
+          "presentation_text": {
+            "title": "Presentation Text",
+            "type": "string"
+          },
+          "requested_interval": {
+            "$ref": "#/components/schemas/ResearchUpdateSourceObservationInterval"
+          },
+          "scope": {
+            "enum": [
+              "pre_anchor",
+              "transition"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "temporal_scope": {
+            "enum": [
+              "point_in_time",
+              "live_only",
+              "unknown"
+            ],
+            "title": "Temporal Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "scope",
+          "temporal_scope",
+          "source",
+          "requested_interval",
+          "presentation_text"
+        ],
+        "title": "ResearchUpdateTransitionLimitation",
         "type": "object"
       },
       "ResearchWarning": {
@@ -6998,6 +7520,16 @@
             },
             "title": "Analysts",
             "type": "array"
+          },
+          "anchor_readiness": {
+            "default": "required",
+            "description": "Require deterministic Forward Research Anchor readiness, or explicitly allow a Full-only non-anchor Research Chain.",
+            "enum": [
+              "required",
+              "allow_non_anchor"
+            ],
+            "title": "Anchor Readiness",
+            "type": "string"
           },
           "asset_type": {
             "anyOf": [
@@ -7403,6 +7935,18 @@
             "title": "Id",
             "type": "string"
           },
+          "information_frontier": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Information Frontier"
+          },
           "instrument_local_name": {
             "anyOf": [
               {
@@ -7629,6 +8173,18 @@
             "title": "Id",
             "type": "string"
           },
+          "information_frontier": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Information Frontier"
+          },
           "instrument_local_name": {
             "anyOf": [
               {
@@ -7847,6 +8403,76 @@
           "limitations"
         ],
         "title": "ScenarioReferenceRange",
+        "type": "object"
+      },
+      "SourceCoverageLimitation": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "partial",
+              "unavailable",
+              "archive_truncation",
+              "live_only",
+              "unknown"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "observed_intervals": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SourceObservationInterval"
+            },
+            "title": "Observed Intervals",
+            "type": "array"
+          },
+          "presentation_text": {
+            "minLength": 1,
+            "title": "Presentation Text",
+            "type": "string"
+          },
+          "requested_interval": {
+            "$ref": "#/components/schemas/SourceObservationInterval"
+          },
+          "temporal_scope": {
+            "enum": [
+              "point_in_time",
+              "live_only",
+              "unknown"
+            ],
+            "title": "Temporal Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "temporal_scope",
+          "requested_interval",
+          "presentation_text"
+        ],
+        "title": "SourceCoverageLimitation",
+        "type": "object"
+      },
+      "SourceObservationInterval": {
+        "additionalProperties": false,
+        "properties": {
+          "end": {
+            "format": "date",
+            "title": "End",
+            "type": "string"
+          },
+          "start": {
+            "format": "date",
+            "title": "Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "end"
+        ],
+        "title": "SourceObservationInterval",
         "type": "object"
       },
       "SourceRecordKind": {
@@ -8116,12 +8742,32 @@
             ],
             "title": "Baseline Cutoff"
           },
+          "information_frontier": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Information Frontier"
+          },
           "limitations": {
             "default": [],
             "items": {
               "type": "string"
             },
             "title": "Limitations",
+            "type": "array"
+          },
+          "observed_intervals": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SourceObservationInterval"
+            },
+            "title": "Observed Intervals",
             "type": "array"
           },
           "overlap_start": {
@@ -8148,6 +8794,16 @@
             ],
             "title": "Reported Records"
           },
+          "requested_interval": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceObservationInterval"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "returned_records": {
             "default": 0,
             "minimum": 0.0,
@@ -8171,6 +8827,14 @@
           },
           "status": {
             "$ref": "#/components/schemas/CoverageStatus"
+          },
+          "structured_limitations": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SourceCoverageLimitation"
+            },
+            "title": "Structured Limitations",
+            "type": "array"
           },
           "temporal_scope": {
             "default": "point_in_time",

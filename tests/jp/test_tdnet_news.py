@@ -7,7 +7,11 @@ from urllib.parse import parse_qs
 import pytest
 
 from tradingagents.dataflows.jp import tdnet_news as td
-from tradingagents.provenance import extract_source_observations, extract_source_watermarks
+from tradingagents.provenance import (
+    SourceInterval,
+    extract_source_observations,
+    extract_source_watermarks,
+)
 
 
 def _row(code="72030", title="2026年3月期決算短信", pdf="/inbs/140120260710590974.pdf",
@@ -118,9 +122,22 @@ class GetNewsTests(unittest.TestCase):
     def tearDown(self):
         mock.patch.stopall()
 
-    def _run(self, html, ticker="7203.T", start="2026-06-12", end="2026-07-12"):
+    def _run(
+        self,
+        html,
+        ticker="7203.T",
+        start="2026-06-12",
+        end="2026-07-12",
+        *,
+        information_frontier=None,
+    ):
         with mock.patch.object(td, "_search", return_value=html):
-            return td.get_news(ticker, start, end)
+            return td.get_news(
+                ticker,
+                start,
+                end,
+                information_frontier=information_frontier,
+            )
 
     def test_filters_by_securities_code(self):
         html = _page(_row(code="72030", title="対象"), _row(code="99840", title="他社"))
@@ -140,6 +157,26 @@ class GetNewsTests(unittest.TestCase):
         self.assertIn("窓内", out)
         self.assertNotIn("前", out)
         self.assertNotIn("未来", out)
+
+    def test_information_frontier_filters_same_day_later_disclosure_from_body_and_records(self):
+        html = _page(
+            _row(title="前の開示", when="2026/07/10 17:30", pdf="/inbs/before.pdf"),
+            _row(title="後の開示", when="2026/07/10 18:30", pdf="/inbs/after.pdf"),
+        )
+
+        out = self._run(
+            html,
+            start="2026-07-10",
+            end="2026-07-10",
+            information_frontier="2026-07-10T18:00:00+09:00",
+        )
+
+        assert "前の開示" in out
+        assert "後の開示" not in out
+        assert [item.record_id for item in extract_source_observations(out)] == ["before"]
+        watermark = extract_source_watermarks(out)[0]
+        assert watermark.returned_records == 1
+        assert watermark.reported_records == 2
 
     def test_renders_block_header_and_pdf(self):
         html = _page(_row(title="決算短信", pdf="/inbs/1.pdf", when="2026/07/10 15:00"))
@@ -224,6 +261,36 @@ class GetNewsTests(unittest.TestCase):
         assert watermark.scanned_end == "2026-07-12"
         assert watermark.status == "limited"
         assert any("archive" in item.lower() for item in watermark.limitations)
+
+    def test_empty_scan_explicitly_attests_the_observed_archive_interval(self):
+        frontier = "2026-07-12T18:00:00+09:00"
+        out = self._run(
+            _page(count=0),
+            start="2026-07-01",
+            end="2026-07-12",
+            information_frontier=frontier,
+        )
+
+        watermark = extract_source_watermarks(out)[0]
+        assert watermark.status == "complete"
+        assert watermark.requested_interval == SourceInterval(
+            start="2026-07-01",
+            end="2026-07-12",
+        )
+        assert watermark.scanned_start == "2026-07-01"
+        assert watermark.scanned_end == "2026-07-12"
+        assert watermark.returned_records == 0
+        assert watermark.reported_records == 0
+        assert watermark.information_frontier == frontier
+
+    def test_unavailable_scan_does_not_attest_an_information_frontier(self):
+        frontier = "2026-07-12T18:00:00+09:00"
+
+        out = self._run(None, information_frontier=frontier)
+
+        watermark = extract_source_watermarks(out)[0]
+        assert watermark.status == "unavailable"
+        assert watermark.information_frontier is None
 
     def test_duplicate_retrieval_is_deduplicated_by_observed_version(self):
         row = _row(pdf="/inbs/140120260710590974.pdf", title="決算短信")

@@ -105,6 +105,7 @@ from .research import (
     RevisionDelta,
     UpdateSummary,
     evaluate_next_update_policy,
+    legacy_forward_research_anchor_qualification,
 )
 from .research_review import derive_review_status, review_status_in_group
 from .sanitization import sanitize_text
@@ -226,7 +227,7 @@ class ResearchRevisionNotFoundError(LookupError):
 
 
 class InvalidResearchBaselineError(ValueError):
-    """Raised when an update does not target the current Eligible Baseline."""
+    """Raised when an update does not target the current Research Chain head."""
 
 
 class OutcomeReflectionRegenerationNotFoundError(LookupError):
@@ -373,7 +374,7 @@ class RunRepository:
                 )
             if request.analysis_date <= baseline.cutoff:
                 raise InvalidResearchBaselineError(
-                    "update cutoff must be strictly later than the Eligible Baseline"
+                    "update cutoff must be strictly later than the current Research Chain head"
                 )
             existing_exact = session.scalar(
                 select(RunRecord)
@@ -968,6 +969,22 @@ class RunRepository:
                 )
             )
         return self.get_run(run_id)
+
+    def freeze_information_frontier(
+        self,
+        run_id: str,
+        frontier: datetime,
+    ) -> datetime:
+        """Persist the first usable frontier and reuse it for later attempts."""
+        if frontier.utcoffset() is None:
+            raise ValueError("Information Frontier requires a timezone")
+        with self.sessions.begin() as session:
+            record = session.get(RunRecord, run_id)
+            if record is None:
+                raise RunNotFoundError(run_id)
+            if record.information_frontier is None:
+                record.information_frontier = frontier.isoformat()
+            return datetime.fromisoformat(record.information_frontier)
 
     def checkpoint_thread(self, run_id: str) -> str:
         with self.sessions() as session:
@@ -3034,7 +3051,7 @@ class RunRepository:
             or chain.current_revision_id != baseline.id
         ):
             raise InvalidResearchBaselineError(
-                "Eligible Baseline is no longer the current Research Chain head"
+                "Update predecessor is no longer the current Research Chain head"
             )
         request = AnalysisRequest.model_validate(record.request_json)
         if request.ticker != chain.instrument or draft.current_state.instrument != chain.instrument:
@@ -3043,7 +3060,7 @@ class RunRepository:
             )
         if draft.cutoff <= baseline.cutoff:
             raise InvalidResearchBaselineError(
-                "completed update cutoff must be strictly later than the Eligible Baseline"
+                "completed update cutoff must be strictly later than the current Research Chain head"
             )
         revision_id = str(uuid4())
         session.add(
@@ -3081,6 +3098,11 @@ class RunRepository:
             predecessor_revision_id=predecessor_revision_id,
             producing_run_id=producing_run_id,
             cutoff=draft.cutoff,
+            information_frontier=(
+                draft.information_frontier.isoformat()
+                if draft.information_frontier is not None
+                else None
+            ),
             role=draft.role.value,
             execution_strategy=draft.execution_strategy.value,
             legacy_outcome=(
@@ -3146,6 +3168,10 @@ class RunRepository:
             current_revision_id=current.id,
             current_revision=current,
             revisions=revisions,
+            forward_research_anchor=(
+                current.coverage.anchor_qualification
+                or legacy_forward_research_anchor_qualification()
+            ),
             next_update_policy=evaluation.policy,
             next_update_reason=evaluation.reason,
             created_at=_aware(record.created_at),
@@ -3161,6 +3187,11 @@ class RunRepository:
             predecessor_revision_id=record.predecessor_revision_id,
             producing_run_id=record.producing_run_id,
             cutoff=record.cutoff,
+            information_frontier=(
+                datetime.fromisoformat(record.information_frontier)
+                if record.information_frontier is not None
+                else None
+            ),
             role=ResearchRevisionRole(record.role),
             execution_strategy=ResearchExecutionStrategy(record.execution_strategy),
             change_conclusion=(
@@ -3240,6 +3271,11 @@ class RunRepository:
             research_update_audit=(
                 ResearchUpdateAudit.model_validate(record.research_update_audit_json)
                 if record.research_update_audit_json is not None
+                else None
+            ),
+            information_frontier=(
+                datetime.fromisoformat(record.information_frontier)
+                if record.information_frontier is not None
                 else None
             ),
             status=RunStatus(record.status),

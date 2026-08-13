@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from .contracts import (
@@ -32,6 +33,7 @@ class RunContext:
     memory: MemoryContext
     instrument_context: str
     cancel_requested: Callable[[], bool]
+    information_frontier: datetime | None = None
     shutdown_requested: Callable[[], bool] = lambda: False
     artifact_writer: Callable[[ResearchArtifactDraft], None] = _discard_artifact
     evidence_writer: Callable[[EvidenceBundle], None] = _discard_evidence

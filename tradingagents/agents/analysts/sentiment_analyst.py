@@ -43,6 +43,10 @@ from tradingagents.agents.utils.agent_utils import (
     get_language_instruction,
     get_news,
 )
+from tradingagents.agents.utils.information_frontier import (
+    filter_evidence_content_at_information_frontier,
+    information_frontier_from_state,
+)
 from tradingagents.agents.utils.structured import (
     NO_EXTERNAL_TOOLS,
 )
@@ -70,6 +74,7 @@ def create_sentiment_analyst(llm):
     def sentiment_analyst_node(state):
         ticker = state["company_of_interest"]
         end_date = state["trade_date"]
+        information_frontier = information_frontier_from_state(state)
         config = get_config()
         news_start_date = lookback_start_date(
             end_date,
@@ -92,7 +97,17 @@ def create_sentiment_analyst(llm):
         # through route_to_vendor, which re-raises for a misconfigured/unset
         # vendor (news_data isn't optional), so we catch and degrade here.
         try:
-            news_block = get_news.func(ticker, news_start_date, end_date)
+            news_kwargs = (
+                {"information_frontier": information_frontier.isoformat()}
+                if information_frontier is not None
+                else {}
+            )
+            news_block = get_news.func(
+                ticker,
+                news_start_date,
+                end_date,
+                **news_kwargs,
+            )
         except Exception as exc:
             logger.warning("News fetch failed for %s: %s", ticker, exc)
             news_block = f"<news unavailable: {type(exc).__name__}>"
@@ -134,6 +149,40 @@ def create_sentiment_analyst(llm):
                 )
                 stocktwits_block = historical
                 reddit_block = historical
+
+        news_block, _ = filter_evidence_content_at_information_frontier(
+            news_block,
+            information_frontier,
+            fallback_source="routed ticker news",
+        )
+        stocktwits_block, _ = filter_evidence_content_at_information_frontier(
+            stocktwits_block,
+            information_frontier,
+            fallback_source="StockTwits",
+            temporal_scope="live_only" if live_run else "point_in_time",
+        )
+        reddit_block, _ = filter_evidence_content_at_information_frontier(
+            reddit_block,
+            information_frontier,
+            fallback_source="Reddit public feeds",
+            temporal_scope="live_only" if live_run else "point_in_time",
+        )
+        fetched_market_signals = tuple(
+            FetchedSentimentSignal(
+                spec=result.spec,
+                body=filter_evidence_content_at_information_frontier(
+                    result.body,
+                    information_frontier,
+                    fallback_source=result.spec.source,
+                    temporal_scope=(
+                        "live_only" if result.spec.live_only else "point_in_time"
+                    ),
+                )[0],
+                retrieved_at=result.retrieved_at,
+                structured_numeric_facts=result.structured_numeric_facts,
+            )
+            for result in fetched_market_signals
+        )
 
         sentiment_sources, prefetched_evidence = prepare_sentiment_sources(
             ticker=ticker,

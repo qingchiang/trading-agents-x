@@ -6,11 +6,13 @@ import operator
 import sqlite3
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict
 from datetime import date, datetime, timedelta, timezone
 from threading import Barrier, Lock
 from typing import Annotated
 from uuid import uuid4
 
+import pandas as pd
 import pytest
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, LLMResult
@@ -21,12 +23,18 @@ from sqlalchemy.exc import DatabaseError
 from typing_extensions import TypedDict
 
 from tests.factories import analyst_report, research_decision
+from tradingagents.application.anchor_readiness import (
+    AnchorReadinessError,
+    AnchorReadinessReason,
+    AnchorReadinessResult,
+)
 from tradingagents.application.contracts import (
     AnalysisRequest,
     ArtifactGenerationMethod,
     EvidenceBundle,
     EvidenceItem,
     ResearchArtifactDraft,
+    ResearchUpdateTransitionCoverage,
     RunMetrics,
     RunStatus,
 )
@@ -60,17 +68,34 @@ from tradingagents.application.research import (
     ResearchRevisionDraft,
     ResearchRevisionRole,
     RevisionDelta,
+    SourceObservationInterval,
     SourceRecordSnapshotItem,
+    SourceRecordVersion,
     SourceWatermarkSnapshot,
+    TransitionCapabilityAttestation,
+    TransitionCoverageAttestation,
     assemble_full_revision,
+    assess_deterministic_update,
+    render_revision_export_markdown,
     validate_experimental_nmc_candidate,
 )
 from tradingagents.application.runtime import RunCancelled, WorkerShutdown
 from tradingagents.application.service import AnalysisService, ChainUpdateExecutionError
 from tradingagents.dataflows.config import get_config
 from tradingagents.dataflows.errors import NoMarketDataError
+from tradingagents.dataflows.jp import edinet_common, edinet_news, jp_news, jquants_indicator
+from tradingagents.dataflows.jp.calendar import is_tse_open
 from tradingagents.graph.research_graph import GraphExecution
-from tradingagents.provenance import SourceWatermark, attach_source_watermarks
+from tradingagents.provenance import (
+    ProvenanceRecord,
+    SourceObservation,
+    SourceWatermark,
+    attach_provenance,
+    attach_source_observations,
+    attach_source_watermarks,
+    extract_source_observations,
+    extract_source_watermarks,
+)
 
 
 def _execution(ticker: str) -> GraphExecution:
@@ -135,6 +160,45 @@ class _Graph:
         if self.error is not None:
             raise self.error
         return _execution(context.request.ticker)
+
+
+class _FrontierCapturingGraph(_Graph):
+    frontiers: list[datetime] = []
+
+    def execute(self, context, **kwargs):
+        assert context.information_frontier is not None
+        self.frontiers.append(context.information_frontier)
+        execution = _execution(context.request.ticker)
+        visible = execution.evidence.items[0].model_copy(
+            update={"available_at": context.information_frontier - timedelta(minutes=1)}
+        )
+        later = EvidenceItem.create(
+            source="future fixture",
+            evidence_type="late evidence",
+            requested_date=context.request.analysis_date,
+            effective_date=context.request.analysis_date,
+            available_at=context.information_frontier + timedelta(minutes=1),
+            content="This was not knowable at the frozen frontier.",
+        )
+        evidence = EvidenceBundle(
+            instrument=context.request.ticker,
+            analysis_date=context.request.analysis_date,
+            information_frontier=context.information_frontier,
+            items=(visible, later),
+        )
+        return execution.__class__(
+            state=execution.state,
+            evidence=evidence,
+            reports=execution.reports,
+            decision=execution.decision,
+        )
+
+
+class _FrontierInspectingGraph(_FrontierCapturingGraph):
+    def execute(self, context, **kwargs):
+        execution = super().execute(context, **kwargs)
+        assert [item.source for item in execution.evidence.items] == ["fixture"]
+        return execution
 
 
 class _MemoryCapturingGraph(_Graph):
@@ -221,6 +285,41 @@ class _ArtifactGraph:
             )
         )
         return execution
+
+
+class _EdinetParentCorrectionGraph:
+    def __init__(self, **_kwargs):
+        pass
+
+    def execute(self, context, **_kwargs):
+        execution = _execution(context.request.ticker)
+        output = edinet_news.get_news(
+            context.request.ticker,
+            context.request.analysis_date.isoformat(),
+            context.request.analysis_date.isoformat(),
+        )
+        evidence = execution.evidence.items[0].model_copy(
+            update={
+                "provenance": {
+                    "source_records": [
+                        asdict(item) for item in extract_source_observations(output)
+                    ],
+                    "source_watermarks": [
+                        asdict(item) for item in extract_source_watermarks(output)
+                    ],
+                }
+            }
+        )
+        return execution.__class__(
+            state=execution.state,
+            evidence=EvidenceBundle(
+                instrument=execution.evidence.instrument,
+                analysis_date=execution.evidence.analysis_date,
+                items=(evidence,),
+            ),
+            reports=execution.reports,
+            decision=execution.decision,
+        )
 
 
 class _MetricFailureGraph:
@@ -384,6 +483,7 @@ def _reset_graph():
     _ResumableGraph.first_calls = 0
     _ResumableGraph.second_calls = 0
     _ResumableGraph.fail_second_once = True
+    _FrontierCapturingGraph.frontiers = []
     yield
     _Graph.barrier = None
     _Graph.observed = []
@@ -391,15 +491,42 @@ def _reset_graph():
     _ResumableGraph.first_calls = 0
     _ResumableGraph.second_calls = 0
     _ResumableGraph.fail_second_once = True
+    _FrontierCapturingGraph.frontiers = []
 
 
 def _eligible_state_assembler(request, execution):
     draft = assemble_full_revision(request, execution)
+    market_session = request.analysis_date
+    while not is_tse_open(market_session):
+        market_session -= timedelta(days=1)
     required_sources = ["EDINET", "TDnet"]
     if "fundamentals" in request.analysts:
         required_sources.append("J-Quants fundamentals")
     if "market" in request.analysts:
         required_sources.append("J-Quants adjusted OHLCV")
+    market_record = (
+        (
+            SourceRecordVersion(
+                source="J-Quants adjusted OHLCV",
+                record_id=f"market:{request.ticker}",
+                version_id=f"market:{request.ticker}:{request.analysis_date}",
+                status="published",
+                published_at=f"{market_session} 17:00",
+                available_at=datetime.combine(
+                    market_session,
+                    datetime.min.time(),
+                    tzinfo=timezone(timedelta(hours=9)),
+                ).replace(hour=17),
+                title="Completed market observation",
+                evidence_ref=execution.evidence.items[0].ref,
+                record_kind="market",
+                adjustment="split_adjusted",
+                unit="JPY",
+            ),
+        )
+        if "market" in request.analysts and request.ticker.endswith(".T")
+        else ()
+    )
     return draft.model_copy(
         update={
             "coverage": draft.coverage.model_copy(
@@ -428,6 +555,18 @@ def _eligible_state_assembler(request, execution):
             ),
             "evidence_snapshot": draft.evidence_snapshot.model_copy(
                 update={
+                    "source_records": (*draft.evidence_snapshot.source_records, *market_record),
+                    "source_record_lineage": (
+                        *draft.evidence_snapshot.source_record_lineage,
+                        *tuple(
+                            SourceRecordSnapshotItem(
+                                version_id=record.version_id,
+                                lineage="new",
+                                observed_in_execution=True,
+                            )
+                            for record in market_record
+                        ),
+                    ),
                     "source_watermarks": tuple(
                         SourceWatermarkSnapshot(
                             source=source,
@@ -440,10 +579,39 @@ def _eligible_state_assembler(request, execution):
                         for source in required_sources
                     )
                     if request.ticker.endswith(".T")
-                    else ()
+                    else (),
                 }
             ),
         }
+    )
+
+
+def _anchor_ready(
+    request,
+    *,
+    information_frontier,
+    market_checker,
+    news_collector,
+    anchor_frontier=None,
+):
+    del news_collector, anchor_frontier
+    try:
+        market_checker(request.ticker, request.analysis_date)
+    except Exception:
+        return AnchorReadinessResult(
+            ready=False,
+            requested_cutoff=request.analysis_date,
+            information_frontier=information_frontier,
+            profile_id="jp-listed-equity-v1",
+            reasons=(AnchorReadinessReason.MISSING_MARKET_OBSERVATION,),
+            metrics=RunMetrics(tool_calls=1),
+        )
+    return AnchorReadinessResult(
+        ready=True,
+        requested_cutoff=request.analysis_date,
+        information_frontier=information_frontier,
+        profile_id="jp-listed-equity-v1",
+        metrics=RunMetrics(tool_calls=2, wall_time_seconds=0.25),
     )
 
 
@@ -461,6 +629,7 @@ def _service(
         ),
     )
     kwargs.setdefault("market_data_readiness_checker", lambda *_args: None)
+    kwargs.setdefault("anchor_readiness_checker", _anchor_ready)
     return AnalysisService(
         app_settings,
         repository=repository,
@@ -472,6 +641,153 @@ def _service(
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
         local_name_resolver=lambda _ticker, _date, _config: None,
         **kwargs,
+    )
+
+
+def _experimental_nmc_candidate(
+    baseline: ResearchRevisionDraft,
+    cutoff: date,
+) -> ResearchRevisionDraft:
+    inherited_snapshot = baseline.evidence_snapshot.model_copy(
+        update={
+            "bundle": baseline.evidence_snapshot.bundle.model_copy(
+                update={"analysis_date": cutoff}
+            ),
+            "lineage": tuple(
+                EvidenceSnapshotItem(
+                    evidence_ref=item.evidence_ref,
+                    lineage="inherited",
+                    source_revision_id=baseline.id,
+                )
+                for item in baseline.evidence_snapshot.lineage
+            ),
+            "source_record_lineage": tuple(
+                SourceRecordSnapshotItem(
+                    version_id=item.version_id,
+                    lineage="inherited",
+                    observed_in_execution=False,
+                    source_revision_id=baseline.id,
+                )
+                for item in baseline.evidence_snapshot.source_record_lineage
+            ),
+            "source_watermarks": tuple(
+                item.model_copy(
+                    update={
+                        "scanned_end": cutoff,
+                        "baseline_cutoff": baseline.cutoff,
+                        "overlap_start": baseline.cutoff,
+                    }
+                )
+                for item in baseline.evidence_snapshot.source_watermarks
+            ),
+        }
+    )
+    return ResearchRevisionDraft(
+        cutoff=cutoff,
+        role=ResearchRevisionRole.UPDATE,
+        execution_strategy=ResearchExecutionStrategy.INCREMENTAL,
+        change_conclusion=ResearchChangeConclusion.NO_MATERIAL_CHANGE,
+        delta=RevisionDelta(
+            opinion_changed=False,
+            claims=tuple(
+                ClaimRevisionDelta(
+                    object_id=item.id,
+                    previous_object_id=item.id,
+                    change=ClaimChange.REAFFIRMED,
+                    identity_disposition=IdentityDisposition.EXACT_MATCH,
+                )
+                for item in baseline.current_state.claims
+            ),
+            questions=tuple(
+                QuestionRevisionDelta(
+                    object_id=item.id,
+                    previous_object_id=item.id,
+                    change=QuestionChange.REAFFIRMED,
+                    identity_disposition=IdentityDisposition.EXACT_MATCH,
+                )
+                for item in baseline.current_state.questions
+            ),
+            inherited_evidence_refs=baseline.current_state.evidence_refs,
+        ),
+        current_state=baseline.current_state.model_copy(
+            update={
+                "cutoff": cutoff,
+                "scenarios": tuple(
+                    item.model_copy(update={"cutoff": cutoff})
+                    for item in baseline.current_state.scenarios
+                ),
+            }
+        ),
+        coverage=baseline.coverage.model_copy(
+            update={
+                "claims": tuple(
+                    item.model_copy(update={"status": CoverageStatus.COMPLETE})
+                    for item in baseline.coverage.claims
+                ),
+                "questions": tuple(
+                    item.model_copy(update={"status": CoverageStatus.COMPLETE})
+                    for item in baseline.coverage.questions
+                ),
+                "domains": tuple(
+                    item.model_copy(update={"status": CoverageStatus.COMPLETE})
+                    for item in baseline.coverage.domains
+                ),
+                "supports_no_material_change": True,
+            }
+        ),
+        update_summary=baseline.update_summary.model_copy(
+            update={
+                "summary": "Bounded assessment reaffirmed the current research state.",
+                "baseline_cutoff": baseline.cutoff,
+                "analysis_cutoff": cutoff,
+                "execution_strategy": ResearchExecutionStrategy.INCREMENTAL,
+                "change_conclusion": ResearchChangeConclusion.NO_MATERIAL_CHANGE,
+            }
+        ),
+        evidence_snapshot=inherited_snapshot,
+    )
+
+
+def _transition_coverage(
+    baseline: ResearchRevisionDraft,
+    cutoff: date,
+    *,
+    complete: bool,
+) -> TransitionCoverageAttestation:
+    assert baseline.information_frontier is not None
+    required_capabilities = tuple(
+        item.capability
+        for item in baseline.coverage.anchor_qualification.capabilities
+        if item.required
+    )
+    sources_by_capability = {
+        "official_filing": ("EDINET",),
+        "timely_disclosure": ("TDnet",),
+        "fundamentals": ("J-Quants fundamentals",),
+        "market_observation": ("J-Quants adjusted OHLCV",),
+        "media": ("Google News",),
+        "social_sentiment": ("Google News",),
+        "macro": ("Google News",),
+    }
+    return TransitionCoverageAttestation(
+        anchor_frontier=baseline.information_frontier,
+        update_frontier=datetime.combine(
+            cutoff,
+            datetime.max.time(),
+            tzinfo=baseline.information_frontier.tzinfo,
+        ),
+        complete=complete,
+        capabilities=tuple(
+            TransitionCapabilityAttestation(
+                capability=capability,
+                complete=complete,
+                sources=sources_by_capability[capability.value],
+                checked_intervals=(
+                    SourceObservationInterval(start=baseline.cutoff, end=cutoff),
+                ),
+            )
+            for capability in required_capabilities
+        ),
     )
 
 
@@ -513,6 +829,370 @@ def test_service_persists_events_before_callback_and_result(
     assert events[2].payload["api_key"] == "[REDACTED]"
 
 
+def test_historical_research_execution_freezes_market_local_end_of_cutoff(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(
+        app_settings,
+        repository,
+        graph_factory=_FrontierInspectingGraph,
+        utc_clock=lambda: datetime(2026, 7, 26, 3, 0, tzinfo=timezone.utc),
+    )
+
+    result = service.run_initial_chain(
+        AnalysisRequest(ticker="7203.T", analysis_date="2026-07-24", analysts=("market",))
+    )
+
+    run = repository.get_run(result.run_id)
+    revision = repository.list_research_chains(instrument="7203.T")[0].current_revision
+    expected = datetime(
+        2026,
+        7,
+        24,
+        23,
+        59,
+        59,
+        999999,
+        tzinfo=timezone(timedelta(hours=9)),
+    )
+    assert run.request.analysis_date == date(2026, 7, 24)
+    assert run.information_frontier == expected
+    assert revision is not None
+    assert revision.cutoff == date(2026, 7, 24)
+    assert revision.information_frontier == expected
+    assert revision.evidence_snapshot.bundle.information_frontier == expected
+    assert [item.source for item in revision.evidence_snapshot.bundle.items] == ["fixture"]
+
+
+def test_current_research_execution_reuses_frozen_frontier_on_retry(
+    app_settings,
+    repository,
+) -> None:
+    clock = iter(
+        (
+            datetime(2026, 7, 24, 9, 0, tzinfo=timezone.utc),
+            datetime(2026, 7, 24, 10, 0, tzinfo=timezone.utc),
+        )
+    )
+    _Graph.error = RuntimeError("fixture failure after collection started")
+    readiness_frontiers = []
+
+    def readiness(*args, information_frontier, **kwargs):
+        readiness_frontiers.append(information_frontier)
+        return _anchor_ready(
+            *args,
+            information_frontier=information_frontier,
+            **kwargs,
+        )
+
+    service = _service(
+        app_settings,
+        repository,
+        utc_clock=lambda: next(clock),
+        anchor_readiness_checker=readiness,
+    )
+    view = service.enqueue_initial_chain(
+        AnalysisRequest(ticker="7203.T", analysis_date="2026-07-24", analysts=("market",))
+    )
+    claimed = repository.claim_run(view.id, "worker-1", app_settings.lease_seconds)
+    with pytest.raises(RuntimeError, match="fixture failure"):
+        service.execute_claimed(claimed, worker_id="worker-1")
+    frozen = repository.get_run(view.id).information_frontier
+
+    _Graph.error = None
+    retried = service.retry(view.id)
+    claimed = repository.claim_run(retried.id, "worker-2", app_settings.lease_seconds)
+    service.execute_claimed(claimed, worker_id="worker-2")
+
+    assert frozen == datetime(2026, 7, 24, 18, 0, tzinfo=timezone(timedelta(hours=9)))
+    assert repository.get_run(view.id).information_frontier == frozen
+    assert readiness_frontiers == [frozen, frozen]
+
+
+def test_readiness_failure_does_not_freeze_information_frontier(
+    app_settings,
+    repository,
+) -> None:
+    def not_ready(*_args):
+        raise MarketDataNotReadyError("market not ready")
+
+    service = _service(
+        app_settings,
+        repository,
+        market_data_readiness_checker=not_ready,
+        utc_clock=lambda: datetime(2026, 7, 24, 7, 0, tzinfo=timezone.utc),
+    )
+    view = service.enqueue_initial_chain(
+        AnalysisRequest(ticker="7203.T", analysis_date="2026-07-24", analysts=("market",))
+    )
+    claimed = repository.claim_run(view.id, "worker", app_settings.lease_seconds)
+
+    with pytest.raises(AnchorReadinessError) as raised:
+        service.execute_claimed(claimed, worker_id="worker")
+
+    assert repository.get_run(view.id).information_frontier is None
+    assert raised.value.result.reasons == (AnchorReadinessReason.MISSING_MARKET_OBSERVATION,)
+    assert repository.get_run(view.id).metrics.llm_calls == 0
+
+
+def test_anchor_readiness_failure_can_retry_and_freezes_only_successful_frontier(
+    app_settings,
+    repository,
+) -> None:
+    ready = False
+
+    def readiness(*_args):
+        if not ready:
+            raise MarketDataNotReadyError("market not ready")
+
+    service = _service(
+        app_settings,
+        repository,
+        market_data_readiness_checker=readiness,
+        utc_clock=lambda: datetime(2026, 7, 24, 9, 0, tzinfo=timezone.utc),
+    )
+    view = service.enqueue_initial_chain(
+        AnalysisRequest(ticker="7203.T", analysis_date="2026-07-24")
+    )
+    claimed = repository.claim_run(view.id, "worker-1", app_settings.lease_seconds)
+    with pytest.raises(AnchorReadinessError):
+        service.execute_claimed(claimed, worker_id="worker-1")
+    assert repository.get_run(view.id).information_frontier is None
+
+    ready = True
+    retried = service.retry(view.id)
+    claimed = repository.claim_run(retried.id, "worker-2", app_settings.lease_seconds)
+    result = service.execute_claimed(claimed, worker_id="worker-2")
+
+    assert result.status is RunStatus.SUCCEEDED
+    assert repository.get_run(view.id).information_frontier == datetime(
+        2026, 7, 24, 18, 0, tzinfo=timezone(timedelta(hours=9))
+    )
+    assert result.metrics.llm_calls == 0
+    assert result.metrics.tool_calls == 3
+
+
+def test_initial_chain_can_explicitly_allow_non_anchor_full_research(
+    app_settings,
+    repository,
+) -> None:
+    readiness_calls = 0
+
+    def readiness(*_args):
+        nonlocal readiness_calls
+        readiness_calls += 1
+        raise AssertionError("non-anchor Full must not claim readiness")
+
+    service = _service(
+        app_settings,
+        repository,
+        market_data_readiness_checker=readiness,
+        utc_clock=lambda: datetime(2026, 7, 24, 9, 0, tzinfo=timezone.utc),
+    )
+
+    result = service.run_initial_chain(
+        AnalysisRequest(
+            ticker="7203.T",
+            analysis_date="2026-07-24",
+            anchor_readiness="allow_non_anchor",
+        )
+    )
+
+    run = repository.get_run(result.run_id)
+    assert result.status is RunStatus.SUCCEEDED
+    assert run.request.anchor_readiness == "allow_non_anchor"
+    assert readiness_calls == 0
+    chain = repository.list_research_chains(instrument="7203.T")[0]
+    assert not chain.forward_research_anchor.is_forward_research_anchor
+    assert chain.forward_research_anchor.reasons == ("anchor_readiness_not_required",)
+    assert chain.next_update_policy == "full_required"
+    assert any(
+        event.event_type == "research.anchor_readiness_not_required"
+        for event in repository.list_events(run.id)
+    )
+
+
+def test_full_update_that_must_reanchor_runs_complete_readiness_before_llm(
+    app_settings,
+    repository,
+) -> None:
+    initial = _service(app_settings, repository)
+    initial.run_initial_chain(
+        AnalysisRequest(
+            ticker="7203.T",
+            analysis_date="2026-07-24",
+            anchor_readiness="allow_non_anchor",
+        )
+    )
+    chain = repository.list_research_chains(instrument="7203.T")[0]
+    llm_calls = 0
+    observed_anchor_frontiers = []
+
+    def llm_factory(*_args, **_kwargs):
+        nonlocal llm_calls
+        llm_calls += 1
+        return object(), object()
+
+    def not_ready(request, *, information_frontier, anchor_frontier, **_kwargs):
+        observed_anchor_frontiers.append(anchor_frontier)
+        return AnchorReadinessResult(
+            ready=False,
+            requested_cutoff=request.analysis_date,
+            information_frontier=information_frontier,
+            profile_id="jp-listed-equity-v1",
+            reasons=(AnchorReadinessReason.REQUIRED_CAPABILITY_UNAVAILABLE,),
+            metrics=RunMetrics(tool_calls=2),
+        )
+
+    service = _service(
+        app_settings,
+        repository,
+        llm_factory=llm_factory,
+        anchor_readiness_checker=not_ready,
+    )
+    queued = service.enqueue_chain_update(
+        chain.id,
+        chain.current_revision_id,
+        AnalysisRequest(ticker="7203.T", analysis_date="2026-07-25"),
+    )
+    claimed = repository.claim_run(queued.id, "worker", app_settings.lease_seconds)
+
+    with pytest.raises(AnchorReadinessError) as raised:
+        service.execute_claimed(claimed, worker_id="worker")
+
+    assert queued.research_execution_strategy == "full"
+    assert raised.value.result.reasons == (
+        AnchorReadinessReason.REQUIRED_CAPABILITY_UNAVAILABLE,
+    )
+    assert observed_anchor_frontiers == [chain.current_revision.information_frontier]
+    assert llm_calls == 0
+
+
+def test_source_frontier_and_structured_limitations_round_trip_without_optimism(
+    app_settings,
+    repository,
+    tmp_path,
+) -> None:
+    frontier = datetime(2026, 7, 24, 18, 0, tzinfo=timezone(timedelta(hours=9)))
+
+    def limited_assembler(request, execution):
+        draft = _eligible_state_assembler(request, execution)
+        watermark = draft.evidence_snapshot.source_watermarks[0].model_copy(
+            update={
+                "scanned_start": date(2026, 7, 1),
+                "scanned_end": date(2026, 7, 23),
+                "status": CoverageStatus.LIMITED,
+                "limitations": ("Archive attests only through July 23.",),
+            }
+        )
+        return draft.model_copy(
+            update={
+                "evidence_snapshot": draft.evidence_snapshot.model_copy(
+                    update={
+                        "source_watermarks": (
+                            watermark,
+                            *draft.evidence_snapshot.source_watermarks[1:],
+                        )
+                    }
+                )
+            }
+        )
+
+    service = _service(
+        app_settings,
+        repository,
+        state_assembler=limited_assembler,
+        utc_clock=lambda: frontier.astimezone(timezone.utc),
+    )
+
+    result = service.run_initial_chain(
+        AnalysisRequest(ticker="7203.T", analysis_date="2026-07-24", analysts=("market",))
+    )
+    revision = repository.list_research_chains(instrument="7203.T")[0].current_revision
+
+    assert revision is not None
+    watermark = revision.evidence_snapshot.source_watermarks[0]
+    assert watermark.information_frontier == datetime(
+        2026, 7, 23, 23, 59, 59, 999999, tzinfo=timezone(timedelta(hours=9))
+    )
+    assert watermark.information_frontier < revision.information_frontier
+    assert watermark.requested_interval.model_dump(mode="json") == {
+        "start": "2026-07-01",
+        "end": "2026-07-23",
+    }
+    assert [item.model_dump(mode="json") for item in watermark.observed_intervals] == [
+        {"start": "2026-07-01", "end": "2026-07-23"}
+    ]
+    assert watermark.structured_limitations[0].presentation_text == (
+        "Archive attests only through July 23."
+    )
+    assert watermark.structured_limitations[0].temporal_scope == "point_in_time"
+    assert repository.get_run(result.run_id).information_frontier == frontier
+    _, markdown = service.export_revision(revision.id, format="markdown")
+    assert "Research Cutoff: 2026-07-24" in markdown
+    assert "Information Frontier: 2026-07-24T18:00:00+09:00" in markdown
+    assert "source frontier: 2026-07-23T23:59:59.999999+09:00" in markdown
+    _, exported_json = service.export_revision(revision.id, format="json")
+    exported = json.loads(exported_json)
+    assert exported["revision"]["information_frontier"] == "2026-07-24T18:00:00+09:00"
+    backup = service.backup_database(tmp_path / "frontier-backup.db")
+    with sqlite3.connect(backup) as connection:
+        assert connection.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+        assert connection.execute(
+            "SELECT information_frontier FROM runs WHERE id = ?",
+            (result.run_id,),
+        ).fetchone() == ("2026-07-24T18:00:00+09:00",)
+        assert connection.execute(
+            "SELECT information_frontier FROM research_revisions WHERE id = ?",
+            (revision.id,),
+        ).fetchone() == ("2026-07-24T18:00:00+09:00",)
+
+
+def test_unavailable_source_does_not_claim_an_observed_frontier(
+    app_settings,
+    repository,
+) -> None:
+    def unavailable_assembler(request, execution):
+        draft = _eligible_state_assembler(request, execution)
+        watermark = draft.evidence_snapshot.source_watermarks[0].model_copy(
+            update={
+                "status": CoverageStatus.UNAVAILABLE,
+                "limitations": ("Source was unavailable during collection.",),
+            }
+        )
+        return draft.model_copy(
+            update={
+                "evidence_snapshot": draft.evidence_snapshot.model_copy(
+                    update={
+                        "source_watermarks": (
+                            watermark,
+                            *draft.evidence_snapshot.source_watermarks[1:],
+                        )
+                    }
+                )
+            }
+        )
+
+    service = _service(
+        app_settings,
+        repository,
+        state_assembler=unavailable_assembler,
+    )
+
+    service.run_initial_chain(
+        AnalysisRequest(ticker="7203.T", analysis_date="2026-07-24", analysts=("market",))
+    )
+    revision = repository.list_research_chains(instrument="7203.T")[0].current_revision
+
+    assert revision is not None
+    watermark = revision.evidence_snapshot.source_watermarks[0]
+    assert watermark.status is CoverageStatus.UNAVAILABLE
+    assert watermark.information_frontier is None
+    assert watermark.observed_intervals == ()
+    assert watermark.structured_limitations[0].observed_intervals == ()
+
+
 def test_research_chain_market_readiness_fails_before_llm_or_graph(
     app_settings,
     repository,
@@ -542,12 +1222,14 @@ def test_research_chain_market_readiness_fails_before_llm_or_graph(
     )
     claimed = repository.claim_run(queued.id, "worker", 30)
 
-    with pytest.raises(RuntimeError, match="daily bar is not ready"):
+    with pytest.raises(AnchorReadinessError) as raised:
         service.execute_claimed(claimed, worker_id="worker")
 
     failed = repository.get_run(queued.id)
     assert failed.status is RunStatus.FAILED
     assert failed.metrics.llm_calls == 0
+    assert failed.metrics.tool_calls == 1
+    assert raised.value.result.reasons == (AnchorReadinessReason.MISSING_MARKET_OBSERVATION,)
     assert llm_calls == 0
 
 
@@ -576,7 +1258,7 @@ def test_research_chain_without_market_analyst_still_checks_jquants_readiness(
     )
     claimed = repository.claim_run(queued.id, "worker", 30)
 
-    with pytest.raises(MarketDataNotReadyError, match="daily bar is not ready"):
+    with pytest.raises(AnchorReadinessError):
         service.execute_claimed(claimed, worker_id="worker")
 
     assert readiness_calls == 1
@@ -690,6 +1372,66 @@ def test_successful_explicit_full_analysis_creates_primary_research_chain(
             ),
             {"revision_id": revision.id},
         )
+
+
+def test_full_research_assembles_multiple_edinet_corrections_with_parent_outside_window(
+    app_settings,
+    repository,
+    monkeypatch,
+) -> None:
+    parent_id = "S100OUTSIDE"
+    records = [
+        {
+            "secCode": "65010",
+            "docDescription": "訂正有価証券報告書",
+            "docTypeCode": "130",
+            "filerName": "株式会社日立製作所",
+            "submitDateTime": "2026-07-20 15:00",
+            "opeDateTime": operation_time,
+            "docID": doc_id,
+            "parentDocID": parent_id,
+            "docInfoEditStatus": "2",
+        }
+        for doc_id, operation_time in (
+            ("S100CORRECTION1", "2026-07-24 09:15"),
+            ("S100CORRECTION2", "2026-07-24 10:30"),
+        )
+    ]
+    edinet_common._documents_cache.clear()
+    monkeypatch.setattr(edinet_common, "fetch_documents", lambda _date: records)
+    service = _service(
+        app_settings,
+        repository,
+        graph_factory=_EdinetParentCorrectionGraph,
+    )
+
+    result = service.run_initial_chain(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+
+    assert result.status is RunStatus.SUCCEEDED
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+    revision = repository.get_research_chain(chain.id).current_revision
+    assert revision is not None
+    assert {item.record_id for item in revision.evidence_snapshot.source_records} == {
+        parent_id,
+        "market:6501.T",
+    }
+    assert {
+        item.native_record_id
+        for item in revision.evidence_snapshot.source_records
+        if item.native_record_id is not None
+    } == {
+        "S100CORRECTION1",
+        "S100CORRECTION2",
+    }
+    assert all(
+        item.replaces_version_id is None for item in revision.evidence_snapshot.source_records
+    )
 
 
 def test_initial_research_chain_does_not_load_or_inject_legacy_memory(
@@ -810,9 +1552,7 @@ def test_feedback_failure_cannot_change_research_revision(
     )
     chain = repository.list_research_chains(instrument="NVDA")[0]
     revision_before = chain.current_revision
-    outcome = repository.pending_outcomes(
-        due_at=datetime(2100, 1, 1, tzinfo=timezone.utc)
-    )[0]
+    outcome = repository.pending_outcomes(due_at=datetime(2100, 1, 1, tzinfo=timezone.utc))[0]
     repository.persist_outcome_observation(
         outcome["outcome_id"],
         observation=OutcomeObservation(
@@ -904,9 +1644,7 @@ def test_settlement_qualifies_decision_cutoff_as_versioned_feedback(
     feedback = repository.review_entries(ticker="NVDA")[0]["outcome_feedback"]
     assert stats == {"checked": 1, "resolved": 1, "pending": 0, "failed": 0}
     assert feedback["status"] == "eligible"
-    assert feedback["qualification_policy_version"] == (
-        "outcome_feedback_qualification.v2"
-    )
+    assert feedback["qualification_policy_version"] == ("outcome_feedback_qualification.v2")
     assert repository.review_entries(ticker="NVDA")[0]["method_feedback"] == (
         "Use a bounded methodological check."
     )
@@ -1128,9 +1866,7 @@ def test_chain_update_strategy_uses_source_qualified_japanese_capability(
     ticker,
     expected_strategy,
 ) -> None:
-    configured = app_settings.model_copy(
-        update={"research_update_mode": mode}
-    )
+    configured = app_settings.model_copy(update={"research_update_mode": mode})
     service = _service(configured, repository)
     service.run_initial_chain(
         AnalysisRequest(ticker=ticker, analysis_date="2026-07-24", analysts=("market",))
@@ -1158,12 +1894,20 @@ def test_repository_round_trip_uses_configured_mode_for_source_qualified_policy(
     )
 
     eligible = repository.list_research_chains(instrument="7203.T")[0]
+    assert eligible.forward_research_anchor.is_forward_research_anchor is True
+    assert eligible.current_revision.coverage.anchor_qualification == (
+        eligible.forward_research_anchor
+    )
+    _, exported = service.export_revision(
+        eligible.current_revision_id,
+        format="markdown",
+    )
+    assert "Forward Research Anchor: qualified" in exported
+    assert "### Anchor Coverage" in exported
     assert eligible.next_update_policy == "incremental_allowed"
     assert eligible.next_update_reason is None
 
-    off_repository = RunRepository(
-        app_settings.model_copy(update={"research_update_mode": "off"})
-    )
+    off_repository = RunRepository(app_settings.model_copy(update={"research_update_mode": "off"}))
     full_only = off_repository.get_research_chain(eligible.id)
     assert full_only.next_update_policy == "full_required"
     assert full_only.next_update_reason == "experiment_mode_off"
@@ -1173,20 +1917,49 @@ def test_ineligible_head_rejects_explicit_incremental_but_allows_full(
     app_settings,
     repository,
 ) -> None:
+    def incomplete_assembler(request, execution):
+        draft = _eligible_state_assembler(request, execution)
+        return draft.model_copy(
+            update={
+                "coverage": draft.coverage.model_copy(
+                    update={
+                        "domains": tuple(
+                            item.model_copy(update={"status": CoverageStatus.LIMITED})
+                            for item in draft.coverage.domains
+                        ),
+                        "supports_no_material_change": False,
+                    }
+                )
+            }
+        )
+
     service = _service(
         app_settings,
         repository,
-        state_assembler=assemble_full_revision,
+        graph_factory=_FrontierCapturingGraph,
+        state_assembler=incomplete_assembler,
+        revision_comparator=lambda _id, _baseline, draft: ResearchRevisionDraft.model_validate(
+            draft.model_copy(
+                update={
+                    "role": ResearchRevisionRole.UPDATE,
+                    "change_conclusion": ResearchChangeConclusion.INDETERMINATE,
+                    "indeterminate_reason": IndeterminateReason.COVERAGE_INCOMPLETE,
+                }
+            ).model_dump(mode="python")
+        ),
     )
     service.run_initial_chain(
         AnalysisRequest(ticker="6501.T", analysis_date="2026-07-24", analysts=("market",))
     )
     chain = repository.list_research_chains(instrument="6501.T")[0]
     assert chain.next_update_policy == "full_required"
-    assert chain.next_update_reason == "required_source_coverage_incomplete"
+    assert chain.next_update_reason == "anchor_coverage_incomplete"
     request = AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",))
 
-    with pytest.raises(InvalidResearchBaselineError, match="does not allow Incremental Execution"):
+    with pytest.raises(
+        InvalidResearchBaselineError,
+        match="Forward Research Anchor does not allow Incremental Execution",
+    ):
         service.enqueue_chain_update(
             chain.id,
             chain.current_revision_id,
@@ -1201,6 +1974,62 @@ def test_ineligible_head_rejects_explicit_incremental_but_allows_full(
         execution_strategy=ResearchExecutionStrategy.FULL,
     )
     assert queued.research_execution_strategy == "full"
+    service.state_assembler = _eligible_state_assembler
+    claimed = repository.claim_run(queued.id, "worker", 30)
+
+    service.execute_claimed(claimed, worker_id="worker")
+
+    recovered = repository.get_research_chain(chain.id)
+    assert recovered.current_revision.coverage.anchor_qualification is not None
+    assert (
+        recovered.current_revision.coverage.anchor_qualification.is_forward_research_anchor
+    ), recovered.current_revision.coverage.anchor_qualification.model_dump(mode="json")
+    assert recovered.next_update_policy == "incremental_allowed"
+    assert recovered.next_update_reason is None
+    following = service.enqueue_chain_update(
+        chain.id,
+        recovered.current_revision_id,
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-26", analysts=("market",)),
+    )
+    assert following.research_execution_strategy == "incremental"
+
+
+def test_current_non_anchor_head_cannot_be_bypassed_with_an_older_anchor(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(app_settings, repository)
+    service.run_initial_chain(
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-24", analysts=("market",))
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+    old_anchor_id = chain.current_revision_id
+    service.state_assembler = assemble_full_revision
+    queued = service.enqueue_chain_update(
+        chain.id,
+        old_anchor_id,
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
+        execution_strategy=ResearchExecutionStrategy.FULL,
+    )
+    claimed = repository.claim_run(queued.id, "worker", 30)
+    service.execute_claimed(claimed, worker_id="worker")
+    non_anchor = repository.get_research_chain(chain.id)
+    assert non_anchor.current_revision_id != old_anchor_id
+    assert non_anchor.next_update_policy == "full_required"
+
+    historical_export = service.get_revision_export(old_anchor_id)
+    assert historical_export.revision.id == old_anchor_id
+    assert historical_export.revision.coverage.anchor_qualification.is_forward_research_anchor
+    assert historical_export.chain.current_revision_id == non_anchor.current_revision_id
+    assert historical_export.chain.forward_research_anchor.is_forward_research_anchor is False
+    assert historical_export.chain.next_update_policy == "full_required"
+
+    with pytest.raises(InvalidResearchBaselineError, match="current Research Chain head"):
+        service.enqueue_chain_update(
+            chain.id,
+            old_anchor_id,
+            AnalysisRequest(ticker="6501.T", analysis_date="2026-07-26", analysts=("market",)),
+        )
 
 
 def test_explicit_incremental_cannot_bypass_off_mode_or_unsupported_market(
@@ -1253,7 +2082,8 @@ def test_inconclusive_full_reassessment_advances_an_indeterminate_full_only_head
     service = _service(
         app_settings,
         repository,
-        state_assembler=assemble_full_revision,
+        graph_factory=_FrontierCapturingGraph,
+        state_assembler=_eligible_state_assembler,
         revision_comparator=lambda _id, _baseline, draft: ResearchRevisionDraft.model_validate(
             draft.model_copy(
                 update={
@@ -1280,8 +2110,9 @@ def test_inconclusive_full_reassessment_advances_an_indeterminate_full_only_head
     assert revision.execution_strategy is ResearchExecutionStrategy.FULL
     assert revision.change_conclusion is ResearchChangeConclusion.INDETERMINATE
     assert revision.indeterminate_reason.value == "coverage_incomplete"
-    assert advanced.next_update_policy == "full_required"
-    assert advanced.next_update_reason == "indeterminate_head"
+    assert advanced.forward_research_anchor.is_forward_research_anchor is True
+    assert advanced.next_update_policy == "incremental_allowed"
+    assert advanced.next_update_reason is None
     assert revision.research_update_audit.comparison == "not_applicable"
 
     next_run = service.enqueue_chain_update(
@@ -1289,7 +2120,7 @@ def test_inconclusive_full_reassessment_advances_an_indeterminate_full_only_head
         revision.id,
         AnalysisRequest(ticker="6501.T", analysis_date="2026-07-26", analysts=("market",)),
     )
-    assert next_run.research_execution_strategy == "full"
+    assert next_run.research_execution_strategy == "incremental"
 
 
 @pytest.mark.parametrize(
@@ -1344,6 +2175,11 @@ def test_shadow_quiet_update_retains_candidate_and_full_remains_authoritative(
     def quiet_gate(_baseline, _request, _config, _cancel_requested):
         return IncrementalGateResult(
             candidate=candidate,
+            transition_coverage=_transition_coverage(
+                _baseline,
+                _request.analysis_date,
+                complete=True,
+            ),
             metrics=RunMetrics(tool_calls=2, wall_time_seconds=0.25),
         )
 
@@ -1386,11 +2222,12 @@ def test_shadow_quiet_update_retains_candidate_and_full_remains_authoritative(
     assert audit.escalation_reason is None
     assert audit.bounded_metrics.tool_calls == 2
     assert audit.full_metrics.llm_calls == result.metrics.llm_calls
-    assert revision.metrics.tool_calls == result.metrics.tool_calls == 2
+    assert revision.metrics.tool_calls == result.metrics.tool_calls == 4
     events = repository.list_events(queued.id)
     assert [event.event_type for event in events] == [
         "run.queued",
         "run.started",
+        "research.anchor_readiness_succeeded",
         "research.incremental_assessed",
         "research.shadow_full_started",
         "node.completed",
@@ -1422,113 +2259,14 @@ def test_experimental_quiet_update_advances_with_nmc_without_full_analysis(
     chain = repository.list_research_chains(instrument="6501.T")[0]
     baseline = repository.get_research_revision(chain.current_revision_id)
     cutoff = date(2026, 7, 25)
-    inherited_snapshot = baseline.evidence_snapshot.model_copy(
-        update={
-            "bundle": baseline.evidence_snapshot.bundle.model_copy(
-                update={"analysis_date": cutoff}
-            ),
-            "lineage": tuple(
-                EvidenceSnapshotItem(
-                    evidence_ref=item.evidence_ref,
-                    lineage="inherited",
-                    source_revision_id=baseline.id,
-                )
-                for item in baseline.evidence_snapshot.lineage
-            ),
-            "source_record_lineage": tuple(
-                SourceRecordSnapshotItem(
-                    version_id=item.version_id,
-                    lineage="inherited",
-                    observed_in_execution=False,
-                    source_revision_id=baseline.id,
-                )
-                for item in baseline.evidence_snapshot.source_record_lineage
-            ),
-            "source_watermarks": tuple(
-                item.model_copy(
-                    update={
-                        "scanned_end": cutoff,
-                        "baseline_cutoff": baseline.cutoff,
-                        "overlap_start": baseline.cutoff,
-                    }
-                )
-                for item in baseline.evidence_snapshot.source_watermarks
-            ),
-        }
-    )
-    candidate = ResearchRevisionDraft(
-        cutoff=cutoff,
-        role=ResearchRevisionRole.UPDATE,
-        execution_strategy=ResearchExecutionStrategy.INCREMENTAL,
-        change_conclusion=ResearchChangeConclusion.NO_MATERIAL_CHANGE,
-        delta=RevisionDelta(
-            opinion_changed=False,
-            claims=tuple(
-                ClaimRevisionDelta(
-                    object_id=item.id,
-                    previous_object_id=item.id,
-                    change=ClaimChange.REAFFIRMED,
-                    identity_disposition=IdentityDisposition.EXACT_MATCH,
-                )
-                for item in baseline.current_state.claims
-            ),
-            questions=tuple(
-                QuestionRevisionDelta(
-                    object_id=item.id,
-                    previous_object_id=item.id,
-                    change=QuestionChange.REAFFIRMED,
-                    identity_disposition=IdentityDisposition.EXACT_MATCH,
-                )
-                for item in baseline.current_state.questions
-            ),
-            inherited_evidence_refs=baseline.current_state.evidence_refs,
-        ),
-        current_state=baseline.current_state.model_copy(
-            update={
-                "cutoff": cutoff,
-                "scenarios": tuple(
-                    item.model_copy(update={"cutoff": cutoff})
-                    for item in baseline.current_state.scenarios
-                ),
-            }
-        ),
-        coverage=baseline.coverage.model_copy(
-            update={
-                "claims": tuple(
-                    item.model_copy(update={"status": CoverageStatus.COMPLETE})
-                    for item in baseline.coverage.claims
-                ),
-                "questions": tuple(
-                    item.model_copy(update={"status": CoverageStatus.COMPLETE})
-                    for item in baseline.coverage.questions
-                ),
-                "domains": tuple(
-                    item.model_copy(update={"status": CoverageStatus.COMPLETE})
-                    for item in baseline.coverage.domains
-                ),
-                "supports_no_material_change": True,
-            }
-        ),
-        update_summary=baseline.update_summary.model_copy(
-            update={
-                "summary": "Bounded assessment reaffirmed the current research state.",
-                "baseline_cutoff": baseline.cutoff,
-                "analysis_cutoff": cutoff,
-                "execution_strategy": ResearchExecutionStrategy.INCREMENTAL,
-                "change_conclusion": ResearchChangeConclusion.NO_MATERIAL_CHANGE,
-            }
-        ),
-        evidence_snapshot=inherited_snapshot,
-    )
+    candidate = _experimental_nmc_candidate(baseline, cutoff)
     assert validate_experimental_nmc_candidate(baseline, candidate) is None
 
     class FullAnalysisMustNotRun:
         def __init__(self, **_kwargs):
             raise AssertionError("Full Analysis must not be constructed for experimental NMC")
 
-    experimental_settings = app_settings.model_copy(
-        update={"research_update_mode": "experimental"}
-    )
+    experimental_settings = app_settings.model_copy(update={"research_update_mode": "experimental"})
     gate_calls = 0
 
     def retrying_gate(*_args):
@@ -1541,6 +2279,7 @@ def test_experimental_quiet_update_advances_with_nmc_without_full_analysis(
             )
         return IncrementalGateResult(
             candidate=candidate,
+            transition_coverage=_transition_coverage(baseline, cutoff, complete=True),
             metrics=RunMetrics(
                 llm_calls=1,
                 tool_calls=2,
@@ -1595,7 +2334,7 @@ def test_experimental_quiet_update_advances_with_nmc_without_full_analysis(
     assert audit.comparison == "not_applicable"
     assert revision.metrics == result.metrics
     assert revision.metrics.llm_calls == 2
-    assert revision.metrics.tool_calls == 5
+    assert revision.metrics.tool_calls == 7
     assert audit.bounded_metrics.llm_calls == 1
     assert audit.bounded_metrics.tool_calls == 5
     assert audit.full_metrics.llm_calls == 1
@@ -1617,6 +2356,189 @@ def test_experimental_quiet_update_advances_with_nmc_without_full_analysis(
             (revision.id,),
         ).fetchone()[0]
     assert json.loads(stored)["authoritative_strategy"] == "incremental"
+
+    presented = service.get_research_chain(chain.id)
+    assert presented.forward_research_anchor.is_forward_research_anchor is True
+    assert presented.current_revision.coverage.anchor_qualification == (
+        presented.forward_research_anchor
+    )
+    assert presented.next_update_policy == "incremental_allowed"
+    assert presented.next_update_reason is None
+
+
+def test_experimental_incomplete_transition_refuses_authoritative_nmc(
+    app_settings,
+    repository,
+) -> None:
+    initial = _service(app_settings, repository)
+    initial.run_initial_chain(
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-24", analysts=("market",))
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+    baseline = repository.get_research_revision(chain.current_revision_id)
+    cutoff = date(2026, 7, 25)
+    candidate = _experimental_nmc_candidate(baseline, cutoff)
+    full_calls = 0
+
+    class CountingGraph(_Graph):
+        def execute(self, context, **kwargs):
+            nonlocal full_calls
+            full_calls += 1
+            return super().execute(context, **kwargs)
+
+    experimental_service = _service(
+        app_settings.model_copy(update={"research_update_mode": "experimental"}),
+        repository,
+        graph_factory=CountingGraph,
+        incremental_gate=lambda *_args: IncrementalGateResult(
+            candidate=candidate,
+            transition_coverage=_transition_coverage(baseline, cutoff, complete=False),
+            metrics=RunMetrics(tool_calls=2, wall_time_seconds=0.2),
+        ),
+    )
+    queued = experimental_service.enqueue_chain_update(
+        chain.id,
+        baseline.id,
+        AnalysisRequest(ticker="6501.T", analysis_date=cutoff, analysts=("market",)),
+    )
+    claimed = repository.claim_run(queued.id, "worker", 30)
+
+    result = experimental_service.execute_claimed(claimed, worker_id="worker")
+
+    revision = repository.get_research_chain(chain.id).current_revision
+    audit = repository.get_run(queued.id).research_update_audit
+    assert result.status is RunStatus.SUCCEEDED
+    assert full_calls == 1
+    assert revision.execution_strategy is ResearchExecutionStrategy.FULL
+    assert audit is not None
+    assert audit.authoritative_strategy == "full"
+    assert audit.escalation_reason == "coverage_incomplete"
+    assert audit.transition_coverage is not None
+    assert audit.transition_coverage.complete is False
+
+
+@pytest.mark.parametrize(
+    "malformation",
+    ["empty_capabilities", "wrong_anchor", "wrong_update", "stale_intervals"],
+)
+def test_experimental_malformed_complete_transition_refuses_authoritative_nmc(
+    app_settings,
+    repository,
+    malformation,
+) -> None:
+    initial = _service(app_settings, repository)
+    initial.run_initial_chain(
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-24", analysts=("market",))
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+    baseline = repository.get_research_revision(chain.current_revision_id)
+    cutoff = date(2026, 7, 25)
+    candidate = _experimental_nmc_candidate(baseline, cutoff)
+    transition = _transition_coverage(baseline, cutoff, complete=True)
+    if malformation == "empty_capabilities":
+        transition = transition.model_copy(update={"capabilities": ()})
+    elif malformation == "wrong_anchor":
+        transition = transition.model_copy(
+            update={"anchor_frontier": baseline.information_frontier - timedelta(seconds=1)}
+        )
+    elif malformation == "wrong_update":
+        transition = transition.model_copy(
+            update={"update_frontier": transition.update_frontier + timedelta(seconds=1)}
+        )
+    else:
+        stale = SourceObservationInterval(start=date(2020, 1, 1), end=date(2020, 1, 1))
+        transition = transition.model_copy(
+            update={
+                "capabilities": tuple(
+                    item.model_copy(update={"checked_intervals": (stale,)})
+                    for item in transition.capabilities
+                )
+            }
+        )
+    service = _service(
+        app_settings.model_copy(update={"research_update_mode": "experimental"}),
+        repository,
+        incremental_gate=lambda *_args: IncrementalGateResult(
+            candidate=candidate,
+            transition_coverage=transition,
+        ),
+    )
+    queued = service.enqueue_chain_update(
+        chain.id,
+        baseline.id,
+        AnalysisRequest(ticker="6501.T", analysis_date=cutoff, analysts=("market",)),
+    )
+    claimed = repository.claim_run(queued.id, "worker", 30)
+
+    service.execute_claimed(claimed, worker_id="worker")
+
+    audit = repository.get_run(queued.id).research_update_audit
+    revision = repository.get_research_chain(chain.id).current_revision
+    assert audit is not None
+    assert audit.escalation_reason == "coverage_incomplete"
+    assert audit.authoritative_strategy == "full"
+    assert revision.execution_strategy is ResearchExecutionStrategy.FULL
+
+
+@pytest.mark.parametrize("transition_complete", [None, False])
+def test_shadow_unproven_transition_retains_typed_escalation_and_runs_full(
+    app_settings,
+    repository,
+    transition_complete,
+) -> None:
+    initial = _service(app_settings, repository)
+    initial.run_initial_chain(
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-24", analysts=("market",))
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+    baseline = repository.get_research_revision(chain.current_revision_id)
+    cutoff = date(2026, 7, 25)
+    candidate = _experimental_nmc_candidate(baseline, cutoff)
+    full_calls = 0
+
+    class CountingGraph(_Graph):
+        def execute(self, context, **kwargs):
+            nonlocal full_calls
+            full_calls += 1
+            return super().execute(context, **kwargs)
+
+    shadow_service = _service(
+        app_settings,
+        repository,
+        graph_factory=CountingGraph,
+        incremental_gate=lambda *_args: IncrementalGateResult(
+            candidate=candidate,
+            transition_coverage=(
+                None
+                if transition_complete is None
+                else _transition_coverage(baseline, cutoff, complete=transition_complete)
+            ),
+            metrics=RunMetrics(tool_calls=2, wall_time_seconds=0.2),
+        ),
+    )
+    queued = shadow_service.enqueue_chain_update(
+        chain.id,
+        baseline.id,
+        AnalysisRequest(ticker="6501.T", analysis_date=cutoff, analysts=("market",)),
+    )
+    claimed = repository.claim_run(queued.id, "worker", 30)
+
+    result = shadow_service.execute_claimed(claimed, worker_id="worker")
+
+    audit = repository.get_run(queued.id).research_update_audit
+    revision = repository.get_research_chain(chain.id).current_revision
+    assert result.status is RunStatus.SUCCEEDED
+    assert full_calls == 1
+    assert revision.execution_strategy is ResearchExecutionStrategy.FULL
+    assert audit is not None
+    assert audit.authoritative_strategy == "full"
+    assert audit.candidate is not None
+    assert audit.escalation_reason == "coverage_incomplete"
+    assert (audit.transition_coverage is None) is (transition_complete is None)
+    assert audit.coverage is not None
+    assert audit.checked_windows
+    assert audit.evidence_lineage
+    assert audit.comparison in {"agreement", "inconclusive", "disagreement"}
 
 
 def test_default_shadow_collection_runs_before_any_full_llm_client(
@@ -1651,9 +2573,14 @@ def test_default_shadow_collection_runs_before_any_full_llm_client(
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
         local_name_resolver=lambda _ticker, _date, _config: None,
         market_data_readiness_checker=lambda *_args: None,
+        anchor_readiness_checker=_anchor_ready,
     )
     service.run_initial_chain(
-        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-24", analysts=("market",))
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
     )
     chain = repository.list_research_chains(instrument="6501.T")[0]
     llm_calls = 0
@@ -1671,7 +2598,649 @@ def test_default_shadow_collection_runs_before_any_full_llm_client(
     assert llm_calls == 1
     assert audit is not None
     assert audit.escalation_reason == "coverage_incomplete"
+    assert audit.transition_coverage is not None
+    assert audit.transition_coverage.complete is False
+    assert audit.transition_coverage.anchor_frontier == chain.current_revision.information_frontier
+    assert (
+        audit.transition_coverage.update_frontier
+        == repository.get_run(queued.id).information_frontier
+    )
+    assert all(
+        capability.gaps
+        for capability in audit.transition_coverage.capabilities
+        if not capability.complete
+    )
     assert audit.bounded_metrics.tool_calls == 1
+
+    stored_transition = ResearchUpdateTransitionCoverage.model_validate(
+        audit.transition_coverage.model_dump(mode="json")
+    )
+    revision = repository.get_research_chain(chain.id).current_revision
+    audited_revision = revision.model_copy(
+        update={
+            "research_update_audit": audit.model_copy(
+                update={"transition_coverage": stored_transition}
+            )
+        }
+    )
+    markdown = render_revision_export_markdown(
+        service.get_revision_export(revision.id).model_copy(update={"revision": audited_revision})
+    )
+    assert "### Transition Coverage" in markdown
+    assert "Frontier interval:" in markdown
+
+
+def test_default_bounded_collection_omits_unattested_fallback_content(
+    app_settings,
+    repository,
+    monkeypatch,
+) -> None:
+    fallback_calls = 0
+
+    def route_to_vendor(*_args, **_kwargs):
+        nonlocal fallback_calls
+        fallback_calls += 1
+        return "POST FRONTIER FALLBACK"
+
+    monkeypatch.setattr(
+        "tradingagents.application.incremental.route_to_vendor",
+        route_to_vendor,
+    )
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_Graph,
+        state_assembler=_eligible_state_assembler,
+        identity_resolver=lambda ticker, _date: {"company_name": ticker},
+        local_name_resolver=lambda _ticker, _date, _config: None,
+        market_data_readiness_checker=lambda *_args: None,
+        anchor_readiness_checker=_anchor_ready,
+    )
+    service.run_initial_chain(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+    queued = service.enqueue_chain_update(
+        chain.id,
+        chain.current_revision_id,
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
+    )
+    claimed = repository.claim_run(queued.id, "worker", 30)
+
+    service.execute_claimed(claimed, worker_id="worker")
+
+    audit = repository.get_run(queued.id).research_update_audit
+    assert fallback_calls == 1
+    assert audit is not None
+    assert audit.escalation_reason == "coverage_incomplete"
+    assert audit.candidate is None
+    revision = repository.get_research_chain(chain.id).current_revision
+    assert all(
+        "POST FRONTIER FALLBACK" not in (item.content or "")
+        for item in revision.evidence_snapshot.bundle.items
+    )
+    assert audit.transition_coverage is not None, audit.model_dump(mode="json")
+    disclosure = next(
+        item
+        for item in audit.transition_coverage.capabilities
+        if item.capability == "timely_disclosure"
+    )
+    assert disclosure.complete is False
+    assert disclosure.limitations[0].kind == "unavailable"
+
+
+def test_default_bounded_collection_keeps_required_news_attestation_with_advisory_media(
+    app_settings,
+    repository,
+    monkeypatch,
+) -> None:
+    frontier = "2026-07-25T23:59:59.999999+09:00"
+
+    def official_block(source):
+        return attach_source_watermarks(
+            f"## {source} disclosures\n\n### Attested item",
+            SourceWatermark(
+                source=source,
+                scanned_start="2026-07-24",
+                scanned_end="2026-07-25",
+                status="complete",
+                returned_records=0,
+                reported_records=0,
+                information_frontier=frontier,
+            ),
+        )
+
+    monkeypatch.setattr(
+        jp_news,
+        "_edinet_news",
+        lambda *_args, **_kwargs: official_block("EDINET"),
+    )
+    monkeypatch.setattr(
+        jp_news,
+        "_tdnet_news",
+        lambda *_args, **_kwargs: official_block("TDnet"),
+    )
+    monkeypatch.setattr(
+        jp_news,
+        "_google_news",
+        lambda *_args, **_kwargs: "No Google News items found.",
+    )
+    payload = jp_news.get_news(
+        "6501.T",
+        "2026-07-24",
+        "2026-07-25",
+        information_frontier=frontier,
+    )
+    google = next(
+        item for item in extract_source_watermarks(payload) if item.source == "Google News"
+    )
+    assert google.temporal_scope == "live_only"
+    assert google.information_frontier is None
+    assert any(
+        item.source == "EDINET" and item.information_frontier == frontier
+        for item in extract_source_watermarks(payload)
+    )
+    assert any(
+        item.source == "TDnet" and item.information_frontier == frontier
+        for item in extract_source_watermarks(payload)
+    )
+    monkeypatch.setattr(
+        "tradingagents.application.incremental.route_to_vendor",
+        lambda *_args, **_kwargs: payload,
+    )
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_FrontierCapturingGraph,
+        state_assembler=_eligible_state_assembler,
+        identity_resolver=lambda ticker, _date: {"company_name": ticker},
+        local_name_resolver=lambda _ticker, _date, _config: None,
+        market_data_readiness_checker=lambda *_args: None,
+        anchor_readiness_checker=_anchor_ready,
+        utc_clock=lambda: datetime.fromisoformat(frontier).astimezone(timezone.utc),
+    )
+    service.run_initial_chain(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+    queued = service.enqueue_chain_update(
+        chain.id,
+        chain.current_revision_id,
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
+    )
+    claimed = repository.claim_run(queued.id, "worker", 30)
+
+    service.execute_claimed(claimed, worker_id="worker")
+
+    audit = repository.get_run(queued.id).research_update_audit
+    assert audit is not None
+    assert {item.source for item in audit.checked_windows}.issuperset(
+        {
+            "EDINET",
+            "TDnet",
+            "Google News",
+        }
+    )
+    assert (
+        next(
+            item
+            for item in audit.transition_coverage.capabilities
+            if item.capability == "timely_disclosure"
+        ).complete
+        is True
+    )
+
+
+def test_default_bounded_collection_preserves_other_sources_when_one_required_source_fails(
+    app_settings,
+    repository,
+    monkeypatch,
+) -> None:
+    frontier = "2026-07-25T23:59:59.999999+09:00"
+    payload = attach_provenance(
+        attach_source_observations(
+            attach_source_watermarks(
+                "Mixed assembler payload. EDINET-FAILED-SENTINEL TDNET-SUCCESS-SENTINEL",
+                SourceWatermark(
+                    source="EDINET",
+                    scanned_start="2026-07-24",
+                    scanned_end="2026-07-25",
+                    status="complete",
+                    returned_records=0,
+                    reported_records=0,
+                ),
+                SourceWatermark(
+                    source="TDnet",
+                    scanned_start="2026-07-24",
+                    scanned_end="2026-07-25",
+                    status="complete",
+                    returned_records=0,
+                    reported_records=0,
+                    information_frontier=frontier,
+                ),
+                SourceWatermark(
+                    source="Google News",
+                    scanned_start="2026-07-24",
+                    scanned_end="2026-07-25",
+                    status="complete",
+                    temporal_scope="live_only",
+                    returned_records=0,
+                    reported_records=0,
+                ),
+            ),
+            SourceObservation(
+                source="EDINET",
+                record_id="edinet-failed",
+                version_id="edinet-failed-v1",
+                status="published",
+                published_at="2026-07-25 12:00",
+                available_at="2026-07-25T12:00:00+09:00",
+                title="EDINET failed sentinel",
+            ),
+            SourceObservation(
+                source="TDnet",
+                record_id="tdnet-success",
+                version_id="tdnet-success-v1",
+                status="published",
+                published_at="2026-07-25 13:00",
+                available_at="2026-07-25T13:00:00+09:00",
+                title="TDnet success sentinel",
+            ),
+        ),
+        ProvenanceRecord(
+            evidence="EDINET available sentinel",
+            source="EDINET",
+            requested="2026-07-24 to 2026-07-25",
+            effective="2026-07-25",
+            timing="available",
+        ),
+        ProvenanceRecord(
+            evidence="TDnet available sentinel",
+            source="TDnet",
+            requested="2026-07-24 to 2026-07-25",
+            effective="2026-07-25",
+            timing="available",
+        ),
+    )
+    monkeypatch.setattr(
+        "tradingagents.application.incremental.route_to_vendor",
+        lambda *_args, **_kwargs: payload,
+    )
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_FrontierCapturingGraph,
+        state_assembler=_eligible_state_assembler,
+        identity_resolver=lambda ticker, _date: {"company_name": ticker},
+        local_name_resolver=lambda _ticker, _date, _config: None,
+        market_data_readiness_checker=lambda *_args: None,
+        anchor_readiness_checker=_anchor_ready,
+        utc_clock=lambda: datetime.fromisoformat(frontier).astimezone(timezone.utc),
+    )
+    service.run_initial_chain(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+    queued = service.enqueue_chain_update(
+        chain.id,
+        chain.current_revision_id,
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
+    )
+    claimed = repository.claim_run(queued.id, "worker", 30)
+
+    service.execute_claimed(claimed, worker_id="worker")
+
+    audit = repository.get_run(queued.id).research_update_audit
+    assert audit is not None
+    windows = {item.source: item for item in audit.checked_windows}
+    assert windows["EDINET"].status == "unavailable"
+    assert windows["TDnet"].status == "complete"
+    assert windows["TDnet"].information_frontier == datetime.fromisoformat(frontier)
+    assert windows["Google News"].temporal_scope == "live_only"
+    revision = repository.get_research_chain(chain.id).current_revision
+    records = revision.evidence_snapshot.source_records
+    assert all(item.source != "EDINET" for item in records)
+    assert any(item.source == "TDnet" and item.record_id == "tdnet-success" for item in records)
+    assert all(
+        "EDINET-FAILED-SENTINEL" not in (item.content or "")
+        for item in revision.evidence_snapshot.bundle.items
+    )
+    origins = tuple(
+        origin for item in revision.evidence_snapshot.bundle.items for origin in item.origins
+    )
+    assert not any(origin.evidence_type == "EDINET available sentinel" for origin in origins)
+    assert any(
+        origin.source == "EDINET"
+        and origin.evidence_type == "bounded source collection"
+        and origin.quality == "unavailable"
+        for origin in origins
+    )
+    assert any(origin.evidence_type == "TDnet available sentinel" for origin in origins)
+
+
+def test_service_preserves_same_day_jquants_adapter_availability_at_frozen_frontier(
+    app_settings,
+    repository,
+    monkeypatch,
+) -> None:
+    frontier = datetime(2026, 7, 27, 18, 0, tzinfo=timezone(timedelta(hours=9)))
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_FrontierCapturingGraph,
+        state_assembler=_eligible_state_assembler,
+        identity_resolver=lambda ticker, _date: {"company_name": ticker},
+        local_name_resolver=lambda _ticker, _date, _config: None,
+        market_data_readiness_checker=lambda *_args: None,
+        anchor_readiness_checker=_anchor_ready,
+        utc_clock=lambda: frontier.astimezone(timezone.utc),
+    )
+    service.run_initial_chain(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+    dates = pd.bdate_range(end="2026-07-27", periods=220)
+    frame = pd.DataFrame(
+        {
+            "Date": dates,
+            "Open": range(220),
+            "High": range(1, 221),
+            "Low": range(220),
+            "Close": range(1, 221),
+            "Volume": range(100, 320),
+        }
+    )
+    frame.attrs["price_adjustment"] = "J-Quants adjusted OHLCV v2"
+    monkeypatch.setattr(jquants_indicator, "_fetch_ohlcv_frame", lambda *_args: frame)
+
+    def bounded_route(method, *args, **kwargs):
+        kwargs.pop("_provenance", None)
+        if method == "get_verified_market_snapshot":
+            return jquants_indicator.get_verified_market_snapshot(*args, **kwargs)
+        information_frontier = kwargs["information_frontier"]
+        return attach_source_watermarks(
+            "No bounded disclosures were returned.",
+            *(
+                SourceWatermark(
+                    source=source,
+                    scanned_start="2026-07-24",
+                    scanned_end="2026-07-27",
+                    status="complete",
+                    returned_records=0,
+                    reported_records=0,
+                    information_frontier=information_frontier,
+                )
+                for source in ("EDINET", "TDnet", "Google News")
+            ),
+        )
+
+    monkeypatch.setattr(
+        "tradingagents.application.incremental.route_to_vendor",
+        bounded_route,
+    )
+    queued = service.enqueue_chain_update(
+        chain.id,
+        chain.current_revision_id,
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-27", analysts=("market",)),
+    )
+    claimed = repository.claim_run(queued.id, "worker", 30)
+
+    service.execute_claimed(claimed, worker_id="worker")
+
+    run = repository.get_run(queued.id)
+    audit = run.research_update_audit
+    assert run.information_frontier == frontier
+    assert audit is not None
+    market_window = next(
+        item for item in audit.checked_windows if item.source == "J-Quants adjusted OHLCV"
+    )
+    assert market_window.information_frontier == frontier
+    market_coverage = next(
+        item
+        for item in audit.transition_coverage.capabilities
+        if item.capability == "market_observation"
+    )
+    assert market_coverage.complete is True
+
+
+@pytest.mark.parametrize(
+    ("tdnet_start", "expected_complete"),
+    [("2026-07-25", True), ("2026-07-26", False)],
+)
+def test_service_audits_same_tdnet_limitation_before_and_inside_transition(
+    app_settings,
+    repository,
+    tdnet_start,
+    expected_complete,
+) -> None:
+    initial = _service(app_settings, repository)
+    initial.run_initial_chain(
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-24", analysts=("market",))
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+
+    def transition_gate(baseline, request, _config, _cancel_requested):
+        records = [
+            item.model_dump(mode="json", exclude={"evidence_ref", "fallback"})
+            for item in baseline.evidence_snapshot.source_records
+        ]
+        records = [
+            {
+                **item,
+                **(
+                    {
+                        "version_id": "market:2026-07-27",
+                        "published_at": "2026-07-27",
+                        "available_at": "2026-07-27T17:00:00+09:00",
+                    }
+                    if item.get("source") == "J-Quants adjusted OHLCV"
+                    else {}
+                ),
+            }
+            for item in records
+        ]
+        watermarks = []
+        for item in baseline.evidence_snapshot.source_watermarks:
+            raw = item.model_dump(
+                mode="json",
+                exclude={
+                    "baseline_cutoff",
+                    "overlap_start",
+                    "information_frontier",
+                    "structured_limitations",
+                },
+            )
+            raw["scanned_end"] = request.analysis_date.isoformat()
+            raw["requested_interval"] = {
+                "start": "2026-07-01",
+                "end": request.analysis_date.isoformat(),
+            }
+            raw["information_frontier"] = "2026-07-27T23:59:59.999999+09:00"
+            if item.source == "TDnet":
+                raw.update(
+                    scanned_start=tdnet_start,
+                    status="limited",
+                    limitations=("Archive overlap was truncated.",),
+                    limitation_kind="archive_truncation",
+                    returned_records=0,
+                    reported_records=0,
+                )
+            if item.source == "J-Quants adjusted OHLCV":
+                raw.update(returned_records=1, reported_records=1)
+            watermarks.append(raw)
+        evidence = EvidenceBundle(
+            instrument=request.ticker,
+            analysis_date=request.analysis_date,
+            items=(
+                EvidenceItem.create(
+                    source="bounded fixture",
+                    evidence_type="transition coverage",
+                    requested_date=request.analysis_date,
+                    effective_date=baseline.cutoff,
+                    content="Checked transition sources.",
+                    provenance={
+                        "source_records": records,
+                        "source_watermarks": watermarks,
+                    },
+                ),
+            ),
+        )
+        return assess_deterministic_update(
+            baseline.id,
+            baseline,
+            request,
+            evidence,
+            mode="shadow",
+            information_frontier=datetime(
+                2026,
+                7,
+                27,
+                23,
+                59,
+                59,
+                999999,
+                tzinfo=timezone(timedelta(hours=9)),
+            ),
+        )
+
+    service = _service(app_settings, repository, incremental_gate=transition_gate)
+    queued = service.enqueue_chain_update(
+        chain.id,
+        chain.current_revision_id,
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-27", analysts=("market",)),
+    )
+    claimed = repository.claim_run(queued.id, "worker", 30)
+
+    service.execute_claimed(claimed, worker_id="worker")
+
+    audit = repository.get_run(queued.id).research_update_audit
+    assert audit is not None
+    assert audit.transition_coverage is not None
+    assert audit.transition_coverage.complete is expected_complete, audit.model_dump(mode="json")
+    assert audit.escalation_reason == (None if expected_complete else "coverage_incomplete")
+    tdnet = next(
+        item
+        for item in audit.transition_coverage.capabilities
+        if item.capability == "timely_disclosure"
+    )
+    assert tdnet.limitations[0].scope == ("pre_anchor" if expected_complete else "transition")
+
+
+def test_service_retains_same_day_late_disclosure_as_new_transition_evidence(
+    app_settings,
+    repository,
+) -> None:
+    anchor_frontier = datetime(2026, 7, 24, 18, 0, tzinfo=timezone(timedelta(hours=9)))
+    initial = _service(
+        app_settings,
+        repository,
+        utc_clock=lambda: anchor_frontier.astimezone(timezone.utc),
+    )
+    initial.run_initial_chain(
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-24", analysts=("market",))
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+    assert chain.current_revision.information_frontier == anchor_frontier
+    assert datetime.fromisoformat("2026-07-24T20:00:00+09:00") > anchor_frontier
+
+    def late_event_gate(baseline, request, _config, _cancel_requested):
+        market = next(
+            item
+            for item in baseline.evidence_snapshot.source_records
+            if item.source == "J-Quants adjusted OHLCV"
+        )
+        records = [
+            market.model_dump(mode="json", exclude={"evidence_ref", "fallback"}),
+            {
+                "source": "TDnet",
+                "record_id": "tdnet-late",
+                "version_id": "tdnet:late-same-day-service",
+                "status": "published",
+                "published_at": "2026-07-24 20:00",
+                "available_at": "2026-07-24T20:00:00+09:00",
+                "title": "Late same-day timely disclosure",
+            },
+        ]
+        watermarks = [
+            {
+                "source": source,
+                "scanned_start": "2026-07-24",
+                "scanned_end": "2026-07-25",
+                "status": "complete",
+                "returned_records": 1 if source in {"TDnet", "J-Quants adjusted OHLCV"} else 0,
+                "reported_records": 1 if source in {"TDnet", "J-Quants adjusted OHLCV"} else 0,
+                "information_frontier": "2026-07-25T18:00:00+09:00",
+            }
+            for source in ("EDINET", "TDnet", "J-Quants adjusted OHLCV")
+        ]
+        evidence = EvidenceBundle(
+            instrument=request.ticker,
+            analysis_date=request.analysis_date,
+            items=(
+                EvidenceItem.create(
+                    source="bounded fixture",
+                    evidence_type="same-day transition",
+                    requested_date=request.analysis_date,
+                    effective_date=date(2026, 7, 24),
+                    content="Late same-day event.",
+                    provenance={"source_records": records, "source_watermarks": watermarks},
+                ),
+            ),
+        )
+        return assess_deterministic_update(
+            baseline.id,
+            baseline,
+            request,
+            evidence,
+            mode="shadow",
+            information_frontier=datetime(2026, 7, 25, 18, 0, tzinfo=timezone(timedelta(hours=9))),
+        )
+
+    service = _service(app_settings, repository, incremental_gate=late_event_gate)
+    queued = service.enqueue_chain_update(
+        chain.id,
+        chain.current_revision_id,
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
+    )
+    claimed = repository.claim_run(queued.id, "worker", 30)
+
+    service.execute_claimed(claimed, worker_id="worker")
+
+    audit = repository.get_run(queued.id).research_update_audit
+    assert audit is not None
+    assert audit.escalation_reason == "source_version_change"
+    revision = repository.get_research_chain(chain.id).current_revision
+    assert any(
+        item.version_id == "tdnet:late-same-day-service"
+        for item in revision.evidence_snapshot.source_records
+    )
+    late_lineage = next(
+        item
+        for item in revision.evidence_snapshot.source_record_lineage
+        if item.version_id == "tdnet:late-same-day-service"
+    )
+    assert late_lineage.lineage == "new"
+    assert late_lineage.observed_in_execution is True
 
 
 def test_default_shadow_semantic_assessment_is_audited_before_independent_full(
@@ -1689,21 +3258,38 @@ def test_default_shadow_semantic_assessment_is_audited_before_independent_full(
         )
     )
     chain = repository.list_research_chains(instrument="6501.T")[0]
-    payload = attach_source_watermarks(
-        "No deterministic material change was found.",
-        *(
-            SourceWatermark(
-                source=source,
-                scanned_start="2026-07-01",
-                scanned_end="2026-07-25",
-                status="complete",
-            )
-            for source in (
-                "EDINET",
-                "TDnet",
-                "Google News",
-                "J-Quants adjusted OHLCV",
-            )
+    payload = attach_source_observations(
+        attach_source_watermarks(
+            "No deterministic material change was found.",
+            *(
+                SourceWatermark(
+                    source=source,
+                    scanned_start="2026-07-01",
+                    scanned_end="2026-07-25",
+                    status="complete",
+                    returned_records=(1 if source == "J-Quants adjusted OHLCV" else 0),
+                    reported_records=(1 if source == "J-Quants adjusted OHLCV" else 0),
+                    information_frontier="2026-07-25T23:59:59.999999+09:00",
+                )
+                for source in (
+                    "EDINET",
+                    "TDnet",
+                    "Google News",
+                    "J-Quants adjusted OHLCV",
+                )
+            ),
+        ),
+        SourceObservation(
+            source="J-Quants adjusted OHLCV",
+            record_id="market:6501.T",
+            version_id="market:6501.T:2026-07-24",
+            status="published",
+            published_at="2026-07-24 17:00",
+            available_at="2026-07-24T17:00:00+09:00",
+            title="6501.T adjusted close",
+            record_kind="market",
+            adjustment="split_adjusted",
+            unit="JPY",
         ),
     )
     monkeypatch.setattr(
@@ -1734,6 +3320,7 @@ def test_default_shadow_semantic_assessment_is_audited_before_independent_full(
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
         local_name_resolver=lambda _ticker, _date, _config: None,
         market_data_readiness_checker=lambda *_args: None,
+        anchor_readiness_checker=_anchor_ready,
     )
     queued = service.enqueue_chain_update(
         chain.id,
@@ -1752,7 +3339,7 @@ def test_default_shadow_semantic_assessment_is_audited_before_independent_full(
     audit = repository.get_run(queued.id).research_update_audit
     revision = repository.get_research_chain(chain.id).current_revision
     assert result.status is RunStatus.SUCCEEDED
-    assert llm_factory_calls == 2
+    assert llm_factory_calls == 2, audit.model_dump(mode="json") if audit else None
     assert audit is not None
     assert audit.semantic_assessment is not None
     assert audit.semantic_assessment.language == "ja"
@@ -1830,28 +3417,46 @@ def test_cancelled_after_partial_bounded_collection_retains_progress_and_metrics
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
         local_name_resolver=lambda _ticker, _date, _config: None,
         market_data_readiness_checker=lambda *_args: None,
+        anchor_readiness_checker=_anchor_ready,
     )
     queued = shadow_service.enqueue_chain_update(
         chain.id,
         chain.current_revision_id,
         AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
     )
-    payload = attach_source_watermarks(
-        "No bounded source changes were returned.",
-        *(
-            SourceWatermark(
-                source=source,
-                scanned_start="2026-07-24",
-                scanned_end="2026-07-25",
-                status="complete",
-            )
-            for source in (
-                "EDINET",
-                "TDnet",
-                "Google News",
-                "J-Quants fundamentals",
-                "J-Quants adjusted OHLCV",
-            )
+    payload = attach_source_observations(
+        attach_source_watermarks(
+            "No bounded source changes were returned.",
+            *(
+                SourceWatermark(
+                    source=source,
+                    scanned_start="2026-07-24",
+                    scanned_end="2026-07-25",
+                    status="complete",
+                    returned_records=(1 if source == "J-Quants adjusted OHLCV" else 0),
+                    reported_records=(1 if source == "J-Quants adjusted OHLCV" else 0),
+                    information_frontier="2026-07-25T23:59:59.999999+09:00",
+                )
+                for source in (
+                    "EDINET",
+                    "TDnet",
+                    "Google News",
+                    "J-Quants fundamentals",
+                    "J-Quants adjusted OHLCV",
+                )
+            ),
+        ),
+        SourceObservation(
+            source="J-Quants adjusted OHLCV",
+            record_id="market:6501.T",
+            version_id="market:6501.T:2026-07-24",
+            status="published",
+            published_at="2026-07-24 17:00",
+            available_at="2026-07-24T17:00:00+09:00",
+            title="6501.T adjusted close",
+            record_kind="market",
+            adjustment="split_adjusted",
+            unit="JPY",
         ),
     )
 
@@ -1870,7 +3475,7 @@ def test_cancelled_after_partial_bounded_collection_retains_progress_and_metrics
     run = repository.get_run(queued.id)
     audit = run.research_update_audit
     assert audit is not None
-    assert audit.escalation_reason is None
+    assert audit.escalation_reason is None, audit.model_dump(mode="json")
     assert result.status is RunStatus.CANCELLED, audit
     assert {item.source for item in audit.checked_windows} == {
         "EDINET",
@@ -1880,7 +3485,7 @@ def test_cancelled_after_partial_bounded_collection_retains_progress_and_metrics
         "J-Quants adjusted OHLCV",
     }
     assert audit.bounded_metrics.tool_calls == 1
-    assert run.metrics.tool_calls == 1
+    assert run.metrics.tool_calls == 3
     assert repository.get_research_chain(chain.id).current_revision_id == chain.current_revision_id
 
 
@@ -1963,7 +3568,7 @@ def test_shadow_terminal_full_path_retains_separate_partial_full_metrics(
     assert audit.bounded_metrics.tool_calls == 2
     assert audit.full_metrics.llm_calls == 1
     assert audit.full_metrics.input_tokens == 250
-    assert run.metrics.tool_calls == 2
+    assert run.metrics.tool_calls == 4
     assert run.metrics.llm_calls == 1
     assert repository.get_research_chain(chain.id).current_revision_id == chain.current_revision_id
 
@@ -2021,9 +3626,7 @@ def test_experimental_escalation_stops_bounded_work_and_runs_full(
             metrics=RunMetrics(tool_calls=1, wall_time_seconds=0.1),
         )
 
-    experimental_settings = app_settings.model_copy(
-        update={"research_update_mode": "experimental"}
-    )
+    experimental_settings = app_settings.model_copy(update={"research_update_mode": "experimental"})
     experimental_service = _service(
         experimental_settings,
         repository,
@@ -2051,10 +3654,107 @@ def test_experimental_escalation_stops_bounded_work_and_runs_full(
     assert audit.checked_windows[0].source == "EDINET"
     assert audit.evidence_lineage
     assert audit.bounded_metrics.tool_calls == 1
-    assert result.metrics.tool_calls == 1
+    assert result.metrics.tool_calls == 3
     assert "research.full_escalation_started" in {
         event.event_type for event in repository.list_events(queued.id)
     }
+
+
+@pytest.mark.parametrize("mode", ["shadow", "experimental"])
+def test_dynamic_full_path_requires_anchor_readiness_before_llm_construction(
+    app_settings,
+    repository,
+    mode,
+) -> None:
+    initial = _service(app_settings, repository)
+    initial.run_initial_chain(
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-24", analysts=("market",))
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+    baseline = chain.current_revision
+    gate_calls = 0
+    observed_anchor_frontiers = []
+
+    def escalated_gate(*_args):
+        nonlocal gate_calls
+        gate_calls += 1
+        return IncrementalGateResult(
+            escalation_reason=IncrementalEscalationReason.COVERAGE_INCOMPLETE
+        )
+
+    def not_ready(request, *, information_frontier, anchor_frontier, **_kwargs):
+        observed_anchor_frontiers.append(anchor_frontier)
+        return AnchorReadinessResult(
+            ready=False,
+            requested_cutoff=request.analysis_date,
+            information_frontier=information_frontier,
+            profile_id="jp-listed-equity-v1",
+            reasons=(AnchorReadinessReason.REQUIRED_CAPABILITY_UNAVAILABLE,),
+            metrics=RunMetrics(tool_calls=2),
+        )
+
+    service = _service(
+        app_settings.model_copy(update={"research_update_mode": mode}),
+        repository,
+        incremental_gate=escalated_gate,
+        anchor_readiness_checker=not_ready,
+        llm_factory=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("LLM construction must follow complete anchor readiness")
+        ),
+    )
+    queued = service.enqueue_chain_update(
+        chain.id,
+        baseline.id,
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
+    )
+    claimed = repository.claim_run(queued.id, "worker", 30)
+
+    with pytest.raises(AnchorReadinessError):
+        service.execute_claimed(claimed, worker_id="worker")
+
+    assert observed_anchor_frontiers == [baseline.information_frontier]
+    assert gate_calls == (0 if mode == "shadow" else 1)
+
+
+def test_experimental_full_escalation_with_opt_out_remains_non_anchor(
+    app_settings,
+    repository,
+) -> None:
+    initial = _service(app_settings, repository)
+    initial.run_initial_chain(
+        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-24", analysts=("market",))
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+    baseline = chain.current_revision
+    service = _service(
+        app_settings.model_copy(update={"research_update_mode": "experimental"}),
+        repository,
+        incremental_gate=lambda *_args: IncrementalGateResult(
+            escalation_reason=IncrementalEscalationReason.COVERAGE_INCOMPLETE
+        ),
+        anchor_readiness_checker=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("explicit non-anchor Full must not claim readiness")
+        ),
+    )
+    queued = service.enqueue_chain_update(
+        chain.id,
+        baseline.id,
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-25",
+            analysts=("market",),
+            anchor_readiness="allow_non_anchor",
+        ),
+    )
+    claimed = repository.claim_run(queued.id, "worker", 30)
+
+    result = service.execute_claimed(claimed, worker_id="worker")
+
+    advanced = repository.get_research_chain(chain.id)
+    assert result.status is RunStatus.SUCCEEDED
+    assert not advanced.forward_research_anchor.is_forward_research_anchor
+    assert advanced.forward_research_anchor.reasons == ("anchor_readiness_not_required",)
+    assert advanced.next_update_policy == "full_required"
 
 
 def test_concurrent_full_update_submissions_resolve_to_one_execution(
@@ -2901,6 +4601,11 @@ def test_controlled_live_thesis_validation_advances_five_distinct_main_database_
         )
         return IncrementalGateResult(
             candidate=candidate,
+            transition_coverage=_transition_coverage(
+                baseline,
+                request.analysis_date,
+                complete=True,
+            ),
             metrics=RunMetrics(tool_calls=2, wall_time_seconds=0.2),
         )
 

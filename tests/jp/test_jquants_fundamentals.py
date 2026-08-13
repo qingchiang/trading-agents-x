@@ -96,6 +96,62 @@ class FundamentalsTests(unittest.TestCase):
         self.assertEqual(watermark.status, "limited")
         self.assertIn("without a disclosure date", watermark.limitations[0])
 
+    def test_information_frontier_filters_same_day_later_summary_from_body_and_records(self):
+        before = _summary("2026-07-27", disc_time="17:00:00", sales="500")
+        after = _summary("2026-07-27", disc_time="20:00:00", sales="999")
+        with _patch([before, after]):
+            out = jf.get_fundamentals(
+                "9984.T",
+                curr_date="2026-07-27",
+                information_frontier="2026-07-27T18:00:00+09:00",
+            )
+
+        assert "Net sales: 500" in out
+        assert "999" not in out
+        observations = extract_source_observations(out)
+        assert [item.published_at for item in observations] == ["2026-07-27 17:00:00"]
+        watermark = extract_source_watermarks(out)[0]
+        assert watermark.returned_records == 1
+        assert watermark.reported_records == 2
+
+    def test_information_frontier_excludes_same_day_summary_without_disclosure_time(self):
+        before = _summary("2026-07-27", disc_time="17:00:00", sales="500")
+        unknown = _summary("2026-07-27", disc_time=None, sales="999")
+        with _patch([before, unknown]):
+            out = jf.get_fundamentals(
+                "9984.T",
+                curr_date="2026-07-27",
+                information_frontier="2026-07-27T18:00:00+09:00",
+            )
+
+        assert "Net sales: 500" in out
+        assert "999" not in out
+        observations = extract_source_observations(out)
+        assert [item.published_at for item in observations] == ["2026-07-27 17:00:00"]
+        watermark = extract_source_watermarks(out)[0]
+        assert watermark.status == "limited"
+        assert watermark.returned_records == 1
+        assert watermark.reported_records == 2
+        assert any("precise disclosure time" in item for item in watermark.limitations)
+
+    def test_information_frontier_keeps_earlier_summary_without_disclosure_time(self):
+        historical = _summary("2026-07-24", disc_time=None, sales="500")
+        with _patch([historical]):
+            out = jf.get_fundamentals(
+                "9984.T",
+                curr_date="2026-07-27",
+                information_frontier="2026-07-27T18:00:00+09:00",
+            )
+
+        assert "Net sales: 500" in out
+        observation = extract_source_observations(out)[0]
+        assert observation.available_at == "2026-07-24T23:59:59+09:00"
+        assert "conservative end-of-day" in observation.availability_basis
+        watermark = extract_source_watermarks(out)[0]
+        assert watermark.status == "complete"
+        assert watermark.returned_records == 1
+        assert watermark.reported_records == 1
+
     def test_snapshot_marks_stale_latest_disclosure_limited(self):
         with _patch([_summary("2022-05-10")]):
             out = jf.get_fundamentals("9984.T", curr_date="2023-05-13")
