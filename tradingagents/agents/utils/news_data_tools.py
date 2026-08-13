@@ -26,7 +26,7 @@ def get_news(
     information_frontier: Annotated[
         str | None,
         InjectedState("information_frontier"),
-    ] = None,
+    ],
 ) -> str:
     """
     Retrieve news data for a given ticker symbol.
@@ -38,13 +38,15 @@ def get_news(
     Returns:
         str: A formatted string containing news data
     """
+    route_kwargs = {"_provenance": True}
+    if information_frontier is not None:
+        route_kwargs["information_frontier"] = information_frontier
     return route_to_vendor(
         "get_news",
         ticker,
         start_date,
         end_date,
-        information_frontier=information_frontier,
-        _provenance=True,
+        **route_kwargs,
     )
 
 

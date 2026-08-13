@@ -97,16 +97,15 @@ def create_sentiment_analyst(llm):
         # through route_to_vendor, which re-raises for a misconfigured/unset
         # vendor (news_data isn't optional), so we catch and degrade here.
         try:
-            news_kwargs = (
-                {"information_frontier": information_frontier.isoformat()}
-                if information_frontier is not None
-                else {}
-            )
             news_block = get_news.func(
                 ticker,
                 news_start_date,
                 end_date,
-                **news_kwargs,
+                information_frontier=(
+                    information_frontier.isoformat()
+                    if information_frontier is not None
+                    else None
+                ),
             )
         except Exception as exc:
             logger.warning("News fetch failed for %s: %s", ticker, exc)

@@ -170,6 +170,29 @@ def test_information_frontier_is_injected_not_model_controlled():
 
 
 @pytest.mark.unit
+def test_contextless_news_does_not_forward_an_empty_information_frontier():
+    with mock.patch(
+        "tradingagents.agents.utils.news_data_tools.route_to_vendor",
+        return_value="NEWS_DATA",
+    ) as router:
+        result = get_news.func(
+            "NVDA",
+            "2026-01-01",
+            "2026-01-15",
+            information_frontier=None,
+        )
+
+    assert result == "NEWS_DATA"
+    router.assert_called_once_with(
+        "get_news",
+        "NVDA",
+        "2026-01-01",
+        "2026-01-15",
+        _provenance=True,
+    )
+
+
+@pytest.mark.unit
 def test_markdown_draft_is_persisted_with_local_confidence():
     captured, *_prefix, result = _run()
 
@@ -186,7 +209,12 @@ def test_markdown_draft_is_persisted_with_local_confidence():
 def test_us_run_uses_social_sources_and_separate_windows():
     captured, stocktwits, reddit, signals, news, _ = _run()
 
-    news.func.assert_called_once_with("NVDA", "2026-01-01", "2026-01-15")
+    news.func.assert_called_once_with(
+        "NVDA",
+        "2026-01-01",
+        "2026-01-15",
+        information_frontier=None,
+    )
     stocktwits.assert_called_once_with(
         "NVDA",
         limit=30,
