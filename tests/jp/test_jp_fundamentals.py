@@ -36,11 +36,15 @@ def _price_df(close, high, low, date="2026-06-26"):
 
     Only two rows, so it can't satisfy the beta regression's minimum overlap —
     beta renders N/A for these (a dedicated test below exercises a real beta)."""
-    return pd.DataFrame({
-        "Date": [pd.Timestamp("2025-07-01"), pd.Timestamp(date)],
+    end = pd.Timestamp(date)
+    start = min(pd.Timestamp("2025-07-01"), end - pd.Timedelta(days=360))
+    frame = pd.DataFrame({
+        "Date": [start, end],
         "Open": [low, close], "High": [high, close], "Low": [low, low],
         "Close": [low, close], "Volume": [1, 1],
     })
+    frame.attrs["price_adjustment"] = "J-Quants adjusted OHLCV v2"
+    return frame
 
 
 def _returns_frame(returns, start=100.0, origin="2024-01-05", freq="W-FRI"):
@@ -156,13 +160,14 @@ class JPFundamentalsTests(unittest.TestCase):
     def _run_live(self, analyst, curr_date, records=None):
         # analyst is the (forward_eps, num_analysts) tuple the yfinance overlay
         # would return; pass a near-today curr_date to open the live gate.
+        price_frame = _price_df(3567.0, 5208.0, 3171.0, date=curr_date)
         with mock.patch.object(jp_fundamentals.jqf, "get_fundamentals", return_value="BASE-OVERVIEW"), \
                 mock.patch.object(jp_fundamentals.jqf, "fetch_periods",
                                   return_value=("7011.T", records or [_FY])), \
                 mock.patch.object(jp_fundamentals, "_fetch_ohlcv_frame",
-                                  return_value=_price_df(3567.0, 5208.0, 3171.0)), \
+                                  return_value=price_frame), \
                 mock.patch.object(jp_fundamentals, "fetch_topix_closes",
-                                  return_value=_price_df(3567.0, 5208.0, 3171.0)), \
+                                  return_value=price_frame), \
                 mock.patch.object(jp_fundamentals, "get_analyst_forward", return_value=analyst) as gaf:
             out = jp_fundamentals.get_fundamentals("7011.T", curr_date)
         return out, gaf
@@ -334,6 +339,8 @@ class JPFundamentalsTests(unittest.TestCase):
     def test_valuation_uses_the_same_information_frontier_as_official_summary(self):
         frontier = "2026-07-27T18:00:00+09:00"
         fetch_periods = mock.Mock(return_value=("7011.T", [_FY]))
+        history = _price_df(3567.0, 5208.0, 3171.0, date="2026-07-27")
+        history.attrs["price_adjustment"] = "J-Quants adjusted OHLCV v2"
         with mock.patch.object(
             jp_fundamentals.jqf,
             "get_fundamentals",
@@ -345,13 +352,13 @@ class JPFundamentalsTests(unittest.TestCase):
         ), mock.patch.object(
             jp_fundamentals,
             "_fetch_ohlcv_frame",
-            return_value=_price_df(3567.0, 5208.0, 3171.0),
+            return_value=history,
         ), mock.patch.object(
             jp_fundamentals,
             "fetch_topix_closes",
             return_value=_price_df(3567.0, 5208.0, 3171.0),
         ):
-            jp_fundamentals.get_fundamentals(
+            output = jp_fundamentals.get_fundamentals(
                 "7011.T",
                 "2026-07-27",
                 information_frontier=frontier,
@@ -366,6 +373,34 @@ class JPFundamentalsTests(unittest.TestCase):
             "7011.T",
             "2026-07-27",
             information_frontier=frontier,
+        )
+        market_records = [
+            item
+            for item in extract_source_observations(output)
+            if item.source == "J-Quants adjusted OHLCV"
+        ]
+        assert len(market_records) == 1
+        assert market_records[0].published_at == "2026-07-27"
+        market_watermarks = [
+            item
+            for item in extract_source_watermarks(output)
+            if item.source == "J-Quants adjusted OHLCV"
+        ]
+        assert len(market_watermarks) == 1
+        assert market_watermarks[0].information_frontier == frontier
+        assert market_watermarks[0].returned_records == len(history)
+        filtered, _omitted = filter_evidence_content_at_information_frontier(
+            output,
+            datetime.fromisoformat(frontier),
+            fallback_source="get_fundamentals",
+            analysis_date=date(2026, 7, 27),
+            instrument="7011.T",
+        )
+        assert "Valuation (computed from J-Quants summary + price" in filtered
+        assert not any(
+            item.source == "J-Quants adjusted OHLCV"
+            and item.status == "unavailable"
+            for item in extract_source_watermarks(filtered)
         )
 
     def test_official_summary_closure_survives_unsafe_valuation_sibling(self):

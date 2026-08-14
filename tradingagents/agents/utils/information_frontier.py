@@ -143,7 +143,10 @@ def filter_evidence_content_at_information_frontier(
                 observation.source == item.source
                 for observation in observations
             )
-            and not _watermark_attests_frontier(item, information_frontier)
+            and not _watermark_attests_content_at_frontier(
+                item,
+                information_frontier,
+            )
             for item in watermarks
         )
     )
@@ -268,7 +271,10 @@ def _span_is_admissible(
                     observation.source == item.source
                     for observation in observations
                 )
-                and not _watermark_attests_frontier(item, information_frontier)
+                and not _watermark_attests_content_at_frontier(
+                    item,
+                    information_frontier,
+                )
                 for item in watermarks
             )
         )
@@ -297,15 +303,22 @@ def _span_is_admissible(
     )
 
 
-def _watermark_attests_frontier(
+def _watermark_attests_content_at_frontier(
     watermark: SourceWatermark,
     information_frontier: datetime,
 ) -> bool:
-    """Accept an empty PIT scan only when its producer froze the same horizon."""
+    """Accept PIT content whose producer froze an auditable scanned horizon."""
 
     if (
         watermark.temporal_scope != "point_in_time"
-        or watermark.status != "complete"
+        or not (
+            watermark.status == "complete"
+            or (
+                watermark.status == "limited"
+                and watermark.limitation_kind
+                in {"archive_truncation", "partial"}
+            )
+        )
         or watermark.information_frontier is None
     ):
         return False
@@ -347,7 +360,10 @@ def _provenance_record_has_frontier_attestation(
     return any(
         watermark.source == record.source
         and covers_effective_date(date.fromisoformat(watermark.scanned_end))
-        and _watermark_attests_frontier(watermark, information_frontier)
+        and _watermark_attests_content_at_frontier(
+            watermark,
+            information_frontier,
+        )
         for watermark in watermarks
     )
 

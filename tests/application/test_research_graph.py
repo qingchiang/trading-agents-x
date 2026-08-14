@@ -923,6 +923,81 @@ def test_tool_output_rejects_provenance_beyond_same_source_closure() -> None:
     assert "Market data beyond" not in filtered["messages"][0].content
 
 
+def test_tool_output_retains_tdnet_body_with_limited_frontier_closure() -> None:
+    frontier = datetime(
+        2026,
+        8,
+        10,
+        23,
+        59,
+        tzinfo=timezone(timedelta(hours=9)),
+    )
+    content = attach_provenance(
+        "TDnet disclosure inside the scanned rolling archive.",
+        ProvenanceRecord(
+            evidence="get_news",
+            source="TDnet",
+            requested="2026-07-01 to 2026-08-10",
+            effective="2026-07-11 to 2026-08-10",
+            timing="publication-date filtered",
+        ),
+    )
+    content = attach_source_observations(
+        content,
+        SourceObservation(
+            source="TDnet",
+            record_id="140120260808000001",
+            version_id="tdnet:fixture",
+            status="published",
+            published_at="2026-08-08 15:00",
+            available_at="2026-08-08T15:00:00+09:00",
+            title="決算短信",
+        ),
+    )
+    content = attach_source_watermarks(
+        content,
+        SourceWatermark(
+            source="TDnet",
+            scanned_start="2026-07-11",
+            scanned_end="2026-08-10",
+            status="limited",
+            limitations=(
+                "Requested interval was truncated by the TDnet rolling archive.",
+            ),
+            returned_records=1,
+            reported_records=1,
+            requested_interval=SourceInterval(
+                start="2026-07-01",
+                end="2026-08-10",
+            ),
+            limitation_kind="archive_truncation",
+            information_frontier=frontier.isoformat(),
+        ),
+    )
+    content = attach_evidence_span(content, temporal_scope="point_in_time")
+
+    filtered = _filter_tool_output_at_information_frontier(
+        {
+            "messages": [
+                ToolMessage(
+                    content=content,
+                    tool_call_id="call-limited-tdnet",
+                    name="get_news",
+                )
+            ]
+        },
+        frontier,
+        analysis_date=date(2026, 8, 10),
+        instrument="4568.T",
+    )
+
+    filtered_content = filtered["messages"][0].content
+    assert "TDnet disclosure" in filtered_content
+    watermark = extract_source_watermarks(filtered_content)[0]
+    assert watermark.status == "limited"
+    assert watermark.limitation_kind == "archive_truncation"
+
+
 @pytest.mark.parametrize("as_span", [False, True])
 def test_tool_output_omits_unattested_current_day_provenance(
     as_span: bool,

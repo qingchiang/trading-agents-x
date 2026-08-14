@@ -326,7 +326,9 @@ disclosure more than 180 days before the analysis cutoff marks the snapshot
 limited. Adjusted
 market history records its provider, adjustment contract, latest observation,
 unit, precision, and actual returned warm-up start separately from the requested
-scan cutoff. The Current Research
+scan cutoff. The verified snapshot and fundamentals valuation block derive
+their Source Record and Watermark closure from the same bounded OHLCV-frame
+metadata builder. The Current Research
 State retains audited market reference levels, and a Revision delta records
 ordinary movement separately from a deterministic crossing of one of those
 levels. Provider, adjustment, or unit drift is an incompatible market signal,
@@ -992,10 +994,17 @@ unknown rather than becoming a neutral or bearish signal. When a live-only
 response is cached, its producer-owned retrieval timestamp is cached with the
 payload and reused by consumers; cache hits are never restamped at assembly
 time. For both explicit spans and unwrapped point-in-time payloads, a safe
-Source Observation or complete frontier-attested Source Watermark may attest a
+Source Observation or frontier-attested Source Watermark may attest a
 Provenance Record only when their canonical source identities match and the
 attested horizon covers the record's effective horizon. An attestation from
 another source never makes the record admissible.
+
+Content admission and Coverage completeness remain separate. A point-in-time
+Watermark with a frozen frontier may attest returned content within its scanned
+horizon when it is `complete`, or when it is `limited` by typed partial/archive
+truncation. The sanitizer preserves the original status, limitations, requested
+interval, and limitation kind; it never upgrades limited Coverage to complete
+or treats an unscanned interval as proof of absence.
 
 Evidence admission is source- or span-scoped. A point-in-time EDINET or TDnet
 channel remains usable when a sibling Google News channel is live-only, and an
