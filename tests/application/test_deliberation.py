@@ -60,6 +60,7 @@ from tradingagents.graph.deliberation import (
     _canonicalize_calculation_result,
     _emit_numeric_normalization_event,
     _evaluate_formula,
+    _live_snapshot_date,
     _normalize_numeric_requirement_candidate,
     _numeric_audit_snapshot,
     _numeric_example_pair,
@@ -466,7 +467,7 @@ def _live_numeric_fixture(
     analysis_date: date,
     retrieved_at: datetime,
     sealed_at: datetime | None = None,
-) -> tuple[EvidenceBundle, DecisionNumericDraft]:
+) -> tuple[EvidenceBundle, DecisionNumericDraft | None]:
     origin = EvidenceOrigin(
         source="fixture.live",
         evidence_type="analyst consensus",
@@ -492,16 +493,17 @@ def _live_numeric_fixture(
         items=(item,),
         sealed_at=sealed_at or retrieved_at + timedelta(minutes=1),
     )
+    catalog = build_numeric_value_catalog(bundle)
     draft = DecisionNumericDraft(
         requested=True,
         market_reference_levels=(
             ObservedMarketReferenceLevelDraft(
                 label="Analyst target",
-                value_ref=build_numeric_value_catalog(bundle)[0].id,
+                value_ref=catalog[0].id,
                 interpretation="Retrieval-time analyst consensus.",
             ),
         ),
-    )
+    ) if catalog else None
     return bundle, draft
 
 
@@ -3719,6 +3721,7 @@ def test_live_numeric_evidence_uses_market_local_snapshot_date(
         analysis_date=analysis_date,
         retrieved_at=datetime.fromisoformat(retrieved_at),
     )
+    assert draft is not None
 
     result = _assemble_numeric_draft(
         draft,
@@ -3749,6 +3752,13 @@ def test_live_numeric_evidence_enforces_near_live_window(
         retrieved_at=retrieved_at,
     )
 
+    if not accepted:
+        assert draft is None
+        assert bundle.items[0].quality is EvidenceQuality.UNAVAILABLE
+        assert _live_snapshot_date(bundle.items[0], bundle=bundle) is None
+        return
+    assert draft is not None
+
     result = _assemble_numeric_draft(
         draft,
         bundle=bundle,
@@ -3771,18 +3781,12 @@ def test_live_numeric_evidence_rejects_retrieval_after_seal() -> None:
         retrieved_at=retrieved_at,
         sealed_at=retrieved_at - timedelta(seconds=1),
     )
-
-    result = _assemble_numeric_draft(
-        draft,
-        bundle=bundle,
-        allowed_evidence_refs={bundle.items[0].ref},
-        value_catalog=_value_catalog(bundle),
-        salvage=True,
-        node="committee.final.serialize.numeric",
+    assert draft is None
+    assert bundle.items[0].quality is EvidenceQuality.UNAVAILABLE
+    assert bundle.items[0].provenance["evidence_admission"]["reason"] == (
+        "retrieved_after_seal"
     )
-
-    assert result.market_reference_levels == ()
-    assert "numeric.market_reference.0.date_unavailable" in result.issues
+    assert _live_snapshot_date(bundle.items[0], bundle=bundle) is None
 
 
 def test_6501_invalid_numeric_tool_candidate_is_repaired_and_retained() -> None:

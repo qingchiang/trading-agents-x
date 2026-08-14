@@ -1,3 +1,5 @@
+from datetime import date
+
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from tradingagents.agents.utils.agent_states import (
@@ -70,6 +72,8 @@ def create_news_analyst(llm):
             macro_panel,
             information_frontier,
             fallback_source="global macro panel",
+            analysis_date=date.fromisoformat(current_date),
+            instrument=ticker,
         )
         market_flow_context = (
             get_market_investor_flows(ticker, current_date)
@@ -80,6 +84,8 @@ def create_news_analyst(llm):
             market_flow_context,
             information_frontier,
             fallback_source="J-Quants investor-types",
+            analysis_date=date.fromisoformat(current_date),
+            instrument=ticker,
         )
         market_flow_section = ""
         if market_flow_context:

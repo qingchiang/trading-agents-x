@@ -29,6 +29,7 @@ from tradingagents.application.contracts import (
     DecisionNumericAuditAppendix,
     EvidenceBundle,
     EvidenceItem,
+    EvidenceOrigin,
     EvidenceQuality,
     EvidenceTemporalScope,
     EvidenceValueLocator,
@@ -307,6 +308,228 @@ def test_explicit_temporal_spans_split_composite_tool_content() -> None:
     assert live_item.content == "RETRIEVAL SNAPSHOT BODY"
     assert live_item.quality is EvidenceQuality.LOW
     assert live_item.origins[0].retrieved_at == "2026-07-24T12:00:00Z"
+
+
+def test_bundle_retains_eligible_near_live_body_as_low_quality_advisory() -> None:
+    item = EvidenceItem.create(
+        source="Google News",
+        evidence_type="ticker news",
+        requested_date=date(2026, 8, 10),
+        content="ELIGIBLE NEAR-LIVE BODY",
+        quality=EvidenceQuality.HIGH,
+        origins=(
+            EvidenceOrigin(
+                source="Google News",
+                evidence_type="ticker news",
+                requested="2026-08-10",
+                effective="published through 2026-08-10",
+                effective_date=date(2026, 8, 10),
+                timing="live non-point-in-time; publication-date filtered",
+                retrieved_at="2026-08-15T20:00:00+09:00",
+                quality=EvidenceQuality.LOW,
+                temporal_scope=EvidenceTemporalScope.LIVE_ONLY,
+            ),
+        ),
+    )
+
+    bundle = EvidenceBundle(
+        instrument="4568.T",
+        analysis_date=date(2026, 8, 10),
+        information_frontier=datetime(2026, 8, 10, 23, 59, tzinfo=timezone.utc),
+        items=(item,),
+        sealed_at=datetime(2026, 8, 15, 21, 0, tzinfo=timezone.utc),
+    )
+
+    admitted = bundle.items[0]
+    assert admitted.content == "ELIGIBLE NEAR-LIVE BODY"
+    assert admitted.quality is EvidenceQuality.LOW
+    assert admitted.origins[0].temporal_scope is EvidenceTemporalScope.LIVE_ONLY
+    assert admitted.origins[0].retrieved_at == "2026-08-15T20:00:00+09:00"
+    assert EvidenceBundle.model_validate(bundle.model_dump(mode="json")).digest == (
+        bundle.digest
+    )
+
+
+@pytest.mark.parametrize(
+    ("retrieved_at", "sealed_at", "expected_reason"),
+    [
+        (None, "2026-08-14T21:00:00+09:00", "retrieved_at_missing"),
+        (
+            "2026-08-16T20:00:00+09:00",
+            "2026-08-16T21:00:00+09:00",
+            "near_live_window_exceeded",
+        ),
+        (
+            "2026-08-14T21:01:00+09:00",
+            "2026-08-14T21:00:00+09:00",
+            "retrieved_after_seal",
+        ),
+    ],
+)
+def test_bundle_withholds_ineligible_near_live_body_but_keeps_audit_item(
+    retrieved_at: str | None,
+    sealed_at: str,
+    expected_reason: str,
+) -> None:
+    item = EvidenceItem.create(
+        source="Google News",
+        evidence_type="ticker news",
+        requested_date=date(2026, 8, 10),
+        content="INELIGIBLE LIVE BODY",
+        origins=(
+            EvidenceOrigin(
+                source="Google News",
+                evidence_type="ticker news",
+                requested="2026-08-10",
+                effective="published through 2026-08-10",
+                effective_date=date(2026, 8, 10),
+                timing="live non-point-in-time; publication-date filtered",
+                retrieved_at=retrieved_at,
+                quality=EvidenceQuality.LOW,
+                temporal_scope=EvidenceTemporalScope.LIVE_ONLY,
+            ),
+        ),
+    )
+
+    bundle = EvidenceBundle(
+        instrument="4568.T",
+        analysis_date=date(2026, 8, 10),
+        information_frontier=datetime(2026, 8, 10, 23, 59, tzinfo=timezone.utc),
+        items=(item,),
+        sealed_at=datetime.fromisoformat(sealed_at),
+    )
+
+    withheld = bundle.items[0]
+    assert withheld.content is None
+    assert withheld.quality is EvidenceQuality.UNAVAILABLE
+    assert withheld.provenance["evidence_admission"] == {
+        "status": "withheld",
+        "reason": expected_reason,
+    }
+    assert EvidenceBundle.model_validate(bundle.model_dump(mode="json")).digest == (
+        bundle.digest
+    )
+
+
+def test_legacy_digest_snapshot_remains_readable_without_admission_rewrite() -> None:
+    item = EvidenceItem.create(
+        source="legacy live source",
+        evidence_type="legacy snapshot",
+        requested_date=date(2026, 8, 10),
+        content="LEGACY SEALED BODY",
+        quality=EvidenceQuality.HIGH,
+        origins=(
+            EvidenceOrigin(
+                source="legacy live source",
+                evidence_type="legacy snapshot",
+                requested="2026-08-10",
+                effective="retrieval-time snapshot",
+                timing="live non-point-in-time",
+                retrieved_at="2026-08-14T00:20:00+09:00",
+                quality=EvidenceQuality.HIGH,
+                temporal_scope=EvidenceTemporalScope.LIVE_ONLY,
+            ),
+        ),
+    )
+    digest_payload = {
+        "items": [item.model_dump(mode="json")],
+        "tables": [],
+    }
+    digest = hashlib.sha256(
+        json.dumps(
+            digest_payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+
+    bundle = EvidenceBundle.model_validate(
+        {
+            "version": "8",
+            "instrument": "4568.T",
+            "analysis_date": "2026-08-10",
+            "items": [item.model_dump(mode="json")],
+            "tables": [],
+            "sealed_at": "2026-08-14T00:21:00+09:00",
+            "digest": digest,
+        }
+    )
+
+    assert bundle.digest == digest
+    assert bundle.items[0].content == "LEGACY SEALED BODY"
+    assert bundle.items[0].quality is EvidenceQuality.HIGH
+
+
+def test_bundle_withholds_pit_body_when_origin_is_after_cutoff() -> None:
+    item = EvidenceItem.create(
+        source="J-Quants",
+        evidence_type="market data",
+        requested_date=date(2026, 8, 10),
+        content="POST-CUTOFF PIT BODY",
+        origins=(
+            EvidenceOrigin(
+                source="J-Quants",
+                evidence_type="market data",
+                requested="2026-08-10",
+                effective="2026-08-11",
+                effective_date=date(2026, 8, 11),
+                timing="market-date filtered",
+                quality=EvidenceQuality.HIGH,
+                temporal_scope=EvidenceTemporalScope.POINT_IN_TIME,
+            ),
+        ),
+    )
+
+    bundle = EvidenceBundle(
+        instrument="4568.T",
+        analysis_date=date(2026, 8, 10),
+        items=(item,),
+    )
+
+    assert bundle.items[0].content is None
+    assert bundle.items[0].quality is EvidenceQuality.UNAVAILABLE
+    assert bundle.items[0].provenance["evidence_admission"]["reason"] == (
+        "effective_after_cutoff"
+    )
+
+
+def test_withheld_live_item_cannot_retain_referenced_evidence_table() -> None:
+    item = EvidenceItem.create(
+        source="live fixture",
+        evidence_type="live snapshot",
+        requested_date=date(2026, 8, 10),
+        content=(
+            "| Metric | Value |\n"
+            "|---|---:|\n"
+            "| Unsafe live value | 123 |"
+        ),
+        origins=(
+            EvidenceOrigin(
+                source="live fixture",
+                evidence_type="live snapshot",
+                requested="2026-08-10",
+                effective="retrieval-time snapshot",
+                timing="live non-point-in-time",
+                retrieved_at="2026-08-16T12:00:00+09:00",
+                quality=EvidenceQuality.LOW,
+                temporal_scope=EvidenceTemporalScope.LIVE_ONLY,
+            ),
+        ),
+    )
+    tables = extract_evidence_tables((item,))
+    assert tables
+
+    bundle = EvidenceBundle(
+        instrument="4568.T",
+        analysis_date=date(2026, 8, 10),
+        items=(item,),
+        tables=tables,
+        sealed_at=datetime(2026, 8, 16, 13, 0, tzinfo=timezone.utc),
+    )
+
+    assert bundle.items[0].content is None
+    assert bundle.tables == ()
 
 
 def test_unavailable_live_span_keeps_audit_record_without_body() -> None:

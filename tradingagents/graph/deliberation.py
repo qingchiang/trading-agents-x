@@ -72,8 +72,10 @@ from tradingagents.application.contracts import (
     ScenarioReferenceRange,
     ValuationAssessment,
 )
+from tradingagents.application.evidence_admission import (
+    evaluate_evidence_admission,
+)
 from tradingagents.application.markdown_evidence import normalize_evidence_markdown
-from tradingagents.dataflows.lookahead import is_near_live
 from tradingagents.dataflows.symbol_utils import market_timezone
 from tradingagents.graph.numeric_evidence import (
     NumericValueCatalogEntry,
@@ -3504,17 +3506,23 @@ def _live_snapshot_date(item: EvidenceItem, *, bundle: EvidenceBundle) -> date |
         return None
     retrieved: list[datetime] = []
     for origin in item.origins:
+        decision = evaluate_evidence_admission(
+            temporal_scope=origin.temporal_scope.value,
+            analysis_date=bundle.analysis_date,
+            instrument=bundle.instrument,
+            retrieved_at=origin.retrieved_at,
+            sealed_at=bundle.sealed_at,
+            effective_dates=(
+                (origin.effective_date,)
+                if origin.effective_date is not None
+                else ()
+            ),
+        )
+        if not decision.admitted:
+            return None
         try:
             value = datetime.fromisoformat(str(origin.retrieved_at).replace("Z", "+00:00"))
         except ValueError:
-            return None
-        if value.utcoffset() is None or value > bundle.sealed_at:
-            return None
-        if not is_near_live(
-            bundle.analysis_date.isoformat(),
-            bundle.instrument,
-            now=value,
-        ):
             return None
         retrieved.append(value)
     timezone = market_timezone(bundle.instrument)

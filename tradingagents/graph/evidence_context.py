@@ -110,8 +110,10 @@ def build_analyst_evidence_context(
     analyst_bundle = EvidenceBundle(
         instrument=bundle.instrument,
         analysis_date=bundle.analysis_date,
+        information_frontier=bundle.information_frontier,
         items=selected_items,
         tables=selected_tables,
+        sealed_at=bundle.sealed_at,
     )
     query_results: list[dict[str, Any]] = [
         get_evidence_item_payload(analyst_bundle, item.ref)

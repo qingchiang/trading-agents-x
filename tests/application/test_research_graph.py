@@ -55,6 +55,7 @@ from tradingagents.provenance import (
     attach_provenance,
     attach_source_observations,
     attach_source_watermarks,
+    extract_evidence_spans,
     extract_source_watermarks,
 )
 
@@ -198,6 +199,328 @@ def test_tool_output_checks_live_only_metadata_even_with_attested_records() -> N
     )
 
     assert filtered["messages"][0].content.startswith("Evidence omitted")
+
+
+def test_tool_output_admits_safe_pit_and_near_live_spans_independently() -> None:
+    frontier = datetime(
+        2026,
+        8,
+        10,
+        23,
+        59,
+        tzinfo=timezone(timedelta(hours=9)),
+    )
+    pit = attach_evidence_span(
+        attach_provenance(
+            "PIT DISCLOSURE BODY",
+            ProvenanceRecord(
+                evidence="filing",
+                source="EDINET",
+                requested="2026-08-10",
+                effective="2026-08-10",
+                timing="disclosure-date filtered",
+                retrieved_at="2026-08-10T17:00:00+09:00",
+            ),
+        ),
+        temporal_scope="point_in_time",
+    )
+    near_live = attach_evidence_span(
+        attach_provenance(
+            "NEAR-LIVE HEADLINE BODY",
+            ProvenanceRecord(
+                evidence="ticker news",
+                source="Google News",
+                requested="2026-08-10",
+                effective="published through 2026-08-10",
+                timing="live non-point-in-time; publication-date filtered",
+                retrieved_at="2026-08-14T00:20:00+09:00",
+            ),
+        ),
+        temporal_scope="live_only",
+    )
+
+    filtered = _filter_tool_output_at_information_frontier(
+        {
+            "messages": [
+                ToolMessage(
+                    content=f"{pit}\n{near_live}",
+                    tool_call_id="call-source-spans",
+                    name="get_news",
+                )
+            ]
+        },
+        frontier,
+        analysis_date=date(2026, 8, 10),
+        instrument="4568.T",
+        sealed_at=datetime(2026, 8, 14, 0, 21, tzinfo=timezone(timedelta(hours=9))),
+    )
+
+    content = filtered["messages"][0].content
+    assert "PIT DISCLOSURE BODY" in content
+    assert "NEAR-LIVE HEADLINE BODY" in content
+    assert len(extract_evidence_spans(content)) == 2
+    assert filtered["messages"][0].additional_kwargs[
+        "evidence_admission_sealed_at"
+    ] == "2026-08-14T00:21:00+09:00"
+
+
+def test_tool_output_withholds_only_ineligible_live_span_body() -> None:
+    frontier = datetime(
+        2026,
+        8,
+        10,
+        23,
+        59,
+        tzinfo=timezone(timedelta(hours=9)),
+    )
+    pit = attach_evidence_span(
+        attach_provenance(
+            "PIT SIBLING BODY",
+            ProvenanceRecord(
+                evidence="filing",
+                source="EDINET",
+                requested="2026-08-10",
+                effective="2026-08-09",
+                timing="disclosure-date filtered",
+            ),
+        ),
+        temporal_scope="point_in_time",
+    )
+    stale_live = attach_evidence_span(
+        attach_provenance(
+            "STALE LIVE BODY",
+            ProvenanceRecord(
+                evidence="ticker news",
+                source="Google News",
+                requested="2026-08-10",
+                effective="published through 2026-08-10",
+                timing="live non-point-in-time; publication-date filtered",
+                retrieved_at="2026-08-16T00:20:00+09:00",
+            ),
+        ),
+        temporal_scope="live_only",
+    )
+
+    filtered = _filter_tool_output_at_information_frontier(
+        {
+            "messages": [
+                ToolMessage(
+                    content=f"{pit}\n{stale_live}",
+                    tool_call_id="call-stale-span",
+                    name="get_news",
+                )
+            ]
+        },
+        frontier,
+        analysis_date=date(2026, 8, 10),
+        instrument="4568.T",
+        sealed_at=datetime(2026, 8, 16, 0, 21, tzinfo=timezone(timedelta(hours=9))),
+    )
+
+    content = filtered["messages"][0].content
+    assert "PIT SIBLING BODY" in content
+    assert "STALE LIVE BODY" not in content
+    watermarks = extract_source_watermarks(content)
+    assert any(item.source == "Google News" for item in watermarks)
+    assert all(item.status == "unavailable" for item in watermarks)
+    assert all(item.temporal_scope == "live_only" for item in watermarks)
+    assert all(item.limitation_kind == "live_only" for item in watermarks)
+
+
+def test_near_live_exception_does_not_admit_post_cutoff_pit_span() -> None:
+    frontier = datetime(
+        2026,
+        8,
+        14,
+        0,
+        20,
+        tzinfo=timezone(timedelta(hours=9)),
+    )
+    post_cutoff = attach_evidence_span(
+        attach_provenance(
+            "POST-CUTOFF PIT BODY",
+            ProvenanceRecord(
+                evidence="market data",
+                source="J-Quants",
+                requested="2026-08-10",
+                effective="2026-08-12",
+                timing="trade-date filtered",
+                retrieved_at="2026-08-13T18:00:00+09:00",
+            ),
+        ),
+        temporal_scope="point_in_time",
+    )
+
+    filtered = _filter_tool_output_at_information_frontier(
+        {
+            "messages": [
+                ToolMessage(
+                    content=post_cutoff,
+                    tool_call_id="call-post-cutoff-pit",
+                    name="get_stock_data",
+                )
+            ]
+        },
+        frontier,
+        analysis_date=date(2026, 8, 10),
+        instrument="4568.T",
+    )
+
+    assert "POST-CUTOFF PIT BODY" not in filtered["messages"][0].content
+
+
+def test_tool_output_rejects_live_span_retrieved_after_preseal_bound() -> None:
+    frontier = datetime(2026, 8, 10, 23, 59, tzinfo=timezone.utc)
+    live = attach_evidence_span(
+        attach_provenance(
+            "FUTURE RETRIEVAL BODY",
+            ProvenanceRecord(
+                evidence="ticker news",
+                source="Google News",
+                requested="2026-08-10",
+                effective="published through 2026-08-10",
+                timing="live non-point-in-time; publication-date filtered",
+                retrieved_at="2026-08-14T00:21:00+09:00",
+            ),
+        ),
+        temporal_scope="live_only",
+    )
+
+    filtered = _filter_tool_output_at_information_frontier(
+        {
+            "messages": [
+                ToolMessage(
+                    content=live,
+                    tool_call_id="call-future-retrieval",
+                    name="get_news",
+                )
+            ]
+        },
+        frontier,
+        analysis_date=date(2026, 8, 10),
+        instrument="4568.T",
+        sealed_at=datetime(2026, 8, 14, 0, 20, tzinfo=timezone(timedelta(hours=9))),
+    )
+
+    assert "FUTURE RETRIEVAL BODY" not in filtered["messages"][0].content
+
+
+def test_tool_output_reuses_checkpointed_preseal_bound_on_replay() -> None:
+    frontier = datetime(2026, 8, 10, 23, 59, tzinfo=timezone.utc)
+    live = attach_evidence_span(
+        attach_provenance(
+            "REPLAY MUST NOT ADMIT THIS BODY",
+            ProvenanceRecord(
+                evidence="ticker news",
+                source="Google News",
+                requested="2026-08-10",
+                effective="published through 2026-08-10",
+                timing="live non-point-in-time; publication-date filtered",
+                retrieved_at="2026-08-14T00:21:00+09:00",
+            ),
+        ),
+        temporal_scope="live_only",
+    )
+    message = ToolMessage(
+        content=live,
+        tool_call_id="call-replayed-bound",
+        name="get_news",
+        additional_kwargs={
+            "evidence_admission_sealed_at": "2026-08-14T00:20:00+09:00"
+        },
+    )
+
+    filtered = _filter_tool_output_at_information_frontier(
+        {"messages": [message]},
+        frontier,
+        analysis_date=date(2026, 8, 10),
+        instrument="4568.T",
+    )
+
+    assert "REPLAY MUST NOT ADMIT THIS BODY" not in filtered["messages"][0].content
+    assert filtered["messages"][0].additional_kwargs == message.additional_kwargs
+
+
+def test_tool_output_fails_closed_for_unsegmented_mixed_temporal_records() -> None:
+    frontier = datetime(2026, 8, 10, 23, 59, tzinfo=timezone.utc)
+    mixed = attach_provenance(
+        "UNSEGMENTED MIXED BODY",
+        ProvenanceRecord(
+            evidence="filing",
+            source="EDINET",
+            requested="2026-08-10",
+            effective="2026-08-10",
+            timing="disclosure-date filtered",
+            retrieved_at="2026-08-10T12:00:00+09:00",
+        ),
+        ProvenanceRecord(
+            evidence="ticker news",
+            source="Google News",
+            requested="2026-08-10",
+            effective="published through 2026-08-10",
+            timing="live non-point-in-time; publication-date filtered",
+            retrieved_at="2026-08-14T00:19:00+09:00",
+        ),
+    )
+
+    filtered = _filter_tool_output_at_information_frontier(
+        {
+            "messages": [
+                ToolMessage(
+                    content=mixed,
+                    tool_call_id="call-mixed-unsegmented",
+                    name="get_news",
+                )
+            ]
+        },
+        frontier,
+        analysis_date=date(2026, 8, 10),
+        instrument="4568.T",
+        sealed_at=datetime(2026, 8, 14, 0, 20, tzinfo=timezone(timedelta(hours=9))),
+    )
+
+    assert "UNSEGMENTED MIXED BODY" not in filtered["messages"][0].content
+
+
+def test_tool_output_fails_closed_for_unsegmented_live_and_unknown_records() -> None:
+    frontier = datetime(2026, 8, 10, 23, 59, tzinfo=timezone.utc)
+    mixed = attach_provenance(
+        "LIVE PLUS UNKNOWN BODY",
+        ProvenanceRecord(
+            evidence="ticker news",
+            source="Google News",
+            requested="2026-08-10",
+            effective="published through 2026-08-10",
+            timing="live non-point-in-time; publication-date filtered",
+            retrieved_at="2026-08-14T00:19:00+09:00",
+        ),
+        ProvenanceRecord(
+            evidence="opaque overlay",
+            source="unknown adapter",
+            requested="2026-08-10",
+            effective="2026-08-10",
+            timing="opaque temporal semantics",
+            retrieved_at="2026-08-14T00:19:00+09:00",
+        ),
+    )
+
+    filtered = _filter_tool_output_at_information_frontier(
+        {
+            "messages": [
+                ToolMessage(
+                    content=mixed,
+                    tool_call_id="call-live-unknown",
+                    name="get_news",
+                )
+            ]
+        },
+        frontier,
+        analysis_date=date(2026, 8, 10),
+        instrument="4568.T",
+        sealed_at=datetime(2026, 8, 14, 0, 20, tzinfo=timezone(timedelta(hours=9))),
+    )
+
+    assert "LIVE PLUS UNKNOWN BODY" not in filtered["messages"][0].content
 
 
 def test_tool_output_checks_each_same_day_channel_independently() -> None:

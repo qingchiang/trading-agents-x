@@ -79,6 +79,9 @@ class EvidenceSpan:
     content: str | None
     records: tuple[ProvenanceRecord, ...]
     temporal_scope: TemporalScopeName
+    source_observations: tuple[SourceObservation, ...] = ()
+    source_watermarks: tuple[SourceWatermark, ...] = ()
+    explicit: bool = True
 
 
 @dataclass(frozen=True)
@@ -307,6 +310,10 @@ def extract_evidence_spans(text: str) -> list[EvidenceSpan]:
                 content=strip_provenance_markers(raw_content).strip() or None,
                 records=tuple(extract_provenance(raw_content)),
                 temporal_scope=scope,
+                source_observations=tuple(
+                    extract_source_observations(raw_content)
+                ),
+                source_watermarks=tuple(extract_source_watermarks(raw_content)),
             )
         )
     remainder_parts.append(text[cursor:])
@@ -324,6 +331,11 @@ def extract_evidence_spans(text: str) -> list[EvidenceSpan]:
                 temporal_scope=temporal_scope_from_records(
                     remainder_records
                 ),
+                source_observations=tuple(
+                    extract_source_observations(remainder)
+                ),
+                source_watermarks=tuple(extract_source_watermarks(remainder)),
+                explicit=False,
             ),
         )
     return explicit
@@ -334,7 +346,6 @@ def temporal_scope_from_records(
 ) -> TemporalScopeName:
     """Infer a conservative scope for unwrapped legacy source metadata."""
     scopes = {_temporal_scope_from_record(record) for record in records}
-    scopes.discard("unknown")
     return scopes.pop() if len(scopes) == 1 else "unknown"
 
 

@@ -7,7 +7,7 @@ import operator
 import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Annotated, Any, Literal
 
 from langchain_core.messages import HumanMessage, ToolMessage
@@ -117,20 +117,36 @@ from tradingagents.provenance import (
 )
 
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_ADMISSION_SEALED_AT_KEY = "evidence_admission_sealed_at"
+
+
 def _filter_tool_output_at_information_frontier(
     output: dict[str, Any],
     information_frontier: datetime | None,
+    *,
+    analysis_date: date | None = None,
+    instrument: str | None = None,
+    sealed_at: datetime | None = None,
 ) -> dict[str, Any]:
     """Keep post-frontier source payloads out of analyst conversations."""
 
     if information_frontier is None:
         return output
+    batch_sealed_at = sealed_at or datetime.now(timezone.utc)
     messages = []
     for message in output.get("messages", ()):
         if not isinstance(message, ToolMessage):
             messages.append(message)
             continue
         content = message.content if isinstance(message.content, str) else str(message.content)
+        additional_kwargs = dict(message.additional_kwargs)
+        raw_sealed_at = additional_kwargs.get(_ADMISSION_SEALED_AT_KEY)
+        message_sealed_at = (
+            datetime.fromisoformat(str(raw_sealed_at))
+            if raw_sealed_at is not None
+            else batch_sealed_at
+        )
+        additional_kwargs[_ADMISSION_SEALED_AT_KEY] = message_sealed_at.isoformat()
         artifact = getattr(message, "artifact", None)
         artifact_scope = (
             artifact.get("temporal_scope")
@@ -144,6 +160,9 @@ def _filter_tool_output_at_information_frontier(
             fallback_source=message.name or "unknown",
             temporal_scope=artifact_scope,
             external_attestation=artifact_scope is not None,
+            analysis_date=analysis_date,
+            instrument=instrument,
+            sealed_at=message_sealed_at,
         )
         if is_evidence_tool_artifact(artifact):
             effective_dates = [
@@ -167,7 +186,12 @@ def _filter_tool_output_at_information_frontier(
                         )
                     ),
                     "artifact": None,
+                    "additional_kwargs": additional_kwargs,
                 }
+            )
+        elif additional_kwargs != message.additional_kwargs:
+            message = message.model_copy(
+                update={"additional_kwargs": additional_kwargs}
             )
         messages.append(message)
     return {**output, "messages": messages}
@@ -181,6 +205,8 @@ class _InformationFrontierToolNode(ToolNode):
         return _filter_tool_output_at_information_frontier(
             output,
             runtime.context.information_frontier,
+            analysis_date=runtime.context.request.analysis_date,
+            instrument=runtime.context.request.ticker,
         )
 
     async def _afunc(self, input, config, runtime):
@@ -188,6 +214,8 @@ class _InformationFrontierToolNode(ToolNode):
         return _filter_tool_output_at_information_frontier(
             output,
             runtime.context.information_frontier,
+            analysis_date=runtime.context.request.analysis_date,
+            instrument=runtime.context.request.ticker,
         )
 
 
@@ -677,6 +705,7 @@ class ResearchGraph:
                     for table in sealed_bundle.tables
                     if evidence_ref_set.intersection(table.evidence_refs)
                 ),
+                sealed_at=sealed_bundle.sealed_at,
             )
             output_language = report_language_prompt_label(context.settings.output_language)
             prepared_evidence = build_analyst_evidence_context(
