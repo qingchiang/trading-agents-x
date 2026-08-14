@@ -1565,6 +1565,14 @@ def derive_forward_research_anchor(
         item.object_id: item for item in (*revision.coverage.claims, *revision.coverage.questions)
     }
     for research_object in (*revision.current_state.claims, *revision.current_state.questions):
+        if (
+            isinstance(research_object, ResearchClaim)
+            and research_object.standing is not ClaimStanding.ACTIVE
+        ) or (
+            isinstance(research_object, ResearchQuestion)
+            and research_object.status is not QuestionStatus.OPEN
+        ):
+            continue
         coverage = object_coverage[research_object.id]
         if coverage.status is CoverageStatus.COMPLETE:
             continue
@@ -3805,6 +3813,7 @@ def assemble_full_update(
                 item.domain
                 for item in candidate.coverage.domains
                 if item.requirement is CoverageRequirement.REQUIRED
+                and item.source is None
             )
         ),
     )

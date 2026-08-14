@@ -522,6 +522,15 @@ Question-state changes, novelty, ordinal Claim Confidence changes, and
 uncertainty produce stable Full-escalation reasons. Invalid structured output
 gets one repair attempt and then escalates fail-closed.
 
+The semantic boundary projects only active Claims, open or answered Questions,
+and their current decision context; retired objects remain in the Revision for
+audit but are not current comparison targets. Every new Evidence item and each
+applicable persistent ID remains present. Evidence content is truncated through
+a deterministic, new-Evidence-first character budget while source, timing,
+quality, and temporal-scope metadata remain visible. If that bounded projection
+or the Evidence item-count limit still cannot fit the semantic contract, the
+update escalates fail-closed with `semantic_input_oversize`.
+
 When bounded gates can propose No Material Change, Shadow mode persists the
 candidate and its semantic assessment, then runs independent Full Analysis.
 Only the Full result creates the authoritative Revision and advances the

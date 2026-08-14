@@ -499,6 +499,63 @@ def test_limited_decision_envelope_claim_remains_usable_anchor_state():
     assert derive_forward_research_anchor(limited).is_forward_research_anchor is True
 
 
+def test_retired_claim_coverage_does_not_poison_current_anchor_state():
+    baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    retired = baseline.current_state.claims[0].model_copy(
+        update={
+            "id": "claim_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "standing": ClaimStanding.RETIRED,
+        }
+    )
+    revision = baseline.model_copy(
+        update={
+            "current_state": baseline.current_state.model_copy(
+                update={"claims": (*baseline.current_state.claims, retired)}
+            ),
+            "coverage": baseline.coverage.model_copy(
+                update={
+                    "claims": (
+                        *baseline.coverage.claims,
+                        ResearchObjectCoverage(
+                            object_id=retired.id,
+                            status=CoverageStatus.LIMITED,
+                            evidence_refs=retired.evidence_refs,
+                            limitations=("Retired Claim is retained for audit only.",),
+                        ),
+                    )
+                }
+            ),
+        }
+    )
+
+    qualification = derive_forward_research_anchor(revision)
+
+    assert qualification.is_forward_research_anchor is True
+    assert AnchorQualificationReason.CURRENT_STATE_UNUSABLE not in qualification.reasons
+
+
+def test_active_direct_claim_still_requires_complete_anchor_coverage():
+    baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    revision = baseline.model_copy(
+        update={
+            "coverage": baseline.coverage.model_copy(
+                update={
+                    "claims": (
+                        baseline.coverage.claims[0].model_copy(
+                            update={"status": CoverageStatus.LIMITED}
+                        ),
+                    )
+                }
+            )
+        }
+    )
+
+    qualification = derive_forward_research_anchor(revision)
+
+    assert qualification.is_forward_research_anchor is False
+    assert AnchorQualificationReason.CURRENT_STATE_UNUSABLE in qualification.reasons
+
+
 def test_open_question_is_anchor_covered_when_required_domain_was_checked():
     baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
     question = ResearchQuestion(
@@ -1173,6 +1230,47 @@ def test_full_update_preserves_only_unambiguous_longitudinal_identities():
     assert updated.delta.claims[0].change.value == "reaffirmed"
     assert {item.lineage for item in updated.evidence_snapshot.lineage} == {"new"}
     assert updated.execution_strategy.value == "full"
+
+
+def test_full_update_does_not_promote_advisory_sources_in_a_shared_required_domain():
+    watermarks = [
+        _watermark("EDINET", returned_records=0, reported_records=0),
+        _watermark("TDnet", returned_records=0, reported_records=0),
+        _watermark(
+            "FRED",
+            status="unavailable",
+            limitations=("Advisory macro collection was unavailable.",),
+            returned_records=0,
+            reported_records=0,
+        ),
+    ]
+    execution = _with_disclosure_metadata(
+        _execution("6501.T"),
+        records=[],
+        watermarks=watermarks,
+    )
+    baseline = assemble_full_revision(
+        AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
+        execution,
+    )
+    candidate = assemble_full_revision(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date=CUTOFF + timedelta(days=1),
+            analysts=("market",),
+        ),
+        execution,
+    )
+    candidate_fred = next(
+        item for item in candidate.coverage.domains if item.source == "FRED"
+    )
+    assert candidate_fred.requirement is CoverageRequirement.ADVISORY
+
+    updated = assemble_full_update("revision-1", baseline, candidate)
+
+    fred = next(item for item in updated.coverage.domains if item.source == "FRED")
+    assert fred.requirement is CoverageRequirement.ADVISORY
+    assert fred.status is CoverageStatus.UNAVAILABLE
 
 
 def test_legacy_internal_source_dependency_remains_readable_but_forces_full():
@@ -2787,6 +2885,118 @@ def test_positive_near_live_evidence_reaches_semantic_assessment_with_scope():
     assert result.escalation_reason is IncrementalEscalationReason.POTENTIALLY_MATERIAL_NOVELTY
     assert "timestamped headline" in llm.prompts[0]
     assert '"temporal_scopes": ["live_only"]' in llm.prompts[0]
+
+
+def test_semantic_assessment_accepts_a_realistic_large_current_state():
+    baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    template = baseline.current_state.claims[0]
+    claims = (
+        *baseline.current_state.claims,
+        *(
+            template.model_copy(
+                update={
+                    "id": f"claim_{index:032x}",
+                    "statement": (
+                        f"Claim {index} tracks a distinct decision-relevant operating condition. "
+                        + "Observed margins, demand, and capital allocation remain conditional. "
+                        * 2
+                    ),
+                    "falsifier": (
+                        "A future filing or market observation contradicts this operating condition. "
+                        * 2
+                    ),
+                }
+            )
+            for index in range(len(baseline.current_state.claims), 112)
+        ),
+    )
+    baseline = baseline.model_copy(
+        update={
+            "current_state": baseline.current_state.model_copy(
+                update={"claims": claims}
+            ),
+            "coverage": baseline.coverage.model_copy(
+                update={
+                    "claims": tuple(
+                        ResearchObjectCoverage(
+                            object_id=claim.id,
+                            status=CoverageStatus.COMPLETE,
+                            evidence_refs=claim.evidence_refs,
+                        )
+                        for claim in claims
+                    )
+                }
+            ),
+        }
+    )
+    baseline = baseline.__class__.model_validate(baseline.model_dump(mode="python"))
+    deterministic = assess_deterministic_update(
+        "revision-1",
+        baseline,
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-25",
+            analysts=("market",),
+        ),
+        evidence,
+    )
+    assert deterministic.candidate is not None
+    new_ref = deterministic.candidate.delta.new_evidence_refs[0]
+    llm = _SemanticLLM(
+        _semantic_response(
+            "support",
+            evidence_ref=new_ref,
+            claim_ids=(claims[0].id,),
+        )
+    )
+
+    result = assess_semantic_update(baseline, deterministic, llm)
+
+    assert result.candidate is not None
+    assert result.escalation_reason is None
+    assert len(llm.prompts) == 1
+    assert len(llm.prompts[0]) <= 48_000
+    assert claims[-1].id in llm.prompts[0]
+    assert new_ref in llm.prompts[0]
+
+
+def test_semantic_assessment_still_fails_closed_above_the_evidence_item_bound():
+    baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    template = evidence.items[0]
+    oversized = EvidenceBundle(
+        instrument=evidence.instrument,
+        analysis_date=evidence.analysis_date,
+        information_frontier=evidence.information_frontier,
+        items=tuple(
+            EvidenceItem.create(
+                source=template.source,
+                evidence_type=template.evidence_type,
+                requested_date=template.requested_date,
+                effective_date=template.effective_date,
+                content=f"Bounded source observation {index}.",
+                provenance=template.provenance,
+            )
+            for index in range(33)
+        ),
+    )
+    deterministic = assess_deterministic_update(
+        "revision-1",
+        baseline,
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-25",
+            analysts=("market",),
+        ),
+        oversized,
+    )
+    assert deterministic.candidate is not None
+    llm = _SemanticLLM()
+
+    result = assess_semantic_update(baseline, deterministic, llm)
+
+    assert result.candidate is None
+    assert result.escalation_reason is IncrementalEscalationReason.SEMANTIC_INPUT_OVERSIZE
+    assert llm.prompts == []
 
 
 def test_empty_advisory_live_only_watermark_does_not_block_quiet_candidate():

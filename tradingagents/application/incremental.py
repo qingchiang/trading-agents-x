@@ -268,10 +268,14 @@ def run_deterministic_incremental_gate(
     return assess()
 
 
-def _semantic_evidence_summary(item: Any) -> dict[str, Any]:
+def _semantic_evidence_summary(
+    item: Any,
+    *,
+    max_content_chars: int = _MAX_SEMANTIC_EVIDENCE_TEXT,
+) -> dict[str, Any]:
     content = item.content
-    if content is not None and len(content) > _MAX_SEMANTIC_EVIDENCE_TEXT:
-        content = content[:_MAX_SEMANTIC_EVIDENCE_TEXT] + "..."
+    if content is not None and len(content) > max_content_chars:
+        content = content[:max_content_chars] + "..."
     return {
         "ref": item.ref,
         "source": item.source,
@@ -299,6 +303,35 @@ def _semantic_evidence_summary(item: Any) -> dict[str, Any]:
     }
 
 
+def _semantic_current_state_summary(baseline: ResearchRevisionDraft) -> dict[str, Any]:
+    state = baseline.current_state
+    return {
+        "schema_version": state.schema_version,
+        "language": state.language,
+        "instrument": state.instrument,
+        "cutoff": state.cutoff,
+        "opinion": state.opinion.model_dump(mode="json", exclude={"evidence_refs"}),
+        "claims": tuple(
+            {
+                "id": claim.id,
+                "statement": claim.statement,
+                "confidence": claim.confidence,
+            }
+            for claim in state.claims
+            if claim.standing is ClaimStanding.ACTIVE
+        ),
+        "questions": tuple(
+            {
+                "id": question.id,
+                "question": question.question,
+                "status": question.status,
+            }
+            for question in state.questions
+            if question.status in {QuestionStatus.OPEN, QuestionStatus.ANSWERED}
+        ),
+    }
+
+
 def _is_research_context(item: Any) -> bool:
     markers = {
         "prior research",
@@ -317,21 +350,6 @@ def _is_research_context(item: Any) -> bool:
         if value is not None:
             labels.add(normalized(value))
     return bool(labels & markers)
-
-
-def _without_evidence_refs(value: Any, excluded_refs: set[str]) -> Any:
-    if isinstance(value, dict):
-        return {
-            key: (
-                [item for item in child if item not in excluded_refs]
-                if key == "evidence_refs" and isinstance(child, list)
-                else _without_evidence_refs(child, excluded_refs)
-            )
-            for key, child in value.items()
-        }
-    if isinstance(value, list):
-        return [_without_evidence_refs(item, excluded_refs) for item in value]
-    return value
 
 
 def _semantic_prompt(
@@ -358,64 +376,81 @@ def _semantic_prompt(
         for item in baseline.evidence_snapshot.bundle.items
         if item.ref in prior_refs and not _is_research_context(item)
     )
-    excluded_refs = {
-        item.ref for item in baseline.evidence_snapshot.bundle.items if _is_research_context(item)
-    }
     if (
         not new_evidence
         or len(new_evidence) > _MAX_SEMANTIC_EVIDENCE_ITEMS
         or len(prior_evidence) > _MAX_SEMANTIC_EVIDENCE_ITEMS
     ):
         raise ValueError("semantic assessment input is empty or exceeds its item bound")
-    payload = {
-        "current_research_state": _without_evidence_refs(
-            baseline.current_state.model_dump(mode="json"),
-            excluded_refs,
-        ),
-        "relevant_claim_ids": tuple(
-            claim.id
-            for claim in baseline.current_state.claims
-            if claim.standing is ClaimStanding.ACTIVE
-        ),
-        "relevant_question_ids": tuple(
-            question.id
-            for question in baseline.current_state.questions
-            if question.status in {QuestionStatus.OPEN, QuestionStatus.ANSWERED}
-        ),
-        "materiality_rules": (
-            "weakening, contradiction, answering, reopening, unresolved uncertainty, "
-            "potentially material novelty, and ordinal confidence changes require Full Analysis",
-            "only support or irrelevance with stable identities and confidence may preserve state",
-        ),
-        "coverage_rules": {
-            "supports_no_material_change": candidate.coverage.supports_no_material_change,
-            "domains": tuple(
-                {
-                    "domain": item.domain,
-                    "source": item.source,
-                    "requirement": item.requirement,
-                    "status": item.status,
-                    "limitations": item.limitations,
-                }
-                for item in candidate.coverage.domains
-            ),
-        },
-        "necessary_prior_evidence_summaries": tuple(
-            _semantic_evidence_summary(item) for item in prior_evidence
-        ),
-        "new_evidence": tuple(_semantic_evidence_summary(item) for item in new_evidence),
-        "output_language": baseline.current_state.language,
-    }
-    prompt = (
+    state_summary = _semantic_current_state_summary(baseline)
+    prefix = (
         "Assess how the new Evidence relates to the Current Research State. "
         "Return only the schema-constrained result. Application code resolves all persistent "
         "identities, so use only the supplied IDs and never create an ID. Human-readable "
         "fields must use output_language.\n\nBOUNDED INPUT:\n"
-        + json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
     )
-    if len(prompt) > _MAX_SEMANTIC_PROMPT_CHARS:
-        raise ValueError("semantic assessment prompt exceeds its character bound")
-    return prompt, tuple(item.ref for item in new_evidence)
+    for new_content_chars, prior_content_chars in (
+        (_MAX_SEMANTIC_EVIDENCE_TEXT, _MAX_SEMANTIC_EVIDENCE_TEXT),
+        (_MAX_SEMANTIC_EVIDENCE_TEXT, 600),
+        (800, 400),
+        (600, 200),
+        (400, 100),
+    ):
+        payload = {
+            "current_research_state": state_summary,
+            "relevant_claim_ids": tuple(
+                claim.id
+                for claim in baseline.current_state.claims
+                if claim.standing is ClaimStanding.ACTIVE
+            ),
+            "relevant_question_ids": tuple(
+                question.id
+                for question in baseline.current_state.questions
+                if question.status in {QuestionStatus.OPEN, QuestionStatus.ANSWERED}
+            ),
+            "materiality_rules": (
+                "weakening, contradiction, answering, reopening, unresolved uncertainty, "
+                "potentially material novelty, and ordinal confidence changes require Full Analysis",
+                "only support or irrelevance with stable identities and confidence may preserve state",
+            ),
+            "coverage_rules": {
+                "supports_no_material_change": candidate.coverage.supports_no_material_change,
+                "domains": tuple(
+                    {
+                        "domain": item.domain,
+                        "source": item.source,
+                        "requirement": item.requirement,
+                        "status": item.status,
+                        "limitations": item.limitations,
+                    }
+                    for item in candidate.coverage.domains
+                ),
+            },
+            "necessary_prior_evidence_summaries": tuple(
+                _semantic_evidence_summary(
+                    item,
+                    max_content_chars=prior_content_chars,
+                )
+                for item in prior_evidence
+            ),
+            "new_evidence": tuple(
+                _semantic_evidence_summary(
+                    item,
+                    max_content_chars=new_content_chars,
+                )
+                for item in new_evidence
+            ),
+            "output_language": baseline.current_state.language,
+        }
+        prompt = prefix + json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        )
+        if len(prompt) <= _MAX_SEMANTIC_PROMPT_CHARS:
+            return prompt, tuple(item.ref for item in new_evidence)
+    raise ValueError("semantic assessment prompt exceeds its character bound")
 
 
 def _semantic_escalation_reason(
