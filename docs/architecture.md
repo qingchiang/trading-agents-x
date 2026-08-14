@@ -415,6 +415,18 @@ Advisory. Required sources are derived from active Claims and open Questions;
 EDINET and TDnet remain Required for Japanese chains, and audited market
 reference levels require compatible adjusted-market coverage.
 
+A Required source dependency names an external data source, not an Evidence,
+Evidence Table, memory, Claim, Question, calculation, requirement, or debate
+object. New analyst and Decision output that places an internal reference in a
+source dependency enters structured-output repair and cannot be assembled into
+a new Research State. Persisted legacy Revisions remain readable: policy omits
+the internal reference from collection, records a typed compatibility
+limitation, and requires the next execution to be Full. That Full update keeps
+legal inherited source names, replaces legacy internal values with legal names
+from the independently assembled candidate when available, and records the
+compatibility repair in Update Summary without treating it as a Coverage
+limitation.
+
 The bounded phase derives versioned Transition Coverage over the interval after
 the current Forward Research Anchor's Information Frontier through the frozen
 update frontier. Each Required Market Research Capability retains its checked

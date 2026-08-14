@@ -76,6 +76,9 @@ from tradingagents.application.evidence_admission import (
     evaluate_evidence_admission,
 )
 from tradingagents.application.markdown_evidence import normalize_evidence_markdown
+from tradingagents.application.source_dependencies import (
+    partition_source_dependencies,
+)
 from tradingagents.dataflows.symbol_utils import market_timezone
 from tradingagents.graph.numeric_evidence import (
     NumericValueCatalogEntry,
@@ -1489,6 +1492,13 @@ def invoke_research_decision(
             raise OutputValidationError("decision.question_sources.duplicate_question")
         if not set(dependency_questions).issubset(result.unresolved_questions):
             raise OutputValidationError("decision.question_sources.unknown_question")
+        if any(
+            partition_source_dependencies(item.required_sources)[1]
+            for item in result.question_source_dependencies
+        ):
+            raise OutputValidationError(
+                "decision.question_sources.internal_reference"
+            )
         scenario_kinds = tuple(item.kind for item in result.scenarios)
         if len(set(scenario_kinds)) != len(scenario_kinds):
             raise OutputValidationError("decision.scenarios.duplicate_kind")
@@ -1651,7 +1661,9 @@ def invoke_research_decision(
             "range_low/range_high requirements with one display_group_id for a "
             "derived range. "
             "Use question_source_dependencies only when an unresolved question "
-            "explicitly depends on a named source remaining available. "
+            "explicitly depends on a named external source remaining available. "
+            "Evidence, memory, table, Claim, Question, calculation, and requirement "
+            "IDs are internal refs and must never be used as source names. "
             + percentage_rules
             + " "
             + display_scale_rules

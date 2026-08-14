@@ -34,6 +34,7 @@ from tradingagents.application.contracts import (
     NumericTemporalBasis,
     RebuttalReview,
     ReportLanguage,
+    ResearchQuestionSourceDependency,
     ResearchScenarioKind,
     RiskReview,
     RiskReviewAdjustment,
@@ -2830,6 +2831,58 @@ def test_final_serializers_preserve_output_language_in_primary_and_repair(
         "display_scale=base, not million" in prompt
         for _schema, prompt in llm.prompts
     )
+
+
+def test_internal_evidence_ref_as_question_source_triggers_core_repair() -> None:
+    state = _state()
+    ref = state["evidence_bundle"]["items"][0]["ref"]
+    question = "Which filing will resolve the uncertainty?"
+    core = _core_draft_from_decision(
+        research_decision(evidence_refs=(ref,)).model_copy(
+            update={"unresolved_questions": (question,)}
+        ).model_dump(mode="json")
+    )
+    invalid = _core_envelope(core).model_copy(
+        update={
+            "question_source_dependencies": (
+                ResearchQuestionSourceDependency(
+                    question=question,
+                    required_sources=(ref,),
+                ),
+            )
+        }
+    )
+    repaired = _core_envelope(core).model_copy(
+        update={
+            "question_source_dependencies": (
+                ResearchQuestionSourceDependency(
+                    question=question,
+                    required_sources=("EDINET",),
+                ),
+            )
+        }
+    )
+    llm = _SequenceLLM(
+        {
+            "ResearchDecisionCoreEnvelope": [invalid, repaired],
+            "DecisionNumericDraft": [DecisionNumericDraft(requested=False)],
+        }
+    )
+
+    result = invoke_research_decision(
+        llm,
+        prompt="Form the final decision.",
+        state=state,
+        node="committee.final",
+        require_risk_adjustments=False,
+    )
+
+    assert result.value.question_source_dependencies[0].required_sources == (
+        "EDINET",
+    )
+    assert [schema for schema, _prompt in llm.prompts].count(
+        "ResearchDecisionCoreEnvelope"
+    ) == 2
 
 
 @pytest.mark.parametrize(

@@ -959,6 +959,101 @@ def test_full_state_assembly_rejects_missing_explicit_claim_evidence():
         )
 
 
+def test_full_state_assembly_rejects_internal_claim_source_reference():
+    execution = _execution("6501.T")
+    ref = execution.evidence.items[0].ref
+    report = execution.reports["market"].model_copy(
+        update={
+            "key_claims": tuple(
+                claim.model_copy(update={"required_sources": (ref,)})
+                for claim in execution.reports["market"].key_claims
+            )
+        }
+    )
+    execution = execution.__class__(
+        state=execution.state,
+        evidence=execution.evidence,
+        reports={"market": report},
+        decision=execution.decision,
+    )
+
+    with pytest.raises(ValueError, match="internal source reference"):
+        assemble_full_revision(
+            AnalysisRequest(
+                ticker="6501.T",
+                analysis_date=CUTOFF,
+                analysts=("market",),
+            ),
+            execution,
+        )
+
+
+def test_full_state_assembly_rejects_internal_question_source_reference():
+    execution = _execution("6501.T")
+    ref = execution.evidence.items[0].ref
+    question = "Which filing will resolve the uncertainty?"
+    execution = execution.__class__(
+        state=execution.state,
+        evidence=execution.evidence,
+        reports=execution.reports,
+        decision=execution.decision.model_copy(
+            update={
+                "unresolved_questions": (question,),
+                "question_source_dependencies": (
+                    ResearchQuestionSourceDependency(
+                        question=question,
+                        required_sources=(ref,),
+                    ),
+                ),
+            }
+        ),
+    )
+
+    with pytest.raises(ValueError, match="internal source reference"):
+        assemble_full_revision(
+            AnalysisRequest(
+                ticker="6501.T",
+                analysis_date=CUTOFF,
+                analysts=("market",),
+            ),
+            execution,
+        )
+
+
+def test_full_state_assembly_keeps_legal_future_question_source_dependency():
+    execution = _execution("6501.T")
+    question = "Which future archive can resolve the uncertainty?"
+    execution = execution.__class__(
+        state=execution.state,
+        evidence=execution.evidence,
+        reports=execution.reports,
+        decision=execution.decision.model_copy(
+            update={
+                "unresolved_questions": (question,),
+                "question_source_dependencies": (
+                    ResearchQuestionSourceDependency(
+                        question=question,
+                        required_sources=("Future Vendor Archive",),
+                    ),
+                ),
+            }
+        ),
+    )
+
+    draft = assemble_full_revision(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date=CUTOFF,
+            analysts=("market",),
+        ),
+        execution,
+    )
+
+    assert draft.current_state.questions[0].required_sources == (
+        "Future Vendor Archive",
+    )
+
+
 def test_full_update_preserves_only_unambiguous_longitudinal_identities():
     request = AnalysisRequest(
         ticker="6501.T",
@@ -976,6 +1071,259 @@ def test_full_update_preserves_only_unambiguous_longitudinal_identities():
     assert updated.delta.claims[0].change.value == "reaffirmed"
     assert {item.lineage for item in updated.evidence_snapshot.lineage} == {"new"}
     assert updated.execution_strategy.value == "full"
+
+
+def test_legacy_internal_source_dependency_remains_readable_but_forces_full():
+    baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    claim = baseline.current_state.claims[0].model_copy(
+        update={"required_sources": ("ev_deadbeefdead",)}
+    )
+    polluted = baseline.model_copy(
+        update={
+            "current_state": baseline.current_state.model_copy(
+                update={"claims": (claim, *baseline.current_state.claims[1:])}
+            ),
+            "coverage": baseline.coverage.model_copy(
+                update={
+                    "domains": (
+                        *baseline.coverage.domains,
+                        ResearchDomainCoverage(
+                            domain="required_source",
+                            source="ev_deadbeefdead",
+                            requirement=CoverageRequirement.REQUIRED,
+                            status=CoverageStatus.UNAVAILABLE,
+                            limitations=(
+                                "Required internal ref coverage was not recorded.",
+                            ),
+                        ),
+                    )
+                }
+            ),
+        }
+    )
+
+    loaded = baseline.__class__.model_validate(polluted.model_dump(mode="python"))
+    evaluation = evaluate_next_update_policy(
+        loaded,
+        instrument="6501.T",
+        mode="experimental",
+    )
+
+    assert loaded.current_state.claims[0].required_sources == ("ev_deadbeefdead",)
+    assert evaluation.policy == "full_required"
+    assert evaluation.reason is NextUpdateReason.INVALID_SOURCE_DEPENDENCY
+    assert evaluation.compatibility_limitations == ("internal_source_reference",)
+    assert "ev_deadbeefdead" not in required_incremental_sources(loaded)
+    assert "ev_deadbeefdead" not in evaluation.required_sources
+
+
+def test_inactive_legacy_internal_dependencies_still_force_full_and_are_repaired():
+    baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    retired_claim = baseline.current_state.claims[0].model_copy(
+        update={
+            "id": "claim_ffffffffffffffffffffffffffffffff",
+            "standing": ClaimStanding.RETIRED,
+            "required_sources": ("ev_deadbeefdead",),
+        }
+    )
+    answered_question = ResearchQuestion(
+        id="question_ffffffffffffffffffffffffffffffff",
+        question="Which archived evidence resolved the uncertainty?",
+        status=QuestionStatus.ANSWERED,
+        required_sources=("memory:legacy-run",),
+    )
+    polluted = baseline.model_copy(
+        update={
+            "current_state": baseline.current_state.model_copy(
+                update={
+                    "claims": (*baseline.current_state.claims, retired_claim),
+                    "questions": (*baseline.current_state.questions, answered_question),
+                }
+            ),
+            "coverage": baseline.coverage.model_copy(
+                update={
+                    "claims": (
+                        *baseline.coverage.claims,
+                        ResearchObjectCoverage(
+                            object_id=retired_claim.id,
+                            status=CoverageStatus.COMPLETE,
+                        ),
+                    ),
+                    "questions": (
+                        *baseline.coverage.questions,
+                        ResearchObjectCoverage(
+                            object_id=answered_question.id,
+                            status=CoverageStatus.COMPLETE,
+                        ),
+                    ),
+                }
+            ),
+        }
+    )
+    loaded = baseline.__class__.model_validate(polluted.model_dump(mode="python"))
+
+    evaluation = evaluate_next_update_policy(
+        loaded,
+        instrument="6501.T",
+        mode="experimental",
+    )
+
+    assert evaluation.policy == "full_required"
+    assert evaluation.reason is NextUpdateReason.INVALID_SOURCE_DEPENDENCY
+    assert evaluation.compatibility_limitations == ("internal_source_reference",)
+    assert "ev_deadbeefdead" not in evaluation.required_sources
+    assert "memory:legacy-run" not in evaluation.required_sources
+
+    candidate = assemble_full_revision(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date=date(2026, 7, 25),
+            analysts=("market",),
+        ),
+        _execution("6501.T"),
+    )
+    repaired = assemble_full_update("revision-1", loaded, candidate)
+    dependencies = tuple(
+        source
+        for claim in repaired.current_state.claims
+        for source in claim.required_sources
+    ) + tuple(
+        source
+        for question in repaired.current_state.questions
+        for source in question.required_sources
+    )
+    assert "ev_deadbeefdead" not in dependencies
+    assert "memory:legacy-run" not in dependencies
+
+
+@pytest.mark.parametrize(
+    ("baseline_sources", "candidate_sources", "expected_sources", "repaired"),
+    (
+        (("ev_deadbeefdead",), (), (), True),
+        (
+            ("EDINET", "ev_deadbeefdead"),
+            ("Google News",),
+            ("EDINET", "Google News"),
+            True,
+        ),
+        (("EDINET",), (), ("EDINET",), False),
+    ),
+)
+def test_full_update_repairs_only_internal_source_dependencies(
+    baseline_sources,
+    candidate_sources,
+    expected_sources,
+    repaired,
+):
+    baseline = assemble_full_revision(
+        AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
+        _execution("6501.T"),
+    )
+    candidate = assemble_full_revision(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date=date(2026, 7, 25),
+            analysts=("market",),
+        ),
+        _execution("6501.T"),
+    )
+    baseline_claim = baseline.current_state.claims[0].model_copy(
+        update={"required_sources": baseline_sources}
+    )
+    candidate_claim = candidate.current_state.claims[0].model_copy(
+        update={"required_sources": candidate_sources}
+    )
+    baseline = baseline.model_copy(
+        update={
+            "current_state": baseline.current_state.model_copy(
+                update={
+                    "claims": (baseline_claim, *baseline.current_state.claims[1:])
+                }
+            )
+        }
+    )
+    candidate = candidate.model_copy(
+        update={
+            "current_state": candidate.current_state.model_copy(
+                update={
+                    "claims": (candidate_claim, *candidate.current_state.claims[1:])
+                }
+            )
+        }
+    )
+
+    updated = assemble_full_update("revision-1", baseline, candidate)
+
+    assert updated.current_state.claims[0].required_sources == expected_sources
+    compatibility_note = "Legacy internal source dependencies were repaired."
+    assert (compatibility_note in updated.update_summary.limitations) is repaired
+
+
+def test_full_update_replaces_internal_question_dependency_from_current_candidate():
+    baseline = assemble_full_revision(
+        AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
+        _execution("6501.T"),
+    )
+    candidate = assemble_full_revision(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date=date(2026, 7, 25),
+            analysts=("market",),
+        ),
+        _execution("6501.T"),
+    )
+    question_text = "Which disclosure will resolve the order uncertainty?"
+    baseline_question = ResearchQuestion(
+        id="question_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        question=question_text,
+        status=QuestionStatus.OPEN,
+        required_sources=("ev_deadbeefdead",),
+    )
+    candidate_question = ResearchQuestion(
+        id="question_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        question=question_text,
+        status=QuestionStatus.OPEN,
+        required_sources=("EDINET",),
+    )
+    baseline = baseline.model_copy(
+        update={
+            "current_state": baseline.current_state.model_copy(
+                update={"questions": (baseline_question,)}
+            )
+        }
+    )
+    candidate = candidate.model_copy(
+        update={
+            "current_state": candidate.current_state.model_copy(
+                update={"questions": (candidate_question,)}
+            ),
+            "delta": candidate.delta.model_copy(
+                update={
+                    "question_disposition": QuestionDispositionAudit(
+                        status="complete",
+                        language="en",
+                        dispositions=(
+                            QuestionDispositionRecord(
+                                baseline_question_id=baseline_question.id,
+                                disposition="reaffirmed",
+                                candidate_question_id=candidate_question.id,
+                                evidence_refs=(candidate.current_state.evidence_refs[0],),
+                                reason="Current Full Evidence preserves the open question.",
+                            ),
+                        ),
+                    )
+                }
+            ),
+        }
+    )
+
+    updated = assemble_full_update("revision-1", baseline, candidate)
+
+    assert updated.current_state.questions[0].id == baseline_question.id
+    assert updated.current_state.questions[0].required_sources == ("EDINET",)
+    assert "Legacy internal source dependencies were repaired." in (
+        updated.update_summary.limitations
+    )
 
 
 def _with_disclosure_metadata(execution, *, records, watermarks):

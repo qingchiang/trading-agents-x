@@ -26,6 +26,9 @@ from tradingagents.application.contracts import (
 )
 from tradingagents.application.markdown_evidence import normalize_evidence_markdown
 from tradingagents.application.metrics import MetricsCallback
+from tradingagents.application.source_dependencies import (
+    partition_source_dependencies,
+)
 from tradingagents.graph.evidence_context import (
     PreparedEvidence,
     build_evidence_catalog,
@@ -462,6 +465,13 @@ def _extract_report_audit(
                 set(valid_refs),
                 required=True,
             )
+            _external, internal = partition_source_dependencies(
+                claim.required_sources
+            )
+            if internal:
+                raise OutputValidationError(
+                    "analyst_audit.required_sources.internal_reference"
+                )
         if not set(audit.section_source_refs).issubset(section_ids):
             raise OutputValidationError("analyst_audit.section_refs")
         for refs in audit.section_source_refs.values():
@@ -498,7 +508,9 @@ Rules:
 - Every claim must point to an existing section ID and at least one allowed
   evidence ref.
 - List a source in required_sources only when the claim explicitly depends on
-  that named source remaining available; otherwise leave it empty.
+  that named external source remaining available; otherwise leave it empty.
+- Evidence, memory, table, Claim, Question, calculation, and requirement IDs
+  are internal refs, not source names, and must never appear in required_sources.
 - Section source refs are optional and should cover whole paragraphs or tables,
   not every sentence or cell.
 - Observation, inference, and forecast must remain distinct.
@@ -525,6 +537,8 @@ LOCALIZED VALID EXAMPLE:
         repair_instructions=(
             "Preserve valid claims. Use only supplied section IDs and evidence "
             "refs. Keep the object small and do not include report Markdown. "
+            "Remove internal object refs from required_sources; retain only named "
+            "external sources that the claim explicitly depends on. "
             "Write statement and implication fields in this output language: "
             f"{output_language}"
         ),

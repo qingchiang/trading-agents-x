@@ -4179,6 +4179,47 @@ def test_revision_owns_state_and_evidence_after_producing_run_is_purged(
     assert revision.evidence_snapshot.bundle.items[0].content == "Fixture evidence."
 
 
+def test_repository_round_trip_keeps_legacy_internal_source_dependency_readable(
+    app_settings,
+    repository,
+) -> None:
+    internal_ref = "ev_deadbeefdead"
+
+    def legacy_state_assembler(request, execution):
+        draft = _eligible_state_assembler(request, execution)
+        claim = draft.current_state.claims[0].model_copy(
+            update={"required_sources": (internal_ref,)}
+        )
+        return draft.model_copy(
+            update={
+                "current_state": draft.current_state.model_copy(
+                    update={"claims": (claim, *draft.current_state.claims[1:])}
+                )
+            }
+        )
+
+    service = _service(
+        app_settings,
+        repository,
+        state_assembler=legacy_state_assembler,
+    )
+    service.run_initial_chain(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+
+    revision = repository.get_research_revision(chain.current_revision_id)
+    presented = service.get_research_chain(chain.id)
+
+    assert revision.current_state.claims[0].required_sources == (internal_ref,)
+    assert presented.next_update_policy == "full_required"
+    assert presented.next_update_reason == "invalid_source_dependency"
+
+
 @pytest.mark.parametrize(
     ("identity", "expected"),
     [
