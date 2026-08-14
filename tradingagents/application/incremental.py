@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import timedelta
 from time import monotonic
 from typing import Any
 
@@ -13,17 +13,7 @@ from langchain_core.messages import ToolMessage
 from tradingagents.dataflows.interface import route_to_vendor
 from tradingagents.graph.research_graph import collect_evidence
 from tradingagents.graph.structured_output import StructuredOutputError, StructuredOutputRunner
-from tradingagents.provenance import (
-    ProvenanceRecord,
-    SourceInterval,
-    SourceWatermark,
-    attach_provenance,
-    attach_source_observations,
-    attach_source_watermarks,
-    extract_provenance,
-    extract_source_observations,
-    extract_source_watermarks,
-)
+from tradingagents.provenance import SourceWatermark, attach_source_watermarks
 
 from .contracts import AnalysisRequest, EvidenceBundle, NodeMetrics, RunMetrics
 from .evidence import extract_evidence_tables
@@ -37,7 +27,7 @@ from .research import (
     SemanticChangeAssessment,
     SemanticChangeRelationship,
     assess_deterministic_update,
-    required_incremental_sources,
+    required_research_sources,
 )
 from .runtime import RunCancelled
 
@@ -47,12 +37,12 @@ _MAX_SEMANTIC_PROMPT_CHARS = 48_000
 
 
 def _required_sources(baseline: ResearchRevision) -> set[str]:
-    return set(required_incremental_sources(baseline))
+    return set(required_research_sources(baseline.current_state))
 
 
 def _unavailable_payload(sources: tuple[str, ...], start: str, end: str) -> str:
-    payload = attach_source_watermarks(
-        "Bounded source collection was unavailable.",
+    return attach_source_watermarks(
+        "",
         *(
             SourceWatermark(
                 source=source,
@@ -60,52 +50,10 @@ def _unavailable_payload(sources: tuple[str, ...], start: str, end: str) -> str:
                 scanned_end=end,
                 status="unavailable",
                 limitations=("Bounded collection failed before coverage was established.",),
-                requested_interval=SourceInterval(start=start, end=end),
-                limitation_kind="unavailable",
             )
             for source in sources
         ),
     )
-    return attach_provenance(
-        payload,
-        *(
-            ProvenanceRecord(
-                evidence="bounded source collection",
-                source=source,
-                requested=f"{start} to {end}",
-                effective="unavailable",
-                timing="unavailable; bounded collection did not establish source frontier provenance",
-            )
-            for source in sources
-        ),
-    )
-
-
-def _sanitize_unattested_sources(
-    payload: str,
-    *,
-    failed_sources: tuple[str, ...],
-    start: str,
-    end: str,
-) -> str:
-    failed = set(failed_sources)
-    watermarks = tuple(
-        item for item in extract_source_watermarks(payload) if item.source not in failed
-    )
-    observations = tuple(
-        item for item in extract_source_observations(payload) if item.source not in failed
-    )
-    unavailable_payload = _unavailable_payload(failed_sources, start, end)
-    unavailable = extract_source_watermarks(unavailable_payload)
-    provenance = tuple(item for item in extract_provenance(payload) if item.source not in failed)
-    provenance += tuple(extract_provenance(unavailable_payload))
-    sanitized = attach_provenance(
-        "Bounded source content was omitted because one or more Required sources "
-        "did not attest the frozen Information Frontier.",
-        *provenance,
-    )
-    sanitized = attach_source_observations(sanitized, *observations)
-    return attach_source_watermarks(sanitized, *watermarks, *unavailable)
 
 
 def run_deterministic_incremental_gate(
@@ -114,7 +62,6 @@ def run_deterministic_incremental_gate(
     config: dict[str, Any],
     cancel_requested: Callable[[], bool],
     *,
-    information_frontier: datetime,
     on_progress: Callable[[IncrementalGateResult], None] | None = None,
 ) -> IncrementalGateResult:
     """Collect source-owned Japanese changes without invoking a model."""
@@ -136,23 +83,6 @@ def run_deterministic_incremental_gate(
             payload = call()
         except Exception:
             payload = _unavailable_payload(unavailable_sources, overlap_start, cutoff)
-        watermarks = extract_source_watermarks(payload)
-        attested_sources = {
-            watermark.source
-            for watermark in watermarks
-            if watermark.information_frontier == information_frontier.isoformat()
-        }
-        required_for_call = required_sources.intersection(unavailable_sources)
-        failed_sources = tuple(sorted(required_for_call - attested_sources))
-        if not watermarks:
-            payload = _unavailable_payload(unavailable_sources, overlap_start, cutoff)
-        elif failed_sources:
-            payload = _sanitize_unattested_sources(
-                payload,
-                failed_sources=failed_sources,
-                start=overlap_start,
-                end=cutoff,
-            )
         payloads.append((name, payload))
         attempted_sources.update(unavailable_sources)
 
@@ -177,7 +107,6 @@ def run_deterministic_incremental_gate(
         bundle = EvidenceBundle(
             instrument=request.ticker,
             analysis_date=request.analysis_date,
-            information_frontier=information_frontier,
             items=unique_items,
             tables=extract_evidence_tables(unique_items),
         )
@@ -195,7 +124,6 @@ def run_deterministic_incremental_gate(
             bundle,
             metrics=metrics,
             mode=config.get("research_update_mode", "off"),
-            information_frontier=information_frontier,
         )
         if on_progress is not None:
             on_progress(result)
@@ -224,7 +152,6 @@ def run_deterministic_incremental_gate(
             overlap_start,
             cutoff,
             _provenance=True,
-            information_frontier=information_frontier.isoformat(),
         ),
         ("EDINET", "TDnet", "Google News"),
     )
@@ -239,7 +166,6 @@ def run_deterministic_incremental_gate(
                 request.ticker,
                 cutoff,
                 _provenance=True,
-                information_frontier=information_frontier.isoformat(),
             ),
             ("J-Quants fundamentals",),
         )
@@ -259,7 +185,6 @@ def run_deterministic_incremental_gate(
                 cutoff,
                 260,
                 _provenance=True,
-                information_frontier=information_frontier.isoformat(),
             ),
             ("J-Quants adjusted OHLCV",),
         )
@@ -347,7 +272,9 @@ def _semantic_prompt(
         if item.ref in prior_refs and not _is_research_context(item)
     )
     excluded_refs = {
-        item.ref for item in baseline.evidence_snapshot.bundle.items if _is_research_context(item)
+        item.ref
+        for item in baseline.evidence_snapshot.bundle.items
+        if _is_research_context(item)
     }
     if (
         not new_evidence

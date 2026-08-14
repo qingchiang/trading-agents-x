@@ -188,31 +188,6 @@ settings must remain isolated even if worker concurrency changes in the future.
 Graph nodes return state; they do not write files, reports, or application
 tables.
 
-Every Research Execution freezes one timezone-aware Information Frontier before
-source collection. A current-day execution freezes it only after market
-readiness succeeds; a historical execution uses the end of its market-local
-Research Cutoff. Failed readiness does not persist an unusable frontier, while
-retries after collection begins reuse the execution's existing frontier. New
-Research Revisions retain that boundary separately from their market-local
-Research Cutoff; legacy Revisions without a provable boundary remain readable
-with no synthesized frontier.
-
-An anchor-required Japanese initial Full execution first runs a deterministic,
-zero-LLM readiness operation over the profile's minimum Official Filing, Timely
-Disclosure, and Market Observation capabilities. It retains only typed source
-frontiers, limitations, reasons, and deterministic metrics, and freezes the
-intended Information Frontier only after that operation succeeds. An ordinary
-initial Full execution may explicitly select `allow_non_anchor`; this visible
-request policy skips the anchor claim and may create a Full-only Research Chain
-whose resulting Revision must independently qualify before bounded updates are
-allowed.
-
-The same complete readiness gate runs before any Full Research Chain update
-that may establish its next Forward Research Anchor. When a predecessor exists,
-event-source observations must cover the interval from that anchor's frontier;
-an archive limitation confined before it remains visible, while a gap after it
-fails readiness before LLM construction.
-
 ### Run state and attempts
 
 ```text
@@ -234,7 +209,7 @@ interrupt forces termination.
   compatible checkpoint thread.
 - `source_run_id` remains a legacy template relation for compatible API
   callers, but it is not exposed in the primary reader flow and is never used
-  as Research Chain lineage or a Forward Research Anchor;
+  as Research Chain lineage or an Eligible Baseline;
 - a queued cancellation becomes terminal immediately;
 - a running cancellation is checked cooperatively at graph-node boundaries;
 - supervisor shutdown returns a running claim to the queue at the next node
@@ -320,8 +295,8 @@ concurrent queued or running updates for one chain.
 The ResearchGraph receives only the new `AnalysisRequest` and runs the existing
 Full Analysis pipeline without Prior Research. After Full Evidence and the
 independently assembled candidate Current Research State are sealed, but before
-comparison with the current predecessor Revision, the application runs a
-bounded Question Disposition step. Its structured result may refer only to baseline and
+comparison with the Eligible Baseline, the application runs a bounded Question
+Disposition step. Its structured result may refer only to baseline and
 candidate Question IDs assigned by application code, references from bounded
 current Full Evidence summaries (including content and PIT timing), one
 disposition, an optional successor, and a concise reason.
@@ -355,9 +330,8 @@ does not become a permanent blocker. Google News watermarks are live-only, so
 Required Google coverage cannot establish No Material Change. A semantically
 unchanged Full update with one of these blockers creates an Indeterminate
 Revision with stable reason `coverage_incomplete`, not No Material Change or a
-fabricated Material Change. It becomes the readable and exportable head, and
-independently qualifies as a Forward Research Anchor only when its resulting
-Current Research State satisfies Anchor Coverage.
+fabricated Material Change. It becomes the readable and exportable head but is
+never an Eligible Baseline.
 
 When their analyst domains are selected, J-Quants fundamental snapshots and
 adjusted market history are Required for Japanese coverage. Missing, stale,
@@ -383,10 +357,9 @@ its sanitized audit remain durable.
 The server derives the head's next-update policy independently from role and
 conclusion. Complete state, Evidence closure, Required/object coverage, and
 compatible market semantics yield `incremental_allowed`; otherwise the API
-returns `full_required` and a stable reason. Change Conclusion does not decide
-future anchor eligibility: an Indeterminate Full head with complete Anchor
-Coverage may become the comparison anchor, while incomplete candidate coverage
-cannot repair an unqualified baseline.
+returns `full_required` and a stable reason. An Indeterminate head always
+requires an explicitly Full reassessment, and an incremental request is
+rejected rather than allowed to repair the baseline with candidate coverage.
 
 ### Shadow incremental updates
 
@@ -397,18 +370,6 @@ fundamental and adjusted-market snapshots, and labels contextual sources
 Advisory. Required sources are derived from active Claims and open Questions;
 EDINET and TDnet remain Required for Japanese chains, and audited market
 reference levels require compatible adjusted-market coverage.
-
-The bounded phase derives versioned Transition Coverage over the interval after
-the current Forward Research Anchor's Information Frontier through the frozen
-update frontier. Each Required Market Research Capability retains its checked
-source intervals, gaps, and typed limitations. Source overlap before the anchor
-remains available for delayed-discovery and correction checks; a TDnet rolling-
-archive limitation wholly inside that overlap stays visible as `pre_anchor` but
-does not block quiet reassessment. A limitation or unobserved interval that
-intersects the transition, a live-only or unknown temporal scope, or a source
-frontier short of the update frontier fails closed as `coverage_incomplete`.
-Zero-record scans count only when the source explicitly attests the applicable
-interval and reports zero records.
 
 For a Japanese Research Chain whose configured market route resolves
 `get_verified_market_snapshot` to J-Quants first, `AnalysisService` performs a
@@ -482,8 +443,8 @@ boundary, and before recording each scenario. This is a process attestation,
 not byte-for-byte proof of modules already loaded into the process. The
 command verifies an ordinary online backup before its first execution and
 rejects reused cases or heads whose server-derived,
-source-qualified next-update policy is not `incremental_allowed`. The reviewed
-pilot selects at least two distinct supported Japanese Research Chains and
+source-qualified next-update policy is not `incremental_allowed`. The five
+reviewed cases directly select distinct supported Japanese Research Chains and
 run isolated Shadow scenarios against the configured main SQLite database;
 there is no runtime ticker whitelist. SQLite remains the sole owner of
 requests, settings, Evidence, coverage, state, audit, events, metrics,
@@ -493,12 +454,10 @@ recovery-point metadata; application success and expectation agreement remain
 separate verdict dimensions. This is a manual, user-triggered experiment, not
 a scheduled or production automation facility.
 
-Before creating the backup, the command applies the complete zero-LLM anchor
-readiness operation to every reviewed cutoff. A missing expected J-Quants bar,
-unavailable minimum capability, unsafe point-in-time boundary, or invalid source
-closure refuses the whole set before an authoritative Research Execution is
-queued. Each sanitized manifest entry carries that typed readiness outcome but
-does not copy Evidence or source payloads owned by SQLite.
+Before creating the backup, the command applies the same J-Quants daily-bar
+readiness preflight to every reviewed cutoff. One unfinished session or missing
+expected bar refuses the whole set before an authoritative Research Execution
+is queued.
 
 The internal research-update mode is persisted in each update's immutable
 settings snapshot. `off` routes every update through Full Analysis. `shadow`
@@ -917,14 +876,6 @@ normalization where needed but cannot create a research run.
 The analysis cutoff uses the instrument market's timezone, never the host's
 calendar or an unconditional UTC date. Historical tools receive that cutoff
 from runtime context rather than an LLM-provided argument.
-
-Research Cutoff is a date, not an execution timestamp. The Information Frontier
-is the distinct point-in-time knowledge boundary. Evidence available after the
-frontier is excluded even when its effective date is on or before the cutoff.
-Required source watermarks retain their own timezone-aware attested frontier,
-requested interval, actual observed intervals, temporal scope, typed limitation
-kind, and presentation text. A source frontier may be earlier than the Revision
-frontier and is never optimistically advanced to the common target.
 
 Sources truncate observations to the cutoff. A disclosure/update source uses
 the conservative visibility boundary. Live-only values are withheld from

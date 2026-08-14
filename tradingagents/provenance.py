@@ -45,9 +45,6 @@ _SOURCE_WATERMARK_RE = re.compile(
 )
 
 TemporalScopeName = Literal["point_in_time", "live_only", "unknown"]
-CoverageLimitationKind = Literal[
-    "partial", "unavailable", "archive_truncation", "live_only", "unknown"
-]
 
 
 @dataclass(frozen=True)
@@ -126,18 +123,6 @@ class SourceObservation:
 
 
 @dataclass(frozen=True)
-class SourceInterval:
-    """One source-native requested or observed calendar interval."""
-
-    start: str
-    end: str
-
-    def __post_init__(self) -> None:
-        if date.fromisoformat(self.start) > date.fromisoformat(self.end):
-            raise ValueError("Source interval start must not follow end")
-
-
-@dataclass(frozen=True)
 class SourceWatermark:
     """A source-specific collection boundary and its explicit limitations."""
 
@@ -149,9 +134,6 @@ class SourceWatermark:
     limitations: tuple[str, ...] = ()
     returned_records: int = 0
     reported_records: int | None = None
-    requested_interval: SourceInterval | None = None
-    limitation_kind: CoverageLimitationKind | None = None
-    information_frontier: str | None = None
 
     def __post_init__(self) -> None:
         start = date.fromisoformat(self.scanned_start)
@@ -166,16 +148,6 @@ class SourceWatermark:
             self.reported_records is not None and self.reported_records < 0
         ):
             raise ValueError("Source Watermark record counts must be non-negative")
-        if isinstance(self.requested_interval, dict):
-            object.__setattr__(
-                self,
-                "requested_interval",
-                SourceInterval(**self.requested_interval),
-            )
-        if self.information_frontier is not None:
-            frontier = datetime.fromisoformat(self.information_frontier)
-            if frontier.utcoffset() is None:
-                raise ValueError("Source Information Frontier requires a timezone")
 
 
 def provenance_marker(record: ProvenanceRecord) -> str:
@@ -220,13 +192,7 @@ def attach_source_watermarks(text: str, *records: SourceWatermark) -> str:
     return _attach_machine_records(text, _SOURCE_WATERMARK_PREFIX, records)
 
 
-def _extract_machine_records(
-    text: str,
-    pattern: re.Pattern[str],
-    model,
-    *,
-    strict: bool = False,
-):
+def _extract_machine_records(text: str, pattern: re.Pattern[str], model):
     records = []
     seen = set()
     if not isinstance(text, str):
@@ -238,8 +204,6 @@ def _extract_machine_records(
                 payload["limitations"] = tuple(payload.get("limitations") or ())
             record = model(**payload)
         except (TypeError, ValueError, json.JSONDecodeError):
-            if strict:
-                raise ValueError(f"invalid {model.__name__} metadata marker") from None
             continue
         if record not in seen:
             records.append(record)
@@ -249,16 +213,6 @@ def _extract_machine_records(
 
 def extract_source_observations(text: str) -> list[SourceObservation]:
     return _extract_machine_records(text, _SOURCE_RECORD_RE, SourceObservation)
-
-
-def extract_source_observations_strict(text: str) -> list[SourceObservation]:
-    """Parse every Source Record marker or reject the payload as invalid."""
-    return _extract_machine_records(
-        text,
-        _SOURCE_RECORD_RE,
-        SourceObservation,
-        strict=True,
-    )
 
 
 def extract_source_watermarks(text: str) -> list[SourceWatermark]:

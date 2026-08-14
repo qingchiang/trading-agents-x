@@ -336,21 +336,9 @@ def _beta(hist, curr_date: str) -> float | None:
     return beta if pd.notna(beta) else None  # never emit a NaN/inf beta
 
 
-def _valuation_block(
-    ticker: str,
-    curr_date: str,
-    *,
-    information_frontier: str | None = None,
-) -> str:
+def _valuation_block(ticker: str, curr_date: str) -> str:
     """Render the computed, date-safe valuation block for ``ticker`` as of ``curr_date``."""
-    if information_frontier is None:
-        _canonical, records = jqf.fetch_periods(ticker, curr_date)
-    else:
-        _canonical, records = jqf.fetch_periods(
-            ticker,
-            curr_date,
-            information_frontier=information_frontier,
-        )
+    _canonical, records = jqf.fetch_periods(ticker, curr_date)
     statements = [r for r in records if _is_statement(r)]
     if not statements:
         return "\n\n## Valuation (computed)\n(unavailable: no statement disclosures)"
@@ -426,12 +414,7 @@ def _valuation_block(
     return result
 
 
-def get_fundamentals(
-    ticker: str,
-    curr_date: str | None = None,
-    *,
-    information_frontier: str | None = None,
-) -> str:
+def get_fundamentals(ticker: str, curr_date: str | None = None) -> str:
     """Official J-Quants overview plus a date-safe computed valuation block.
 
     The base overview comes from :func:`jquants_fundamentals.get_fundamentals`
@@ -440,18 +423,10 @@ def get_fundamentals(
     valuation block is best-effort: any failure degrades to a short note rather
     than losing the official summary.
     """
-    base = jqf.get_fundamentals(
-        ticker,
-        curr_date,
-        information_frontier=information_frontier,
-    )
+    base = jqf.get_fundamentals(ticker, curr_date)
     as_of = curr_date or datetime.now().strftime("%Y-%m-%d")
     try:
-        result = base + _valuation_block(
-            ticker,
-            as_of,
-            information_frontier=information_frontier,
-        )
+        result = base + _valuation_block(ticker, as_of)
     except Exception as exc:  # never let ratio math break the official overview
         logger.warning("JP fundamentals: valuation block failed for %s: %s", ticker, exc)
         result = base + "\n\n## Valuation (computed)\n(unavailable: ratio computation failed)"

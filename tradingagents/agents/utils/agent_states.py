@@ -7,7 +7,6 @@ from typing import Annotated
 from langgraph.graph import MessagesState
 from typing_extensions import NotRequired, TypedDict
 
-from tradingagents.agents.utils.information_frontier import source_metadata
 from tradingagents.application.evidence_workset import StructuredNumericFact
 from tradingagents.provenance import (
     ProvenanceRecord,
@@ -23,8 +22,6 @@ class PrefetchedEvidenceBlock(TypedDict):
     records: list[dict[str, str | None]]
     temporal_scope: str
     structured_numeric_facts: NotRequired[list[StructuredNumericFact]]
-    source_records: NotRequired[list[dict[str, object]]]
-    source_watermarks: NotRequired[list[dict[str, object]]]
 
 
 class AgentState(MessagesState):
@@ -45,10 +42,6 @@ class AgentState(MessagesState):
         list[PrefetchedEvidenceBlock],
         "Evidence fetched before an analyst LLM call",
     ]
-    information_frontier: Annotated[
-        str | None,
-        "Frozen timezone-aware point-in-time boundary for source collection",
-    ]
 
 
 def prefetched_evidence_block(
@@ -62,27 +55,17 @@ def prefetched_evidence_block(
 
     records = tuple(records)
     content = strip_provenance_markers(body).strip()
-    metadata = source_metadata(body)
-    unavailable = (
-        records
-        and all(
-            any(
-                token in record.timing.casefold()
-                for token in (
-                    "unavailable",
-                    "failed",
-                    "not queried",
-                    "no usable data",
-                )
+    unavailable = records and all(
+        any(
+            token in record.timing.casefold()
+            for token in (
+                "unavailable",
+                "failed",
+                "not queried",
+                "no usable data",
             )
-            for record in records
         )
-    ) or (
-        bool(metadata.get("source_watermarks"))
-        and all(
-            item.get("status") == "unavailable"
-            for item in metadata["source_watermarks"]
-        )
+        for record in records
     )
     if (
         not content
@@ -103,7 +86,6 @@ def prefetched_evidence_block(
     facts = list(structured_numeric_facts)
     if facts:
         block["structured_numeric_facts"] = facts
-    block.update(metadata)
     return block
 
 

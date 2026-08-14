@@ -18,20 +18,6 @@ const chain = {
   updated_at: "2026-07-24T00:00:00Z",
   next_update_policy: "incremental_allowed",
   next_update_reason: null,
-  forward_research_anchor: {
-    is_forward_research_anchor: true,
-    profile_id: "jp-listed-equity-v1",
-    reasons: [],
-    capabilities: [
-      {
-        capability: "market_observation",
-        required: true,
-        satisfied: true,
-        sources: ["J-Quants adjusted OHLCV"],
-        limitations: [],
-      },
-    ],
-  },
   revisions: [],
   current_revision: {
     id: "revision-1",
@@ -39,7 +25,6 @@ const chain = {
     sequence: 1,
     producing_run_id: "run-1",
     cutoff: "2026-07-24",
-    information_frontier: "2026-07-24T18:00:00+09:00",
     role: "initial",
     execution_strategy: "full",
     change_conclusion: null,
@@ -62,27 +47,6 @@ const chain = {
       escalation_reason: null,
       comparison: "disagreement",
       checked_windows: [{ source: "EDINET", scanned_start: "2026-07-01", scanned_end: "2026-07-25", status: "complete" }],
-      transition_coverage: {
-        anchor_frontier: "2026-07-24T18:00:00+09:00",
-        update_frontier: "2026-07-25T18:00:00+09:00",
-        complete: true,
-        capabilities: [{
-          capability: "timely_disclosure",
-          complete: true,
-          sources: ["TDnet"],
-          checked_intervals: [{ start: "2026-07-24", end: "2026-07-25" }],
-          gaps: [],
-          limitations: [{
-            kind: "archive_truncation",
-            scope: "pre_anchor",
-            temporal_scope: "point_in_time",
-            source: "TDnet",
-            requested_interval: { start: "2026-06-01", end: "2026-07-25" },
-            observed_intervals: [{ start: "2026-07-24", end: "2026-07-25" }],
-            presentation_text: "Older archive dates were unavailable.",
-          }],
-        }],
-      },
       evidence_lineage: [{ evidence_ref: "ev_0123456789ab", lineage: "new" }],
       semantic_assessment: {
         schema_version: "1",
@@ -216,16 +180,6 @@ const chain = {
           scanned_end: "2026-07-24",
           status: "limited",
           limitations: ["rolling archive truncated the requested interval"],
-          information_frontier: "2026-07-23T23:59:59.999999+09:00",
-          requested_interval: { start: "2026-06-01", end: "2026-07-24" },
-          observed_intervals: [{ start: "2026-06-24", end: "2026-07-24" }],
-          structured_limitations: [{
-            kind: "archive_truncation",
-            temporal_scope: "point_in_time",
-            requested_interval: { start: "2026-06-01", end: "2026-07-24" },
-            observed_intervals: [{ start: "2026-06-24", end: "2026-07-24" }],
-            presentation_text: "rolling archive truncated the requested interval",
-          }],
           returned_records: 2,
           reported_records: 5,
         },
@@ -249,15 +203,6 @@ test("reads the complete current thesis, coverage, evidence, reports, and metric
   );
 
   expect(await screen.findByText("需要证据持续确认利润率修复。")).toBeVisible();
-  expect(screen.getByText(/Forward Research Anchor: qualified/)).toBeVisible();
-  expect(
-    screen.getByText(
-      "Next update starts bounded assessment from this Forward Research Anchor.",
-    ),
-  ).toBeVisible();
-  expect(screen.getByText("market_observation").closest("li")).toHaveTextContent(
-    "market_observation · Required · complete",
-  );
   expect(screen.getByText("初回のフル分析を完了。")).toBeVisible();
   expect(screen.getByText("订单能否持续？")).toBeVisible();
   expect(screen.getAllByText(/reopened/)[0]).toBeVisible();
@@ -279,24 +224,11 @@ test("reads the complete current thesis, coverage, evidence, reports, and metric
   expect(screen.getByText(/JPY\/2/)).toBeVisible();
   expect(screen.getByText(/fallback true/)).toBeVisible();
   expect(screen.getByText(/2026-06-24.*2026-07-24/)).toBeVisible();
-  expect(screen.getByText(/Research cutoff: 2026-07-24/)).toBeVisible();
-  expect(screen.getByText(/Information frontier: 2026-07-24T18:00:00\+09:00/)).toBeVisible();
-  expect(screen.getByText(/Source frontier: 2026-07-23T23:59:59.999999\+09:00/)).toBeVisible();
-  expect(screen.getByText(/Requested interval: 2026-06-01.*2026-07-24/)).toBeVisible();
   expect(screen.getByText("Bounded update finding")).toBeVisible();
   expect(screen.getByText(/Experiment mode: shadow/)).toBeVisible();
   expect(screen.getByText(/Candidate Change Conclusion: no_material_change/)).toBeVisible();
   expect(screen.getByText(/Comparison: disagreement/)).toBeVisible();
   expect(screen.getByText(/Bounded checked windows: EDINET 2026-07-01–2026-07-25/)).toBeVisible();
-  expect(screen.getByText(/Transition frontiers:/)).toHaveTextContent(
-    "(2026-07-24T18:00:00+09:00, 2026-07-25T18:00:00+09:00]",
-  );
-  expect(screen.getByText(/Transition limitations:/)).toHaveTextContent(
-    "pre_anchor/archive_truncation/point_in_time",
-  );
-  expect(screen.getByText(/Checked intervals:/)).toHaveTextContent(
-    "2026-07-24–2026-07-25",
-  );
   expect(screen.getByText(/Bounded update summary: No bounded material change detected/)).toBeVisible();
   expect(screen.getByText(/Bounded coverage attestation: true; company_disclosures \(complete\)/)).toBeVisible();
   expect(screen.getByText("Bounded archive constraint")).toBeVisible();
@@ -311,8 +243,7 @@ test("reads the complete current thesis, coverage, evidence, reports, and metric
   expect(screen.getByText(/Thesis reference: 100/)).toBeVisible();
   expect(screen.getByText(/95 → 101/)).toBeVisible();
   expect(screen.getByText(/requires Full Analysis/)).toBeVisible();
-  expect(screen.queryByText("Quiet reassessment supported")).not.toBeInTheDocument();
-  expect(screen.queryByText("Quiet reassessment blocked")).not.toBeInTheDocument();
+  expect(screen.getByText("Quiet reassessment blocked")).toBeVisible();
   expect(screen.getByRole("link", { name: "Full analysis" })).toHaveAttribute(
     "href",
     "/runs/run-1",
@@ -326,26 +257,6 @@ test("reads the complete current thesis, coverage, evidence, reports, and metric
     screen.getByRole("link", { name: "Producing execution" }),
   ).toHaveAttribute("href", "/runs/run-1");
 });
-
-test.each([
-  ["en", "Research cutoff", "Information frontier", "Source frontier"],
-  ["zh-CN", "研究截止日", "信息边界", "来源信息边界"],
-  ["ja", "リサーチ基準日", "情報フロンティア", "ソース情報フロンティア"],
-])(
-  "labels research and source frontiers in %s",
-  async (language, cutoffLabel, frontierLabel, sourceFrontierLabel) => {
-    await i18n.changeLanguage(language);
-    render(
-      <Router initialPath="/research/chain-1">
-        <ResearchChainDetail />
-      </Router>,
-    );
-
-    expect(await screen.findByText(new RegExp(`${cutoffLabel}: 2026-07-24`))).toBeVisible();
-    expect(screen.getByText(new RegExp(`${frontierLabel}: 2026-07-24T18:00:00\\+09:00`))).toBeVisible();
-    expect(screen.getByText(new RegExp(`${sourceFrontierLabel}: 2026-07-23T23:59:59.999999\\+09:00`))).toBeVisible();
-  },
-);
 
 test("queues an update from the displayed current head", async () => {
   vi.mocked(api.updateResearchChain).mockResolvedValue({ id: "run-2" } as never);
@@ -387,11 +298,6 @@ test("separates experimental NMC strategy, outcome, execution, and escalation ra
   );
 
   expect(await screen.findByText(/Experiment mode: experimental/)).toBeVisible();
-  expect(
-    screen.getByText(
-      "Next update starts bounded assessment from this Forward Research Anchor.",
-    ),
-  ).toBeVisible();
   expect(screen.getByText(/Authoritative strategy: incremental/)).toBeVisible();
   expect(screen.getByText(/Role: update · Execution strategy: incremental · Change conclusion: no_material_change/)).toBeVisible();
   expect(screen.getByText(/Full escalation rate: 0\/1 \(0%\)/)).toBeVisible();
@@ -427,13 +333,8 @@ test("warns before an Indeterminate thesis and queues only a Full reassessment",
   expect(screen.getByRole("alert")).toHaveTextContent(
     "TDnet archive coverage is incomplete.",
   );
-  expect(screen.queryByText("Quiet reassessment blocked")).not.toBeInTheDocument();
+  expect(screen.getByText("Quiet reassessment blocked")).toBeVisible();
   expect(screen.queryByText("Quiet reassessment supported")).not.toBeInTheDocument();
-  expect(
-    screen.getByText(
-      "Next update requires independent Full Analysis; it will not bypass the current Research Chain head for an older Forward Research Anchor.",
-    ),
-  ).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Run Full reassessment" }));
   await waitFor(() => expect(api.updateResearchChain).toHaveBeenCalled());
   expect(vi.mocked(api.updateResearchChain).mock.calls[0][1]).toEqual({
@@ -441,25 +342,4 @@ test("warns before an Indeterminate thesis and queues only a Full reassessment",
     analysis_date: "2026-07-25",
     execution_strategy: "full",
   });
-});
-
-test("does not claim a qualified Indeterminate anchor requires Full reassessment", async () => {
-  const indeterminate = structuredClone(chain) as ResearchChain;
-  const revision = indeterminate.current_revision!;
-  revision.role = "update";
-  revision.change_conclusion = "indeterminate";
-  revision.indeterminate_reason = "coverage_incomplete";
-  indeterminate.revisions = [revision];
-  vi.mocked(api.researchChain).mockResolvedValue(indeterminate);
-
-  render(
-    <Router initialPath="/research/chain-1">
-      <ResearchChainDetail />
-    </Router>,
-  );
-
-  expect(await screen.findByText("This Research Revision is Indeterminate.")).toBeVisible();
-  expect(
-    screen.queryByText("The next update must be an independent Full reassessment."),
-  ).not.toBeInTheDocument();
 });

@@ -194,26 +194,6 @@ class StockFetchTests(unittest.TestCase):
         assert watermark.scanned_start == dates[0].strftime("%Y-%m-%d")
         assert watermark.scanned_end == dates[-1].strftime("%Y-%m-%d")
 
-    def test_same_day_snapshot_uses_successful_collection_as_availability_proof(self):
-        from tradingagents.dataflows.jp.jquants_indicator import get_verified_market_snapshot
-
-        dates = pd.bdate_range(end="2026-06-23", periods=220)
-        records = [_quote(d.strftime("%Y-%m-%d"), 100.0 + i) for i, d in enumerate(dates)]
-        frontier = "2026-06-23T18:00:00+09:00"
-        with self._patch_records(records):
-            out = get_verified_market_snapshot(
-                "9984.T",
-                "2026-06-23",
-                30,
-                information_frontier=frontier,
-            )
-
-        observation = extract_source_observations(out)[0]
-        watermark = extract_source_watermarks(out)[0]
-        assert observation.available_at == frontier
-        assert "successful bounded collection" in observation.availability_basis
-        assert watermark.information_frontier == frontier
-
     def test_verified_snapshot_watermark_uses_returned_start_and_requested_cutoff(self):
         from tradingagents.dataflows.jp.jquants_indicator import get_verified_market_snapshot
 

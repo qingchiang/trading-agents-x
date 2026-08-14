@@ -163,13 +163,13 @@ configured main SQLite database. Implementing or installing it does not
 authorize a live run. Before a separately approved run:
 
 1. Stop or drain the worker so no other update can advance a selected head.
-2. In the Research Chain reader, review at least two distinct Japanese Chains
-   whose server-derived next-update policy is `incremental_allowed`. The initial
-   pilot may use two reviewed scenario kinds; broader runs may add
-   `quiet_interval`, `material_event`, `source_integrity`, `missing_coverage`,
-   and `threshold_crossing`, without reusing a Chain or requiring all five.
+2. In the Research Chain reader, review exactly five distinct Japanese Chains
+   whose server-derived next-update policy is `incremental_allowed`. Select one
+   Chain for each of `quiet_interval`, `material_event`, `source_integrity`,
+   `missing_coverage`, and `threshold_crossing`; do not reuse a Chain.
 3. Review each cutoff, expected bounded result, and expected Full Change
-   Conclusion. Save only this control metadata in a JSON file such as
+   Conclusion. Include Material Change, No Material Change, and Indeterminate
+   across the set. Save only this control metadata in a JSON file such as
    `tmp/incremental-research/reviewed-live-cases.json`:
 
 ```json
@@ -187,10 +187,7 @@ readiness check. J-Quants documents that equity daily OHLCV normally updates at
 approximately 16:30, while explicitly warning that the time is not guaranteed;
 see [J-Quants data update timing](https://jpx-jquants.com/ja/spec/data-update.md).
 The command therefore requires both the conservative time boundary and an
-actual returned bar for the expected completed TSE session. It also checks the
-Japanese profile's minimum Official Filing and Timely Disclosure capabilities,
-point-in-time boundaries, and Source Record closure before backup. On a holiday,
-keep
+actual returned bar for the expected completed TSE session. On a holiday, keep
 the requested analysis cutoff: the completed market scan reaches that cutoff,
 while the Market Source Record retains the prior completed session as its
 distinct effective date. A future cutoff, unfinished current session, or
@@ -235,10 +232,8 @@ queues the first execution. It records a recovery-point file containing only
 the backup filename, size, SHA-256 digest, creation time, and Alembic revision.
 It then writes one exclusive sanitized JSON entry per scenario under the
 ignored `tmp/incremental-research/live-validation/` area. Entries contain only
-the attested checkout commit, reviewed expectations, typed sanitized anchor
-readiness, application status, validation verdict, and run/Chain/Revision IDs.
-They never contain Evidence bodies, prompts, headers, or private exceptions. A
-successful application
+the attested checkout commit, reviewed expectations, application status,
+validation verdict, and run/Chain/Revision IDs. A successful application
 execution whose results differ from expectations is `expectation_mismatch`; it
 is never passed.
 If enqueueing fails before SQLite creates a run, the scenario still receives an

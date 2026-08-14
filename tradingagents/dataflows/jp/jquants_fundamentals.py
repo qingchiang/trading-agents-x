@@ -15,7 +15,6 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from tradingagents.provenance import (
-    SourceInterval,
     SourceObservation,
     SourceWatermark,
     attach_source_observations,
@@ -141,12 +140,7 @@ def _fetch_summary(code: str) -> list[dict]:
     return memoized_fetch(_summary_cache, code, "/fins/summary", {"code": code}, "data")
 
 
-def _visible_summary_records(
-    symbol: str,
-    curr_date: str | None,
-    *,
-    information_frontier: str | None = None,
-):
+def _visible_summary_records(symbol: str, curr_date: str | None):
     """Return ``(canonical, records)`` for ``symbol``, newest disclosure first.
 
     Filters out periods disclosed after ``curr_date`` to prevent look-ahead bias.
@@ -171,37 +165,6 @@ def _visible_summary_records(
                 symbol, canonical, f"no financial summary disclosed on/before {curr_date}"
             )
 
-    reported_records = len(records)
-    excluded_unknown_time = False
-    if information_frontier is not None:
-        frontier = datetime.fromisoformat(information_frontier)
-        if frontier.utcoffset() is None:
-            raise ValueError("J-Quants Information Frontier requires a timezone")
-        frontier_day = frontier.astimezone(_TOKYO).date().isoformat()
-        excluded_unknown_time = any(
-            record.get("DiscDate") == frontier_day and _precise_available_at(record) is None
-            for record in records
-        )
-        records = [
-            record
-            for record in records
-            if (
-                (available_at := _precise_available_at(record)) is not None
-                and datetime.fromisoformat(available_at) <= frontier
-            )
-            or (
-                available_at is None
-                and bool(record.get("DiscDate"))
-                and record["DiscDate"] < frontier_day
-            )
-        ]
-        if not records:
-            raise NoMarketDataError(
-                symbol,
-                canonical,
-                "no financial summary was available at the Information Frontier",
-            )
-
     # The API returns records in ascending disclosure-number order. Preserve
     # that sequence as the final tie-breaker: corrections can share the same
     # disclosure date/time, and a stable reverse sort alone would otherwise
@@ -219,22 +182,11 @@ def _visible_summary_records(
             reverse=True,
         )
     ]
-    return canonical, ordered, excluded_undated, excluded_unknown_time, reported_records
+    return canonical, ordered, excluded_undated
 
 
-def _fetch_summary_periods(
-    symbol: str,
-    curr_date: str | None,
-    *,
-    information_frontier: str | None = None,
-):
-    canonical, ordered, _excluded_undated, _excluded_unknown_time, _reported_records = (
-        _visible_summary_records(
-            symbol,
-            curr_date,
-            information_frontier=information_frontier,
-        )
-    )
+def _fetch_summary_periods(symbol: str, curr_date: str | None):
+    canonical, ordered, _excluded_undated = _visible_summary_records(symbol, curr_date)
     return canonical, _dedupe_periods(ordered)
 
 
@@ -311,22 +263,11 @@ def _changed_numeric_values(previous: dict, current: dict) -> bool:
 
 def _available_at(record: dict) -> str:
     day = str(record.get("DiscDate") or "")
-    raw_time = str(record.get("DiscTime") or "23:59:59")
+    raw_time = str(record.get("DiscTime") or "15:30:00")
     try:
         return datetime.fromisoformat(f"{day}T{raw_time}").replace(tzinfo=_TOKYO).isoformat()
     except ValueError:
         return datetime.fromisoformat(f"{day}T23:59:59").replace(tzinfo=_TOKYO).isoformat()
-
-
-def _precise_available_at(record: dict) -> str | None:
-    day = record.get("DiscDate")
-    raw_time = record.get("DiscTime")
-    if not day or not raw_time:
-        return None
-    try:
-        return datetime.fromisoformat(f"{day}T{raw_time}").replace(tzinfo=_TOKYO).isoformat()
-    except ValueError:
-        return None
 
 
 def _snapshot_metadata(
@@ -335,9 +276,6 @@ def _snapshot_metadata(
     curr_date: str | None,
     *,
     excluded_undated: bool = False,
-    excluded_unknown_time: bool = False,
-    information_frontier: str | None = None,
-    reported_records: int | None = None,
 ):
     grouped: dict[str, list[dict]] = defaultdict(list)
     dated_records = [record for record in records if record.get("DiscDate")]
@@ -378,11 +316,7 @@ def _snapshot_metadata(
                         f"{record.get('DiscDate')} {record.get('DiscTime') or ''}".strip()
                     ),
                     available_at=_available_at(record),
-                    availability_basis=(
-                        "official disclosure date and time"
-                        if _precise_available_at(record) is not None
-                        else "official disclosure date; conservative end-of-day availability"
-                    ),
+                    availability_basis="official disclosure date and time",
                     title=(
                         f"{record.get('CurPerType') or 'Financial summary'} "
                         f"ending {record.get('CurPerEn') or record.get('CurFYEn') or '?'}"
@@ -402,10 +336,6 @@ def _snapshot_metadata(
     limitations = []
     if len(dated_records) != len(records) or excluded_undated:
         limitations.append("Rows without a disclosure date were excluded from the PIT snapshot.")
-    if excluded_unknown_time:
-        limitations.append(
-            "Rows without a precise disclosure time were excluded at the Information Frontier."
-        )
     if dates:
         newest_disclosure = datetime.strptime(max(dates), "%Y-%m-%d").date()
         cutoff = datetime.strptime(scan_boundary, "%Y-%m-%d").date()
@@ -421,35 +351,18 @@ def _snapshot_metadata(
         status="limited" if limitations else "complete",
         limitations=limitations,
         returned_records=len(dated_records),
-        reported_records=(len(records) if reported_records is None else reported_records),
-        requested_interval=SourceInterval(start=scan_boundary, end=scan_boundary),
-        limitation_kind="partial" if limitations else None,
-        information_frontier=information_frontier,
+        reported_records=len(records),
     )
     return tuple(observations), watermark
 
 
-def _fetch_summary_snapshot(
-    symbol: str,
-    curr_date: str | None,
-    *,
-    information_frontier: str | None = None,
-):
-    canonical, records, excluded_undated, excluded_unknown_time, reported_records = (
-        _visible_summary_records(
-            symbol,
-            curr_date,
-            information_frontier=information_frontier,
-        )
-    )
+def _fetch_summary_snapshot(symbol: str, curr_date: str | None):
+    canonical, records, excluded_undated = _visible_summary_records(symbol, curr_date)
     observations, watermark = _snapshot_metadata(
         canonical,
         records,
         curr_date,
         excluded_undated=excluded_undated,
-        excluded_unknown_time=excluded_unknown_time,
-        information_frontier=information_frontier,
-        reported_records=reported_records,
     )
     return canonical, _dedupe_periods(records), observations, watermark
 
@@ -458,12 +371,7 @@ def _attach_snapshot_metadata(text: str, observations, watermark: SourceWatermar
     return attach_source_watermarks(attach_source_observations(text, *observations), watermark)
 
 
-def fetch_periods(
-    ticker: str,
-    curr_date: str | None = None,
-    *,
-    information_frontier: str | None = None,
-):
+def fetch_periods(ticker: str, curr_date: str | None = None):
     """Public accessor: ``(canonical, records)`` for ``ticker``, newest disclosure
     first, already look-ahead filtered (``DiscDate <= curr_date``).
 
@@ -474,11 +382,7 @@ def fetch_periods(
     official data, not derived metrics. Raises ``NoMarketDataError`` when nothing
     is disclosed on/before ``curr_date``.
     """
-    return _fetch_summary_periods(
-        ticker,
-        curr_date,
-        information_frontier=information_frontier,
-    )
+    return _fetch_summary_periods(ticker, curr_date)
 
 
 def _select(records: list[dict], freq: str) -> list[dict]:
@@ -500,18 +404,9 @@ def _render_periods(canonical, records, freq, title, field_specs) -> str:
     return "\n".join(lines)
 
 
-def get_fundamentals(
-    ticker: str,
-    curr_date: str | None = None,
-    *,
-    information_frontier: str | None = None,
-) -> str:
+def get_fundamentals(ticker: str, curr_date: str | None = None) -> str:
     """Headline fundamentals overview from the latest disclosed period."""
-    canonical, records, observations, watermark = _fetch_summary_snapshot(
-        ticker,
-        curr_date,
-        information_frontier=information_frontier,
-    )
+    canonical, records, observations, watermark = _fetch_summary_snapshot(ticker, curr_date)
     r = records[0]
     body = "\n".join(
         [

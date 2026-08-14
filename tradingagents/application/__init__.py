@@ -92,8 +92,6 @@ from .research import (
     ResearchRevisionDraft,
     RevisionDelta,
     ScenarioLikelihood,
-    SourceCoverageLimitation,
-    SourceObservationInterval,
     SourceRecordKind,
     SourceRecordSnapshotItem,
     SourceRecordStatus,
@@ -199,8 +197,6 @@ __all__ = [
     "SourceRecordKind",
     "SourceRecordStatus",
     "SourceRecordVersion",
-    "SourceCoverageLimitation",
-    "SourceObservationInterval",
     "SourceWatermarkSnapshot",
     "UpdateSummary",
 ]

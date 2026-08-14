@@ -8,7 +8,6 @@ export interface components {
     AnalysisRequest: {
       analysis_date: string;
       analysts?: ("market" | "social" | "news" | "fundamentals")[];
-      anchor_readiness?: "required" | "allow_non_anchor";
       asset_type?: components["schemas"]["AssetType"] | null;
       deep_model?: string | null;
       deep_reasoning_effort?: string | null;
@@ -44,7 +43,6 @@ export interface components {
       source_refs?: string[];
       warnings?: components["schemas"]["ResearchWarning"][];
     };
-    AnchorQualificationReason: "anchor_readiness_not_required" | "legacy_anchor_coverage_unproven" | "unsupported_market_profile" | "not_full_research" | "information_frontier_missing" | "full_audit_incomplete" | "current_state_unusable" | "evidence_closure_invalid" | "point_in_time_invalid" | "required_capability_missing" | "required_domain_missing" | "incompatible_market_semantics";
     ArtifactGenerationMethod: "tool_call" | "tool_call_recovered" | "json_mode" | "raw_json_recovered" | "json_mode_recovered" | "sectioned_recovery" | "markdown_audited" | "markdown_audit_incomplete";
     ArtifactGenerationObservation: {
       client_role: "quick_reasoning" | "deep_reasoning" | "quick_serializer" | "deep_serializer";
@@ -83,13 +81,6 @@ export interface components {
       profiles: string[];
       providers: Record<string, components["schemas"]["ProviderCapabilities"]>;
     };
-    CapabilityAttestation: {
-      capability: components["schemas"]["MarketResearchCapability"];
-      limitations?: string[];
-      required?: boolean;
-      satisfied: boolean;
-      sources?: string[];
-    };
     CapabilityDefaults: {
       deep_model: string;
       deep_reasoning_effort: string | null;
@@ -112,12 +103,11 @@ export interface components {
     };
     ClaimStanding: "active" | "invalidated" | "retired";
     CoverageAttestation: {
-      anchor_qualification?: components["schemas"]["ForwardResearchAnchorQualification"] | null;
       claims: components["schemas"]["ResearchObjectCoverage"][];
       domains: components["schemas"]["ResearchDomainCoverage"][];
       limitations?: string[];
       questions: components["schemas"]["ResearchObjectCoverage"][];
-      schema_version?: "1" | "2";
+      schema_version?: string;
       supports_no_material_change?: boolean;
     };
     CoverageRequirement: "required" | "advisory";
@@ -175,7 +165,7 @@ export interface components {
     EffectiveEvidenceSnapshot: {
       bundle: components["schemas"]["EvidenceBundle"];
       lineage: components["schemas"]["EvidenceSnapshotItem"][];
-      schema_version?: "1" | "2";
+      schema_version?: string;
       source_record_lineage?: components["schemas"]["SourceRecordSnapshotItem"][];
       source_records?: components["schemas"]["SourceRecordVersion"][];
       source_watermarks?: components["schemas"]["SourceWatermarkSnapshot"][];
@@ -184,7 +174,6 @@ export interface components {
     EvidenceBundle: {
       analysis_date: string;
       digest?: string | null;
-      information_frontier?: string | null;
       instrument: string;
       items: components["schemas"]["EvidenceItem"][];
       sealed_at?: string;
@@ -267,13 +256,6 @@ export interface components {
       row_id?: string | null;
       table_id?: string | null;
     };
-    ForwardResearchAnchorQualification: {
-      capabilities?: components["schemas"]["CapabilityAttestation"][];
-      is_forward_research_anchor: boolean;
-      profile_id?: string | null;
-      reasons?: components["schemas"]["AnchorQualificationReason"][];
-      schema_version?: string;
-    };
     HTTPValidationError: {
       detail?: components["schemas"]["ValidationError"][];
     };
@@ -324,13 +306,12 @@ export interface components {
       unit?: string | null;
       value: number;
     };
-    MarketResearchCapability: "official_filing" | "timely_disclosure" | "fundamentals" | "market_observation" | "media" | "social_sentiment" | "macro";
     MeasurementKind: "currency" | "percent" | "ratio" | "index" | "quantity" | "count" | "basis_points" | "unitless" | "unknown";
     ModelDiscoveryWarningView: {
       code: string;
       message: string;
     };
-    NextUpdateReason: "experiment_mode_off" | "unsupported_incremental_market" | "legacy_anchor_coverage_unproven" | "anchor_coverage_incomplete" | "required_source_coverage_incomplete" | "indeterminate_head" | "coverage_incomplete" | "incompatible_market_semantics" | "invalid_revision";
+    NextUpdateReason: "experiment_mode_off" | "unsupported_incremental_market" | "required_source_coverage_incomplete" | "indeterminate_head" | "coverage_incomplete" | "incompatible_market_semantics" | "invalid_revision";
     NodeMetrics: {
       cache_hit_input_tokens?: number;
       cache_miss_input_tokens?: number;
@@ -612,7 +593,6 @@ export interface components {
       created_at: string;
       current_revision?: components["schemas"]["ResearchRevision"] | null;
       current_revision_id: string;
-      forward_research_anchor?: components["schemas"]["ForwardResearchAnchorQualification"];
       id: string;
       instrument: string;
       is_primary: boolean;
@@ -623,7 +603,6 @@ export interface components {
     };
     ResearchChainUpdateRequest: {
       analysis_date: string;
-      anchor_readiness?: "required" | "allow_non_anchor";
       baseline_revision_id: string;
       execution_strategy?: "full" | "incremental" | null;
     };
@@ -753,7 +732,6 @@ export interface components {
       execution_strategy: components["schemas"]["ResearchExecutionStrategy"];
       id: string;
       indeterminate_reason?: components["schemas"]["IndeterminateReason"] | null;
-      information_frontier?: string | null;
       metrics?: components["schemas"]["RunMetrics"];
       predecessor_revision_id?: string | null;
       producing_run_id?: string | null;
@@ -782,7 +760,6 @@ export interface components {
     };
     ResearchUpdateAudit: {
       authoritative_strategy?: "full" | "incremental";
-      baseline_information_frontier?: string | null;
       bounded_metrics?: components["schemas"]["RunMetrics"];
       candidate?: components["schemas"]["ResearchUpdateCandidate"] | null;
       checked_windows?: components["schemas"]["ResearchUpdateCheckedWindow"][];
@@ -792,9 +769,8 @@ export interface components {
       evidence_lineage?: components["schemas"]["ResearchUpdateEvidenceLineage"][];
       full_metrics?: components["schemas"]["RunMetrics"];
       mode?: "shadow" | "experimental";
-      schema_version?: "2" | "3";
+      schema_version?: string;
       semantic_assessment?: components["schemas"]["ResearchUpdateSemanticAssessment"] | null;
-      transition_coverage?: components["schemas"]["ResearchUpdateTransitionCoverage"] | null;
     };
     ResearchUpdateCandidate: {
       change_conclusion: string;
@@ -805,18 +781,14 @@ export interface components {
     };
     ResearchUpdateCheckedWindow: {
       baseline_cutoff?: string | null;
-      information_frontier?: string | null;
       limitations?: string[];
-      observed_intervals?: components["schemas"]["ResearchUpdateSourceObservationInterval"][];
       overlap_start?: string | null;
       reported_records?: number | null;
-      requested_interval?: components["schemas"]["ResearchUpdateSourceObservationInterval"] | null;
       returned_records?: number;
       scanned_end: string;
       scanned_start: string;
       source: string;
       status: "complete" | "limited" | "unavailable";
-      structured_limitations?: components["schemas"]["ResearchUpdateSourceCoverageLimitation"][];
       temporal_scope?: "point_in_time" | "live_only" | "unknown";
     };
     ResearchUpdateCoverageAttestation: {
@@ -843,7 +815,7 @@ export interface components {
     ResearchUpdateEvidenceSnapshot: {
       bundle: components["schemas"]["EvidenceBundle"];
       lineage: components["schemas"]["ResearchUpdateEvidenceSnapshotItem"][];
-      schema_version?: "1" | "2";
+      schema_version?: string;
       source_record_lineage?: components["schemas"]["ResearchUpdateSourceRecordSnapshotItem"][];
       source_records?: components["schemas"]["ResearchUpdateSourceRecordVersion"][];
       source_watermarks?: components["schemas"]["ResearchUpdateSourceWatermarkSnapshot"][];
@@ -871,17 +843,6 @@ export interface components {
       suggested_claim_confidence?: "low" | "medium" | "high" | "indeterminate" | null;
       suggested_claim_ids?: string[];
       suggested_question_ids?: string[];
-    };
-    ResearchUpdateSourceCoverageLimitation: {
-      kind: "partial" | "unavailable" | "archive_truncation" | "live_only" | "unknown";
-      observed_intervals?: components["schemas"]["ResearchUpdateSourceObservationInterval"][];
-      presentation_text: string;
-      requested_interval: components["schemas"]["ResearchUpdateSourceObservationInterval"];
-      temporal_scope: "point_in_time" | "live_only" | "unknown";
-    };
-    ResearchUpdateSourceObservationInterval: {
-      end: string;
-      start: string;
     };
     ResearchUpdateSourceRecordSnapshotItem: {
       lineage: "new" | "inherited";
@@ -914,18 +875,14 @@ export interface components {
     };
     ResearchUpdateSourceWatermarkSnapshot: {
       baseline_cutoff?: string | null;
-      information_frontier?: string | null;
       limitations?: string[];
-      observed_intervals?: components["schemas"]["ResearchUpdateSourceObservationInterval"][];
       overlap_start?: string | null;
       reported_records?: number | null;
-      requested_interval?: components["schemas"]["ResearchUpdateSourceObservationInterval"] | null;
       returned_records?: number;
       scanned_end: string;
       scanned_start: string;
       source: string;
       status: "complete" | "limited" | "unavailable";
-      structured_limitations?: components["schemas"]["ResearchUpdateSourceCoverageLimitation"][];
       temporal_scope?: "point_in_time" | "live_only" | "unknown";
     };
     ResearchUpdateSummaryContract: {
@@ -939,31 +896,6 @@ export interface components {
       new_evidence_refs?: string[];
       schema_version?: string;
       summary: string;
-    };
-    ResearchUpdateTransitionCapability: {
-      capability: "official_filing" | "timely_disclosure" | "fundamentals" | "market_observation" | "media" | "social_sentiment" | "macro";
-      checked_intervals?: components["schemas"]["ResearchUpdateSourceObservationInterval"][];
-      complete: boolean;
-      gaps?: components["schemas"]["ResearchUpdateSourceObservationInterval"][];
-      limitations?: components["schemas"]["ResearchUpdateTransitionLimitation"][];
-      required?: boolean;
-      sources?: string[];
-    };
-    ResearchUpdateTransitionCoverage: {
-      anchor_frontier: string;
-      capabilities?: components["schemas"]["ResearchUpdateTransitionCapability"][];
-      complete: boolean;
-      schema_version?: string;
-      update_frontier: string;
-    };
-    ResearchUpdateTransitionLimitation: {
-      kind: "partial" | "unavailable" | "archive_truncation" | "live_only" | "unknown";
-      observed_intervals?: components["schemas"]["ResearchUpdateSourceObservationInterval"][];
-      presentation_text: string;
-      requested_interval: components["schemas"]["ResearchUpdateSourceObservationInterval"];
-      scope: "pre_anchor" | "transition";
-      source: string;
-      temporal_scope: "point_in_time" | "live_only" | "unknown";
     };
     ResearchWarning: {
       code?: string;
@@ -1015,7 +947,6 @@ export interface components {
     RunCreateRequest: {
       analysis_date: string;
       analysts?: ("market" | "social" | "news" | "fundamentals")[];
-      anchor_readiness?: "required" | "allow_non_anchor";
       asset_type?: components["schemas"]["AssetType"] | null;
       deep_model?: string | null;
       deep_reasoning_effort?: string | null;
@@ -1073,7 +1004,6 @@ export interface components {
       error_message?: string | null;
       finished_at?: string | null;
       id: string;
-      information_frontier?: string | null;
       instrument_local_name?: string | null;
       instrument_name?: string | null;
       metrics?: components["schemas"]["RunMetrics"];
@@ -1101,7 +1031,6 @@ export interface components {
       error_message?: string | null;
       finished_at?: string | null;
       id: string;
-      information_frontier?: string | null;
       instrument_local_name?: string | null;
       instrument_name?: string | null;
       metrics?: components["schemas"]["RunMetrics"];
@@ -1128,17 +1057,6 @@ export interface components {
       low: components["schemas"]["AuditedRangeEndpoint"];
       measurement_kind?: components["schemas"]["MeasurementKind"];
       unit?: string | null;
-    };
-    SourceCoverageLimitation: {
-      kind: "partial" | "unavailable" | "archive_truncation" | "live_only" | "unknown";
-      observed_intervals?: components["schemas"]["SourceObservationInterval"][];
-      presentation_text: string;
-      requested_interval: components["schemas"]["SourceObservationInterval"];
-      temporal_scope: "point_in_time" | "live_only" | "unknown";
-    };
-    SourceObservationInterval: {
-      end: string;
-      start: string;
     };
     SourceRecordKind: "disclosure" | "fundamental" | "market";
     SourceRecordSnapshotItem: {
@@ -1173,18 +1091,14 @@ export interface components {
     };
     SourceWatermarkSnapshot: {
       baseline_cutoff?: string | null;
-      information_frontier?: string | null;
       limitations?: string[];
-      observed_intervals?: components["schemas"]["SourceObservationInterval"][];
       overlap_start?: string | null;
       reported_records?: number | null;
-      requested_interval?: components["schemas"]["SourceObservationInterval"] | null;
       returned_records?: number;
       scanned_end: string;
       scanned_start: string;
       source: string;
       status: components["schemas"]["CoverageStatus"];
-      structured_limitations?: components["schemas"]["SourceCoverageLimitation"][];
       temporal_scope?: "point_in_time" | "live_only" | "unknown";
     };
     StructuredRecoveryNotice: {

@@ -4,11 +4,6 @@ status: accepted
 
 # Fall back to Full Analysis when a bounded update is inconclusive
 
-The baseline-eligibility and Indeterminate-anchor rules in this ADR are
-superseded by [ADR 0007](0007-separate-anchor-and-transition-coverage.md). The
-remaining fail-closed Change Assessment, escalation, Evidence closure, market
-capability, and Shadow Comparison decisions remain accepted.
-
 Incremental Execution is not defined as fetching a shorter date range. It uses
 the current Research Revision as an Eligible Baseline, collects source-aware
 changes since that cutoff, and checks them against active Claims, open

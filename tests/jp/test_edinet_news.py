@@ -108,28 +108,6 @@ class NewsRenderTests(unittest.TestCase):
             out = edinet_news.get_news("9984.T", "2026-06-20", "2026-06-22")
         self.assertLess(out.index("新しい開示"), out.index("古い開示"))  # newest first
 
-    def test_information_frontier_filters_same_day_later_filing_from_body_and_records(self):
-        mapping = {
-            "2026-06-22": [
-                _doc(when="2026-06-22 17:30", desc="前の開示", doc_id="BEFORE"),
-                _doc(when="2026-06-22 18:30", desc="後の開示", doc_id="AFTER"),
-            ]
-        }
-        with self._patch(mapping):
-            out = edinet_news.get_news(
-                "9984.T",
-                "2026-06-22",
-                "2026-06-22",
-                information_frontier="2026-06-22T18:00:00+09:00",
-            )
-
-        assert "前の開示" in out
-        assert "後の開示" not in strip_provenance_markers(out)
-        assert [item.record_id for item in extract_source_observations(out)] == ["BEFORE"]
-        watermark = extract_source_watermarks(out)[0]
-        assert watermark.returned_records == 1
-        assert watermark.reported_records == 2
-
     def test_dates_outside_window_are_never_fetched(self):
         # Look-ahead safety: a filing the day after end_date must not appear,
         # because that date is never queried.
@@ -180,13 +158,11 @@ class NewsRenderTests(unittest.TestCase):
             **_doc(doc_id="S100CORRECTED", desc="訂正有価証券報告書"),
             "parentDocID": "S100ORIGINAL",
             "docInfoEditStatus": "2",
-            "opeDateTime": "2026-06-22 15:10",
         }
         withdrawn = {
             **_doc(doc_id="S100WITHDRAWN", desc="取下げ"),
             "parentDocID": "S100ORIGINAL",
             "withdrawalStatus": "1",
-            "opeDateTime": "2026-06-22 15:20",
         }
 
         with self._patch({"2026-06-22": [original, correction, withdrawn]}):
@@ -230,104 +206,17 @@ class NewsRenderTests(unittest.TestCase):
         assert out.count("EDINET docID: S100DUPLICATE") == 1
         assert len(extract_source_observations(out)) == 1
 
-    def test_parent_groups_versions_without_claiming_direct_replacement(self):
-        corrections = [
-            {
-                **_doc(doc_id="S100NEW1", desc="訂正有価証券報告書"),
-                "parentDocID": "S100OLD",
-                "docInfoEditStatus": "2",
-                "opeDateTime": "2026-06-22 15:10",
-            },
-            {
-                **_doc(doc_id="S100NEW2", desc="訂正有価証券報告書"),
-                "parentDocID": "S100OLD",
-                "docInfoEditStatus": "2",
-                "opeDateTime": "2026-06-22 15:20",
-            },
-        ]
-        with self._patch({"2026-06-22": corrections}):
-            out = edinet_news.get_news("9984.T", "2026-06-22", "2026-06-22")
-
-        observations = extract_source_observations(out)
-        assert {item.record_id for item in observations} == {"S100OLD"}
-        assert {item.version_id for item in observations} == {
-            "edinet:S100NEW1",
-            "edinet:S100NEW2",
+    def test_parent_document_without_correction_marker_is_replacement(self):
+        replacement = {
+            **_doc(doc_id="S100NEW", desc="臨時報告書"),
+            "parentDocID": "S100OLD",
         }
-        assert {item.native_record_id for item in observations} == {
-            "S100NEW1",
-            "S100NEW2",
-        }
-        assert all(item.status == "corrected" for item in observations)
-        assert all(item.replaces_version_id is None for item in observations)
-
-    def test_document_information_edit_uses_operation_availability(self):
-        correction = {
-            **_doc(
-                doc_id="S100EDITED",
-                desc="訂正有価証券報告書",
-                when="2026-06-20 15:00",
-            ),
-            "parentDocID": "S100ORIGINAL",
-            "docInfoEditStatus": "2",
-            "opeDateTime": "2026-06-22 09:30",
-        }
-        with self._patch({"2026-06-22": [correction]}):
+        with self._patch({"2026-06-22": [replacement]}):
             out = edinet_news.get_news("9984.T", "2026-06-22", "2026-06-22")
 
         observation = extract_source_observations(out)[0]
-        assert observation.published_at == "2026-06-20 15:00"
-        assert observation.available_at == "2026-06-22T09:30:00+09:00"
-        assert observation.availability_basis == "EDINET operation timestamp"
-
-    def test_non_operation_uses_submission_basis_when_timestamps_are_equal(self):
-        filing = {
-            **_doc(doc_id="S100PUBLISHED", when="2026-06-22 15:00"),
-            "opeDateTime": "2026-06-22 15:00",
-        }
-        with self._patch({"2026-06-22": [filing]}):
-            out = edinet_news.get_news("9984.T", "2026-06-22", "2026-06-22")
-
-        observation = extract_source_observations(out)[0]
-        assert observation.status == "published"
-        assert observation.availability_basis == "EDINET submission timestamp"
-
-    def test_document_information_edit_without_operation_time_limits_coverage(self):
-        correction = {
-            **_doc(doc_id="S100UNKNOWN", desc="訂正有価証券報告書"),
-            "parentDocID": "S100ORIGINAL",
-            "docInfoEditStatus": "2",
-        }
-        with self._patch({"2026-06-22": [correction]}):
-            out = edinet_news.get_news("9984.T", "2026-06-22", "2026-06-22")
-
-        assert extract_source_observations(out) == []
-        watermark = extract_source_watermarks(out)[0]
-        assert watermark.status == "limited"
-        assert watermark.limitations == (
-            "EDINET document S100UNKNOWN has an operation without a safe availability timestamp.",
-        )
-
-    def test_operation_available_after_historical_boundary_is_excluded(self):
-        later_correction = {
-            **_doc(
-                doc_id="S100FUTURE",
-                desc="訂正有価証券報告書 FUTURE",
-                when="2026-06-20 15:00",
-            ),
-            "parentDocID": "S100ORIGINAL",
-            "docInfoEditStatus": "2",
-            "opeDateTime": "2026-06-23 09:30",
-        }
-        with self._patch({"2026-06-22": [later_correction]}):
-            out = edinet_news.get_news("9984.T", "2026-06-22", "2026-06-22")
-
-        assert "FUTURE" not in strip_provenance_markers(out)
-        assert extract_source_observations(out) == []
-        watermark = extract_source_watermarks(out)[0]
-        assert watermark.status == "complete"
-        assert watermark.returned_records == 0
-        assert watermark.reported_records == 1
+        assert observation.status == "replaced"
+        assert observation.replaces_version_id == "edinet:S100OLD"
 
 
 @pytest.mark.unit

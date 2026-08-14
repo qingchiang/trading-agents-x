@@ -87,7 +87,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     finally:
         engine.dispose()
 
-    assert revision == "0015_information_frontiers"
+    assert revision == "0014_research_review_audit_fixes"
     assert {
         "id",
         "run_id",
@@ -130,9 +130,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     assert "baseline_revision_id" in run_columns
     assert "research_execution_strategy" in run_columns
     assert "research_update_audit_json" in run_columns
-    assert "information_frontier" in run_columns
     assert "research_update_audit_json" in revision_columns
-    assert "information_frontier" in revision_columns
     assert {"role", "execution_strategy", "change_conclusion", "indeterminate_reason"}.issubset(
         revision_columns
     )
@@ -532,7 +530,7 @@ def test_revision_semantic_migration_does_not_invent_initial_change_conclusion(
         with engine.connect() as connection:
             rows = connection.execute(
                 text(
-                    "SELECT role, change_conclusion, indeterminate_reason, information_frontier "
+                    "SELECT role, change_conclusion, indeterminate_reason "
                     "FROM research_revisions ORDER BY sequence"
                 )
             ).all()
@@ -552,9 +550,9 @@ def test_revision_semantic_migration_does_not_invent_initial_change_conclusion(
         engine.dispose()
 
     assert rows == [
-        ("initial", None, None, None),
-        ("update", "no_material_change", None, None),
-        ("update", "indeterminate", "coverage_incomplete", None),
+        ("initial", None, None),
+        ("update", "no_material_change", None),
+        ("update", "indeterminate", "coverage_incomplete"),
     ]
     upgraded_audit = ResearchUpdateAudit.model_validate(json.loads(upgraded_audit_value))
     assert upgraded_audit.schema_version == "2"
@@ -584,7 +582,6 @@ def test_revision_semantic_migration_does_not_invent_initial_change_conclusion(
     command.downgrade(config, "0007_shadow_research_updates")
     engine = create_sqlite_engine(app_settings.database_path)
     try:
-        inspector = inspect(engine)
         with engine.connect() as connection:
             downgraded_rows = connection.execute(
                 text("SELECT outcome FROM research_revisions ORDER BY sequence")
@@ -604,12 +601,6 @@ def test_revision_semantic_migration_does_not_invent_initial_change_conclusion(
         "coverage_incomplete",
     ]
     assert "schema_version" not in downgraded_audit
-    assert "information_frontier" not in {
-        column["name"] for column in inspector.get_columns("research_revisions")
-    }
-    assert "information_frontier" not in {
-        column["name"] for column in inspector.get_columns("runs")
-    }
     assert downgraded_audit["comparison"] == "not_applicable"
     assert downgraded_audit["candidate"]["outcome"] == "no_material_change"
     assert (
@@ -639,9 +630,6 @@ def test_v8_upgrade_preserves_research_data_and_downgrade_recreates_empty_table(
         )
         connection.exec_driver_sql(
             "ALTER TABLE runs ADD COLUMN research_update_audit_json JSON"
-        )
-        connection.exec_driver_sql(
-            "ALTER TABLE runs ADD COLUMN information_frontier VARCHAR(64)"
         )
         for definition in (
             "research_revision_id VARCHAR(36)",
@@ -709,7 +697,6 @@ def test_v8_upgrade_preserves_research_data_and_downgrade_recreates_empty_table(
         connection.exec_driver_sql("ALTER TABLE runs DROP COLUMN baseline_revision_id")
         connection.exec_driver_sql("ALTER TABLE runs DROP COLUMN research_execution_strategy")
         connection.exec_driver_sql("ALTER TABLE runs DROP COLUMN research_update_audit_json")
-        connection.exec_driver_sql("ALTER TABLE runs DROP COLUMN information_frontier")
         for column in (
             "research_revision_id",
             "market_timezone",

@@ -183,17 +183,11 @@ async def test_initial_research_chain_creation_read_and_export_surfaces(
 ) -> None:
     queued = await web_client.post(
         "/api/v1/research-chains",
-        json={
-            **_payload("6501.T"),
-            "analysts": ["market"],
-            "output_language": "ja",
-            "anchor_readiness": "allow_non_anchor",
-        },
+        json={**_payload("6501.T"), "analysts": ["market"], "output_language": "ja"},
         headers={"Idempotency-Key": "initial-chain"},
     )
     assert queued.status_code == 202
     assert queued.json()["research_chain_requested"] is True
-    assert queued.json()["request"]["anchor_readiness"] == "allow_non_anchor"
 
     service = AnalysisService(
         web_settings,
@@ -222,13 +216,8 @@ async def test_initial_research_chain_creation_read_and_export_surfaces(
     assert chains.status_code == 200
     assert detail.json()["current_revision"]["current_state"]["language"] == "ja"
     assert detail.json()["current_revision"]["coverage"]["supports_no_material_change"] is False
-    assert detail.json()["forward_research_anchor"]["is_forward_research_anchor"] is False
-    assert (
-        detail.json()["current_revision"]["coverage"]["anchor_qualification"]
-        == (detail.json()["forward_research_anchor"])
-    )
     assert detail.json()["next_update_policy"] == "full_required"
-    assert detail.json()["next_update_reason"] == "anchor_coverage_incomplete"
+    assert detail.json()["next_update_reason"] == "required_source_coverage_incomplete"
     assert revision.json()["producing_run_id"] == queued.json()["id"]
     assert revision.json()["evidence_snapshot"]["source_records"][0]["version_id"] == (
         "edinet:S100ROOT"
@@ -246,20 +235,20 @@ async def test_initial_research_chain_creation_read_and_export_surfaces(
         json={
             "baseline_revision_id": revision_id,
             "analysis_date": "2026-07-25",
-            "anchor_readiness": "allow_non_anchor",
             "execution_strategy": "incremental",
         },
     )
     assert refused_incremental.status_code == 409
     assert refused_incremental.json()["error"]["code"] == "invalid_research_baseline"
-    assert "anchor_coverage_incomplete" in (refused_incremental.json()["error"]["message"])
+    assert "required_source_coverage_incomplete" in (
+        refused_incremental.json()["error"]["message"]
+    )
 
     update = await web_client.post(
         f"/api/v1/research-chains/{chain['id']}/updates",
         json={
             "baseline_revision_id": revision_id,
             "analysis_date": "2026-07-25",
-            "anchor_readiness": "allow_non_anchor",
         },
         headers={"Idempotency-Key": "full-update"},
     )
@@ -268,7 +257,6 @@ async def test_initial_research_chain_creation_read_and_export_surfaces(
         json={
             "baseline_revision_id": revision_id,
             "analysis_date": "2026-07-25",
-            "anchor_readiness": "allow_non_anchor",
         },
         headers={"Idempotency-Key": "full-update"},
     )
@@ -287,11 +275,6 @@ async def test_initial_research_chain_creation_read_and_export_surfaces(
     assert signal["kind"] == "market_boundary_crossing"
     assert signal["previous_value"] == 95.0
     assert signal["current_value"] == 101.0
-    assert current["coverage"]["anchor_qualification"]["is_forward_research_anchor"] is False
-    assert current["coverage"]["anchor_qualification"]["reasons"] == [
-        "anchor_readiness_not_required"
-    ]
-    assert advanced["next_update_policy"] == "full_required"
     assert current["research_update_audit"] is None
     assert run_detail["run"]["research_update_audit"] is None
     updated_export = await web_client.get(
@@ -586,7 +569,6 @@ async def test_openapi_contains_versioned_run_center_contract(
         "full_required",
     ]
     assert "server-derived" in chain["next_update_policy"]["description"].lower()
-    assert "Forward Research Anchor" in chain["next_update_policy"]["description"]
     assert "Full Analysis" in chain["next_update_reason"]["description"]
 
 

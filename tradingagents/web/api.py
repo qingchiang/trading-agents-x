@@ -315,7 +315,7 @@ def create_app(
         chain = service.get_research_chain(chain_id)
         baseline = chain.current_revision
         if baseline is None:
-            raise InvalidResearchBaselineError("Research Chain has no current head")
+            raise InvalidResearchBaselineError("Research Chain has no Eligible Baseline")
         analysts = tuple(
             item.domain for item in baseline.coverage.domains if item.source is None
         )
@@ -327,7 +327,6 @@ def create_app(
                 analysis_date=request.analysis_date,
                 analysts=analysts,
                 output_language=baseline.current_state.language,
-                anchor_readiness=request.anchor_readiness,
             ),
             idempotency_key=idempotency_key,
             execution_strategy=(

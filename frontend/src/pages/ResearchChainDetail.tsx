@@ -36,14 +36,7 @@ export default function ResearchChainDetail() {
   const boundedMetrics = { ...emptyMetrics, ...(updateAudit?.bounded_metrics ?? {}) };
   const fullMetrics = { ...emptyMetrics, ...(updateAudit?.full_metrics ?? {}) };
   const boundedCoverage = updateAudit?.coverage;
-  const transitionCoverage = updateAudit?.transition_coverage;
   const candidateSummary = updateAudit?.candidate?.update_summary;
-  const forwardAnchor = chain.forward_research_anchor ?? {
-    is_forward_research_anchor: false,
-    reasons: ["legacy_anchor_coverage_unproven"],
-    capabilities: [],
-  };
-  const forwardAnchorReasons = forwardAnchor.reasons ?? [];
   const requiresFull = chain.next_update_policy === "full_required";
   const isIndeterminate = revision.change_conclusion === "indeterminate";
   const nextCutoff = updateCutoff || dayAfter(revision.cutoff);
@@ -72,22 +65,8 @@ export default function ResearchChainDetail() {
           </Link>
           <h1>{state.instrument}</h1>
           <p className="subtitle">
-            {t("researchCutoff")}: {revision.cutoff} · {revision.execution_strategy}
+            {revision.cutoff} · {revision.execution_strategy}
             {chain.is_primary ? ` · ${t("primaryChain")}` : ""}
-          </p>
-          <p className="subtitle">
-            {t("informationFrontier")}: {revision.information_frontier ?? t("notApplicable")}
-          </p>
-          <p className="subtitle">
-            {t("forwardResearchAnchor")}: {forwardAnchor.is_forward_research_anchor
-              ? t("qualified")
-              : t("notQualified")}
-            {forwardAnchorReasons.length > 0
-              ? ` · ${t("reason")}: ${forwardAnchorReasons.join(", ")}`
-              : ""}
-          </p>
-          <p className="subtitle">
-            {t(requiresFull ? "nextUpdateRequiresFull" : "nextUpdateStartsBounded")}
           </p>
         </div>
         <div className="action-row">
@@ -152,9 +131,7 @@ export default function ResearchChainDetail() {
               ))}
             </ul>
           )}
-          {chain.next_update_policy === "full_required" && (
-            <p>{t("fullReassessmentRequired")}</p>
-          )}
+          <p>{t("fullReassessmentRequired")}</p>
         </div>
       )}
 
@@ -215,15 +192,6 @@ export default function ResearchChainDetail() {
 
       <article className="panel">
         <h2>{t("coverageLimitations")}</h2>
-        <h3>{t("anchorCoverage")}</h3>
-        <ul>
-          {(forwardAnchor.capabilities ?? []).map((item) => (
-            <li key={item.capability}>
-              <strong>{item.capability}</strong> · {item.required ? t("required") : t("advisory")} · {item.satisfied ? t("complete") : t("missing")}
-              {(item.sources ?? []).length > 0 ? ` · ${(item.sources ?? []).join(" + ")}` : ""}
-            </li>
-          ))}
-        </ul>
         {(revision.coverage.limitations ?? []).length ? (
           <ul>{(revision.coverage.limitations ?? []).map((item) => <li key={item}>{item}</li>)}</ul>
         ) : (
@@ -241,20 +209,18 @@ export default function ResearchChainDetail() {
             </li>
           ))}
         </ul>
+        <p>
+          <strong>
+            {t(requiresFull || revision.coverage.supports_no_material_change === false
+              ? "quietReassessmentBlocked"
+              : "quietReassessmentSupported")}
+          </strong>
+        </p>
         <h3>{t("sourceWatermarks")}</h3>
         <ul>
           {(revision.evidence_snapshot.source_watermarks ?? []).map((item) => (
             <li key={`${item.source}-${item.scanned_start}-${item.scanned_end}`}>
               <strong>{item.source}</strong> · {item.scanned_start} – {item.scanned_end} · {item.status}
-              {item.information_frontier
-                ? ` · ${t("sourceFrontier")}: ${item.information_frontier}`
-                : ""}
-              {item.requested_interval
-                ? ` · ${t("requestedInterval")}: ${item.requested_interval.start} – ${item.requested_interval.end}`
-                : ""}
-              {(item.observed_intervals ?? []).length > 0
-                ? ` · ${t("observedIntervals")}: ${(item.observed_intervals ?? []).map((interval) => `${interval.start} – ${interval.end}`).join(", ")}`
-                : ""}
               {item.baseline_cutoff ? ` · ${t("baseline")}: ${item.baseline_cutoff}` : ""}
               {item.overlap_start ? ` · ${t("overlapStart")}: ${item.overlap_start}` : ""}
               {(item.limitations ?? []).length > 0 && (
@@ -338,37 +304,6 @@ export default function ResearchChainDetail() {
                   ? (updateAudit.checked_windows ?? []).map((item) => `${item.source} ${item.scanned_start}–${item.scanned_end} (${item.status})`).join("; ")
                   : t("none")}
               </li>
-              {transitionCoverage && (
-                <li>
-                  <strong>{t("transitionCoverage")}</strong>
-                  <ul>
-                    <li>
-                      {t("transitionFrontiers")}: ({transitionCoverage.anchor_frontier}, {transitionCoverage.update_frontier}]
-                    </li>
-                    <li>{t("transitionComplete")}: {String(transitionCoverage.complete)}</li>
-                    {(transitionCoverage.capabilities ?? []).map((capability) => (
-                      <li key={capability.capability}>
-                        {capability.capability} · {String(capability.complete)} · {(capability.sources ?? []).join(" + ")}
-                        {(capability.checked_intervals ?? []).length > 0 && (
-                          <div>{t("transitionChecked")}: {(capability.checked_intervals ?? []).map((interval) => `${interval.start}–${interval.end}`).join(", ")}</div>
-                        )}
-                        {(capability.gaps ?? []).length > 0 && (
-                          <div>{t("transitionGaps")}: {(capability.gaps ?? []).map((gap) => `${gap.start}–${gap.end}`).join(", ")}</div>
-                        )}
-                        {(capability.limitations ?? []).length > 0 && (
-                          <ul>
-                            {(capability.limitations ?? []).map((limitation, index) => (
-                              <li key={`${limitation.source}-${limitation.kind}-${index}`}>
-                                {t("transitionLimitations")}: {limitation.scope}/{limitation.kind}/{limitation.temporal_scope} · {limitation.requested_interval.start}–{limitation.requested_interval.end} · {(limitation.observed_intervals ?? []).map((interval) => `${interval.start}–${interval.end}`).join(", ") || t("none")} · {limitation.presentation_text}
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                </li>
-              )}
               <li>
                 {t("boundedUpdateSummary")}: {candidateSummary?.summary ?? t("none")}
               </li>

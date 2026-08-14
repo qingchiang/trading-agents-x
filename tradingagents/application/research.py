@@ -5,15 +5,13 @@ from __future__ import annotations
 import io
 import json
 import zipfile
-from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta, tzinfo
+from datetime import date, datetime, timedelta
 from enum import Enum
 from typing import Literal, Protocol
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from tradingagents.dataflows.jp.calendar import is_tse_open
 from tradingagents.dataflows.symbol_utils import is_supported_equity_symbol, market_timezone
 
 from .contracts import (
@@ -26,7 +24,6 @@ from .contracts import (
     ResearchRating,
     ResearchScenarioKind,
     ResearchUpdateAudit,
-    ResearchUpdateTransitionCoverage,
     RunMetrics,
     report_language_value,
 )
@@ -105,87 +102,6 @@ class CoverageRequirement(str, Enum):
     ADVISORY = "advisory"
 
 
-class MarketResearchCapability(str, Enum):
-    OFFICIAL_FILING = "official_filing"
-    TIMELY_DISCLOSURE = "timely_disclosure"
-    FUNDAMENTALS = "fundamentals"
-    MARKET_OBSERVATION = "market_observation"
-    MEDIA = "media"
-    SOCIAL_SENTIMENT = "social_sentiment"
-    MACRO = "macro"
-
-
-class TransitionContinuityRule(str, Enum):
-    EVENT_STREAM = "event_stream"
-    SNAPSHOT = "snapshot"
-    MARKET_SERIES = "market_series"
-
-
-class CapabilitySourceContract(ResearchModel):
-    """Explicit alternatives of complementary configured source sets."""
-
-    capability: MarketResearchCapability
-    transition_continuity: TransitionContinuityRule
-    acceptable_source_sets: tuple[tuple[str, ...], ...] = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def validate_sources(self) -> CapabilitySourceContract:
-        if any(
-            not source_set or any(not source for source in source_set)
-            for source_set in self.acceptable_source_sets
-        ):
-            raise ValueError("capability source sets must contain named configured sources")
-        return self
-
-
-class MarketResearchCapabilityProfile(ResearchModel):
-    id: str = Field(min_length=1)
-    instrument_suffixes: tuple[str, ...] = ()
-    bounded_execution_supported: bool
-    minimum_anchor_capabilities: tuple[MarketResearchCapability, ...] = ()
-    source_contracts: tuple[CapabilitySourceContract, ...] = ()
-
-    @model_validator(mode="after")
-    def validate_contracts(self) -> MarketResearchCapabilityProfile:
-        capabilities = tuple(item.capability for item in self.source_contracts)
-        if len(capabilities) != len(set(capabilities)):
-            raise ValueError("a capability profile must declare each capability once")
-        if not set(self.minimum_anchor_capabilities).issubset(capabilities):
-            raise ValueError("minimum anchor capabilities require source contracts")
-        return self
-
-
-class AnchorQualificationReason(str, Enum):
-    ANCHOR_READINESS_NOT_REQUIRED = "anchor_readiness_not_required"
-    LEGACY_ANCHOR_COVERAGE_UNPROVEN = "legacy_anchor_coverage_unproven"
-    UNSUPPORTED_MARKET_PROFILE = "unsupported_market_profile"
-    NOT_FULL_RESEARCH = "not_full_research"
-    INFORMATION_FRONTIER_MISSING = "information_frontier_missing"
-    FULL_AUDIT_INCOMPLETE = "full_audit_incomplete"
-    CURRENT_STATE_UNUSABLE = "current_state_unusable"
-    EVIDENCE_CLOSURE_INVALID = "evidence_closure_invalid"
-    POINT_IN_TIME_INVALID = "point_in_time_invalid"
-    REQUIRED_CAPABILITY_MISSING = "required_capability_missing"
-    REQUIRED_DOMAIN_MISSING = "required_domain_missing"
-    INCOMPATIBLE_MARKET_SEMANTICS = "incompatible_market_semantics"
-
-
-class CapabilityAttestation(ResearchModel):
-    capability: MarketResearchCapability
-    required: bool = True
-    satisfied: bool
-    sources: tuple[str, ...] = ()
-    limitations: tuple[str, ...] = ()
-
-
-class ForwardResearchAnchorQualification(ResearchModel):
-    schema_version: Literal["1"] = "1"
-    is_forward_research_anchor: bool
-    profile_id: str | None = None
-    reasons: tuple[AnchorQualificationReason, ...] = ()
-    capabilities: tuple[CapabilityAttestation, ...] = ()
-
-
 class SourceRecordStatus(str, Enum):
     PUBLISHED = "published"
     CORRECTED = "corrected"
@@ -235,8 +151,6 @@ class IndeterminateReason(str, Enum):
 class NextUpdateReason(str, Enum):
     EXPERIMENT_MODE_OFF = "experiment_mode_off"
     UNSUPPORTED_INCREMENTAL_MARKET = "unsupported_incremental_market"
-    LEGACY_ANCHOR_COVERAGE_UNPROVEN = "legacy_anchor_coverage_unproven"
-    ANCHOR_COVERAGE_INCOMPLETE = "anchor_coverage_incomplete"
     REQUIRED_SOURCE_COVERAGE_INCOMPLETE = "required_source_coverage_incomplete"
     INDETERMINATE_HEAD = "indeterminate_head"
     COVERAGE_INCOMPLETE = "coverage_incomplete"
@@ -489,16 +403,12 @@ class ResearchObjectCoverage(ResearchModel):
 
 
 class CoverageAttestation(ResearchModel):
-    schema_version: Literal["1", "2"] = "1"
+    schema_version: Literal["1"] = "1"
     claims: tuple[ResearchObjectCoverage, ...]
     questions: tuple[ResearchObjectCoverage, ...]
     domains: tuple[ResearchDomainCoverage, ...] = Field(min_length=1)
     limitations: tuple[str, ...] = ()
     supports_no_material_change: bool = True
-    anchor_qualification: ForwardResearchAnchorQualification | None = Field(
-        default=None,
-        exclude_if=lambda value: value is None,
-    )
 
 
 class UpdateSummary(ResearchModel):
@@ -572,25 +482,6 @@ class SourceRecordSnapshotItem(ResearchModel):
     source_revision_id: str | None = None
 
 
-class SourceObservationInterval(ResearchModel):
-    start: date
-    end: date
-
-    @model_validator(mode="after")
-    def validate_interval(self) -> SourceObservationInterval:
-        if self.start > self.end:
-            raise ValueError("source observation interval start must not follow end")
-        return self
-
-
-class SourceCoverageLimitation(ResearchModel):
-    kind: Literal["partial", "unavailable", "archive_truncation", "live_only", "unknown"]
-    temporal_scope: Literal["point_in_time", "live_only", "unknown"]
-    requested_interval: SourceObservationInterval
-    observed_intervals: tuple[SourceObservationInterval, ...] = ()
-    presentation_text: str = Field(min_length=1)
-
-
 class SourceWatermarkSnapshot(ResearchModel):
     source: str = Field(min_length=1)
     scanned_start: date
@@ -602,10 +493,6 @@ class SourceWatermarkSnapshot(ResearchModel):
     reported_records: int | None = Field(default=None, ge=0)
     baseline_cutoff: date | None = None
     overlap_start: date | None = None
-    information_frontier: datetime | None = None
-    requested_interval: SourceObservationInterval | None = None
-    observed_intervals: tuple[SourceObservationInterval, ...] = ()
-    structured_limitations: tuple[SourceCoverageLimitation, ...] = ()
 
     @model_validator(mode="after")
     def validate_window(self) -> SourceWatermarkSnapshot:
@@ -615,49 +502,11 @@ class SourceWatermarkSnapshot(ResearchModel):
             self.scanned_start <= self.overlap_start <= self.scanned_end
         ):
             raise ValueError("Source Watermark overlap must be inside scanned interval")
-        if self.information_frontier is not None and self.information_frontier.utcoffset() is None:
-            raise ValueError("Source Information Frontier requires a timezone")
-        return self
-
-
-class TransitionCoverageLimitation(ResearchModel):
-    kind: Literal["partial", "unavailable", "archive_truncation", "live_only", "unknown"]
-    scope: Literal["pre_anchor", "transition"]
-    temporal_scope: Literal["point_in_time", "live_only", "unknown"]
-    source: str = Field(min_length=1)
-    requested_interval: SourceObservationInterval
-    observed_intervals: tuple[SourceObservationInterval, ...] = ()
-    presentation_text: str = Field(min_length=1)
-
-
-class TransitionCapabilityAttestation(ResearchModel):
-    capability: MarketResearchCapability
-    required: bool = True
-    complete: bool
-    sources: tuple[str, ...] = ()
-    checked_intervals: tuple[SourceObservationInterval, ...] = ()
-    gaps: tuple[SourceObservationInterval, ...] = ()
-    limitations: tuple[TransitionCoverageLimitation, ...] = ()
-
-
-class TransitionCoverageAttestation(ResearchModel):
-    schema_version: Literal["1"] = "1"
-    anchor_frontier: datetime
-    update_frontier: datetime
-    complete: bool
-    capabilities: tuple[TransitionCapabilityAttestation, ...] = ()
-
-    @model_validator(mode="after")
-    def validate_frontiers(self) -> TransitionCoverageAttestation:
-        if self.anchor_frontier.utcoffset() is None or self.update_frontier.utcoffset() is None:
-            raise ValueError("Transition Coverage frontiers require timezones")
-        if self.update_frontier <= self.anchor_frontier:
-            raise ValueError("update frontier must follow anchor frontier")
         return self
 
 
 class EffectiveEvidenceSnapshot(ResearchModel):
-    schema_version: Literal["1", "2"] = "2"
+    schema_version: Literal["1"] = "1"
     bundle: EvidenceBundle
     lineage: tuple[EvidenceSnapshotItem, ...]
     source_records: tuple[SourceRecordVersion, ...] = ()
@@ -785,7 +634,6 @@ class ResearchChangeSignal(ResearchModel):
 
 class ResearchRevisionDraft(ResearchModel):
     cutoff: date
-    information_frontier: datetime | None = None
     role: ResearchRevisionRole
     execution_strategy: ResearchExecutionStrategy
     change_conclusion: ResearchChangeConclusion | None = None
@@ -799,8 +647,6 @@ class ResearchRevisionDraft(ResearchModel):
 
     @model_validator(mode="after")
     def validate_complete_coverage(self) -> ResearchRevisionDraft:
-        if self.information_frontier is not None and self.information_frontier.utcoffset() is None:
-            raise ValueError("Information Frontier requires a timezone")
         if self.role is ResearchRevisionRole.INITIAL:
             if self.change_conclusion is not None:
                 raise ValueError("initial Revision has no Change Conclusion")
@@ -970,7 +816,6 @@ class IncrementalGateResult(ResearchModel):
     coverage: CoverageAttestation | None = None
     evidence_snapshot: EffectiveEvidenceSnapshot | None = None
     semantic_assessment: SemanticChangeAssessment | None = None
-    transition_coverage: TransitionCoverageAttestation | None = None
     metrics: RunMetrics = Field(default_factory=RunMetrics)
 
     @model_validator(mode="after")
@@ -1002,14 +847,11 @@ def validate_experimental_nmc_candidate(
     candidate: ResearchRevisionDraft,
 ) -> IncrementalEscalationReason | None:
     """Fail closed unless a bounded candidate can safely become authoritative."""
-    if (
-        evaluate_next_update_policy(
-            baseline,
-            instrument=baseline.current_state.instrument,
-            mode="experimental",
-        ).policy
-        != "incremental_allowed"
-    ):
+    if evaluate_next_update_policy(
+        baseline,
+        instrument=baseline.current_state.instrument,
+        mode="experimental",
+    ).policy != "incremental_allowed":
         return IncrementalEscalationReason.INVALID_BASELINE
     if (
         candidate.execution_strategy is not ResearchExecutionStrategy.INCREMENTAL
@@ -1085,11 +927,20 @@ def validate_experimental_nmc_candidate(
         or reaffirmed_question_ids != current_question_ids
     ):
         return IncrementalEscalationReason.INCOMPATIBLE_SEMANTICS
-    if not _required_source_coverage_complete(
+    candidate_policy = evaluate_next_update_policy(
         candidate,
-        required_incremental_sources(candidate),
-    ):
-        return IncrementalEscalationReason.COVERAGE_INCOMPLETE
+        instrument=candidate.current_state.instrument,
+        mode="experimental",
+    )
+    if candidate_policy.policy != "incremental_allowed":
+        if candidate_policy.reason in {
+            NextUpdateReason.REQUIRED_SOURCE_COVERAGE_INCOMPLETE,
+            NextUpdateReason.COVERAGE_INCOMPLETE,
+        }:
+            return IncrementalEscalationReason.COVERAGE_INCOMPLETE
+        if candidate_policy.reason is NextUpdateReason.INCOMPATIBLE_MARKET_SEMANTICS:
+            return IncrementalEscalationReason.INCOMPATIBLE_SEMANTICS
+        return IncrementalEscalationReason.SCHEMA_INVALID
     return None
 
 
@@ -1200,504 +1051,6 @@ class ResearchRevision(ResearchRevisionDraft):
     created_at: datetime
 
 
-JAPANESE_ANCHOR_PROFILE = MarketResearchCapabilityProfile(
-    id="jp-listed-equity-v1",
-    instrument_suffixes=(".T",),
-    bounded_execution_supported=True,
-    minimum_anchor_capabilities=(
-        MarketResearchCapability.OFFICIAL_FILING,
-        MarketResearchCapability.TIMELY_DISCLOSURE,
-        MarketResearchCapability.MARKET_OBSERVATION,
-    ),
-    source_contracts=(
-        CapabilitySourceContract(
-            capability=MarketResearchCapability.OFFICIAL_FILING,
-            transition_continuity=TransitionContinuityRule.EVENT_STREAM,
-            acceptable_source_sets=(("EDINET",),),
-        ),
-        CapabilitySourceContract(
-            capability=MarketResearchCapability.TIMELY_DISCLOSURE,
-            transition_continuity=TransitionContinuityRule.EVENT_STREAM,
-            acceptable_source_sets=(("TDnet",),),
-        ),
-        CapabilitySourceContract(
-            capability=MarketResearchCapability.FUNDAMENTALS,
-            transition_continuity=TransitionContinuityRule.SNAPSHOT,
-            acceptable_source_sets=(("J-Quants fundamentals",),),
-        ),
-        CapabilitySourceContract(
-            capability=MarketResearchCapability.MARKET_OBSERVATION,
-            transition_continuity=TransitionContinuityRule.MARKET_SERIES,
-            acceptable_source_sets=(("J-Quants adjusted OHLCV",),),
-        ),
-        CapabilitySourceContract(
-            capability=MarketResearchCapability.MEDIA,
-            transition_continuity=TransitionContinuityRule.EVENT_STREAM,
-            acceptable_source_sets=(("Google News",),),
-        ),
-        CapabilitySourceContract(
-            capability=MarketResearchCapability.SOCIAL_SENTIMENT,
-            transition_continuity=TransitionContinuityRule.SNAPSHOT,
-            acceptable_source_sets=(("Social sentiment",),),
-        ),
-        CapabilitySourceContract(
-            capability=MarketResearchCapability.MACRO,
-            transition_continuity=TransitionContinuityRule.SNAPSHOT,
-            acceptable_source_sets=(("Macro observations",),),
-        ),
-    ),
-)
-
-
-def market_research_capability_profile(
-    instrument: str,
-) -> MarketResearchCapabilityProfile | None:
-    if any(instrument.endswith(suffix) for suffix in JAPANESE_ANCHOR_PROFILE.instrument_suffixes):
-        return JAPANESE_ANCHOR_PROFILE
-    return None
-
-
-def _anchor_watermark_usable(
-    watermark: SourceWatermarkSnapshot,
-    revision: ResearchRevisionDraft,
-) -> bool:
-    if (
-        watermark.status is CoverageStatus.UNAVAILABLE
-        or watermark.temporal_scope != "point_in_time"
-        or watermark.information_frontier is None
-        or revision.information_frontier is None
-        or watermark.information_frontier > revision.information_frontier
-        or watermark.scanned_end != revision.cutoff
-        or (
-            watermark.reported_records is not None
-            and watermark.reported_records < watermark.returned_records
-        )
-    ):
-        return False
-    blocking = tuple(
-        limitation
-        for limitation in watermark.structured_limitations
-        if not (
-            limitation.kind == "archive_truncation"
-            and limitation.temporal_scope == "point_in_time"
-            and limitation.observed_intervals
-            and max(item.end for item in limitation.observed_intervals) == revision.cutoff
-        )
-    )
-    return not blocking and (
-        watermark.status is CoverageStatus.COMPLETE
-        or (
-            watermark.status is CoverageStatus.LIMITED
-            and watermark.structured_limitations
-            and not blocking
-        )
-    )
-
-
-def _latest_permitted_market_session(cutoff: date) -> date:
-    session = cutoff
-    while not is_tse_open(session):
-        session -= timedelta(days=1)
-    return session
-
-
-def _source_record_published_date(record: SourceRecordVersion) -> date | None:
-    try:
-        return date.fromisoformat(record.published_at[:10])
-    except ValueError:
-        return None
-
-
-def _anchor_record_point_in_time_valid(
-    record: SourceRecordVersion,
-    revision: ResearchRevisionDraft,
-) -> bool:
-    return revision.information_frontier is not None and (
-        record.available_at <= revision.information_frontier
-        and record.available_at.astimezone(
-            market_timezone(revision.current_state.instrument)
-        ).date()
-        <= revision.cutoff
-    )
-
-
-def transition_coverage_is_complete(
-    revision: ResearchRevisionDraft,
-    transition_coverage: TransitionCoverageAttestation | ResearchUpdateTransitionCoverage | None,
-    *,
-    anchor_frontier: datetime,
-    update_frontier: datetime,
-) -> bool:
-    """Validate the persisted aggregate against its required capability details."""
-    if transition_coverage is None:
-        return False
-    capabilities = transition_coverage.capabilities
-    required_capabilities = {
-        item.capability.value
-        for item in (
-            revision.coverage.anchor_qualification.capabilities
-            if revision.coverage.anchor_qualification is not None
-            else ()
-        )
-        if item.required
-    }
-    if not required_capabilities:
-        profile = market_research_capability_profile(revision.current_state.instrument)
-        required_capabilities = {
-            item.value for item in (profile.minimum_anchor_capabilities if profile else ())
-        }
-    by_capability = {
-        getattr(item.capability, "value", item.capability): item for item in capabilities
-    }
-    profile = market_research_capability_profile(revision.current_state.instrument)
-    if (
-        not transition_coverage.complete
-        or transition_coverage.anchor_frontier != anchor_frontier
-        or transition_coverage.update_frontier != update_frontier
-        or len(by_capability) != len(capabilities)
-        or not required_capabilities
-        or not required_capabilities.issubset(by_capability)
-        or profile is None
-    ):
-        return False
-    transition_start = _transition_calendar_start(
-        anchor_frontier,
-        market_timezone(revision.current_state.instrument),
-    )
-    transition_end = update_frontier.astimezone(
-        market_timezone(revision.current_state.instrument)
-    ).date()
-    contracts = {item.capability.value: item for item in profile.source_contracts}
-    return all(
-        by_capability[capability].required for capability in required_capabilities
-    ) and all(
-        not item.required
-        or (
-            item.complete
-            and bool(item.checked_intervals)
-            and not item.gaps
-            and not any(limitation.scope == "transition" for limitation in item.limitations)
-            and (contract := contracts.get(getattr(item.capability, "value", item.capability)))
-            is not None
-            and any(
-                set(source_set).issubset(item.sources)
-                for source_set in contract.acceptable_source_sets
-            )
-            and not _continuity_gaps(
-                contract.transition_continuity,
-                transition_start,
-                transition_end,
-                item.checked_intervals,
-            )
-        )
-        for item in capabilities
-    )
-
-
-def _authoritative_incremental_nmc_reaffirms_full_anchor(
-    revision: ResearchRevisionDraft,
-) -> bool:
-    audit = revision.research_update_audit
-    return (
-        revision.execution_strategy is ResearchExecutionStrategy.INCREMENTAL
-        and revision.change_conclusion is ResearchChangeConclusion.NO_MATERIAL_CHANGE
-        and audit is not None
-        and audit.mode == "experimental"
-        and audit.authoritative_strategy == "incremental"
-        and audit.candidate is not None
-        and audit.candidate.change_conclusion == "no_material_change"
-        and revision.information_frontier is not None
-        and audit.baseline_information_frontier is not None
-        and audit.transition_coverage is not None
-        and transition_coverage_is_complete(
-            revision,
-            audit.transition_coverage,
-            anchor_frontier=audit.baseline_information_frontier,
-            update_frontier=revision.information_frontier,
-        )
-        and audit.escalation_reason is None
-    )
-
-
-def derive_forward_research_anchor(
-    revision: ResearchRevisionDraft,
-) -> ForwardResearchAnchorQualification:
-    """Derive future comparison eligibility from Full-established research quality."""
-    existing = revision.coverage.anchor_qualification
-    if (
-        existing is not None
-        and AnchorQualificationReason.ANCHOR_READINESS_NOT_REQUIRED in existing.reasons
-    ):
-        return existing
-    profile = market_research_capability_profile(revision.current_state.instrument)
-    reasons: list[AnchorQualificationReason] = []
-    if profile is None or not profile.bounded_execution_supported:
-        reasons.append(AnchorQualificationReason.UNSUPPORTED_MARKET_PROFILE)
-        return ForwardResearchAnchorQualification(
-            is_forward_research_anchor=False,
-            reasons=tuple(reasons),
-        )
-    if (
-        revision.execution_strategy is not ResearchExecutionStrategy.FULL
-        and not _authoritative_incremental_nmc_reaffirms_full_anchor(revision)
-    ):
-        reasons.append(AnchorQualificationReason.NOT_FULL_RESEARCH)
-    if revision.information_frontier is None:
-        reasons.append(AnchorQualificationReason.INFORMATION_FRONTIER_MISSING)
-    if any(
-        not _anchor_record_point_in_time_valid(record, revision)
-        for record in revision.evidence_snapshot.source_records
-    ):
-        reasons.append(AnchorQualificationReason.POINT_IN_TIME_INVALID)
-
-    required_capabilities = _required_research_capabilities(revision, profile)
-
-    watermarks_by_source: dict[str, tuple[SourceWatermarkSnapshot, ...]] = {
-        source: tuple(
-            item for item in revision.evidence_snapshot.source_watermarks if item.source == source
-        )
-        for source in {
-            source
-            for contract in profile.source_contracts
-            for source_set in contract.acceptable_source_sets
-            for source in source_set
-        }
-    }
-    records_by_source = {
-        source: tuple(
-            item
-            for item in revision.evidence_snapshot.source_records
-            if item.source == source and _anchor_record_point_in_time_valid(item, revision)
-        )
-        for source in watermarks_by_source
-    }
-    attestations: list[CapabilityAttestation] = []
-    for contract in profile.source_contracts:
-        capability = contract.capability
-        required = capability in required_capabilities
-
-        def source_attests(
-            source: str,
-            capability: MarketResearchCapability = capability,
-        ) -> bool:
-            watermarks = watermarks_by_source[source]
-            records = records_by_source[source]
-            latest_market_session = _latest_permitted_market_session(revision.cutoff)
-            market_observation_matches_cutoff = (
-                capability is not MarketResearchCapability.MARKET_OBSERVATION
-                or any(
-                    _source_record_published_date(item) == latest_market_session for item in records
-                )
-            )
-            return (
-                bool(watermarks)
-                and all(item.scanned_end <= revision.cutoff for item in watermarks)
-                and any(_anchor_watermark_usable(item, revision) for item in watermarks)
-                and (
-                    (
-                        capability is not MarketResearchCapability.MARKET_OBSERVATION
-                        and all(item.returned_records == 0 for item in watermarks)
-                    )
-                    or bool(records)
-                )
-                and market_observation_matches_cutoff
-            )
-
-        satisfied_sources = next(
-            (
-                source_set
-                for source_set in contract.acceptable_source_sets
-                if all(source_attests(source) for source in source_set)
-            ),
-            (),
-        )
-        satisfied = bool(satisfied_sources)
-        attestations.append(
-            CapabilityAttestation(
-                capability=contract.capability,
-                required=required,
-                satisfied=satisfied,
-                sources=satisfied_sources,
-                limitations=(
-                    ()
-                    if satisfied or not required
-                    else ("No acceptable configured source set attested the capability.",)
-                ),
-            )
-        )
-        if required and not satisfied:
-            reasons.append(AnchorQualificationReason.REQUIRED_CAPABILITY_MISSING)
-
-    required_domains = tuple(
-        item
-        for item in revision.coverage.domains
-        if item.requirement is CoverageRequirement.REQUIRED
-    )
-    if any(
-        item.status is not CoverageStatus.COMPLETE
-        and not (
-            item.source in watermarks_by_source
-            and any(
-                _anchor_watermark_usable(mark, revision)
-                for mark in watermarks_by_source[item.source]
-            )
-        )
-        for item in required_domains
-    ):
-        reasons.append(AnchorQualificationReason.REQUIRED_DOMAIN_MISSING)
-    object_coverage = {
-        item.object_id: item for item in (*revision.coverage.claims, *revision.coverage.questions)
-    }
-    for research_object in (*revision.current_state.claims, *revision.current_state.questions):
-        coverage = object_coverage[research_object.id]
-        if coverage.status is CoverageStatus.COMPLETE:
-            continue
-        if (
-            isinstance(research_object, ResearchQuestion)
-            and coverage.status is CoverageStatus.UNAVAILABLE
-        ):
-            reasons.append(AnchorQualificationReason.REQUIRED_DOMAIN_MISSING)
-            break
-        required_sources = set(research_object.required_sources)
-        checked_sources = {
-            domain.source
-            for domain in required_domains
-            if domain.status is CoverageStatus.COMPLETE and domain.source is not None
-        }
-        if required_sources - checked_sources:
-            reasons.append(AnchorQualificationReason.REQUIRED_DOMAIN_MISSING)
-            break
-        if isinstance(research_object, ResearchClaim) and not (
-            coverage.status is CoverageStatus.LIMITED
-            and research_object.evidence_relationship == "decision_envelope"
-        ):
-            reasons.append(AnchorQualificationReason.CURRENT_STATE_UNUSABLE)
-            break
-    if any(
-        item.kind is ResearchChangeKind.MARKET_SEMANTIC_INCOMPATIBILITY
-        for item in revision.delta.change_signals
-    ):
-        reasons.append(AnchorQualificationReason.INCOMPATIBLE_MARKET_SEMANTICS)
-    if any(
-        domain.requirement is CoverageRequirement.REQUIRED
-        and domain.domain in {"market", "fundamentals"}
-        and "audit incomplete" in " ".join(domain.limitations).lower()
-        for domain in revision.coverage.domains
-    ):
-        reasons.append(AnchorQualificationReason.FULL_AUDIT_INCOMPLETE)
-    promoted_audit_domains = {
-        MarketResearchCapability.MEDIA: "news",
-        MarketResearchCapability.SOCIAL_SENTIMENT: "social",
-        MarketResearchCapability.MACRO: "macro",
-    }
-    if any(
-        attestation.required
-        and (audit_domain := promoted_audit_domains.get(attestation.capability)) is not None
-        and not any(
-            domain.domain == audit_domain and domain.status is CoverageStatus.COMPLETE
-            for domain in revision.coverage.domains
-        )
-        for attestation in attestations
-    ):
-        reasons.append(AnchorQualificationReason.FULL_AUDIT_INCOMPLETE)
-    return ForwardResearchAnchorQualification(
-        is_forward_research_anchor=not reasons,
-        profile_id=profile.id,
-        reasons=tuple(dict.fromkeys(reasons)),
-        capabilities=tuple(attestations),
-    )
-
-
-def bind_information_frontier(
-    revision: ResearchRevisionDraft,
-    frontier: datetime,
-) -> ResearchRevisionDraft:
-    """Bind one frozen execution frontier to its Revision and source attestations."""
-    if frontier.utcoffset() is None:
-        raise ValueError("Information Frontier requires a timezone")
-    market_tz = market_timezone(revision.current_state.instrument)
-    watermarks = []
-    for watermark in revision.evidence_snapshot.source_watermarks:
-        requested = watermark.requested_interval or SourceObservationInterval(
-            start=watermark.scanned_start,
-            end=watermark.scanned_end,
-        )
-        observed = watermark.observed_intervals or (
-            ()
-            if watermark.status is CoverageStatus.UNAVAILABLE
-            else (
-                SourceObservationInterval(
-                    start=watermark.scanned_start,
-                    end=watermark.scanned_end,
-                ),
-            )
-        )
-        attested_through = (
-            None
-            if watermark.status is CoverageStatus.UNAVAILABLE or not observed
-            else min(
-                frontier,
-                datetime.combine(max(item.end for item in observed), time.max, tzinfo=market_tz),
-            )
-        )
-        kind = (
-            "live_only"
-            if watermark.temporal_scope == "live_only"
-            else "unknown"
-            if watermark.temporal_scope == "unknown"
-            else "unavailable"
-            if watermark.status is CoverageStatus.UNAVAILABLE
-            else "partial"
-        )
-        structured = watermark.structured_limitations or tuple(
-            SourceCoverageLimitation(
-                kind=kind,
-                temporal_scope=watermark.temporal_scope,
-                requested_interval=requested,
-                observed_intervals=observed,
-                presentation_text=text,
-            )
-            for text in watermark.limitations
-        )
-        watermarks.append(
-            watermark.model_copy(
-                update={
-                    "information_frontier": attested_through,
-                    "requested_interval": requested,
-                    "observed_intervals": observed,
-                    "structured_limitations": structured,
-                }
-            )
-        )
-    bundle = EvidenceBundle.model_validate(
-        {
-            **revision.evidence_snapshot.bundle.model_dump(mode="python"),
-            "information_frontier": frontier,
-            "digest": None,
-        }
-    )
-    snapshot = revision.evidence_snapshot.model_copy(
-        update={
-            "bundle": bundle,
-            "source_watermarks": tuple(watermarks),
-        }
-    )
-    bound = revision.model_copy(
-        update={"information_frontier": frontier, "evidence_snapshot": snapshot}
-    )
-    bound = bound.model_copy(
-        update={
-            "coverage": bound.coverage.model_copy(
-                update={
-                    "schema_version": "2",
-                    "anchor_qualification": derive_forward_research_anchor(bound),
-                }
-            )
-        }
-    )
-    return bound
-
-
 class NextUpdatePolicyEvaluation(ResearchModel):
     """One typed decision shared by presentation, enforcement, and execution."""
 
@@ -1725,55 +1078,18 @@ def required_research_sources(state: CurrentResearchState) -> tuple[str, ...]:
     return tuple(sorted(sources))
 
 
-def _required_research_capabilities(
-    revision: ResearchRevisionDraft,
-    profile: MarketResearchCapabilityProfile,
-) -> set[MarketResearchCapability]:
-    required = set(profile.minimum_anchor_capabilities)
-    if any(
-        domain.domain == "fundamentals" and domain.requirement is CoverageRequirement.REQUIRED
-        for domain in revision.coverage.domains
-    ):
-        required.add(MarketResearchCapability.FUNDAMENTALS)
-    explicitly_required = set(required_research_sources(revision.current_state))
-    for contract in profile.source_contracts:
-        if any(
-            source in explicitly_required
-            for source_set in contract.acceptable_source_sets
-            for source in source_set
-        ):
-            required.add(contract.capability)
-    return required
-
-
-def required_incremental_sources(revision: ResearchRevisionDraft) -> tuple[str, ...]:
-    sources = set(required_research_sources(revision.current_state))
-    profile = market_research_capability_profile(revision.current_state.instrument)
-    if profile is not None:
-        required_capabilities = _required_research_capabilities(revision, profile)
-        qualified_sources = {
-            item.capability: item.sources
-            for item in (
-                revision.coverage.anchor_qualification.capabilities
-                if revision.coverage.anchor_qualification is not None
-                else ()
-            )
-            if item.required and item.satisfied and item.sources
-        }
-        for contract in profile.source_contracts:
-            if contract.capability not in required_capabilities:
-                continue
-            sources.update(
-                qualified_sources.get(
-                    contract.capability,
-                    contract.acceptable_source_sets[0],
-                )
-            )
+def _required_incremental_sources(revision: ResearchRevisionDraft) -> tuple[str, ...]:
+    sources = {"EDINET", "TDnet", *required_research_sources(revision.current_state)}
+    typed_domains = {
+        "fundamentals": "J-Quants fundamentals",
+        "market": "J-Quants adjusted OHLCV",
+    }
     for domain in revision.coverage.domains:
         if domain.requirement is not CoverageRequirement.REQUIRED:
             continue
-        if domain.source:
-            sources.add(domain.source)
+        source = typed_domains.get(domain.domain, domain.source)
+        if source:
+            sources.add(source)
     return tuple(sorted(sources))
 
 
@@ -1789,12 +1105,7 @@ def _required_source_coverage_complete(
         records_by_source.setdefault(record.source, []).append(record)
         if record.evidence_ref not in evidence_refs:
             return False
-        if (
-            record.available_at.astimezone(
-                market_timezone(revision.current_state.instrument)
-            ).date()
-            > revision.cutoff
-        ):
+        if record.available_at.astimezone(market_timezone(revision.current_state.instrument)).date() > revision.cutoff:
             return False
     for source in required_sources:
         source_watermarks = tuple(
@@ -1808,9 +1119,14 @@ def _required_source_coverage_complete(
             and item.status is CoverageStatus.COMPLETE
             and item.temporal_scope == "point_in_time"
             and not item.limitations
-            and (item.reported_records is None or item.reported_records >= item.returned_records)
+            and (
+                item.reported_records is None
+                or item.reported_records >= item.returned_records
+            )
         )
-        ordered = sorted((item.scanned_start, item.scanned_end) for item in source_watermarks)
+        ordered = sorted(
+            (item.scanned_start, item.scanned_end) for item in source_watermarks
+        )
         has_gap = False
         if ordered:
             covered_end = ordered[0][1]
@@ -1860,19 +1176,6 @@ def _required_source_coverage_complete(
     return True
 
 
-def _forward_anchor_policy_reason(
-    revision: ResearchRevisionDraft,
-) -> NextUpdateReason | None:
-    if revision.coverage.anchor_qualification is None:
-        return NextUpdateReason.LEGACY_ANCHOR_COVERAGE_UNPROVEN
-    qualification = derive_forward_research_anchor(revision)
-    if qualification.is_forward_research_anchor:
-        return None
-    if AnchorQualificationReason.INCOMPATIBLE_MARKET_SEMANTICS in qualification.reasons:
-        return NextUpdateReason.INCOMPATIBLE_MARKET_SEMANTICS
-    return NextUpdateReason.ANCHOR_COVERAGE_INCOMPLETE
-
-
 def evaluate_next_update_policy(
     revision: ResearchRevisionDraft,
     *,
@@ -1890,7 +1193,9 @@ def evaluate_next_update_policy(
             required_sources=required_sources,
         )
 
-    required_sources = required_incremental_sources(revision)
+    required_sources = _required_incremental_sources(revision)
+    if revision.change_conclusion is ResearchChangeConclusion.INDETERMINATE:
+        return result(NextUpdateReason.INDETERMINATE_HEAD)
     if mode == "off":
         return result(NextUpdateReason.EXPERIMENT_MODE_OFF)
     if (
@@ -1901,7 +1206,10 @@ def evaluate_next_update_policy(
         return result(NextUpdateReason.UNSUPPORTED_INCREMENTAL_MARKET)
     try:
         ResearchRevisionDraft.model_validate(
-            {field: getattr(revision, field) for field in ResearchRevisionDraft.model_fields}
+            {
+                field: getattr(revision, field)
+                for field in ResearchRevisionDraft.model_fields
+            }
         )
     except ValueError:
         return result(NextUpdateReason.INVALID_REVISION)
@@ -1911,15 +1219,21 @@ def evaluate_next_update_policy(
         or instrument != revision.evidence_snapshot.bundle.instrument
     ):
         return result(NextUpdateReason.INVALID_REVISION)
-    anchor_reason = _forward_anchor_policy_reason(revision)
-    if anchor_reason is not None:
-        return result(anchor_reason)
-    if revision.execution_strategy is ResearchExecutionStrategy.INCREMENTAL:
-        if not _required_source_coverage_complete(revision, required_sources):
-            return result(NextUpdateReason.REQUIRED_SOURCE_COVERAGE_INCOMPLETE)
-        if not revision.coverage.supports_no_material_change:
-            return result(NextUpdateReason.COVERAGE_INCOMPLETE)
-        return result(None)
+    if not _required_source_coverage_complete(revision, required_sources):
+        return result(NextUpdateReason.REQUIRED_SOURCE_COVERAGE_INCOMPLETE)
+    if (
+        not revision.coverage.supports_no_material_change
+        or any(
+            item.requirement is CoverageRequirement.REQUIRED
+            and item.status is not CoverageStatus.COMPLETE
+            for item in revision.coverage.domains
+        )
+        or any(
+            item.status is not CoverageStatus.COMPLETE
+            for item in (*revision.coverage.claims, *revision.coverage.questions)
+        )
+    ):
+        return result(NextUpdateReason.COVERAGE_INCOMPLETE)
     if any(
         item.kind is ResearchChangeKind.MARKET_SEMANTIC_INCOMPATIBILITY
         for item in revision.delta.change_signals
@@ -1955,13 +1269,6 @@ def derive_shadow_comparison_from_conclusions(
     return "disagreement"
 
 
-def legacy_forward_research_anchor_qualification() -> ForwardResearchAnchorQualification:
-    return ForwardResearchAnchorQualification(
-        is_forward_research_anchor=False,
-        reasons=(AnchorQualificationReason.LEGACY_ANCHOR_COVERAGE_UNPROVEN,),
-    )
-
-
 class ResearchChain(ResearchModel):
     id: str
     instrument: str
@@ -1969,19 +1276,11 @@ class ResearchChain(ResearchModel):
     current_revision_id: str
     current_revision: ResearchRevision | None = None
     revisions: tuple[ResearchRevision, ...] = ()
-    forward_research_anchor: ForwardResearchAnchorQualification = Field(
-        default_factory=legacy_forward_research_anchor_qualification,
-        description=(
-            "Content-derived qualification of the current Revision for future bounded "
-            "comparison, independent of its Change Conclusion."
-        ),
-    )
     next_update_policy: Literal["incremental_allowed", "full_required"] = Field(
         default="full_required",
         description=(
-            "Server-derived policy: bounded Incremental Execution starts only from a "
-            "qualifying Forward Research Anchor for a supported Japanese Instrument in "
-            "an enabled experiment mode; otherwise the current head requires Full Analysis."
+            "Server-derived policy: bounded Incremental Execution is allowed only for a "
+            "source-qualified supported Japanese head in an enabled experiment mode."
         ),
     )
     next_update_reason: NextUpdateReason | None = Field(
@@ -2010,13 +1309,7 @@ def render_revision_export_markdown(export: RevisionExport) -> str:
         "",
         f"- Chain: `{revision.chain_id}`",
         f"- Revision: `{revision.id}`",
-        f"- Research Cutoff: {revision.cutoff.isoformat()}",
-        "- Information Frontier: "
-        + (
-            revision.information_frontier.isoformat()
-            if revision.information_frontier is not None
-            else "not recorded"
-        ),
+        f"- Cutoff: {revision.cutoff.isoformat()}",
         f"- Language: {state.language}",
         f"- Revision role: {revision.role.value}",
         f"- Execution strategy: {revision.execution_strategy.value}",
@@ -2025,16 +1318,6 @@ def render_revision_export_markdown(export: RevisionExport) -> str:
             revision.change_conclusion.value
             if revision.change_conclusion is not None
             else "not applicable"
-        ),
-        "- Forward Research Anchor: "
-        + (
-            "qualified"
-            if export.chain.forward_research_anchor.is_forward_research_anchor
-            else "not qualified"
-        ),
-        "- Anchor qualification reasons: "
-        + (
-            ", ".join(item.value for item in export.chain.forward_research_anchor.reasons) or "none"
         ),
         "",
         "## Current Research Opinion",
@@ -2120,15 +1403,6 @@ def render_revision_export_markdown(export: RevisionExport) -> str:
         lines.extend(["", f"## {title}", ""])
         lines.extend(f"- {factor.statement}" for factor in factors)
     lines.extend(["", "## Coverage", ""])
-    lines.append("### Anchor Coverage")
-    lines.append("")
-    for capability in export.chain.forward_research_anchor.capabilities:
-        lines.append(
-            f"- {capability.capability.value}: required={str(capability.required).lower()}; "
-            f"satisfied={str(capability.satisfied).lower()}; sources: "
-            f"{', '.join(capability.sources) or 'none'}"
-        )
-    lines.extend(["", "### Domain Coverage", ""])
     for domain in revision.coverage.domains:
         limitation = "; ".join(domain.limitations) or "none"
         lines.append(f"- {domain.domain}: {domain.status.value}; limitations: {limitation}")
@@ -2152,24 +1426,8 @@ def render_revision_export_markdown(export: RevisionExport) -> str:
             f"- {watermark.source}: {watermark.scanned_start} to {watermark.scanned_end}; "
             f"status: {watermark.status.value}; returned/reported: "
             f"{watermark.returned_records}/{watermark.reported_records}; "
-            f"source frontier: "
-            f"{watermark.information_frontier.isoformat() if watermark.information_frontier else 'not recorded'}; "
             f"limitations: {limitation}{overlap}"
         )
-        for structured in watermark.structured_limitations:
-            observed = (
-                ", ".join(
-                    f"{interval.start} to {interval.end}"
-                    for interval in structured.observed_intervals
-                )
-                or "none"
-            )
-            lines.append(
-                f"  - {structured.kind}/{structured.temporal_scope}; requested: "
-                f"{structured.requested_interval.start} to "
-                f"{structured.requested_interval.end}; observed: {observed}; "
-                f"{structured.presentation_text}"
-            )
     lines.extend(["", "## Source Record Versions", ""])
     source_lineage = {
         item.version_id: item for item in revision.evidence_snapshot.source_record_lineage
@@ -2255,41 +1513,6 @@ def render_revision_export_markdown(export: RevisionExport) -> str:
                 f"{audit.full_metrics.wall_time_seconds:.3f}s",
             ]
         )
-        if audit.transition_coverage is not None:
-            transition = audit.transition_coverage
-            lines.extend(
-                [
-                    "",
-                    "### Transition Coverage",
-                    "",
-                    f"- Frontier interval: ({transition.anchor_frontier.isoformat()}, "
-                    f"{transition.update_frontier.isoformat()}]",
-                    f"- Complete: {str(transition.complete).lower()}",
-                ]
-            )
-            for capability in transition.capabilities:
-                lines.append(
-                    f"- {capability.capability}: complete={str(capability.complete).lower()}; "
-                    f"sources: {', '.join(capability.sources) or 'none'}"
-                )
-                for gap in capability.gaps:
-                    lines.append(f"  - gap: {gap.start} to {gap.end}")
-                for checked in capability.checked_intervals:
-                    lines.append(f"  - checked: {checked.start} to {checked.end}")
-                for limitation in capability.limitations:
-                    observed = (
-                        ", ".join(
-                            f"{item.start} to {item.end}" for item in limitation.observed_intervals
-                        )
-                        or "none"
-                    )
-                    lines.append(
-                        f"  - {limitation.scope}/{limitation.kind}/"
-                        f"{limitation.temporal_scope}; requested: "
-                        f"{limitation.requested_interval.start} to "
-                        f"{limitation.requested_interval.end}; observed: {observed}; "
-                        f"{limitation.presentation_text}"
-                    )
         if audit.semantic_assessment is not None:
             lines.extend(
                 [
@@ -2447,11 +1670,6 @@ def _source_metadata(
                     "fallback": evidence.fallback,
                 }
             )
-            if (
-                bundle.information_frontier is not None
-                and record.available_at > bundle.information_frontier
-            ):
-                continue
             if record.available_at.astimezone(cutoff_timezone).date() > bundle.analysis_date:
                 raise ValueError("Source Record Version is available after the analysis cutoff")
             existing = records.get(record.version_id)
@@ -2463,42 +1681,7 @@ def _source_metadata(
                 record = existing
             records[record.version_id] = record
         for raw in evidence.provenance.get("source_watermarks", ()):
-            raw_watermark = dict(raw)
-            requested_interval = raw_watermark.pop("requested_interval", None)
-            limitation_kind = raw_watermark.pop("limitation_kind", None)
-            observed_intervals = (
-                ()
-                if raw_watermark["status"] == "unavailable"
-                else (
-                    {
-                        "start": raw_watermark["scanned_start"],
-                        "end": raw_watermark["scanned_end"],
-                    },
-                )
-            )
-            structured_limitations = tuple(
-                {
-                    "kind": limitation_kind
-                    or ("unavailable" if raw_watermark["status"] == "unavailable" else "unknown"),
-                    "temporal_scope": raw_watermark.get("temporal_scope", "point_in_time"),
-                    "requested_interval": requested_interval
-                    or {
-                        "start": raw_watermark["scanned_start"],
-                        "end": raw_watermark["scanned_end"],
-                    },
-                    "observed_intervals": observed_intervals,
-                    "presentation_text": text,
-                }
-                for text in raw_watermark.get("limitations", ())
-            )
-            watermark = SourceWatermarkSnapshot.model_validate(
-                {
-                    **raw_watermark,
-                    "requested_interval": requested_interval,
-                    "observed_intervals": observed_intervals,
-                    "structured_limitations": structured_limitations,
-                }
-            )
+            watermark = SourceWatermarkSnapshot.model_validate(raw)
             key = (watermark.source, watermark.scanned_start, watermark.scanned_end)
             existing = watermarks.get(key)
             if existing is None:
@@ -2523,21 +1706,6 @@ def _source_metadata(
                 limitations=tuple(dict.fromkeys((*existing.limitations, *watermark.limitations))),
                 returned_records=max(existing.returned_records, watermark.returned_records),
                 reported_records=max(reported_values) if reported_values else None,
-                information_frontier=(
-                    min(existing.information_frontier, watermark.information_frontier)
-                    if existing.information_frontier is not None
-                    and watermark.information_frontier is not None
-                    else None
-                ),
-                requested_interval=(existing.requested_interval or watermark.requested_interval),
-                observed_intervals=tuple(
-                    dict.fromkeys((*existing.observed_intervals, *watermark.observed_intervals))
-                ),
-                structured_limitations=tuple(
-                    dict.fromkeys(
-                        (*existing.structured_limitations, *watermark.structured_limitations)
-                    )
-                ),
             )
     return tuple(records.values()), tuple(watermarks.values())
 
@@ -2584,7 +1752,8 @@ def _source_coverage(
             item.temporal_scope != "point_in_time" for item in source_watermarks
         )
         count_inconsistent = any(
-            item.reported_records is not None and item.reported_records < item.returned_records
+            item.reported_records is not None
+            and item.reported_records < item.returned_records
             for item in source_watermarks
         )
         positive_without_observed_version = (
@@ -2853,272 +2022,6 @@ def _change_signals(
     return tuple(signals)
 
 
-def _calendar_gaps(
-    start: date,
-    end: date,
-    observed: tuple[SourceObservationInterval, ...],
-) -> tuple[SourceObservationInterval, ...]:
-    clipped = sorted(
-        (max(start, item.start), min(end, item.end))
-        for item in observed
-        if item.end >= start and item.start <= end
-    )
-    gaps: list[SourceObservationInterval] = []
-    cursor = start
-    for interval_start, interval_end in clipped:
-        if interval_start > cursor:
-            gaps.append(
-                SourceObservationInterval(
-                    start=cursor,
-                    end=interval_start - timedelta(days=1),
-                )
-            )
-        cursor = max(cursor, interval_end + timedelta(days=1))
-    if cursor <= end:
-        gaps.append(SourceObservationInterval(start=cursor, end=end))
-    return tuple(gaps)
-
-
-@dataclass(frozen=True)
-class _SourceTransitionResult:
-    complete: bool
-    checked_intervals: tuple[SourceObservationInterval, ...]
-    gaps: tuple[SourceObservationInterval, ...]
-    limitations: tuple[TransitionCoverageLimitation, ...]
-
-
-_MISSING_SOURCE_TRANSITION = _SourceTransitionResult(False, (), (), ())
-
-
-def _transition_calendar_start(frontier: datetime, market_tz: tzinfo) -> date:
-    local_frontier = frontier.astimezone(market_tz)
-    return local_frontier.date() + (
-        timedelta(days=1) if local_frontier.time() == time.max else timedelta()
-    )
-
-
-def _continuity_gaps(
-    rule: TransitionContinuityRule,
-    transition_start: date,
-    transition_end: date,
-    checked: tuple[SourceObservationInterval, ...],
-) -> tuple[SourceObservationInterval, ...]:
-    if rule is TransitionContinuityRule.EVENT_STREAM:
-        return _calendar_gaps(transition_start, transition_end, checked)
-    required_date = (
-        _latest_permitted_market_session(transition_end)
-        if rule is TransitionContinuityRule.MARKET_SERIES
-        else transition_end
-    )
-    if any(item.start <= required_date <= item.end for item in checked):
-        return ()
-    return (SourceObservationInterval(start=required_date, end=required_date),)
-
-
-def _transition_coverage(
-    baseline: ResearchRevisionDraft,
-    update_frontier: datetime,
-    watermarks: tuple[SourceWatermarkSnapshot, ...],
-    observed_records: tuple[SourceRecordVersion, ...],
-) -> TransitionCoverageAttestation:
-    anchor_frontier = baseline.information_frontier
-    if anchor_frontier is None:
-        raise ValueError("Forward Research Anchor requires an Information Frontier")
-    profile = market_research_capability_profile(baseline.current_state.instrument)
-    if profile is None:
-        raise ValueError("Transition Coverage requires an audited market profile")
-    market_tz = market_timezone(baseline.current_state.instrument)
-    transition_start = _transition_calendar_start(anchor_frontier, market_tz)
-    transition_end = update_frontier.astimezone(market_tz).date()
-    required_capabilities = {
-        item.capability
-        for item in (
-            baseline.coverage.anchor_qualification.capabilities
-            if baseline.coverage.anchor_qualification is not None
-            else ()
-        )
-        if item.required
-    } or set(profile.minimum_anchor_capabilities)
-    by_source = {
-        source: tuple(item for item in watermarks if item.source == source)
-        for source in {item.source for item in watermarks}
-    }
-    observed_sources = {item.source for item in observed_records}
-    attestations: list[TransitionCapabilityAttestation] = []
-    for contract in profile.source_contracts:
-        if contract.capability not in required_capabilities:
-            continue
-        source_results: dict[str, _SourceTransitionResult] = {}
-        for source_set in contract.acceptable_source_sets:
-            for source in source_set:
-                if source in source_results:
-                    continue
-                source_watermarks = by_source.get(source, ())
-                transition_watermarks = tuple(
-                    watermark
-                    for watermark in source_watermarks
-                    if any(
-                        interval.end >= transition_start and interval.start <= transition_end
-                        for interval in watermark.observed_intervals
-                    )
-                )
-                checked = tuple(
-                    dict.fromkeys(
-                        interval
-                        for watermark in source_watermarks
-                        for interval in watermark.observed_intervals
-                    )
-                )
-                gaps = _continuity_gaps(
-                    contract.transition_continuity,
-                    transition_start,
-                    transition_end,
-                    checked,
-                )
-                limitations = []
-                for watermark in source_watermarks:
-                    for limitation in watermark.structured_limitations:
-                        limitation_gaps = _calendar_gaps(
-                            limitation.requested_interval.start,
-                            limitation.requested_interval.end,
-                            limitation.observed_intervals,
-                        )
-                        pre_anchor = limitation.requested_interval.end < transition_start or (
-                            bool(limitation_gaps)
-                            and all(item.end < transition_start for item in limitation_gaps)
-                        )
-                        limitations.append(
-                            TransitionCoverageLimitation(
-                                kind=limitation.kind,
-                                scope="pre_anchor" if pre_anchor else "transition",
-                                temporal_scope=limitation.temporal_scope,
-                                source=source,
-                                requested_interval=limitation.requested_interval,
-                                observed_intervals=limitation.observed_intervals,
-                                presentation_text=limitation.presentation_text,
-                            )
-                        )
-                complete = (
-                    bool(transition_watermarks)
-                    and not gaps
-                    and all(
-                        watermark.temporal_scope == "point_in_time"
-                        and watermark.information_frontier is not None
-                        and watermark.information_frontier >= update_frontier
-                        and (
-                            watermark.reported_records == 0
-                            if watermark.returned_records == 0
-                            else watermark.reported_records is None
-                            or watermark.reported_records >= watermark.returned_records
-                        )
-                        and (watermark.returned_records == 0 or source in observed_sources)
-                        and (
-                            contract.transition_continuity
-                            is not TransitionContinuityRule.MARKET_SERIES
-                            or (
-                                watermark.returned_records > 0
-                                and any(
-                                    item.source == source
-                                    and _source_record_published_date(item)
-                                    == _latest_permitted_market_session(transition_end)
-                                    for item in observed_records
-                                )
-                            )
-                        )
-                        for watermark in transition_watermarks
-                    )
-                )
-                if any(item.scope == "transition" for item in limitations):
-                    complete = False
-                if not limitations and any(
-                    watermark.temporal_scope != "point_in_time"
-                    for watermark in transition_watermarks
-                ):
-                    for watermark in transition_watermarks:
-                        if watermark.temporal_scope == "point_in_time":
-                            continue
-                        requested = watermark.requested_interval or SourceObservationInterval(
-                            start=watermark.scanned_start,
-                            end=watermark.scanned_end,
-                        )
-                        limitations.append(
-                            TransitionCoverageLimitation(
-                                kind=(
-                                    "live_only"
-                                    if watermark.temporal_scope == "live_only"
-                                    else "unknown"
-                                ),
-                                scope="transition",
-                                temporal_scope=watermark.temporal_scope,
-                                source=source,
-                                requested_interval=requested,
-                                observed_intervals=watermark.observed_intervals,
-                                presentation_text=(
-                                    "Required source temporal scope cannot prove the transition."
-                                ),
-                            )
-                        )
-                if any(
-                    watermark.status is CoverageStatus.LIMITED
-                    and not watermark.structured_limitations
-                    for watermark in transition_watermarks
-                ):
-                    complete = False
-                source_results[source] = _SourceTransitionResult(
-                    complete=complete,
-                    checked_intervals=checked,
-                    gaps=gaps,
-                    limitations=tuple(limitations),
-                )
-        satisfied_sources = next(
-            (
-                source_set
-                for source_set in contract.acceptable_source_sets
-                if all(source_results[source].complete for source in source_set)
-            ),
-            (),
-        )
-        reported_sources = satisfied_sources or contract.acceptable_source_sets[0]
-        attestations.append(
-            TransitionCapabilityAttestation(
-                capability=contract.capability,
-                complete=bool(satisfied_sources),
-                sources=reported_sources,
-                checked_intervals=tuple(
-                    dict.fromkeys(
-                        item
-                        for source in reported_sources
-                        for item in source_results.get(
-                            source, _MISSING_SOURCE_TRANSITION
-                        ).checked_intervals
-                    )
-                ),
-                gaps=tuple(
-                    dict.fromkeys(
-                        item
-                        for source in reported_sources
-                        for item in source_results.get(source, _MISSING_SOURCE_TRANSITION).gaps
-                    )
-                ),
-                limitations=tuple(
-                    dict.fromkeys(
-                        item
-                        for source in reported_sources
-                        for item in source_results.get(
-                            source, _MISSING_SOURCE_TRANSITION
-                        ).limitations
-                    )
-                ),
-            )
-        )
-    return TransitionCoverageAttestation(
-        anchor_frontier=anchor_frontier,
-        update_frontier=update_frontier,
-        complete=all(item.complete for item in attestations),
-        capabilities=tuple(attestations),
-    )
-
-
 def assess_deterministic_update(
     baseline_revision_id: str,
     baseline: ResearchRevisionDraft,
@@ -3127,7 +2030,6 @@ def assess_deterministic_update(
     *,
     metrics: RunMetrics | None = None,
     mode: Literal["off", "shadow", "experimental"] = "experimental",
-    information_frontier: datetime | None = None,
 ) -> IncrementalGateResult:
     """Apply fail-closed gates and build a quiet bounded-update candidate."""
 
@@ -3148,13 +2050,7 @@ def assess_deterministic_update(
             metrics=metrics or RunMetrics(),
         )
     try:
-        update_frontier = information_frontier or evidence.information_frontier
-        if update_frontier is None:
-            raise ValueError("bounded update requires an explicit Information Frontier")
-        if update_frontier.utcoffset() is None:
-            raise ValueError("bounded update requires a timezone-aware Information Frontier")
-        bounded_evidence = evidence.model_copy(update={"information_frontier": update_frontier})
-        candidate_records, candidate_watermarks = _source_metadata(bounded_evidence)
+        candidate_records, candidate_watermarks = _source_metadata(evidence)
         baseline_records = {
             item.version_id: item for item in baseline.evidence_snapshot.source_records
         }
@@ -3186,17 +2082,6 @@ def assess_deterministic_update(
         }
         if baseline.current_state.market_reference_levels:
             required_domains.add("market")
-        transition_start = _transition_calendar_start(
-            baseline.information_frontier,
-            market_timezone(request.ticker),
-        )
-        profile = market_research_capability_profile(request.ticker)
-        continuity_by_source = {
-            source: contract.transition_continuity
-            for contract in (profile.source_contracts if profile is not None else ())
-            for source_set in contract.acceptable_source_sets
-            for source in source_set
-        }
         watermarks = tuple(
             item.model_copy(
                 update={
@@ -3209,11 +2094,7 @@ def assess_deterministic_update(
                     "status": (
                         CoverageStatus.LIMITED
                         if (
-                            (
-                                continuity_by_source.get(item.source)
-                                is TransitionContinuityRule.EVENT_STREAM
-                                and not item.scanned_start <= transition_start <= item.scanned_end
-                            )
+                            not item.scanned_start <= baseline.cutoff <= item.scanned_end
                             or item.scanned_end != request.analysis_date
                         )
                         and item.status is CoverageStatus.COMPLETE
@@ -3225,11 +2106,9 @@ def assess_deterministic_update(
                                 *item.limitations,
                                 *(
                                     ()
-                                    if continuity_by_source.get(item.source)
-                                    is not TransitionContinuityRule.EVENT_STREAM
-                                    or item.scanned_start <= transition_start <= item.scanned_end
+                                    if item.scanned_start <= baseline.cutoff <= item.scanned_end
                                     else (
-                                        "Collection window did not overlap the required transition.",
+                                        "Collection window did not overlap the Eligible Baseline cutoff.",
                                     )
                                 ),
                                 *(
@@ -3240,20 +2119,9 @@ def assess_deterministic_update(
                             )
                         )
                     ),
-                    "information_frontier": (
-                        min(item.information_frontier, update_frontier)
-                        if item.information_frontier is not None
-                        else None
-                    ),
                 }
             )
             for item in candidate_watermarks
-        )
-        transition_coverage = _transition_coverage(
-            baseline,
-            update_frontier,
-            watermarks,
-            candidate_records,
         )
         combined_records = tuple(
             {
@@ -3267,24 +2135,6 @@ def assess_deterministic_update(
             status_blocking_records=newly_observed,
             observed_records=candidate_records,
             required_data_domains=tuple(sorted(required_domains)),
-        )
-        transition_sources = {
-            source
-            for capability in transition_coverage.capabilities
-            if capability.complete
-            for source in capability.sources
-        }
-        domains = tuple(
-            domain.model_copy(update={"status": CoverageStatus.COMPLETE})
-            if domain.requirement is CoverageRequirement.REQUIRED
-            and domain.source in transition_sources
-            else domain
-            for domain in domains
-        )
-        supports_quiet = transition_coverage.complete and all(
-            domain.status is CoverageStatus.COMPLETE
-            for domain in domains
-            if domain.requirement is CoverageRequirement.REQUIRED
         )
         signals = _change_signals(baseline, candidate_records)
         reason = None
@@ -3315,20 +2165,19 @@ def assess_deterministic_update(
         if reason is None and not supports_quiet:
             reason = IncrementalEscalationReason.COVERAGE_INCOMPLETE
         baseline_bundle = baseline.evidence_snapshot.bundle
-        new_refs = {item.ref for item in bounded_evidence.items}
+        new_refs = {item.ref for item in evidence.items}
         combined_items = tuple(
-            {item.ref: item for item in (*baseline_bundle.items, *bounded_evidence.items)}.values()
+            {item.ref: item for item in (*baseline_bundle.items, *evidence.items)}.values()
         )
         combined_tables = tuple(
-            {item.id: item for item in (*baseline_bundle.tables, *bounded_evidence.tables)}.values()
+            {item.id: item for item in (*baseline_bundle.tables, *evidence.tables)}.values()
         )
         bundle = EvidenceBundle(
             instrument=request.ticker,
             analysis_date=request.analysis_date,
-            information_frontier=update_frontier,
             items=combined_items,
             tables=combined_tables,
-            sealed_at=bounded_evidence.sealed_at,
+            sealed_at=evidence.sealed_at,
         )
         evidence_snapshot = EffectiveEvidenceSnapshot(
             bundle=bundle,
@@ -3384,12 +2233,10 @@ def assess_deterministic_update(
                 escalation_reason=reason,
                 coverage=coverage,
                 evidence_snapshot=evidence_snapshot,
-                transition_coverage=transition_coverage,
                 metrics=metrics or RunMetrics(),
             )
         candidate = ResearchRevisionDraft(
             cutoff=request.analysis_date,
-            information_frontier=update_frontier,
             role=ResearchRevisionRole.UPDATE,
             execution_strategy=ResearchExecutionStrategy.INCREMENTAL,
             change_conclusion=ResearchChangeConclusion.NO_MATERIAL_CHANGE,
@@ -3418,7 +2265,7 @@ def assess_deterministic_update(
                 inherited_evidence_refs=tuple(
                     item.ref for item in baseline_bundle.items if item.ref not in new_refs
                 ),
-                new_evidence_refs=tuple(item.ref for item in bounded_evidence.items),
+                new_evidence_refs=tuple(item.ref for item in evidence.items),
                 change_signals=signals,
             ),
             current_state=baseline.current_state.model_copy(
@@ -3444,7 +2291,7 @@ def assess_deterministic_update(
                 analysis_cutoff=request.analysis_date,
                 execution_strategy=ResearchExecutionStrategy.INCREMENTAL,
                 change_conclusion=ResearchChangeConclusion.NO_MATERIAL_CHANGE,
-                new_evidence_refs=tuple(item.ref for item in bounded_evidence.items),
+                new_evidence_refs=tuple(item.ref for item in evidence.items),
             ),
             evidence_snapshot=evidence_snapshot,
         )
@@ -3457,7 +2304,6 @@ def assess_deterministic_update(
         candidate=candidate,
         coverage=coverage,
         evidence_snapshot=evidence_snapshot,
-        transition_coverage=transition_coverage,
         metrics=metrics or RunMetrics(),
     )
 
@@ -3467,11 +2313,11 @@ def assemble_full_update(
     baseline: ResearchRevisionDraft,
     candidate: ResearchRevisionDraft,
 ) -> ResearchRevisionDraft:
-    """Compare an independently assembled Full result with the current chain head."""
+    """Compare an independently assembled Full result with an Eligible Baseline."""
     if candidate.current_state.instrument != baseline.current_state.instrument:
-        raise ValueError("update Instrument must match the current Research Chain head")
+        raise ValueError("update Instrument must match the Eligible Baseline")
     if candidate.cutoff <= baseline.cutoff:
-        raise ValueError("update cutoff must be strictly later than the current Research Chain head")
+        raise ValueError("update cutoff must be strictly later than the Eligible Baseline")
 
     claim_matches, ambiguous_claims = _unique_identity_matches(
         baseline.current_state.claims,
@@ -3659,7 +2505,7 @@ def assemble_full_update(
         overlap_limitation = (
             ()
             if covers_baseline
-            else ("Collection window did not overlap the current head cutoff.",)
+            else ("Collection window did not overlap the Eligible Baseline cutoff.",)
         )
         source_watermarks.append(
             item.model_copy(
@@ -3963,15 +2809,15 @@ def assemble_full_update(
     summaries = {
         "en": (
             "Full Analysis as of {cutoff} was compared with the {baseline} "
-            "current Research Chain head; {count} Evidence items were newly observed. "
+            "Eligible Baseline; {count} Evidence items were newly observed. "
             "Outcome: {outcome}."
         ),
         "zh-CN": (
-            "截至 {cutoff} 的完整分析已与 {baseline} 当前研究链头部比较；"
+            "截至 {cutoff} 的完整分析已与 {baseline} 合格基线比较；"
             "本次新观察到 {count} 条证据。结果：{outcome}。"
         ),
         "ja": (
-            "{cutoff} 時点のフル分析を {baseline} の現在の Research Chain head と比較し、"
+            "{cutoff} 時点のフル分析を {baseline} の適格ベースラインと比較し、"
             "{count} 件の新規 Evidence を確認しました。結果: {outcome}。"
         ),
     }

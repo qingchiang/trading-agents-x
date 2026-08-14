@@ -17,34 +17,23 @@ from tradingagents.agents.sentiment_sources import (
     SentimentSourceStatus,
     sentiment_confidence,
 )
-from tradingagents.agents.utils.news_data_tools import get_news
 from tradingagents.dataflows.config import bind_config
 from tradingagents.dataflows.market_signals import (
     FetchedSentimentSignal,
     SentimentSignal,
 )
 from tradingagents.graph.research_graph import _collect_evidence
-from tradingagents.provenance import (
-    ProvenanceRecord,
-    SourceObservation,
-    attach_provenance,
-    attach_source_observations,
-)
+from tradingagents.provenance import ProvenanceRecord, attach_provenance
 
 _MODULE = "tradingagents.agents.analysts.sentiment_analyst"
 
 
-def _state(
-    ticker: str = "NVDA",
-    trade_date: str = "2026-01-15",
-    information_frontier: str | None = None,
-):
+def _state(ticker: str = "NVDA", trade_date: str = "2026-01-15"):
     return {
         "company_of_interest": ticker,
         "trade_date": trade_date,
         "asset_type": "stock",
         "messages": [],
-        "information_frontier": information_frontier,
     }
 
 
@@ -66,8 +55,6 @@ def _run(
     routes=None,
     live: bool = True,
     news_side_effect: Exception | None = None,
-    news_block: str = "NEWS_DATA",
-    information_frontier: str | None = None,
     signals: tuple[FetchedSentimentSignal, ...] = (),
     llm=None,
 ):
@@ -101,11 +88,9 @@ def _run(
         if news_side_effect:
             news.func.side_effect = news_side_effect
         else:
-            news.func.return_value = news_block
+            news.func.return_value = "NEWS_DATA"
         llm = llm or _capturing_llm(captured)
-        result = create_sentiment_analyst(llm)(
-            _state(ticker, trade_date, information_frontier)
-        )
+        result = create_sentiment_analyst(llm)(_state(ticker, trade_date))
     return captured, stocktwits, reddit, market_signals, news, result
 
 
@@ -163,36 +148,6 @@ def test_sentiment_confidence_uses_fixed_coverage_rules(sources, expected):
 
 
 @pytest.mark.unit
-def test_information_frontier_is_injected_not_model_controlled():
-    properties = get_news.tool_call_schema.model_json_schema()["properties"]
-
-    assert "information_frontier" not in properties
-
-
-@pytest.mark.unit
-def test_contextless_news_does_not_forward_an_empty_information_frontier():
-    with mock.patch(
-        "tradingagents.agents.utils.news_data_tools.route_to_vendor",
-        return_value="NEWS_DATA",
-    ) as router:
-        result = get_news.func(
-            "NVDA",
-            "2026-01-01",
-            "2026-01-15",
-            information_frontier=None,
-        )
-
-    assert result == "NEWS_DATA"
-    router.assert_called_once_with(
-        "get_news",
-        "NVDA",
-        "2026-01-01",
-        "2026-01-15",
-        _provenance=True,
-    )
-
-
-@pytest.mark.unit
 def test_markdown_draft_is_persisted_with_local_confidence():
     captured, *_prefix, result = _run()
 
@@ -209,12 +164,7 @@ def test_markdown_draft_is_persisted_with_local_confidence():
 def test_us_run_uses_social_sources_and_separate_windows():
     captured, stocktwits, reddit, signals, news, _ = _run()
 
-    news.func.assert_called_once_with(
-        "NVDA",
-        "2026-01-01",
-        "2026-01-15",
-        information_frontier=None,
-    )
+    news.func.assert_called_once_with("NVDA", "2026-01-01", "2026-01-15")
     stocktwits.assert_called_once_with(
         "NVDA",
         limit=30,
@@ -305,44 +255,6 @@ def test_news_error_degrades_to_a_redacted_type_marker():
     assert "<news unavailable: RuntimeError>" in prompt
     assert "private provider detail" not in prompt
     assert result["sentiment_report"]
-
-
-@pytest.mark.unit
-def test_post_frontier_prefetched_news_is_excluded_before_first_model_call():
-    news = attach_source_observations(
-        "POST_FRONTIER_NEWS",
-        SourceObservation(
-            source="TDnet",
-            record_id="tdnet:late",
-            version_id="tdnet:late:v1",
-            status="published",
-            published_at="2026-01-15 21:00",
-            available_at="2026-01-15T21:00:00+09:00",
-            title="Late disclosure",
-        ),
-    )
-
-    captured, *_prefix, routed_news, result = _run(
-        ticker="9984.T",
-        routes={".T": {"news_data": "jp_news"}},
-        news_block=news,
-        information_frontier="2026-01-15T18:00:00+09:00",
-    )
-
-    routed_news.func.assert_called_once_with(
-        "9984.T",
-        "2026-01-01",
-        "2026-01-15",
-        information_frontier="2026-01-15T18:00:00+09:00",
-    )
-    assert "POST_FRONTIER_NEWS" not in "\n".join(map(str, captured["prompt"]))
-    news_evidence = next(
-        block
-        for block in result["prefetched_evidence"]
-        if block["records"][0]["evidence"] == "routed ticker news"
-    )
-    assert news_evidence["content"] is None
-    assert news_evidence["source_watermarks"][0]["source"] == "TDnet"
 
 
 @pytest.mark.unit

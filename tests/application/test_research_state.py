@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date
 from typing import Any
-from zoneinfo import ZoneInfo
 
 import pytest
 from langchain_core.messages import AIMessage
@@ -25,8 +24,6 @@ from tradingagents.application.contracts import (
 )
 from tradingagents.application.incremental import assess_semantic_update
 from tradingagents.application.research import (
-    AnchorQualificationReason,
-    CapabilitySourceContract,
     ClaimConfidence,
     ClaimStanding,
     CoverageRequirement,
@@ -38,9 +35,6 @@ from tradingagents.application.research import (
     EvidenceSnapshotItem,
     IncrementalEscalationReason,
     IndeterminateReason,
-    MarketResearchCapability,
-    MarketResearchCapabilityProfile,
-    NextUpdateReason,
     QuestionDispositionAudit,
     QuestionDispositionRecord,
     QuestionStatus,
@@ -49,7 +43,6 @@ from tradingagents.application.research import (
     ResearchChangeKind,
     ResearchChangeSignal,
     ResearchClaim,
-    ResearchDomainCoverage,
     ResearchExecutionStrategy,
     ResearchObjectCoverage,
     ResearchOpinion,
@@ -60,21 +53,12 @@ from tradingagents.application.research import (
     RevisionExport,
     ScenarioLikelihood,
     SemanticChangeRelationship,
-    SourceCoverageLimitation,
-    SourceObservationInterval,
-    SourceRecordSnapshotItem,
-    SourceRecordStatus,
-    SourceRecordVersion,
-    TransitionContinuityRule,
     assemble_full_revision,
     assemble_full_update,
     assess_deterministic_update,
-    bind_information_frontier,
-    derive_forward_research_anchor,
     derive_shadow_comparison,
     evaluate_next_update_policy,
     render_revision_export_markdown,
-    required_incremental_sources,
     validate_experimental_nmc_candidate,
 )
 
@@ -136,415 +120,6 @@ def test_current_research_state_allows_tied_indeterminate_scenario_likelihoods()
     }
     assert state.opinion.confidence is DecisionConfidence.MEDIUM
     assert state.claims[0].confidence is ClaimConfidence.MEDIUM
-
-
-def test_capability_profile_supports_complementary_sources_and_alternatives():
-    profile = MarketResearchCapabilityProfile(
-        id="fixture",
-        instrument_suffixes=(".T",),
-        bounded_execution_supported=True,
-        minimum_anchor_capabilities=(MarketResearchCapability.OFFICIAL_FILING,),
-        source_contracts=(
-            CapabilitySourceContract(
-                capability=MarketResearchCapability.OFFICIAL_FILING,
-                transition_continuity=TransitionContinuityRule.EVENT_STREAM,
-                acceptable_source_sets=(("source-a", "source-b"), ("source-c",)),
-            ),
-        ),
-    )
-
-    assert profile.source_contracts[0].acceptable_source_sets == (
-        ("source-a", "source-b"),
-        ("source-c",),
-    )
-    assert (
-        profile.source_contracts[0].transition_continuity is TransitionContinuityRule.EVENT_STREAM
-    )
-
-
-def test_japanese_full_revision_derives_provider_independent_anchor_coverage():
-    baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
-    frontier = datetime(2026, 7, 24, 23, 59, tzinfo=ZoneInfo("Asia/Tokyo"))
-    anchored = bind_information_frontier(baseline, frontier)
-
-    qualification = derive_forward_research_anchor(anchored)
-
-    assert qualification.is_forward_research_anchor is True
-    assert qualification.reasons == ()
-    assert {item.capability for item in qualification.capabilities if item.required} == {
-        MarketResearchCapability.OFFICIAL_FILING,
-        MarketResearchCapability.TIMELY_DISCLOSURE,
-        MarketResearchCapability.MARKET_OBSERVATION,
-    }
-    assert all(item.satisfied for item in qualification.capabilities if item.required)
-
-
-def test_pre_frontier_archive_truncation_is_retained_without_blocking_anchor():
-    baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
-    tdnet = next(
-        item for item in baseline.evidence_snapshot.source_watermarks if item.source == "TDnet"
-    )
-    limited_tdnet = tdnet.model_copy(
-        update={
-            "status": CoverageStatus.LIMITED,
-            "limitations": ("Older archive history is unavailable.",),
-            "structured_limitations": (
-                SourceCoverageLimitation(
-                    kind="archive_truncation",
-                    temporal_scope="point_in_time",
-                    requested_interval=SourceObservationInterval(
-                        start=date(2026, 6, 1), end=CUTOFF
-                    ),
-                    observed_intervals=(
-                        SourceObservationInterval(start=date(2026, 7, 1), end=CUTOFF),
-                    ),
-                    presentation_text="Older archive history is unavailable.",
-                ),
-            ),
-        }
-    )
-    limited = baseline.model_copy(
-        update={
-            "evidence_snapshot": baseline.evidence_snapshot.model_copy(
-                update={
-                    "source_watermarks": tuple(
-                        limited_tdnet if item.source == "TDnet" else item
-                        for item in baseline.evidence_snapshot.source_watermarks
-                    )
-                }
-            )
-        }
-    )
-
-    qualification = derive_forward_research_anchor(limited)
-
-    assert qualification.is_forward_research_anchor is True
-    assert limited_tdnet.limitations == ("Older archive history is unavailable.",)
-
-
-def test_correction_assessed_by_full_analysis_does_not_permanently_block_anchor():
-    baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
-    evidence_ref = baseline.evidence_snapshot.bundle.items[0].ref
-    corrected = SourceRecordVersion(
-        source="EDINET",
-        record_id="filing-1",
-        version_id="filing-1:v2",
-        status=SourceRecordStatus.CORRECTED,
-        published_at="2026-07-24 10:00",
-        available_at=datetime(2026, 7, 24, 10, tzinfo=ZoneInfo("Asia/Tokyo")),
-        title="Corrected filing",
-        evidence_ref=evidence_ref,
-    )
-    assessed = baseline.model_copy(
-        update={
-            "evidence_snapshot": baseline.evidence_snapshot.model_copy(
-                update={
-                    "source_records": (*baseline.evidence_snapshot.source_records, corrected),
-                    "source_record_lineage": (
-                        *baseline.evidence_snapshot.source_record_lineage,
-                        SourceRecordSnapshotItem(
-                            version_id=corrected.version_id,
-                            lineage="new",
-                            observed_in_execution=True,
-                        ),
-                    ),
-                }
-            )
-        }
-    )
-
-    assert derive_forward_research_anchor(assessed).is_forward_research_anchor is True
-
-
-def test_source_record_observed_after_frontier_fails_anchor_point_in_time_validity():
-    baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
-    future_record = baseline.evidence_snapshot.source_records[0].model_copy(
-        update={"available_at": baseline.information_frontier + timedelta(minutes=1)}
-    )
-    future = baseline.model_copy(
-        update={
-            "evidence_snapshot": baseline.evidence_snapshot.model_copy(
-                update={"source_records": (future_record,)}
-            )
-        }
-    )
-
-    assert AnchorQualificationReason.POINT_IN_TIME_INVALID in (
-        derive_forward_research_anchor(future).reasons
-    )
-
-
-@pytest.mark.parametrize(
-    ("cutoff", "published_at"),
-    [
-        (date(2026, 7, 24), "2026-07-23"),
-        (date(2026, 7, 25), "2026-07-23"),
-    ],
-)
-def test_market_observation_requires_latest_permitted_completed_session(
-    cutoff,
-    published_at,
-):
-    baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
-    stale_market = baseline.evidence_snapshot.source_records[0].model_copy(
-        update={"published_at": published_at}
-    )
-    stale = baseline.model_copy(
-        update={
-            "cutoff": cutoff,
-            "current_state": baseline.current_state.model_copy(update={"cutoff": cutoff}),
-            "evidence_snapshot": baseline.evidence_snapshot.model_copy(
-                update={
-                    "bundle": baseline.evidence_snapshot.bundle.model_copy(
-                        update={"analysis_date": cutoff}
-                    ),
-                    "source_records": (stale_market,),
-                    "source_watermarks": tuple(
-                        item.model_copy(update={"scanned_end": cutoff})
-                        for item in baseline.evidence_snapshot.source_watermarks
-                    ),
-                }
-            ),
-        }
-    )
-
-    qualification = derive_forward_research_anchor(stale)
-
-    market = next(
-        item
-        for item in qualification.capabilities
-        if item.capability is MarketResearchCapability.MARKET_OBSERVATION
-    )
-    assert market.satisfied is False
-
-
-def test_invalid_market_observation_date_fails_anchor_without_raising():
-    baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
-    invalid = baseline.evidence_snapshot.source_records[0].model_copy(
-        update={"published_at": "unknown"}
-    )
-
-    qualification = derive_forward_research_anchor(
-        baseline.model_copy(
-            update={
-                "evidence_snapshot": baseline.evidence_snapshot.model_copy(
-                    update={"source_records": (invalid,)}
-                )
-            }
-        )
-    )
-
-    assert qualification.is_forward_research_anchor is False
-    assert AnchorQualificationReason.REQUIRED_CAPABILITY_MISSING in qualification.reasons
-
-
-def test_unavailable_open_question_fails_anchor_even_without_declared_sources():
-    baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
-    question = ResearchQuestion(
-        id="question_0123456789abcdef0123456789abcdef",
-        question="Was this uncertainty checked?",
-    )
-    unavailable = baseline.model_copy(
-        update={
-            "current_state": baseline.current_state.model_copy(update={"questions": (question,)}),
-            "coverage": baseline.coverage.model_copy(
-                update={
-                    "questions": (
-                        ResearchObjectCoverage(
-                            object_id=question.id,
-                            status=CoverageStatus.UNAVAILABLE,
-                        ),
-                    )
-                }
-            ),
-        }
-    )
-
-    assert AnchorQualificationReason.REQUIRED_DOMAIN_MISSING in (
-        derive_forward_research_anchor(unavailable).reasons
-    )
-
-
-@pytest.mark.parametrize(
-    ("source", "capability"),
-    [
-        ("Google News", MarketResearchCapability.MEDIA),
-        ("Social sentiment", MarketResearchCapability.SOCIAL_SENTIMENT),
-        ("Macro observations", MarketResearchCapability.MACRO),
-    ],
-)
-def test_research_object_can_promote_advisory_capability(source, capability):
-    baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
-    claim = baseline.current_state.claims[0].model_copy(update={"required_sources": (source,)})
-    promoted = baseline.model_copy(
-        update={"current_state": baseline.current_state.model_copy(update={"claims": (claim,)})}
-    )
-
-    qualification = derive_forward_research_anchor(promoted)
-
-    attestation = next(item for item in qualification.capabilities if item.capability is capability)
-    assert attestation.required is True
-    assert attestation.satisfied is False
-
-
-def test_promoted_advisory_capability_requires_completed_audit():
-    baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
-    claim = baseline.current_state.claims[0].model_copy(
-        update={"required_sources": ("Google News",)}
-    )
-    news_domain = ResearchDomainCoverage(
-        domain="news",
-        requirement=CoverageRequirement.ADVISORY,
-        status=CoverageStatus.LIMITED,
-        limitations=("news audit incomplete",),
-    )
-    promoted = baseline.model_copy(
-        update={
-            "current_state": baseline.current_state.model_copy(update={"claims": (claim,)}),
-            "coverage": baseline.coverage.model_copy(
-                update={"domains": (*baseline.coverage.domains, news_domain)}
-            ),
-        }
-    )
-
-    assert AnchorQualificationReason.FULL_AUDIT_INCOMPLETE in (
-        derive_forward_research_anchor(promoted).reasons
-    )
-
-
-def test_limited_decision_envelope_claim_remains_usable_anchor_state():
-    baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
-    claim = baseline.current_state.claims[0].model_copy(
-        update={"evidence_relationship": "decision_envelope"}
-    )
-    limited = baseline.model_copy(
-        update={
-            "current_state": baseline.current_state.model_copy(update={"claims": (claim,)}),
-            "coverage": baseline.coverage.model_copy(
-                update={
-                    "claims": (
-                        baseline.coverage.claims[0].model_copy(
-                            update={"status": CoverageStatus.LIMITED}
-                        ),
-                    )
-                }
-            ),
-        }
-    )
-
-    assert derive_forward_research_anchor(limited).is_forward_research_anchor is True
-
-
-def test_open_question_is_anchor_covered_when_required_domain_was_checked():
-    baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
-    question = ResearchQuestion(
-        id="question_0123456789abcdef0123456789abcdef",
-        question="Will the filing resolve the uncertainty?",
-        status=QuestionStatus.OPEN,
-        required_sources=("EDINET",),
-    )
-    checked = baseline.model_copy(
-        update={
-            "current_state": baseline.current_state.model_copy(update={"questions": (question,)}),
-            "coverage": baseline.coverage.model_copy(
-                update={
-                    "questions": (
-                        ResearchObjectCoverage(
-                            object_id=question.id,
-                            status=CoverageStatus.LIMITED,
-                            limitations=("Question remains open after checking EDINET.",),
-                        ),
-                    )
-                }
-            ),
-        }
-    )
-    checked = bind_information_frontier(
-        checked, datetime(2026, 7, 24, 23, 59, tzinfo=ZoneInfo("Asia/Tokyo"))
-    )
-
-    assert derive_forward_research_anchor(checked).is_forward_research_anchor is True
-
-
-def test_question_missing_required_domain_fails_anchor_coverage():
-    baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
-    question = ResearchQuestion(
-        id="question_0123456789abcdef0123456789abcdef",
-        question="Will an unavailable source resolve the uncertainty?",
-        status=QuestionStatus.OPEN,
-        required_sources=("Unconfigured source",),
-    )
-    missing = baseline.model_copy(
-        update={
-            "current_state": baseline.current_state.model_copy(update={"questions": (question,)}),
-            "coverage": baseline.coverage.model_copy(
-                update={
-                    "questions": (
-                        ResearchObjectCoverage(
-                            object_id=question.id,
-                            status=CoverageStatus.UNAVAILABLE,
-                            limitations=("Required Domain was not checked.",),
-                        ),
-                    )
-                }
-            ),
-        }
-    )
-    missing = bind_information_frontier(
-        missing, datetime(2026, 7, 24, 23, 59, tzinfo=ZoneInfo("Asia/Tokyo"))
-    )
-
-    qualification = derive_forward_research_anchor(missing)
-
-    assert qualification.is_forward_research_anchor is False
-    assert AnchorQualificationReason.REQUIRED_DOMAIN_MISSING in qualification.reasons
-
-
-def test_qualifying_indeterminate_full_revision_remains_a_forward_anchor():
-    baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
-    indeterminate = baseline.model_copy(
-        update={
-            "role": ResearchRevisionRole.UPDATE,
-            "change_conclusion": ResearchChangeConclusion.INDETERMINATE,
-            "indeterminate_reason": IndeterminateReason.COVERAGE_INCOMPLETE,
-        }
-    )
-    indeterminate = bind_information_frontier(
-        indeterminate, datetime(2026, 7, 24, 23, 59, tzinfo=ZoneInfo("Asia/Tokyo"))
-    )
-
-    assert indeterminate.coverage.anchor_qualification.is_forward_research_anchor is True
-    assert (
-        evaluate_next_update_policy(indeterminate, instrument="6501.T", mode="experimental").policy
-        == "incremental_allowed"
-    )
-
-
-def test_incremental_sources_include_profile_minimum_without_explicit_domains():
-    baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
-    baseline = baseline.model_copy(
-        update={
-            "coverage": baseline.coverage.model_copy(update={"domains": ()}),
-            "current_state": baseline.current_state.model_copy(
-                update={
-                    "claims": tuple(
-                        claim.model_copy(update={"required_sources": ()})
-                        for claim in baseline.current_state.claims
-                    ),
-                    "questions": tuple(
-                        question.model_copy(update={"required_sources": ()})
-                        for question in baseline.current_state.questions
-                    ),
-                }
-            ),
-        }
-    )
-
-    assert set(required_incremental_sources(baseline)) == {
-        "EDINET",
-        "TDnet",
-        "J-Quants adjusted OHLCV",
-    }
 
 
 def test_current_research_state_requires_one_shared_scenario_horizon():
@@ -636,10 +211,12 @@ def test_next_update_policy_is_derived_from_complete_baseline_eligibility():
         AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
         _execution("6501.T"),
     )
-    initial_policy = evaluate_next_update_policy(initial, instrument="6501.T", mode="experimental")
+    initial_policy = evaluate_next_update_policy(
+        initial, instrument="6501.T", mode="experimental"
+    )
     assert (initial_policy.policy, initial_policy.reason) == (
         "full_required",
-        "legacy_anchor_coverage_unproven",
+        "required_source_coverage_incomplete",
     )
 
     complete = initial.model_copy(
@@ -668,7 +245,7 @@ def test_next_update_policy_is_derived_from_complete_baseline_eligibility():
     )
     assert (complete_policy.policy, complete_policy.reason) == (
         "full_required",
-        "legacy_anchor_coverage_unproven",
+        "required_source_coverage_incomplete",
     )
 
     indeterminate = complete.model_copy(
@@ -683,7 +260,7 @@ def test_next_update_policy_is_derived_from_complete_baseline_eligibility():
     )
     assert (indeterminate_policy.policy, indeterminate_policy.reason) == (
         "full_required",
-        "legacy_anchor_coverage_unproven",
+        "indeterminate_head",
     )
     assert derive_shadow_comparison(complete, indeterminate) == "inconclusive"
 
@@ -746,7 +323,7 @@ def test_revision_draft_rejects_unresolved_typed_audit_evidence(path: str):
     )
     unknown_ref = "ev_444444444444"
     coverage = ResearchUpdateCoverageAttestation.model_validate(
-        draft.coverage.model_dump(mode="python", exclude={"anchor_qualification"})
+        draft.coverage.model_dump(mode="python")
     )
     summary = ResearchUpdateSummaryContract.model_validate(
         draft.update_summary.model_dump(mode="python")
@@ -846,28 +423,6 @@ def test_revision_draft_rejects_change_signal_version_outside_snapshot():
     with pytest.raises(ValidationError, match="Source Record closure"):
         draft.__class__.model_validate(
             draft.model_copy(update={"delta": broken_delta}).model_dump(mode="python")
-        )
-
-
-def test_full_state_assembly_rejects_unresolved_non_edinet_direct_predecessor():
-    unresolved_tdnet = {
-        **_source_record("tdnet:new", replaces="tdnet:missing"),
-        "source": "TDnet",
-        "record_id": "tdnet-record",
-    }
-
-    with pytest.raises(ValidationError, match="Source Record closure"):
-        assemble_full_revision(
-            AnalysisRequest(
-                ticker="6501.T",
-                analysis_date=CUTOFF,
-                analysts=("market",),
-            ),
-            _with_disclosure_metadata(
-                _execution("6501.T"),
-                records=[unresolved_tdnet],
-                watermarks=[_watermark("TDnet")],
-            ),
         )
 
 
@@ -986,8 +541,6 @@ def _incremental_baseline_and_evidence(
         "adjustment": "split_adjusted",
         "observation_value": 95.0,
         "unit": "JPY",
-        "published_at": "2026-07-24",
-        "available_at": "2026-07-24T17:00:00+09:00",
     }
     watermarks = [
         _watermark("EDINET", returned_records=0, reported_records=0),
@@ -1019,30 +572,6 @@ def _incremental_baseline_and_evidence(
             )
         }
     )
-    baseline = bind_information_frontier(
-        baseline,
-        datetime.combine(
-            date(2026, 7, 24),
-            datetime.max.time(),
-            tzinfo=ZoneInfo("Asia/Tokyo"),
-        ),
-    )
-    selected_watermarks = (
-        candidate_watermarks
-        if candidate_watermarks is not None
-        else [{**item, "scanned_end": "2026-07-25"} for item in watermarks]
-    )
-    selected_watermarks = [
-        {
-            **item,
-            **(
-                {}
-                if "information_frontier" in item
-                else {"information_frontier": "2026-07-25T23:59:59.999999+09:00"}
-            ),
-        }
-        for item in selected_watermarks
-    ]
     item = EvidenceItem.create(
         source="bounded fixture",
         evidence_type="bounded update",
@@ -1051,514 +580,19 @@ def _incremental_baseline_and_evidence(
         content="Bounded source observations.",
         provenance={
             "source_records": candidate_records if candidate_records is not None else [market],
-            "source_watermarks": selected_watermarks,
+            "source_watermarks": (
+                candidate_watermarks
+                if candidate_watermarks is not None
+                else [{**item, "scanned_end": "2026-07-25"} for item in watermarks]
+            ),
         },
     )
     evidence = EvidenceBundle(
         instrument="6501.T",
         analysis_date=date(2026, 7, 25),
-        information_frontier=datetime(
-            2026, 7, 25, 23, 59, 59, 999999, tzinfo=ZoneInfo("Asia/Tokyo")
-        ),
         items=(item,),
     )
     return baseline, evidence, market, watermarks
-
-
-def _tdnet_archive_transition_watermark(*, observed_start: str) -> dict[str, object]:
-    return {
-        **_watermark(
-            "TDnet",
-            status="limited",
-            limitations=("Requested interval was truncated by the TDnet rolling archive.",),
-            returned_records=0,
-            reported_records=0,
-        ),
-        "scanned_start": observed_start,
-        "scanned_end": "2026-07-25",
-        "requested_interval": {"start": "2026-07-01", "end": "2026-07-25"},
-        "limitation_kind": "archive_truncation",
-    }
-
-
-@pytest.mark.parametrize(
-    ("capability", "source", "returned_records", "expected_complete", "expected_gap"),
-    [
-        (MarketResearchCapability.OFFICIAL_FILING, "EDINET", 0, False, date(2026, 7, 25)),
-        (MarketResearchCapability.FUNDAMENTALS, "J-Quants fundamentals", 0, True, None),
-        (
-            MarketResearchCapability.MARKET_OBSERVATION,
-            "J-Quants adjusted OHLCV",
-            1,
-            True,
-            None,
-        ),
-    ],
-)
-def test_transition_coverage_applies_capability_specific_continuity(
-    capability,
-    source,
-    returned_records,
-    expected_complete,
-    expected_gap,
-):
-    baseline, _evidence, market, _watermarks = _incremental_baseline_and_evidence()
-    qualification = baseline.coverage.anchor_qualification
-    assert qualification is not None
-    baseline = baseline.model_copy(
-        update={
-            "coverage": baseline.coverage.model_copy(
-                update={
-                    "anchor_qualification": qualification.model_copy(
-                        update={
-                            "capabilities": tuple(
-                                item.model_copy(update={"required": item.capability is capability})
-                                for item in qualification.capabilities
-                            )
-                        }
-                    )
-                }
-            )
-        }
-    )
-    update_frontier = datetime(2026, 7, 27, 23, 59, tzinfo=ZoneInfo("Asia/Tokyo"))
-    candidate_records = []
-    if capability is MarketResearchCapability.MARKET_OBSERVATION:
-        candidate_records.append(
-            {
-                **market,
-                "version_id": "market:v2",
-                "published_at": "2026-07-27",
-                "available_at": "2026-07-27T17:00:00+09:00",
-            }
-        )
-    item = EvidenceItem.create(
-        source="bounded fixture",
-        evidence_type="bounded update",
-        requested_date=date(2026, 7, 27),
-        effective_date=date(2026, 7, 27),
-        content="Capability-specific continuity fixture.",
-        provenance={
-            "source_records": candidate_records,
-            "source_watermarks": [
-                {
-                    "source": source,
-                    "scanned_start": "2026-07-27",
-                    "scanned_end": "2026-07-27",
-                    "status": "complete",
-                    "returned_records": returned_records,
-                    "reported_records": returned_records,
-                    "requested_interval": {"start": "2026-07-27", "end": "2026-07-27"},
-                    "information_frontier": update_frontier.isoformat(),
-                }
-            ],
-        },
-    )
-    evidence = EvidenceBundle(
-        instrument="6501.T",
-        analysis_date=date(2026, 7, 27),
-        information_frontier=update_frontier,
-        items=(item,),
-    )
-
-    result = assess_deterministic_update(
-        "revision-1",
-        baseline,
-        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-27", analysts=("market",)),
-        evidence,
-        information_frontier=update_frontier,
-    )
-
-    transition = next(
-        item for item in result.transition_coverage.capabilities if item.capability is capability
-    )
-    assert transition.complete is expected_complete, result.model_dump(mode="json")
-    assert ([item.start for item in transition.gaps] or [None])[0] == expected_gap
-
-
-def test_transition_coverage_ignores_tdnet_archive_gap_wholly_before_anchor():
-    baseline, _evidence, market, watermarks = _incremental_baseline_and_evidence()
-    candidate_watermarks = [
-        ({**item, "scanned_end": "2026-07-25"}) for item in watermarks if item["source"] != "TDnet"
-    ]
-    candidate_watermarks.append(_tdnet_archive_transition_watermark(observed_start="2026-07-24"))
-    _, evidence, _, _ = _incremental_baseline_and_evidence(
-        candidate_records=[market],
-        candidate_watermarks=candidate_watermarks,
-    )
-
-    result = assess_deterministic_update(
-        "revision-1",
-        baseline,
-        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
-        evidence,
-        information_frontier=datetime(2026, 7, 25, 18, 0, tzinfo=ZoneInfo("Asia/Tokyo")),
-    )
-
-    assert result.escalation_reason is None
-    assert result.candidate is not None
-    assert result.transition_coverage is not None
-    assert result.transition_coverage.complete is True
-    tdnet = next(
-        item
-        for item in result.transition_coverage.capabilities
-        if item.capability is MarketResearchCapability.TIMELY_DISCLOSURE
-    )
-    assert tdnet.complete is True
-    assert tdnet.limitations[0].scope == "pre_anchor"
-
-
-def test_transition_coverage_blocks_tdnet_archive_gap_intersecting_transition():
-    baseline, _evidence, market, watermarks = _incremental_baseline_and_evidence()
-    baseline = bind_information_frontier(
-        baseline,
-        datetime(2026, 7, 24, 18, 0, tzinfo=ZoneInfo("Asia/Tokyo")),
-    )
-    candidate_watermarks = [
-        ({**item, "scanned_end": "2026-07-25"}) for item in watermarks if item["source"] != "TDnet"
-    ]
-    candidate_watermarks.append(_tdnet_archive_transition_watermark(observed_start="2026-07-25"))
-    _, evidence, _, _ = _incremental_baseline_and_evidence(
-        candidate_records=[market],
-        candidate_watermarks=candidate_watermarks,
-    )
-
-    result = assess_deterministic_update(
-        "revision-1",
-        baseline,
-        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
-        evidence,
-        information_frontier=datetime(2026, 7, 25, 18, 0, tzinfo=ZoneInfo("Asia/Tokyo")),
-    )
-
-    assert result.candidate is None
-    assert result.escalation_reason is IncrementalEscalationReason.COVERAGE_INCOMPLETE
-    assert result.transition_coverage is not None
-    assert result.transition_coverage.complete is False
-    tdnet = next(
-        item
-        for item in result.transition_coverage.capabilities
-        if item.capability is MarketResearchCapability.TIMELY_DISCLOSURE
-    )
-    assert tdnet.complete is False
-    assert tdnet.limitations[0].scope == "transition"
-
-
-def test_transition_preserves_an_earlier_source_frontier_and_fails_closed():
-    baseline, _evidence, market, watermarks = _incremental_baseline_and_evidence()
-    candidate_watermarks = [
-        {
-            **item,
-            "scanned_end": "2026-07-25",
-            **(
-                {"information_frontier": "2026-07-25T17:00:00+09:00"}
-                if item["source"] == "TDnet"
-                else {}
-            ),
-        }
-        for item in watermarks
-    ]
-    _, evidence, _, _ = _incremental_baseline_and_evidence(
-        candidate_records=[market],
-        candidate_watermarks=candidate_watermarks,
-    )
-
-    result = assess_deterministic_update(
-        "revision-1",
-        baseline,
-        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
-        evidence,
-        information_frontier=datetime(2026, 7, 25, 18, 0, tzinfo=ZoneInfo("Asia/Tokyo")),
-    )
-
-    assert result.escalation_reason is IncrementalEscalationReason.COVERAGE_INCOMPLETE
-    tdnet = next(
-        item for item in result.evidence_snapshot.source_watermarks if item.source == "TDnet"
-    )
-    assert tdnet.information_frontier == datetime(2026, 7, 25, 17, 0, tzinfo=ZoneInfo("Asia/Tokyo"))
-
-
-def test_transition_requires_an_explicit_common_information_frontier():
-    baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence()
-    evidence = evidence.model_copy(update={"information_frontier": None})
-
-    result = assess_deterministic_update(
-        "revision-1",
-        baseline,
-        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
-        evidence,
-    )
-
-    assert result.candidate is None
-    assert result.transition_coverage is None
-    assert result.escalation_reason is IncrementalEscalationReason.SCHEMA_INVALID
-
-
-def test_transition_does_not_merge_a_missing_source_frontier_into_attested_coverage():
-    baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence()
-    tdnet = next(
-        item
-        for item in evidence.items[0].provenance["source_watermarks"]
-        if item["source"] == "TDnet"
-    )
-    missing_frontier = EvidenceItem.create(
-        source="second TDnet collector",
-        evidence_type="bounded update",
-        requested_date=date(2026, 7, 25),
-        effective_date=date(2026, 7, 25),
-        content="A duplicate source scan without a frontier attestation.",
-        provenance={"source_watermarks": [{**tdnet, "information_frontier": None}]},
-    )
-    evidence = evidence.model_copy(update={"items": (*evidence.items, missing_frontier)})
-
-    result = assess_deterministic_update(
-        "revision-1",
-        baseline,
-        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
-        evidence,
-        information_frontier=datetime(2026, 7, 25, 18, 0, tzinfo=ZoneInfo("Asia/Tokyo")),
-    )
-
-    assert result.candidate is None
-    assert result.escalation_reason is IncrementalEscalationReason.COVERAGE_INCOMPLETE
-    assert result.transition_coverage is not None
-    assert result.transition_coverage.complete is False
-    merged_tdnet = next(
-        item for item in result.evidence_snapshot.source_watermarks if item.source == "TDnet"
-    )
-    assert merged_tdnet.information_frontier is None
-
-
-@pytest.mark.parametrize(
-    "tdnet_update",
-    [
-        {"information_frontier": None},
-        {"returned_records": 0, "reported_records": None},
-    ],
-)
-def test_empty_transition_requires_explicit_frontier_and_zero_attestation(tdnet_update):
-    baseline, _evidence, market, watermarks = _incremental_baseline_and_evidence()
-    candidate_watermarks = [
-        {
-            **item,
-            "scanned_end": "2026-07-25",
-            **(tdnet_update if item["source"] == "TDnet" else {}),
-        }
-        for item in watermarks
-    ]
-    _, evidence, _, _ = _incremental_baseline_and_evidence(
-        candidate_records=[market],
-        candidate_watermarks=candidate_watermarks,
-    )
-
-    result = assess_deterministic_update(
-        "revision-1",
-        baseline,
-        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
-        evidence,
-        information_frontier=datetime(2026, 7, 25, 18, 0, tzinfo=ZoneInfo("Asia/Tokyo")),
-    )
-
-    assert result.escalation_reason is IncrementalEscalationReason.COVERAGE_INCOMPLETE
-    assert result.transition_coverage.complete is False
-
-
-def test_non_archive_limitation_wholly_before_anchor_does_not_block_transition():
-    baseline, _evidence, market, watermarks = _incremental_baseline_and_evidence()
-    candidate_watermarks = [
-        ({**item, "scanned_end": "2026-07-25"}) for item in watermarks if item["source"] != "TDnet"
-    ]
-    candidate_watermarks.append(
-        {
-            **_tdnet_archive_transition_watermark(observed_start="2026-07-24"),
-            "limitation_kind": "partial",
-        }
-    )
-    _, evidence, _, _ = _incremental_baseline_and_evidence(
-        candidate_records=[market],
-        candidate_watermarks=candidate_watermarks,
-    )
-
-    result = assess_deterministic_update(
-        "revision-1",
-        baseline,
-        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
-        evidence,
-        information_frontier=datetime(2026, 7, 25, 18, 0, tzinfo=ZoneInfo("Asia/Tokyo")),
-    )
-
-    assert result.escalation_reason is None
-    tdnet = next(
-        item
-        for item in result.transition_coverage.capabilities
-        if item.capability is MarketResearchCapability.TIMELY_DISCLOSURE
-    )
-    assert tdnet.limitations[0].scope == "pre_anchor"
-
-
-def test_complete_typed_limitation_window_wholly_before_anchor_does_not_block():
-    baseline, _evidence, market, watermarks = _incremental_baseline_and_evidence()
-    candidate_watermarks = [
-        ({**item, "scanned_end": "2026-07-25"}) for item in watermarks if item["source"] != "TDnet"
-    ]
-    candidate_watermarks.extend(
-        (
-            {
-                **_watermark(
-                    "TDnet",
-                    status="limited",
-                    limitations=("Historical source limitation.",),
-                    returned_records=0,
-                    reported_records=None,
-                ),
-                "scanned_start": "2026-07-01",
-                "scanned_end": "2026-07-23",
-                "requested_interval": {"start": "2026-07-01", "end": "2026-07-23"},
-                "limitation_kind": "partial",
-                "information_frontier": None,
-            },
-            {
-                **_watermark("TDnet", returned_records=0, reported_records=0),
-                "scanned_start": "2026-07-25",
-                "scanned_end": "2026-07-25",
-                "requested_interval": {"start": "2026-07-25", "end": "2026-07-25"},
-            },
-        )
-    )
-    _, evidence, _, _ = _incremental_baseline_and_evidence(
-        candidate_records=[market],
-        candidate_watermarks=candidate_watermarks,
-    )
-
-    result = assess_deterministic_update(
-        "revision-1",
-        baseline,
-        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
-        evidence,
-        information_frontier=datetime(2026, 7, 25, 18, 0, tzinfo=ZoneInfo("Asia/Tokyo")),
-    )
-
-    assert result.escalation_reason is None
-    tdnet = next(
-        item
-        for item in result.transition_coverage.capabilities
-        if item.capability is MarketResearchCapability.TIMELY_DISCLOSURE
-    )
-    assert tdnet.complete is True
-    assert tdnet.limitations[0].scope == "pre_anchor"
-
-
-def _tdnet_record(*, version_id: str, available_at: str) -> dict[str, object]:
-    return {
-        **_source_record(version_id),
-        "source": "TDnet",
-        "record_id": "tdnet-same-day",
-        "published_at": "2026-07-24 20:00",
-        "available_at": available_at,
-        "title": "Late same-day timely disclosure",
-    }
-
-
-def test_transition_treats_same_day_event_after_anchor_frontier_as_new():
-    baseline, _evidence, market, watermarks = _incremental_baseline_and_evidence()
-    baseline = bind_information_frontier(
-        baseline,
-        datetime(2026, 7, 24, 18, 0, tzinfo=ZoneInfo("Asia/Tokyo")),
-    )
-    candidate_watermarks = [{**item, "scanned_end": "2026-07-25"} for item in watermarks]
-    candidate_watermarks[1] = {
-        **candidate_watermarks[1],
-        "returned_records": 1,
-        "reported_records": 1,
-    }
-    _, evidence, _, _ = _incremental_baseline_and_evidence(
-        candidate_records=[
-            market,
-            _tdnet_record(
-                version_id="tdnet:late-same-day",
-                available_at="2026-07-24T20:00:00+09:00",
-            ),
-        ],
-        candidate_watermarks=candidate_watermarks,
-    )
-
-    result = assess_deterministic_update(
-        "revision-1",
-        baseline,
-        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
-        evidence,
-        information_frontier=datetime(2026, 7, 25, 18, 0, tzinfo=ZoneInfo("Asia/Tokyo")),
-    )
-
-    assert result.escalation_reason is IncrementalEscalationReason.SOURCE_VERSION_CHANGE
-    late = next(
-        item
-        for item in result.evidence_snapshot.source_record_lineage
-        if item.version_id == "tdnet:late-same-day"
-    )
-    assert late.lineage == "new"
-    assert late.observed_in_execution is True
-
-
-def test_observation_after_update_frontier_cannot_prove_transition():
-    baseline, _evidence, market, watermarks = _incremental_baseline_and_evidence()
-    candidate_watermarks = [{**item, "scanned_end": "2026-07-25"} for item in watermarks]
-    candidate_watermarks[1] = {
-        **candidate_watermarks[1],
-        "returned_records": 1,
-        "reported_records": 1,
-    }
-    _, evidence, _, _ = _incremental_baseline_and_evidence(
-        candidate_records=[
-            market,
-            _tdnet_record(
-                version_id="tdnet:after-frontier",
-                available_at="2026-07-25T20:00:00+09:00",
-            ),
-        ],
-        candidate_watermarks=candidate_watermarks,
-    )
-
-    result = assess_deterministic_update(
-        "revision-1",
-        baseline,
-        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
-        evidence,
-        information_frontier=datetime(2026, 7, 25, 18, 0, tzinfo=ZoneInfo("Asia/Tokyo")),
-    )
-
-    assert result.escalation_reason is IncrementalEscalationReason.COVERAGE_INCOMPLETE
-    assert all(
-        item.version_id != "tdnet:after-frontier"
-        for item in result.evidence_snapshot.source_records
-    )
-
-
-@pytest.mark.parametrize("temporal_scope", ["live_only", "unknown"])
-def test_required_transition_rejects_unprovable_temporal_scope(temporal_scope):
-    baseline, _evidence, market, watermarks = _incremental_baseline_and_evidence()
-    candidate_watermarks = [
-        {
-            **item,
-            "scanned_end": "2026-07-25",
-            **({"temporal_scope": temporal_scope} if item["source"] == "TDnet" else {}),
-        }
-        for item in watermarks
-    ]
-    _, evidence, _, _ = _incremental_baseline_and_evidence(
-        candidate_records=[market],
-        candidate_watermarks=candidate_watermarks,
-    )
-
-    result = assess_deterministic_update(
-        "revision-1",
-        baseline,
-        AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",)),
-        evidence,
-        information_frontier=datetime(2026, 7, 25, 18, 0, tzinfo=ZoneInfo("Asia/Tokyo")),
-    )
-
-    assert result.escalation_reason is IncrementalEscalationReason.COVERAGE_INCOMPLETE
 
 
 @pytest.mark.parametrize(
@@ -1566,6 +600,12 @@ def test_required_transition_rejects_unprovable_temporal_scope(temporal_scope):
     [
         ("off", "6501.T", {}, "experiment_mode_off"),
         ("experimental", "NVDA", {}, "unsupported_incremental_market"),
+        (
+            "experimental",
+            "6501.T",
+            {"change_conclusion": ResearchChangeConclusion.INDETERMINATE},
+            "indeterminate_head",
+        ),
     ],
 )
 def test_next_update_policy_has_stable_mode_market_and_head_reasons(
@@ -1634,7 +674,7 @@ def test_next_update_policy_requires_source_qualified_japanese_coverage():
         mode="shadow",
     )
     assert refused.policy == "full_required"
-    assert refused.reason == "anchor_coverage_incomplete"
+    assert refused.reason == "required_source_coverage_incomplete"
 
 
 def test_next_update_policy_rejects_positive_watermark_without_observed_version():
@@ -1660,7 +700,7 @@ def test_next_update_policy_rejects_positive_watermark_without_observed_version(
         mode="experimental",
     )
 
-    assert result.reason == "anchor_coverage_incomplete"
+    assert result.reason == "required_source_coverage_incomplete"
 
 
 def test_bounded_update_rejects_positive_results_without_observed_version():
@@ -1710,7 +750,7 @@ def test_next_update_policy_distinguishes_general_coverage_and_market_semantics(
         instrument="6501.T",
         mode="shadow",
     )
-    assert limited_result.reason == "anchor_coverage_incomplete"
+    assert limited_result.reason == "coverage_incomplete"
 
     incompatible = baseline.model_copy(
         update={
@@ -1754,16 +794,14 @@ def test_next_update_policy_rejects_future_scan_invalid_revision_and_missing_ove
             )
         }
     )
-    assert (
-        evaluate_next_update_policy(future_scan, instrument="6501.T", mode="shadow").reason
-        == "anchor_coverage_incomplete"
-    )
+    assert evaluate_next_update_policy(
+        future_scan, instrument="6501.T", mode="shadow"
+    ).reason == "required_source_coverage_incomplete"
 
     invalid = baseline.model_copy(update={"cutoff": date(2026, 7, 23)})
-    assert (
-        evaluate_next_update_policy(invalid, instrument="6501.T", mode="shadow").reason
-        == "invalid_revision"
-    )
+    assert evaluate_next_update_policy(
+        invalid, instrument="6501.T", mode="shadow"
+    ).reason == "invalid_revision"
 
     candidate = assess_deterministic_update(
         "revision-1",
@@ -1784,12 +822,9 @@ def test_next_update_policy_rejects_future_scan_invalid_revision_and_missing_ove
             )
         }
     )
-    assert (
-        evaluate_next_update_policy(
-            missing_overlap, instrument="6501.T", mode="experimental"
-        ).reason
-        == "legacy_anchor_coverage_unproven"
-    )
+    assert evaluate_next_update_policy(
+        missing_overlap, instrument="6501.T", mode="experimental"
+    ).reason == "required_source_coverage_incomplete"
 
     wrong_baseline = candidate.model_copy(
         update={
@@ -1803,16 +838,17 @@ def test_next_update_policy_rejects_future_scan_invalid_revision_and_missing_ove
             )
         }
     )
-    assert (
-        evaluate_next_update_policy(wrong_baseline, instrument="6501.T", mode="experimental").reason
-        == "legacy_anchor_coverage_unproven"
-    )
+    assert evaluate_next_update_policy(
+        wrong_baseline, instrument="6501.T", mode="experimental"
+    ).reason == "required_source_coverage_incomplete"
 
 
 def test_next_update_policy_rejects_mixed_current_and_future_source_watermarks():
     baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
     tdnet = next(
-        item for item in baseline.evidence_snapshot.source_watermarks if item.source == "TDnet"
+        item
+        for item in baseline.evidence_snapshot.source_watermarks
+        if item.source == "TDnet"
     )
     mixed = baseline.model_copy(
         update={
@@ -1833,13 +869,15 @@ def test_next_update_policy_rejects_mixed_current_and_future_source_watermarks()
         mode="shadow",
     )
 
-    assert result.reason == "anchor_coverage_incomplete"
+    assert result.reason == "required_source_coverage_incomplete"
 
 
 def test_next_update_policy_accepts_nested_contiguous_source_watermarks():
     baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
     edinet = next(
-        item for item in baseline.evidence_snapshot.source_watermarks if item.source == "EDINET"
+        item
+        for item in baseline.evidence_snapshot.source_watermarks
+        if item.source == "EDINET"
     )
     nested_intervals = (
         edinet.model_copy(
@@ -1966,104 +1004,6 @@ def test_experimental_nmc_validation_fails_closed_for_coverage_or_semantic_drift
         validate_experimental_nmc_candidate(baseline, material_signal)
         is IncrementalEscalationReason.THRESHOLD_CROSSING
     )
-
-
-def test_unqualified_incremental_head_cannot_claim_bounded_next_update():
-    baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence()
-    result = assess_deterministic_update(
-        "revision-1",
-        baseline,
-        AnalysisRequest(
-            ticker="6501.T",
-            analysis_date="2026-07-25",
-            analysts=("market",),
-        ),
-        evidence,
-    )
-    candidate = result.candidate
-    assert candidate is not None
-
-    policy = evaluate_next_update_policy(
-        candidate,
-        instrument="6501.T",
-        mode="experimental",
-    )
-
-    assert policy.policy == "full_required"
-    assert policy.reason is NextUpdateReason.LEGACY_ANCHOR_COVERAGE_UNPROVEN
-
-
-@pytest.mark.parametrize(
-    "audit_update",
-    [
-        {"transition_coverage": None},
-        {"escalation_reason": "coverage_incomplete"},
-    ],
-)
-def test_experimental_reaffirmation_requires_consistent_complete_transition_audit(
-    audit_update,
-):
-    baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence()
-    result = assess_deterministic_update(
-        "revision-1",
-        baseline,
-        AnalysisRequest(
-            ticker="6501.T",
-            analysis_date="2026-07-25",
-            analysts=("market",),
-        ),
-        evidence,
-    )
-    candidate = result.candidate
-    assert candidate is not None
-    assert result.transition_coverage is not None
-    valid_audit = ResearchUpdateAudit(
-        mode="experimental",
-        candidate=ResearchUpdateCandidate(
-            change_conclusion="no_material_change",
-            coverage=candidate.coverage.model_dump(mode="json"),
-            update_summary=candidate.update_summary.model_dump(mode="json"),
-            evidence_snapshot=candidate.evidence_snapshot.model_dump(mode="json"),
-        ),
-        transition_coverage=result.transition_coverage.model_dump(mode="json"),
-        baseline_information_frontier=result.transition_coverage.anchor_frontier,
-        authoritative_strategy="incremental",
-        comparison="not_applicable",
-    )
-    audit = valid_audit.model_copy(update=audit_update)
-    inconsistent = bind_information_frontier(
-        candidate.model_copy(update={"research_update_audit": audit}),
-        result.transition_coverage.update_frontier,
-    )
-
-    assert inconsistent.coverage.anchor_qualification is not None
-    assert inconsistent.coverage.anchor_qualification.is_forward_research_anchor is False
-    policy = evaluate_next_update_policy(
-        inconsistent,
-        instrument="6501.T",
-        mode="experimental",
-    )
-    assert policy.policy == "full_required"
-    assert policy.reason is NextUpdateReason.ANCHOR_COVERAGE_INCOMPLETE
-
-    forged_transition = valid_audit.transition_coverage.model_copy(
-        update={
-            "anchor_frontier": valid_audit.baseline_information_frontier
-            - timedelta(seconds=1)
-        }
-    )
-    forged = bind_information_frontier(
-        candidate.model_copy(
-            update={
-                "research_update_audit": valid_audit.model_copy(
-                    update={"transition_coverage": forged_transition}
-                )
-            }
-        ),
-        result.transition_coverage.update_frontier,
-    )
-    assert forged.coverage.anchor_qualification is not None
-    assert forged.coverage.anchor_qualification.is_forward_research_anchor is False
 
 
 class _SemanticInvoker:
@@ -2327,12 +1267,12 @@ def test_semantic_change_assessment_excludes_prior_research_disguised_as_evidenc
             "evidence_snapshot": baseline.evidence_snapshot.model_copy(
                 update={
                     "bundle": baseline_bundle,
-                    "lineage": (
-                        *baseline.evidence_snapshot.lineage,
-                        EvidenceSnapshotItem(
-                            evidence_ref=prior_research.ref,
-                            lineage="new",
-                        ),
+                        "lineage": (
+                            *baseline.evidence_snapshot.lineage,
+                            EvidenceSnapshotItem(
+                                evidence_ref=prior_research.ref,
+                                lineage="new",
+                            ),
                     ),
                 }
             ),
@@ -2808,7 +1748,7 @@ def test_full_update_preserves_corrected_versions_with_overlap_lineage():
 
     updated = assemble_full_update("revision-1", baseline, candidate)
     audit_coverage = ResearchUpdateCoverageAttestation.model_validate(
-        updated.coverage.model_dump(mode="python", exclude={"anchor_qualification"})
+        updated.coverage.model_dump(mode="python")
     )
     updated = updated.model_copy(
         update={
