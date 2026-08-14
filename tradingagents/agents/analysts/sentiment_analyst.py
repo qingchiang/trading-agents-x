@@ -121,7 +121,15 @@ def create_sentiment_analyst(llm):
             placeholder = "<unavailable: no coverage for this market>"
             stocktwits_block = placeholder
             reddit_block = placeholder
-            fetched_market_signals = fetch_sentiment_signals(ticker, end_date)
+            fetched_market_signals = fetch_sentiment_signals(
+                ticker,
+                end_date,
+                information_frontier=(
+                    information_frontier.isoformat()
+                    if information_frontier is not None
+                    else None
+                ),
+            )
         else:
             if live_run:
                 stocktwits_block = fetch_stocktwits_messages(

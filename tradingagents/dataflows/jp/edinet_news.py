@@ -32,7 +32,6 @@ from zoneinfo import ZoneInfo
 
 from tradingagents.provenance import (
     SourceInterval,
-    SourceObservation,
     SourceWatermark,
     attach_source_observations,
     attach_source_watermarks,
@@ -45,64 +44,12 @@ from .edinet_common import (
     filing_detail_line,
     iter_window_dates,
     render_filings,
+    source_observation,
 )
 from .jquants_common import to_jquants_code
 
 logger = logging.getLogger(__name__)
 _TOKYO = ZoneInfo("Asia/Tokyo")
-
-
-def _observation(record: dict) -> tuple[SourceObservation | None, str | None]:
-    doc_id = str(record.get("docID") or "").strip()
-    if not doc_id:
-        return None, "EDINET returned a document without a native document identifier."
-    parent_id = str(record.get("parentDocID") or "").strip()
-    submitted = str(record.get("submitDateTime") or "").strip()
-    withdrawn = str(
-        record.get("withdrawalStatus") or record.get("withdrawStatus") or ""
-    ).strip()
-    corrected = str(record.get("docInfoEditStatus") or "").strip()
-    operation_at = str(record.get("opeDateTime") or "").strip()
-    is_operation = withdrawn not in {"", "0"} or corrected not in {"", "0"}
-    if is_operation and not operation_at:
-        return (
-            None,
-            f"EDINET document {doc_id} has an operation without a safe availability "
-            "timestamp.",
-        )
-    availability_text = operation_at if is_operation else submitted
-    try:
-        available = datetime.fromisoformat(availability_text)
-    except ValueError:
-        return None, f"EDINET document {doc_id} has an invalid availability timestamp."
-    if available.utcoffset() is None:
-        available = available.replace(tzinfo=_TOKYO)
-    title = str(record.get("docDescription") or record.get("docTypeCode") or "Disclosure")
-    if withdrawn not in {"", "0"}:
-        status = "withdrawn"
-    elif "訂正" in title or corrected not in {"", "0"}:
-        status = "corrected"
-    else:
-        status = "published"
-    return (
-        SourceObservation(
-            source="EDINET",
-            record_id=parent_id or doc_id,
-            version_id=f"edinet:{doc_id}",
-            status=status,
-            published_at=submitted,
-            available_at=available.isoformat(),
-            title=title,
-            availability_basis=(
-                "EDINET operation timestamp"
-                if is_operation
-                else "EDINET submission timestamp"
-            ),
-            url=f"https://disclosure2.edinet-fsa.go.jp/WEEK0010.aspx?docID={doc_id}",
-            native_record_id=doc_id,
-        ),
-        None,
-    )
 
 
 def _format_filing(record: dict) -> str:
@@ -158,7 +105,7 @@ def get_news(
     )
 
     observation_results = tuple(
-        (record, *_observation(record)) for record in reported_matches
+        (record, *source_observation(record)) for record in reported_matches
     )
     boundary = date.fromisoformat(end_date)
     frontier = datetime.fromisoformat(information_frontier) if information_frontier else None

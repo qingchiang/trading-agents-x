@@ -428,14 +428,19 @@ def _required_source_closure_is_blocking(
 ) -> bool:
     """Reject unsafe Required watermarks and incompatible interval siblings."""
 
-    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    grouped: dict[tuple[str | None, str, str], list[dict[str, Any]]] = {}
     for item in bundle.items:
+        dataset_id = item.provenance.get("dataset_id")
+        if not isinstance(dataset_id, str) or not dataset_id:
+            dataset_id = None
         for watermark in _item_source_metadata(item, "source_watermarks", source):
             scanned_start = watermark.get("scanned_start")
             scanned_end = watermark.get("scanned_end")
             if not isinstance(scanned_start, str) or not isinstance(scanned_end, str):
                 return True
-            grouped.setdefault((scanned_start, scanned_end), []).append(watermark)
+            grouped.setdefault((dataset_id, scanned_start, scanned_end), []).append(
+                watermark
+            )
 
     for siblings in grouped.values():
         for watermark in siblings:
@@ -2205,6 +2210,12 @@ def collect_evidence(
                 ),
                 "source_records": block.get("source_records", []),
                 "source_watermarks": block.get("source_watermarks", []),
+                **(
+                    {"dataset_id": block["dataset_id"]}
+                    if isinstance(block.get("dataset_id"), str)
+                    and block["dataset_id"]
+                    else {}
+                ),
             },
         )
 

@@ -385,6 +385,18 @@ fabricated Material Change. It becomes the readable and exportable head, and
 independently qualifies as a Forward Research Anchor only when its resulting
 Current Research State satisfies Anchor Coverage.
 
+EDINET ownership/control filings collected for the sentiment analyst remain a
+Required subset of the same official-filing event stream. Their producer carries
+the frozen Information Frontier and emits Source Records plus a PIT Watermark for
+the actual scan; a successful zero-result scan emits an explicit frontier-attested
+zero-record closure. The sentiment presentation role does not downgrade those
+official filings to Advisory or create a second, weaker EDINET coverage contract.
+Graph-facing Evidence retains the `edinet.ownership_control` dataset identity so
+closure comparisons do not equate that subject-company query with EDINET's
+company-filer disclosure query merely because their source and calendar interval
+match. An unavailable Required EDINET dataset remains blocking; dataset scoping
+separates incompatible record universes, not Required from Advisory Evidence.
+
 Near-live Advisory Evidence may appear in the same Revision and inform its
 reports, risks, catalysts, and Research Opinion without satisfying or poisoning
 Anchor Coverage. If a Claim or open Question promotes its live-only source to

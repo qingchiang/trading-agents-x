@@ -24,8 +24,11 @@ import time
 from collections import OrderedDict
 from collections.abc import Iterator
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import requests
+
+from tradingagents.provenance import SourceObservation
 
 from ..config import get_config
 from ..errors import VendorNotConfiguredError, VendorRateLimitError
@@ -48,6 +51,64 @@ _DISK_MAX_FILES = 400
 _LIVE_MEMORY_TTL_SECONDS = 60.0
 _PRUNE_EVERY_WRITES = 25
 _TMP_ORPHAN_SECONDS = 3600.0
+_TOKYO = ZoneInfo("Asia/Tokyo")
+
+
+def source_observation(
+    record: dict,
+) -> tuple[SourceObservation | None, str | None]:
+    """Build the shared EDINET Source Record identity and availability proof."""
+
+    doc_id = str(record.get("docID") or "").strip()
+    if not doc_id:
+        return None, "EDINET returned a document without a native document identifier."
+    parent_id = str(record.get("parentDocID") or "").strip()
+    submitted = str(record.get("submitDateTime") or "").strip()
+    withdrawn = str(
+        record.get("withdrawalStatus") or record.get("withdrawStatus") or ""
+    ).strip()
+    corrected = str(record.get("docInfoEditStatus") or "").strip()
+    operation_at = str(record.get("opeDateTime") or "").strip()
+    is_operation = withdrawn not in {"", "0"} or corrected not in {"", "0"}
+    if is_operation and not operation_at:
+        return (
+            None,
+            f"EDINET document {doc_id} has an operation without a safe availability "
+            "timestamp.",
+        )
+    availability_text = operation_at if is_operation else submitted
+    try:
+        available = datetime.fromisoformat(availability_text)
+    except ValueError:
+        return None, f"EDINET document {doc_id} has an invalid availability timestamp."
+    if available.utcoffset() is None:
+        available = available.replace(tzinfo=_TOKYO)
+    title = str(record.get("docDescription") or record.get("docTypeCode") or "Disclosure")
+    if withdrawn not in {"", "0"}:
+        status = "withdrawn"
+    elif "訂正" in title or corrected not in {"", "0"}:
+        status = "corrected"
+    else:
+        status = "published"
+    return (
+        SourceObservation(
+            source="EDINET",
+            record_id=parent_id or doc_id,
+            version_id=f"edinet:{doc_id}",
+            status=status,
+            published_at=submitted,
+            available_at=available.isoformat(),
+            title=title,
+            availability_basis=(
+                "EDINET operation timestamp"
+                if is_operation
+                else "EDINET submission timestamp"
+            ),
+            url=f"https://disclosure2.edinet-fsa.go.jp/WEEK0010.aspx?docID={doc_id}",
+            native_record_id=doc_id,
+        ),
+        None,
+    )
 
 
 class EDINETNotConfiguredError(VendorNotConfiguredError):

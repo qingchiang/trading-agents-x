@@ -2,13 +2,21 @@
 windowing, graceful degradation. Network and code resolution are mocked."""
 import tempfile
 import unittest
+from datetime import datetime
 from unittest import mock
 
 import pytest
 
 import tradingagents.default_config as default_config
+from tradingagents.agents.utils.information_frontier import (
+    filter_evidence_content_at_information_frontier,
+)
 from tradingagents.dataflows.config import bind_config
 from tradingagents.dataflows.jp import edinet_code_map as cm, edinet_common, edinet_holdings
+from tradingagents.provenance import (
+    extract_source_observations,
+    extract_source_watermarks,
+)
 
 
 def _holding(subject="E02778", *, doc_type="350", filer="ブラックロック・ジャパン株式会社",
@@ -110,8 +118,58 @@ class HoldingsTests(unittest.TestCase):
 
     def test_no_reports_returns_informative_line(self):
         with self._patch({"2026-06-22": [_holding(subject="E99999")]}):
-            out = edinet_holdings.get_large_holdings("9984.T", "2026-06-22", look_back_days=0)
+            out = edinet_holdings.get_large_holdings(
+                "9984.T",
+                "2026-06-22",
+                look_back_days=0,
+                information_frontier="2026-06-22T23:59:59+09:00",
+            )
         self.assertIn("No EDINET large-shareholding or tender-offer filings", out)
+        self.assertEqual(extract_source_observations(out), [])
+        watermark = extract_source_watermarks(out)[0]
+        self.assertEqual(watermark.source, "EDINET")
+        self.assertEqual(watermark.status, "complete")
+        self.assertEqual(watermark.returned_records, 0)
+        self.assertEqual(watermark.reported_records, 0)
+        self.assertEqual(
+            watermark.information_frontier,
+            "2026-06-22T23:59:59+09:00",
+        )
+
+    def test_matching_reports_carry_record_and_frontier_closure(self):
+        mapping = {"2026-06-22": [_holding(subject="E02778", doc_id="HOLD-1")]}
+
+        with self._patch(mapping):
+            out = edinet_holdings.get_large_holdings(
+                "9984.T",
+                "2026-06-22",
+                look_back_days=0,
+                information_frontier="2026-06-22T23:59:59+09:00",
+            )
+
+        observation = extract_source_observations(out)[0]
+        self.assertEqual(observation.source, "EDINET")
+        self.assertEqual(observation.native_record_id, "HOLD-1")
+        watermark = extract_source_watermarks(out)[0]
+        self.assertEqual(watermark.status, "complete")
+        self.assertEqual(watermark.returned_records, 1)
+        self.assertEqual(watermark.reported_records, 1)
+        self.assertEqual(
+            watermark.information_frontier,
+            "2026-06-22T23:59:59+09:00",
+        )
+
+        filtered, omitted = filter_evidence_content_at_information_frontier(
+            out,
+            datetime.fromisoformat("2026-06-22T23:59:59+09:00"),
+            fallback_source="EDINET",
+            analysis_date=datetime.fromisoformat("2026-06-22").date(),
+            instrument="9984.T",
+            sealed_at=datetime.fromisoformat("2026-06-23T00:00:00+09:00"),
+        )
+        self.assertFalse(omitted)
+        self.assertIn("HOLD-1", filtered)
+        self.assertEqual(extract_source_watermarks(filtered)[0].status, "complete")
 
     def test_surfaces_tender_offer_family_with_correct_labels(self):
         # TOB filings tag the target in subjectEdinetCode too (verified live), so
@@ -160,6 +218,15 @@ class HoldingsTests(unittest.TestCase):
     def test_malformed_curr_date_degrades_without_raising(self):
         with self._patch({}):
             out = edinet_holdings.get_large_holdings("9984.T", "not-a-date")
+        self.assertIn("<large-shareholding data unavailable: ValueError>", out)
+
+    def test_malformed_information_frontier_degrades_without_raising(self):
+        with self._patch({}):
+            out = edinet_holdings.get_large_holdings(
+                "9984.T",
+                "2026-06-22",
+                information_frontier="not-a-frontier",
+            )
         self.assertIn("<large-shareholding data unavailable: ValueError>", out)
 
     def test_window_shares_cache_with_news(self):

@@ -26,9 +26,12 @@ from tradingagents.dataflows.market_signals import (
 from tradingagents.graph.research_graph import _collect_evidence
 from tradingagents.provenance import (
     ProvenanceRecord,
+    SourceInterval,
     SourceObservation,
+    SourceWatermark,
     attach_provenance,
     attach_source_observations,
+    attach_source_watermarks,
 )
 
 _MODULE = "tradingagents.agents.analysts.sentiment_analyst"
@@ -261,7 +264,11 @@ def test_routed_markets_skip_us_social_and_use_per_name_signals(ticker, route):
 
     stocktwits.assert_not_called()
     reddit.assert_not_called()
-    signals.assert_called_once_with(ticker, "2026-01-15")
+    signals.assert_called_once_with(
+        ticker,
+        "2026-01-15",
+        information_frontier=None,
+    )
     prompt = "\n".join(map(str, captured["prompt"]))
     assert "unavailable: no coverage for this market" in prompt
     assert "SIGNAL_DATA" in prompt
@@ -274,6 +281,95 @@ def test_routed_markets_skip_us_social_and_use_per_name_signals(ticker, route):
         if block["content"] == "SIGNAL_DATA"
     )
     assert signal_block["records"][0]["source"] == "official source"
+
+
+@pytest.mark.unit
+def test_routed_market_forwards_frozen_frontier_to_signal_prefetch():
+    frontier = "2026-01-15T23:59:59+09:00"
+
+    *_, signals, _news, _result = _run(
+        ticker="9984.T",
+        routes={".T": {"news_data": "jp_news"}},
+        information_frontier=frontier,
+    )
+
+    signals.assert_called_once_with(
+        "9984.T",
+        "2026-01-15",
+        information_frontier=frontier,
+    )
+
+
+@pytest.mark.unit
+def test_edinet_sentiment_prefetch_retains_required_source_closure():
+    frontier = "2026-01-15T23:59:59+09:00"
+    spec = SentimentSignal(
+        tag="large_holdings",
+        fetch=lambda *_args: "",
+        evidence="ownership and control filings",
+        source="EDINET",
+        title="Ownership and control",
+        intro="Official filings.",
+        effective=lambda value: f"2025-10-18 to {value}",
+        timing="disclosure-date filtered",
+        accepts_information_frontier=True,
+        dataset_id="edinet.ownership_control",
+    )
+    body = attach_source_observations(
+        "EDINET_OWNERSHIP_CONTROL",
+        SourceObservation(
+            source="EDINET",
+            record_id="edinet:holding:1",
+            version_id="edinet:holding:1:v1",
+            status="published",
+            published_at="2026-01-14 15:00",
+            available_at="2026-01-14T15:00:00+09:00",
+            title="Large-shareholding report",
+            native_record_id="holding:1",
+        ),
+    )
+    body = attach_source_watermarks(
+        body,
+        SourceWatermark(
+            source="EDINET",
+            scanned_start="2025-10-18",
+            scanned_end="2026-01-15",
+            status="complete",
+            returned_records=1,
+            reported_records=1,
+            requested_interval=SourceInterval(
+                start="2025-10-18",
+                end="2026-01-15",
+            ),
+            information_frontier=frontier,
+        ),
+    )
+    result = _run(
+        ticker="9984.T",
+        routes={".T": {"news_data": "jp_news"}},
+        information_frontier=frontier,
+        signals=(FetchedSentimentSignal(spec=spec, body=body),),
+    )[-1]
+
+    evidence = _collect_evidence(
+        result["messages"],
+        result["sentiment_report"],
+        requested_date=date(2026, 1, 15),
+        analyst="sentiment",
+        prefetched_blocks=result["prefetched_evidence"],
+    )
+
+    ownership = next(
+        item
+        for item in evidence
+        if any(origin.source == "EDINET" for origin in item.origins)
+        and item.content == "EDINET_OWNERSHIP_CONTROL"
+    )
+    assert ownership.provenance["dataset_id"] == "edinet.ownership_control"
+    assert ownership.provenance["source_records"][0]["native_record_id"] == "holding:1"
+    watermark = ownership.provenance["source_watermarks"][0]
+    assert watermark["status"] == "complete"
+    assert watermark["information_frontier"] == frontier
 
 
 @pytest.mark.unit

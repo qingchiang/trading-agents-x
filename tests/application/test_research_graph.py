@@ -1513,6 +1513,95 @@ class _ConflictingRequiredEvidenceSubgraph(_RequiredEvidenceSubgraph):
         }
 
 
+class _DistinctEdinetDatasetSubgraph(_RequiredEvidenceSubgraph):
+    def invoke(self, state, **kwargs):
+        result = super().invoke(state, **kwargs)
+        if self.analyst != "social":
+            return result
+        return {
+            **result,
+            "prefetched_evidence": [
+                {
+                    "content": "EDINET ownership and control filing.",
+                    "records": [
+                        {
+                            "evidence": "ownership and control filings",
+                            "source": "EDINET",
+                            "requested": "2026-07-12 to 2026-08-10",
+                            "effective": "2026-07-12 to 2026-08-10",
+                            "timing": "disclosure-date filtered",
+                            "retrieved_at": None,
+                        }
+                    ],
+                    "temporal_scope": "point_in_time",
+                    "dataset_id": "edinet.ownership_control",
+                    "source_records": [
+                        {
+                            "source": "EDINET",
+                            "record_id": "edinet:holding:1",
+                            "version_id": "edinet:holding:1:v1",
+                            "status": "published",
+                            "published_at": "2026-08-10 15:00",
+                            "available_at": "2026-08-10T15:00:00+09:00",
+                            "title": "Large-shareholding report",
+                            "availability_basis": "EDINET submission timestamp",
+                            "url": None,
+                            "replaces_version_id": None,
+                            "record_kind": "disclosure",
+                            "native_record_id": "holding:1",
+                            "comparison_key": None,
+                            "change_hint": None,
+                            "accounting_scope": None,
+                            "adjustment": None,
+                            "observation_value": None,
+                            "unit": None,
+                            "precision": None,
+                        }
+                    ],
+                    "source_watermarks": [
+                        {
+                            "source": "EDINET",
+                            "scanned_start": "2026-07-12",
+                            "scanned_end": "2026-08-10",
+                            "status": "complete",
+                            "temporal_scope": "point_in_time",
+                            "limitations": (),
+                            "returned_records": 1,
+                            "reported_records": 1,
+                            "requested_interval": {
+                                "start": "2026-07-12",
+                                "end": "2026-08-10",
+                            },
+                            "limitation_kind": None,
+                            "information_frontier": "2026-08-10T23:59:00+09:00",
+                        }
+                    ],
+                }
+            ],
+        }
+
+
+class _UnavailableEdinetDatasetSubgraph(_DistinctEdinetDatasetSubgraph):
+    def invoke(self, state, **kwargs):
+        result = super().invoke(state, **kwargs)
+        if self.analyst != "social":
+            return result
+        block = result["prefetched_evidence"][0]
+        watermark = block["source_watermarks"][0]
+        watermark.update(
+            {
+                "status": "unavailable",
+                "returned_records": 0,
+                "reported_records": 0,
+                "information_frontier": None,
+                "limitation_kind": "unavailable",
+                "limitations": ("Ownership/control scan unavailable.",),
+            }
+        )
+        block["source_records"] = []
+        return result
+
+
 _ACCEPTANCE_FRONTIER = "2026-08-10T23:59:00+09:00"
 _ACCEPTANCE_RETRIEVED_AT = "2026-08-14T00:15:00+09:00"
 _ACCEPTANCE_SEALED_AT = "2026-08-14T00:20:00+09:00"
@@ -2044,6 +2133,107 @@ def test_conflicting_required_source_closure_stops_before_synthesis(
     }
     assert quick.calls == []
     assert deep.calls == []
+
+
+def test_distinct_required_edinet_datasets_do_not_conflict(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _DistinctEdinetDatasetSubgraph(analyst)
+            for analyst in self.selected_analysts
+        },
+    )
+    quick = _FakeLLM()
+    readiness = _jp_anchor_readiness()
+    request = AnalysisRequest(
+        ticker="4568.T",
+        analysis_date="2026-08-10",
+        profile=RunProfile.FAST,
+        analysts=("market", "social", "news", "fundamentals"),
+    )
+    settings = app_settings.resolve_run(request)
+    graph = ResearchGraph(
+        quick_llm=quick,
+        deep_llm=_FakeLLM(),
+        profile=request.profile,
+        selected_analysts=request.analysts,
+        metrics=MetricsCallback(),
+    )
+
+    execution = graph.execute(
+        RunContext(
+            run_id="fixture-distinct-edinet-datasets",
+            request=request,
+            settings=settings,
+            dataflow_config=settings.dataflow_config(app_settings),
+            memory=MemoryContext(instrument=request.ticker, market="Asia/Tokyo"),
+            instrument_context="The instrument is 4568.T.",
+            cancel_requested=lambda: False,
+            information_frontier=readiness.information_frontier,
+            anchor_readiness=readiness,
+        ),
+        checkpoint_thread_id="distinct-edinet-datasets",
+    )
+
+    assert any(
+        item.provenance.get("dataset_id") == "edinet.ownership_control"
+        for item in execution.evidence.items
+    )
+    assert quick.calls
+
+
+def test_unavailable_required_edinet_dataset_still_blocks_synthesis(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _UnavailableEdinetDatasetSubgraph(analyst)
+            for analyst in self.selected_analysts
+        },
+    )
+    quick = _FakeLLM()
+    readiness = _jp_anchor_readiness()
+    request = AnalysisRequest(
+        ticker="4568.T",
+        analysis_date="2026-08-10",
+        profile=RunProfile.FAST,
+        analysts=("market", "social", "news", "fundamentals"),
+    )
+    settings = app_settings.resolve_run(request)
+    graph = ResearchGraph(
+        quick_llm=quick,
+        deep_llm=_FakeLLM(),
+        profile=request.profile,
+        selected_analysts=request.analysts,
+        metrics=MetricsCallback(),
+    )
+
+    with pytest.raises(GraphVisibleRequiredEvidenceError) as exc_info:
+        graph.execute(
+            RunContext(
+                run_id="fixture-unavailable-edinet-dataset",
+                request=request,
+                settings=settings,
+                dataflow_config=settings.dataflow_config(app_settings),
+                memory=MemoryContext(instrument=request.ticker, market="Asia/Tokyo"),
+                instrument_context="The instrument is 4568.T.",
+                cancel_requested=lambda: False,
+                information_frontier=readiness.information_frontier,
+                anchor_readiness=readiness,
+            ),
+            checkpoint_thread_id="unavailable-edinet-dataset",
+        )
+
+    assert exc_info.value.missing_sources == ("EDINET",)
+    assert exc_info.value.missing_capabilities == ("official_filing",)
+    assert quick.calls == []
 
 
 def test_offline_near_live_acceptance_produces_forward_anchor_and_incremental_policy(
