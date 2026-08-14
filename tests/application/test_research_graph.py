@@ -14,6 +14,7 @@ from tradingagents.application.anchor_readiness import (
     AnchorReadinessResult,
     AnchorReadinessSourceFrontier,
     source_record_versions_digest,
+    validate_japanese_anchor_readiness,
 )
 from tradingagents.application.contracts import (
     AnalysisRequest,
@@ -27,7 +28,6 @@ from tradingagents.application.contracts import (
     EvidenceItem,
     EvidenceQuality,
     IssueDisposition,
-    KeyClaim,
     MemoryContext,
     MemoryOutcome,
     MemoryRecord,
@@ -39,13 +39,20 @@ from tradingagents.application.contracts import (
     RunMetrics,
     RunProfile,
 )
+from tradingagents.application.market_readiness import MarketDataReadiness
 from tradingagents.application.metrics import MetricsCallback
 from tradingagents.application.research import (
     CapabilityAttestation,
+    CoverageRequirement,
     MarketResearchCapability,
+    assemble_full_revision,
+    bind_information_frontier,
+    derive_forward_research_anchor,
+    evaluate_next_update_policy,
 )
 from tradingagents.application.runtime import RunContext
-from tradingagents.graph.analyst_synthesis import AnalystAuditDraft
+from tradingagents.application.source_dependencies import is_internal_source_reference
+from tradingagents.graph.analyst_synthesis import AnalystAuditDraft, AuditKeyClaimDraft
 from tradingagents.graph.deliberation import (
     DecisionNumericDraft,
     JudgeAudit,
@@ -938,7 +945,7 @@ class _StructuredInvoker:
             parsed = AnalystAuditDraft(
                 confidence=0.6,
                 key_claims=(
-                    KeyClaim(
+                    AuditKeyClaimDraft(
                         id=f"{analyst}.claim_1",
                         section_id=section_id,
                         kind=AnalystClaimType.INFERENCE,
@@ -1223,6 +1230,228 @@ class _RequiredEvidenceSubgraph(_AnalystSubgraph):
         return {**result, "messages": [*state["messages"], message]}
 
 
+_ACCEPTANCE_FRONTIER = "2026-08-10T23:59:00+09:00"
+_ACCEPTANCE_RETRIEVED_AT = "2026-08-14T00:15:00+09:00"
+_ACCEPTANCE_SEALED_AT = "2026-08-14T00:20:00+09:00"
+
+
+def _acceptance_news_payload() -> str:
+    spans = []
+    for source, sentinel in (
+        ("EDINET", "EDINET PIT FILING BODY"),
+        ("TDnet", "TDNET PIT DISCLOSURE BODY"),
+    ):
+        version_id = f"{source.casefold()}:4568:2026-08-10:v1"
+        payload = attach_source_watermarks(
+            attach_source_observations(
+                attach_provenance(
+                    sentinel,
+                    ProvenanceRecord(
+                        evidence="get_news",
+                        source=source,
+                        requested="2026-07-12 to 2026-08-10",
+                        effective="2026-08-10",
+                        timing="available",
+                    ),
+                ),
+                SourceObservation(
+                    source=source,
+                    record_id=f"{source.casefold()}:4568:2026-08-10",
+                    version_id=version_id,
+                    status="published",
+                    published_at="2026-08-10 15:00",
+                    available_at="2026-08-10T15:00:00+09:00",
+                    title=f"{source} acceptance record",
+                ),
+            ),
+            SourceWatermark(
+                source=source,
+                scanned_start="2026-07-12",
+                scanned_end="2026-08-10",
+                status="complete",
+                returned_records=1,
+                reported_records=1,
+                requested_interval=SourceInterval(
+                    start="2026-07-12",
+                    end="2026-08-10",
+                ),
+                information_frontier=_ACCEPTANCE_FRONTIER,
+            ),
+        )
+        spans.append(attach_evidence_span(payload, temporal_scope="point_in_time"))
+
+    google = attach_source_watermarks(
+        attach_source_observations(
+            attach_provenance(
+                "GOOGLE NEAR LIVE HEADLINE BODY",
+                ProvenanceRecord(
+                    evidence="get_news",
+                    source="Google News",
+                    requested="2026-08-10",
+                    effective="2026-08-10",
+                    timing="live non-point-in-time",
+                    retrieved_at=_ACCEPTANCE_RETRIEVED_AT,
+                ),
+            ),
+            SourceObservation(
+                source="Google News",
+                record_id="google:4568:2026-08-10",
+                version_id="google:4568:2026-08-10:v1",
+                status="published",
+                published_at="2026-08-10 13:00",
+                available_at="2026-08-10T13:00:00+09:00",
+                title="Near-live acceptance headline",
+            ),
+        ),
+        SourceWatermark(
+            source="Google News",
+            scanned_start="2026-08-10",
+            scanned_end="2026-08-10",
+            status="complete",
+            temporal_scope="live_only",
+            returned_records=1,
+            reported_records=1,
+        ),
+    )
+    spans.append(attach_evidence_span(google, temporal_scope="live_only"))
+    return "\n".join(spans)
+
+
+class _OfflineAcceptanceSubgraph(_AnalystSubgraph):
+    def invoke(self, state, **kwargs):
+        result = super().invoke(state, **kwargs)
+        if self.analyst == "news":
+            messages = (
+                ToolMessage(
+                    content=_acceptance_news_payload(),
+                    tool_call_id="acceptance-news",
+                    name="get_news",
+                    additional_kwargs={
+                        "evidence_admission_sealed_at": _ACCEPTANCE_SEALED_AT,
+                    },
+                ),
+            )
+        elif self.analyst == "market":
+            snapshot = attach_source_watermarks(
+                attach_source_observations(
+                    attach_provenance(
+                        "J-QUANTS VERIFIED MARKET SNAPSHOT",
+                        ProvenanceRecord(
+                            evidence="get_verified_market_snapshot",
+                            source="J-Quants adjusted OHLCV",
+                            requested="2026-08-10",
+                            effective="2026-08-10",
+                            timing="market-date filtered",
+                        ),
+                    ),
+                    SourceObservation(
+                        source="J-Quants adjusted OHLCV",
+                        record_id="jquants-market:4568.T",
+                        version_id="jquants-market:4568:2026-08-10:v1",
+                        status="published",
+                        published_at="2026-08-10",
+                        available_at=_ACCEPTANCE_FRONTIER,
+                        title="Adjusted market history through 2026-08-10",
+                        record_kind="market",
+                        adjustment="J-Quants adjusted OHLCV v2",
+                        observation_value=101.0,
+                        unit="JPY",
+                        precision=2,
+                    ),
+                ),
+                SourceWatermark(
+                    source="J-Quants adjusted OHLCV",
+                    scanned_start="2026-08-10",
+                    scanned_end="2026-08-10",
+                    status="complete",
+                    returned_records=1,
+                    reported_records=1,
+                    information_frontier=_ACCEPTANCE_FRONTIER,
+                ),
+            )
+            messages = (
+                ToolMessage(
+                    content="J-Quants adjusted market artifact is available.",
+                    tool_call_id="acceptance-market",
+                    name="get_stock_data",
+                    artifact={
+                        "schema_version": "1",
+                        "kind": "source",
+                        "dataset_id": "ds_acceptancemarket",
+                        "evidence_type": "get_stock_data",
+                        "source_content": (
+                            "# Data retrieved on: 2026-08-14\n"
+                            "Date,Open,High,Low,Close,Volume\n"
+                            "2026-08-10,100,102,99,101,1200"
+                        ),
+                        "provenance": [
+                            {
+                                "evidence": "get_stock_data",
+                                "source": "J-Quants adjusted OHLCV",
+                                "requested": "2026-08-10 to 2026-08-10",
+                                "effective": "2026-08-10",
+                                "timing": "market-date filtered",
+                            }
+                        ],
+                        "temporal_scope": "point_in_time",
+                        "analytical_views": {
+                            "row_count": 1,
+                            "effective_end": "2026-08-10",
+                        },
+                    },
+                ),
+                ToolMessage(
+                    content=snapshot,
+                    tool_call_id="acceptance-market-snapshot",
+                    name="get_verified_market_snapshot",
+                ),
+            )
+        elif self.analyst == "fundamentals":
+            payload = attach_source_watermarks(
+                attach_source_observations(
+                    attach_provenance(
+                        "J-QUANTS PIT FUNDAMENTALS BODY",
+                        ProvenanceRecord(
+                            evidence="get_fundamentals",
+                            source="J-Quants official summary",
+                            requested="2026-08-10",
+                            effective="disclosures <= 2026-08-10",
+                            timing="disclosure-date filtered",
+                        ),
+                    ),
+                    SourceObservation(
+                        source="J-Quants fundamentals",
+                        record_id="4568:2026-08-10",
+                        version_id="jquants-fundamentals:4568:2026-08-10",
+                        status="published",
+                        published_at="2026-08-10 15:00",
+                        available_at="2026-08-10T15:00:00+09:00",
+                        title="Financial summary",
+                        record_kind="fundamental",
+                    ),
+                ),
+                SourceWatermark(
+                    source="J-Quants fundamentals",
+                    scanned_start="2026-08-10",
+                    scanned_end="2026-08-10",
+                    status="complete",
+                    returned_records=1,
+                    reported_records=1,
+                    information_frontier=_ACCEPTANCE_FRONTIER,
+                ),
+            )
+            messages = (
+                ToolMessage(
+                    content=attach_evidence_span(payload, temporal_scope="point_in_time"),
+                    tool_call_id="acceptance-fundamentals",
+                    name="get_fundamentals",
+                ),
+            )
+        else:
+            return result
+        return {**result, "messages": [*state["messages"], *messages]}
+
+
 def _context(
     app_settings,
     profile: RunProfile,
@@ -1473,6 +1702,122 @@ def test_anchor_readiness_matching_graph_evidence_reaches_synthesis(
         for origin in item.origins
     )
     assert quick.calls
+
+
+def test_offline_near_live_acceptance_produces_forward_anchor_and_incremental_policy(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _OfflineAcceptanceSubgraph(analyst)
+            for analyst in self.selected_analysts
+        },
+    )
+    request = AnalysisRequest(
+        ticker="4568.T",
+        analysis_date="2026-08-10",
+        profile=RunProfile.FAST,
+        analysts=("market", "news", "fundamentals"),
+    )
+    frontier = datetime.fromisoformat(_ACCEPTANCE_FRONTIER)
+    readiness = validate_japanese_anchor_readiness(
+        request,
+        information_frontier=frontier,
+        market_checker=lambda _ticker, cutoff: MarketDataReadiness(
+            requested_cutoff=cutoff,
+            market_effective_date=cutoff,
+            observed_bar_date=cutoff,
+        ),
+        news_collector=lambda *_args, **_kwargs: _acceptance_news_payload(),
+    )
+    assert readiness.ready is True
+
+    quick = _FakeLLM()
+    deep = _FakeLLM()
+    settings = app_settings.resolve_run(request)
+    context = RunContext(
+        run_id="fixture-offline-near-live-acceptance",
+        request=request,
+        settings=settings,
+        dataflow_config=settings.dataflow_config(app_settings),
+        memory=MemoryContext(instrument=request.ticker, market="Asia/Tokyo"),
+        instrument_context="The instrument is 4568.T.",
+        cancel_requested=lambda: False,
+        information_frontier=frontier,
+        anchor_readiness=readiness,
+    )
+    execution = ResearchGraph(
+        quick_llm=quick,
+        deep_llm=deep,
+        profile=request.profile,
+        selected_analysts=request.analysts,
+        metrics=MetricsCallback(),
+    ).execute(
+        context,
+        checkpoint_thread_id="offline-near-live-acceptance",
+    )
+
+    analyst_prompts = "\n".join(
+        prompt for call_type, prompt in quick.calls if call_type == "MarkdownReport"
+    )
+    for sentinel in (
+        "EDINET PIT FILING BODY",
+        "TDNET PIT DISCLOSURE BODY",
+        "J-QUANTS PIT FUNDAMENTALS BODY",
+        "GOOGLE NEAR LIVE HEADLINE BODY",
+    ):
+        assert sentinel in analyst_prompts
+    assert execution.evidence.tables
+    market_row = execution.evidence.tables[0].rows[-1]
+    assert market_row.cells["date"].raw_value == "2026-08-10"
+    assert market_row.cells["close"].raw_value == 101.0
+
+    google_item = next(
+        item
+        for item in execution.evidence.items
+        if any(origin.source == "Google News" for origin in item.origins)
+    )
+    assert google_item.content == "GOOGLE NEAR LIVE HEADLINE BODY"
+    assert google_item.quality is EvidenceQuality.LOW
+    assert any(
+        origin.temporal_scope.value == "live_only" for origin in google_item.origins
+    )
+    assert google_item.ref in execution.reports["news"].source_refs
+
+    revision = bind_information_frontier(
+        assemble_full_revision(request, execution),
+        frontier,
+    )
+    qualification = derive_forward_research_anchor(revision)
+    policy = evaluate_next_update_policy(
+        revision,
+        instrument=request.ticker,
+        mode="experimental",
+    )
+    google_coverage = next(
+        item for item in revision.coverage.domains if item.source == "Google News"
+    )
+
+    assert google_coverage.requirement is CoverageRequirement.ADVISORY
+    assert qualification.is_forward_research_anchor is True, qualification.model_dump(
+        mode="json"
+    )
+    assert revision.coverage.anchor_qualification == qualification
+    assert policy.policy == "incremental_allowed"
+    assert policy.reason is None
+    assert all(
+        not is_internal_source_reference(source)
+        for claim in revision.current_state.claims
+        for source in claim.required_sources
+    )
+    assert all(
+        not is_internal_source_reference(source)
+        for question in revision.current_state.questions
+        for source in question.required_sources
+    )
 
 
 def test_empty_ready_manifest_fails_closed_before_synthesis(

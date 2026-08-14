@@ -219,6 +219,10 @@ manifest before analyst synthesis. Missing Required source records, watermarks,
 or selected market/fundamental datasets fail with a typed admission reason
 before the case, debate, risk, or committee stages. Ordinary explicitly
 non-anchor Full executions retain their existing degraded-evidence behavior.
+Market Observation closure includes both the complete adjusted-OHLCV artifact
+and table used by the analyst and the verified market snapshot's PIT Source
+Record/Watermark used by Anchor Coverage; neither representation substitutes
+for the other.
 The successful manifest is immutable across attempts of the same run. Event
 source frontiers retain returned/reported counts, a digest of the observed
 record-version closure, and typed limitations; retries reuse both that manifest
