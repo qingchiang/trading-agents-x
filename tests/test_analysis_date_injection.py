@@ -222,6 +222,47 @@ def test_verified_market_snapshot_forwards_frozen_information_frontier(
 
 
 @pytest.mark.unit
+def test_stock_data_forwards_frozen_information_frontier(app_settings):
+    request = AnalysisRequest(
+        ticker="4568.T",
+        analysis_date="2026-08-10",
+        analysts=("market",),
+    )
+    settings = app_settings.resolve_run(request)
+    frontier = datetime.fromisoformat("2026-08-10T23:59:00+09:00")
+    context = RunContext(
+        run_id="market-table-frontier",
+        request=request,
+        settings=settings,
+        dataflow_config=settings.dataflow_config(app_settings),
+        memory=MemoryContext(instrument=request.ticker, market="Asia/Tokyo"),
+        instrument_context="The instrument is 4568.T.",
+        cancel_requested=lambda: False,
+        information_frontier=frontier,
+    )
+
+    with mock.patch(
+        "tradingagents.agents.utils.core_stock_tools.route_to_vendor",
+        return_value="SAFE",
+    ) as router:
+        _invoke_tool(
+            get_stock_data_for_analysis,
+            {"symbol": request.ticker, "start_date": "2026-05-13"},
+            trade_date=request.analysis_date.isoformat(),
+            context=context,
+        )
+
+    router.assert_called_once_with(
+        "get_stock_data",
+        "4568.T",
+        "2026-05-13",
+        "2026-08-10",
+        _provenance=True,
+        information_frontier=frontier.isoformat(),
+    )
+
+
+@pytest.mark.unit
 def test_news_tool_node_derives_window_from_injected_trade_date():
     with (
         mock.patch(

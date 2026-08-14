@@ -5,6 +5,7 @@ from langgraph.prebuilt import InjectedState
 
 from tradingagents.agents.utils.runtime import (
     AnalysisToolRuntime,
+    evidence_route_kwargs,
     tool_runtime_scope,
 )
 from tradingagents.dataflows.interface import route_to_vendor
@@ -96,19 +97,11 @@ def get_fundamentals_for_analysis(
 ) -> str:
     """Retrieve fundamentals using the workflow's immutable analysis date."""
     with tool_runtime_scope(runtime, curr_date) as cutoff:
-        route_kwargs = {"_provenance": True}
-        information_frontier = getattr(
-            runtime.context,
-            "information_frontier",
-            None,
-        )
-        if information_frontier is not None:
-            route_kwargs["information_frontier"] = information_frontier.isoformat()
         return route_to_vendor(
             "get_fundamentals",
             ticker,
             cutoff,
-            **route_kwargs,
+            **evidence_route_kwargs(runtime),
         )
 
 
@@ -122,7 +115,11 @@ def get_balance_sheet_for_analysis(
     """Retrieve a balance sheet using the workflow's immutable analysis date."""
     with tool_runtime_scope(runtime, curr_date) as cutoff:
         return route_to_vendor(
-            "get_balance_sheet", ticker, freq, cutoff, _provenance=True
+            "get_balance_sheet",
+            ticker,
+            freq,
+            cutoff,
+            **evidence_route_kwargs(runtime),
         )
 
 
@@ -136,7 +133,11 @@ def get_cashflow_for_analysis(
     """Retrieve cash flow using the workflow's immutable analysis date."""
     with tool_runtime_scope(runtime, curr_date) as cutoff:
         return route_to_vendor(
-            "get_cashflow", ticker, freq, cutoff, _provenance=True
+            "get_cashflow",
+            ticker,
+            freq,
+            cutoff,
+            **evidence_route_kwargs(runtime),
         )
 
 
@@ -150,5 +151,9 @@ def get_income_statement_for_analysis(
     """Retrieve an income statement using the workflow's immutable analysis date."""
     with tool_runtime_scope(runtime, curr_date) as cutoff:
         return route_to_vendor(
-            "get_income_statement", ticker, freq, cutoff, _provenance=True
+            "get_income_statement",
+            ticker,
+            freq,
+            cutoff,
+            **evidence_route_kwargs(runtime),
         )

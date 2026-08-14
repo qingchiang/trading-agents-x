@@ -5,6 +5,7 @@ from langgraph.prebuilt import InjectedState
 
 from tradingagents.agents.utils.runtime import (
     AnalysisToolRuntime,
+    evidence_route_kwargs,
     tool_runtime_scope,
 )
 from tradingagents.dataflows.interface import route_to_vendor
@@ -41,18 +42,10 @@ def get_verified_market_snapshot_for_analysis(
 ) -> str:
     """Build a verified snapshot at the workflow's immutable analysis date."""
     with tool_runtime_scope(runtime, curr_date) as cutoff:
-        route_kwargs = {"_provenance": True}
-        information_frontier = getattr(
-            runtime.context,
-            "information_frontier",
-            None,
-        )
-        if information_frontier is not None:
-            route_kwargs["information_frontier"] = information_frontier.isoformat()
         return route_to_vendor(
             "get_verified_market_snapshot",
             symbol,
             cutoff,
             look_back_days,
-            **route_kwargs,
+            **evidence_route_kwargs(runtime),
         )

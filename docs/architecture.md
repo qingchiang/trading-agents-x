@@ -222,7 +222,11 @@ non-anchor Full executions retain their existing degraded-evidence behavior.
 Market Observation closure includes both the complete adjusted-OHLCV artifact
 and table used by the analyst and the verified market snapshot's PIT Source
 Record/Watermark used by Anchor Coverage; neither representation substitutes
-for the other.
+for the other. The cost gate evaluates every graph-visible Watermark for each
+Required source, not merely the first successful sibling. An unavailable,
+non-PIT, or unattested sibling remains blocking, and conflicting Watermarks for
+the same source and scanned interval fail closed before analyst synthesis so
+the gate cannot be more optimistic than final Anchor Coverage.
 The successful manifest is immutable across attempts of the same run. Event
 source frontiers retain returned/reported counts, a digest of the observed
 record-version closure, and typed limitations; retries reuse both that manifest

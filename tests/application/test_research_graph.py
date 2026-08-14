@@ -1230,6 +1230,58 @@ class _RequiredEvidenceSubgraph(_AnalystSubgraph):
         return {**result, "messages": [*state["messages"], message]}
 
 
+class _ConflictingRequiredEvidenceSubgraph(_RequiredEvidenceSubgraph):
+    def invoke(self, state, **kwargs):
+        result = super().invoke(state, **kwargs)
+        if self.analyst not in {"market", "fundamentals"}:
+            return result
+        source = (
+            "J-Quants adjusted OHLCV"
+            if self.analyst == "market"
+            else "J-Quants fundamentals"
+        )
+        conflict = attach_source_watermarks(
+            attach_provenance(
+                "Required source closure was unavailable in one graph tool path.",
+                ProvenanceRecord(
+                    evidence=(
+                        "get_stock_data"
+                        if self.analyst == "market"
+                        else "get_balance_sheet"
+                    ),
+                    source=source,
+                    requested="2026-08-10",
+                    effective="—",
+                    timing="retrieval unavailable",
+                ),
+            ),
+            SourceWatermark(
+                source=source,
+                scanned_start="2026-08-10",
+                scanned_end="2026-08-10",
+                status="unavailable",
+                returned_records=0,
+                reported_records=0,
+                information_frontier=None,
+            ),
+        )
+        return {
+            **result,
+            "messages": [
+                *result["messages"],
+                ToolMessage(
+                    content=conflict,
+                    tool_call_id=f"conflicting-{self.analyst}",
+                    name=(
+                        "get_stock_data"
+                        if self.analyst == "market"
+                        else "get_balance_sheet"
+                    ),
+                ),
+            ],
+        }
+
+
 _ACCEPTANCE_FRONTIER = "2026-08-10T23:59:00+09:00"
 _ACCEPTANCE_RETRIEVED_AT = "2026-08-14T00:15:00+09:00"
 _ACCEPTANCE_SEALED_AT = "2026-08-14T00:20:00+09:00"
@@ -1702,6 +1754,65 @@ def test_anchor_readiness_matching_graph_evidence_reaches_synthesis(
         for origin in item.origins
     )
     assert quick.calls
+
+
+def test_conflicting_required_source_closure_stops_before_synthesis(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _ConflictingRequiredEvidenceSubgraph(analyst)
+            for analyst in self.selected_analysts
+        },
+    )
+    quick = _FakeLLM()
+    deep = _FakeLLM()
+    readiness = _jp_anchor_readiness()
+    request = AnalysisRequest(
+        ticker="4568.T",
+        analysis_date="2026-08-10",
+        profile=RunProfile.FAST,
+        analysts=("market", "news", "fundamentals"),
+    )
+    settings = app_settings.resolve_run(request)
+    context = RunContext(
+        run_id="fixture-conflicting-required-closure",
+        request=request,
+        settings=settings,
+        dataflow_config=settings.dataflow_config(app_settings),
+        memory=MemoryContext(instrument=request.ticker, market="Asia/Tokyo"),
+        instrument_context="The instrument is 4568.T.",
+        cancel_requested=lambda: False,
+        information_frontier=readiness.information_frontier,
+        anchor_readiness=readiness,
+    )
+    graph = ResearchGraph(
+        quick_llm=quick,
+        deep_llm=deep,
+        profile=request.profile,
+        selected_analysts=request.analysts,
+        metrics=MetricsCallback(),
+    )
+
+    with pytest.raises(GraphVisibleRequiredEvidenceError) as exc_info:
+        graph.execute(
+            context,
+            checkpoint_thread_id="conflicting-required-closure",
+        )
+
+    assert set(exc_info.value.missing_sources) == {
+        "J-Quants adjusted OHLCV",
+        "J-Quants fundamentals",
+    }
+    assert set(exc_info.value.missing_capabilities) == {
+        "fundamentals",
+        "market_observation",
+    }
+    assert quick.calls == []
+    assert deep.calls == []
 
 
 def test_offline_near_live_acceptance_produces_forward_anchor_and_incremental_policy(

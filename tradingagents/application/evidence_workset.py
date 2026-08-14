@@ -18,6 +18,8 @@ from tradingagents.dataflows.measurement import instrument_currency
 from tradingagents.provenance import (
     ProvenanceRecord,
     extract_provenance,
+    extract_source_observations,
+    extract_source_watermarks,
     strip_provenance_markers,
     temporal_scope_from_records,
 )
@@ -36,6 +38,8 @@ class EvidenceToolArtifact(TypedDict):
     analytical_views: dict[str, Any]
     column_measurements: NotRequired[dict[str, dict[str, str | None]]]
     structured_numeric_facts: NotRequired[list[dict[str, Any]]]
+    source_records: NotRequired[list[dict[str, Any]]]
+    source_watermarks: NotRequired[list[dict[str, Any]]]
 
 
 class StructuredNumericFact(TypedDict):
@@ -89,6 +93,8 @@ def build_market_data_artifact(
         "temporal_scope": temporal_scope_from_records(records),
         "analytical_views": views,
         "column_measurements": market_column_measurements(symbol),
+        "source_records": [asdict(item) for item in extract_source_observations(raw)],
+        "source_watermarks": [asdict(item) for item in extract_source_watermarks(raw)],
     }
     return render_market_overview(dataset_id, views), artifact
 

@@ -422,6 +422,73 @@ def _fundamentals_are_graph_visible(
     )
 
 
+def _required_source_closure_is_blocking(
+    bundle: EvidenceBundle,
+    source: str,
+) -> bool:
+    """Reject unsafe Required watermarks and incompatible interval siblings."""
+
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for item in bundle.items:
+        for watermark in _item_source_metadata(item, "source_watermarks", source):
+            scanned_start = watermark.get("scanned_start")
+            scanned_end = watermark.get("scanned_end")
+            if not isinstance(scanned_start, str) or not isinstance(scanned_end, str):
+                return True
+            grouped.setdefault((scanned_start, scanned_end), []).append(watermark)
+
+    for siblings in grouped.values():
+        for watermark in siblings:
+            raw_frontier = watermark.get("information_frontier")
+            try:
+                source_frontier = (
+                    datetime.fromisoformat(raw_frontier)
+                    if isinstance(raw_frontier, str)
+                    else None
+                )
+            except ValueError:
+                return True
+            if (
+                watermark.get("status") == "unavailable"
+                or watermark.get("temporal_scope", "point_in_time")
+                != "point_in_time"
+                or source_frontier is None
+                or source_frontier.utcoffset() is None
+                or bundle.information_frontier is None
+                or source_frontier > bundle.information_frontier
+            ):
+                return True
+
+    closure_fields = (
+        "status",
+        "temporal_scope",
+        "information_frontier",
+        "returned_records",
+        "reported_records",
+        "requested_interval",
+        "limitation_kind",
+        "limitations",
+    )
+    return any(
+        len(siblings) > 1
+        and any(
+            len(
+                {
+                    json.dumps(
+                        sibling.get(field),
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                    for sibling in siblings
+                }
+            )
+            > 1
+            for field in closure_fields
+        )
+        for siblings in grouped.values()
+    )
+
+
 def _missing_anchor_required_evidence(
     bundle: EvidenceBundle,
     context: RunContext,
@@ -485,6 +552,18 @@ def _missing_anchor_required_evidence(
     ):
         missing_sources.add("J-Quants fundamentals")
         missing_capabilities.add("fundamentals")
+    required_source_capabilities = {
+        source: item.capability.value
+        for item in readiness.capabilities
+        if item.required
+        for source in item.sources
+    }
+    if "fundamentals" in context.request.analysts:
+        required_source_capabilities["J-Quants fundamentals"] = "fundamentals"
+    for source, capability in required_source_capabilities.items():
+        if _required_source_closure_is_blocking(bundle, source):
+            missing_sources.add(source)
+            missing_capabilities.add(capability)
     return tuple(sorted(missing_sources)), tuple(sorted(missing_capabilities))
 
 
@@ -2046,6 +2125,8 @@ def collect_evidence(
                     "structured_numeric_facts": artifact.get(
                         "structured_numeric_facts", []
                     ),
+                    "source_records": artifact.get("source_records", []),
+                    "source_watermarks": artifact.get("source_watermarks", []),
                 },
             )
             continue

@@ -5,6 +5,7 @@ from langgraph.prebuilt import InjectedState
 
 from tradingagents.agents.utils.runtime import (
     AnalysisToolRuntime,
+    evidence_route_kwargs,
     tool_runtime_scope,
 )
 from tradingagents.application.evidence_workset import (
@@ -43,7 +44,11 @@ def get_stock_data_for_analysis(
     """Retrieve OHLCV while keeping the complete table out of model context."""
     with tool_runtime_scope(runtime, end_date) as cutoff:
         raw = route_to_vendor(
-            "get_stock_data", symbol, start_date, cutoff, _provenance=True
+            "get_stock_data",
+            symbol,
+            start_date,
+            cutoff,
+            **evidence_route_kwargs(runtime),
         )
     return build_market_data_artifact(
         raw,

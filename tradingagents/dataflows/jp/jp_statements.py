@@ -208,22 +208,63 @@ def _with_official_provenance(
     )
 
 
-def get_income_statement(ticker: str, freq: str = "quarterly", curr_date: str | None = None) -> str:
+def _frontier_kwargs(information_frontier: str | None) -> dict[str, str]:
+    return (
+        {"information_frontier": information_frontier}
+        if information_frontier is not None
+        else {}
+    )
+
+
+def get_income_statement(
+    ticker: str,
+    freq: str = "quarterly",
+    curr_date: str | None = None,
+    *,
+    information_frontier: str | None = None,
+) -> str:
     """J-Quants income summary + curated yfinance line items."""
-    base = jqf.get_income_statement(ticker, freq, curr_date)
+    base = jqf.get_income_statement(
+        ticker,
+        freq,
+        curr_date,
+        **_frontier_kwargs(information_frontier),
+    )
     result = base + _no_date_live_note(curr_date) + _detail_block(ticker, "income", freq, curr_date)
     return _with_official_provenance(result, "income", curr_date)
 
 
-def get_balance_sheet(ticker: str, freq: str = "quarterly", curr_date: str | None = None) -> str:
+def get_balance_sheet(
+    ticker: str,
+    freq: str = "quarterly",
+    curr_date: str | None = None,
+    *,
+    information_frontier: str | None = None,
+) -> str:
     """J-Quants balance-sheet summary + curated yfinance line items."""
-    base = jqf.get_balance_sheet(ticker, freq, curr_date)
+    base = jqf.get_balance_sheet(
+        ticker,
+        freq,
+        curr_date,
+        **_frontier_kwargs(information_frontier),
+    )
     result = base + _no_date_live_note(curr_date) + _detail_block(ticker, "balance", freq, curr_date)
     return _with_official_provenance(result, "balance", curr_date)
 
 
-def get_cashflow(ticker: str, freq: str = "quarterly", curr_date: str | None = None) -> str:
+def get_cashflow(
+    ticker: str,
+    freq: str = "quarterly",
+    curr_date: str | None = None,
+    *,
+    information_frontier: str | None = None,
+) -> str:
     """J-Quants cash-flow summary + curated yfinance line items."""
-    base = jqf.get_cashflow(ticker, freq, curr_date)
+    base = jqf.get_cashflow(
+        ticker,
+        freq,
+        curr_date,
+        **_frontier_kwargs(information_frontier),
+    )
     result = base + _no_date_live_note(curr_date) + _detail_block(ticker, "cashflow", freq, curr_date)
     return _with_official_provenance(result, "cashflow", curr_date)

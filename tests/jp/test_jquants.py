@@ -13,6 +13,7 @@ from unittest import mock
 import pandas as pd
 import pytest
 import requests
+from langchain_core.messages import ToolMessage
 
 import tradingagents.default_config as default_config
 from tradingagents.application.evidence_workset import build_market_data_artifact
@@ -35,6 +36,7 @@ from tradingagents.dataflows.jp.jquants_common import (
     to_jquants_code,
 )
 from tradingagents.dataflows.jp.jquants_stock import get_stock
+from tradingagents.graph.research_graph import collect_evidence
 from tradingagents.provenance import (
     extract_provenance,
     extract_source_observations,
@@ -139,6 +141,59 @@ class StockFetchTests(unittest.TestCase):
         assert [item["source"] for item in artifact["provenance"]] == [
             "J-Quants adjusted OHLCV"
         ]
+
+    def test_get_stock_attests_the_frozen_information_frontier(self):
+        records = [_quote("2026-08-07", 105.0), _quote("2026-08-10", 108.0)]
+        frontier = "2026-08-10T23:59:00+09:00"
+        with self._patch_records(records):
+            out = get_stock(
+                "9984.T",
+                "2026-08-07",
+                "2026-08-10",
+                information_frontier=frontier,
+            )
+
+        observations = extract_source_observations(out)
+        watermarks = extract_source_watermarks(out)
+
+        assert observations == []
+        assert len(watermarks) == 1
+        assert watermarks[0].source == "J-Quants adjusted OHLCV"
+        assert watermarks[0].status == "complete"
+        assert watermarks[0].information_frontier == frontier
+        assert watermarks[0].scanned_start == "2026-08-07"
+        assert watermarks[0].scanned_end == "2026-08-10"
+        assert watermarks[0].returned_records == 0
+        assert watermarks[0].reported_records == 0
+
+        overview, artifact = build_market_data_artifact(
+            out,
+            symbol="9984.T",
+            start_date="2026-08-07",
+            end_date="2026-08-10",
+        )
+        assert artifact["source_records"] == []
+        assert [item["information_frontier"] for item in artifact["source_watermarks"]] == [
+            frontier
+        ]
+        evidence = collect_evidence(
+            [
+                ToolMessage(
+                    content=overview,
+                    artifact=artifact,
+                    tool_call_id="stock-frontier",
+                    name="get_stock_data",
+                )
+            ],
+            "",
+            requested_date=date(2026, 8, 10),
+            analyst="market",
+        )
+        assert evidence[0].provenance.get("source_records", []) == []
+        assert [
+            item["information_frontier"]
+            for item in evidence[0].provenance["source_watermarks"]
+        ] == [frontier]
 
     def test_get_stock_falls_back_to_raw_when_adjusted_missing(self):
         records = [_quote("2026-06-23", 50.0, adjusted=False)]  # only raw Close=100
