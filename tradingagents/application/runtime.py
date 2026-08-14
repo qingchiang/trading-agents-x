@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from .anchor_readiness import AnchorReadinessResult
 from .contracts import (
     AnalysisRequest,
     EvidenceBundle,
@@ -24,6 +25,12 @@ def _discard_evidence(_evidence: EvidenceBundle) -> None:
     """Default sink used by direct graph callers without persistence."""
 
 
+def _no_sealed_evidence() -> EvidenceBundle | None:
+    """Default source used by direct graph callers without persistence."""
+
+    return None
+
+
 @dataclass(frozen=True)
 class RunContext:
     run_id: str
@@ -34,9 +41,11 @@ class RunContext:
     instrument_context: str
     cancel_requested: Callable[[], bool]
     information_frontier: datetime | None = None
+    anchor_readiness: AnchorReadinessResult | None = None
     shutdown_requested: Callable[[], bool] = lambda: False
     artifact_writer: Callable[[ResearchArtifactDraft], None] = _discard_artifact
     evidence_writer: Callable[[EvidenceBundle], None] = _discard_evidence
+    sealed_evidence_reader: Callable[[], EvidenceBundle | None] = _no_sealed_evidence
 
 
 class RunCancelled(RuntimeError):

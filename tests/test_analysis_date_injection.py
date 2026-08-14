@@ -1,6 +1,7 @@
 """Graph tools must use AgentState.trade_date instead of model-supplied dates."""
 
 import warnings
+from typing import get_type_hints
 from unittest import mock
 
 import pytest
@@ -28,6 +29,7 @@ from tradingagents.agents.utils.prediction_markets_tools import (
 from tradingagents.agents.utils.technical_indicators_tools import (
     get_indicators_for_analysis,
 )
+from tradingagents.application.anchor_readiness import AnchorReadinessResult
 from tradingagents.application.contracts import AnalysisRequest, MemoryContext
 from tradingagents.application.runtime import RunContext
 from tradingagents.provenance import extract_provenance, strip_provenance_markers
@@ -37,6 +39,13 @@ class _ToolState(TypedDict):
     messages: list
     trade_date: str
     company_of_interest: str
+
+
+@pytest.mark.unit
+def test_run_context_runtime_annotations_are_resolvable():
+    hints = get_type_hints(RunContext)
+
+    assert hints["anchor_readiness"] == AnchorReadinessResult | None
 
 
 def _invoke_tool(tool, args, trade_date="2020-01-15", context=None):

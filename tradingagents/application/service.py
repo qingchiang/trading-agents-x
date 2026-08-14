@@ -69,7 +69,12 @@ from .market_readiness import (
 )
 from .metrics import MetricsCallback, merge_run_metrics
 from .question_disposition import run_full_question_disposition
-from .repository import InvalidResearchBaselineError, RunRepository, RunView
+from .repository import (
+    EvidenceNotSealedError,
+    InvalidResearchBaselineError,
+    RunRepository,
+    RunView,
+)
 from .research import (
     AnchorQualificationReason,
     IncrementalEscalationReason,
@@ -530,6 +535,7 @@ class AnalysisService:
         )
         metrics = MetricsCallback()
         readiness_metrics: RunMetrics | None = None
+        anchor_readiness_result: AnchorReadinessResult | None = None
         full_analysis_executed = False
         incremental_result: IncrementalGateResult | None = None
         update_audit: ResearchUpdateAudit | None = None
@@ -663,7 +669,8 @@ class AnalysisService:
             self.repository.set_research_update_audit(run.id, update_audit)
 
         def ensure_anchor_readiness_for_full() -> None:
-            nonlocal full_analysis_executed, information_frontier, readiness_metrics
+            nonlocal anchor_readiness_result, full_analysis_executed
+            nonlocal information_frontier, readiness_metrics
             if full_analysis_executed:
                 return
             baseline_for_readiness = (
@@ -672,19 +679,25 @@ class AnalysisService:
                 else None
             )
             if run.request.anchor_readiness == "required":
-                readiness = self.validate_anchor_readiness(
-                    run.request,
-                    run_settings=run_settings,
-                    dataflow_config=dataflow_config,
-                    information_frontier=run.information_frontier,
-                    anchor_frontier=(
-                        baseline_for_readiness.information_frontier
-                        if baseline_for_readiness is not None
-                        else None
-                    ),
-                )
+                readiness = self._prior_successful_anchor_readiness(run.id)
+                reused_readiness = readiness is not None
+                if readiness is None:
+                    readiness = self.validate_anchor_readiness(
+                        run.request,
+                        run_settings=run_settings,
+                        dataflow_config=dataflow_config,
+                        information_frontier=run.information_frontier,
+                        anchor_frontier=(
+                            baseline_for_readiness.information_frontier
+                            if baseline_for_readiness is not None
+                            else None
+                        ),
+                    )
                 if readiness is not None:
-                    readiness_metrics = readiness.metrics
+                    anchor_readiness_result = readiness
+                    readiness_metrics = (
+                        RunMetrics() if reused_readiness else readiness.metrics
+                    )
                     if not readiness.ready:
                         self._emit(
                             run.id,
@@ -695,7 +708,11 @@ class AnalysisService:
                         raise AnchorReadinessError(readiness)
                     self._emit(
                         run.id,
-                        "research.anchor_readiness_succeeded",
+                        (
+                            "research.anchor_readiness_reused"
+                            if reused_readiness
+                            else "research.anchor_readiness_succeeded"
+                        ),
                         payload=readiness.model_dump(mode="json"),
                         on_event=on_event,
                     )
@@ -1026,6 +1043,7 @@ class AnalysisService:
                     instrument_context=instrument_context,
                     cancel_requested=lambda: self.repository.cancel_requested(run.id),
                     information_frontier=information_frontier,
+                    anchor_readiness=anchor_readiness_result,
                     shutdown_requested=shutdown_requested or (lambda: False),
                     artifact_writer=lambda artifact: self._persist_artifact(
                         run.id,
@@ -1036,6 +1054,9 @@ class AnalysisService:
                         run.id,
                         evidence,
                         on_event,
+                    ),
+                    sealed_evidence_reader=lambda: self._read_sealed_evidence(
+                        run.id
                     ),
                 )
                 with SqliteSaver.from_conn_string(str(self.settings.database_path)) as saver:
@@ -1532,6 +1553,25 @@ class AnalysisService:
         _, event = self.repository.seal_evidence(run_id, evidence)
         if event is not None and on_event is not None:
             on_event(event)
+
+    def _read_sealed_evidence(self, run_id: str) -> EvidenceBundle | None:
+        try:
+            return self.repository.get_evidence(run_id)
+        except EvidenceNotSealedError:
+            return None
+
+    def _prior_successful_anchor_readiness(
+        self,
+        run_id: str,
+    ) -> AnchorReadinessResult | None:
+        return next(
+            (
+                AnchorReadinessResult.model_validate(event.payload)
+                for event in self.repository.list_events(run_id, limit=2000)
+                if event.event_type == "research.anchor_readiness_succeeded"
+            ),
+            None,
+        )
 
     def _emit(
         self,

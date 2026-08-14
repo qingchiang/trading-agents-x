@@ -13,6 +13,9 @@ from tradingagents.application.contracts import (
     AnalysisRequest,
     EvidenceBundle,
     EvidenceItem,
+    EvidenceOrigin,
+    EvidenceQuality,
+    EvidenceTemporalScope,
     MarketReferenceLevel,
     ReportLanguage,
     ResearchQuestionSourceDependency,
@@ -177,6 +180,63 @@ def test_japanese_full_revision_derives_provider_independent_anchor_coverage():
         MarketResearchCapability.MARKET_OBSERVATION,
     }
     assert all(item.satisfied for item in qualification.capabilities if item.required)
+
+
+def test_advisory_live_only_watermark_does_not_poison_forward_anchor():
+    baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    live_watermarks = tuple(
+        item.model_copy(update={"temporal_scope": "live_only"})
+        if item.source == "Google News"
+        else item
+        for item in baseline.evidence_snapshot.source_watermarks
+    )
+    revision = baseline.model_copy(
+        update={
+            "evidence_snapshot": baseline.evidence_snapshot.model_copy(
+                update={"source_watermarks": live_watermarks}
+            )
+        }
+    )
+
+    qualification = derive_forward_research_anchor(revision)
+
+    assert qualification.is_forward_research_anchor is True
+
+
+def test_required_live_only_watermark_blocks_forward_anchor():
+    baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    live_watermarks = tuple(
+        item.model_copy(update={"temporal_scope": "live_only"})
+        if item.source == "Google News"
+        else item
+        for item in baseline.evidence_snapshot.source_watermarks
+    )
+    claim = baseline.current_state.claims[0].model_copy(
+        update={"required_sources": ("Google News",)}
+    )
+    revision = baseline.model_copy(
+        update={
+            "current_state": baseline.current_state.model_copy(
+                update={
+                    "claims": (claim, *baseline.current_state.claims[1:])
+                }
+            ),
+            "evidence_snapshot": baseline.evidence_snapshot.model_copy(
+                update={"source_watermarks": live_watermarks}
+            ),
+        }
+    )
+
+    qualification = derive_forward_research_anchor(revision)
+
+    assert qualification.is_forward_research_anchor is False
+    google = next(
+        item
+        for item in qualification.capabilities
+        if item.capability is MarketResearchCapability.MEDIA
+    )
+    assert google.required is True
+    assert google.satisfied is False
 
 
 def test_pre_frontier_archive_truncation_is_retained_without_blocking_anchor():
@@ -2201,6 +2261,124 @@ def test_semantic_change_assessment_supports_typed_relationships(
     )
     assert (result.escalation_reason is not None) is escalates
     assert (result.candidate is not None) is not escalates
+
+
+def test_positive_near_live_evidence_reaches_semantic_assessment_with_scope():
+    baseline, _evidence, _market, watermarks = _incremental_baseline_and_evidence()
+    candidate_watermarks = [
+        *(
+            {**item, "scanned_end": "2026-07-25"}
+            for item in watermarks
+            if item["source"] != "Google News"
+        ),
+        {
+            **_watermark(
+                "Google News",
+                temporal_scope="live_only",
+                returned_records=1,
+                reported_records=1,
+            ),
+            "scanned_end": "2026-07-25",
+        },
+    ]
+    _, evidence, _, _ = _incremental_baseline_and_evidence(
+        candidate_watermarks=candidate_watermarks,
+    )
+    live_item = EvidenceItem.create(
+        source="Google News",
+        evidence_type="get_news",
+        requested_date=date(2026, 7, 25),
+        effective_date=date(2026, 7, 25),
+        content="A timestamped headline reports a potentially relevant development.",
+        quality=EvidenceQuality.LOW,
+        origins=(
+            EvidenceOrigin(
+                source="Google News",
+                evidence_type="get_news",
+                requested="2026-07-25",
+                effective="2026-07-25",
+                effective_date=date(2026, 7, 25),
+                timing="live non-point-in-time; publication-date filtered",
+                retrieved_at="2026-07-25T20:00:00+09:00",
+                quality=EvidenceQuality.LOW,
+                temporal_scope=EvidenceTemporalScope.LIVE_ONLY,
+            ),
+        ),
+        provenance=evidence.items[0].provenance,
+    )
+    bounded = EvidenceBundle(
+        instrument="6501.T",
+        analysis_date=date(2026, 7, 25),
+        information_frontier=evidence.information_frontier,
+        items=(live_item,),
+    )
+    request = AnalysisRequest(
+        ticker="6501.T",
+        analysis_date="2026-07-25",
+        analysts=("market",),
+    )
+    deterministic = assess_deterministic_update(
+        "revision-1",
+        baseline,
+        request,
+        bounded,
+    )
+    assert deterministic.candidate is not None
+    new_ref = deterministic.candidate.delta.new_evidence_refs[0]
+    llm = _SemanticLLM(
+        _semantic_response(
+            "potentially_material_novelty",
+            evidence_ref=new_ref,
+        )
+    )
+
+    result = assess_semantic_update(baseline, deterministic, llm)
+
+    assert result.escalation_reason is IncrementalEscalationReason.POTENTIALLY_MATERIAL_NOVELTY
+    assert "timestamped headline" in llm.prompts[0]
+    assert '"temporal_scopes": ["live_only"]' in llm.prompts[0]
+
+
+def test_empty_advisory_live_only_watermark_does_not_block_quiet_candidate():
+    baseline, _evidence, _market, watermarks = _incremental_baseline_and_evidence()
+    candidate_watermarks = [
+        *(
+            {**item, "scanned_end": "2026-07-25"}
+            for item in watermarks
+            if item["source"] != "Google News"
+        ),
+        {
+            **_watermark(
+                "Google News",
+                temporal_scope="live_only",
+                returned_records=0,
+                reported_records=0,
+            ),
+            "scanned_end": "2026-07-25",
+        },
+    ]
+    _, evidence, _, _ = _incremental_baseline_and_evidence(
+        candidate_watermarks=candidate_watermarks,
+    )
+
+    result = assess_deterministic_update(
+        "revision-1",
+        baseline,
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-25",
+            analysts=("market",),
+        ),
+        evidence,
+    )
+
+    assert result.candidate is not None
+    assert result.coverage is not None
+    google = next(
+        item for item in result.coverage.domains if item.source == "Google News"
+    )
+    assert google.requirement is CoverageRequirement.ADVISORY
+    assert result.coverage.supports_no_material_change is True
 
 
 def test_semantic_change_assessment_rejects_ambiguous_identity_and_confidence_change():

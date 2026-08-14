@@ -219,6 +219,11 @@ manifest before analyst synthesis. Missing Required source records, watermarks,
 or selected market/fundamental datasets fail with a typed admission reason
 before the case, debate, risk, or committee stages. Ordinary explicitly
 non-anchor Full executions retain their existing degraded-evidence behavior.
+The successful manifest is immutable across attempts of the same run. Event
+source frontiers retain returned/reported counts, a digest of the observed
+record-version closure, and typed limitations; retries reuse both that manifest
+and the first sealed Evidence bundle rather than recollecting against a weaker
+boundary or creating a different seal timestamp.
 
 ### Run state and attempts
 

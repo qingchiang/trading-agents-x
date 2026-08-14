@@ -284,6 +284,18 @@ def _semantic_evidence_summary(item: Any) -> dict[str, Any]:
         "unit": item.unit,
         "quality": item.quality,
         "fallback": item.fallback,
+        "temporal_scopes": tuple(
+            sorted({origin.temporal_scope.value for origin in item.origins})
+        ),
+        "retrieved_at": tuple(
+            sorted(
+                {
+                    origin.retrieved_at
+                    for origin in item.origins
+                    if origin.retrieved_at is not None
+                }
+            )
+        ),
     }
 
 

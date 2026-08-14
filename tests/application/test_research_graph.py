@@ -10,6 +10,11 @@ from langgraph.checkpoint.memory import MemorySaver
 
 import tradingagents.graph.research_graph as research_graph_module
 from tests.factories import analyst_report, research_decision
+from tradingagents.application.anchor_readiness import (
+    AnchorReadinessResult,
+    AnchorReadinessSourceFrontier,
+    source_record_versions_digest,
+)
 from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalystClaimType,
@@ -18,6 +23,7 @@ from tradingagents.application.contracts import (
     DebateImportance,
     DebateIssue,
     DecisionBrief,
+    EvidenceBundle,
     EvidenceItem,
     EvidenceQuality,
     IssueDisposition,
@@ -30,9 +36,14 @@ from tradingagents.application.contracts import (
     ResearchWarning,
     RiskReviewAdjustment,
     RiskReviewDisposition,
+    RunMetrics,
     RunProfile,
 )
 from tradingagents.application.metrics import MetricsCallback
+from tradingagents.application.research import (
+    CapabilityAttestation,
+    MarketResearchCapability,
+)
 from tradingagents.application.runtime import RunContext
 from tradingagents.graph.analyst_synthesis import AnalystAuditDraft
 from tradingagents.graph.deliberation import (
@@ -42,6 +53,7 @@ from tradingagents.graph.deliberation import (
     ResearchDecisionCoreEnvelope,
 )
 from tradingagents.graph.research_graph import (
+    GraphVisibleRequiredEvidenceError,
     ResearchGraph,
     _evidence_from_record,
     _evidence_warnings,
@@ -49,6 +61,7 @@ from tradingagents.graph.research_graph import (
 )
 from tradingagents.provenance import (
     ProvenanceRecord,
+    SourceInterval,
     SourceObservation,
     SourceWatermark,
     attach_evidence_span,
@@ -1080,6 +1093,136 @@ class _AnalystSubgraph:
         }
 
 
+class _RequiredEvidenceSubgraph(_AnalystSubgraph):
+    def invoke(self, state, **kwargs):
+        result = super().invoke(state, **kwargs)
+        frontier = "2026-08-10T23:59:00+09:00"
+        if self.analyst == "news":
+            spans = []
+            for source in ("EDINET", "TDnet"):
+                payload = attach_provenance(
+                    "",
+                    ProvenanceRecord(
+                        evidence="get_news",
+                        source=source,
+                        requested="2026-07-12 to 2026-08-10",
+                        effective="2026-07-12 to 2026-08-10",
+                        timing="available; no relevant items in window",
+                    ),
+                )
+                payload = attach_source_watermarks(
+                    payload,
+                    SourceWatermark(
+                        source=source,
+                        scanned_start="2026-07-12",
+                        scanned_end="2026-08-10",
+                        status="complete",
+                        returned_records=0,
+                        reported_records=0,
+                        requested_interval=SourceInterval(
+                            start="2026-07-12",
+                            end="2026-08-10",
+                        ),
+                        information_frontier=frontier,
+                    ),
+                )
+                spans.append(
+                    attach_evidence_span(payload, temporal_scope="point_in_time")
+                )
+            message = ToolMessage(
+                content="\n".join(spans),
+                tool_call_id="required-news",
+                name="get_news",
+            )
+        elif self.analyst == "market":
+            message = ToolMessage(
+                content="Market artifact is available.",
+                tool_call_id="required-market",
+                name="get_stock_data",
+                artifact={
+                    "schema_version": "1",
+                    "kind": "source",
+                    "dataset_id": "ds_requiredmarket",
+                    "evidence_type": "get_stock_data",
+                    "source_content": (
+                        "Date,Open,High,Low,Close,Volume\n"
+                        "2026-08-10,100,102,99,101,1200"
+                    ),
+                    "provenance": [
+                        {
+                            "evidence": "get_stock_data",
+                            "source": "J-Quants adjusted OHLCV",
+                            "requested": "2026-08-10 to 2026-08-10",
+                            "effective": "2026-08-10",
+                            "timing": "market-date filtered",
+                            "retrieved_at": None,
+                        }
+                    ],
+                    "temporal_scope": "point_in_time",
+                    "analytical_views": {
+                        "row_count": 1,
+                        "effective_end": "2026-08-10",
+                    },
+                },
+            )
+        elif self.analyst == "fundamentals":
+            pit = attach_source_watermarks(
+                attach_source_observations(
+                    attach_provenance(
+                        "J-Quants disclosed fundamentals.",
+                        ProvenanceRecord(
+                            evidence="get_fundamentals",
+                            source="J-Quants official summary",
+                            requested="2026-08-10",
+                            effective="disclosures <= 2026-08-10",
+                            timing="disclosure-date filtered",
+                        ),
+                    ),
+                    SourceObservation(
+                        source="J-Quants fundamentals",
+                        record_id="4568:2026-08-10",
+                        version_id="jquants-fundamentals:4568:2026-08-10",
+                        status="published",
+                        published_at="2026-08-10 15:00",
+                        available_at="2026-08-10T15:00:00+09:00",
+                        title="Financial summary",
+                        record_kind="fundamental",
+                    ),
+                ),
+                SourceWatermark(
+                    source="J-Quants fundamentals",
+                    scanned_start="2026-08-10",
+                    scanned_end="2026-08-10",
+                    status="complete",
+                    returned_records=1,
+                    reported_records=1,
+                    information_frontier=frontier,
+                ),
+            )
+            live = attach_provenance(
+                "Forward PE: 20 (analyst consensus, live only).",
+                ProvenanceRecord(
+                    evidence="get_fundamentals",
+                    source="yfinance analyst consensus",
+                    requested="2026-08-10",
+                    effective="retrieval-time analyst snapshot",
+                    timing="live non-point-in-time",
+                    retrieved_at="2026-08-12T23:00:00+09:00",
+                ),
+            )
+            message = ToolMessage(
+                content=(
+                    attach_evidence_span(pit, temporal_scope="point_in_time")
+                    + attach_evidence_span(live, temporal_scope="live_only")
+                ),
+                tool_call_id="required-fundamentals",
+                name="get_fundamentals",
+            )
+        else:
+            return result
+        return {**result, "messages": [*state["messages"], message]}
+
+
 def _context(
     app_settings,
     profile: RunProfile,
@@ -1144,6 +1287,590 @@ def _memory_context() -> MemoryContext:
             ),
         ),
     )
+
+
+def _jp_anchor_readiness() -> AnchorReadinessResult:
+    frontier = datetime(
+        2026,
+        8,
+        10,
+        23,
+        59,
+        tzinfo=timezone(timedelta(hours=9)),
+    )
+    sources = (
+        ("EDINET", MarketResearchCapability.OFFICIAL_FILING),
+        ("TDnet", MarketResearchCapability.TIMELY_DISCLOSURE),
+        ("J-Quants adjusted OHLCV", MarketResearchCapability.MARKET_OBSERVATION),
+    )
+    return AnchorReadinessResult(
+        ready=True,
+        requested_cutoff=date(2026, 8, 10),
+        information_frontier=frontier,
+        profile_id="jp-listed-equity-v1",
+        capabilities=tuple(
+            CapabilityAttestation(
+                capability=capability,
+                satisfied=True,
+                sources=(source,),
+            )
+            for source, capability in sources
+        ),
+        source_frontiers=tuple(
+            AnchorReadinessSourceFrontier(
+                source=source,
+                capability=capability,
+                status="complete",
+                information_frontier=frontier,
+                observed_start=(
+                    date(2026, 8, 10)
+                    if capability is MarketResearchCapability.MARKET_OBSERVATION
+                    else date(2026, 7, 12)
+                ),
+                observed_end=date(2026, 8, 10),
+                requested_start=date(2026, 7, 12),
+                requested_end=date(2026, 8, 10),
+                returned_records=(
+                    None
+                    if capability is MarketResearchCapability.MARKET_OBSERVATION
+                    else 0
+                ),
+                reported_records=(
+                    None
+                    if capability is MarketResearchCapability.MARKET_OBSERVATION
+                    else 0
+                ),
+                record_versions_digest=(
+                    None
+                    if capability is MarketResearchCapability.MARKET_OBSERVATION
+                    else source_record_versions_digest(())
+                ),
+            )
+            for source, capability in sources
+        ),
+        metrics=RunMetrics(),
+    )
+
+
+def test_anchor_readiness_missing_graph_evidence_stops_before_downstream_llms(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _AnalystSubgraph(analyst) for analyst in self.selected_analysts
+        },
+    )
+    quick = _FakeLLM()
+    deep = _FakeLLM()
+    events: list[dict[str, Any]] = []
+    sealed: list[EvidenceBundle] = []
+    readiness = _jp_anchor_readiness()
+    request = AnalysisRequest(
+        ticker="4568.T",
+        analysis_date="2026-08-10",
+        profile=RunProfile.STANDARD,
+        analysts=("market", "news", "fundamentals"),
+    )
+    settings = app_settings.resolve_run(request)
+    context = RunContext(
+        run_id="fixture-required-evidence-gate",
+        request=request,
+        settings=settings,
+        dataflow_config=settings.dataflow_config(app_settings),
+        memory=MemoryContext(instrument=request.ticker, market="Asia/Tokyo"),
+        instrument_context="The instrument is 4568.T.",
+        cancel_requested=lambda: False,
+        information_frontier=readiness.information_frontier,
+        anchor_readiness=readiness,
+        evidence_writer=sealed.append,
+    )
+    graph = ResearchGraph(
+        quick_llm=quick,
+        deep_llm=deep,
+        profile=request.profile,
+        selected_analysts=request.analysts,
+        metrics=MetricsCallback(),
+    )
+
+    with pytest.raises(GraphVisibleRequiredEvidenceError) as exc_info:
+        graph.execute(
+            context,
+            checkpoint_thread_id="required-evidence-gate",
+            on_event=events.append,
+        )
+
+    assert exc_info.value.reason == "graph_visible_required_evidence_missing"
+    assert quick.calls == []
+    assert deep.calls == []
+    assert len(sealed) == 1
+    failure = next(
+        event
+        for event in events
+        if event["event_type"] == "research.anchor_evidence_gate_failed"
+    )
+    assert failure["payload"]["reason"] == "graph_visible_required_evidence_missing"
+    assert set(failure["payload"]["missing_sources"]) == {
+        "EDINET",
+        "TDnet",
+        "J-Quants adjusted OHLCV",
+        "J-Quants fundamentals",
+    }
+
+
+def test_anchor_readiness_matching_graph_evidence_reaches_synthesis(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _RequiredEvidenceSubgraph(analyst)
+            for analyst in self.selected_analysts
+        },
+    )
+    quick = _FakeLLM()
+    deep = _FakeLLM()
+    readiness = _jp_anchor_readiness()
+    request = AnalysisRequest(
+        ticker="4568.T",
+        analysis_date="2026-08-10",
+        profile=RunProfile.FAST,
+        analysts=("market", "news", "fundamentals"),
+    )
+    settings = app_settings.resolve_run(request)
+    context = RunContext(
+        run_id="fixture-required-evidence-visible",
+        request=request,
+        settings=settings,
+        dataflow_config=settings.dataflow_config(app_settings),
+        memory=MemoryContext(instrument=request.ticker, market="Asia/Tokyo"),
+        instrument_context="The instrument is 4568.T.",
+        cancel_requested=lambda: False,
+        information_frontier=readiness.information_frontier,
+        anchor_readiness=readiness,
+    )
+    graph = ResearchGraph(
+        quick_llm=quick,
+        deep_llm=deep,
+        profile=request.profile,
+        selected_analysts=request.analysts,
+        metrics=MetricsCallback(),
+    )
+
+    execution = graph.execute(
+        context,
+        checkpoint_thread_id="required-evidence-visible",
+    )
+
+    assert execution.evidence.tables
+    assert any(
+        origin.temporal_scope.value == "live_only"
+        for item in execution.evidence.items
+        for origin in item.origins
+    )
+    assert quick.calls
+
+
+def test_empty_ready_manifest_fails_closed_before_synthesis(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _AnalystSubgraph(analyst) for analyst in self.selected_analysts
+        },
+    )
+    quick = _FakeLLM()
+    complete = _jp_anchor_readiness()
+    readiness = complete.model_copy(
+        update={"capabilities": (), "source_frontiers": ()}
+    )
+    request = AnalysisRequest(
+        ticker="4568.T",
+        analysis_date="2026-08-10",
+        profile=RunProfile.FAST,
+        analysts=("market",),
+    )
+    settings = app_settings.resolve_run(request)
+    graph = ResearchGraph(
+        quick_llm=quick,
+        deep_llm=_FakeLLM(),
+        profile=request.profile,
+        selected_analysts=request.analysts,
+        metrics=MetricsCallback(),
+    )
+
+    with pytest.raises(GraphVisibleRequiredEvidenceError) as exc_info:
+        graph.execute(
+            RunContext(
+                run_id="fixture-empty-readiness-manifest",
+                request=request,
+                settings=settings,
+                dataflow_config=settings.dataflow_config(app_settings),
+                memory=MemoryContext(instrument=request.ticker, market="Asia/Tokyo"),
+                instrument_context="The instrument is 4568.T.",
+                cancel_requested=lambda: False,
+                information_frontier=readiness.information_frontier,
+                anchor_readiness=readiness,
+            ),
+            checkpoint_thread_id="empty-readiness-manifest",
+        )
+
+    assert set(exc_info.value.missing_capabilities) == {
+        "market_observation",
+        "official_filing",
+        "timely_disclosure",
+    }
+    assert quick.calls == []
+
+
+def test_source_frontier_mismatch_fails_before_synthesis(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _RequiredEvidenceSubgraph(analyst)
+            for analyst in self.selected_analysts
+        },
+    )
+    quick = _FakeLLM()
+    complete = _jp_anchor_readiness()
+    source_frontiers = tuple(
+        item.model_copy(
+            update={"observed_start": item.observed_start - timedelta(days=1)}
+        )
+        if item.source == "EDINET"
+        else item
+        for item in complete.source_frontiers
+    )
+    readiness = complete.model_copy(update={"source_frontiers": source_frontiers})
+    request = AnalysisRequest(
+        ticker="4568.T",
+        analysis_date="2026-08-10",
+        profile=RunProfile.FAST,
+        analysts=("market", "news"),
+    )
+    settings = app_settings.resolve_run(request)
+    graph = ResearchGraph(
+        quick_llm=quick,
+        deep_llm=_FakeLLM(),
+        profile=request.profile,
+        selected_analysts=request.analysts,
+        metrics=MetricsCallback(),
+    )
+
+    with pytest.raises(GraphVisibleRequiredEvidenceError) as exc_info:
+        graph.execute(
+            RunContext(
+                run_id="fixture-readiness-frontier-mismatch",
+                request=request,
+                settings=settings,
+                dataflow_config=settings.dataflow_config(app_settings),
+                memory=MemoryContext(instrument=request.ticker, market="Asia/Tokyo"),
+                instrument_context="The instrument is 4568.T.",
+                cancel_requested=lambda: False,
+                information_frontier=readiness.information_frontier,
+                anchor_readiness=readiness,
+            ),
+            checkpoint_thread_id="readiness-frontier-mismatch",
+        )
+
+    assert exc_info.value.missing_sources == ("EDINET",)
+    assert exc_info.value.missing_capabilities == ("official_filing",)
+    assert quick.calls == []
+
+
+def test_source_frontier_limitation_mismatch_fails_before_synthesis(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _RequiredEvidenceSubgraph(analyst)
+            for analyst in self.selected_analysts
+        },
+    )
+    quick = _FakeLLM()
+    complete = _jp_anchor_readiness()
+    source_frontiers = tuple(
+        item.model_copy(update={"limitations": ("Expected archive limitation.",)})
+        if item.source == "TDnet"
+        else item
+        for item in complete.source_frontiers
+    )
+    readiness = complete.model_copy(update={"source_frontiers": source_frontiers})
+    request = AnalysisRequest(
+        ticker="4568.T",
+        analysis_date="2026-08-10",
+        profile=RunProfile.FAST,
+        analysts=("market", "news"),
+    )
+    settings = app_settings.resolve_run(request)
+    graph = ResearchGraph(
+        quick_llm=quick,
+        deep_llm=_FakeLLM(),
+        profile=request.profile,
+        selected_analysts=request.analysts,
+        metrics=MetricsCallback(),
+    )
+
+    with pytest.raises(GraphVisibleRequiredEvidenceError) as exc_info:
+        graph.execute(
+            RunContext(
+                run_id="fixture-readiness-limitation-mismatch",
+                request=request,
+                settings=settings,
+                dataflow_config=settings.dataflow_config(app_settings),
+                memory=MemoryContext(instrument=request.ticker, market="Asia/Tokyo"),
+                instrument_context="The instrument is 4568.T.",
+                cancel_requested=lambda: False,
+                information_frontier=readiness.information_frontier,
+                anchor_readiness=readiness,
+            ),
+            checkpoint_thread_id="readiness-limitation-mismatch",
+        )
+
+    assert exc_info.value.missing_sources == ("TDnet",)
+    assert exc_info.value.missing_capabilities == ("timely_disclosure",)
+    assert quick.calls == []
+
+
+def test_source_frontier_limitation_kind_mismatch_fails_before_synthesis(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _RequiredEvidenceSubgraph(analyst)
+            for analyst in self.selected_analysts
+        },
+    )
+    quick = _FakeLLM()
+    complete = _jp_anchor_readiness()
+    source_frontiers = tuple(
+        item.model_copy(update={"limitation_kind": "archive_truncation"})
+        if item.source == "TDnet"
+        else item
+        for item in complete.source_frontiers
+    )
+    readiness = complete.model_copy(update={"source_frontiers": source_frontiers})
+    request = AnalysisRequest(
+        ticker="4568.T",
+        analysis_date="2026-08-10",
+        profile=RunProfile.FAST,
+        analysts=("market", "news"),
+    )
+    settings = app_settings.resolve_run(request)
+    graph = ResearchGraph(
+        quick_llm=quick,
+        deep_llm=_FakeLLM(),
+        profile=request.profile,
+        selected_analysts=request.analysts,
+        metrics=MetricsCallback(),
+    )
+
+    with pytest.raises(GraphVisibleRequiredEvidenceError) as exc_info:
+        graph.execute(
+            RunContext(
+                run_id="fixture-readiness-limitation-kind-mismatch",
+                request=request,
+                settings=settings,
+                dataflow_config=settings.dataflow_config(app_settings),
+                memory=MemoryContext(instrument=request.ticker, market="Asia/Tokyo"),
+                instrument_context="The instrument is 4568.T.",
+                cancel_requested=lambda: False,
+                information_frontier=readiness.information_frontier,
+                anchor_readiness=readiness,
+            ),
+            checkpoint_thread_id="readiness-limitation-kind-mismatch",
+        )
+
+    assert exc_info.value.missing_sources == ("TDnet",)
+    assert exc_info.value.missing_capabilities == ("timely_disclosure",)
+    assert quick.calls == []
+
+
+def test_source_record_closure_mismatch_fails_before_synthesis(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _RequiredEvidenceSubgraph(analyst)
+            for analyst in self.selected_analysts
+        },
+    )
+    quick = _FakeLLM()
+    complete = _jp_anchor_readiness()
+    source_frontiers = tuple(
+        item.model_copy(
+            update={
+                "returned_records": 1,
+                "reported_records": 1,
+                "record_versions_digest": source_record_versions_digest(
+                    ("edinet-record:v1",)
+                ),
+            }
+        )
+        if item.source == "EDINET"
+        else item
+        for item in complete.source_frontiers
+    )
+    readiness = complete.model_copy(update={"source_frontiers": source_frontiers})
+    request = AnalysisRequest(
+        ticker="4568.T",
+        analysis_date="2026-08-10",
+        profile=RunProfile.FAST,
+        analysts=("market", "news"),
+    )
+    settings = app_settings.resolve_run(request)
+    graph = ResearchGraph(
+        quick_llm=quick,
+        deep_llm=_FakeLLM(),
+        profile=request.profile,
+        selected_analysts=request.analysts,
+        metrics=MetricsCallback(),
+    )
+
+    with pytest.raises(GraphVisibleRequiredEvidenceError) as exc_info:
+        graph.execute(
+            RunContext(
+                run_id="fixture-readiness-record-closure-mismatch",
+                request=request,
+                settings=settings,
+                dataflow_config=settings.dataflow_config(app_settings),
+                memory=MemoryContext(instrument=request.ticker, market="Asia/Tokyo"),
+                instrument_context="The instrument is 4568.T.",
+                cancel_requested=lambda: False,
+                information_frontier=readiness.information_frontier,
+                anchor_readiness=readiness,
+            ),
+            checkpoint_thread_id="readiness-record-closure-mismatch",
+        )
+
+    assert exc_info.value.missing_sources == ("EDINET",)
+    assert exc_info.value.missing_capabilities == ("official_filing",)
+    assert quick.calls == []
+
+
+def test_unknown_readiness_profile_fails_closed_before_synthesis(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _AnalystSubgraph(analyst) for analyst in self.selected_analysts
+        },
+    )
+    quick = _FakeLLM()
+    complete = _jp_anchor_readiness()
+    readiness = complete.model_copy(
+        update={
+            "profile_id": "unknown-profile",
+            "capabilities": (),
+            "source_frontiers": (),
+        }
+    )
+    request = AnalysisRequest(
+        ticker="4568.T",
+        analysis_date="2026-08-10",
+        profile=RunProfile.FAST,
+        analysts=("market",),
+    )
+    settings = app_settings.resolve_run(request)
+    graph = ResearchGraph(
+        quick_llm=quick,
+        deep_llm=_FakeLLM(),
+        profile=request.profile,
+        selected_analysts=request.analysts,
+        metrics=MetricsCallback(),
+    )
+
+    with pytest.raises(GraphVisibleRequiredEvidenceError) as exc_info:
+        graph.execute(
+            RunContext(
+                run_id="fixture-unknown-readiness-profile",
+                request=request,
+                settings=settings,
+                dataflow_config=settings.dataflow_config(app_settings),
+                memory=MemoryContext(instrument=request.ticker, market="Asia/Tokyo"),
+                instrument_context="The instrument is 4568.T.",
+                cancel_requested=lambda: False,
+                information_frontier=readiness.information_frontier,
+                anchor_readiness=readiness,
+            ),
+            checkpoint_thread_id="unknown-readiness-profile",
+        )
+
+    assert set(exc_info.value.missing_capabilities) == {
+        "market_observation",
+        "official_filing",
+        "timely_disclosure",
+    }
+    assert quick.calls == []
+
+
+def test_allow_non_anchor_context_does_not_apply_required_evidence_gate(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _AnalystSubgraph(analyst) for analyst in self.selected_analysts
+        },
+    )
+    request = AnalysisRequest(
+        ticker="4568.T",
+        analysis_date="2026-08-10",
+        profile=RunProfile.FAST,
+        analysts=("market",),
+        anchor_readiness="allow_non_anchor",
+    )
+    settings = app_settings.resolve_run(request)
+    quick = _FakeLLM()
+    graph = ResearchGraph(
+        quick_llm=quick,
+        deep_llm=_FakeLLM(),
+        profile=request.profile,
+        selected_analysts=request.analysts,
+        metrics=MetricsCallback(),
+    )
+
+    execution = graph.execute(
+        RunContext(
+            run_id="fixture-allow-non-anchor",
+            request=request,
+            settings=settings,
+            dataflow_config=settings.dataflow_config(app_settings),
+            memory=MemoryContext(instrument=request.ticker, market="Asia/Tokyo"),
+            instrument_context="The instrument is 4568.T.",
+            cancel_requested=lambda: False,
+            information_frontier=_jp_anchor_readiness().information_frontier,
+        ),
+        checkpoint_thread_id="allow-non-anchor",
+    )
+
+    assert execution.evidence.items
+    assert quick.calls
 
 
 @pytest.mark.parametrize(

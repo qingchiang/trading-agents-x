@@ -51,6 +51,9 @@ from tradingagents.agents.utils.prediction_markets_tools import (
 from tradingagents.agents.utils.technical_indicators_tools import (
     get_indicators_for_analysis,
 )
+from tradingagents.application.anchor_readiness import (
+    source_record_versions_digest,
+)
 from tradingagents.application.contracts import (
     AnalystReport,
     ArtifactGenerationMethod,
@@ -82,6 +85,7 @@ from tradingagents.application.evidence_workset import (
 )
 from tradingagents.application.metrics import MetricsCallback
 from tradingagents.application.reporting import order_reports
+from tradingagents.application.research import JAPANESE_ANCHOR_PROFILE
 from tradingagents.application.runtime import RunContext, check_cancelled
 from tradingagents.dataflows.config import use_config
 from tradingagents.graph.analyst_synthesis import (
@@ -122,6 +126,25 @@ from tradingagents.provenance import (
 
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _ADMISSION_SEALED_AT_KEY = "evidence_admission_sealed_at"
+_GRAPH_VISIBLE_REQUIRED_EVIDENCE_MISSING = (
+    "graph_visible_required_evidence_missing"
+)
+
+
+class GraphVisibleRequiredEvidenceError(RuntimeError):
+    """Stop anchor-required work when sealed Evidence diverges from readiness."""
+
+    reason = _GRAPH_VISIBLE_REQUIRED_EVIDENCE_MISSING
+
+    def __init__(
+        self,
+        *,
+        missing_sources: Iterable[str],
+        missing_capabilities: Iterable[str],
+    ) -> None:
+        self.missing_sources = tuple(sorted(set(missing_sources)))
+        self.missing_capabilities = tuple(sorted(set(missing_capabilities)))
+        super().__init__(self.reason)
 
 
 def _filter_tool_output_at_information_frontier(
@@ -243,6 +266,226 @@ def _artifact_is_admissible(
         information_frontier=information_frontier,
     )
     return decision.admitted
+
+
+def _item_has_visible_pit_source(item: EvidenceItem, source: str) -> bool:
+    return (
+        item.quality is not EvidenceQuality.UNAVAILABLE
+        and item.provenance.get("evidence_admission", {}).get("status")
+        != "withheld"
+        and any(
+            origin.source == source
+            and origin.temporal_scope is EvidenceTemporalScope.POINT_IN_TIME
+            and origin.quality is not EvidenceQuality.UNAVAILABLE
+            for origin in item.origins
+        )
+    )
+
+
+def _item_source_metadata(
+    item: EvidenceItem,
+    key: str,
+    source: str,
+) -> tuple[dict[str, Any], ...]:
+    return tuple(
+        raw
+        for raw in item.provenance.get(key, ())
+        if isinstance(raw, dict) and raw.get("source") == source
+    )
+
+
+def _watermark_record_count_is_visible(
+    watermark: Mapping[str, Any],
+    *,
+    record_count: int,
+) -> bool:
+    try:
+        return int(watermark.get("returned_records", 0)) <= record_count
+    except (TypeError, ValueError):
+        return False
+
+
+def _watermark_limitations(
+    watermark: Mapping[str, Any],
+) -> tuple[str, ...] | None:
+    raw = watermark.get("limitations", ())
+    if not isinstance(raw, (list, tuple)) or not all(
+        isinstance(item, str) for item in raw
+    ):
+        return None
+    return tuple(raw)
+
+
+def _event_source_matches_readiness(
+    bundle: EvidenceBundle,
+    source_frontier: Any,
+) -> bool:
+    source = source_frontier.source
+    return any(
+        _item_has_visible_pit_source(item, source)
+        and any(
+            watermark.get("temporal_scope", "point_in_time") == "point_in_time"
+            and watermark.get("status") == source_frontier.status
+            and watermark.get("information_frontier")
+            == source_frontier.information_frontier.isoformat()
+            and watermark.get("scanned_start")
+            == source_frontier.observed_start.isoformat()
+            and watermark.get("scanned_end")
+            == source_frontier.observed_end.isoformat()
+            and _watermark_limitations(watermark) == source_frontier.limitations
+            and watermark.get("limitation_kind") == source_frontier.limitation_kind
+            and watermark.get("returned_records")
+            == source_frontier.returned_records
+            and watermark.get("reported_records")
+            == source_frontier.reported_records
+            and isinstance(watermark.get("requested_interval"), dict)
+            and watermark["requested_interval"].get("start")
+            == source_frontier.requested_start.isoformat()
+            and watermark["requested_interval"].get("end")
+            == source_frontier.requested_end.isoformat()
+            and _watermark_record_count_is_visible(
+                watermark,
+                record_count=len(records),
+            )
+            and all(
+                isinstance(record.get("version_id"), str)
+                and bool(record["version_id"])
+                for record in records
+            )
+            and source_record_versions_digest(
+                record["version_id"] for record in records
+            )
+            == source_frontier.record_versions_digest
+            for watermark in _item_source_metadata(
+                item,
+                "source_watermarks",
+                source,
+            )
+        )
+        for item in bundle.items
+        for records in (_item_source_metadata(item, "source_records", source),)
+    )
+
+
+def _market_source_matches_readiness(
+    bundle: EvidenceBundle,
+    source_frontier: Any,
+) -> bool:
+    source = source_frontier.source
+    items = tuple(
+        item
+        for item in bundle.items
+        if _item_has_visible_pit_source(item, source)
+        and item.effective_date == source_frontier.observed_end
+    )
+    refs = {item.ref for item in items}
+    return bool(refs) and any(
+        refs.intersection(table.evidence_refs) for table in bundle.tables
+    )
+
+
+def _fundamentals_are_graph_visible(
+    bundle: EvidenceBundle,
+    *,
+    information_frontier: datetime,
+) -> bool:
+    source = "J-Quants fundamentals"
+    cutoff = bundle.analysis_date.isoformat()
+    return any(
+        item.quality is not EvidenceQuality.UNAVAILABLE
+        and item.provenance.get("evidence_admission", {}).get("status")
+        != "withheld"
+        and any(
+            origin.temporal_scope is EvidenceTemporalScope.POINT_IN_TIME
+            for origin in item.origins
+        )
+        and bool(item.content)
+        and any(
+            watermark.get("temporal_scope", "point_in_time") == "point_in_time"
+            and watermark.get("status") in {"complete", "limited"}
+            and watermark.get("information_frontier")
+            == information_frontier.isoformat()
+            and watermark.get("scanned_end") == cutoff
+            and _watermark_record_count_is_visible(
+                watermark,
+                record_count=len(
+                    _item_source_metadata(item, "source_records", source)
+                ),
+            )
+            for watermark in _item_source_metadata(
+                item,
+                "source_watermarks",
+                source,
+            )
+        )
+        for item in bundle.items
+    )
+
+
+def _missing_anchor_required_evidence(
+    bundle: EvidenceBundle,
+    context: RunContext,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    readiness = context.anchor_readiness
+    if readiness is None:
+        return (), ()
+    missing_sources: set[str] = set()
+    missing_capabilities: set[str] = set()
+    required_attestations = {
+        item.capability: item for item in readiness.capabilities if item.required
+    }
+    if readiness.profile_id != JAPANESE_ANCHOR_PROFILE.id:
+        missing_capabilities.update(
+            item.value for item in JAPANESE_ANCHOR_PROFILE.minimum_anchor_capabilities
+        )
+        return tuple(sorted(missing_sources)), tuple(sorted(missing_capabilities))
+    for capability in JAPANESE_ANCHOR_PROFILE.minimum_anchor_capabilities:
+        attestation = required_attestations.get(capability)
+        if (
+            attestation is None
+            or not attestation.satisfied
+            or not attestation.sources
+        ):
+            missing_capabilities.add(capability.value)
+            continue
+        for source in attestation.sources:
+            if not any(
+                item.source == source and item.capability is capability
+                for item in readiness.source_frontiers
+            ):
+                missing_sources.add(source)
+                missing_capabilities.add(capability.value)
+    if (
+        not readiness.ready
+        or bundle.instrument != context.request.ticker
+        or bundle.analysis_date != readiness.requested_cutoff
+        or bundle.information_frontier != readiness.information_frontier
+    ):
+        missing_sources.update(item.source for item in readiness.source_frontiers)
+        missing_capabilities.update(
+            item.capability.value for item in readiness.capabilities if item.required
+        )
+        return tuple(sorted(missing_sources)), tuple(sorted(missing_capabilities))
+    for source_frontier in readiness.source_frontiers:
+        if source_frontier.capability.value == "market_observation":
+            visible = _market_source_matches_readiness(bundle, source_frontier)
+        elif source_frontier.capability.value == "fundamentals":
+            visible = _fundamentals_are_graph_visible(
+                bundle,
+                information_frontier=readiness.information_frontier,
+            )
+        else:
+            visible = _event_source_matches_readiness(bundle, source_frontier)
+        if not visible:
+            missing_sources.add(source_frontier.source)
+            missing_capabilities.add(source_frontier.capability.value)
+    if "fundamentals" in context.request.analysts and not _fundamentals_are_graph_visible(
+        bundle,
+        information_frontier=readiness.information_frontier,
+    ):
+        missing_sources.add("J-Quants fundamentals")
+        missing_capabilities.add("fundamentals")
+    return tuple(sorted(missing_sources)), tuple(sorted(missing_capabilities))
 
 
 class _InformationFrontierToolNode(ToolNode):
@@ -838,7 +1081,32 @@ class ResearchGraph:
             items=tuple(deduped.values()),
             tables=extract_evidence_tables(tuple(deduped.values())),
         )
-        runtime.context.evidence_writer(bundle)
+        persisted_bundle = runtime.context.sealed_evidence_reader()
+        if persisted_bundle is None:
+            runtime.context.evidence_writer(bundle)
+        else:
+            bundle = persisted_bundle
+        missing_sources, missing_capabilities = _missing_anchor_required_evidence(
+            bundle,
+            runtime.context,
+        )
+        if missing_sources or missing_capabilities:
+            payload = {
+                "reason": _GRAPH_VISIBLE_REQUIRED_EVIDENCE_MISSING,
+                "missing_sources": list(missing_sources),
+                "missing_capabilities": list(missing_capabilities),
+            }
+            runtime.stream_writer(
+                {
+                    "event_type": "research.anchor_evidence_gate_failed",
+                    "node": node,
+                    "payload": payload,
+                }
+            )
+            raise GraphVisibleRequiredEvidenceError(
+                missing_sources=missing_sources,
+                missing_capabilities=missing_capabilities,
+            )
         self._finish_node(
             runtime,
             node,
@@ -1715,7 +1983,13 @@ def collect_evidence(
         dict[str, Any],
     ] = {}
     content_order: list[tuple[str, EvidenceTemporalScope]] = []
-    empty_payloads: list[tuple[tuple[ProvenanceRecord, ...], EvidenceTemporalScope]] = []
+    empty_payloads: list[
+        tuple[
+            tuple[ProvenanceRecord, ...],
+            EvidenceTemporalScope,
+            dict[str, Any],
+        ]
+    ] = []
 
     def collect_payload(
         records: Iterable[ProvenanceRecord],
@@ -1740,7 +2014,7 @@ def collect_evidence(
                 if record not in existing:
                     existing.append(record)
         else:
-            empty_payloads.append((records, scope))
+            empty_payloads.append((records, scope, dict(provenance_metadata or {})))
 
     tool_messages = [message for message in messages if isinstance(message, ToolMessage)]
     for message in tool_messages:
@@ -1862,12 +2136,13 @@ def collect_evidence(
             provenance_metadata=content_metadata[(content, scope)],
         )
         items[item.ref] = item
-    for records, scope in empty_payloads:
+    for records, scope, provenance_metadata in empty_payloads:
         item = _evidence_from_records(
             records,
             requested_date=requested_date,
             content=None,
             temporal_scope=scope,
+            provenance_metadata=provenance_metadata,
         )
         items[item.ref] = item
     if not items:
