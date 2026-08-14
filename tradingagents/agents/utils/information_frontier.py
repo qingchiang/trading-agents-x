@@ -200,6 +200,13 @@ def _span_is_admissible(
     observations = span.source_observations
     watermarks = span.source_watermarks
     if span.temporal_scope == "point_in_time":
+        attested_sources = {
+            observation.source for observation in observations
+        } | {
+            watermark.source
+            for watermark in watermarks
+            if _watermark_attests_frontier(watermark, information_frontier)
+        }
         effective_dates = tuple(
             date.fromisoformat(value)
             for record in span.records
@@ -238,7 +245,11 @@ def _span_is_admissible(
             )
             or any(item.temporal_scope != "point_in_time" for item in watermarks)
             or provenance_requires_frontier_omission(
-                span.records,
+                (
+                    record
+                    for record in span.records
+                    if record.source not in attested_sources
+                ),
                 information_frontier,
             )
             or any(
@@ -248,6 +259,7 @@ def _span_is_admissible(
                     observation.source == item.source
                     for observation in observations
                 )
+                and not _watermark_attests_frontier(item, information_frontier)
                 for item in watermarks
             )
         )
@@ -273,6 +285,25 @@ def _span_is_admissible(
             effective_dates=effective_dates,
         ).admitted
         for record in span.records
+    )
+
+
+def _watermark_attests_frontier(
+    watermark: SourceWatermark,
+    information_frontier: datetime,
+) -> bool:
+    """Accept an empty PIT scan only when its producer froze the same horizon."""
+
+    if (
+        watermark.temporal_scope != "point_in_time"
+        or watermark.status != "complete"
+        or watermark.information_frontier is None
+    ):
+        return False
+    producer_frontier = datetime.fromisoformat(watermark.information_frontier)
+    return (
+        producer_frontier <= information_frontier
+        and date.fromisoformat(watermark.scanned_end) <= producer_frontier.date()
     )
 
 

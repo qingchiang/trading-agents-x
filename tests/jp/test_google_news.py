@@ -6,6 +6,7 @@ from unittest import mock
 import pytest
 
 from tradingagents.dataflows.jp import google_news as gn
+from tradingagents.provenance import extract_provenance
 
 
 def _rss(*items: str) -> bytes:
@@ -113,8 +114,28 @@ class GetNewsTests(unittest.TestCase):
         self.assertIn("omitted_by_limit=3", out)
 
     def test_no_items_returns_no_news_line(self):
-        out = self._run([])
+        with mock.patch.object(
+            gn,
+            "_retrieved_at",
+            return_value="2026-07-11T01:02:03+00:00",
+        ):
+            out = self._run([])
         self.assertIn("No Google News found for 4568.T", out)
+        record = extract_provenance(out)[0]
+        self.assertEqual(record.source, "Google News")
+        self.assertEqual(record.retrieved_at, "2026-07-11T01:02:03+00:00")
+
+    def test_positive_result_carries_producer_retrieval_time(self):
+        with mock.patch.object(
+            gn,
+            "_retrieved_at",
+            return_value="2026-07-11T01:02:03+00:00",
+        ):
+            out = self._run([_parsed("第一三共が決算を発表")])
+
+        records = extract_provenance(out)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].retrieved_at, "2026-07-11T01:02:03+00:00")
 
     def test_malformed_date_returns_no_news_line(self):
         out = self._run([_parsed("記事")], start="bad", end="date")

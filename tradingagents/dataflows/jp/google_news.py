@@ -30,6 +30,8 @@ from email.utils import parsedate_to_datetime
 from urllib.parse import urlencode
 from urllib.request import Request
 
+from tradingagents.provenance import ProvenanceRecord, attach_provenance
+
 from ..config import get_config
 from ..news_quality import (
     build_company_aliases,
@@ -48,6 +50,35 @@ _RSS = "https://news.google.com/rss/search?{qs}"
 # converting before the window filter avoids a ~9h skew that would otherwise admit
 # early-next-JST-day headlines into a backtest (look-ahead safety).
 _JST = timezone(timedelta(hours=9))
+
+
+def _retrieved_at() -> str:
+    """Capture the RSS producer's own retrieval completion time once."""
+
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _producer_result(
+    body: str,
+    *,
+    start_date: str,
+    end_date: str,
+    retrieved_at: str,
+) -> str:
+    """Carry the immutable RSS retrieval time with positive and empty results."""
+
+    return attach_provenance(
+        body,
+        ProvenanceRecord(
+            evidence="get_news",
+            source="Google News",
+            requested=f"{start_date} to {end_date}",
+            effective=f"{start_date} to {end_date}",
+            timing="live non-point-in-time; publication-date filtered",
+            retrieved_at=retrieved_at,
+        ),
+    )
+
 
 def _parse_pubdate(raw: str | None) -> datetime | None:
     """Parse an RFC-822 ``pubDate`` to a naive **JST** datetime, or None.
@@ -133,14 +164,21 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0)
     except (TypeError, ValueError):
         return f"No Google News found for {ticker} between {start_date} and {end_date}"
 
+    fetched_items = _fetch_items(query, timeout)
+    retrieved_at = _retrieved_at()
     candidates = [
         it
-        for it in _fetch_items(query, timeout)
+        for it in fetched_items
         if it["title"]
         and _in_window(it["pub_date"], start_dt, end_dt)
     ]
     if not candidates:
-        return f"No Google News found for {ticker} between {start_date} and {end_date}"
+        return _producer_result(
+            f"No Google News found for {ticker} between {start_date} and {end_date}",
+            start_date=start_date,
+            end_date=end_date,
+            retrieved_at=retrieved_at,
+        )
     aliases = build_company_aliases(ticker, name)
     candidates.sort(key=lambda it: it["pub_date"], reverse=True)
     relevant = []
@@ -157,10 +195,15 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0)
 
     kept = relevant[: get_config()["news_article_limit"]]
     if not kept:
-        return (
-            f"No relevant Google News found for {ticker} between {start_date} and "
-            f"{end_date} after quality filtering ({len(candidates)} in-window "
-            "candidates dropped)"
+        return _producer_result(
+            (
+                f"No relevant Google News found for {ticker} between {start_date} and "
+                f"{end_date} after quality filtering ({len(candidates)} in-window "
+                "candidates dropped)"
+            ),
+            start_date=start_date,
+            end_date=end_date,
+            retrieved_at=retrieved_at,
         )
 
     direct_count = sum(tier == "direct" for _, tier in kept)
@@ -179,7 +222,12 @@ def get_news(ticker: str, start_date: str, end_date: str, timeout: float = 10.0)
         f"context={context_count}); "
         f"dropped={dropped_count}; omitted_by_limit={omitted_count}."
     )
-    return (
-        f"## {ticker} News (media, Google News), from {start_date} to {end_date}:"
-        f"\n\n{stats}\n\n{body}"
+    return _producer_result(
+        (
+            f"## {ticker} News (media, Google News), from {start_date} to {end_date}:"
+            f"\n\n{stats}\n\n{body}"
+        ),
+        start_date=start_date,
+        end_date=end_date,
+        retrieved_at=retrieved_at,
     )

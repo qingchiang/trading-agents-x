@@ -578,6 +578,131 @@ def test_tool_output_checks_each_same_day_channel_independently() -> None:
     assert filtered["messages"][0].artifact is None
 
 
+@pytest.mark.parametrize(
+    ("instrument", "source"),
+    [
+        ("4568.T", "J-Quants adjusted OHLCV"),
+        ("NVDA", "yfinance"),
+        ("600519.SS", "AKShare"),
+    ],
+)
+def test_cutoff_date_pit_market_artifact_survives_graph_admission(
+    instrument: str,
+    source: str,
+) -> None:
+    frontier = datetime(2026, 8, 10, 23, 59, tzinfo=timezone.utc)
+    artifact = {
+        "schema_version": "1",
+        "kind": "source",
+        "dataset_id": "ds_cutoffmarket",
+        "evidence_type": "get_stock_data",
+        "source_content": (
+            "# Data retrieved on: 2026-08-14 00:20:00\n"
+            "Date,Open,High,Low,Close,Volume\n"
+            "2026-08-09,99,101,98,100,1000\n"
+            "2026-08-10,100,102,99,101,1200"
+        ),
+        "provenance": [
+            {
+                "evidence": "get_stock_data",
+                "source": source,
+                "requested": "2026-08-09 to 2026-08-10",
+                "effective": "2026-08-09 to 2026-08-10",
+                "timing": "market-date filtered; rows after cutoff excluded",
+                "retrieved_at": None,
+            }
+        ],
+        "temporal_scope": "point_in_time",
+        "analytical_views": {"row_count": 2, "effective_end": "2026-08-10"},
+    }
+    message = ToolMessage(
+        content="MODEL-SAFE MARKET OVERVIEW",
+        artifact=artifact,
+        tool_call_id="call-cutoff-market",
+        name="get_stock_data",
+    )
+
+    filtered = _filter_tool_output_at_information_frontier(
+        {"messages": [message]},
+        frontier,
+        analysis_date=date(2026, 8, 10),
+        instrument=instrument,
+    )
+
+    assert filtered["messages"][0].content == "MODEL-SAFE MARKET OVERVIEW"
+    assert filtered["messages"][0].artifact == artifact
+
+
+@pytest.mark.parametrize(
+    ("temporal_scope", "effective", "timing", "source_content"),
+    [
+        (
+            "point_in_time",
+            "2026-08-11",
+            "market-date filtered",
+            "Date,Close\n2026-08-10,101",
+        ),
+        ("unknown", "2026-08-10", "unknown", "Date,Close\n2026-08-10,101"),
+        (
+            "point_in_time",
+            "unknown",
+            "market-date filtered",
+            "Date,Close\n2026-08-10,101",
+        ),
+        (
+            "point_in_time",
+            "2026-08-10",
+            "market-date filtered",
+            "Date,Close\n2026-08-11,102",
+        ),
+    ],
+)
+def test_market_artifact_fails_closed_for_unsafe_temporal_metadata(
+    temporal_scope: str,
+    effective: str,
+    timing: str,
+    source_content: str,
+) -> None:
+    artifact = {
+        "schema_version": "1",
+        "kind": "source",
+        "dataset_id": "ds_unsafemarket",
+        "evidence_type": "get_stock_data",
+        "source_content": source_content,
+        "provenance": [
+            {
+                "evidence": "get_stock_data",
+                "source": "fixture",
+                "requested": "2026-08-10",
+                "effective": effective,
+                "timing": timing,
+                "retrieved_at": None,
+            }
+        ],
+        "temporal_scope": temporal_scope,
+        "analytical_views": {"row_count": 1},
+    }
+
+    filtered = _filter_tool_output_at_information_frontier(
+        {
+            "messages": [
+                ToolMessage(
+                    content="UNSAFE MARKET OVERVIEW",
+                    artifact=artifact,
+                    tool_call_id="call-unsafe-market",
+                    name="get_stock_data",
+                )
+            ]
+        },
+        datetime(2026, 8, 10, 23, 59, tzinfo=timezone.utc),
+        analysis_date=date(2026, 8, 10),
+        instrument="4568.T",
+    )
+
+    assert filtered["messages"][0].artifact is None
+    assert "UNSAFE MARKET OVERVIEW" not in filtered["messages"][0].content
+
+
 def test_tool_output_retains_same_source_precisely_attested_before_frontier() -> None:
     frontier = datetime(
         2026,

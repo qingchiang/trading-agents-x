@@ -9,6 +9,7 @@ from tradingagents.application.evidence import extract_evidence_tables
 from tradingagents.application.evidence_workset import (
     build_market_data_artifact,
     market_analytical_views,
+    market_source_dates,
     parse_ohlcv_frame,
 )
 from tradingagents.provenance import ProvenanceRecord, attach_provenance
@@ -100,6 +101,50 @@ def test_analytical_views_are_reproducible_and_cutoff_safe() -> None:
     assert views["returns"]["1_session"] == pytest.approx(107.25 / 107.0 - 1)
     assert views["drawdown"]["maximum"] == 0.0
     assert all(row["month"] == "2024-01" for row in views["monthly"])
+
+
+@pytest.mark.unit
+def test_market_artifact_source_table_is_physically_truncated_to_cutoff() -> None:
+    raw = attach_provenance(
+        (
+            "Date,Open,High,Low,Close,Volume\n"
+            "2026-08-09,99,101,98,100,1000\n"
+            "2026-08-10,100,102,99,101,1200\n"
+            "2026-08-11,101,103,100,102,1300"
+        ),
+        ProvenanceRecord(
+            evidence="get_stock_data",
+            source="fixture",
+            requested="2026-08-09 to 2026-08-10",
+            effective="2026-08-09 to 2026-08-10",
+            timing="market-date filtered; rows after cutoff excluded",
+        ),
+    )
+
+    _overview, artifact = build_market_data_artifact(
+        raw,
+        symbol="4568.T",
+        start_date="2026-08-09",
+        end_date="2026-08-10",
+    )
+
+    assert "2026-08-10" in artifact["source_content"]
+    assert "2026-08-11" not in artifact["source_content"]
+
+
+@pytest.mark.unit
+def test_market_source_dates_ignore_retrieval_header_dates() -> None:
+    content = (
+        "# Data retrieved on: 2026-08-14 00:20:00\n"
+        "Date,Open,High,Low,Close,Volume\n"
+        "2026-08-09,99,101,98,100,1000\n"
+        "2026-08-10,100,102,99,101,1200"
+    )
+
+    assert market_source_dates(content) == (
+        date(2026, 8, 9),
+        date(2026, 8, 10),
+    )
 
 
 @pytest.mark.unit

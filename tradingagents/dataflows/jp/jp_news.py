@@ -35,12 +35,14 @@ from tradingagents.provenance import (
     ProvenanceRecord,
     SourceInterval,
     SourceWatermark,
+    attach_evidence_span,
     attach_provenance,
     attach_source_observations,
     attach_source_watermarks,
+    extract_provenance,
     extract_source_observations,
     extract_source_watermarks,
-    strip_source_metadata_markers,
+    strip_provenance_markers,
 )
 
 from ..config import get_config
@@ -107,7 +109,10 @@ def _item_key(item: str) -> str:
     return canonical_headline(title)
 
 
-def _merge_blocks(blocks: list[str], limit: int) -> tuple[list[str], list[_MergeCounts]]:
+def _merge_blocks(
+    blocks: list[str],
+    limit: int,
+) -> tuple[list[str | None], list[_MergeCounts]]:
     """Deduplicate and cap blocks in source-priority order.
 
     Returns rendered non-empty blocks plus disposition counts aligned with the
@@ -117,7 +122,7 @@ def _merge_blocks(blocks: list[str], limit: int) -> tuple[list[str], list[_Merge
     """
     remaining = max(1, limit)
     seen: set[str] = set()
-    merged: list[str] = []
+    merged: list[str | None] = []
     counts: list[_MergeCounts] = []
     for block in blocks:
         parsed = _split_feed_block(block)
@@ -145,8 +150,11 @@ def _merge_blocks(blocks: list[str], limit: int) -> tuple[list[str], list[_Merge
                 cap_omitted=cap_omitted,
             )
         )
-        if kept:
-            merged.append(f"{parsed.preamble}\n\n" + "\n\n".join(kept))
+        merged.append(
+            f"{parsed.preamble}\n\n" + "\n\n".join(kept)
+            if kept
+            else None
+        )
     return merged, counts
 
 
@@ -240,28 +248,28 @@ def get_news(
             feed_requests,
         )
     rendered = list(rendered)
-    source_observations = tuple(
-        observation
-        for block in rendered
-        for observation in extract_source_observations(block)
+    observations_by_feed = tuple(
+        tuple(extract_source_observations(block)) for block in rendered
     )
-    source_watermarks = tuple(
-        watermark
-        for block in rendered
-        for watermark in extract_source_watermarks(block)
+    watermarks_by_feed = tuple(
+        tuple(extract_source_watermarks(block)) for block in rendered
     )
-    rendered = [strip_source_metadata_markers(block) for block in rendered]
+    provenance_by_feed = tuple(tuple(extract_provenance(block)) for block in rendered)
+    rendered = [strip_provenance_markers(block) for block in rendered]
     data_blocks = [block for block in rendered if block.startswith(_DATA_PREFIX)]
     limit = max(1, int(get_config()["news_article_limit"]))
-    blocks, merged_counts = _merge_blocks(data_blocks, limit)
-    records = []
-    notes: list[tuple[str, ProvenanceRecord]] = []
+    merged_blocks, merged_counts = _merge_blocks(data_blocks, limit)
+    channel_spans: list[str] = []
     data_count_index = 0
-    for (source, _fetch, effective_start, effective_end), block in zip(
-        feed_requests, rendered, strict=True
-    ):
+    for source_index, (
+        (source, _fetch, effective_start, effective_end),
+        block,
+    ) in enumerate(zip(feed_requests, rendered, strict=True)):
+        counts = None
+        selected_body = ""
         if block.startswith(_DATA_PREFIX):
             counts = merged_counts[data_count_index]
+            selected_body = merged_blocks[data_count_index] or ""
             data_count_index += 1
             timing = (
                 "publication/disclosure-date filtered; "
@@ -282,12 +290,20 @@ def get_news(
             requested=f"{start_date} to {end_date}",
             effective=f"{effective_start} to {effective_end}",
             timing=timing,
+            retrieved_at=(
+                _producer_retrieval_time(provenance_by_feed[source_index], source)
+                if source == "Google News"
+                else None
+            ),
         )
-        records.append(record)
-        if not any(item.source == source for item in source_watermarks):
-            returned = counts.returned if block.startswith(_DATA_PREFIX) else 0
+        source_watermarks = tuple(
+            item
+            for item in watermarks_by_feed[source_index]
+            if item.source == source
+        )
+        if not source_watermarks:
+            returned = counts.returned if counts is not None else 0
             source_watermarks = (
-                *source_watermarks,
                 SourceWatermark(
                     source=source,
                     scanned_start=effective_start,
@@ -313,26 +329,43 @@ def get_news(
                     ),
                 ),
             )
+        source_observations = tuple(
+            item
+            for item in observations_by_feed[source_index]
+            if item.source == source
+        )
         if block.startswith(_NOTE_PREFIX):
-            notes.append((block, record))
+            selected_body = block
+        scoped = attach_provenance(selected_body, record)
+        scoped = attach_source_observations(scoped, *source_observations)
+        scoped = attach_source_watermarks(scoped, *source_watermarks)
+        channel_spans.append(
+            attach_evidence_span(
+                scoped,
+                temporal_scope=(
+                    "live_only" if source == "Google News" else "point_in_time"
+                ),
+            )
+        )
 
-    if not blocks:
-        coverage_markers = attach_source_watermarks("", *source_watermarks).strip()
+    if not any(merged_blocks):
         raise NoMarketDataError(
             ticker,
             detail="no EDINET/TDnet disclosures or media news in the window",
-            availability_notes=(
-                *(
-                    attach_provenance(note, record) for note, record in notes
-                ),
-                *([coverage_markers] if coverage_markers else []),
-            ),
+            availability_notes=tuple(channel_spans),
         )
-    if notes:
-        blocks.append(
-            "### Source availability notes\n"
-            + "\n".join(note for note, _record in notes)
-        )
-    result = attach_provenance("\n\n".join(blocks), *records)
-    result = attach_source_observations(result, *source_observations)
-    return attach_source_watermarks(result, *source_watermarks)
+    return "\n\n".join(channel_spans)
+
+
+def _producer_retrieval_time(
+    records: tuple[ProvenanceRecord, ...],
+    source: str,
+) -> str | None:
+    """Forward one unambiguous producer timestamp without restamping it."""
+
+    retrieved = {
+        record.retrieved_at
+        for record in records
+        if record.source == source and record.retrieved_at is not None
+    }
+    return retrieved.pop() if len(retrieved) == 1 else None

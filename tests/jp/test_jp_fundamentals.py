@@ -7,8 +7,11 @@ from unittest import mock
 import pandas as pd
 import pytest
 import requests
+from langchain_core.messages import ToolMessage
 
+from tradingagents.application.contracts import EvidenceTemporalScope
 from tradingagents.dataflows.jp import jp_fundamentals
+from tradingagents.graph.research_graph import _collect_evidence
 from tradingagents.provenance import extract_provenance
 
 
@@ -161,6 +164,37 @@ class JPFundamentalsTests(unittest.TestCase):
         self.assertIn("| forward_eps | 92.67 | currency | JPY/share |", out)
         self.assertIn("| forward_pe |", out)
         self.assertIn("| forward_eps_growth |", out)
+
+    def test_pit_summary_and_live_overlay_become_separate_evidence_items(self):
+        today = pd.Timestamp.now().date()
+        out, _ = self._run_live((92.67, 16), today.isoformat())
+
+        items = _collect_evidence(
+            [
+                ToolMessage(
+                    content=out,
+                    tool_call_id="jp-fundamentals-evidence",
+                    name="get_fundamentals",
+                )
+            ],
+            "",
+            requested_date=today,
+            analyst="fundamentals",
+        )
+
+        by_scope = {item.origins[0].temporal_scope: item for item in items}
+        self.assertEqual(
+            set(by_scope),
+            {
+                EvidenceTemporalScope.POINT_IN_TIME,
+                EvidenceTemporalScope.LIVE_ONLY,
+            },
+        )
+        self.assertIn("BASE-OVERVIEW", by_scope[EvidenceTemporalScope.POINT_IN_TIME].content)
+        self.assertIn(
+            "analyst consensus, live only",
+            by_scope[EvidenceTemporalScope.LIVE_ONLY].content,
+        )
 
     def test_flat_company_guidance_vs_decline_reads_divergent(self):
         # Sign boundary: flat company guidance (NxFEPS == EPS → 0% growth) vs an

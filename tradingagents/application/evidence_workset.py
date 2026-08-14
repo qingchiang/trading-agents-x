@@ -64,7 +64,10 @@ def build_market_data_artifact(
 ) -> tuple[str, EvidenceToolArtifact]:
     """Split a complete OHLCV result into a concise view and raw artifact."""
 
-    source_content = strip_provenance_markers(raw).strip()
+    source_content = _truncate_ohlcv_source_content(
+        strip_provenance_markers(raw).strip(),
+        cutoff=end_date,
+    )
     records = tuple(extract_provenance(raw))
     frame = parse_ohlcv_frame(source_content, cutoff=end_date)
     views = market_analytical_views(
@@ -88,6 +91,78 @@ def build_market_data_artifact(
         "column_measurements": market_column_measurements(symbol),
     }
     return render_market_overview(dataset_id, views), artifact
+
+
+def _truncate_ohlcv_source_content(content: str, *, cutoff: str) -> str:
+    """Retain the complete source table while physically removing future rows."""
+
+    lines = content.splitlines()
+    cutoff_date = date.fromisoformat(cutoff)
+    for header_index, line in enumerate(lines):
+        try:
+            headers = [cell.strip() for cell in next(csv.reader([line]))]
+        except (csv.Error, StopIteration):
+            continue
+        date_index = next(
+            (
+                index
+                for index, header in enumerate(headers)
+                if header.casefold() == "date"
+            ),
+            None,
+        )
+        if date_index is None or not _OHLCV_REQUIRED.issubset(
+            {header.casefold() for header in headers}
+        ):
+            continue
+        retained = lines[: header_index + 1]
+        for row_index, row in enumerate(
+            lines[header_index + 1 :],
+            start=header_index + 1,
+        ):
+            if not row.strip() or row.lstrip().startswith(("#", "<!--", "|")):
+                retained.extend(lines[row_index:])
+                break
+            try:
+                cells = next(csv.reader([row]))
+                row_date = date.fromisoformat(cells[date_index][:10])
+            except (csv.Error, IndexError, StopIteration, ValueError):
+                retained.extend(lines[row_index:])
+                break
+            if row_date <= cutoff_date:
+                retained.append(row)
+        return "\n".join(retained).strip()
+    return content
+
+
+def market_source_dates(content: str) -> tuple[date, ...]:
+    """Return producer rows' market dates without treating retrieval notes as rows."""
+
+    lines = content.splitlines()
+    for header_index, line in enumerate(lines):
+        try:
+            headers = [cell.strip() for cell in next(csv.reader([line]))]
+        except (csv.Error, StopIteration):
+            continue
+        normalized = {header.casefold() for header in headers}
+        if not _OHLCV_REQUIRED.issubset(normalized):
+            continue
+        date_index = next(
+            index
+            for index, header in enumerate(headers)
+            if header.casefold() == "date"
+        )
+        dates = []
+        for row in lines[header_index + 1 :]:
+            if not row.strip() or row.lstrip().startswith(("#", "<!--", "|")):
+                break
+            try:
+                cells = next(csv.reader([row]))
+                dates.append(date.fromisoformat(cells[date_index][:10]))
+            except (csv.Error, IndexError, StopIteration, ValueError):
+                break
+        return tuple(dates)
+    return ()
 
 
 def market_column_measurements(symbol: str) -> dict[str, dict[str, str | None]]:

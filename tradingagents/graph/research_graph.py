@@ -72,9 +72,13 @@ from tradingagents.application.contracts import (
 from tradingagents.application.evidence import (
     extract_evidence_tables,
 )
+from tradingagents.application.evidence_admission import (
+    evaluate_evidence_admission,
+)
 from tradingagents.application.evidence_workset import (
     artifact_records,
     is_evidence_tool_artifact,
+    market_source_dates,
 )
 from tradingagents.application.metrics import MetricsCallback
 from tradingagents.application.reporting import order_reports
@@ -153,7 +157,6 @@ def _filter_tool_output_at_information_frontier(
             if is_evidence_tool_artifact(artifact)
             else None
         )
-        frontier_date = information_frontier.date()
         filtered_content, should_omit = filter_evidence_content_at_information_frontier(
             content,
             information_frontier,
@@ -165,13 +168,11 @@ def _filter_tool_output_at_information_frontier(
             sealed_at=message_sealed_at,
         )
         if is_evidence_tool_artifact(artifact):
-            effective_dates = [
-                date.fromisoformat(value)
-                for record in artifact_records(artifact)
-                for value in _DATE_RE.findall(record.effective)
-            ]
-            should_omit = should_omit or (
-                not effective_dates or max(effective_dates) >= frontier_date
+            should_omit = should_omit or not _artifact_is_admissible(
+                artifact,
+                analysis_date=analysis_date,
+                instrument=instrument,
+                information_frontier=information_frontier,
             )
         if should_omit:
             message = message.model_copy(
@@ -195,6 +196,53 @@ def _filter_tool_output_at_information_frontier(
             )
         messages.append(message)
     return {**output, "messages": messages}
+
+
+def _artifact_is_admissible(
+    artifact: Mapping[str, Any],
+    *,
+    analysis_date: date | None,
+    instrument: str | None,
+    information_frontier: datetime,
+) -> bool:
+    """Validate one producer-declared PIT artifact without a date blanket."""
+
+    if (
+        analysis_date is None
+        or instrument is None
+        or artifact.get("temporal_scope") != "point_in_time"
+    ):
+        return False
+    records = artifact_records(artifact)
+    if not records or any(
+        not record.source.strip()
+        or record.source.strip().casefold() in {"unknown", "—"}
+        or temporal_scope_from_records((record,)) != "point_in_time"
+        for record in records
+    ):
+        return False
+    dates_by_record = tuple(
+        tuple(
+            date.fromisoformat(value)
+            for value in _DATE_RE.findall(record.effective)
+        )
+        for record in records
+    )
+    if any(not values for values in dates_by_record):
+        return False
+    source_dates = market_source_dates(str(artifact.get("source_content", "")))
+    if any(value > analysis_date for value in source_dates):
+        return False
+    decision = evaluate_evidence_admission(
+        temporal_scope="point_in_time",
+        analysis_date=analysis_date,
+        instrument=instrument,
+        effective_dates=tuple(
+            value for values in dates_by_record for value in values
+        ),
+        information_frontier=information_frontier,
+    )
+    return decision.admitted
 
 
 class _InformationFrontierToolNode(ToolNode):
@@ -1736,6 +1784,17 @@ def collect_evidence(
         spans = extract_evidence_spans(content)
         if spans:
             for span in spans:
+                span_metadata = {
+                    "source_records": [
+                        asdict(item) for item in span.source_observations
+                    ],
+                    "source_watermarks": [
+                        asdict(item) for item in span.source_watermarks
+                    ],
+                }
+                span_metadata = {
+                    key: value for key, value in span_metadata.items() if value
+                }
                 records = list(span.records)
                 if not records:
                     records = [
@@ -1753,7 +1812,7 @@ def collect_evidence(
                     records,
                     span.content,
                     span.temporal_scope,
-                    source_metadata,
+                    span_metadata,
                 )
             continue
         records = extract_provenance(content)
