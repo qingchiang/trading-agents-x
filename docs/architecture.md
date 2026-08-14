@@ -318,8 +318,12 @@ retain each upstream disclosure number as the version's native record identity,
 and carry an explicit accounting-period comparison key. These fields classify
 new filings, corrections, restatements, accounting-scope changes, and otherwise
 unclassifiable differences across snapshots without conflating logical identity
-with an individual upstream disclosure. A latest visible disclosure more than
-180 days before the analysis cutoff marks the snapshot limited. Adjusted
+with an individual upstream disclosure. Fundamentals overview and statement
+assemblers use the same canonical `J-Quants fundamentals` identity for their
+Provenance Records, Source Records, and Source Watermarks; presentation labels
+such as "official summary" do not create a separate source. A latest visible
+disclosure more than 180 days before the analysis cutoff marks the snapshot
+limited. Adjusted
 market history records its provider, adjustment contract, latest observation,
 unit, precision, and actual returned warm-up start separately from the requested
 scan cutoff. The Current Research
@@ -987,7 +991,11 @@ sources also truncate each item to the Research Cutoff. Their absence remains
 unknown rather than becoming a neutral or bearish signal. When a live-only
 response is cached, its producer-owned retrieval timestamp is cached with the
 payload and reused by consumers; cache hits are never restamped at assembly
-time.
+time. For both explicit spans and unwrapped point-in-time payloads, a safe
+Source Observation or complete frontier-attested Source Watermark may attest a
+Provenance Record only when their canonical source identities match and the
+attested horizon covers the record's effective horizon. An attestation from
+another source never makes the record admissible.
 
 Evidence admission is source- or span-scoped. A point-in-time EDINET or TDnet
 channel remains usable when a sibling Google News channel is live-only, and an

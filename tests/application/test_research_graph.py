@@ -767,6 +767,162 @@ def test_tool_output_retains_same_source_precisely_attested_before_frontier() ->
     assert filtered["messages"][0].content == content
 
 
+def test_tool_output_uses_same_source_closure_to_attest_plain_provenance() -> None:
+    frontier = datetime(
+        2026,
+        8,
+        10,
+        23,
+        59,
+        tzinfo=timezone(timedelta(hours=9)),
+    )
+    source = "J-Quants adjusted OHLCV"
+    content = attach_provenance(
+        "Verified current-cutoff market snapshot.",
+        ProvenanceRecord(
+            evidence="get_verified_market_snapshot",
+            source=source,
+            requested="2026-08-10",
+            effective="2026-08-10",
+            timing="market-date filtered",
+        ),
+    )
+    content = attach_source_observations(
+        content,
+        SourceObservation(
+            source=source,
+            record_id="jquants-market:4568.T",
+            version_id="jquants-market:fixture",
+            status="published",
+            published_at="2026-08-10",
+            available_at=frontier.isoformat(),
+            availability_basis=(
+                "observed in successful bounded collection at Information Frontier"
+            ),
+            title="Adjusted market history through 2026-08-10",
+            record_kind="market",
+        ),
+    )
+    content = attach_source_watermarks(
+        content,
+        SourceWatermark(
+            source=source,
+            scanned_start="2025-07-07",
+            scanned_end="2026-08-10",
+            status="complete",
+            returned_records=220,
+            information_frontier=frontier.isoformat(),
+        ),
+    )
+
+    filtered = _filter_tool_output_at_information_frontier(
+        {
+            "messages": [
+                ToolMessage(
+                    content=content,
+                    tool_call_id="call-verified-snapshot",
+                    name="get_verified_market_snapshot",
+                )
+            ]
+        },
+        frontier,
+        analysis_date=date(2026, 8, 10),
+        instrument="4568.T",
+    )
+
+    assert filtered["messages"][0].content == content
+
+
+def test_tool_output_retains_plain_complete_empty_scan_at_frozen_frontier() -> None:
+    frontier = datetime(
+        2026,
+        8,
+        10,
+        23,
+        59,
+        tzinfo=timezone(timedelta(hours=9)),
+    )
+    content = attach_source_watermarks(
+        "No EDINET records were found in the bounded interval.",
+        SourceWatermark(
+            source="EDINET",
+            scanned_start="2026-08-10",
+            scanned_end="2026-08-10",
+            status="complete",
+            returned_records=0,
+            reported_records=0,
+            information_frontier=frontier.isoformat(),
+        ),
+    )
+
+    filtered = _filter_tool_output_at_information_frontier(
+        {
+            "messages": [
+                ToolMessage(
+                    content=content,
+                    tool_call_id="call-empty-edinet",
+                    name="get_news",
+                )
+            ]
+        },
+        frontier,
+        analysis_date=date(2026, 8, 10),
+        instrument="4568.T",
+    )
+
+    assert filtered["messages"][0].content == content
+
+
+def test_tool_output_rejects_provenance_beyond_same_source_closure() -> None:
+    frontier = datetime(
+        2026,
+        8,
+        10,
+        23,
+        59,
+        tzinfo=timezone(timedelta(hours=9)),
+    )
+    source = "J-Quants adjusted OHLCV"
+    content = attach_provenance(
+        "Market data beyond the attested source horizon.",
+        ProvenanceRecord(
+            evidence="get_verified_market_snapshot",
+            source=source,
+            requested="2026-08-10",
+            effective="2026-08-10",
+            timing="market-date filtered",
+        ),
+    )
+    content = attach_source_watermarks(
+        content,
+        SourceWatermark(
+            source=source,
+            scanned_start="2025-07-07",
+            scanned_end="2026-08-09",
+            status="complete",
+            returned_records=219,
+            information_frontier="2026-08-09T23:59:00+09:00",
+        ),
+    )
+
+    filtered = _filter_tool_output_at_information_frontier(
+        {
+            "messages": [
+                ToolMessage(
+                    content=content,
+                    tool_call_id="call-stale-market-closure",
+                    name="get_verified_market_snapshot",
+                )
+            ]
+        },
+        frontier,
+        analysis_date=date(2026, 8, 10),
+        instrument="4568.T",
+    )
+
+    assert "Market data beyond" not in filtered["messages"][0].content
+
+
 @pytest.mark.parametrize("as_span", [False, True])
 def test_tool_output_omits_unattested_current_day_provenance(
     as_span: bool,

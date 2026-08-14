@@ -71,7 +71,7 @@ class JPStatementsTests(unittest.TestCase):
         self.assertTrue(strip_provenance_markers(out).startswith("JQ-INCOME"))
         self.assertEqual(
             {record.source for record in extract_provenance(out)},
-            {"J-Quants official summary", "yfinance curated detail"},
+            {"J-Quants fundamentals", "yfinance curated detail"},
         )
         self.assertIn("Line-item detail (yfinance, curated", out)
         self.assertIn("Gross Profit", out)

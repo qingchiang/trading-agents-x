@@ -200,7 +200,7 @@ def _with_official_provenance(
         text,
         ProvenanceRecord(
             evidence=_EVIDENCE_BY_KIND[kind],
-            source="J-Quants official summary",
+            source="J-Quants fundamentals",
             requested=requested,
             effective=effective,
             timing=timing,

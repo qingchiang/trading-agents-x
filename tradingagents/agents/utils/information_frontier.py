@@ -14,6 +14,7 @@ from tradingagents.application.evidence_admission import (
 from tradingagents.provenance import (
     EvidenceSpan,
     ProvenanceRecord,
+    SourceObservation,
     SourceWatermark,
     attach_evidence_span,
     attach_provenance,
@@ -124,7 +125,16 @@ def filter_evidence_content_at_information_frontier(
             if item.temporal_scope == "point_in_time"
         )
         or provenance_requires_frontier_omission(
-            plain_records,
+            (
+                record
+                for record in plain_records
+                if not _provenance_record_has_frontier_attestation(
+                    record,
+                    observations,
+                    watermarks,
+                    information_frontier,
+                )
+            ),
             information_frontier,
         )
         or any(
@@ -133,6 +143,7 @@ def filter_evidence_content_at_information_frontier(
                 observation.source == item.source
                 for observation in observations
             )
+            and not _watermark_attests_frontier(item, information_frontier)
             for item in watermarks
         )
     )
@@ -200,13 +211,6 @@ def _span_is_admissible(
     observations = span.source_observations
     watermarks = span.source_watermarks
     if span.temporal_scope == "point_in_time":
-        attested_sources = {
-            observation.source for observation in observations
-        } | {
-            watermark.source
-            for watermark in watermarks
-            if _watermark_attests_frontier(watermark, information_frontier)
-        }
         effective_dates = tuple(
             date.fromisoformat(value)
             for record in span.records
@@ -248,7 +252,12 @@ def _span_is_admissible(
                 (
                     record
                     for record in span.records
-                    if record.source not in attested_sources
+                    if not _provenance_record_has_frontier_attestation(
+                        record,
+                        observations,
+                        watermarks,
+                        information_frontier,
+                    )
                 ),
                 information_frontier,
             )
@@ -304,6 +313,42 @@ def _watermark_attests_frontier(
     return (
         producer_frontier <= information_frontier
         and date.fromisoformat(watermark.scanned_end) <= producer_frontier.date()
+    )
+
+
+def _provenance_record_has_frontier_attestation(
+    record: ProvenanceRecord,
+    observations: Iterable[SourceObservation],
+    watermarks: Iterable[SourceWatermark],
+    information_frontier: datetime,
+) -> bool:
+    """Return whether same-source closure covers the record's effective horizon."""
+
+    effective_dates = tuple(
+        date.fromisoformat(value) for value in _DATE_RE.findall(record.effective)
+    )
+
+    def covers_effective_date(boundary: date) -> bool:
+        return not effective_dates or max(effective_dates) <= boundary
+
+    if any(
+        observation.source == record.source
+        and datetime.fromisoformat(observation.available_at) <= information_frontier
+        and (
+            published_dates := tuple(
+                date.fromisoformat(value)
+                for value in _DATE_RE.findall(observation.published_at)
+            )
+        )
+        and covers_effective_date(max(published_dates))
+        for observation in observations
+    ):
+        return True
+    return any(
+        watermark.source == record.source
+        and covers_effective_date(date.fromisoformat(watermark.scanned_end))
+        and _watermark_attests_frontier(watermark, information_frontier)
+        for watermark in watermarks
     )
 
 
