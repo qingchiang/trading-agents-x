@@ -445,31 +445,35 @@ def get_fundamentals(
         curr_date,
         information_frontier=information_frontier,
     )
+    base = attach_evidence_span(
+        attach_provenance(
+            base,
+            ProvenanceRecord(
+                evidence="get_fundamentals",
+                source="J-Quants fundamentals",
+                requested=curr_date or "live retrieval",
+                effective=(
+                    f"disclosures <= {curr_date}"
+                    if curr_date
+                    else "latest disclosure at retrieval"
+                ),
+                timing=(
+                    "disclosure-date filtered"
+                    if curr_date
+                    else "live retrieval; no historical cutoff supplied"
+                ),
+            ),
+        ),
+        temporal_scope="point_in_time",
+    )
     as_of = curr_date or datetime.now().strftime("%Y-%m-%d")
     try:
-        result = base + _valuation_block(
+        valuation = _valuation_block(
             ticker,
             as_of,
             information_frontier=information_frontier,
         )
     except Exception as exc:  # never let ratio math break the official overview
         logger.warning("JP fundamentals: valuation block failed for %s: %s", ticker, exc)
-        result = base + "\n\n## Valuation (computed)\n(unavailable: ratio computation failed)"
-    return attach_provenance(
-        result,
-        ProvenanceRecord(
-            evidence="get_fundamentals",
-            source="J-Quants official summary",
-            requested=curr_date or "live retrieval",
-            effective=(
-                f"disclosures <= {curr_date}"
-                if curr_date
-                else "latest disclosure at retrieval"
-            ),
-            timing=(
-                "disclosure-date filtered"
-                if curr_date
-                else "live retrieval; no historical cutoff supplied"
-            ),
-        ),
-    )
+        valuation = "\n\n## Valuation (computed)\n(unavailable: ratio computation failed)"
+    return base + valuation

@@ -1179,7 +1179,7 @@ class _RequiredEvidenceSubgraph(_AnalystSubgraph):
                         "J-Quants disclosed fundamentals.",
                         ProvenanceRecord(
                             evidence="get_fundamentals",
-                            source="J-Quants official summary",
+                            source="J-Quants fundamentals",
                             requested="2026-08-10",
                             effective="disclosures <= 2026-08-10",
                             timing="disclosure-date filtered",
@@ -1413,7 +1413,7 @@ class _OfflineAcceptanceSubgraph(_AnalystSubgraph):
                         "J-QUANTS PIT FUNDAMENTALS BODY",
                         ProvenanceRecord(
                             evidence="get_fundamentals",
-                            source="J-Quants official summary",
+                            source="J-Quants fundamentals",
                             requested="2026-08-10",
                             effective="disclosures <= 2026-08-10",
                             timing="disclosure-date filtered",

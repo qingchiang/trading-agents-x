@@ -15,6 +15,7 @@ import pytest
 import requests
 
 import tradingagents.default_config as default_config
+from tradingagents.application.evidence_workset import build_market_data_artifact
 from tradingagents.application.market_readiness import (
     MarketDataNotReadyError,
     validate_jquants_daily_bar_ready,
@@ -35,6 +36,7 @@ from tradingagents.dataflows.jp.jquants_common import (
 )
 from tradingagents.dataflows.jp.jquants_stock import get_stock
 from tradingagents.provenance import (
+    extract_provenance,
     extract_source_observations,
     extract_source_watermarks,
 )
@@ -118,6 +120,26 @@ class StockFetchTests(unittest.TestCase):
         # Adjusted close (105/108), not the raw doubled value (210/216).
         self.assertEqual(df["Close"].tolist(), [105.0, 108.0])
 
+    def test_get_stock_declares_adjusted_ohlcv_source_identity(self):
+        records = [_quote("2026-06-22", 105.0), _quote("2026-06-23", 108.0)]
+        with self._patch_records(records):
+            out = get_stock("9984.T", "2026-06-20", "2026-06-23")
+
+        provenance = extract_provenance(out)
+
+        assert len(provenance) == 1
+        assert provenance[0].source == "J-Quants adjusted OHLCV"
+        assert provenance[0].effective == "2026-06-22 to 2026-06-23"
+        _overview, artifact = build_market_data_artifact(
+            out,
+            symbol="9984.T",
+            start_date="2026-06-20",
+            end_date="2026-06-23",
+        )
+        assert [item["source"] for item in artifact["provenance"]] == [
+            "J-Quants adjusted OHLCV"
+        ]
+
     def test_get_stock_falls_back_to_raw_when_adjusted_missing(self):
         records = [_quote("2026-06-23", 50.0, adjusted=False)]  # only raw Close=100
         with self._patch_records(records):
@@ -193,6 +215,20 @@ class StockFetchTests(unittest.TestCase):
         assert watermark.returned_records == 220
         assert watermark.scanned_start == dates[0].strftime("%Y-%m-%d")
         assert watermark.scanned_end == dates[-1].strftime("%Y-%m-%d")
+
+    def test_verified_snapshot_declares_adjusted_ohlcv_source_identity(self):
+        from tradingagents.dataflows.jp.jquants_indicator import get_verified_market_snapshot
+
+        dates = pd.bdate_range(end="2026-06-23", periods=220)
+        records = [_quote(d.strftime("%Y-%m-%d"), 100.0 + i) for i, d in enumerate(dates)]
+        with self._patch_records(records):
+            out = get_verified_market_snapshot("9984.T", "2026-06-23", 30)
+
+        provenance = extract_provenance(out)
+
+        assert len(provenance) == 1
+        assert provenance[0].source == "J-Quants adjusted OHLCV"
+        assert provenance[0].effective == "2026-06-23"
 
     def test_same_day_snapshot_uses_successful_collection_as_availability_proof(self):
         from tradingagents.dataflows.jp.jquants_indicator import get_verified_market_snapshot

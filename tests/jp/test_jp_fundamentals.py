@@ -2,6 +2,7 @@
 J-Quants summary + as-of price. All J-Quants/price fetches are mocked, so these
 run without network or keys."""
 import unittest
+from datetime import date, datetime
 from unittest import mock
 
 import pandas as pd
@@ -9,10 +10,25 @@ import pytest
 import requests
 from langchain_core.messages import ToolMessage
 
+from tradingagents.agents.utils.information_frontier import (
+    filter_evidence_content_at_information_frontier,
+)
 from tradingagents.application.contracts import EvidenceTemporalScope
 from tradingagents.dataflows.jp import jp_fundamentals
 from tradingagents.graph.research_graph import _collect_evidence
-from tradingagents.provenance import extract_provenance
+from tradingagents.provenance import (
+    ProvenanceRecord,
+    SourceInterval,
+    SourceObservation,
+    SourceWatermark,
+    attach_evidence_span,
+    attach_provenance,
+    attach_source_observations,
+    attach_source_watermarks,
+    extract_provenance,
+    extract_source_observations,
+    extract_source_watermarks,
+)
 
 
 def _price_df(close, high, low, date="2026-06-26"):
@@ -263,7 +279,7 @@ class JPFundamentalsTests(unittest.TestCase):
         self.assertIn("ROE: 10.76%", out)
         self.assertIn("Beta (vs TOPIX, 3yr weekly): N/A", out)   # no price frame → no beta
         sources = {record.source for record in extract_provenance(out)}
-        self.assertIn("J-Quants official summary", sources)
+        self.assertIn("J-Quants fundamentals", sources)
         self.assertNotIn("J-Quants adjusted OHLCV", sources)
 
     def test_price_provenance_is_only_emitted_for_an_effective_price(self):
@@ -274,7 +290,7 @@ class JPFundamentalsTests(unittest.TestCase):
             "2026-06-26",
         )
         self.assertEqual(
-            records["J-Quants official summary"].effective,
+            records["J-Quants fundamentals"].effective,
             "disclosures <= 2026-06-26",
         )
 
@@ -351,6 +367,117 @@ class JPFundamentalsTests(unittest.TestCase):
             "2026-07-27",
             information_frontier=frontier,
         )
+
+    def test_official_summary_closure_survives_unsafe_valuation_sibling(self):
+        frontier = "2026-08-10T23:59:00+09:00"
+        base = attach_source_observations(
+            "OFFICIAL FUNDAMENTALS BODY",
+            SourceObservation(
+                source="J-Quants fundamentals",
+                record_id="7011:2026-08-10",
+                version_id="jquants-fundamentals:7011:2026-08-10",
+                status="published",
+                published_at="2026-08-10 15:00",
+                available_at="2026-08-10T15:00:00+09:00",
+                title="Financial summary",
+                record_kind="fundamental",
+            ),
+        )
+        base = attach_source_watermarks(
+            base,
+            SourceWatermark(
+                source="J-Quants fundamentals",
+                scanned_start="2026-08-10",
+                scanned_end="2026-08-10",
+                status="complete",
+                returned_records=1,
+                reported_records=1,
+                requested_interval=SourceInterval(
+                    start="2026-08-10",
+                    end="2026-08-10",
+                ),
+                information_frontier=frontier,
+            ),
+        )
+        valuation = attach_provenance(
+            "VALUATION BODY",
+            ProvenanceRecord(
+                evidence="get_fundamentals",
+                source="J-Quants adjusted OHLCV",
+                requested="2026-08-10",
+                effective="2026-08-10",
+                timing="market-date filtered",
+            ),
+        )
+        live = attach_evidence_span(
+            attach_provenance(
+                "LIVE ANALYST BODY",
+                ProvenanceRecord(
+                    evidence="get_fundamentals",
+                    source="yfinance analyst consensus",
+                    requested="2026-08-10",
+                    effective="2026-08-10",
+                    timing="live non-point-in-time",
+                    retrieved_at="2026-08-14T00:15:00+09:00",
+                ),
+            ),
+            temporal_scope="live_only",
+        )
+        with mock.patch.object(
+            jp_fundamentals.jqf,
+            "get_fundamentals",
+            return_value=base,
+        ), mock.patch.object(
+            jp_fundamentals,
+            "_valuation_block",
+            return_value=valuation + live,
+        ):
+            content = jp_fundamentals.get_fundamentals(
+                "7011.T",
+                "2026-08-10",
+                information_frontier=frontier,
+            )
+
+        filtered, omitted = filter_evidence_content_at_information_frontier(
+            content,
+            datetime.fromisoformat(frontier),
+            fallback_source="get_fundamentals",
+            analysis_date=date(2026, 8, 10),
+            instrument="7011.T",
+            sealed_at=datetime.fromisoformat("2026-08-14T00:20:00+09:00"),
+        )
+
+        assert omitted is True
+        assert "OFFICIAL FUNDAMENTALS BODY" in filtered
+        assert "VALUATION BODY" not in filtered
+        assert "LIVE ANALYST BODY" in filtered
+        assert [item.source for item in extract_source_observations(filtered)] == [
+            "J-Quants fundamentals"
+        ]
+        assert any(
+            item.source == "J-Quants fundamentals" and item.status == "complete"
+            for item in extract_source_watermarks(filtered)
+        )
+        items = _collect_evidence(
+            [
+                ToolMessage(
+                    content=filtered,
+                    tool_call_id="jp-fundamentals-live-closure",
+                    name="get_fundamentals",
+                )
+            ],
+            "",
+            requested_date=date(2026, 8, 10),
+            analyst="fundamentals",
+        )
+        graph_records = [
+            record
+            for item in items
+            for record in item.provenance.get("source_records", ())
+        ]
+        assert [record["source"] for record in graph_records] == [
+            "J-Quants fundamentals"
+        ]
 
     def test_no_statements_notes_unavailable_but_keeps_summary(self):
         # Only a forecast-revision row (no actual results) → valuation note, but

@@ -52,12 +52,17 @@ def get_verified_market_snapshot(
     ).strftime("%Y-%m-%d")
     df = _fetch_ohlcv_frame(symbol, start, curr_date)
     adjustment = str(df.attrs.get("price_adjustment") or "unknown")
+    source = (
+        "J-Quants adjusted OHLCV"
+        if adjustment == "J-Quants adjusted OHLCV v2"
+        else "J-Quants mixed adjusted/raw OHLCV"
+    )
     body = render_verified_market_snapshot(
         df,
         symbol,
         curr_date,
         look_back_days,
-        source="J-Quants",
+        source=source,
         adjustment=adjustment,
     )
     latest = df.iloc[-1]
@@ -94,7 +99,7 @@ def get_verified_market_snapshot(
                 "observed in successful bounded collection at Information Frontier"
             )
     observation = SourceObservation(
-        source="J-Quants adjusted OHLCV",
+        source=source,
         record_id=f"jquants-market:{symbol.upper()}",
         version_id=version_id,
         status="published",
@@ -124,7 +129,7 @@ def get_verified_market_snapshot(
         )
     limitations = tuple(warmup_limitations)
     watermark = SourceWatermark(
-        source="J-Quants adjusted OHLCV",
+        source=source,
         scanned_start=first_date.strftime("%Y-%m-%d"),
         scanned_end=curr_date,
         status="complete" if not limitations else "limited",

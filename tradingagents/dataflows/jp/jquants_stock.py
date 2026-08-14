@@ -7,6 +7,8 @@ from datetime import date, datetime
 
 import pandas as pd
 
+from tradingagents.provenance import ProvenanceRecord, attach_provenance
+
 from ..stockstats_utils import _assert_ohlcv_not_stale, _clean_dataframe
 from ..symbol_utils import NoMarketDataError
 from .jquants_common import from_jquants_code, memoized_fetch, to_jquants_code
@@ -141,6 +143,28 @@ def get_stock(symbol: str, start_date: str, end_date: str) -> str:
     header = (
         f"# Stock data for {label} from {start_date} to {end_date}\n"
         f"# Total records: {len(out)}\n"
-        f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
     )
-    return header + csv_string
+    adjustment = str(df.attrs.get("price_adjustment") or "unknown")
+    source = (
+        "J-Quants adjusted OHLCV"
+        if adjustment == "J-Quants adjusted OHLCV v2"
+        else "J-Quants mixed adjusted/raw OHLCV"
+    )
+    effective_start = out.iloc[0]["Date"].strftime("%Y-%m-%d")
+    effective_end = out.iloc[-1]["Date"].strftime("%Y-%m-%d")
+    header = attach_provenance(
+        header,
+        ProvenanceRecord(
+            evidence="get_stock_data",
+            source=source,
+            requested=f"{start_date} to {end_date}",
+            effective=f"{effective_start} to {effective_end}",
+            timing=(
+                "market-date filtered"
+                if source == "J-Quants adjusted OHLCV"
+                else "market-date filtered; adjusted fields incomplete"
+            ),
+        ),
+    )
+    return header + "\n\n" + csv_string
