@@ -96,8 +96,19 @@ def get_fundamentals_for_analysis(
 ) -> str:
     """Retrieve fundamentals using the workflow's immutable analysis date."""
     with tool_runtime_scope(runtime, curr_date) as cutoff:
+        route_kwargs = {"_provenance": True}
+        information_frontier = getattr(
+            runtime.context,
+            "information_frontier",
+            None,
+        )
+        if information_frontier is not None:
+            route_kwargs["information_frontier"] = information_frontier.isoformat()
         return route_to_vendor(
-            "get_fundamentals", ticker, cutoff, _provenance=True
+            "get_fundamentals",
+            ticker,
+            cutoff,
+            **route_kwargs,
         )
 
 

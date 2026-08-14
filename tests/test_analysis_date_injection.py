@@ -1,6 +1,7 @@
 """Graph tools must use AgentState.trade_date instead of model-supplied dates."""
 
 import warnings
+from datetime import datetime
 from typing import get_type_hints
 from unittest import mock
 
@@ -174,6 +175,49 @@ def test_tool_node_accepts_typed_run_context_without_serialization_warning(
         "PydanticSerializationUnexpectedValue" in str(item.message)
         or "Expected `none`" in str(item.message)
         for item in caught
+    )
+
+
+@pytest.mark.unit
+def test_verified_market_snapshot_forwards_frozen_information_frontier(
+    app_settings,
+):
+    request = AnalysisRequest(
+        ticker="4568.T",
+        analysis_date="2026-08-10",
+        analysts=("market",),
+    )
+    settings = app_settings.resolve_run(request)
+    frontier = datetime.fromisoformat("2026-08-10T23:59:00+09:00")
+    context = RunContext(
+        run_id="market-snapshot-frontier",
+        request=request,
+        settings=settings,
+        dataflow_config=settings.dataflow_config(app_settings),
+        memory=MemoryContext(instrument=request.ticker, market="Asia/Tokyo"),
+        instrument_context="The instrument is 4568.T.",
+        cancel_requested=lambda: False,
+        information_frontier=frontier,
+    )
+
+    with mock.patch(
+        "tradingagents.agents.utils.market_data_validation_tools.route_to_vendor",
+        return_value="SAFE",
+    ) as router:
+        _invoke_tool(
+            get_verified_market_snapshot_for_analysis,
+            {"symbol": request.ticker},
+            trade_date=request.analysis_date.isoformat(),
+            context=context,
+        )
+
+    router.assert_called_once_with(
+        "get_verified_market_snapshot",
+        "4568.T",
+        "2026-08-10",
+        30,
+        _provenance=True,
+        information_frontier=frontier.isoformat(),
     )
 
 

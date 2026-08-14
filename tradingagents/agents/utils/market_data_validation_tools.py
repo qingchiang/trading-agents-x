@@ -41,10 +41,18 @@ def get_verified_market_snapshot_for_analysis(
 ) -> str:
     """Build a verified snapshot at the workflow's immutable analysis date."""
     with tool_runtime_scope(runtime, curr_date) as cutoff:
+        route_kwargs = {"_provenance": True}
+        information_frontier = getattr(
+            runtime.context,
+            "information_frontier",
+            None,
+        )
+        if information_frontier is not None:
+            route_kwargs["information_frontier"] = information_frontier.isoformat()
         return route_to_vendor(
             "get_verified_market_snapshot",
             symbol,
             cutoff,
             look_back_days,
-            _provenance=True,
+            **route_kwargs,
         )
