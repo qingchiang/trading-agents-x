@@ -213,6 +213,13 @@ event-source observations must cover the interval from that anchor's frontier;
 an archive limitation confined before it remains visible, while a gap after it
 fails readiness before LLM construction.
 
+After parallel Full collection converges, anchor-required executions compare
+the graph-visible sealed Evidence with the successful readiness source
+manifest before analyst synthesis. Missing Required source records, watermarks,
+or selected market/fundamental datasets fail with a typed admission reason
+before the case, debate, risk, or committee stages. Ordinary explicitly
+non-anchor Full executions retain their existing degraded-evidence behavior.
+
 ### Run state and attempts
 
 ```text
@@ -359,6 +366,11 @@ fabricated Material Change. It becomes the readable and exportable head, and
 independently qualifies as a Forward Research Anchor only when its resulting
 Current Research State satisfies Anchor Coverage.
 
+Near-live Advisory Evidence may appear in the same Revision and inform its
+reports, risks, catalysts, and Research Opinion without satisfying or poisoning
+Anchor Coverage. If a Claim or open Question promotes its live-only source to
+Required, that source remains limited and blocks Anchor qualification.
+
 When their analyst domains are selected, J-Quants fundamental snapshots and
 adjusted market history are Required for Japanese coverage. Missing, stale,
 partial, incompatible, truncated, or insufficient-warm-up observations block a
@@ -409,6 +421,13 @@ intersects the transition, a live-only or unknown temporal scope, or a source
 frontier short of the update frontier fails closed as `coverage_incomplete`.
 Zero-record scans count only when the source explicitly attests the applicable
 interval and reports zero records.
+
+Positive Near-live Evidence may enter Change Assessment and cause Automatic
+Escalation when it could affect a Claim or Question. An empty live-only response
+is not evidence of absence: while an Advisory empty response does not block a
+No Material Change conclusion supported by complete Required point-in-time
+sources, it contributes no support to that conclusion. A live-only source made
+Required cannot prove Transition Coverage or No Material Change.
 
 For a Japanese Research Chain whose configured market route resolves
 `get_verified_market_snapshot` to J-Quants first, `AnalysisService` performs a
@@ -919,19 +938,37 @@ calendar or an unconditional UTC date. Historical tools receive that cutoff
 from runtime context rather than an LLM-provided argument.
 
 Research Cutoff is a date, not an execution timestamp. The Information Frontier
-is the distinct point-in-time knowledge boundary. Evidence available after the
-frontier is excluded even when its effective date is on or before the cutoff.
+is the distinct point-in-time knowledge and Coverage boundary. Point-in-time
+Evidence available after the frontier is excluded even when its effective date
+is on or before the cutoff. Auditable Near-live Evidence is a deliberate
+exception for research content, not Coverage: its Research Cutoff may be the
+retrieval date or one of the five preceding market-local dates without
+advancing the Information Frontier. Compute the inclusive age as
+`market_local_date(retrieved_at) - Research Cutoff`; only age 0--5 is eligible,
+so retrieval occurs on the cutoff date or one of its five following local
+dates. Do not use replay time. A cutoff later than retrieval, retrieval later
+than the Evidence snapshot's timezone-aware `sealed_at`, and missing, naive, or
+age 6+ timestamps fail closed.
 Required source watermarks retain their own timezone-aware attested frontier,
 requested interval, actual observed intervals, temporal scope, typed limitation
 kind, and presentation text. A source frontier may be earlier than the Revision
 frontier and is never optimistically advanced to the common target.
 
 Sources truncate observations to the cutoff. A disclosure/update source uses
-the conservative visibility boundary. Live-only values are withheld from
-historical runs; absence remains unknown rather than becoming a neutral or
-bearish signal. When a live-only response is cached, its producer-owned
-retrieval timestamp is cached with the payload and reused by consumers; cache
-hits are never restamped at assembly time.
+the conservative visibility boundary. Live-only values outside the five-day
+near-live window are withheld; inside it they retain `live_only` temporal scope,
+producer-owned retrieval time, and degraded quality. Event-like near-live
+sources also truncate each item to the Research Cutoff. Their absence remains
+unknown rather than becoming a neutral or bearish signal. When a live-only
+response is cached, its producer-owned retrieval timestamp is cached with the
+payload and reused by consumers; cache hits are never restamped at assembly
+time.
+
+Evidence admission is source- or span-scoped. A point-in-time EDINET or TDnet
+channel remains usable when a sibling Google News channel is live-only, and an
+inadmissible channel retains a structured limitation without erasing safe
+content. An unsegmented response that mixes incompatible temporal scopes still
+fails closed.
 
 ### Vendor chains and assemblers
 
