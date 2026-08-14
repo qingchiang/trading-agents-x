@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -16,7 +17,10 @@ from tradingagents.application.contracts import (
     EvidenceOrigin,
     EvidenceQuality,
     EvidenceTemporalScope,
+    EvidenceValueLocator,
     MarketReferenceLevel,
+    MeasurementKind,
+    NumericTemporalBasis,
     ReportLanguage,
     ResearchQuestionSourceDependency,
     ResearchRating,
@@ -669,6 +673,104 @@ def test_full_state_assembly_assigns_ids_and_preserves_selected_language():
     missing_sources = {item.source for item in draft.coverage.domains if item.source}
     assert missing_sources == {"EDINET", "TDnet", "J-Quants adjusted OHLCV"}
     assert draft.coverage.supports_no_material_change is False
+
+
+def test_full_state_assembly_keeps_near_live_market_reference_out_of_cutoff_state():
+    execution = _execution("6501.T")
+    pit_ref = execution.evidence.items[0].ref
+    retrieved_at = datetime(2026, 7, 28, 9, 0, tzinfo=ZoneInfo("Asia/Tokyo"))
+    near_live = EvidenceItem.create(
+        source="Near-live market snapshot",
+        evidence_type="market snapshot",
+        requested_date=CUTOFF,
+        content="Admitted near-live market observation.",
+        value=101.0,
+        measurement_kind=MeasurementKind.CURRENCY,
+        unit="JPY",
+        origins=(
+            EvidenceOrigin(
+                source="Near-live market snapshot",
+                evidence_type="market snapshot",
+                requested=CUTOFF.isoformat(),
+                retrieved_at=retrieved_at.isoformat(),
+                temporal_scope=EvidenceTemporalScope.LIVE_ONLY,
+            ),
+        ),
+    )
+    evidence = EvidenceBundle(
+        instrument="6501.T",
+        analysis_date=CUTOFF,
+        items=(*execution.evidence.items, near_live),
+        sealed_at=retrieved_at + timedelta(minutes=1),
+    )
+    pit_level = MarketReferenceLevel(
+        label="Cutoff close",
+        value=100.0,
+        measurement_kind="currency",
+        unit="JPY",
+        as_of_date=CUTOFF,
+        interpretation="Point-in-time cutoff reference.",
+        evidence_refs=(pit_ref,),
+        date_evidence_refs=(pit_ref,),
+        source_locator=EvidenceValueLocator(evidence_ref=pit_ref),
+    )
+    near_live_level = MarketReferenceLevel(
+        label="Near-live observation",
+        value=101.0,
+        measurement_kind="currency",
+        unit="JPY",
+        as_of_date=retrieved_at.date(),
+        interpretation="Advisory observation after the research cutoff.",
+        evidence_refs=(near_live.ref,),
+        date_evidence_refs=(near_live.ref,),
+        source_locator=EvidenceValueLocator(evidence_ref=near_live.ref),
+        temporal_basis=NumericTemporalBasis.LIVE_SNAPSHOT,
+    )
+    decision = execution.decision.model_copy(
+        update={
+            "evidence_refs": (*execution.decision.evidence_refs, near_live.ref),
+            "market_reference_levels": (pit_level, near_live_level),
+        }
+    )
+
+    draft = assemble_full_revision(
+        AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
+        replace(execution, evidence=evidence, decision=decision),
+    )
+
+    assert draft.current_state.market_reference_levels == (pit_level,)
+    assert near_live.ref in {item.ref for item in draft.evidence_snapshot.bundle.items}
+    limitation = (
+        "Near-live market references remain Research Artifacts and do not become "
+        "cutoff-dated Current Research State levels."
+    )
+    assert limitation in draft.coverage.limitations
+    assert limitation in draft.update_summary.limitations
+
+
+def test_full_state_assembly_rejects_point_in_time_market_reference_after_cutoff():
+    execution = _execution("6501.T")
+    evidence_ref = execution.evidence.items[0].ref
+    future_level = MarketReferenceLevel(
+        label="Future PIT level",
+        value=101.0,
+        measurement_kind="currency",
+        unit="JPY",
+        as_of_date=CUTOFF + timedelta(days=1),
+        interpretation="Invalid point-in-time reference after the cutoff.",
+        evidence_refs=(evidence_ref,),
+        date_evidence_refs=(evidence_ref,),
+        source_locator=EvidenceValueLocator(evidence_ref=evidence_ref),
+    )
+    decision = execution.decision.model_copy(
+        update={"market_reference_levels": (future_level,)}
+    )
+
+    with pytest.raises(ValidationError, match="market reference levels"):
+        assemble_full_revision(
+            AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
+            replace(execution, decision=decision),
+        )
 
 
 def test_revision_role_and_change_conclusion_are_independent_contracts():

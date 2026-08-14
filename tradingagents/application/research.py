@@ -20,7 +20,10 @@ from .contracts import (
     AnalysisRequest,
     AnalystReport,
     EvidenceBundle,
+    EvidenceQuality,
+    EvidenceTemporalScope,
     MarketReferenceLevel,
+    NumericTemporalBasis,
     ReportLanguage,
     ResearchDecision,
     ResearchRating,
@@ -30,11 +33,16 @@ from .contracts import (
     RunMetrics,
     report_language_value,
 )
+from .evidence_admission import evaluate_evidence_admission
 from .source_dependencies import partition_source_dependencies
 
 _CLAIM_ID = r"^claim_[a-f0-9]{32}$"
 _QUESTION_ID = r"^question_[a-f0-9]{32}$"
 _EVIDENCE_REF = r"^ev_[a-f0-9]{12}$"
+_NEAR_LIVE_MARKET_REFERENCE_LIMITATION = (
+    "Near-live market references remain Research Artifacts and do not become "
+    "cutoff-dated Current Research State levels."
+)
 
 
 class ResearchModel(BaseModel):
@@ -4159,6 +4167,73 @@ def assemble_full_update(
     return ResearchRevisionDraft.model_validate(updated.model_dump(mode="python"))
 
 
+def _current_state_market_reference_levels(
+    levels: tuple[MarketReferenceLevel, ...],
+    *,
+    evidence: EvidenceBundle,
+) -> tuple[tuple[MarketReferenceLevel, ...], bool]:
+    """Keep audited Near-live levels in artifacts without moving the state cutoff."""
+
+    evidence_by_ref = {item.ref: item for item in evidence.items}
+    retained: list[MarketReferenceLevel] = []
+    omitted_near_live = False
+    for level in levels:
+        if level.as_of_date <= evidence.analysis_date:
+            retained.append(level)
+            continue
+        if level.temporal_basis is not NumericTemporalBasis.LIVE_SNAPSHOT:
+            retained.append(level)
+            continue
+        referenced = tuple(evidence_by_ref.get(ref) for ref in level.date_evidence_refs)
+        if not referenced or any(item is None for item in referenced):
+            retained.append(level)
+            continue
+        retrieval_dates: list[date] = []
+        admissible = True
+        for item in referenced:
+            assert item is not None
+            if (
+                item.quality is EvidenceQuality.UNAVAILABLE
+                or item.provenance.get("evidence_admission", {}).get("status") == "withheld"
+                or not item.origins
+                or any(
+                    origin.temporal_scope is not EvidenceTemporalScope.LIVE_ONLY
+                    for origin in item.origins
+                )
+            ):
+                admissible = False
+                break
+            for origin in item.origins:
+                decision = evaluate_evidence_admission(
+                    temporal_scope=origin.temporal_scope.value,
+                    analysis_date=evidence.analysis_date,
+                    instrument=evidence.instrument,
+                    retrieved_at=origin.retrieved_at,
+                    sealed_at=evidence.sealed_at,
+                    effective_dates=tuple(
+                        value
+                        for value in (item.effective_date, origin.effective_date)
+                        if value is not None
+                    ),
+                )
+                if not decision.admitted or origin.retrieved_at is None:
+                    admissible = False
+                    break
+                retrieved_at = datetime.fromisoformat(
+                    origin.retrieved_at.replace("Z", "+00:00")
+                )
+                retrieval_dates.append(
+                    retrieved_at.astimezone(market_timezone(evidence.instrument)).date()
+                )
+            if not admissible:
+                break
+        if not admissible or not retrieval_dates or max(retrieval_dates) != level.as_of_date:
+            retained.append(level)
+            continue
+        omitted_near_live = True
+    return tuple(retained), omitted_near_live
+
+
 def assemble_full_revision(
     request: AnalysisRequest,
     execution: FullResearchExecution,
@@ -4325,6 +4400,12 @@ def assemble_full_revision(
         )
         for question in decision.unresolved_questions
     )
+    state_market_reference_levels, omitted_near_live_reference = (
+        _current_state_market_reference_levels(
+            decision.market_reference_levels,
+            evidence=evidence,
+        )
+    )
     state = CurrentResearchState(
         language=language,
         instrument=request.ticker,
@@ -4342,7 +4423,7 @@ def assemble_full_revision(
         risks=risks,
         catalysts=catalysts,
         invalidation_conditions=invalidations,
-        market_reference_levels=decision.market_reference_levels,
+        market_reference_levels=state_market_reference_levels,
         evidence_refs=evidence_refs,
     )
     source_records, source_watermarks = _source_metadata(evidence)
@@ -4353,7 +4434,11 @@ def assemble_full_revision(
         required_data_domains=request.analysts,
     )
     domains: list[ResearchDomainCoverage] = []
-    limitations: list[str] = []
+    limitations: list[str] = (
+        [_NEAR_LIVE_MARKET_REFERENCE_LIMITATION]
+        if omitted_near_live_reference
+        else []
+    )
     for analyst in request.analysts:
         report = reports.get(analyst)
         complete = bool(

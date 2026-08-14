@@ -401,6 +401,12 @@ Near-live Advisory Evidence may appear in the same Revision and inform its
 reports, risks, catalysts, and Research Opinion without satisfying or poisoning
 Anchor Coverage. If a Claim or open Question promotes its live-only source to
 Required, that source remains limited and blocks Anchor qualification.
+Post-cutoff Near-live market reference levels remain auditable Research Decision
+artifacts rather than becoming cutoff-dated `CurrentResearchState` levels. State
+Assembly revalidates their live-only Evidence origins against the sealed snapshot,
+records the exclusion as a Revision limitation, and preserves the Evidence in the
+Effective Evidence Snapshot. Unattested, out-of-window, or point-in-time future
+levels continue to fail closed at the state boundary.
 
 When their analyst domains are selected, J-Quants fundamental snapshots and
 adjusted market history are Required for Japanese coverage. Missing, stale,
