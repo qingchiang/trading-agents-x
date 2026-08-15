@@ -651,11 +651,16 @@ def _experimental_nmc_candidate(
     baseline: ResearchRevisionDraft,
     cutoff: date,
 ) -> ResearchRevisionDraft:
+    inherited_bundle = EvidenceBundle.model_validate(
+        {
+            **baseline.evidence_snapshot.bundle.model_dump(mode="python"),
+            "analysis_date": cutoff,
+            "digest": None,
+        }
+    )
     inherited_snapshot = baseline.evidence_snapshot.model_copy(
         update={
-            "bundle": baseline.evidence_snapshot.bundle.model_copy(
-                update={"analysis_date": cutoff}
-            ),
+            "bundle": inherited_bundle,
             "lineage": tuple(
                 EvidenceSnapshotItem(
                     evidence_ref=item.evidence_ref,

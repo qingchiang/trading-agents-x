@@ -731,25 +731,89 @@ class EvidenceBundle(FrozenModel):
         for table in self.tables:
             if not set(table.evidence_refs).issubset(valid_refs):
                 raise ValueError(f"{table.id} contains refs outside this evidence bundle")
-        serialized_items = [item.model_dump(mode="json") for item in self.items]
-        digest_payload = {
-            "items": serialized_items,
-            "tables": [table.model_dump(mode="json") for table in self.tables],
-        }
-        if self.information_frontier is not None:
-            digest_payload["information_frontier"] = self.information_frontier.isoformat()
-        canonical = json.dumps(
-            digest_payload,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
+        calculated = _evidence_bundle_digest(
+            _context_bound_evidence_bundle_payload(self)
         )
-        calculated = hashlib.sha256(canonical.encode()).hexdigest()
         if self.digest is None:
             object.__setattr__(self, "digest", calculated)
-        elif self.digest != calculated:
-            raise ValueError("evidence bundle digest does not match its items")
+        else:
+            legacy_calculated = _evidence_bundle_digest(
+                _legacy_evidence_bundle_payload(self)
+            )
+            if self.digest not in {calculated, legacy_calculated}:
+                raise ValueError(
+                    "evidence bundle digest does not match its admission context"
+                )
+            _audit_persisted_bundle_admission(self)
         return self
+
+
+def _context_bound_evidence_bundle_payload(bundle: EvidenceBundle) -> dict[str, Any]:
+    return {
+        "version": bundle.version,
+        "instrument": bundle.instrument,
+        "analysis_date": bundle.analysis_date.isoformat(),
+        "information_frontier": (
+            bundle.information_frontier.isoformat()
+            if bundle.information_frontier is not None
+            else None
+        ),
+        "sealed_at": bundle.sealed_at.isoformat(),
+        "items": [item.model_dump(mode="json") for item in bundle.items],
+        "tables": [table.model_dump(mode="json") for table in bundle.tables],
+    }
+
+
+def _legacy_evidence_bundle_payload(bundle: EvidenceBundle) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "items": [item.model_dump(mode="json") for item in bundle.items],
+        "tables": [table.model_dump(mode="json") for table in bundle.tables],
+    }
+    if bundle.information_frontier is not None:
+        payload["information_frontier"] = bundle.information_frontier.isoformat()
+    return payload
+
+
+def _evidence_bundle_digest(payload: dict[str, Any]) -> str:
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def _audit_persisted_bundle_admission(bundle: EvidenceBundle) -> None:
+    safe_content_refs: set[str] = set()
+    for item in bundle.items:
+        admitted = _apply_bundle_admission(
+            item,
+            instrument=bundle.instrument,
+            analysis_date=bundle.analysis_date,
+            sealed_at=bundle.sealed_at,
+            information_frontier=bundle.information_frontier,
+        )
+        visible_payload = item.content is not None or item.value is not None
+        admitted_payload_is_unchanged = (
+            admitted is not None
+            and admitted.content == item.content
+            and admitted.value == item.value
+            and admitted.provenance.get("evidence_admission", {}).get("status")
+            != "withheld"
+        )
+        if visible_payload and not admitted_payload_is_unchanged:
+            raise ValueError(
+                f"{item.ref} contains content outside its admission boundary"
+            )
+        if admitted_payload_is_unchanged:
+            safe_content_refs.add(item.ref)
+
+    for table in bundle.tables:
+        if not set(table.evidence_refs).issubset(safe_content_refs):
+            raise ValueError(
+                f"{table.id} contains data outside its admission boundary"
+            )
 
 
 def _apply_bundle_admission(

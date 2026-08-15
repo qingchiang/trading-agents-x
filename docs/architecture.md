@@ -756,7 +756,19 @@ association through the Evidence item that carried the observation.
 `EvidenceBundle(version="8")` deduplicates items, validates unique references,
 rejects effective dates after the analysis cutoff, interprets `available_at`
 in the instrument's market timezone, and seals both evidence items and
-deterministic raw `EvidenceTable` objects with a digest.
+deterministic raw `EvidenceTable` objects. Newly sealed bundles bind the digest
+to the version, instrument, Research Cutoff, Information Frontier, `sealed_at`,
+items, and tables, so admission-driving context cannot be changed independently
+of the ledger contents. The schema version and database shape remain unchanged.
+
+Persisted v8 bundles whose digest was produced by the earlier items/tables
+algorithm remain readable, including eligible Near-live Evidence whose stored
+quality predates current normalization. Legacy digest acceptance is not an
+admission bypass: every digest-bearing bundle receives a non-mutating safety
+audit against its declared cutoff, frontier, and seal. Visible content outside
+that boundary, mixed or unknown temporal leakage, and tables whose supporting
+content would be withheld fail closed. The compatibility path neither rewrites
+the historical bundle nor grants legacy content broader eligibility.
 
 The sealed bundle is written to `run_evidence` independently of the run's final
 status. Evidence sealing and its `evidence.sealed` event commit atomically, so a
