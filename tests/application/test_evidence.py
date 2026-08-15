@@ -17,6 +17,7 @@ from tests.factories import (
     research_case,
     research_decision,
 )
+from tradingagents.application._exports.labels import ExportLabels as InternalExportLabels
 from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
@@ -63,6 +64,7 @@ from tradingagents.application.contracts import (
 )
 from tradingagents.application.evidence import extract_evidence_tables
 from tradingagents.application.exporting import (
+    ExportLabels,
     render_run_export_markdown,
     render_run_export_package,
 )
@@ -76,6 +78,17 @@ from tradingagents.provenance import (
     attach_evidence_span,
     attach_provenance,
 )
+
+
+def test_exporting_facade_preserves_fixed_point_public_names() -> None:
+    import tradingagents.application.exporting as exporting
+
+    assert exporting.__all__ == [
+        "ExportLabels",
+        "render_run_export_markdown",
+        "render_run_export_package",
+    ]
+    assert ExportLabels is InternalExportLabels
 
 
 def _record(
