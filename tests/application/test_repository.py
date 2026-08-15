@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 from threading import Barrier
 
@@ -401,7 +401,7 @@ def test_recent_instruments_are_deduplicated_and_exclude_trashed_runs(
         2026,
         7,
         3,
-        tzinfo=timezone.utc,
+        tzinfo=UTC,
     )
     assert repository.list_runs(q="nvidia").total == 2
     assert repository.list_runs(q="英伟达").total == 1
@@ -856,7 +856,7 @@ def test_complete_persists_result_and_resolved_memory(
 
     repository.complete(run.id, result, evidence=evidence, benchmark="SPY")
     restored = repository.get_result(run.id)
-    due_at = datetime(2100, 1, 1, tzinfo=timezone.utc)
+    due_at = datetime(2100, 1, 1, tzinfo=UTC)
     pending = repository.pending_outcomes(due_at=due_at)
     repository.trash_runs((run.id,))
     assert repository.pending_outcomes(due_at=due_at) == []
@@ -1158,7 +1158,7 @@ def test_research_template_and_source_purge_are_race_safe(
                 2026,
                 9,
                 1,
-                tzinfo=timezone.utc,
+                tzinfo=UTC,
             ),
         ).run_once()
 

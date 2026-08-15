@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -40,7 +40,7 @@ def _ready_result(request) -> AnchorReadinessResult:
     return AnchorReadinessResult(
         ready=True,
         requested_cutoff=request.analysis_date,
-        information_frontier=datetime(2026, 8, 12, 8, 30, tzinfo=timezone.utc),
+        information_frontier=datetime(2026, 8, 12, 8, 30, tzinfo=UTC),
         profile_id="jp-listed-equity-v1",
         metrics=RunMetrics(tool_calls=2, wall_time_seconds=0.25),
     )
@@ -186,7 +186,7 @@ def test_market_readiness_failure_prevents_backup_and_authoritative_execution(
             current_revision=SimpleNamespace(
                 id=f"baseline-{scenario.scenario}",
                 cutoff=date(2026, 8, 9),
-                information_frontier=datetime(2026, 8, 9, 8, 30, tzinfo=timezone.utc),
+                information_frontier=datetime(2026, 8, 9, 8, 30, tzinfo=UTC),
             ),
         )
         for scenario in scenarios
@@ -205,7 +205,7 @@ def test_market_readiness_failure_prevents_backup_and_authoritative_execution(
             return AnchorReadinessResult(
                 ready=False,
                 requested_cutoff=request.analysis_date,
-                information_frontier=datetime(2026, 8, 12, 8, 30, tzinfo=timezone.utc),
+                information_frontier=datetime(2026, 8, 12, 8, 30, tzinfo=UTC),
                 profile_id="jp-listed-equity-v1",
                 reasons=(AnchorReadinessReason.MISSING_MARKET_OBSERVATION,),
                 metrics=RunMetrics(tool_calls=1),
@@ -234,7 +234,7 @@ def test_market_readiness_failure_prevents_backup_and_authoritative_execution(
 
     assert len(checked) == 1
     assert checked[0][0].ticker == "6501.T"
-    assert checked[0][1] == datetime(2026, 8, 9, 8, 30, tzinfo=timezone.utc)
+    assert checked[0][1] == datetime(2026, 8, 9, 8, 30, tzinfo=UTC)
     assert not (tmp_path / "backup.db").exists()
     assert not (tmp_path / "manifest").exists()
 
@@ -265,7 +265,7 @@ def test_failed_run_manifest_uses_the_execution_readiness_typed_outcome(
             current_revision=SimpleNamespace(
                 id=f"baseline-{scenario.scenario}",
                 cutoff=date(2026, 8, 9),
-                information_frontier=datetime(2026, 8, 9, 8, 30, tzinfo=timezone.utc),
+                information_frontier=datetime(2026, 8, 9, 8, 30, tzinfo=UTC),
             ),
         )
         for scenario in scenarios
@@ -302,7 +302,7 @@ def test_failed_run_manifest_uses_the_execution_readiness_typed_outcome(
                         ready=ready,
                         requested_cutoff=date(2026, 8, 10),
                         information_frontier=datetime(
-                            2026, 8, 12, 8, 30, tzinfo=timezone.utc
+                            2026, 8, 12, 8, 30, tzinfo=UTC
                         ),
                         profile_id="jp-listed-equity-v1",
                         reasons=reasons,
@@ -338,7 +338,7 @@ def test_backup_failure_prevents_authoritative_execution_and_manifest(
             current_revision=SimpleNamespace(
                 id=f"revision-{item['scenario']}",
                 cutoff=date(2026, 8, 9),
-                information_frontier=datetime(2026, 8, 9, 8, 30, tzinfo=timezone.utc),
+                information_frontier=datetime(2026, 8, 9, 8, 30, tzinfo=UTC),
             ),
         )
         for item in _reviewed_payload()
@@ -390,7 +390,7 @@ def test_source_policy_rejection_prevents_backup_and_execution(tmp_path: Path) -
             current_revision=SimpleNamespace(
                 id=f"baseline-{scenario.scenario}",
                 cutoff=date(2026, 8, 9),
-                information_frontier=datetime(2026, 8, 9, 8, 30, tzinfo=timezone.utc),
+                information_frontier=datetime(2026, 8, 9, 8, 30, tzinfo=UTC),
             ),
         )
         for scenario in scenarios
@@ -437,7 +437,7 @@ def test_source_is_reverified_after_backup_before_each_execution(tmp_path: Path)
             current_revision=SimpleNamespace(
                 id=f"baseline-{scenario.scenario}",
                 cutoff=date(2026, 8, 9),
-                information_frontier=datetime(2026, 8, 9, 8, 30, tzinfo=timezone.utc),
+                information_frontier=datetime(2026, 8, 9, 8, 30, tzinfo=UTC),
             ),
         )
         for scenario in scenarios
@@ -504,7 +504,7 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
             current_revision=SimpleNamespace(
                 id=f"baseline-{scenario.scenario}",
                 cutoff=date(2026, 8, 9),
-                information_frontier=datetime(2026, 8, 9, 8, 30, tzinfo=timezone.utc),
+                information_frontier=datetime(2026, 8, 9, 8, 30, tzinfo=UTC),
             ),
         )
         for scenario in scenarios
@@ -665,7 +665,7 @@ def test_validation_writes_authoritative_main_database_and_only_sanitized_manife
                 metrics=metrics,
                 cutoff=scenario.analysis_date,
                 information_frontier=datetime(
-                    2026, 8, 12, 8, 30, tzinfo=timezone.utc
+                    2026, 8, 12, 8, 30, tzinfo=UTC
                 ),
             )
             chains[run.chain_id].current_revision = revision

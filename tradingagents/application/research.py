@@ -7,7 +7,7 @@ import json
 import zipfile
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, tzinfo
-from enum import Enum
+from enum import StrEnum
 from typing import Literal, Protocol
 from uuid import uuid4
 
@@ -55,34 +55,34 @@ class FullResearchExecution(Protocol):
     reports: dict[str, AnalystReport]
 
 
-class DecisionConfidence(str, Enum):
+class DecisionConfidence(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
     INDETERMINATE = "indeterminate"
 
 
-class ClaimConfidence(str, Enum):
+class ClaimConfidence(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
     INDETERMINATE = "indeterminate"
 
 
-class ScenarioLikelihood(str, Enum):
+class ScenarioLikelihood(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
     INDETERMINATE = "indeterminate"
 
 
-class EpistemicKind(str, Enum):
+class EpistemicKind(StrEnum):
     OBSERVATION = "observation"
     INFERENCE = "inference"
     FORECAST = "forecast"
 
 
-class DecisionRole(str, Enum):
+class DecisionRole(StrEnum):
     THESIS = "thesis"
     RISK = "risk"
     CATALYST = "catalyst"
@@ -90,31 +90,31 @@ class DecisionRole(str, Enum):
     SCENARIO_ASSUMPTION = "scenario_assumption"
 
 
-class ClaimStanding(str, Enum):
+class ClaimStanding(StrEnum):
     ACTIVE = "active"
     INVALIDATED = "invalidated"
     RETIRED = "retired"
 
 
-class QuestionStatus(str, Enum):
+class QuestionStatus(StrEnum):
     OPEN = "open"
     ANSWERED = "answered"
     SUPERSEDED = "superseded"
     RETIRED = "retired"
 
 
-class CoverageStatus(str, Enum):
+class CoverageStatus(StrEnum):
     COMPLETE = "complete"
     LIMITED = "limited"
     UNAVAILABLE = "unavailable"
 
 
-class CoverageRequirement(str, Enum):
+class CoverageRequirement(StrEnum):
     REQUIRED = "required"
     ADVISORY = "advisory"
 
 
-class MarketResearchCapability(str, Enum):
+class MarketResearchCapability(StrEnum):
     OFFICIAL_FILING = "official_filing"
     TIMELY_DISCLOSURE = "timely_disclosure"
     FUNDAMENTALS = "fundamentals"
@@ -124,7 +124,7 @@ class MarketResearchCapability(str, Enum):
     MACRO = "macro"
 
 
-class TransitionContinuityRule(str, Enum):
+class TransitionContinuityRule(StrEnum):
     EVENT_STREAM = "event_stream"
     SNAPSHOT = "snapshot"
     MARKET_SERIES = "market_series"
@@ -164,7 +164,7 @@ class MarketResearchCapabilityProfile(ResearchModel):
         return self
 
 
-class AnchorQualificationReason(str, Enum):
+class AnchorQualificationReason(StrEnum):
     ANCHOR_READINESS_NOT_REQUIRED = "anchor_readiness_not_required"
     LEGACY_ANCHOR_COVERAGE_UNPROVEN = "legacy_anchor_coverage_unproven"
     UNSUPPORTED_MARKET_PROFILE = "unsupported_market_profile"
@@ -195,20 +195,20 @@ class ForwardResearchAnchorQualification(ResearchModel):
     capabilities: tuple[CapabilityAttestation, ...] = ()
 
 
-class SourceRecordStatus(str, Enum):
+class SourceRecordStatus(StrEnum):
     PUBLISHED = "published"
     CORRECTED = "corrected"
     WITHDRAWN = "withdrawn"
     REPLACED = "replaced"
 
 
-class SourceRecordKind(str, Enum):
+class SourceRecordKind(StrEnum):
     DISCLOSURE = "disclosure"
     FUNDAMENTAL = "fundamental"
     MARKET = "market"
 
 
-class ResearchChangeKind(str, Enum):
+class ResearchChangeKind(StrEnum):
     NEW_FUNDAMENTAL_FILING = "new_fundamental_filing"
     FUNDAMENTAL_CORRECTION = "fundamental_correction"
     FUNDAMENTAL_RESTATEMENT = "fundamental_restatement"
@@ -220,28 +220,28 @@ class ResearchChangeKind(str, Enum):
     UNCHANGED_OBSERVATION = "unchanged_observation"
 
 
-class ResearchExecutionStrategy(str, Enum):
+class ResearchExecutionStrategy(StrEnum):
     FULL = "full"
     INCREMENTAL = "incremental"
 
 
-class ResearchRevisionRole(str, Enum):
+class ResearchRevisionRole(StrEnum):
     INITIAL = "initial"
     UPDATE = "update"
 
 
-class ResearchChangeConclusion(str, Enum):
+class ResearchChangeConclusion(StrEnum):
     MATERIAL_CHANGE = "material_change"
     NO_MATERIAL_CHANGE = "no_material_change"
     INDETERMINATE = "indeterminate"
 
 
-class IndeterminateReason(str, Enum):
+class IndeterminateReason(StrEnum):
     COVERAGE_INCOMPLETE = "coverage_incomplete"
     QUESTION_DISPOSITION_LIMITED = "question_disposition_limited"
 
 
-class NextUpdateReason(str, Enum):
+class NextUpdateReason(StrEnum):
     EXPERIMENT_MODE_OFF = "experiment_mode_off"
     UNSUPPORTED_INCREMENTAL_MARKET = "unsupported_incremental_market"
     LEGACY_ANCHOR_COVERAGE_UNPROVEN = "legacy_anchor_coverage_unproven"
@@ -254,13 +254,13 @@ class NextUpdateReason(str, Enum):
     INVALID_SOURCE_DEPENDENCY = "invalid_source_dependency"
 
 
-class SourceDependencyCompatibilityLimitation(str, Enum):
+class SourceDependencyCompatibilityLimitation(StrEnum):
     """Stable compatibility reason retained without exposing internal IDs."""
 
     INTERNAL_REFERENCE = "internal_source_reference"
 
 
-class IncrementalEscalationReason(str, Enum):
+class IncrementalEscalationReason(StrEnum):
     INVALID_BASELINE = "invalid_baseline"
     SOURCE_CORRECTION = "source_correction"
     SOURCE_WITHDRAWAL = "source_withdrawal"
@@ -282,7 +282,7 @@ class IncrementalEscalationReason(str, Enum):
     SEMANTIC_INPUT_OVERSIZE = "semantic_input_oversize"
 
 
-class SemanticChangeRelationship(str, Enum):
+class SemanticChangeRelationship(StrEnum):
     SUPPORT = "support"
     WEAKENING = "weakening"
     CONTRADICTION = "contradiction"
@@ -293,7 +293,7 @@ class SemanticChangeRelationship(str, Enum):
     POTENTIALLY_MATERIAL_NOVELTY = "potentially_material_novelty"
 
 
-class ClaimChange(str, Enum):
+class ClaimChange(StrEnum):
     INTRODUCED = "introduced"
     REAFFIRMED = "reaffirmed"
     STRENGTHENED = "strengthened"
@@ -303,7 +303,7 @@ class ClaimChange(str, Enum):
     SUPERSEDED = "superseded"
 
 
-class QuestionChange(str, Enum):
+class QuestionChange(StrEnum):
     INTRODUCED = "introduced"
     REAFFIRMED = "reaffirmed"
     ANSWERED = "answered"
@@ -312,7 +312,7 @@ class QuestionChange(str, Enum):
     RETIRED = "retired"
 
 
-class QuestionDispositionKind(str, Enum):
+class QuestionDispositionKind(StrEnum):
     REAFFIRMED = "reaffirmed"
     ANSWERED = "answered"
     REOPENED = "reopened"
@@ -320,7 +320,7 @@ class QuestionDispositionKind(str, Enum):
     RETIRED = "retired"
 
 
-class QuestionDispositionLimitation(str, Enum):
+class QuestionDispositionLimitation(StrEnum):
     OUTPUT_INVALID = "question_disposition_output_invalid"
     EVIDENCE_INVALID = "question_disposition_evidence_invalid"
     AMBIGUOUS_IDENTITY = "question_disposition_ambiguous_identity"
@@ -339,7 +339,7 @@ def _status_after_question_disposition(
     }.get(disposition, previous_status)
 
 
-class IdentityDisposition(str, Enum):
+class IdentityDisposition(StrEnum):
     EXACT_MATCH = "exact_match"
     NEW = "new"
     AMBIGUOUS_NEW = "ambiguous_new"

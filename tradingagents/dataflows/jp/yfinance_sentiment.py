@@ -15,7 +15,7 @@ raise.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from tradingagents.application.evidence_workset import StructuredNumericFact
 
@@ -101,7 +101,7 @@ def get_analyst_ratings_payload(
         return "", ()
     # Data + legend only; the prompt wrapper owns the section framing and the
     # sentiment rules own how to weight it (kept out of here so they don't drift).
-    retrieved = datetime.now(timezone.utc)
+    retrieved = datetime.now(UTC)
     retrieved_at = retrieved.isoformat(timespec="seconds")
     facts = tuple(
         StructuredNumericFact(

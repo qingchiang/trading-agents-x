@@ -2,13 +2,13 @@
 
 import inspect
 from datetime import datetime
+from typing import TypedDict
 from unittest import mock
 
 import pytest
 from langchain_core.messages import AIMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
-from typing_extensions import TypedDict
 
 import tradingagents.agents.analysts.fundamentals_analyst as fa
 from tradingagents.agents.utils.fundamental_data_tools import (

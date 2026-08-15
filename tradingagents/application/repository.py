@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
@@ -147,11 +147,11 @@ _SAFE_METRIC_KEYS = {
 
 
 def _utc_naive() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def _aware(value: datetime | None) -> datetime | None:
-    return value.replace(tzinfo=timezone.utc) if value is not None else None
+    return value.replace(tzinfo=UTC) if value is not None else None
 
 
 def _sanitize_text(value: str | None, limit: int = 2000) -> str | None:
@@ -697,7 +697,7 @@ class RunRepository:
         run and all of its application data for a later retry.
         """
         if cutoff.tzinfo is not None:
-            cutoff = cutoff.astimezone(timezone.utc).replace(tzinfo=None)
+            cutoff = cutoff.astimezone(UTC).replace(tzinfo=None)
         batch_size = min(max(1, batch_size), 200)
         with self.engine.connect() as connection:
             connection.exec_driver_sql("BEGIN IMMEDIATE")
@@ -1695,7 +1695,7 @@ class RunRepository:
     ) -> list[dict[str, Any]]:
         due = due_at or _utc_naive()
         if due.tzinfo is not None:
-            due = due.astimezone(timezone.utc).replace(tzinfo=None)
+            due = due.astimezone(UTC).replace(tzinfo=None)
         stmt = (
             select(OutcomeRecord, DecisionRecord, ReflectionRecord)
             .join(DecisionRecord, OutcomeRecord.decision_id == DecisionRecord.id)
@@ -1764,9 +1764,9 @@ class RunRepository:
         error_message: str | None = None,
     ) -> None:
         if checked_at.tzinfo is not None:
-            checked_at = checked_at.astimezone(timezone.utc).replace(tzinfo=None)
+            checked_at = checked_at.astimezone(UTC).replace(tzinfo=None)
         if next_check_at.tzinfo is not None:
-            next_check_at = next_check_at.astimezone(timezone.utc).replace(tzinfo=None)
+            next_check_at = next_check_at.astimezone(UTC).replace(tzinfo=None)
         with self.sessions.begin() as session:
             outcome = session.get(OutcomeRecord, outcome_id)
             if outcome is None:
@@ -1815,7 +1815,7 @@ class RunRepository:
     ) -> None:
         observed = observed_at
         if observed.tzinfo is not None:
-            observed = observed.astimezone(timezone.utc).replace(tzinfo=None)
+            observed = observed.astimezone(UTC).replace(tzinfo=None)
         with self.sessions.begin() as session:
             outcome = session.scalar(
                 select(OutcomeRecord)
@@ -1862,7 +1862,7 @@ class RunRepository:
     ) -> dict[str, int | str] | None:
         """Reserve the sole active generation cycle before invoking an LLM."""
         started = (
-            started_at.astimezone(timezone.utc).replace(tzinfo=None)
+            started_at.astimezone(UTC).replace(tzinfo=None)
             if started_at.tzinfo is not None
             else started_at
         )
@@ -1942,7 +1942,7 @@ class RunRepository:
     ) -> dict[str, int | str]:
         """Append the sole permitted schema repair to an active generation cycle."""
         started = (
-            started_at.astimezone(timezone.utc).replace(tzinfo=None)
+            started_at.astimezone(UTC).replace(tzinfo=None)
             if started_at.tzinfo is not None
             else started_at
         )
@@ -2092,12 +2092,12 @@ class RunRepository:
         wall_time_seconds: float | None = None,
     ) -> None:
         attempted = (
-            attempted_at.astimezone(timezone.utc).replace(tzinfo=None)
+            attempted_at.astimezone(UTC).replace(tzinfo=None)
             if attempted_at.tzinfo is not None
             else attempted_at
         )
         retry = (
-            next_retry_at.astimezone(timezone.utc).replace(tzinfo=None)
+            next_retry_at.astimezone(UTC).replace(tzinfo=None)
             if next_retry_at is not None and next_retry_at.tzinfo is not None
             else next_retry_at
         )
@@ -2168,7 +2168,7 @@ class RunRepository:
     ) -> str | None:
         generated = generated_at
         if generated.tzinfo is not None:
-            generated = generated.astimezone(timezone.utc).replace(tzinfo=None)
+            generated = generated.astimezone(UTC).replace(tzinfo=None)
         raw_candidate = reflection if isinstance(reflection, str) else None
         text = draft.readable_text if draft is not None else (reflection or "").strip()
         with self.sessions.begin() as session:
@@ -2323,7 +2323,7 @@ class RunRepository:
             )
         queued = queued_at or _aware(_utc_naive())
         if queued.tzinfo is not None:
-            queued = queued.astimezone(timezone.utc).replace(tzinfo=None)
+            queued = queued.astimezone(UTC).replace(tzinfo=None)
         with self.sessions.begin() as session:
             session.connection().exec_driver_sql("BEGIN IMMEDIATE")
             row = session.execute(

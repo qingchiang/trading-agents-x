@@ -5,13 +5,13 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime
-from enum import Enum
+from enum import StrEnum
 
 from tradingagents.dataflows.lookahead import LIVE_SNAPSHOT_MAX_AGE_DAYS
 from tradingagents.dataflows.symbol_utils import market_timezone
 
 
-class EvidenceAdmissionReason(str, Enum):
+class EvidenceAdmissionReason(StrEnum):
     """Stable outcomes emitted by the shared Evidence admission policy."""
 
     POINT_IN_TIME = "point_in_time"

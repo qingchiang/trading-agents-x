@@ -1,6 +1,6 @@
 """A-share news source, quality, history, and fault-isolation tests."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest import mock
 
 import pytest
@@ -59,8 +59,8 @@ def test_cninfo_missing_announcements_field_is_schema_failure(monkeypatch):
 @pytest.mark.unit
 def test_cninfo_rechecks_exact_code_and_shanghai_date(monkeypatch):
     monkeypatch.setattr(news_sources, "_cninfo_org_ids", lambda: {"600519": "org"})
-    in_window = int(datetime(2026, 1, 10, 15, tzinfo=timezone.utc).timestamp() * 1000)
-    future = int(datetime(2026, 1, 11, 16, tzinfo=timezone.utc).timestamp() * 1000)
+    in_window = int(datetime(2026, 1, 10, 15, tzinfo=UTC).timestamp() * 1000)
+    future = int(datetime(2026, 1, 11, 16, tzinfo=UTC).timestamp() * 1000)
     monkeypatch.setattr(
         news_sources,
         "_request_json",
@@ -145,7 +145,7 @@ def test_cninfo_short_and_wider_windows_share_one_same_cutoff_superset(monkeypat
                     "secCode": "600519",
                     "announcementTitle": "older announcement",
                     "announcementTime": int(
-                        datetime(2025, 12, 25, tzinfo=timezone.utc).timestamp() * 1000
+                        datetime(2025, 12, 25, tzinfo=UTC).timestamp() * 1000
                     ),
                     "announcementId": "old",
                     "orgId": "org",
@@ -154,7 +154,7 @@ def test_cninfo_short_and_wider_windows_share_one_same_cutoff_superset(monkeypat
                     "secCode": "600519",
                     "announcementTitle": "recent announcement",
                     "announcementTime": int(
-                        datetime(2026, 1, 5, tzinfo=timezone.utc).timestamp() * 1000
+                        datetime(2026, 1, 5, tzinfo=UTC).timestamp() * 1000
                     ),
                     "announcementId": "new",
                     "orgId": "org",

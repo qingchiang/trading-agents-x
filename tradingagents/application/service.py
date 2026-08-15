@@ -7,7 +7,7 @@ import threading
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import replace
-from datetime import date, datetime, time, timezone
+from datetime import UTC, date, datetime, time
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -184,7 +184,7 @@ class AnalysisService:
         anchor_readiness_checker: Callable[..., AnchorReadinessResult] = (
             validate_japanese_anchor_readiness
         ),
-        utc_clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        utc_clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ):
         self.settings = settings
         if repository is None:

@@ -6,7 +6,7 @@ import hashlib
 import json
 import sqlite3
 from collections.abc import Callable, Mapping, Sequence
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
@@ -326,7 +326,7 @@ def _verified_recovery_point(path: Path) -> BackupRecoveryPoint:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     return BackupRecoveryPoint(
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         backup_file=backup.name,
         sha256=digest.hexdigest(),
         size_bytes=backup.stat().st_size,

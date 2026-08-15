@@ -21,7 +21,7 @@ workflow state rather than accepting an LLM-supplied value.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from tradingagents.provenance import (
     ProvenanceRecord,
@@ -158,7 +158,7 @@ def _detail_block(ticker: str, kind: str, freq: str, curr_date: str | None) -> s
         return _detail_status_marker(
             kind, curr_date, "available; curated line items were empty"
         )
-    retrieved = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    retrieved = datetime.now(UTC).isoformat(timespec="seconds")
     block = (
         "\n\n## Line-item detail (yfinance, curated live snapshot, may lag)\n"
         f"Requested analysis date: {_requested_date_label(curr_date)}\n"

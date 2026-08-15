@@ -9,7 +9,7 @@ import re
 import subprocess
 import sys
 from datetime import date
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -58,7 +58,7 @@ _ANALYSTS = ("market", "social", "news", "fundamentals")
 _LIVE_THESIS_MANIFEST_RELATIVE = Path("tmp/incremental-research/live-validation")
 
 
-class ExportFormat(str, Enum):
+class ExportFormat(StrEnum):
     PACKAGE = "package"
     MARKDOWN = "markdown"
     JSON = "json"

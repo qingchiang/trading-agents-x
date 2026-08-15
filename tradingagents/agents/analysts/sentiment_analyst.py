@@ -28,7 +28,7 @@ See: https://github.com/TauricResearch/TradingAgents/issues/796
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from langchain_core.messages import AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -138,7 +138,7 @@ def create_sentiment_analyst(llm):
                     start_date=social_start_date,
                     end_date=end_date,
                 )
-                stocktwits_retrieved_at = datetime.now(timezone.utc).isoformat(
+                stocktwits_retrieved_at = datetime.now(UTC).isoformat(
                     timespec="seconds"
                 )
                 reddit_block = fetch_reddit_posts(
@@ -146,7 +146,7 @@ def create_sentiment_analyst(llm):
                     start_date=social_start_date,
                     end_date=end_date,
                 )
-                reddit_retrieved_at = datetime.now(timezone.utc).isoformat(
+                reddit_retrieved_at = datetime.now(UTC).isoformat(
                     timespec="seconds"
                 )
             else:
@@ -157,7 +157,7 @@ def create_sentiment_analyst(llm):
                 stocktwits_block = historical
                 reddit_block = historical
 
-        admission_sealed_at = datetime.now(timezone.utc)
+        admission_sealed_at = datetime.now(UTC)
         news_block, _ = filter_evidence_content_at_information_frontier(
             news_block,
             information_frontier,

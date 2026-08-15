@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pandas as pd
 
@@ -287,7 +287,7 @@ def _yfinance_supplement(
                 timing="available; curated line items contained no values",
             ),
         )
-    retrieved = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    retrieved = datetime.now(UTC).isoformat(timespec="seconds")
     block = (
         "\n\n## Supplemental line items (yfinance)\n"
         f"Requested analysis date: {requested}\n"

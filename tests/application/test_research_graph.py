@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Any
 
 import pytest
@@ -390,7 +390,7 @@ def test_near_live_exception_does_not_admit_post_cutoff_pit_span() -> None:
 
 
 def test_tool_output_rejects_live_span_retrieved_after_preseal_bound() -> None:
-    frontier = datetime(2026, 8, 10, 23, 59, tzinfo=timezone.utc)
+    frontier = datetime(2026, 8, 10, 23, 59, tzinfo=UTC)
     live = attach_evidence_span(
         attach_provenance(
             "FUTURE RETRIEVAL BODY",
@@ -426,7 +426,7 @@ def test_tool_output_rejects_live_span_retrieved_after_preseal_bound() -> None:
 
 
 def test_tool_output_reuses_checkpointed_preseal_bound_on_replay() -> None:
-    frontier = datetime(2026, 8, 10, 23, 59, tzinfo=timezone.utc)
+    frontier = datetime(2026, 8, 10, 23, 59, tzinfo=UTC)
     live = attach_evidence_span(
         attach_provenance(
             "REPLAY MUST NOT ADMIT THIS BODY",
@@ -462,7 +462,7 @@ def test_tool_output_reuses_checkpointed_preseal_bound_on_replay() -> None:
 
 
 def test_tool_output_fails_closed_for_unsegmented_mixed_temporal_records() -> None:
-    frontier = datetime(2026, 8, 10, 23, 59, tzinfo=timezone.utc)
+    frontier = datetime(2026, 8, 10, 23, 59, tzinfo=UTC)
     mixed = attach_provenance(
         "UNSEGMENTED MIXED BODY",
         ProvenanceRecord(
@@ -503,7 +503,7 @@ def test_tool_output_fails_closed_for_unsegmented_mixed_temporal_records() -> No
 
 
 def test_tool_output_fails_closed_for_unsegmented_live_and_unknown_records() -> None:
-    frontier = datetime(2026, 8, 10, 23, 59, tzinfo=timezone.utc)
+    frontier = datetime(2026, 8, 10, 23, 59, tzinfo=UTC)
     mixed = attach_provenance(
         "LIVE PLUS UNKNOWN BODY",
         ProvenanceRecord(
@@ -610,7 +610,7 @@ def test_cutoff_date_pit_market_artifact_survives_graph_admission(
     instrument: str,
     source: str,
 ) -> None:
-    frontier = datetime(2026, 8, 10, 23, 59, tzinfo=timezone.utc)
+    frontier = datetime(2026, 8, 10, 23, 59, tzinfo=UTC)
     artifact = {
         "schema_version": "1",
         "kind": "source",
@@ -714,7 +714,7 @@ def test_market_artifact_fails_closed_for_unsafe_temporal_metadata(
                 )
             ]
         },
-        datetime(2026, 8, 10, 23, 59, tzinfo=timezone.utc),
+        datetime(2026, 8, 10, 23, 59, tzinfo=UTC),
         analysis_date=date(2026, 8, 10),
         instrument="4568.T",
     )
@@ -937,7 +937,7 @@ def test_same_source_watermark_attests_effective_dates_inside_scanned_interval(
     status: str,
     limitation_kind: str | None,
 ) -> None:
-    frontier = datetime(2026, 8, 10, 23, 59, tzinfo=timezone.utc)
+    frontier = datetime(2026, 8, 10, 23, 59, tzinfo=UTC)
     source = "bounded source"
     content = attach_provenance(
         "Evidence inside the attested interval.",
@@ -996,7 +996,7 @@ def test_same_source_watermark_rejects_effective_dates_outside_scanned_interval(
     effective: str,
     with_observation: bool,
 ) -> None:
-    frontier = datetime(2026, 8, 10, 23, 59, tzinfo=timezone.utc)
+    frontier = datetime(2026, 8, 10, 23, 59, tzinfo=UTC)
     source = "bounded source"
     content = attach_provenance(
         "Evidence outside the attested interval.",

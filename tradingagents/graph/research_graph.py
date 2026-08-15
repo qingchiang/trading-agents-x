@@ -7,14 +7,13 @@ import operator
 import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass
-from datetime import date, datetime, timezone
-from typing import Annotated, Any, Literal
+from datetime import UTC, date, datetime
+from typing import Annotated, Any, Literal, TypedDict
 
 from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 from langgraph.runtime import Runtime
-from typing_extensions import TypedDict
 
 from tradingagents.agents import (
     create_fundamentals_analyst,
@@ -159,7 +158,7 @@ def _filter_tool_output_at_information_frontier(
 
     if information_frontier is None:
         return output
-    batch_sealed_at = sealed_at or datetime.now(timezone.utc)
+    batch_sealed_at = sealed_at or datetime.now(UTC)
     messages = []
     for message in output.get("messages", ()):
         if not isinstance(message, ToolMessage):

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -134,7 +134,7 @@ def _complete_trashed_run(repository, app_settings):
         benchmark="SPY",
     )
     pending = repository.pending_outcomes(
-        due_at=datetime(2026, 9, 1, tzinfo=timezone.utc)
+        due_at=datetime(2026, 9, 1, tzinfo=UTC)
     )[0]
     repository.resolve_outcome(
         pending["outcome_id"],
@@ -153,7 +153,7 @@ def test_trash_maintenance_purges_owned_data_and_detaches_child_runs(
     repository,
     app_settings,
 ) -> None:
-    now = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 1, 12, tzinfo=UTC)
     run = _complete_trashed_run(repository, app_settings)
     child_request = AnalysisRequest(
         ticker="NVDA",
@@ -235,7 +235,7 @@ def test_trash_maintenance_honors_cutoff_restore_and_disabled_retention(
     repository,
     app_settings,
 ) -> None:
-    now = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 1, 12, tzinfo=UTC)
     boundary = _cancel_and_trash(repository, app_settings, "NVDA")
     newer = _cancel_and_trash(repository, app_settings, "AAPL")
     restored = _cancel_and_trash(repository, app_settings, "MSFT")
@@ -279,7 +279,7 @@ def test_checkpoint_delete_failure_rolls_back_application_deletion(
     repository,
     app_settings,
 ) -> None:
-    now = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 1, 12, tzinfo=UTC)
     run = _cancel_and_trash(repository, app_settings, "NVDA")
     checkpoint_thread = repository.checkpoint_thread(run.id)
     _insert_checkpoint(app_settings, checkpoint_thread)
@@ -318,7 +318,7 @@ def test_concurrent_trash_maintenance_is_idempotent(
     repository,
     app_settings,
 ) -> None:
-    now = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 1, 12, tzinfo=UTC)
     run = _cancel_and_trash(repository, app_settings, "NVDA")
     _set_trashed_at(repository, run.id, now - timedelta(days=31))
 

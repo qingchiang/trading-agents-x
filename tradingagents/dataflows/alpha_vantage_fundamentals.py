@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .alpha_vantage_common import _make_api_request
 from .lookahead import is_near_live
@@ -52,7 +52,7 @@ def get_fundamentals(ticker: str, curr_date: str = None) -> str:
     if not isinstance(result, str):
         result = json.dumps(result)
     requested_date = curr_date or "not supplied (live retrieval compatibility)"
-    retrieved_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    retrieved_at = datetime.now(UTC).isoformat(timespec="seconds")
     return (
         f"Alpha Vantage OVERVIEW for {ticker}\n"
         f"Requested analysis date: {requested_date}\n"

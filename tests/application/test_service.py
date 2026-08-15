@@ -7,9 +7,9 @@ import sqlite3
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from threading import Barrier, Lock
-from typing import Annotated
+from typing import Annotated, TypedDict
 from uuid import uuid4
 
 import pandas as pd
@@ -20,7 +20,6 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from sqlalchemy import text
 from sqlalchemy.exc import DatabaseError
-from typing_extensions import TypedDict
 
 from tests.factories import analyst_report, research_decision
 from tradingagents.application.anchor_readiness import (
@@ -845,7 +844,7 @@ def test_historical_research_execution_freezes_market_local_end_of_cutoff(
         app_settings,
         repository,
         graph_factory=_FrontierInspectingGraph,
-        utc_clock=lambda: datetime(2026, 7, 26, 3, 0, tzinfo=timezone.utc),
+        utc_clock=lambda: datetime(2026, 7, 26, 3, 0, tzinfo=UTC),
     )
 
     result = service.run_initial_chain(
@@ -879,8 +878,8 @@ def test_current_research_execution_reuses_frozen_frontier_and_readiness_on_retr
 ) -> None:
     clock = iter(
         (
-            datetime(2026, 7, 24, 9, 0, tzinfo=timezone.utc),
-            datetime(2026, 7, 24, 10, 0, tzinfo=timezone.utc),
+            datetime(2026, 7, 24, 9, 0, tzinfo=UTC),
+            datetime(2026, 7, 24, 10, 0, tzinfo=UTC),
         )
     )
     _Graph.error = RuntimeError("fixture failure after collection started")
@@ -933,7 +932,7 @@ def test_readiness_failure_does_not_freeze_information_frontier(
         app_settings,
         repository,
         market_data_readiness_checker=not_ready,
-        utc_clock=lambda: datetime(2026, 7, 24, 7, 0, tzinfo=timezone.utc),
+        utc_clock=lambda: datetime(2026, 7, 24, 7, 0, tzinfo=UTC),
     )
     view = service.enqueue_initial_chain(
         AnalysisRequest(ticker="7203.T", analysis_date="2026-07-24", analysts=("market",))
@@ -962,7 +961,7 @@ def test_anchor_readiness_failure_can_retry_and_freezes_only_successful_frontier
         app_settings,
         repository,
         market_data_readiness_checker=readiness,
-        utc_clock=lambda: datetime(2026, 7, 24, 9, 0, tzinfo=timezone.utc),
+        utc_clock=lambda: datetime(2026, 7, 24, 9, 0, tzinfo=UTC),
     )
     view = service.enqueue_initial_chain(
         AnalysisRequest(ticker="7203.T", analysis_date="2026-07-24")
@@ -1000,7 +999,7 @@ def test_initial_chain_can_explicitly_allow_non_anchor_full_research(
         app_settings,
         repository,
         market_data_readiness_checker=readiness,
-        utc_clock=lambda: datetime(2026, 7, 24, 9, 0, tzinfo=timezone.utc),
+        utc_clock=lambda: datetime(2026, 7, 24, 9, 0, tzinfo=UTC),
     )
 
     result = service.run_initial_chain(
@@ -1162,7 +1161,7 @@ def test_required_evidence_gate_retry_reuses_manifest_and_sealed_bundle(
                     24,
                     10,
                     graph_calls,
-                    tzinfo=timezone.utc,
+                    tzinfo=UTC,
                 )
                 constructed_seals.append(seal)
                 bundle = EvidenceBundle(
@@ -1322,7 +1321,7 @@ def test_source_frontier_and_structured_limitations_round_trip_without_optimism(
         app_settings,
         repository,
         state_assembler=limited_assembler,
-        utc_clock=lambda: frontier.astimezone(timezone.utc),
+        utc_clock=lambda: frontier.astimezone(UTC),
     )
 
     result = service.run_initial_chain(
@@ -1771,7 +1770,7 @@ def test_feedback_failure_cannot_change_research_revision(
     )
     chain = repository.list_research_chains(instrument="NVDA")[0]
     revision_before = chain.current_revision
-    outcome = repository.pending_outcomes(due_at=datetime(2100, 1, 1, tzinfo=timezone.utc))[0]
+    outcome = repository.pending_outcomes(due_at=datetime(2100, 1, 1, tzinfo=UTC))[0]
     repository.persist_outcome_observation(
         outcome["outcome_id"],
         observation=OutcomeObservation(
@@ -1781,7 +1780,7 @@ def test_feedback_failure_cannot_change_research_revision(
             start_date=date(2026, 7, 25),
             end_date=date(2026, 8, 1),
         ),
-        observed_at=datetime(2026, 8, 1, 20, tzinfo=timezone.utc),
+        observed_at=datetime(2026, 8, 1, 20, tzinfo=UTC),
     )
 
     def fail_qualification(**_kwargs):
@@ -1799,7 +1798,7 @@ def test_feedback_failure_cannot_change_research_revision(
                 source_decision_evidence_lesson="Compare stored decision evidence.",
                 method_lesson="Use a bounded methodological check.",
             ),
-            generated_at=datetime(2026, 8, 1, 20, 1, tzinfo=timezone.utc),
+            generated_at=datetime(2026, 8, 1, 20, 1, tzinfo=UTC),
         )
 
     assert repository.get_run(result.run_id).status is RunStatus.SUCCEEDED
@@ -1826,9 +1825,9 @@ def test_settlement_qualifies_decision_cutoff_as_versioned_feedback(
     revision_before = chain.current_revision
     clock = iter(
         (
-            datetime(2100, 1, 1, tzinfo=timezone.utc),
-            datetime(2100, 1, 1, 0, 1, tzinfo=timezone.utc),
-            datetime(2100, 1, 1, 0, 2, tzinfo=timezone.utc),
+            datetime(2100, 1, 1, tzinfo=UTC),
+            datetime(2100, 1, 1, 0, 1, tzinfo=UTC),
+            datetime(2100, 1, 1, 0, 2, tzinfo=UTC),
         )
     )
     settlement = OutcomeSettlement(
@@ -2982,7 +2981,7 @@ def test_default_bounded_collection_keeps_required_news_attestation_with_advisor
         local_name_resolver=lambda _ticker, _date, _config: None,
         market_data_readiness_checker=lambda *_args: None,
         anchor_readiness_checker=_anchor_ready,
-        utc_clock=lambda: datetime.fromisoformat(frontier).astimezone(timezone.utc),
+        utc_clock=lambda: datetime.fromisoformat(frontier).astimezone(UTC),
     )
     service.run_initial_chain(
         AnalysisRequest(
@@ -3105,7 +3104,7 @@ def test_default_bounded_collection_preserves_other_sources_when_one_required_so
         local_name_resolver=lambda _ticker, _date, _config: None,
         market_data_readiness_checker=lambda *_args: None,
         anchor_readiness_checker=_anchor_ready,
-        utc_clock=lambda: datetime.fromisoformat(frontier).astimezone(timezone.utc),
+        utc_clock=lambda: datetime.fromisoformat(frontier).astimezone(UTC),
     )
     service.run_initial_chain(
         AnalysisRequest(
@@ -3168,7 +3167,7 @@ def test_service_preserves_same_day_jquants_adapter_availability_at_frozen_front
         local_name_resolver=lambda _ticker, _date, _config: None,
         market_data_readiness_checker=lambda *_args: None,
         anchor_readiness_checker=_anchor_ready,
-        utc_clock=lambda: frontier.astimezone(timezone.utc),
+        utc_clock=lambda: frontier.astimezone(UTC),
     )
     service.run_initial_chain(
         AnalysisRequest(
@@ -3373,7 +3372,7 @@ def test_service_retains_same_day_late_disclosure_as_new_transition_evidence(
     initial = _service(
         app_settings,
         repository,
-        utc_clock=lambda: anchor_frontier.astimezone(timezone.utc),
+        utc_clock=lambda: anchor_frontier.astimezone(UTC),
     )
     initial.run_initial_chain(
         AnalysisRequest(ticker="6501.T", analysis_date="2026-07-24", analysts=("market",))
@@ -4176,7 +4175,7 @@ def test_revision_owns_state_and_evidence_after_producing_run_is_purged(
     )
 
     repository.trash_runs((first.run_id,))
-    repository.purge_expired_trash(cutoff=datetime.now(timezone.utc) + timedelta(days=1))
+    repository.purge_expired_trash(cutoff=datetime.now(UTC) + timedelta(days=1))
 
     revision = repository.get_research_revision(revision_id)
     assert revision.producing_run_id is None
@@ -4623,7 +4622,7 @@ def test_worker_shutdown_reuses_readiness_and_sealed_evidence_in_same_attempt(
                         24,
                         10,
                         0,
-                        tzinfo=timezone.utc,
+                        tzinfo=UTC,
                     ),
                 )
                 context.evidence_writer(bundle)

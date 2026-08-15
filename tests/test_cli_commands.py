@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -116,7 +116,7 @@ def test_run_builds_the_typed_request_and_prints_json(monkeypatch) -> None:
         sequence=1,
         attempt=1,
         event_type="run.started",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     result = AnalysisResult(
         run_id="run-1",
@@ -252,7 +252,7 @@ def test_run_prints_persisted_progress_events(monkeypatch) -> None:
         attempt=1,
         event_type="node.completed",
         node="market",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
     class FakeApplication:
