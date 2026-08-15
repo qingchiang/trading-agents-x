@@ -225,8 +225,10 @@ Record/Watermark used by Anchor Coverage; neither representation substitutes
 for the other. The cost gate evaluates every graph-visible Watermark for each
 Required source, not merely the first successful sibling. An unavailable,
 non-PIT, or unattested sibling remains blocking, and conflicting Watermarks for
-the same source and scanned interval fail closed before analyst synthesis so
-the gate cannot be more optimistic than final Anchor Coverage.
+the same source, dataset identity, and scanned interval fail closed before
+analyst synthesis so the gate cannot be more optimistic than final Anchor
+Coverage. Watermarks from distinct dataset identities are evaluated against
+their own Required capability contracts rather than collapsed by display name.
 The successful manifest is immutable across attempts of the same run. Event
 source frontiers retain returned/reported counts, a digest of the observed
 record-version closure, and typed limitations; retries reuse both that manifest
@@ -386,10 +388,13 @@ independently qualifies as a Forward Research Anchor only when its resulting
 Current Research State satisfies Anchor Coverage.
 
 EDINET ownership/control filings collected for the sentiment analyst remain a
-Required subset of the same official-filing event stream. Their producer carries
-the frozen Information Frontier and emits Source Records plus a PIT Watermark for
-the actual scan; a successful zero-result scan emits an explicit frontier-attested
-zero-record closure. The sentiment presentation role does not downgrade those
+Required subset of the same official-filing event stream. On a successful scan,
+their producer carries the frozen Information Frontier and emits Source Records
+plus a PIT Watermark for the actual interval; a successful zero-result scan emits
+an explicit frontier-attested zero-record closure. On producer failure or missing
+attestation, the graph-facing sanitizer preserves the dataset identity and emits
+a truthful unavailable closure. Producer metadata and sanitizer enforcement
+together guarantee that the sentiment presentation role cannot downgrade those
 official filings to Advisory or create a second, weaker EDINET coverage contract.
 Graph-facing Evidence retains the `edinet.ownership_control` dataset identity so
 closure comparisons do not equate that subject-company query with EDINET's
@@ -761,14 +766,17 @@ to the version, instrument, Research Cutoff, Information Frontier, `sealed_at`,
 items, and tables, so admission-driving context cannot be changed independently
 of the ledger contents. The schema version and database shape remain unchanged.
 
-Persisted v8 bundles whose digest was produced by the earlier items/tables
-algorithm remain readable, including eligible Near-live Evidence whose stored
-quality predates current normalization. Legacy digest acceptance is not an
-admission bypass: every digest-bearing bundle receives a non-mutating safety
-audit against its declared cutoff, frontier, and seal. Visible content outside
-that boundary, mixed or unknown temporal leakage, and tables whose supporting
-content would be withheld fail closed. The compatibility path neither rewrites
-the historical bundle nor grants legacy content broader eligibility.
+Persisted v8 bundles whose digest was produced by the earlier payload containing
+`items`, `tables`, and, when present, `information_frontier` remain readable,
+including eligible
+Near-live Evidence whose stored quality predates current normalization. Legacy
+digest acceptance is not an admission bypass: every digest-bearing bundle
+receives a non-mutating safety audit against its declared cutoff, frontier, and
+seal. Visible content outside that boundary, mixed or unknown temporal leakage,
+and tables whose supporting content would be withheld fail closed. The
+compatibility path neither rewrites the historical bundle nor grants legacy
+content broader eligibility; only newly sealed bundles use the context-bound
+payload described above.
 
 The sealed bundle is written to `run_evidence` independently of the run's final
 status. Evidence sealing and its `evidence.sealed` event commit atomically, so a
