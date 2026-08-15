@@ -1,0 +1,1 @@
+function o(t,n,i=new Date){if(n===0)return null;const e=new Date(t);e.setUTCDate(e.getUTCDate()+n);const a=e.getTime()-i.getTime();return{deletionAt:e,remainingDays:Math.max(0,Math.ceil(a/864e5)),due:a<=0}}function r(t){return new Intl.DateTimeFormat(void 0,{year:"numeric",month:"long",day:"2-digit",timeZone:"UTC"}).format(t)}export{r as f,o as t};

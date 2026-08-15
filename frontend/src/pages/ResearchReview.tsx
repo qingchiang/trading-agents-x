@@ -1,4 +1,4 @@
-import { FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   api,
@@ -8,37 +8,29 @@ import {
 } from "../api/client";
 import {
   InstrumentIdentity,
-  RecentInstrumentDatalist,
   instrumentAccessibleName,
-  recentInstrumentListId,
-  useRecentInstruments,
 } from "../components/Instruments";
 import Markdown from "../components/Markdown";
 import StatusBadge from "../components/StatusBadge";
 import { Link } from "../router";
-
-const statusGroups = [
-  "all",
-  "needs_attention",
-  "in_progress",
-  "feedback_available",
-  "feedback_ineligible_or_retired",
-] as const;
+import {
+  AuditDetail,
+  DecisionDetails,
+  ReflectionAnalysis,
+  ReviewDetailDisclosure,
+  feedbackStateMessageKey,
+  percent,
+  profileDescriptionKey,
+  runDecisionPath,
+} from "./research-review/ResearchReviewDetails";
+import {
+  ResearchReviewFilters,
+  useResearchReviewFilters,
+} from "./research-review/ResearchReviewFilters";
 
 export default function ResearchReview() {
   const { t } = useTranslation();
   const [reviews, setReviews] = useState<ResearchReview[]>([]);
-  const initialParams = new URLSearchParams(window.location.search);
-  const [q, setQ] = useState(() => initialParams.get("q") ?? "");
-  const [ticker, setTicker] = useState(
-    () => initialParams.get("ticker") ?? "",
-  );
-  const [market, setMarket] = useState(
-    () => initialParams.get("market") ?? "",
-  );
-  const [statusGroup, setStatusGroup] = useState(
-    () => initialParams.get("status_group") ?? "all",
-  );
   const [error, setError] = useState("");
   const [reflectionActionError, setReflectionActionError] = useState("");
   const [reflectionActionErrorOutcomeId, setReflectionActionErrorOutcomeId] = useState<number | null>(null);
@@ -59,7 +51,6 @@ export default function ResearchReview() {
   const [auditDetails, setAuditDetails] = useState<
     Record<number, ResearchReviewAuditDetail>
   >({});
-  const recentInstruments = useRecentInstruments();
   const reviewRefs = useRef<Record<number, HTMLElement | null>>({});
   const auditRequestVersionsRef = useRef<Record<number, number>>({});
   const auditLoadingRef = useRef<Record<number, boolean>>({});
@@ -70,14 +61,16 @@ export default function ResearchReview() {
     reviewRefs.current[outcomeId]?.focus();
   };
 
-  const load = async (query = "") => {
+  const load = useCallback(async (query = "") => {
     try {
       setReviews(await api.reviews(query));
       setError("");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t("error"));
     }
-  };
+  }, [t]);
+  const { actions: filterActions, model: filterModel } =
+    useResearchReviewFilters((query) => void load(query));
   useEffect(() => {
     void load(window.location.search);
   }, []);
@@ -95,17 +88,6 @@ export default function ResearchReview() {
     });
   }, [reviews]);
 
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    const params = new URLSearchParams();
-    if (q.trim()) params.set("q", q.trim());
-    if (ticker.trim()) params.set("ticker", ticker.trim());
-    if (market.trim()) params.set("market", market.trim());
-    if (statusGroup !== "all") params.set("status_group", statusGroup);
-    const query = params.size ? `?${params}` : "";
-    window.history.replaceState(null, "", `/reviews${query}`);
-    void load(query);
-  };
   const loadAuditDetail = async (outcomeId: number, force = false) => {
     if (!force && auditDetails[outcomeId]) return;
     if (!force && auditLoadingRef.current[outcomeId]) return;
@@ -235,59 +217,7 @@ export default function ResearchReview() {
           <p className="subtitle">{t("researchReviewHint")}</p>
         </div>
       </header>
-      <form className="panel filter-bar" onSubmit={submit}>
-        <label>
-          {t("reviewSearch")}
-          <input
-            id="review-search"
-            name="q"
-            autoComplete="on"
-            value={q}
-            onChange={(event) => setQ(event.target.value)}
-            placeholder={t("reviewSearchPlaceholder")}
-          />
-        </label>
-        <label>
-          {t("ticker")}
-          <input
-            id="review-ticker"
-            name="ticker"
-            autoComplete="on"
-            list={recentInstrumentListId}
-            spellCheck={false}
-            value={ticker}
-            onChange={(event) => setTicker(event.target.value)}
-          />
-          <RecentInstrumentDatalist instruments={recentInstruments} />
-        </label>
-        <label>
-          {t("market")}
-          <input
-            id="review-market"
-            name="market"
-            autoComplete="on"
-            value={market}
-            onChange={(event) => setMarket(event.target.value)}
-            placeholder="Asia/Tokyo"
-          />
-        </label>
-        <label>
-          {t("reviewStatus")}
-          <select
-            id="review-status-group"
-            name="status_group"
-            value={statusGroup}
-            onChange={(event) => setStatusGroup(event.target.value)}
-          >
-            {statusGroups.map((group) => (
-              <option key={group} value={group}>
-                {t(`reviewStatusGroup.${group}`)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button className="button primary">{t("apply")}</button>
-      </form>
+      <ResearchReviewFilters actions={filterActions} model={filterModel} />
       {error && <div className="alert">{error}</div>}
       <p
         aria-live="polite"
@@ -602,372 +532,4 @@ export default function ResearchReview() {
       )}
     </section>
   );
-}
-
-function ReflectionAnalysis({ reflection }: { reflection: string }) {
-  const { t } = useTranslation();
-  const match = reflection.trim().match(
-    /^Directional assessment:\s*([^\n]+)\nSource-decision evidence lesson:\s*([\s\S]*?)\nMethod lesson(?::\s*|\s*\n)([\s\S]+)$/,
-  );
-
-  if (!match) return <Markdown>{reflection}</Markdown>;
-
-  const assessment = match[1].trim().toLowerCase();
-  const isKnownAssessment = ["consistent", "mixed", "inconsistent"].includes(assessment);
-  const assessmentKey = isKnownAssessment
-    ? `directionalAssessmentValues.${assessment}`
-    : null;
-
-  return (
-    <dl className="reflection-analysis">
-      <div>
-        <dt>{t("directionalAssessment")}</dt>
-        <dd className={`reflection-assessment${isKnownAssessment ? ` reflection-assessment-${assessment}` : ""}`}>
-          {assessmentKey ? t(assessmentKey) : match[1].trim()}
-        </dd>
-      </div>
-      <div>
-        <dt>{t("sourceDecisionEvidenceLesson")}</dt>
-        <dd><Markdown>{match[2].trim()}</Markdown></dd>
-      </div>
-      <div>
-        <dt>{t("methodLesson")}</dt>
-        <dd><Markdown>{match[3].trim()}</Markdown></dd>
-      </div>
-    </dl>
-  );
-}
-
-function ReviewDetailDisclosure({
-  children,
-  className,
-  detail,
-  loadingLabel,
-  onOpen,
-  summary,
-}: {
-  children: (detail: ResearchReviewAuditDetail) => ReactNode;
-  className: string;
-  detail: ResearchReviewAuditDetail | undefined;
-  loadingLabel: string;
-  onOpen: () => void;
-  summary: string;
-}) {
-  return (
-    <details
-      className={`memory-decision-details ${className}`}
-      onToggle={(event) => {
-        if (event.currentTarget.open) onOpen();
-      }}
-    >
-      <summary>{summary}</summary>
-      <div className="review-disclosure-body">
-        {detail ? children(detail) : <p>{loadingLabel}</p>}
-      </div>
-    </details>
-  );
-}
-
-function AuditAttempts({ detail }: { detail: ResearchReviewAuditDetail }) {
-  const { t, i18n } = useTranslation();
-  return (
-    <section className="review-audit-section">
-      <h3>{t("reflectionAttempts")}</h3>
-      {detail.attempts.length === 0 && <p>{t("noReflectionAttempts")}</p>}
-      {detail.attempts.map((attempt) => (
-        <details className="review-attempt" key={attempt.id}>
-          <summary>
-            #{attempt.sequence} · {attempt.attempt_kind} · {attempt.outcome ?? t("statusRunning")}
-          </summary>
-          <div className="review-attempt-body">
-            <KeyValueTable rows={[
-              [t("generationCycleId"), attempt.generation_cycle_id],
-              [t("attemptSchema"), attempt.attempt_schema_version],
-              [t("candidateSchema"), attempt.candidate_schema_version],
-              [t("origin"), attempt.origin],
-              [t("trigger"), attempt.trigger],
-              [t("startedAt"), <AuditTime locale={i18n.language} value={attempt.started_at} />],
-              [t("finishedAt"), <AuditTime locale={i18n.language} value={attempt.finished_at} />],
-            ]} />
-            <UsageTable usage={attempt.usage} />
-            {attempt.diagnostics && Object.keys(attempt.diagnostics).length > 0 && (
-              <div className="review-audit-subsection">
-                <h4>{t("diagnostics")}</h4>
-                <KeyValueTable rows={Object.entries(attempt.diagnostics)} />
-              </div>
-            )}
-            {attempt.validation_issues && attempt.validation_issues.length > 0 && (
-              <div className="review-audit-subsection">
-                <h4>{t("validationIssues")}</h4>
-                <ul>{attempt.validation_issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>
-              </div>
-            )}
-            {attempt.invalid_candidate && (
-              <details className="review-invalid-candidate">
-                <summary>{t("invalidGeneratedCandidate")}</summary>
-                <p>
-                  {t("digest")}: {attempt.invalid_candidate_digest ?? "—"} ·{" "}
-                  {t("length")}: {formatAuditNumber(i18n.language, attempt.invalid_candidate_length)}
-                </p>
-                <pre>{attempt.invalid_candidate}</pre>
-              </details>
-            )}
-          </div>
-        </details>
-      ))}
-    </section>
-  );
-}
-
-function AuditLifecycle({ detail }: { detail: ResearchReviewAuditDetail }) {
-  const { t, i18n } = useTranslation();
-  const { outcome, outcome_feedback: feedback, outcome_reflection: reflection } = detail.review;
-  const cycle = reflection?.generation_cycle;
-  return (
-    <section className="review-audit-section">
-      <h3>{t("lifecycle")}</h3>
-      <div className="review-table-scroll">
-        <table className="review-audit-table">
-          <thead><tr>
-            <th>{t("stage")}</th><th>{t("status")}</th><th>{t("createdOrResolved")}</th>
-            <th>{t("availableOrCompleted")}</th><th>{t("lastUpdated")}</th>
-          </tr></thead>
-          <tbody>
-            <tr>
-              <th scope="row">{t("outcomeObservation")}</th><td>{outcome.status}</td>
-              <td><AuditTime locale={i18n.language} value={outcome.resolved_at} /></td>
-              <td><AuditTime locale={i18n.language} value={outcome.data_available_at} /></td>
-              <td><AuditTime locale={i18n.language} value={outcome.last_checked_at} /></td>
-            </tr>
-            <tr>
-              <th scope="row">{t("methodReflection")}</th><td>{reflection?.status ?? "—"}</td>
-              <td><AuditTime locale={i18n.language} value={reflection?.created_at} /></td>
-              <td><AuditTime locale={i18n.language} value={reflection?.generated_at} /></td>
-              <td><AuditTime locale={i18n.language} value={reflection?.last_attempted_at} /></td>
-            </tr>
-            <tr>
-              <th scope="row">{t("methodFeedback")}</th><td>{feedback?.status ?? "—"}</td>
-              <td><AuditTime locale={i18n.language} value={feedback?.qualified_at} /></td>
-              <td><AuditTime locale={i18n.language} value={feedback?.available_at} /></td>
-              <td><AuditTime locale={i18n.language} value={feedback?.retired_at} /></td>
-            </tr>
-            {cycle && (
-              <tr>
-                <th scope="row">{t("generationCycle")}</th><td>{cycle.status}</td>
-                <td><AuditTime locale={i18n.language} value={cycle.queued_at} /></td>
-                <td><AuditTime locale={i18n.language} value={cycle.due_at} /></td>
-                <td>—</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-      <div className="review-audit-subsection">
-        <h4>{t("lifecycleDiagnostics")}</h4>
-        <KeyValueTable
-          rows={[
-            [
-              t("nextObservationCheck"),
-              <AuditTime locale={i18n.language} value={outcome.next_check_at} />,
-            ],
-            [t("observationError"), outcome.error_message],
-            [
-              t("nextReflectionRetry"),
-              <AuditTime locale={i18n.language} value={reflection?.next_retry_at} />,
-            ],
-            [t("reflectionError"), reflection?.error_code],
-            [t("generationCycleId"), cycle?.id],
-            [t("retryOrdinal"), cycle?.retry_ordinal],
-          ]}
-        />
-      </div>
-    </section>
-  );
-}
-
-function AuditDetail({ detail }: { detail: ResearchReviewAuditDetail }) {
-  const { t } = useTranslation();
-  const review = detail.review;
-  const provenanceRows: Array<[string, ReactNode]> = [
-    [t("observationMethod"), review.outcome.method_category],
-    [t("version"), review.outcome.method_version],
-    [t("marketTimezone"), review.outcome.market_timezone],
-    [t("priceSemantics"), review.outcome.price_semantics],
-    [t("adjustmentSemantics"), review.outcome.adjustment_semantics],
-    [t("horizonLimit"), review.outcome.horizon_limit],
-    [t("qualificationPolicy"), review.outcome_feedback?.qualification_policy_version],
-    [t("qualificationReasons"), review.outcome_feedback?.reasons.join(", ")],
-    [t("limitations"), review.outcome.limitations.join(" · ")],
-  ];
-  return (
-    <div className="review-audit-content">
-      <AuditLifecycle detail={detail} />
-      <section className="review-audit-section">
-        <h3>{t("generationProvenance")}</h3>
-        <KeyValueTable rows={provenanceRows} />
-      </section>
-      <section className="review-audit-section">
-        <h3>{t("usageSummary")}</h3>
-        <UsageTable attemptCount={detail.aggregate_usage.attempt_count} usage={detail.aggregate_usage} />
-      </section>
-      <AuditAttempts detail={detail} />
-    </div>
-  );
-}
-
-type UsageView = ResearchReviewAuditDetail["attempts"][number]["usage"];
-
-function UsageTable({
-  attemptCount,
-  usage,
-}: {
-  attemptCount?: number;
-  usage: UsageView;
-}) {
-  const { t, i18n } = useTranslation();
-  const fields: Array<[string, number | string | null | undefined]> = [
-    ...(attemptCount === undefined ? [] : [[t("attempts"), attemptCount] as [string, number]]),
-    [t("usageStatus"), usage.usage_status],
-    [t("llmCalls"), usage.llm_calls],
-    [t("inputTokens"), usage.input_tokens],
-    [t("outputTokens"), usage.output_tokens],
-    [t("cacheHitInputTokens"), usage.cache_hit_input_tokens],
-    [t("cacheMissInputTokens"), usage.cache_miss_input_tokens],
-    [t("reasoningOutputTokens"), usage.reasoning_output_tokens],
-    [t("wallTime"), usage.wall_time_seconds],
-    [t("providerCostUsd"), usage.provider_reported_cost_usd],
-  ];
-  return (
-    <div className="review-table-scroll">
-      <table className="review-audit-table review-usage-table">
-        <thead><tr>{fields.map(([label]) => <th key={label}>{label}</th>)}</tr></thead>
-        <tbody><tr>{fields.map(([label, value]) => (
-          <td key={label}>{formatAuditNumber(i18n.language, value)}</td>
-        ))}</tr></tbody>
-      </table>
-    </div>
-  );
-}
-
-function KeyValueTable({ rows }: { rows: Array<[string, ReactNode]> }) {
-  return (
-    <div className="review-table-scroll">
-      <table className="review-audit-table review-key-value-table">
-        <tbody>{rows.map(([label, value]) => (
-          <tr key={label}>
-            <th scope="row">{label}</th>
-            <td>{value === null || value === undefined || value === "" ? "—" : value}</td>
-          </tr>
-        ))}</tbody>
-      </table>
-    </div>
-  );
-}
-
-function AuditTime({ locale, value }: { locale: string; value: string | null | undefined }) {
-  if (!value) return <>—</>;
-  const date = new Date(value);
-  const label = Number.isNaN(date.valueOf())
-    ? value
-    : new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(date);
-  return <time dateTime={value} title={value}>{label}</time>;
-}
-
-function formatAuditNumber(locale: string, value: number | string | null | undefined): string {
-  if (value === null || value === undefined || value === "") return "—";
-  return typeof value === "number" ? new Intl.NumberFormat(locale, { maximumFractionDigits: 4 }).format(value) : value;
-}
-
-function DecisionDetails({ review }: { review: ResearchReview }) {
-  const { t } = useTranslation();
-  return (
-    <div className="memory-decision-details-body">
-      <div className="memory-scenarios">
-        <h3>{t("scenarios")}</h3>
-        <div className="memory-scenario-grid">
-          {review.decision.scenarios.map((scenario) => (
-            <div className={`memory-scenario scenario-${scenario.kind}`} key={scenario.kind}>
-              <strong>{t(`${scenario.kind}Scenario`)}</strong>
-              <Markdown>{scenario.outcome}</Markdown>
-              {scenario.core_assumptions.length > 0 && (
-                <div className="memory-decision-field">
-                  <strong>{t("coreAssumptions")}</strong>
-                  <ul>
-                    {scenario.core_assumptions.map((assumption) => (
-                      <li key={assumption}><Markdown>{assumption}</Markdown></li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-      <div className="memory-decision-grid">
-        <DecisionList
-          title={t("catalysts")}
-          items={review.decision.catalysts ?? []}
-        />
-        <DecisionList title={t("risks")} items={review.decision.risks ?? []} />
-        <DecisionList
-          title={t("invalidation")}
-          items={review.decision.invalidation_conditions ?? []}
-        />
-        <DecisionList
-          title={t("unresolvedQuestions")}
-          items={review.decision.unresolved_questions ?? []}
-        />
-      </div>
-    </div>
-  );
-}
-
-function DecisionList({ title, items }: { title: string; items: string[] }) {
-  return (
-    <div className="memory-decision-field">
-      <strong>{title}</strong>
-      {items.length ? (
-        <ul>
-          {items.map((item) => (
-            <li key={item}>
-              <Markdown>{item}</Markdown>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <span>—</span>
-      )}
-    </div>
-  );
-}
-
-function percent(value: number | null) {
-  return value == null ? "—" : `${value >= 0 ? "+" : ""}${(value * 100).toFixed(1)}%`;
-}
-
-function feedbackStateMessageKey(status: ResearchReview["review_status"]): string {
-  return {
-    awaiting_observation: "feedbackAwaitingObservation",
-    observation_delayed: "feedbackAwaitingObservation",
-    awaiting_reflection: "feedbackAwaitingReflection",
-    reflection_retry_scheduled: "feedbackRetryScheduled",
-    reflection_failed: "feedbackGenerationFailed",
-    reflection_invalid: "feedbackGenerationFailed",
-    feedback_available: "feedbackUnavailable",
-    feedback_ineligible: "feedbackUnavailable",
-    feedback_retired: "feedbackUnavailable",
-    lifecycle_inconsistent: "feedbackUnavailable",
-  }[status];
-}
-
-function runDecisionPath(runId: string): string {
-  return `/runs/${encodeURIComponent(runId)}?view=decision`;
-}
-
-function profileDescriptionKey(profile: ResearchReview["profile"]): string {
-  return {
-    fast: "profileFastDesc",
-    standard: "profileStandardDesc",
-    deep: "profileDeepDesc",
-  }[profile];
 }
