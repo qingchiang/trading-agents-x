@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Callable, Iterable
 from datetime import date, datetime, timedelta
-from enum import Enum
+from enum import StrEnum
 from time import monotonic
 from typing import Literal
 
@@ -18,6 +18,7 @@ from tradingagents.provenance import (
     extract_source_observations_strict,
     extract_source_watermarks,
 )
+from tradingagents.research_sources import JapaneseResearchSource
 
 from .contracts import AnalysisRequest, NodeMetrics, RunMetrics
 from .market_readiness import MarketDataReadiness
@@ -28,10 +29,10 @@ from .research import (
     MarketResearchCapability,
 )
 
-_JQUANTS_MARKET_SOURCE = "J-Quants adjusted OHLCV"
+_JQUANTS_MARKET_SOURCE = JapaneseResearchSource.JQUANTS_ADJUSTED_OHLCV
 
 
-class AnchorReadinessReason(str, Enum):
+class AnchorReadinessReason(StrEnum):
     """Stable fail-closed outcomes shared by service and validation tooling."""
 
     MISSING_MARKET_OBSERVATION = "missing_market_observation"

@@ -37,7 +37,45 @@ _FORBIDDEN_REQUIREMENTS = {
     "redis",
     "setuptools",
     "tqdm",
+    "typing-extensions",
 }
+
+_REQUIRES_PYTHON = frozenset({">=3.12", "<3.15"})
+_STATIC_ROOT = "tradingagents/web/static/"
+_INDEX_ASSET_PATTERN = re.compile(r'(?:src|href)="(/assets/[^"]+\.(?:js|css))"')
+_CHUNK_ASSET_PATTERN = re.compile(
+    r'["\']((?:\./|assets/)[^"\']+\.(?:js|css))["\']'
+)
+
+
+def _normalize_asset_reference(reference: str) -> str:
+    if reference.startswith("./"):
+        return f"{_STATIC_ROOT}assets/{reference.removeprefix('./')}"
+    return f"{_STATIC_ROOT}{reference.removeprefix('/')}"
+
+
+def _reachable_web_assets(archive: ZipFile, index: str) -> set[str]:
+    """Return assets reachable from HTML and Vite's generated chunk graph."""
+    reachable = {
+        _normalize_asset_reference(reference)
+        for reference in _INDEX_ASSET_PATTERN.findall(index)
+    }
+    pending = [name for name in reachable if name.endswith(".js")]
+    inspected: set[str] = set()
+    names = set(archive.namelist())
+    while pending:
+        chunk_name = pending.pop()
+        if chunk_name in inspected or chunk_name not in names:
+            continue
+        inspected.add(chunk_name)
+        chunk = archive.read(chunk_name).decode("utf-8")
+        for reference in _CHUNK_ASSET_PATTERN.findall(chunk):
+            asset_name = _normalize_asset_reference(reference)
+            if asset_name not in reachable:
+                reachable.add(asset_name)
+                if asset_name.endswith(".js"):
+                    pending.append(asset_name)
+    return reachable
 
 
 def verify(wheel: Path) -> None:
@@ -55,13 +93,7 @@ def verify(wheel: Path) -> None:
                 f"wheel contains removed runtime files: {', '.join(forbidden)}"
             )
         index = archive.read("tradingagents/web/static/index.html").decode("utf-8")
-        referenced_assets = {
-            f"tradingagents/web/static{path}"
-            for path in re.findall(
-                r'(?:src|href)="(/assets/[^"]+\.(?:js|css))"',
-                index,
-            )
-        }
+        referenced_assets = _reachable_web_assets(archive, index)
         packaged_assets = {
             name
             for name in names
@@ -76,7 +108,7 @@ def verify(wheel: Path) -> None:
             unexpected = sorted(packaged_assets - referenced_assets)
             missing_assets = sorted(referenced_assets - packaged_assets)
             raise ValueError(
-                "wheel static assets do not match index.html: "
+                "wheel static assets do not match the reachable asset graph: "
                 f"unexpected={unexpected}, missing={missing_assets}"
             )
         if not any(name.endswith(".dist-info/licenses/LICENSE") for name in names):
@@ -90,6 +122,13 @@ def verify(wheel: Path) -> None:
         metadata = BytesParser().parsebytes(archive.read(metadata_name))
         if metadata["License-Expression"] != "Apache-2.0":
             raise ValueError("wheel License-Expression must be Apache-2.0")
+        requires_python = frozenset(
+            clause.strip() for clause in metadata["Requires-Python"].split(",")
+        )
+        if requires_python != _REQUIRES_PYTHON:
+            raise ValueError(
+                "wheel Requires-Python must be >=3.12,<3.15"
+            )
         extras = {
             extra.casefold() for extra in metadata.get_all("Provides-Extra", [])
         }

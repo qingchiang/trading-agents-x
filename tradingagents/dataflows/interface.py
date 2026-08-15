@@ -1,6 +1,6 @@
 import logging
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from inspect import Parameter, signature
 
 from tradingagents.provenance import (
@@ -456,7 +456,7 @@ def _provenance_for_route(
             timing = "unavailable for historical date; vendor not queried"
         elif vendor in {"yfinance", "alpha_vantage"}:
             timing = "live non-point-in-time"
-            retrieved_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            retrieved_at = datetime.now(UTC).isoformat(timespec="seconds")
         else:
             timing = "disclosure-date filtered"
     elif method in {"get_balance_sheet", "get_cashflow", "get_income_statement"}:
@@ -471,7 +471,7 @@ def _provenance_for_route(
             timing = "unavailable for historical date; vendor not queried"
         elif vendor in {"yfinance", "alpha_vantage"}:
             timing = "period-end filtered only; not point-in-time"
-            retrieved_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            retrieved_at = datetime.now(UTC).isoformat(timespec="seconds")
         else:
             timing = "disclosure-date filtered"
 

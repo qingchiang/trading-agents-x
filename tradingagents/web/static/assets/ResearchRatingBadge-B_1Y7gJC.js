@@ -1,0 +1,1 @@
+import{j as r}from"./index-CtqPMy7D.js";function n({rating:a}){const e=a?.toLowerCase()??"unavailable";return r.jsx("span",{className:`research-rating-badge rating-${e}`,children:a??"—"})}export{n as R};

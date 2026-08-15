@@ -36,6 +36,7 @@ from tradingagents.provenance import (
     attach_source_observations,
     attach_source_watermarks,
 )
+from tradingagents.research_sources import JapaneseResearchSource
 
 from ..config import get_config
 from ..symbol_utils import tokyo_securities_base
@@ -140,7 +141,7 @@ def get_news(
         )
     )
     watermark = SourceWatermark(
-        source="EDINET",
+        source=JapaneseResearchSource.EDINET,
         scanned_start=scanned_start,
         scanned_end=end_date,
         status="limited" if limitations else "complete",

@@ -43,6 +43,7 @@ from tradingagents.provenance import (
     attach_source_observations,
     attach_source_watermarks,
 )
+from tradingagents.research_sources import JapaneseResearchSource
 
 from ..config import get_config
 from ..symbol_utils import tokyo_securities_base
@@ -186,7 +187,7 @@ def get_news(
         return attach_source_watermarks(
             body,
             SourceWatermark(
-                source="TDnet",
+                source=JapaneseResearchSource.TDNET,
                 scanned_start=start_date,
                 scanned_end=end_date,
                 status="unavailable",
@@ -233,7 +234,7 @@ def get_news(
     if page is None:
         limitations.append("TDnet collection was unavailable.")
     watermark = SourceWatermark(
-        source="TDnet",
+        source=JapaneseResearchSource.TDNET,
         scanned_start=start_date,
         scanned_end=end_date,
         status=("unavailable" if page is None else "limited" if limitations else "complete"),
@@ -291,7 +292,7 @@ def _observation(row: dict) -> SourceObservation:
     else:
         status = "published"
     return SourceObservation(
-        source="TDnet",
+        source=JapaneseResearchSource.TDNET,
         record_id=native_id,
         version_id=f"tdnet:{version}",
         status=status,

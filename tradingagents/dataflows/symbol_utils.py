@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Iterable
-from datetime import date, datetime, timezone, tzinfo
+from datetime import UTC, date, datetime, tzinfo
 from zoneinfo import ZoneInfo
 
 # NoMarketDataError lives in the vendor-error taxonomy (errors.py); re-exported
@@ -324,7 +324,7 @@ def match_exchange_suffix(symbol: str, suffixes: Iterable[str]) -> str:
 def market_timezone(symbol: str | None) -> tzinfo:
     """Return the calendar timezone used for a Yahoo-compatible instrument."""
     if symbol is None:
-        return timezone.utc
+        return UTC
     canonical = normalize_symbol(symbol)
     if canonical in _MARKET_TIMEZONES_BY_SYMBOL:
         return ZoneInfo(_MARKET_TIMEZONES_BY_SYMBOL[canonical])

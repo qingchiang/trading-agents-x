@@ -6,7 +6,7 @@ import hashlib
 import io
 import json
 import zipfile
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pytest
 from langchain_core.messages import ToolMessage
@@ -17,6 +17,7 @@ from tests.factories import (
     research_case,
     research_decision,
 )
+from tradingagents.application._exports.labels import ExportLabels as InternalExportLabels
 from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
@@ -63,6 +64,7 @@ from tradingagents.application.contracts import (
 )
 from tradingagents.application.evidence import extract_evidence_tables
 from tradingagents.application.exporting import (
+    ExportLabels,
     render_run_export_markdown,
     render_run_export_package,
 )
@@ -76,6 +78,17 @@ from tradingagents.provenance import (
     attach_evidence_span,
     attach_provenance,
 )
+
+
+def test_exporting_facade_preserves_fixed_point_public_names() -> None:
+    import tradingagents.application.exporting as exporting
+
+    assert exporting.__all__ == [
+        "ExportLabels",
+        "render_run_export_markdown",
+        "render_run_export_package",
+    ]
+    assert ExportLabels is InternalExportLabels
 
 
 def _record(
@@ -390,9 +403,9 @@ def test_bundle_retains_eligible_near_live_body_as_low_quality_advisory() -> Non
     bundle = EvidenceBundle(
         instrument="4568.T",
         analysis_date=date(2026, 8, 10),
-        information_frontier=datetime(2026, 8, 10, 23, 59, tzinfo=timezone.utc),
+        information_frontier=datetime(2026, 8, 10, 23, 59, tzinfo=UTC),
         items=(item,),
-        sealed_at=datetime(2026, 8, 15, 21, 0, tzinfo=timezone.utc),
+        sealed_at=datetime(2026, 8, 15, 21, 0, tzinfo=UTC),
     )
 
     admitted = bundle.items[0]
@@ -449,7 +462,7 @@ def test_bundle_withholds_ineligible_near_live_body_but_keeps_audit_item(
     bundle = EvidenceBundle(
         instrument="4568.T",
         analysis_date=date(2026, 8, 10),
-        information_frontier=datetime(2026, 8, 10, 23, 59, tzinfo=timezone.utc),
+        information_frontier=datetime(2026, 8, 10, 23, 59, tzinfo=UTC),
         items=(item,),
         sealed_at=datetime.fromisoformat(sealed_at),
     )
@@ -604,7 +617,7 @@ def test_withheld_live_item_cannot_retain_referenced_evidence_table() -> None:
         analysis_date=date(2026, 8, 10),
         items=(item,),
         tables=tables,
-        sealed_at=datetime(2026, 8, 16, 13, 0, tzinfo=timezone.utc),
+        sealed_at=datetime(2026, 8, 16, 13, 0, tzinfo=UTC),
     )
 
     assert bundle.items[0].content is None
@@ -764,7 +777,7 @@ def test_new_bundle_digest_binds_admission_context(
     bundle = EvidenceBundle(
         instrument="4568.T",
         analysis_date=date(2026, 8, 10),
-        information_frontier=datetime(2026, 8, 10, 14, 59, tzinfo=timezone.utc),
+        information_frontier=datetime(2026, 8, 10, 14, 59, tzinfo=UTC),
         items=(item,),
         sealed_at=datetime.fromisoformat("2026-08-14T00:21:00+09:00"),
     )
@@ -970,7 +983,7 @@ def test_markdown_export_renders_an_exact_body_once_with_all_refs() -> None:
         analysis_date=date(2026, 7, 24),
         items=(first, second),
     )
-    now = datetime(2026, 7, 24, 12, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 24, 12, tzinfo=UTC)
     request = AnalysisRequest(ticker="7203.T", analysis_date="2026-07-24")
     run_export = RunExport(
         run=RunView(
@@ -1014,7 +1027,7 @@ def test_failed_run_export_preserves_non_final_decision_brief() -> None:
         analysis_date=date(2026, 7, 24),
         items=(item,),
     )
-    now = datetime(2026, 7, 24, 12, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 24, 12, tzinfo=UTC)
     run_export = RunExport(
         run=RunView(
             id="fixture-run",
@@ -1093,7 +1106,7 @@ def test_markdown_export_uses_stable_evidence_markers_without_definitions() -> N
         analysis_date=date(2026, 7, 24),
         items=(item, second),
     )
-    now = datetime(2026, 7, 24, 12, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 24, 12, tzinfo=UTC)
     report = analyst_report(
         evidence_ref=item.ref,
         narrative=(
@@ -1154,7 +1167,7 @@ def test_markdown_export_links_raw_evidence_table_without_inlining_rows() -> Non
         items=(item,),
         tables=tables,
     )
-    now = datetime(2026, 7, 24, 12, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 24, 12, tzinfo=UTC)
     run_export = RunExport(
         run=RunView(
             id="fixture-run",
@@ -1215,7 +1228,7 @@ def test_markdown_export_links_raw_evidence_table_without_inlining_rows() -> Non
 
 
 def test_markdown_export_uses_canonical_report_order() -> None:
-    now = datetime(2026, 7, 24, 12, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 24, 12, tzinfo=UTC)
     result = AnalysisResult(
         run_id="fixture-run",
         status=RunStatus.SUCCEEDED,
@@ -1262,7 +1275,7 @@ def test_markdown_export_uses_canonical_report_order() -> None:
 
 
 def test_markdown_export_renders_decision_calculation_uses_and_gap_only_appendix() -> None:
-    now = datetime(2026, 7, 24, 12, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 24, 12, tzinfo=UTC)
     decision = research_decision(thesis="Forward PE is 82.1x.").model_copy(
         update={
             "calculation_records": (
@@ -1357,7 +1370,7 @@ def test_markdown_export_renders_decision_calculation_uses_and_gap_only_appendix
 
 
 def test_markdown_export_includes_total_and_per_node_metrics() -> None:
-    now = datetime(2026, 7, 24, 12, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 24, 12, tzinfo=UTC)
     metrics = RunMetrics(
         llm_calls=3,
         tool_calls=2,
@@ -1421,7 +1434,7 @@ def test_markdown_export_includes_total_and_per_node_metrics() -> None:
 
 
 def test_markdown_export_emits_each_audit_section_once() -> None:
-    now = datetime(2026, 7, 24, 12, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 24, 12, tzinfo=UTC)
     warning = ResearchWarning(
         code="evidence.partial",
         message="Historical coverage is partial.",
@@ -1638,7 +1651,7 @@ def test_export_framework_uses_standard_locales_and_custom_language_fallback(
     output_language: str,
     expected: tuple[str, str, str, str],
 ) -> None:
-    now = datetime(2026, 8, 1, 12, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 1, 12, tzinfo=UTC)
     run_export = RunExport(
         run=RunView(
             id="fixture-run",
@@ -1716,7 +1729,7 @@ def test_export_localizes_scenario_range_categories_and_omissions(
             )
         }
     )
-    now = datetime(2026, 8, 1, 12, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 1, 12, tzinfo=UTC)
     run_export = RunExport(
         run=RunView(
             id="fixture-run",
@@ -1793,7 +1806,7 @@ def test_zh_export_localizes_framework_and_keeps_canonical_refs_in_sources() -> 
         analysis_date=date(2026, 8, 1),
         items=(item,),
     )
-    now = datetime(2026, 8, 1, 12, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 1, 12, tzinfo=UTC)
     decision = research_decision(evidence_refs=(item.ref,)).model_copy(
         update={"numeric_audit_status": NumericAuditStatus.INCOMPLETE}
     )

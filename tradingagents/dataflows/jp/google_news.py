@@ -25,12 +25,13 @@ from __future__ import annotations
 
 import logging
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlencode
 from urllib.request import Request
 
 from tradingagents.provenance import ProvenanceRecord, attach_provenance
+from tradingagents.research_sources import JapaneseResearchSource
 
 from ..config import get_config
 from ..news_quality import (
@@ -55,7 +56,7 @@ _JST = timezone(timedelta(hours=9))
 def _retrieved_at() -> str:
     """Capture the RSS producer's own retrieval completion time once."""
 
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def _producer_result(
@@ -71,7 +72,7 @@ def _producer_result(
         body,
         ProvenanceRecord(
             evidence="get_news",
-            source="Google News",
+            source=JapaneseResearchSource.GOOGLE_NEWS,
             requested=f"{start_date} to {end_date}",
             effective=f"{start_date} to {end_date}",
             timing="live non-point-in-time; publication-date filtered",
@@ -93,7 +94,7 @@ def _parse_pubdate(raw: str | None) -> datetime | None:
     except (TypeError, ValueError):
         return None
     if dt.tzinfo is None:  # RFC-822 without a zone — treat as UTC
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     return dt.astimezone(_JST).replace(tzinfo=None)
 
 

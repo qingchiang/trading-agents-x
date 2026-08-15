@@ -6,7 +6,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 METHOD_CATEGORY = "short_term_relative_return"
@@ -49,25 +49,25 @@ class FeedbackQualification:
     applicability: dict[str, Any]
 
 
-class OutcomeObservationStatus(str, Enum):
+class OutcomeObservationStatus(StrEnum):
     PENDING = "pending"
     RESOLVED = "resolved"
 
 
-class OutcomeReflectionStatus(str, Enum):
+class OutcomeReflectionStatus(StrEnum):
     PENDING = "pending"
     GENERATED = "generated"
     INVALID = "invalid"
     RETRYABLE_FAILURE = "retryable_failure"
 
 
-class OutcomeFeedbackStatus(str, Enum):
+class OutcomeFeedbackStatus(StrEnum):
     ELIGIBLE = "eligible"
     INELIGIBLE = "ineligible"
     RETIRED = "retired"
 
 
-class OutcomeFeedbackRetirementReason(str, Enum):
+class OutcomeFeedbackRetirementReason(StrEnum):
     NOT_USEFUL = "not_useful"
     TOO_SPECIFIC = "too_specific"
     MISLEADING = "misleading"

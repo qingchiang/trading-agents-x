@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pandas as pd
 
@@ -155,7 +155,7 @@ def _live_yfinance_block(ticker: str, curr_date: str | None) -> str:
     except Exception as exc:  # noqa: BLE001 - optional enrichment
         logger.warning("CN fundamentals: live yfinance snapshot failed for %s: %s", ticker, exc)
         result = ""
-    retrieved = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    retrieved = datetime.now(UTC).isoformat(timespec="seconds")
     if not result or result.startswith("Error retrieving fundamentals"):
         body = "## Current valuation and analyst snapshot (yfinance)\nUnavailable."
         effective = "—"

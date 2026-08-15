@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+import hashlib
+import json
+from datetime import UTC, date, datetime
 
 import pytest
 from pydantic import ValidationError
@@ -8,14 +10,46 @@ from pydantic import ValidationError
 from tests.factories import analyst_report, research_decision
 from tradingagents.application.contracts import (
     AnalysisRequest,
+    AnalysisResult,
     EvidenceBundle,
     EvidenceItem,
     ReportLanguage,
     ResearchDecision,
+    ResearchUpdateAudit,
     ResearchWarning,
+    RunExport,
     RunProfile,
+    RunStatus,
 )
 from tradingagents.application.settings import AppSettings, RunSettings
+
+
+def test_public_contract_facades_preserve_identity_and_json_schema() -> None:
+    import tradingagents
+    import tradingagents.application as application
+
+    expected_schema_digests = {
+        AnalysisRequest: "ad8969ed862fe2006c16d268a603542bd2296d1e450562d8647ca2adc94d3383",
+        AnalysisResult: "ba21d9ae2bf49636e6deff9d460650ab17d648b52d517280d9b82438a9a17ce4",
+        ResearchDecision: "526e78d30661fe1ef05a2cc8ee01fa6a91a69d3016d45a18f0739f1ae32e3c7b",
+        RunExport: "7a6e6554dcd2ae5ebf934daed4db172cb94634fa69b4563a76c6019c0698c7d5",
+        ResearchUpdateAudit: "6067b69c379d6802fb5035bd2cedf8f0047c7f8f3eb55b322e3a30aab68d9c86",
+    }
+
+    assert tradingagents.AnalysisRequest is AnalysisRequest
+    assert tradingagents.AnalysisResult is AnalysisResult
+    assert tradingagents.ResearchDecision is ResearchDecision
+    assert application.AnalysisRequest is AnalysisRequest
+    assert application.AnalysisResult is AnalysisResult
+    assert application.ResearchDecision is ResearchDecision
+    assert application.RunExport is RunExport
+    for contract, expected_digest in expected_schema_digests.items():
+        canonical_schema = json.dumps(
+            contract.model_json_schema(),
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        assert hashlib.sha256(canonical_schema).hexdigest() == expected_digest
 
 
 def test_analysis_request_is_normalized_ordered_and_immutable() -> None:
@@ -31,6 +65,34 @@ def test_analysis_request_is_normalized_ordered_and_immutable() -> None:
     assert request.analysts == ("market", "news")
     with pytest.raises(ValidationError):
         request.ticker = "NVDA"
+
+
+def test_public_enum_values_and_json_schema_remain_stable() -> None:
+    assert {member.name: member.value for member in RunProfile} == {
+        "FAST": "fast",
+        "STANDARD": "standard",
+        "DEEP": "deep",
+    }
+    assert {member.name: member.value for member in RunStatus} == {
+        "QUEUED": "queued",
+        "RUNNING": "running",
+        "SUCCEEDED": "succeeded",
+        "FAILED": "failed",
+        "CANCELLED": "cancelled",
+    }
+
+    request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date="2026-07-24",
+        profile=RunProfile.DEEP,
+    )
+
+    assert request.model_dump(mode="json")["profile"] == "deep"
+    assert AnalysisRequest.model_json_schema()["$defs"]["RunProfile"]["enum"] == [
+        "fast",
+        "standard",
+        "deep",
+    ]
 
 
 def test_research_decision_rejects_account_level_fields() -> None:
@@ -140,7 +202,7 @@ def test_evidence_bundle_rejects_future_information() -> None:
         source="fixture",
         evidence_type="filing",
         requested_date=date(2026, 7, 24),
-        available_at=datetime(2026, 7, 25, 5, tzinfo=timezone.utc),
+        available_at=datetime(2026, 7, 25, 5, tzinfo=UTC),
         content="Not yet available at the analysis cutoff.",
     )
 

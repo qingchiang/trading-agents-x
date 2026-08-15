@@ -13,7 +13,7 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
-from enum import Enum
+from enum import StrEnum
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, TextIO
@@ -38,7 +38,7 @@ _PREFIX_COLORS = {
 }
 
 
-class ColorMode(str, Enum):
+class ColorMode(StrEnum):
     AUTO = "auto"
     ALWAYS = "always"
     NEVER = "never"

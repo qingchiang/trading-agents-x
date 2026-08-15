@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -3798,7 +3798,7 @@ def test_live_numeric_evidence_enforces_near_live_window(
     age_days: int,
     accepted: bool,
 ) -> None:
-    retrieved_at = datetime(2026, 8, 6, 12, tzinfo=timezone.utc)
+    retrieved_at = datetime(2026, 8, 6, 12, tzinfo=UTC)
     bundle, draft = _live_numeric_fixture(
         ticker="6501.T",
         analysis_date=date(2026, 8, 6) - timedelta(days=age_days),
@@ -3827,7 +3827,7 @@ def test_live_numeric_evidence_enforces_near_live_window(
 
 
 def test_live_numeric_evidence_rejects_retrieval_after_seal() -> None:
-    retrieved_at = datetime(2026, 8, 1, 1, tzinfo=timezone.utc)
+    retrieved_at = datetime(2026, 8, 1, 1, tzinfo=UTC)
     bundle, draft = _live_numeric_fixture(
         ticker="6501.T",
         analysis_date=date(2026, 8, 1),

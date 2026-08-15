@@ -9,7 +9,7 @@ import re
 import subprocess
 import sys
 from datetime import date
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -23,6 +23,7 @@ from rich.table import Table
 from tradingagents import AnalysisRequest, RunProfile, TradingAgents
 from tradingagents.application.contracts import RunEvent, RunStatus
 from tradingagents.application.live_thesis_validation import (
+    LiveThesisValidationContext,
     LiveThesisValidationError,
     load_reviewed_scenarios,
     validate_live_thesis,
@@ -58,7 +59,7 @@ _ANALYSTS = ("market", "social", "news", "fundamentals")
 _LIVE_THESIS_MANIFEST_RELATIVE = Path("tmp/incremental-research/live-validation")
 
 
-class ExportFormat(str, Enum):
+class ExportFormat(StrEnum):
     PACKAGE = "package"
     MARKDOWN = "markdown"
     JSON = "json"
@@ -431,13 +432,15 @@ def validate_live_thesis_command(
         result = validate_live_thesis(
             service,
             scenarios,
-            backup_destination=backup,
-            manifest_root=checkout_root / _LIVE_THESIS_MANIFEST_RELATIVE,
-            git_commit=git_commit,
-            environ=os.environ,
-            in_place_database=in_place_database,
-            verify_source_checkout=lambda: _verify_source_checkout(
-                checkout_root, git_commit
+            LiveThesisValidationContext(
+                backup_destination=backup,
+                manifest_root=checkout_root / _LIVE_THESIS_MANIFEST_RELATIVE,
+                git_commit=git_commit,
+                environ=os.environ,
+                in_place_database=in_place_database,
+                verify_source_checkout=lambda: _verify_source_checkout(
+                    checkout_root, git_commit
+                ),
             ),
         )
     except LiveThesisValidationError as exc:

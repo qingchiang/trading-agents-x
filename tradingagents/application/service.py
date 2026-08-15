@@ -6,8 +6,7 @@ import logging
 import threading
 from collections.abc import Callable
 from contextlib import contextmanager
-from dataclasses import replace
-from datetime import date, datetime, time, timezone
+from datetime import UTC, date, datetime, time
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -47,19 +46,22 @@ from .contracts import (
     MemoryContext,
     ResearchArtifactDraft,
     ResearchUpdateAudit,
-    ResearchUpdateCandidate,
-    ResearchUpdateSemanticAssessment,
-    ResearchUpdateTransitionCoverage,
     RunEvent,
     RunExport,
     RunMetrics,
     RunStatus,
 )
+from .execution import (
+    BoundedUpdateCoordinator,
+    GraphExecutionCoordinator,
+    ResearchUpdateAuditMapper,
+    ShadowUpdateCoordinator,
+)
 from .exporting import (
     render_run_export_markdown,
     render_run_export_package,
 )
-from .incremental import assess_semantic_update, run_deterministic_incremental_gate
+from .incremental import run_deterministic_incremental_gate
 from .instrument_names import resolve_local_instrument_name
 from .llms import RunLLMs, create_run_llms
 from .market_readiness import (
@@ -77,7 +79,6 @@ from .repository import (
 )
 from .research import (
     AnchorQualificationReason,
-    IncrementalEscalationReason,
     IncrementalGateResult,
     ResearchChain,
     ResearchExecutionStrategy,
@@ -87,16 +88,14 @@ from .research import (
     assemble_full_revision,
     assemble_full_update,
     bind_information_frontier,
-    close_revision_over_update_candidate,
-    derive_shadow_comparison,
     evaluate_next_update_policy,
     prepare_experimental_nmc_revision,
+    present_research_chain,
     render_revision_export_markdown,
     render_revision_export_package,
     transition_coverage_is_complete,
-    validate_experimental_nmc_candidate,
 )
-from .runtime import RunCancelled, RunContext, WorkerShutdown
+from .runtime import RunCancelled, WorkerShutdown
 from .settings import AppSettings, RunSettings
 
 logger = logging.getLogger(__name__)
@@ -184,7 +183,7 @@ class AnalysisService:
         anchor_readiness_checker: Callable[..., AnchorReadinessResult] = (
             validate_japanese_anchor_readiness
         ),
-        utc_clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        utc_clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ):
         self.settings = settings
         if repository is None:
@@ -315,22 +314,9 @@ class AnalysisService:
             )
 
     def _present_chain(self, chain: ResearchChain) -> ResearchChain:
-        revision = chain.current_revision
-        if revision is None:
-            return chain
-        evaluation = evaluate_next_update_policy(
-            revision,
-            instrument=chain.instrument,
+        return present_research_chain(
+            chain,
             mode=self.settings.research_update_mode,
-        )
-        return chain.model_copy(
-            update={
-                "forward_research_anchor": (
-                    revision.coverage.anchor_qualification or chain.forward_research_anchor
-                ),
-                "next_update_policy": evaluation.policy,
-                "next_update_reason": evaluation.reason,
-            }
         )
 
     def get_research_chain(self, chain_id: str) -> ResearchChain:
@@ -547,97 +533,12 @@ class AnalysisService:
             result: IncrementalGateResult,
         ) -> ResearchUpdateAudit:
             nonlocal update_audit
-            candidate = result.candidate
-            bounded_coverage = result.coverage or (
-                candidate.coverage if candidate is not None else None
-            )
-            bounded_snapshot = result.evidence_snapshot or (
-                candidate.evidence_snapshot if candidate is not None else None
-            )
-            transition_coverage_incomplete = (
-                candidate is not None and not incremental_transition_is_complete(result)
-            )
-            update_audit = ResearchUpdateAudit(
-                mode=(
-                    "experimental"
-                    if run_settings.research_update_mode == "experimental"
-                    else "shadow"
-                ),
-                candidate=(
-                    ResearchUpdateCandidate(
-                        change_conclusion=candidate.change_conclusion.value,
-                        coverage={
-                            **candidate.coverage.model_dump(
-                                mode="json",
-                                exclude={"anchor_qualification"},
-                            ),
-                            "schema_version": "1",
-                        },
-                        update_summary=candidate.update_summary.model_dump(mode="json"),
-                        evidence_snapshot=candidate.evidence_snapshot.model_dump(mode="json"),
-                    )
-                    if candidate is not None
-                    else None
-                ),
-                coverage=(
-                    {
-                        **bounded_coverage.model_dump(
-                            mode="json",
-                            exclude={"anchor_qualification"},
-                        ),
-                        "schema_version": "1",
-                    }
-                    if bounded_coverage is not None
-                    else None
-                ),
-                checked_windows=(
-                    tuple(
-                        item.model_dump(mode="json") for item in bounded_snapshot.source_watermarks
-                    )
-                    if bounded_snapshot is not None
-                    else ()
-                ),
-                transition_coverage=(
-                    ResearchUpdateTransitionCoverage.model_validate(
-                        result.transition_coverage.model_dump(mode="json")
-                    )
-                    if result.transition_coverage is not None
-                    else None
-                ),
-                evidence_lineage=(
-                    tuple(item.model_dump(mode="json") for item in bounded_snapshot.lineage)
-                    if bounded_snapshot is not None
-                    else ()
-                ),
-                semantic_assessment=(
-                    ResearchUpdateSemanticAssessment.model_validate(
-                        result.semantic_assessment.model_dump(mode="json")
-                    )
-                    if result.semantic_assessment is not None
-                    else None
-                ),
+            update_audit = ResearchUpdateAuditMapper.from_bounded_result(
+                result,
+                mode=run_settings.research_update_mode,
                 baseline_information_frontier=baseline.information_frontier,
-                escalation_reason=(
-                    IncrementalEscalationReason.COVERAGE_INCOMPLETE.value
-                    if transition_coverage_incomplete
-                    else result.escalation_reason.value
-                    if result.escalation_reason is not None
-                    else None
-                ),
-                comparison="not_applicable",
-                bounded_metrics=merge_run_metrics(
-                    (
-                        prior_update_audit.bounded_metrics
-                        if prior_update_audit is not None
-                        else RunMetrics()
-                    ),
-                    result.metrics,
-                ),
-                full_metrics=(
-                    prior_update_audit.full_metrics
-                    if prior_update_audit is not None
-                    else RunMetrics()
-                ),
+                previous=prior_update_audit,
+                transition_complete=incremental_transition_is_complete(result),
             )
             self.repository.set_research_update_audit(run.id, update_audit)
             return update_audit
@@ -658,13 +559,9 @@ class AnalysisService:
             nonlocal update_audit
             if update_audit is None:
                 return
-            update_audit = update_audit.model_copy(
-                update={
-                    "full_metrics": merge_run_metrics(
-                        update_audit.full_metrics,
-                        metrics.snapshot(),
-                    )
-                }
+            update_audit = ResearchUpdateAuditMapper.with_partial_full_metrics(
+                update_audit,
+                metrics.snapshot(),
             )
             self.repository.set_research_update_audit(run.id, update_audit)
 
@@ -817,83 +714,23 @@ class AnalysisService:
                         if run.baseline_revision_id is None:
                             raise ValueError("Research Chain update has no baseline")
                         baseline = self.repository.get_research_revision(run.baseline_revision_id)
-                        update_audit = ResearchUpdateAudit(
-                            comparison="not_applicable",
-                        )
+                        update_audit = ResearchUpdateAuditMapper.initial()
                         self.repository.set_research_update_audit(run.id, update_audit)
-                        if self.incremental_gate is run_deterministic_incremental_gate:
-                            incremental_result = run_deterministic_incremental_gate(
-                                baseline,
-                                run.request,
-                                {
-                                    **dataflow_config,
-                                    "research_update_mode": run_settings.research_update_mode,
-                                },
-                                lambda: self.repository.cancel_requested(run.id),
-                                information_frontier=information_frontier,
-                                on_progress=persist_incremental_audit,
-                            )
-                            if incremental_result.candidate is not None:
-                                semantic_metrics = MetricsCallback()
-                                semantic_llms = self.llm_factory(
-                                    run_settings,
-                                    callbacks=[semantic_metrics],
-                                )
-                                semantic_llm = (
-                                    semantic_llms.quick_serializer
-                                    if isinstance(semantic_llms, RunLLMs)
-                                    else semantic_llms[0]
-                                )
-                                incremental_result = assess_semantic_update(
-                                    baseline,
-                                    incremental_result,
-                                    semantic_llm,
-                                ).model_copy(
-                                    update={
-                                        "metrics": merge_run_metrics(
-                                            incremental_result.metrics,
-                                            semantic_metrics.snapshot(),
-                                        )
-                                    }
-                                )
-                        else:
-                            incremental_result = self.incremental_gate(
-                                baseline,
-                                run.request,
-                                dataflow_config,
-                                lambda: self.repository.cancel_requested(run.id),
-                            )
+                        bounded_execution = BoundedUpdateCoordinator(
+                            incremental_gate=self.incremental_gate,
+                            llm_factory=self.llm_factory,
+                        ).execute(
+                            baseline,
+                            run.request,
+                            run_settings=run_settings,
+                            dataflow_config=dataflow_config,
+                            information_frontier=information_frontier,
+                            cancel_requested=lambda: self.repository.cancel_requested(run.id),
+                            transition_is_complete=incremental_transition_is_complete,
+                            on_progress=persist_incremental_audit,
+                        )
+                        incremental_result = bounded_execution.result
                         candidate = incremental_result.candidate
-                        if (
-                            candidate is not None
-                            and run_settings.research_update_mode == "experimental"
-                            and not incremental_transition_is_complete(incremental_result)
-                        ):
-                            incremental_result = incremental_result.model_copy(
-                                update={
-                                    "candidate": None,
-                                    "escalation_reason": (
-                                        IncrementalEscalationReason.COVERAGE_INCOMPLETE
-                                    ),
-                                }
-                            )
-                            candidate = None
-                        if (
-                            candidate is not None
-                            and run_settings.research_update_mode == "experimental"
-                        ):
-                            invalid_reason = validate_experimental_nmc_candidate(
-                                baseline,
-                                candidate,
-                            )
-                            if invalid_reason is not None:
-                                incremental_result = incremental_result.model_copy(
-                                    update={
-                                        "candidate": None,
-                                        "escalation_reason": invalid_reason,
-                                    }
-                                )
-                                candidate = None
                         update_audit = persist_incremental_audit(incremental_result)
                         self._emit(
                             run.id,
@@ -940,8 +777,9 @@ class AnalysisService:
                         ):
                             if self.repository.cancel_requested(run.id):
                                 raise RunCancelled("cancelled before experimental NMC commit")
-                            update_audit = update_audit.model_copy(
-                                update={"authoritative_strategy": "incremental"}
+                            update_audit = ResearchUpdateAuditMapper.with_authoritative_strategy(
+                                update_audit,
+                                "incremental",
                             )
                             self.repository.set_research_update_audit(run.id, update_audit)
                             revision_draft = prepare_experimental_nmc_revision(
@@ -1012,38 +850,23 @@ class AnalysisService:
                         instrument=run.request.ticker,
                         market=self.repository.market_bucket(run.request.ticker),
                     )
-                    llms = self.llm_factory(
-                        run_settings,
-                        callbacks=[metrics],
-                    )
-                    if isinstance(llms, RunLLMs):
-                        quick_llm = llms.quick
-                        deep_llm = llms.deep
-                        quick_serializer_llm = llms.quick_serializer
-                        deep_serializer_llm = llms.deep_serializer
-                    else:
-                        quick_llm, deep_llm = llms
-                        quick_serializer_llm = quick_llm
-                        deep_serializer_llm = deep_llm
-                graph = self.graph_factory(
-                    quick_llm=quick_llm,
-                    deep_llm=deep_llm,
-                    quick_serializer_llm=quick_serializer_llm,
-                    deep_serializer_llm=deep_serializer_llm,
-                    profile=run.request.profile,
-                    selected_analysts=run.request.analysts,
-                    metrics=metrics,
-                )
-                context = RunContext(
+                with GraphExecutionCoordinator(
+                    self.settings,
+                    llm_factory=self.llm_factory,
+                    graph_factory=self.graph_factory,
+                ).execute(
                     run_id=run.id,
+                    attempt=run.attempt,
                     request=run.request,
-                    settings=run_settings,
+                    run_settings=run_settings,
                     dataflow_config=dataflow_config,
                     memory=memory,
                     instrument_context=instrument_context,
-                    cancel_requested=lambda: self.repository.cancel_requested(run.id),
+                    metrics=metrics,
+                    checkpoint_thread=checkpoint_thread,
                     information_frontier=information_frontier,
                     anchor_readiness=anchor_readiness_result,
+                    cancel_requested=lambda: self.repository.cancel_requested(run.id),
                     shutdown_requested=shutdown_requested or (lambda: False),
                     artifact_writer=lambda artifact: self._persist_artifact(
                         run.id,
@@ -1058,39 +881,20 @@ class AnalysisService:
                     sealed_evidence_reader=lambda: self._read_sealed_evidence(
                         run.id
                     ),
-                )
-                with SqliteSaver.from_conn_string(str(self.settings.database_path)) as saver:
-                    saver.conn.execute("PRAGMA journal_mode=WAL")
-                    saver.conn.execute(f"PRAGMA busy_timeout={self.settings.busy_timeout_ms}")
-                    saver.setup()
-                    checkpoint_config = {"configurable": {"thread_id": checkpoint_thread}}
-                    resume = saver.get_tuple(checkpoint_config) is not None
-                    if resume:
-                        self._emit(
-                            run.id,
-                            "run.resumed",
-                            payload={"attempt": run.attempt},
-                            on_event=on_event,
-                        )
-                    with use_config(dataflow_config):
-                        execution = graph.execute(
-                            context,
-                            checkpointer=saver,
-                            checkpoint_thread_id=checkpoint_thread,
-                            resume=resume,
-                            on_event=lambda raw: self._persist_graph_event(run.id, raw, on_event),
-                        )
-                    if information_frontier is not None:
-                        execution = replace(
-                            execution,
-                            evidence=EvidenceBundle.model_validate(
-                                {
-                                    **execution.evidence.model_dump(mode="python"),
-                                    "information_frontier": information_frontier,
-                                    "digest": None,
-                                }
-                            ),
-                        )
+                    event_writer=lambda raw: self._persist_graph_event(
+                        run.id,
+                        raw,
+                        on_event,
+                    ),
+                    resumed_writer=lambda attempt: self._emit(
+                        run.id,
+                        "run.resumed",
+                        payload={"attempt": attempt},
+                        on_event=on_event,
+                    ),
+                ) as graph_result:
+                    execution = graph_result.execution
+                    quick_serializer_llm = graph_result.quick_serializer_llm
                     # Production graphs seal before deliberation. This
                     # idempotent application boundary also protects custom
                     # graph implementations from completing without durable
@@ -1179,48 +983,20 @@ class AnalysisService:
                             revision_draft,
                         )
                     if update_audit is not None and revision_draft is not None:
-                        bounded_snapshot = (
-                            incremental_result.candidate
-                            if incremental_result is not None
-                            and incremental_result.candidate is not None
-                            else incremental_result.evidence_snapshot
-                            if incremental_result is not None
-                            else None
-                        )
-                        if bounded_snapshot is not None:
-                            revision_draft = close_revision_over_update_candidate(
-                                revision_draft,
-                                bounded_snapshot,
-                            )
+                        if incremental_result is None:
+                            raise ValueError("Research update audit has no bounded result")
                         current_full_metrics = metrics.snapshot()
-                        full_metrics = merge_run_metrics(
-                            (
-                                prior_update_audit.full_metrics
-                                if prior_update_audit is not None
-                                else RunMetrics()
-                            ),
-                            current_full_metrics,
+                        projection = ShadowUpdateCoordinator.execute(
+                            update_audit,
+                            incremental_result=incremental_result,
+                            revision_draft=revision_draft,
+                            previous_audit=prior_update_audit,
+                            current_full_metrics=current_full_metrics,
                         )
-                        comparison = derive_shadow_comparison(
-                            (
-                                incremental_result.candidate
-                                if incremental_result is not None
-                                else None
-                            ),
-                            revision_draft,
-                        )
-                        update_audit = update_audit.model_copy(
-                            update={
-                                "comparison": comparison,
-                                "full_metrics": full_metrics,
-                            }
-                        )
+                        update_audit = projection.audit
+                        revision_draft = projection.revision_draft
+                        comparison = update_audit.comparison
                         self.repository.set_research_update_audit(run.id, update_audit)
-                        revision_draft = ResearchRevisionDraft.model_validate(
-                            revision_draft.model_copy(
-                                update={"research_update_audit": update_audit}
-                            ).model_dump(mode="python")
-                        )
                         result = result.model_copy(
                             update={
                                 "metrics": merge_run_metrics(
@@ -1252,7 +1028,7 @@ class AnalysisService:
                                 ),
                                 "metrics": {
                                     "bounded": update_audit.bounded_metrics.model_dump(mode="json"),
-                                    "full": full_metrics.model_dump(mode="json"),
+                                    "full": update_audit.full_metrics.model_dump(mode="json"),
                                 },
                             },
                             on_event=on_event,
@@ -1292,7 +1068,6 @@ class AnalysisService:
                         revision_draft=revision_draft,
                     )
                     result = result.model_copy(update={"metrics": aggregate_metrics})
-                    saver.delete_thread(checkpoint_thread)
                 self._emit(
                     run.id,
                     "run.succeeded",

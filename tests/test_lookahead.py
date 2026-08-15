@@ -1,6 +1,6 @@
 """Market-local boundaries for retrieval-time evidence."""
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -13,17 +13,17 @@ from tradingagents.dataflows.lookahead import is_near_live
     [
         (
             "6501.T",
-            datetime(2026, 7, 28, 15, 30, tzinfo=timezone.utc),
+            datetime(2026, 7, 28, 15, 30, tzinfo=UTC),
             date(2026, 7, 29),
         ),
         (
             "600519.SS",
-            datetime(2026, 7, 28, 16, 30, tzinfo=timezone.utc),
+            datetime(2026, 7, 28, 16, 30, tzinfo=UTC),
             date(2026, 7, 29),
         ),
         (
             "NVDA",
-            datetime(2026, 7, 29, 1, tzinfo=timezone.utc),
+            datetime(2026, 7, 29, 1, tzinfo=UTC),
             date(2026, 7, 28),
         ),
     ],

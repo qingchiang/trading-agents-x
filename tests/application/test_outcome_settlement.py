@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pandas as pd
 import pytest
@@ -79,14 +79,14 @@ def test_earliest_check_uses_six_market_closes_and_local_timezone() -> None:
         holding_intervals=5,
     )
 
-    assert stock_due == datetime(2026, 8, 4, 15, tzinfo=timezone.utc)
+    assert stock_due == datetime(2026, 8, 4, 15, tzinfo=UTC)
 
 
 def test_pending_observation_is_deferred_for_24_hours(
     app_settings,
     monkeypatch,
 ) -> None:
-    now = datetime(2026, 8, 5, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 5, 0, tzinfo=UTC)
     repository = _ScheduledRepository(_pending_item())
     settlement = OutcomeSettlement(
         app_settings,
@@ -114,7 +114,7 @@ def test_provider_failure_is_deferred_for_one_hour(
     app_settings,
     monkeypatch,
 ) -> None:
-    now = datetime(2026, 8, 5, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 5, 0, tzinfo=UTC)
     repository = _ScheduledRepository(_pending_item())
     settlement = OutcomeSettlement(
         app_settings,
@@ -192,7 +192,7 @@ def test_observation_survives_reflection_failure_and_retry_does_not_reobserve(
     app_settings,
     monkeypatch,
 ) -> None:
-    now = datetime(2026, 8, 5, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 5, 0, tzinfo=UTC)
     item = {
         **_pending_item(),
         "status": "pending",
@@ -250,7 +250,7 @@ def test_invalid_reflection_does_not_recompute_completed_observation(
     app_settings,
     monkeypatch,
 ) -> None:
-    now = datetime(2026, 8, 5, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 5, 0, tzinfo=UTC)
     item = {
         **_pending_item(),
         "status": "resolved",
@@ -299,7 +299,7 @@ def test_invalid_initial_draft_is_repaired_once_without_reobserving(
     app_settings,
     monkeypatch,
 ) -> None:
-    now = datetime(2026, 8, 5, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 5, 0, tzinfo=UTC)
     item = {
         **_pending_item(),
         "status": "resolved",
@@ -343,7 +343,7 @@ def test_schema_invalid_cycle_does_not_schedule_provider_retry_after_repair_fail
     app_settings,
     monkeypatch,
 ) -> None:
-    now = datetime(2026, 8, 5, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 5, 0, tzinfo=UTC)
     item = {
         **_pending_item(),
         "status": "resolved",
@@ -387,9 +387,9 @@ def test_lifecycle_timestamps_are_captured_after_each_phase(
     app_settings,
     monkeypatch,
 ) -> None:
-    due_at = datetime(2026, 8, 5, 0, tzinfo=timezone.utc)
-    observed_at = datetime(2026, 8, 5, 0, 1, tzinfo=timezone.utc)
-    generated_at = datetime(2026, 8, 5, 0, 3, tzinfo=timezone.utc)
+    due_at = datetime(2026, 8, 5, 0, tzinfo=UTC)
+    observed_at = datetime(2026, 8, 5, 0, 1, tzinfo=UTC)
+    generated_at = datetime(2026, 8, 5, 0, 3, tzinfo=UTC)
     clock = iter((due_at, observed_at, generated_at))
     item = {
         **_pending_item(),

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 
@@ -28,7 +28,7 @@ class TrashMaintenance:
     ):
         self.settings = settings
         self.repository = repository
-        self.utc_clock = utc_clock or (lambda: datetime.now(timezone.utc))
+        self.utc_clock = utc_clock or (lambda: datetime.now(UTC))
         self.batch_size = batch_size
 
     def run_once(self) -> int:
@@ -37,10 +37,7 @@ class TrashMaintenance:
         if retention_days == 0:
             return 0
         now = self.utc_clock()
-        if now.tzinfo is None:
-            now = now.replace(tzinfo=timezone.utc)
-        else:
-            now = now.astimezone(timezone.utc)
+        now = now.replace(tzinfo=UTC) if now.tzinfo is None else now.astimezone(UTC)
         cutoff = now - timedelta(days=retention_days)
         self._ensure_checkpoint_schema()
         purged = 0

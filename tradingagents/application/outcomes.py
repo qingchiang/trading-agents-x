@@ -6,7 +6,7 @@ import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from time import monotonic
 from typing import Any
 
@@ -66,7 +66,7 @@ class OutcomeSettlement:
         self.repository = repository
         self.history_provider = history_provider
         self._reflector = reflector
-        self.utc_clock = utc_clock or (lambda: datetime.now(timezone.utc))
+        self.utc_clock = utc_clock or (lambda: datetime.now(UTC))
 
     def settle_once(self, *, limit: int = 20) -> dict[str, int]:
         stats = {"checked": 0, "resolved": 0, "pending": 0, "failed": 0}
@@ -237,8 +237,8 @@ class OutcomeSettlement:
     def _now(self) -> datetime:
         now = self.utc_clock()
         if now.tzinfo is None:
-            return now.replace(tzinfo=timezone.utc)
-        return now.astimezone(timezone.utc)
+            return now.replace(tzinfo=UTC)
+        return now.astimezone(UTC)
 
     @staticmethod
     def _persisted_observation(item: dict[str, Any]) -> OutcomeObservation | None:

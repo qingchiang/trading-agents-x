@@ -13,7 +13,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Annotated, Any, Literal, TypeAlias
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -630,7 +630,7 @@ class DerivedRangeEndpointDraft(BaseModel):
     calculation_id: str = Field(pattern=r"^calc_[a-z0-9][a-z0-9_.-]*$")
 
 
-RangeEndpointDraft: TypeAlias = Annotated[
+type RangeEndpointDraft = Annotated[
     ObservedRangeEndpointDraft | InterpretedRangeEndpointDraft | DerivedRangeEndpointDraft,
     Field(discriminator="basis"),
 ]
@@ -715,7 +715,7 @@ class DerivedMarketReferenceLevelDraft(BaseModel):
     calculation_id: str = Field(pattern=r"^calc_[a-z0-9][a-z0-9_.-]*$")
 
 
-MarketReferenceLevelDraft: TypeAlias = Annotated[
+type MarketReferenceLevelDraft = Annotated[
     ObservedMarketReferenceLevelDraft
     | InterpretedMarketReferenceLevelDraft
     | DerivedMarketReferenceLevelDraft,

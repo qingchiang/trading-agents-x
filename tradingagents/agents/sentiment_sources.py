@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Literal
 
 from tradingagents.agents.utils.agent_states import (
@@ -16,7 +16,7 @@ from tradingagents.dataflows.market_signals import FetchedSentimentSignal
 from tradingagents.provenance import ProvenanceRecord, extract_provenance
 
 
-class SentimentSourceStatus(str, Enum):
+class SentimentSourceStatus(StrEnum):
     """Whether one applicable source contains a substantive signal."""
 
     SUBSTANTIVE = "substantive"

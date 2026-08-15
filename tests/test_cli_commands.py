@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -116,7 +116,7 @@ def test_run_builds_the_typed_request_and_prints_json(monkeypatch) -> None:
         sequence=1,
         attempt=1,
         event_type="run.started",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     result = AnalysisResult(
         run_id="run-1",
@@ -252,7 +252,7 @@ def test_run_prints_persisted_progress_events(monkeypatch) -> None:
         attempt=1,
         event_type="node.completed",
         node="market",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
     class FakeApplication:
@@ -657,8 +657,8 @@ def test_live_thesis_validation_cli_requires_explicit_in_place_flag_and_reports_
         lambda: (tmp_path / "checkout", "a" * 40),
     )
 
-    def validate(service, scenarios, **kwargs):
-        captured.update(service=service, scenarios=scenarios, **kwargs)
+    def validate(service, scenarios, context):
+        captured.update(service=service, scenarios=scenarios, context=context)
         return SimpleNamespace(
             manifest_directory=tmp_path / "manifest" / "session",
             passed=True,
@@ -692,9 +692,9 @@ def test_live_thesis_validation_cli_requires_explicit_in_place_flag_and_reports_
     assert completed.exit_code == 0
     assert captured["service"] is service
     assert "validate_market_readiness" not in captured
-    assert captured["in_place_database"] is True
-    assert captured["git_commit"] == "a" * 40
-    assert captured["manifest_root"] == (
+    assert captured["context"].in_place_database is True
+    assert captured["context"].git_commit == "a" * 40
+    assert captured["context"].manifest_root == (
         tmp_path / "checkout" / "tmp/incremental-research/live-validation"
     )
     assert "manifest/session" in completed.output
@@ -750,8 +750,8 @@ def test_live_thesis_validation_cli_accepts_clean_checkout_with_ignored_runtime_
         lambda: SimpleNamespace(validate_market_data_readiness=lambda _request: None),
     )
 
-    def validate(_service, _scenarios, **kwargs):
-        captured.update(kwargs)
+    def validate(_service, _scenarios, context):
+        captured["context"] = context
         return SimpleNamespace(
             manifest_directory=manifest.parent / "new-session",
             passed=True,
@@ -773,8 +773,8 @@ def test_live_thesis_validation_cli_accepts_clean_checkout_with_ignored_runtime_
     )
 
     assert result.exit_code == 0
-    assert captured["git_commit"] == commit
-    assert captured["manifest_root"] == manifest.parent
+    assert captured["context"].git_commit == commit
+    assert captured["context"].manifest_root == manifest.parent
 
 
 @pytest.mark.parametrize("dirty_kind", ["staged", "modified", "untracked"])

@@ -2,14 +2,13 @@
 
 import warnings
 from datetime import datetime
-from typing import get_type_hints
+from typing import TypedDict, get_type_hints
 from unittest import mock
 
 import pytest
 from langchain_core.messages import AIMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
-from typing_extensions import TypedDict
 
 from tradingagents.agents.utils.core_stock_tools import (
     get_stock_data_for_analysis,

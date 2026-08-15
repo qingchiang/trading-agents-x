@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 
 import pandas as pd
@@ -48,7 +48,7 @@ def _parse_date(raw: str | None) -> datetime | None:
     except (TypeError, ValueError):
         return None
     if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
+        value = value.replace(tzinfo=UTC)
     return value.astimezone(_CST).replace(tzinfo=None)
 
 

@@ -46,7 +46,7 @@ Markdown 禁用原始 HTML，并在显示前清洗。
 
 ## 快速开始
 
-支持 Python 3.10–3.13 和 uv 0.12.1 或更高版本。只有开发前端时才需要
+支持 Python 3.12–3.14 和 uv 0.12.1 或更高版本。只有开发前端时才需要
 Node.js；发布 wheel 已携带编译后的 Web 静态资源。
 
 ```bash
@@ -280,7 +280,7 @@ npm run typecheck --prefix frontend
 npm run build --prefix frontend
 ```
 
-CI 固定使用 uv 0.12.1，覆盖 Python 3.10–3.13、Ruff、前端单测、
+CI 固定使用 uv 0.12.1，覆盖 Python 3.12–3.14、Ruff、前端单测、
 Playwright、OpenAPI/TS 类型漂移、wheel 内容及其全新 pip 安装，以及 Docker
 Web+worker smoke。
 

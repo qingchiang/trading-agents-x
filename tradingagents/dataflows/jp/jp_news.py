@@ -44,6 +44,7 @@ from tradingagents.provenance import (
     extract_source_watermarks,
     strip_provenance_markers,
 )
+from tradingagents.research_sources import JAPANESE_EVENT_SOURCES, JapaneseResearchSource
 
 from ..config import get_config
 from ..errors import NoMarketDataError
@@ -166,7 +167,7 @@ def _mergeable_feed_body(
     """Exclude unattested official bodies before shared deduplication and caps."""
     source_watermarks = tuple(item for item in watermarks if item.source == source)
     if (
-        source in {"EDINET", "TDnet"}
+        source in JAPANESE_EVENT_SOURCES
         and body.startswith(_DATA_PREFIX)
         and len(source_watermarks) != 1
     ):
@@ -189,7 +190,7 @@ def _safe_feed(
     hide the keyless Google-News media feed entirely.
     """
     try:
-        if source in {"EDINET", "TDnet"} and information_frontier is not None:
+        if source in JAPANESE_EVENT_SOURCES and information_frontier is not None:
             return fetch(
                 ticker,
                 start_date,
@@ -245,9 +246,19 @@ def get_news(
     # Sub-feeds in output order (statutory → timely → media); resolved here (not
     # module scope) so tests patching these names take effect.
     feed_requests = (
-        ("EDINET", _edinet_news, _edinet_start_date(start_date, end_date), end_date),
-        ("TDnet", _tdnet_news, _tdnet_start_date(start_date, end_date), end_date),
-        ("Google News", _google_news, start_date, end_date),
+        (
+            JapaneseResearchSource.EDINET,
+            _edinet_news,
+            _edinet_start_date(start_date, end_date),
+            end_date,
+        ),
+        (
+            JapaneseResearchSource.TDNET,
+            _tdnet_news,
+            _tdnet_start_date(start_date, end_date),
+            end_date,
+        ),
+        (JapaneseResearchSource.GOOGLE_NEWS, _google_news, start_date, end_date),
     )
     # Fan out the independent network fetches; ``map`` yields results in feed
     # order, so the rendered blocks keep that statutory → timely → media order.
@@ -333,7 +344,7 @@ def get_news(
         if len(source_watermarks) == 1:
             effective_start = source_watermarks[0].scanned_start
             effective_end = source_watermarks[0].scanned_end
-        elif source in {"EDINET", "TDnet"}:
+        elif source in JAPANESE_EVENT_SOURCES:
             limitation = (
                 f"{source} producer did not provide source closure."
                 if not source_watermarks
@@ -366,7 +377,7 @@ def get_news(
             timing=timing,
             retrieved_at=(
                 _producer_retrieval_time(provenance_by_feed[source_index], source)
-                if source == "Google News"
+                if source == JapaneseResearchSource.GOOGLE_NEWS
                 else None
             ),
         )
@@ -379,7 +390,9 @@ def get_news(
                     scanned_end=effective_end,
                     status="unavailable" if block.startswith(_NOTE_PREFIX) else "complete",
                     temporal_scope=(
-                        "live_only" if source == "Google News" else "point_in_time"
+                        "live_only"
+                        if source == JapaneseResearchSource.GOOGLE_NEWS
+                        else "point_in_time"
                     ),
                     limitations=(
                         (f"{source} collection was unavailable.",)
@@ -391,7 +404,7 @@ def get_news(
                     requested_interval=SourceInterval(start=start_date, end=end_date),
                     limitation_kind=(
                         "live_only"
-                        if source == "Google News"
+                        if source == JapaneseResearchSource.GOOGLE_NEWS
                         else "unavailable"
                         if block.startswith(_NOTE_PREFIX)
                         else None
@@ -412,7 +425,9 @@ def get_news(
             attach_evidence_span(
                 scoped,
                 temporal_scope=(
-                    "live_only" if source == "Google News" else "point_in_time"
+                    "live_only"
+                    if source == JapaneseResearchSource.GOOGLE_NEWS
+                    else "point_in_time"
                 ),
             )
         )

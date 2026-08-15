@@ -7,14 +7,13 @@ import operator
 import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass
-from datetime import date, datetime, timezone
-from typing import Annotated, Any, Literal
+from datetime import UTC, date, datetime
+from typing import Annotated, Any, Literal, TypedDict
 
 from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 from langgraph.runtime import Runtime
-from typing_extensions import TypedDict
 
 from tradingagents.agents import (
     create_fundamentals_analyst,
@@ -123,6 +122,7 @@ from tradingagents.provenance import (
     strip_provenance_markers,
     temporal_scope_from_records,
 )
+from tradingagents.research_sources import JapaneseResearchSource
 
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _ADMISSION_SEALED_AT_KEY = "evidence_admission_sealed_at"
@@ -159,7 +159,7 @@ def _filter_tool_output_at_information_frontier(
 
     if information_frontier is None:
         return output
-    batch_sealed_at = sealed_at or datetime.now(timezone.utc)
+    batch_sealed_at = sealed_at or datetime.now(UTC)
     messages = []
     for message in output.get("messages", ()):
         if not isinstance(message, ToolMessage):
@@ -389,7 +389,7 @@ def _fundamentals_are_graph_visible(
     *,
     information_frontier: datetime,
 ) -> bool:
-    source = "J-Quants fundamentals"
+    source = JapaneseResearchSource.JQUANTS_FUNDAMENTALS
     cutoff = bundle.analysis_date.isoformat()
     return any(
         item.quality is not EvidenceQuality.UNAVAILABLE
@@ -555,7 +555,7 @@ def _missing_anchor_required_evidence(
         bundle,
         information_frontier=readiness.information_frontier,
     ):
-        missing_sources.add("J-Quants fundamentals")
+        missing_sources.add(JapaneseResearchSource.JQUANTS_FUNDAMENTALS)
         missing_capabilities.add("fundamentals")
     required_source_capabilities = {
         source: item.capability.value
@@ -564,7 +564,7 @@ def _missing_anchor_required_evidence(
         for source in item.sources
     }
     if "fundamentals" in context.request.analysts:
-        required_source_capabilities["J-Quants fundamentals"] = "fundamentals"
+        required_source_capabilities[JapaneseResearchSource.JQUANTS_FUNDAMENTALS] = "fundamentals"
     for source, capability in required_source_capabilities.items():
         if _required_source_closure_is_blocking(bundle, source):
             missing_sources.add(source)
