@@ -19,18 +19,14 @@ from ._repository_common import (
     ArtifactGenerationMethod,
     ArtifactGenerationObservation,
     Base,
-    CoverageAttestation,
-    CurrentResearchState,
     DebateAgenda,
     DecisionBrief,
     DecisionRecord,
-    EffectiveEvidenceSnapshot,
     EvidenceBundle,
     EvidenceConflictError,
     EvidenceNotSealedError,
     EvidenceSealView,
     IdempotencyConflictError,
-    IndeterminateReason,
     InvalidResearchBaselineError,
     InvalidRunTransitionError,
     JudgeDraft,
@@ -56,7 +52,6 @@ from ._repository_common import (
     ResearchChain,
     ResearchChainNotFoundError,
     ResearchChainRecord,
-    ResearchChangeConclusion,
     ResearchDecision,
     ResearchExecutionStrategy,
     ResearchRating,
@@ -64,9 +59,7 @@ from ._repository_common import (
     ResearchRevisionDraft,
     ResearchRevisionNotFoundError as ResearchRevisionNotFoundError,
     ResearchRevisionRecord,
-    ResearchRevisionRole,
     ResearchUpdateAudit,
-    RevisionDelta,
     RiskReview,
     RunAttemptRecord,
     RunAttemptView,
@@ -82,7 +75,6 @@ from ._repository_common import (
     RunView,
     Session,
     StructuredRecoveryNotice,
-    UpdateSummary,
     __version__,
     _aware,
     _invalid_candidate_audit,
@@ -102,7 +94,7 @@ from ._repository_common import (
     sqlite3,
     uuid4,
 )
-from ._repository_outcome import OutcomeReviewStore
+from ._repository_outcome import OutcomeReviewStore, OutcomeStoreDependencies
 from ._repository_research import ResearchChainStore
 from ._repository_run import RunEventEvidenceStore
 
@@ -116,9 +108,28 @@ class RunRepository:
             busy_timeout_ms=settings.busy_timeout_ms,
         )
         self.sessions = sessionmaker(self.engine, expire_on_commit=False, class_=Session)
-        self.run_store = RunEventEvidenceStore(self)
-        self.outcome_store = OutcomeReviewStore(self)
-        self.research_store = ResearchChainStore(self)
+        self.run_store = RunEventEvidenceStore(
+            engine=self.engine,
+            sessions=self.sessions,
+            dependencies=self,
+        )
+        self.outcome_store = OutcomeReviewStore(
+            engine=self.engine,
+            sessions=self.sessions,
+            dependencies=OutcomeStoreDependencies(
+                now=self._now,
+                qualify_reflection=self._qualify_reflection,
+                market_bucket=self.market_bucket,
+                finish_reflection_attempt=self._finish_reflection_attempt,
+                generation_cycle_view=self._generation_cycle_view,
+                outcome_feedback_retirement_view=self._outcome_feedback_retirement_view,
+            ),
+        )
+        self.research_store = ResearchChainStore(
+            settings=self.settings,
+            engine=self.engine,
+            sessions=self.sessions,
+        )
 
     def create_schema(self) -> None:
         """Create the current schema for tests; production entry points run Alembic."""
@@ -483,7 +494,7 @@ class RunRepository:
             if record.research_chain_requested:
                 if revision_draft is None:
                     raise ValueError("explicit Research Chain execution requires a Revision draft")
-                revision_id = self._create_initial_revision(
+                revision_id = self.research_store.create_initial_revision(
                     session,
                     record=record,
                     draft=revision_draft,
@@ -496,7 +507,7 @@ class RunRepository:
             elif record.research_chain_id is not None:
                 if revision_draft is None:
                     raise ValueError("Research Chain update requires a Revision draft")
-                revision_id = self._advance_research_chain(
+                revision_id = self.research_store.advance_research_chain(
                     session,
                     record=record,
                     draft=revision_draft,
@@ -888,46 +899,13 @@ class RunRepository:
         metrics: RunMetrics,
         created_at: datetime,
     ) -> str:
-        existing = session.scalar(
-            select(ResearchRevisionRecord).where(
-                ResearchRevisionRecord.producing_run_id == record.id
-            )
-        )
-        if existing is not None:
-            return existing.id
-        request = AnalysisRequest.model_validate(record.request_json)
-        has_primary = session.scalar(
-            select(ResearchChainRecord.id).where(
-                ResearchChainRecord.instrument == request.ticker,
-                ResearchChainRecord.is_primary.is_(True),
-            )
-        )
-        chain_id = str(uuid4())
-        revision_id = str(uuid4())
-        chain = ResearchChainRecord(
-            id=chain_id,
-            instrument=request.ticker,
-            is_primary=has_primary is None,
-            current_revision_id=None,
+        return ResearchChainStore.create_initial_revision(
+            session,
+            record=record,
+            draft=draft,
+            metrics=metrics,
             created_at=created_at,
-            updated_at=created_at,
         )
-        session.add(chain)
-        session.flush()
-        session.add(
-            RunRepository._revision_record(
-                revision_id=revision_id,
-                chain_id=chain_id,
-                sequence=1,
-                predecessor_revision_id=None,
-                producing_run_id=record.id,
-                draft=draft,
-                metrics=metrics,
-                created_at=created_at,
-            )
-        )
-        chain.current_revision_id = revision_id
-        return revision_id
 
     @staticmethod
     def _advance_research_chain(
@@ -938,42 +916,13 @@ class RunRepository:
         metrics: RunMetrics,
         created_at: datetime,
     ) -> str:
-        chain = session.get(ResearchChainRecord, record.research_chain_id)
-        baseline = session.get(ResearchRevisionRecord, record.baseline_revision_id)
-        if (
-            chain is None
-            or baseline is None
-            or baseline.chain_id != chain.id
-            or chain.current_revision_id != baseline.id
-        ):
-            raise InvalidResearchBaselineError(
-                "Update predecessor is no longer the current Research Chain head"
-            )
-        request = AnalysisRequest.model_validate(record.request_json)
-        if request.ticker != chain.instrument or draft.current_state.instrument != chain.instrument:
-            raise InvalidResearchBaselineError(
-                "completed update Instrument does not match the Research Chain"
-            )
-        if draft.cutoff <= baseline.cutoff:
-            raise InvalidResearchBaselineError(
-                "completed update cutoff must be strictly later than the current Research Chain head"
-            )
-        revision_id = str(uuid4())
-        session.add(
-            RunRepository._revision_record(
-                revision_id=revision_id,
-                chain_id=chain.id,
-                sequence=baseline.sequence + 1,
-                predecessor_revision_id=baseline.id,
-                producing_run_id=record.id,
-                draft=draft,
-                metrics=metrics,
-                created_at=created_at,
-            )
+        return ResearchChainStore.advance_research_chain(
+            session,
+            record=record,
+            draft=draft,
+            metrics=metrics,
+            created_at=created_at,
         )
-        chain.current_revision_id = revision_id
-        chain.updated_at = created_at
-        return revision_id
 
     @staticmethod
     def _revision_record(
@@ -987,45 +936,14 @@ class RunRepository:
         metrics: RunMetrics,
         created_at: datetime,
     ) -> ResearchRevisionRecord:
-        return ResearchRevisionRecord(
-            id=revision_id,
+        return ResearchChainStore.revision_record(
+            revision_id=revision_id,
             chain_id=chain_id,
             sequence=sequence,
             predecessor_revision_id=predecessor_revision_id,
             producing_run_id=producing_run_id,
-            cutoff=draft.cutoff,
-            information_frontier=(
-                draft.information_frontier.isoformat()
-                if draft.information_frontier is not None
-                else None
-            ),
-            role=draft.role.value,
-            execution_strategy=draft.execution_strategy.value,
-            legacy_outcome=(
-                "material_change"
-                if draft.change_conclusion is None
-                else "coverage_incomplete"
-                if draft.change_conclusion is ResearchChangeConclusion.INDETERMINATE
-                else draft.change_conclusion.value
-            ),
-            change_conclusion=(
-                draft.change_conclusion.value if draft.change_conclusion is not None else None
-            ),
-            indeterminate_reason=(
-                draft.indeterminate_reason.value if draft.indeterminate_reason is not None else None
-            ),
-            language=draft.current_state.language,
-            current_state_json=draft.current_state.model_dump(mode="json"),
-            delta_json=draft.delta.model_dump(mode="json"),
-            coverage_json=draft.coverage.model_dump(mode="json"),
-            update_summary_json=draft.update_summary.model_dump(mode="json"),
-            evidence_snapshot_json=draft.evidence_snapshot.model_dump(mode="json"),
-            research_update_audit_json=(
-                draft.research_update_audit.model_dump(mode="json")
-                if draft.research_update_audit is not None
-                else None
-            ),
-            metrics_json=metrics.model_dump(mode="json"),
+            draft=draft,
+            metrics=metrics,
             created_at=created_at,
         )
 
@@ -1034,72 +952,11 @@ class RunRepository:
         session: Session,
         record: ResearchChainRecord,
     ) -> ResearchChain:
-        revisions = tuple(
-            self._research_revision(item)
-            for item in session.scalars(
-                select(ResearchRevisionRecord)
-                .where(ResearchRevisionRecord.chain_id == record.id)
-                .order_by(ResearchRevisionRecord.sequence)
-            )
-        )
-        current = next(
-            (item for item in revisions if item.id == record.current_revision_id),
-            None,
-        )
-        if current is None:
-            raise ValueError(f"Research Chain {record.id} has no current Revision")
-        return ResearchChain(
-            id=record.id,
-            instrument=record.instrument,
-            is_primary=record.is_primary,
-            current_revision_id=current.id,
-            current_revision=current,
-            revisions=revisions,
-            created_at=_aware(record.created_at),
-            updated_at=_aware(record.updated_at),
-        )
+        return self.research_store.hydrate_chain(session, record)
 
     @staticmethod
     def _research_revision(record: ResearchRevisionRecord) -> ResearchRevision:
-        return ResearchRevision(
-            id=record.id,
-            chain_id=record.chain_id,
-            sequence=record.sequence,
-            predecessor_revision_id=record.predecessor_revision_id,
-            producing_run_id=record.producing_run_id,
-            cutoff=record.cutoff,
-            information_frontier=(
-                datetime.fromisoformat(record.information_frontier)
-                if record.information_frontier is not None
-                else None
-            ),
-            role=ResearchRevisionRole(record.role),
-            execution_strategy=ResearchExecutionStrategy(record.execution_strategy),
-            change_conclusion=(
-                ResearchChangeConclusion(record.change_conclusion)
-                if record.change_conclusion is not None
-                else None
-            ),
-            indeterminate_reason=(
-                IndeterminateReason(record.indeterminate_reason)
-                if record.indeterminate_reason is not None
-                else None
-            ),
-            current_state=CurrentResearchState.model_validate(record.current_state_json),
-            delta=RevisionDelta.model_validate(record.delta_json),
-            coverage=CoverageAttestation.model_validate(record.coverage_json),
-            update_summary=UpdateSummary.model_validate(record.update_summary_json),
-            evidence_snapshot=EffectiveEvidenceSnapshot.model_validate(
-                record.evidence_snapshot_json
-            ),
-            research_update_audit=(
-                ResearchUpdateAudit.model_validate(record.research_update_audit_json)
-                if record.research_update_audit_json is not None
-                else None
-            ),
-            metrics=RunMetrics.model_validate(record.metrics_json),
-            created_at=_aware(record.created_at),
-        )
+        return ResearchChainStore.hydrate_revision(record)
 
     @staticmethod
     def market_bucket(ticker: str) -> str | None:

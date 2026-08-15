@@ -248,16 +248,3 @@ class OutcomeFeedbackRetirementNotFoundError(LookupError):
 
 class OutcomeFeedbackRetirementConflictError(RuntimeError):
     pass
-
-
-class RepositoryStore:
-    """Internal aggregate store sharing the facade's database resources."""
-
-    def __init__(self, repository: Any):
-        self._repository = repository
-        self.settings = repository.settings
-        self.engine = repository.engine
-        self.sessions = repository.sessions
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._repository, name)

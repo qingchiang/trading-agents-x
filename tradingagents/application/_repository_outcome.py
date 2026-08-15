@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
+
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
+
 from ._repository_common import (
     _REFLECTION_RETRY_DELAYS,
     OUTCOME_REFLECTION_SCHEMA_VERSION,
@@ -30,7 +36,6 @@ from ._repository_common import (
     ReflectionGenerationCycleRecord,
     ReflectionQualificationInput,
     ReflectionRecord,
-    RepositoryStore,
     ResearchDecision,
     ResearchRevisionRecord,
     RunRecord,
@@ -48,14 +53,35 @@ from ._repository_common import (
 )
 
 
-class OutcomeReviewStore(RepositoryStore):
+@dataclass(frozen=True)
+class OutcomeStoreDependencies:
+    now: Callable[[], datetime]
+    qualify_reflection: Callable[..., Any]
+    market_bucket: Callable[[str], str | None]
+    finish_reflection_attempt: Callable[..., ReflectionAttemptRecord]
+    generation_cycle_view: Callable[[ReflectionGenerationCycleRecord], dict[str, Any]]
+    outcome_feedback_retirement_view: Callable[[OutcomeFeedbackRecord], dict[str, Any]]
+
+
+class OutcomeReviewStore:
+    def __init__(
+        self,
+        *,
+        engine: Engine,
+        sessions: sessionmaker[Session],
+        dependencies: OutcomeStoreDependencies,
+    ) -> None:
+        self.engine = engine
+        self.sessions = sessions
+        self.dependencies = dependencies
+
     def pending_outcomes(
         self,
         limit: int = 20,
         *,
         due_at: datetime | None = None,
     ) -> list[dict[str, Any]]:
-        due = due_at or self._repository._now()
+        due = due_at or self.dependencies.now()
         if due.tzinfo is not None:
             due = due.astimezone(UTC).replace(tzinfo=None)
         stmt = (
@@ -149,7 +175,7 @@ class OutcomeReviewStore(RepositoryStore):
         alpha_return: float,
         reflection: str,
     ) -> None:
-        now = _aware(self._repository._now())
+        now = _aware(self.dependencies.now())
         from .outcomes import OutcomeObservation
 
         self.persist_outcome_observation(
@@ -371,7 +397,7 @@ class OutcomeReviewStore(RepositoryStore):
             reflection.status = OutcomeReflectionStatus.RETRYABLE_FAILURE.value
             reflection.last_attempted_at = attempted
             reflection.error_code = _sanitize_text(error_code, limit=80)
-            self._finish_reflection_attempt(
+            self.dependencies.finish_reflection_attempt(
                 session,
                 reflection=reflection,
                 outcome_id=outcome_id,
@@ -464,7 +490,7 @@ class OutcomeReviewStore(RepositoryStore):
                 reflection_record.status = OutcomeReflectionStatus.INVALID.value
                 reflection_record.text = None
                 reflection_record.candidate_json = None
-                self._finish_reflection_attempt(
+                self.dependencies.finish_reflection_attempt(
                     session,
                     reflection=reflection_record,
                     outcome_id=outcome_id,
@@ -490,9 +516,9 @@ class OutcomeReviewStore(RepositoryStore):
             ):
                 raise ValueError("Outcome Observation is incomplete")
             qualification_started_at = max(
-                self._repository._now(), outcome.data_available_at, generated
+                self.dependencies.now(), outcome.data_available_at, generated
             )
-            qualification = self._repository._qualify_reflection(
+            qualification = self.dependencies.qualify_reflection(
                 source=FeedbackSource(
                     decision_id=decision.id,
                     revision_id=outcome.research_revision_id,
@@ -520,7 +546,7 @@ class OutcomeReviewStore(RepositoryStore):
                 ),
                 qualified_at=qualification_started_at,
             )
-            qualified_at = max(self._repository._now(), qualification_started_at)
+            qualified_at = max(self.dependencies.now(), qualification_started_at)
             reflection_record.status = OutcomeReflectionStatus.GENERATED.value
             reflection_record.text = text
             reflection_record.candidate_json = (
@@ -545,7 +571,7 @@ class OutcomeReviewStore(RepositoryStore):
                     available_at=available_at,
                 )
             )
-            attempt = self._finish_reflection_attempt(
+            attempt = self.dependencies.finish_reflection_attempt(
                 session,
                 reflection=reflection_record,
                 outcome_id=outcome_id,
@@ -577,7 +603,7 @@ class OutcomeReviewStore(RepositoryStore):
             raise OutcomeReflectionRegenerationConflictError("Idempotency-Key is required")
         if len(key) > 200:
             raise OutcomeReflectionRegenerationConflictError("Idempotency-Key is too long")
-        queued = queued_at or _aware(self._repository._now())
+        queued = queued_at or _aware(self.dependencies.now())
         if queued.tzinfo is not None:
             queued = queued.astimezone(UTC).replace(tzinfo=None)
         with self.sessions.begin() as session:
@@ -609,7 +635,7 @@ class OutcomeReviewStore(RepositoryStore):
             )
             if existing_key is not None:
                 return {
-                    "cycle": self._generation_cycle_view(existing_key),
+                    "cycle": self.dependencies.generation_cycle_view(existing_key),
                     "review_status": review_status,
                     "reflection_status": reflection.status if reflection else None,
                 }
@@ -661,7 +687,7 @@ class OutcomeReviewStore(RepositoryStore):
             reflection.current_generation_cycle_id = cycle.id
             session.flush()
             return {
-                "cycle": self._generation_cycle_view(cycle),
+                "cycle": self.dependencies.generation_cycle_view(cycle),
                 "review_status": derive_review_status(
                     outcome_status=outcome.status,
                     outcome_error=outcome.error_message,
@@ -719,7 +745,7 @@ class OutcomeReviewStore(RepositoryStore):
                 raise OutcomeFeedbackRetirementConflictError("Review lifecycle is inconsistent")
             if feedback.status == OutcomeFeedbackStatus.RETIRED.value:
                 return {
-                    **self._outcome_feedback_retirement_view(feedback),
+                    **self.dependencies.outcome_feedback_retirement_view(feedback),
                     "review_status": derive_review_status(
                         outcome_status=outcome.status,
                         outcome_error=outcome.error_message,
@@ -735,10 +761,10 @@ class OutcomeReviewStore(RepositoryStore):
             feedback.status = OutcomeFeedbackStatus.RETIRED.value
             feedback.retirement_reason = reason.value
             feedback.retirement_note = note
-            feedback.retired_at = self._repository._now()
+            feedback.retired_at = self.dependencies.now()
             session.flush()
             return {
-                **self._outcome_feedback_retirement_view(feedback),
+                **self.dependencies.outcome_feedback_retirement_view(feedback),
                 "review_status": derive_review_status(
                     outcome_status=outcome.status,
                     outcome_error=outcome.error_message,
@@ -756,7 +782,7 @@ class OutcomeReviewStore(RepositoryStore):
         same_limit: int = 5,
         cross_limit: int = 3,
     ) -> MemoryContext:
-        market = self.market_bucket(ticker)
+        market = self.dependencies.market_bucket(ticker)
         resolved = (
             select(
                 DecisionRecord,
@@ -1042,7 +1068,7 @@ class OutcomeReviewStore(RepositoryStore):
                                 "next_retry_at": _aware(reflection.next_retry_at),
                                 "error_code": reflection.error_code,
                                 "generation_cycle": (
-                                    self._generation_cycle_view(generation_cycle)
+                                    self.dependencies.generation_cycle_view(generation_cycle)
                                     if generation_cycle is not None
                                     else None
                                 ),

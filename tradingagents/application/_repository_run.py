@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from typing import Protocol
+
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
+
 from ._repository_common import (
     _TERMINAL_STATUSES,
     AnalysisRequest,
@@ -20,7 +25,6 @@ from ._repository_common import (
     InvalidRunTransitionError,
     NumericAuditStatus,
     RecentInstrument,
-    RepositoryStore,
     ResearchArtifact,
     ResearchArtifactDraft,
     ResearchDecision,
@@ -37,6 +41,7 @@ from ._repository_common import (
     RunPage,
     RunRecord,
     RunStatus,
+    RunSummaryView,
     RunTrashState,
     RunView,
     StructuredRecoveryNotice,
@@ -59,7 +64,41 @@ from ._repository_common import (
 )
 
 
-class RunEventEvidenceStore(RepositoryStore):
+class RunStoreDependencies(Protocol):
+    def checkpoint_thread_id(self, run_id: str, attempt: int) -> str: ...
+
+    def _run_exists(self, run_id: str) -> bool: ...
+
+    def _artifact(self, record: Any) -> ResearchArtifact: ...
+
+    def _evidence_view(self, record: Any) -> EvidenceSealView: ...
+
+    def _attempt(self, session: Session, record: RunRecord) -> RunAttemptRecord: ...
+
+    def _merge_metrics(
+        self,
+        record: RunRecord,
+        attempt: RunAttemptRecord,
+        segment: RunMetrics | None,
+    ) -> RunMetrics: ...
+
+    def _view(self, record: RunRecord) -> RunView: ...
+
+    def _summary(self, record: RunRecord, rating: str | None) -> RunSummaryView: ...
+
+
+class RunEventEvidenceStore:
+    def __init__(
+        self,
+        *,
+        engine: Engine,
+        sessions: sessionmaker[Session],
+        dependencies: RunStoreDependencies,
+    ) -> None:
+        self.engine = engine
+        self.sessions = sessions
+        self.dependencies = dependencies
+
     def create_run(
         self,
         request: AnalysisRequest,
@@ -87,7 +126,7 @@ class RunEventEvidenceStore(RepositoryStore):
                             raise IdempotencyConflictError(
                                 "idempotency key was already used for a different request"
                             )
-                        return self._view(existing), False
+                        return self.dependencies._view(existing), False
                 if source_run_id is not None:
                     source = session.get(RunRecord, source_run_id)
                     if source is None:
@@ -119,7 +158,7 @@ class RunEventEvidenceStore(RepositoryStore):
                         run_id=run_id,
                         attempt=1,
                         status=RunStatus.QUEUED.value,
-                        checkpoint_thread_id=self.checkpoint_thread_id(run_id, 1),
+                        checkpoint_thread_id=self.dependencies.checkpoint_thread_id(run_id, 1),
                         metrics_json=RunMetrics().model_dump(mode="json"),
                     )
                 )
@@ -140,7 +179,7 @@ class RunEventEvidenceStore(RepositoryStore):
                     raise IdempotencyConflictError(
                         "idempotency key was already used for a different request"
                     ) from exc
-                return self._view(existing), False
+                return self.dependencies._view(existing), False
         return self.get_run(run_id), True
 
     def set_research_update_audit(
@@ -162,7 +201,7 @@ class RunEventEvidenceStore(RepositoryStore):
             record = session.get(RunRecord, run_id)
             if record is None:
                 raise RunNotFoundError(run_id)
-            return self._view(record)
+            return self.dependencies._view(record)
 
     def list_runs(
         self,
@@ -223,7 +262,8 @@ class RunEventEvidenceStore(RepositoryStore):
         with self.sessions() as session:
             return RunPage(
                 items=tuple(
-                    self._summary(record, rating) for record, rating in session.execute(stmt)
+                    self.dependencies._summary(record, rating)
+                    for record, rating in session.execute(stmt)
                 ),
                 total=int(session.scalar(count_stmt) or 0),
                 limit=limit,
@@ -261,7 +301,7 @@ class RunEventEvidenceStore(RepositoryStore):
                     record.updated_at = now
                     changed += 1
             session.flush()
-            views = tuple(self._view(records[run_id]) for run_id in run_ids)
+            views = tuple(self.dependencies._view(records[run_id]) for run_id in run_ids)
         return views, changed
 
     def restore_runs(
@@ -286,7 +326,7 @@ class RunEventEvidenceStore(RepositoryStore):
                     record.updated_at = now
                     changed += 1
             session.flush()
-            views = tuple(self._view(records[run_id]) for run_id in run_ids)
+            views = tuple(self.dependencies._view(records[run_id]) for run_id in run_ids)
         return views, changed
 
     def set_instrument_name(
@@ -530,11 +570,11 @@ class RunEventEvidenceStore(RepositoryStore):
             record.lease_owner = None
             record.lease_expires_at = None
             record.updated_at = now
-            attempt = self._attempt(session, record)
+            attempt = self.dependencies._attempt(session, record)
             attempt.status = RunStatus.QUEUED.value
             attempt.lease_owner = None
             attempt.lease_expires_at = None
-            self._merge_metrics(record, attempt, metrics)
+            self.dependencies._merge_metrics(record, attempt, metrics)
         return self.get_run(run_id)
 
     def request_cancel(self, run_id: str) -> RunView:
@@ -549,7 +589,7 @@ class RunEventEvidenceStore(RepositoryStore):
                 record.status = RunStatus.CANCELLED.value
                 record.cancel_requested = True
                 record.finished_at = now
-                attempt = self._attempt(session, record)
+                attempt = self.dependencies._attempt(session, record)
                 attempt.status = RunStatus.CANCELLED.value
                 attempt.finished_at = now
             elif record.status == RunStatus.RUNNING.value:
@@ -582,7 +622,7 @@ class RunEventEvidenceStore(RepositoryStore):
                 raise InvalidRunTransitionError(
                     f"only failed runs can be retried, got {record.status}"
                 )
-            checkpoint_thread_id = self._attempt(
+            checkpoint_thread_id = self.dependencies._attempt(
                 session,
                 record,
             ).checkpoint_thread_id
@@ -627,7 +667,7 @@ class RunEventEvidenceStore(RepositoryStore):
             record = session.get(RunRecord, run_id)
             if record is None:
                 raise RunNotFoundError(run_id)
-            attempt = self._attempt(session, record)
+            attempt = self.dependencies._attempt(session, record)
             return attempt.checkpoint_thread_id
 
     def append_event(
@@ -784,7 +824,7 @@ class RunEventEvidenceStore(RepositoryStore):
                     connection.rollback()
                     raise ArtifactConflictError("artifact identity replayed with different content")
                 connection.commit()
-                return self._artifact(existing), None
+                return self.dependencies._artifact(existing), None
 
             artifact_id = str(uuid4())
             attempt = run_row.current_attempt
@@ -878,9 +918,9 @@ class RunEventEvidenceStore(RepositoryStore):
         stmt = stmt.order_by(table.c.created_at, table.c.id)
         with self.engine.connect() as connection:
             records = list(connection.execute(stmt).mappings())
-        if not records and not self._run_exists(run_id):
+        if not records and not self.dependencies._run_exists(run_id):
             raise RunNotFoundError(run_id)
-        return [self._artifact(record) for record in records]
+        return [self.dependencies._artifact(record) for record in records]
 
     def seal_evidence(
         self,
@@ -915,7 +955,7 @@ class RunEventEvidenceStore(RepositoryStore):
                     connection.rollback()
                     raise EvidenceConflictError("evidence seal replayed with a different digest")
                 connection.commit()
-                return self._evidence_view(existing), None
+                return self.dependencies._evidence_view(existing), None
 
             attempt = run_row.current_attempt
             connection.execute(
@@ -988,7 +1028,7 @@ class RunEventEvidenceStore(RepositoryStore):
                 .first()
             )
         return (
-            self._evidence_view(record)
+            self.dependencies._evidence_view(record)
             if record is not None
             else EvidenceSealView(status="pending")
         )
@@ -1023,14 +1063,14 @@ class RunEventEvidenceStore(RepositoryStore):
             record.updated_at = now
             record.lease_owner = None
             record.lease_expires_at = None
-            attempt = self._attempt(session, record)
+            attempt = self.dependencies._attempt(session, record)
             attempt.status = RunStatus.FAILED.value
             attempt.error_code = code
             attempt.error_message = message
             attempt.finished_at = now
             attempt.lease_owner = None
             attempt.lease_expires_at = None
-            aggregate = self._merge_metrics(record, attempt, metrics)
+            aggregate = self.dependencies._merge_metrics(record, attempt, metrics)
         return aggregate
 
     def finish_cancel(
@@ -1049,12 +1089,12 @@ class RunEventEvidenceStore(RepositoryStore):
             record.updated_at = now
             record.lease_owner = None
             record.lease_expires_at = None
-            attempt = self._attempt(session, record)
+            attempt = self.dependencies._attempt(session, record)
             attempt.status = RunStatus.CANCELLED.value
             attempt.finished_at = now
             attempt.lease_owner = None
             attempt.lease_expires_at = None
-            aggregate = self._merge_metrics(record, attempt, metrics)
+            aggregate = self.dependencies._merge_metrics(record, attempt, metrics)
         return aggregate
 
     def get_result(self, run_id: str) -> AnalysisResult:
@@ -1139,7 +1179,7 @@ class RunEventEvidenceStore(RepositoryStore):
         )
 
     def list_attempts(self, run_id: str) -> tuple[RunAttemptView, ...]:
-        if not self._run_exists(run_id):
+        if not self.dependencies._run_exists(run_id):
             raise RunNotFoundError(run_id)
         with self.sessions() as session:
             records = tuple(

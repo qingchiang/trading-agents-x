@@ -101,6 +101,16 @@ def test_repository_aggregate_stores_share_the_facade_session_factory(
     assert repository.run_store.engine is repository.engine
     assert repository.outcome_store.engine is repository.engine
     assert repository.research_store.engine is repository.engine
+    assert not hasattr(type(repository.run_store), "__getattr__")
+    assert not hasattr(type(repository.outcome_store), "__getattr__")
+    assert not hasattr(type(repository.research_store), "__getattr__")
+    assert {
+        "create_initial_revision",
+        "advance_research_chain",
+        "revision_record",
+        "hydrate_chain",
+        "hydrate_revision",
+    }.issubset(type(repository.research_store).__dict__)
 
 
 def test_idempotent_create_reuses_only_identical_request(

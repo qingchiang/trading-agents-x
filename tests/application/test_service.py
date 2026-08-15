@@ -1874,6 +1874,7 @@ def test_full_update_is_idempotent_for_current_head_and_advances_atomically(
     app_settings,
     repository,
     tmp_path,
+    monkeypatch,
 ) -> None:
     service = _service(app_settings, repository)
     service.run_initial_chain(
@@ -1903,6 +1904,18 @@ def test_full_update_is_idempotent_for_current_head_and_advances_atomically(
     assert duplicate.id == first.id
     assert duplicate.update_intent_id == first.update_intent_id
     assert duplicate.research_execution_strategy == "incremental"
+
+    advance = repository.research_store.advance_research_chain
+
+    def advance_inside_facade_transaction(session, **kwargs):
+        assert session.in_transaction()
+        return advance(session, **kwargs)
+
+    monkeypatch.setattr(
+        repository.research_store,
+        "advance_research_chain",
+        advance_inside_facade_transaction,
+    )
 
     claimed = repository.claim_run(first.id, "worker", 30)
     result = service.execute_claimed(claimed, worker_id="worker")
