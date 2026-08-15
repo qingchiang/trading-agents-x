@@ -15,6 +15,8 @@ from tradingagents.application.anchor_readiness import (
 )
 from tradingagents.application.contracts import RunMetrics, RunStatus
 from tradingagents.application.live_thesis_validation import (
+    LiveThesisService,
+    LiveThesisValidationContext,
     LiveThesisValidationError,
     load_reviewed_scenarios,
     validate_live_thesis,
@@ -22,6 +24,34 @@ from tradingagents.application.live_thesis_validation import (
 from tradingagents.application.metrics import merge_run_metrics
 from tradingagents.application.research import ResearchChangeConclusion
 from tradingagents.application.service import ChainUpdateExecutionError
+
+
+def test_validation_context_is_frozen_and_copies_environment(tmp_path: Path) -> None:
+    environ = {"RUN_LIVE_DATA_TESTS": "1", "RUN_LIVE_LLM_TESTS": "1"}
+    context = LiveThesisValidationContext(
+        backup_destination=tmp_path / "backup.db",
+        manifest_root=tmp_path / "manifest",
+        git_commit="a" * 40,
+        environ=environ,
+        in_place_database=True,
+        verify_source_checkout=lambda: None,
+    )
+
+    environ["RUN_LIVE_DATA_TESTS"] = "0"
+
+    assert context.environ["RUN_LIVE_DATA_TESTS"] == "1"
+    with pytest.raises(TypeError):
+        context.environ["RUN_LIVE_DATA_TESTS"] = "0"  # type: ignore[index]
+    with pytest.raises(AttributeError):
+        context.git_commit = "b" * 40  # type: ignore[misc]
+
+
+def test_analysis_service_matches_live_thesis_protocol(app_settings, repository) -> None:
+    from tradingagents.application.service import AnalysisService
+
+    service = AnalysisService(app_settings, repository=repository)
+
+    assert isinstance(service, LiveThesisService)
 
 
 class _MustNotRunService:

@@ -6,17 +6,21 @@ import hashlib
 import json
 import sqlite3
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any, Literal
+from types import MappingProxyType
+from typing import Any, Literal, Protocol, runtime_checkable
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from .anchor_readiness import AnchorReadinessResult
-from .contracts import AnalysisRequest, RunStatus
+from .contracts import AnalysisRequest, AnalysisResult, RunEvent, RunStatus
 from .metrics import merge_run_metrics
+from .repository import RunView
 from .research import (
+    ResearchChain,
     ResearchChangeConclusion,
     derive_shadow_comparison_from_conclusions,
 )
@@ -61,6 +65,66 @@ _SEMANTIC_BOUNDED_RESULTS = {
 
 class LiveThesisValidationError(ValueError):
     """Raised before or during an invalid controlled validation request."""
+
+
+class LiveThesisSettings(Protocol):
+    """Settings surface required by the controlled validation harness."""
+
+    research_update_mode: str
+
+
+class LiveThesisRepository(Protocol):
+    """Read-only post-execution repository surface used by the harness."""
+
+    def get_run(self, run_id: str) -> RunView: ...
+
+    def get_research_chain(self, chain_id: str) -> ResearchChain: ...
+
+    def list_events(self, run_id: str) -> list[RunEvent]: ...
+
+
+@runtime_checkable
+class LiveThesisService(Protocol):
+    """Minimal application-service surface required by Live Thesis validation."""
+
+    settings: LiveThesisSettings
+    repository: LiveThesisRepository
+
+    def get_research_chain(self, chain_id: str) -> ResearchChain: ...
+
+    def validate_anchor_readiness(
+        self,
+        request: AnalysisRequest,
+        *,
+        anchor_frontier: datetime | None = None,
+    ) -> AnchorReadinessResult | None: ...
+
+    def backup_database(self, destination: Path) -> Path: ...
+
+    def run_chain_update(
+        self,
+        chain_id: str,
+        baseline_revision_id: str,
+        request: AnalysisRequest,
+        *,
+        idempotency_key: str | None = None,
+        information_frontier: datetime | None = None,
+    ) -> tuple[RunView, AnalysisResult]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class LiveThesisValidationContext:
+    """Immutable environment and filesystem inputs for one validation session."""
+
+    backup_destination: Path
+    manifest_root: Path
+    git_commit: str
+    environ: Mapping[str, str]
+    in_place_database: bool
+    verify_source_checkout: Callable[[], None]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "environ", MappingProxyType(dict(self.environ)))
 
 
 class ReviewedLiveThesisScenario(BaseModel):
@@ -149,17 +213,25 @@ def _validate_reviewed_scenarios(
 
 
 def validate_live_thesis(
-    service: Any,
+    service: LiveThesisService,
     scenarios: Sequence[ReviewedLiveThesisScenario],
-    *,
-    backup_destination: Path,
-    manifest_root: Path,
-    git_commit: str,
-    environ: Mapping[str, str],
-    in_place_database: bool,
-    verify_source_checkout: Callable[[], None],
+    context: LiveThesisValidationContext | None = None,
+    **legacy_context: Any,
 ) -> LiveThesisValidationResult:
     """Run the reviewed Shadow set after backup and retain only sanitized metadata."""
+    if context is None:
+        try:
+            context = LiveThesisValidationContext(**legacy_context)
+        except TypeError as exc:
+            raise TypeError("validation context is required") from exc
+    elif legacy_context:
+        raise TypeError("validation context cannot be combined with legacy keyword inputs")
+    backup_destination = context.backup_destination
+    manifest_root = context.manifest_root
+    git_commit = context.git_commit
+    environ = context.environ
+    in_place_database = context.in_place_database
+    verify_source_checkout = context.verify_source_checkout
     if environ.get("RUN_LIVE_DATA_TESTS") != "1":
         raise LiveThesisValidationError("RUN_LIVE_DATA_TESTS=1 is required")
     if environ.get("RUN_LIVE_LLM_TESTS") != "1":
@@ -173,7 +245,7 @@ def validate_live_thesis(
         character not in "0123456789abcdef" for character in git_commit
     ):
         raise LiveThesisValidationError("git commit must be a full lowercase SHA-1")
-    selected_chains: dict[str, Any] = {}
+    selected_chains: dict[str, ResearchChain] = {}
     selected_requests: dict[str, AnalysisRequest] = {}
     selected_readiness: dict[str, AnchorReadinessResult] = {}
     for scenario in scenarios:
@@ -353,7 +425,7 @@ def _write_json_exclusive(path: Path, payload: Mapping[str, Any]) -> None:
 
 
 def _successful_entry(
-    service: Any,
+    service: LiveThesisService,
     scenario: ReviewedLiveThesisScenario,
     *,
     baseline_revision_id: str,
@@ -434,7 +506,7 @@ def _successful_entry(
 
 
 def _failed_entry(
-    service: Any,
+    service: LiveThesisService,
     scenario: ReviewedLiveThesisScenario,
     *,
     run_id: str | None,
