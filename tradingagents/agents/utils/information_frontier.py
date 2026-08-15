@@ -138,6 +138,14 @@ def filter_evidence_content_at_information_frontier(
             information_frontier,
         )
         or any(
+            _record_conflicts_with_same_source_watermark(
+                record,
+                watermarks,
+                information_frontier,
+            )
+            for record in plain_records
+        )
+        or any(
             date.fromisoformat(item.scanned_end) >= frontier_date
             and not any(
                 observation.source == item.source
@@ -265,6 +273,14 @@ def _span_is_admissible(
                 information_frontier,
             )
             or any(
+                _record_conflicts_with_same_source_watermark(
+                    record,
+                    watermarks,
+                    information_frontier,
+                )
+                for record in span.records
+            )
+            or any(
                 date.fromisoformat(item.scanned_end)
                 >= information_frontier.date()
                 and not any(
@@ -329,6 +345,28 @@ def _watermark_attests_content_at_frontier(
     )
 
 
+def _watermark_attests_record_effective_dates(
+    record: ProvenanceRecord,
+    watermark: SourceWatermark,
+    information_frontier: datetime,
+) -> bool:
+    effective_dates = tuple(
+        date.fromisoformat(value) for value in _DATE_RE.findall(record.effective)
+    )
+    scanned_start = date.fromisoformat(watermark.scanned_start)
+    scanned_end = date.fromisoformat(watermark.scanned_end)
+    return (
+        (not effective_dates or all(
+            scanned_start <= effective_date <= scanned_end
+            for effective_date in effective_dates
+        ))
+        and _watermark_attests_content_at_frontier(
+            watermark,
+            information_frontier,
+        )
+    )
+
+
 def _provenance_record_has_frontier_attestation(
     record: ProvenanceRecord,
     observations: Iterable[SourceObservation],
@@ -359,12 +397,31 @@ def _provenance_record_has_frontier_attestation(
         return True
     return any(
         watermark.source == record.source
-        and covers_effective_date(date.fromisoformat(watermark.scanned_end))
-        and _watermark_attests_content_at_frontier(
+        and _watermark_attests_record_effective_dates(
+            record,
             watermark,
             information_frontier,
         )
         for watermark in watermarks
+    )
+
+
+def _record_conflicts_with_same_source_watermark(
+    record: ProvenanceRecord,
+    watermarks: Iterable[SourceWatermark],
+    information_frontier: datetime,
+) -> bool:
+    watermarks = tuple(watermarks)
+    same_source = tuple(
+        watermark for watermark in watermarks if watermark.source == record.source
+    )
+    return bool(same_source) and not any(
+        _watermark_attests_record_effective_dates(
+            record,
+            watermark,
+            information_frontier,
+        )
+        for watermark in same_source
     )
 
 

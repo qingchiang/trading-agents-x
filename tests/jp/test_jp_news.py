@@ -52,6 +52,27 @@ def _google_payload(
     )
 
 
+def _official_payload(
+    body: str,
+    source: str,
+    scanned_start: str,
+    scanned_end: str,
+    *,
+    information_frontier: str | None = None,
+) -> str:
+    return attach_source_watermarks(
+        body,
+        SourceWatermark(
+            source=source,
+            scanned_start=scanned_start,
+            scanned_end=scanned_end,
+            status="complete",
+            returned_records=body.count("\n### "),
+            information_frontier=information_frontier,
+        ),
+    )
+
+
 def _spec(value):
     """A string → mock return_value; an exception → mock side_effect (raises)."""
     is_exc = isinstance(value, BaseException) or (
@@ -61,6 +82,28 @@ def _spec(value):
 
 
 def _run(edinet, media, tdnet=_TDNET_EMPTY):
+    if (
+        isinstance(edinet, str)
+        and edinet.startswith("## ")
+        and not extract_source_watermarks(edinet)
+    ):
+        edinet = _official_payload(
+            edinet,
+            "EDINET",
+            "2026-04-19",
+            "2026-07-17",
+        )
+    if (
+        isinstance(tdnet, str)
+        and tdnet.startswith("## ")
+        and not extract_source_watermarks(tdnet)
+    ):
+        tdnet = _official_payload(
+            tdnet,
+            "TDnet",
+            "2026-06-17",
+            "2026-07-17",
+        )
     if isinstance(media, str) and not extract_provenance(media):
         media = _google_payload(media)
     with (
@@ -347,9 +390,16 @@ class JpNewsAssemblerTests(unittest.TestCase):
                 information_frontier=frontier.isoformat(),
             ),
         )
+        safe_tdnet = _official_payload(
+            _TDNET_DATA,
+            "TDnet",
+            "2026-07-11",
+            "2026-08-10",
+            information_frontier=frontier.isoformat(),
+        )
         with (
             mock.patch.object(jp_news, "_edinet_news", return_value=empty_edinet),
-            mock.patch.object(jp_news, "_tdnet_news", return_value=_TDNET_DATA),
+            mock.patch.object(jp_news, "_tdnet_news", return_value=safe_tdnet),
             mock.patch.object(jp_news, "_google_news", return_value=_MEDIA_EMPTY),
         ):
             content = jp_news.get_news(
@@ -358,6 +408,16 @@ class JpNewsAssemblerTests(unittest.TestCase):
                 "2026-08-10",
                 information_frontier=frontier.isoformat(),
             )
+
+        edinet_span = next(
+            span
+            for span in extract_evidence_spans(content)
+            if span.records and span.records[0].source == "EDINET"
+        )
+        self.assertEqual(
+            edinet_span.records[0].effective,
+            "2026-07-12 to 2026-08-10",
+        )
 
         filtered = _filter_tool_output_at_information_frontier(
             {
@@ -389,6 +449,177 @@ class JpNewsAssemblerTests(unittest.TestCase):
         )
         self.assertEqual(watermark.status, "complete")
         self.assertEqual(watermark.returned_records, 0)
+
+    def test_official_channel_without_unique_producer_watermark_fails_closed(self):
+        frontier = datetime(
+            2026,
+            8,
+            10,
+            23,
+            59,
+            tzinfo=timezone(timedelta(hours=9)),
+        )
+        ambiguous = attach_source_watermarks(
+            attach_source_observations(
+                _EDINET_DATA,
+                SourceObservation(
+                    source="EDINET",
+                    record_id="S100",
+                    version_id="edinet:S100",
+                    status="published",
+                    published_at="2026-08-10 15:00",
+                    available_at="2026-08-10T15:00:00+09:00",
+                    title="有価証券報告書",
+                ),
+            ),
+            SourceWatermark(
+                source="EDINET",
+                scanned_start="2026-05-13",
+                scanned_end="2026-08-10",
+                status="complete",
+                returned_records=1,
+                information_frontier=frontier.isoformat(),
+            ),
+            SourceWatermark(
+                source="EDINET",
+                scanned_start="2026-07-12",
+                scanned_end="2026-08-10",
+                status="complete",
+                returned_records=1,
+                information_frontier=frontier.isoformat(),
+            ),
+        )
+        safe_tdnet = _official_payload(
+            _TDNET_DATA,
+            "TDnet",
+            "2026-07-11",
+            "2026-08-10",
+            information_frontier=frontier.isoformat(),
+        )
+
+        for producer_payload in (_EDINET_EMPTY, ambiguous):
+            with self.subTest(
+                watermark_count=len(extract_source_watermarks(producer_payload))
+            ):
+                with (
+                    mock.patch.object(
+                        jp_news,
+                        "_edinet_news",
+                        return_value=producer_payload,
+                    ),
+                    mock.patch.object(jp_news, "_tdnet_news", return_value=safe_tdnet),
+                    mock.patch.object(jp_news, "_google_news", return_value=_MEDIA_EMPTY),
+                ):
+                    content = jp_news.get_news(
+                        "4568.T",
+                        "2026-07-12",
+                        "2026-08-10",
+                        information_frontier=frontier.isoformat(),
+                    )
+
+                filtered = _filter_tool_output_at_information_frontier(
+                    {
+                        "messages": [
+                            ToolMessage(
+                                content=content,
+                                tool_call_id="jp-news-ambiguous-official",
+                                name="get_news",
+                            )
+                        ]
+                    },
+                    frontier,
+                    analysis_date=date(2026, 8, 10),
+                    instrument="4568.T",
+                    sealed_at=datetime(
+                        2026,
+                        8,
+                        12,
+                        23,
+                        0,
+                        tzinfo=timezone(timedelta(hours=9)),
+                    ),
+                )["messages"][0].content
+
+                self.assertNotIn("### 有価証券報告書", filtered)
+                edinet_watermarks = tuple(
+                    item
+                    for item in extract_source_watermarks(filtered)
+                    if item.source == "EDINET"
+                )
+                self.assertTrue(edinet_watermarks)
+                self.assertTrue(
+                    any(item.status == "unavailable" for item in edinet_watermarks)
+                )
+                edinet_record = next(
+                    item
+                    for item in extract_provenance(content)
+                    if item.source == "EDINET"
+                )
+                expected_count = 1 if producer_payload == ambiguous else 0
+                self.assertIn("unavailable", edinet_record.timing)
+                self.assertIn(
+                    f"returned_items={expected_count}",
+                    edinet_record.timing,
+                )
+                unavailable = next(
+                    item
+                    for item in extract_source_watermarks(content)
+                    if item.source == "EDINET" and item.status == "unavailable"
+                )
+                self.assertEqual(unavailable.reported_records, expected_count)
+
+    def test_ambiguous_official_channel_does_not_consume_safe_sibling_budget(self):
+        frontier = datetime(
+            2026,
+            8,
+            10,
+            23,
+            59,
+            tzinfo=timezone(timedelta(hours=9)),
+        )
+        ambiguous_edinet = attach_source_watermarks(
+            _EDINET_DATA,
+            SourceWatermark(
+                source="EDINET",
+                scanned_start="2026-05-13",
+                scanned_end="2026-08-10",
+                status="complete",
+                information_frontier=frontier.isoformat(),
+            ),
+            SourceWatermark(
+                source="EDINET",
+                scanned_start="2026-07-12",
+                scanned_end="2026-08-10",
+                status="complete",
+                information_frontier=frontier.isoformat(),
+            ),
+        )
+        safe_tdnet = attach_source_watermarks(
+            _TDNET_DATA,
+            SourceWatermark(
+                source="TDnet",
+                scanned_start="2026-07-11",
+                scanned_end="2026-08-10",
+                status="complete",
+                information_frontier=frontier.isoformat(),
+            ),
+        )
+
+        with (
+            mock.patch.object(jp_news, "get_config", return_value={"news_article_limit": 1}),
+            mock.patch.object(jp_news, "_edinet_news", return_value=ambiguous_edinet),
+            mock.patch.object(jp_news, "_tdnet_news", return_value=safe_tdnet),
+            mock.patch.object(jp_news, "_google_news", return_value=_MEDIA_EMPTY),
+        ):
+            content = jp_news.get_news(
+                "4568.T",
+                "2026-07-12",
+                "2026-08-10",
+                information_frontier=frontier.isoformat(),
+            )
+
+        self.assertNotIn("### 有価証券報告書", content)
+        self.assertIn("### 自己株式の取得", content)
 
     def test_three_sources_share_one_30_item_budget_with_official_priority(self):
         edinet_titles = [f"EDINET item {index}" for index in range(15)]

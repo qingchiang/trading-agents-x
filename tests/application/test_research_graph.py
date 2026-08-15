@@ -923,6 +923,133 @@ def test_tool_output_rejects_provenance_beyond_same_source_closure() -> None:
     assert "Market data beyond" not in filtered["messages"][0].content
 
 
+@pytest.mark.parametrize(
+    ("effective", "status", "limitation_kind"),
+    [
+        ("2026-07-07", "complete", None),
+        ("2026-08-10", "complete", None),
+        ("2026-08-10", "limited", "archive_truncation"),
+        ("2026-08-10", "limited", "partial"),
+    ],
+)
+def test_same_source_watermark_attests_effective_dates_inside_scanned_interval(
+    effective: str,
+    status: str,
+    limitation_kind: str | None,
+) -> None:
+    frontier = datetime(2026, 8, 10, 23, 59, tzinfo=timezone.utc)
+    source = "bounded source"
+    content = attach_provenance(
+        "Evidence inside the attested interval.",
+        ProvenanceRecord(
+            evidence="bounded fixture",
+            source=source,
+            requested="2026-07-07 to 2026-08-10",
+            effective=effective,
+            timing="publication-date filtered",
+        ),
+    )
+    content = attach_source_watermarks(
+        content,
+        SourceWatermark(
+            source=source,
+            scanned_start="2026-07-07",
+            scanned_end="2026-08-10",
+            status=status,
+            limitation_kind=limitation_kind,
+            information_frontier=frontier.isoformat(),
+        ),
+    )
+
+    filtered = _filter_tool_output_at_information_frontier(
+        {
+            "messages": [
+                ToolMessage(
+                    content=content,
+                    tool_call_id="call-bounded-source",
+                    name="get_news",
+                )
+            ]
+        },
+        frontier,
+        analysis_date=date(2026, 8, 10),
+        instrument="4568.T",
+    )
+
+    filtered_content = filtered["messages"][0].content
+    assert "Evidence inside" in filtered_content
+    retained = extract_source_watermarks(filtered_content)[0]
+    assert retained.status == status
+    assert retained.limitation_kind == limitation_kind
+
+
+@pytest.mark.parametrize(
+    "effective",
+    [
+        "2026-07-06",
+        "2026-08-11",
+        "2026-07-06 to 2026-07-08",
+    ],
+)
+@pytest.mark.parametrize("with_observation", [False, True])
+def test_same_source_watermark_rejects_effective_dates_outside_scanned_interval(
+    effective: str,
+    with_observation: bool,
+) -> None:
+    frontier = datetime(2026, 8, 10, 23, 59, tzinfo=timezone.utc)
+    source = "bounded source"
+    content = attach_provenance(
+        "Evidence outside the attested interval.",
+        ProvenanceRecord(
+            evidence="bounded fixture",
+            source=source,
+            requested="2026-07-07 to 2026-08-10",
+            effective=effective,
+            timing="publication-date filtered",
+        ),
+    )
+    content = attach_source_watermarks(
+        content,
+        SourceWatermark(
+            source=source,
+            scanned_start="2026-07-07",
+            scanned_end="2026-08-10",
+            status="complete",
+            information_frontier=frontier.isoformat(),
+        ),
+    )
+    if with_observation:
+        content = attach_source_observations(
+            content,
+            SourceObservation(
+                source=source,
+                record_id="bounded-record",
+                version_id="bounded-record:v1",
+                status="published",
+                published_at="2026-08-10",
+                available_at=frontier.isoformat(),
+                title="Bounded record",
+            ),
+        )
+
+    filtered = _filter_tool_output_at_information_frontier(
+        {
+            "messages": [
+                ToolMessage(
+                    content=content,
+                    tool_call_id="call-outside-source",
+                    name="get_news",
+                )
+            ]
+        },
+        frontier,
+        analysis_date=date(2026, 8, 10),
+        instrument="4568.T",
+    )
+
+    assert "Evidence outside" not in filtered["messages"][0].content
+
+
 def test_tool_output_retains_tdnet_body_with_limited_frontier_closure() -> None:
     frontier = datetime(
         2026,

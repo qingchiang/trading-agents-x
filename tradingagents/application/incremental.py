@@ -32,6 +32,8 @@ from .research import (
     IncrementalEscalationReason,
     IncrementalGateResult,
     QuestionStatus,
+    ResearchClaim,
+    ResearchQuestion,
     ResearchRevision,
     ResearchRevisionDraft,
     SemanticChangeAssessment,
@@ -303,8 +305,30 @@ def _semantic_evidence_summary(
     }
 
 
+def _semantic_current_claims(
+    baseline: ResearchRevisionDraft,
+) -> tuple[ResearchClaim, ...]:
+    return tuple(
+        claim
+        for claim in baseline.current_state.claims
+        if claim.standing is ClaimStanding.ACTIVE
+    )
+
+
+def _semantic_current_questions(
+    baseline: ResearchRevisionDraft,
+) -> tuple[ResearchQuestion, ...]:
+    return tuple(
+        question
+        for question in baseline.current_state.questions
+        if question.status in {QuestionStatus.OPEN, QuestionStatus.ANSWERED}
+    )
+
+
 def _semantic_current_state_summary(baseline: ResearchRevisionDraft) -> dict[str, Any]:
     state = baseline.current_state
+    current_claims = _semantic_current_claims(baseline)
+    current_questions = _semantic_current_questions(baseline)
     return {
         "schema_version": state.schema_version,
         "language": state.language,
@@ -317,8 +341,7 @@ def _semantic_current_state_summary(baseline: ResearchRevisionDraft) -> dict[str
                 "statement": claim.statement,
                 "confidence": claim.confidence,
             }
-            for claim in state.claims
-            if claim.standing is ClaimStanding.ACTIVE
+            for claim in current_claims
         ),
         "questions": tuple(
             {
@@ -326,8 +349,7 @@ def _semantic_current_state_summary(baseline: ResearchRevisionDraft) -> dict[str
                 "question": question.question,
                 "status": question.status,
             }
-            for question in state.questions
-            if question.status in {QuestionStatus.OPEN, QuestionStatus.ANSWERED}
+            for question in current_questions
         ),
     }
 
@@ -359,16 +381,16 @@ def _semantic_prompt(
     new_refs = tuple(candidate.delta.new_evidence_refs)
     items = {item.ref: item for item in candidate.evidence_snapshot.bundle.items}
     new_evidence = tuple(items[ref] for ref in new_refs if ref in items)
+    current_claims = _semantic_current_claims(baseline)
+    current_questions = _semantic_current_questions(baseline)
     prior_refs = {
         ref
-        for claim in baseline.current_state.claims
-        if claim.standing is ClaimStanding.ACTIVE
+        for claim in current_claims
         for ref in claim.evidence_refs
     }
     prior_refs.update(
         ref
-        for question in baseline.current_state.questions
-        if question.status in {QuestionStatus.OPEN, QuestionStatus.ANSWERED}
+        for question in current_questions
         for ref in question.evidence_refs
     )
     prior_evidence = tuple(
@@ -403,14 +425,10 @@ def _semantic_prompt(
         payload = {
             "current_research_state": state_summary,
             "relevant_claim_ids": tuple(
-                claim.id
-                for claim in baseline.current_state.claims
-                if claim.standing is ClaimStanding.ACTIVE
+                claim.id for claim in current_claims
             ),
             "relevant_question_ids": tuple(
-                question.id
-                for question in baseline.current_state.questions
-                if question.status in {QuestionStatus.OPEN, QuestionStatus.ANSWERED}
+                question.id for question in current_questions
             ),
             "materiality_rules": (
                 "weakening, contradiction, answering, reopening, unresolved uncertainty, "
@@ -461,8 +479,8 @@ def _semantic_escalation_reason(
     baseline: ResearchRevisionDraft,
     assessment: SemanticChangeAssessment,
 ) -> IncrementalEscalationReason | None:
-    claims = {item.id: item for item in baseline.current_state.claims}
-    questions = {item.id: item for item in baseline.current_state.questions}
+    claims = {item.id: item for item in _semantic_current_claims(baseline)}
+    questions = {item.id: item for item in _semantic_current_questions(baseline)}
     claim_relationships = {
         SemanticChangeRelationship.SUPPORT,
         SemanticChangeRelationship.WEAKENING,
@@ -567,8 +585,10 @@ def assess_semantic_update(
             }
         )
 
-    allowed_claim_ids = {item.id for item in baseline.current_state.claims}
-    allowed_question_ids = {item.id for item in baseline.current_state.questions}
+    current_claims = _semantic_current_claims(baseline)
+    current_questions = _semantic_current_questions(baseline)
+    allowed_claim_ids = {item.id for item in current_claims}
+    allowed_question_ids = {item.id for item in current_questions}
 
     def validate(value: SemanticChangeAssessment) -> SemanticChangeAssessment:
         if value.language != baseline.current_state.language:
@@ -629,16 +649,22 @@ def assess_semantic_update(
             )
         return value
 
+    example_relationship = (
+        {
+            "evidence_refs": (new_refs[0],),
+            "relationship": "support",
+            "suggested_claim_ids": (current_claims[0].id,),
+        }
+        if current_claims
+        else {
+            "evidence_refs": (new_refs[0],),
+            "relationship": "irrelevance",
+        }
+    )
     example = SemanticChangeAssessment(
         language=baseline.current_state.language,
         summary="The new Evidence supports an existing Claim without changing its confidence.",
-        relationships=(
-            {
-                "evidence_refs": (new_refs[0],),
-                "relationship": "support",
-                "suggested_claim_ids": (baseline.current_state.claims[0].id,),
-            },
-        ),
+        relationships=(example_relationship,),
     )
     runner = StructuredOutputRunner(
         llm=llm,

@@ -66,6 +66,7 @@ from tradingagents.application.research import (
     ResearchScenarioState,
     RevisionExport,
     ScenarioLikelihood,
+    SemanticChangeAssessment,
     SemanticChangeRelationship,
     SourceCoverageLimitation,
     SourceObservationInterval,
@@ -2748,6 +2749,11 @@ def test_semantic_change_assessment_supports_typed_relationships(
         question = ResearchQuestion(
             id="question_0123456789abcdef0123456789abcdef",
             question="Will margin recovery persist?",
+            status=(
+                QuestionStatus.ANSWERED
+                if relationship == "reopening"
+                else QuestionStatus.OPEN
+            ),
             evidence_refs=(baseline.current_state.evidence_refs[0],),
         )
         baseline = baseline.model_copy(
@@ -2809,6 +2815,123 @@ def test_semantic_change_assessment_supports_typed_relationships(
     )
     assert (result.escalation_reason is not None) is escalates
     assert (result.candidate is not None) is not escalates
+
+
+@pytest.mark.parametrize(
+    ("object_kind", "standing_or_status"),
+    [
+        ("claim", ClaimStanding.RETIRED),
+        ("claim", ClaimStanding.INVALIDATED),
+        ("question", QuestionStatus.RETIRED),
+        ("question", QuestionStatus.SUPERSEDED),
+    ],
+)
+def test_semantic_change_assessment_rejects_noncurrent_targets_as_ambiguous(
+    object_kind: str,
+    standing_or_status: ClaimStanding | QuestionStatus,
+) -> None:
+    baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    if object_kind == "claim":
+        target = baseline.current_state.claims[0].model_copy(
+            update={
+                "id": "claim_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "standing": standing_or_status,
+            }
+        )
+        baseline = baseline.model_copy(
+            update={
+                "current_state": baseline.current_state.model_copy(
+                    update={"claims": (*baseline.current_state.claims, target)}
+                ),
+                "coverage": baseline.coverage.model_copy(
+                    update={
+                        "claims": (
+                            *baseline.coverage.claims,
+                            ResearchObjectCoverage(
+                                object_id=target.id,
+                                status=CoverageStatus.COMPLETE,
+                            ),
+                        )
+                    }
+                ),
+            }
+        )
+        relationship = "support"
+        target_kwargs = {"claim_ids": (target.id,)}
+    else:
+        target = ResearchQuestion(
+            id="question_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            question="A non-current question?",
+            status=standing_or_status,
+            evidence_refs=(baseline.current_state.evidence_refs[0],),
+        )
+        baseline = baseline.model_copy(
+            update={
+                "current_state": baseline.current_state.model_copy(
+                    update={"questions": (*baseline.current_state.questions, target)}
+                ),
+                "coverage": baseline.coverage.model_copy(
+                    update={
+                        "questions": (
+                            *baseline.coverage.questions,
+                            ResearchObjectCoverage(
+                                object_id=target.id,
+                                status=CoverageStatus.COMPLETE,
+                            ),
+                        )
+                    }
+                ),
+            }
+        )
+        relationship = "answering"
+        target_kwargs = {"question_ids": (target.id,)}
+    deterministic = assess_deterministic_update(
+        "revision-1",
+        baseline,
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-25",
+            analysts=("market",),
+        ),
+        evidence,
+    )
+    new_ref = deterministic.candidate.delta.new_evidence_refs[0]
+
+    result = assess_semantic_update(
+        baseline,
+        deterministic,
+        _SemanticLLM(
+            _semantic_response(
+                relationship,
+                evidence_ref=new_ref,
+                **target_kwargs,
+            )
+        ),
+    )
+
+    assert result.candidate is None
+    assert result.escalation_reason is IncrementalEscalationReason.AMBIGUOUS_IDENTITY
+
+
+def test_persisted_v1_semantic_change_assessment_remains_readable() -> None:
+    assessment = SemanticChangeAssessment.model_validate(
+        {
+            "schema_version": "1",
+            "language": "en",
+            "summary": "Persisted bounded assessment.",
+            "relationships": (
+                {
+                    "evidence_refs": (REF,),
+                    "relationship": "irrelevance",
+                },
+            ),
+        }
+    )
+
+    assert assessment.schema_version == "1"
+    assert assessment.relationships[0].relationship is (
+        SemanticChangeRelationship.IRRELEVANCE
+    )
 
 
 def test_positive_near_live_evidence_reaches_semantic_assessment_with_scope():

@@ -158,6 +158,22 @@ def _merge_blocks(
     return merged, counts
 
 
+def _mergeable_feed_body(
+    source: str,
+    body: str,
+    watermarks: tuple[SourceWatermark, ...],
+) -> str:
+    """Exclude unattested official bodies before shared deduplication and caps."""
+    source_watermarks = tuple(item for item in watermarks if item.source == source)
+    if (
+        source in {"EDINET", "TDnet"}
+        and body.startswith(_DATA_PREFIX)
+        and len(source_watermarks) != 1
+    ):
+        return ""
+    return body
+
+
 def _safe_feed(
     source: str,
     fetch,
@@ -256,7 +272,19 @@ def get_news(
     )
     provenance_by_feed = tuple(tuple(extract_provenance(block)) for block in rendered)
     rendered = [strip_provenance_markers(block) for block in rendered]
-    data_blocks = [block for block in rendered if block.startswith(_DATA_PREFIX)]
+    mergeable_rendered = [
+        _mergeable_feed_body(
+            source,
+            block,
+            watermarks_by_feed[source_index],
+        )
+        for source_index, ((source, *_request), block) in enumerate(
+            zip(feed_requests, rendered, strict=True)
+        )
+    ]
+    data_blocks = [
+        block for block in mergeable_rendered if block.startswith(_DATA_PREFIX)
+    ]
     limit = max(1, int(get_config()["news_article_limit"]))
     merged_blocks, merged_counts = _merge_blocks(data_blocks, limit)
     channel_spans: list[str] = []
@@ -264,10 +292,11 @@ def get_news(
     for source_index, (
         (source, _fetch, effective_start, effective_end),
         block,
-    ) in enumerate(zip(feed_requests, rendered, strict=True)):
+        mergeable_block,
+    ) in enumerate(zip(feed_requests, rendered, mergeable_rendered, strict=True)):
         counts = None
         selected_body = ""
-        if block.startswith(_DATA_PREFIX):
+        if mergeable_block.startswith(_DATA_PREFIX):
             counts = merged_counts[data_count_index]
             selected_body = merged_blocks[data_count_index] or ""
             data_count_index += 1
@@ -280,10 +309,55 @@ def get_news(
             )
             if counts.cap_omitted:
                 timing += f"; truncated_by_global_cap={counts.cap_omitted}"
+        elif block.startswith(_DATA_PREFIX):
+            returned = len(_split_feed_block(block).items)
+            counts = _MergeCounts(
+                returned=returned,
+                duplicates=0,
+                kept=0,
+                cap_omitted=0,
+            )
+            timing = (
+                "unavailable; producer source closure is missing or ambiguous; "
+                f"returned_items={returned}"
+            )
         elif block.startswith(_NOTE_PREFIX):
             timing = "unavailable"
         else:
             timing = "available; no relevant items in window; returned_items=0"
+        source_watermarks = tuple(
+            item
+            for item in watermarks_by_feed[source_index]
+            if item.source == source
+        )
+        if len(source_watermarks) == 1:
+            effective_start = source_watermarks[0].scanned_start
+            effective_end = source_watermarks[0].scanned_end
+        elif source in {"EDINET", "TDnet"}:
+            limitation = (
+                f"{source} producer did not provide source closure."
+                if not source_watermarks
+                else f"{source} producer provided ambiguous source closure."
+            )
+            if not block.startswith(_NOTE_PREFIX):
+                timing = (
+                    "unavailable; producer source closure is missing or ambiguous; "
+                    f"returned_items={counts.returned if counts is not None else 0}"
+                )
+            source_watermarks = (
+                *source_watermarks,
+                SourceWatermark(
+                    source=source,
+                    scanned_start=effective_start,
+                    scanned_end=effective_end,
+                    status="unavailable",
+                    limitations=(limitation,),
+                    returned_records=0,
+                    reported_records=(counts.returned if counts is not None else 0),
+                    requested_interval=SourceInterval(start=start_date, end=end_date),
+                    limitation_kind="unknown",
+                ),
+            )
         record = ProvenanceRecord(
             evidence="get_news",
             source=source,
@@ -295,11 +369,6 @@ def get_news(
                 if source == "Google News"
                 else None
             ),
-        )
-        source_watermarks = tuple(
-            item
-            for item in watermarks_by_feed[source_index]
-            if item.source == source
         )
         if not source_watermarks:
             returned = counts.returned if counts is not None else 0
