@@ -387,7 +387,11 @@ def _semantic_prompt(
         "Assess how the new Evidence relates to the Current Research State. "
         "Return only the schema-constrained result. Application code resolves all persistent "
         "identities, so use only the supplied IDs and never create an ID. Human-readable "
-        "fields must use output_language.\n\nBOUNDED INPUT:\n"
+        "fields must use output_language. Classify each new Evidence ref exactly once, with "
+        "one Evidence ref per relationship. Support, weakening, or contradiction must select "
+        "the single most directly affected Claim. Answering or reopening must select one "
+        "Question. Irrelevance, uncertainty, and potentially material novelty have no target; "
+        "use uncertainty when no single target is unambiguous.\n\nBOUNDED INPUT:\n"
     )
     for new_content_chars, prior_content_chars in (
         (_MAX_SEMANTIC_EVIDENCE_TEXT, _MAX_SEMANTIC_EVIDENCE_TEXT),
@@ -569,18 +573,60 @@ def assess_semantic_update(
     def validate(value: SemanticChangeAssessment) -> SemanticChangeAssessment:
         if value.language != baseline.current_state.language:
             raise ValueError("semantic output language differs from Current Research State")
-        assessed_refs: set[str] = set()
+        assessed_ref_counts: dict[str, int] = {}
+        claim_relationships = {
+            SemanticChangeRelationship.SUPPORT,
+            SemanticChangeRelationship.WEAKENING,
+            SemanticChangeRelationship.CONTRADICTION,
+        }
+        question_relationships = {
+            SemanticChangeRelationship.ANSWERING,
+            SemanticChangeRelationship.REOPENING,
+        }
         for item in value.relationships:
+            if len(item.evidence_refs) != 1:
+                raise ValueError(
+                    "semantic relationship must classify exactly one Evidence item"
+                )
+            if len(item.suggested_claim_ids) + len(item.suggested_question_ids) > 1:
+                raise ValueError(
+                    "semantic relationship must identify at most one research object"
+                )
+            if item.relationship in claim_relationships and (
+                len(item.suggested_claim_ids) != 1 or item.suggested_question_ids
+            ):
+                raise ValueError(
+                    "claim relationship must identify exactly one supplied Claim"
+                )
+            if item.relationship in question_relationships and (
+                len(item.suggested_question_ids) != 1 or item.suggested_claim_ids
+            ):
+                raise ValueError(
+                    "question relationship must identify exactly one supplied Question"
+                )
+            if item.relationship not in claim_relationships | question_relationships and (
+                item.suggested_claim_ids
+                or item.suggested_question_ids
+                or item.suggested_claim_confidence is not None
+            ):
+                raise ValueError(
+                    "untargeted semantic relationship must not identify a research object"
+                )
             if not set(item.evidence_refs).issubset(new_refs):
                 raise ValueError("semantic relationship used Evidence outside bounded input")
-            assessed_refs.update(item.evidence_refs)
+            evidence_ref = item.evidence_refs[0]
+            assessed_ref_counts[evidence_ref] = assessed_ref_counts.get(evidence_ref, 0) + 1
             if not set(item.suggested_claim_ids).issubset(allowed_claim_ids):
                 # Unknown suggestions are handled as ambiguous identities after validation.
                 continue
             if not set(item.suggested_question_ids).issubset(allowed_question_ids):
                 continue
-        if assessed_refs != set(new_refs):
-            raise ValueError("semantic assessment must classify every new Evidence item")
+        if set(assessed_ref_counts) != set(new_refs) or any(
+            count != 1 for count in assessed_ref_counts.values()
+        ):
+            raise ValueError(
+                "semantic assessment must classify every new Evidence item exactly once"
+            )
         return value
 
     example = SemanticChangeAssessment(
@@ -604,7 +650,10 @@ def assess_semantic_update(
         include_candidate_in_repair=True,
         candidate_only_repair=True,
         repair_instructions=(
-            "Use only supplied Claim, Question, and Evidence identifiers and preserve "
+            "Use only supplied Claim, Question, and Evidence identifiers. Assign at most one "
+            "Claim or Question to each relationship and return exactly one relationship for "
+            "each new Evidence item. If no single target is unambiguous, use uncertainty with "
+            "no target. Preserve "
             f"the output language {baseline.current_state.language}."
         ),
     )

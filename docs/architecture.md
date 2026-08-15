@@ -531,6 +531,16 @@ quality, and temporal-scope metadata remain visible. If that bounded projection
 or the Evidence item-count limit still cannot fit the semantic contract, the
 update escalates fail-closed with `semantic_input_oversize`.
 
+The model classifies each new Evidence item exactly once. A relationship may
+identify at most one application-owned Claim or Question: Claim relationships
+select the single most directly affected Claim, Question relationships select
+one Question, and untargeted relationships select neither. When an Evidence
+item cannot be assigned to one unambiguous target, the model reports
+uncertainty and the update escalates to Full Analysis. Cardinality or duplicate
+assignment errors enter the bounded structured-output repair before they fail
+closed; persisted version-1 assessments remain readable without retroactively
+reinterpreting their model-suggested targets.
+
 When bounded gates can propose No Material Change, Shadow mode persists the
 candidate and its semantic assessment, then runs independent Full Analysis.
 Only the Full result creates the authoritative Revision and advances the

@@ -3057,7 +3057,7 @@ def test_semantic_change_assessment_rejects_ambiguous_identity_and_confidence_ch
             _semantic_response(
                 "support",
                 evidence_ref=deterministic.candidate.delta.new_evidence_refs[0],
-                claim_ids=(claim_id, "claim_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+                claim_ids=("claim_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",),
             )
         ),
     )
@@ -3078,7 +3078,69 @@ def test_semantic_change_assessment_rejects_ambiguous_identity_and_confidence_ch
     assert confidence.escalation_reason is IncrementalEscalationReason.CONFIDENCE_CHANGE
 
 
-def test_semantic_change_assessment_rejects_cross_item_identity_ambiguity():
+def test_semantic_change_assessment_repairs_multi_target_relationship():
+    baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    second_claim = baseline.current_state.claims[0].model_copy(
+        update={
+            "id": "claim_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "statement": "A second valid Claim.",
+        }
+    )
+    baseline = baseline.model_copy(
+        update={
+            "current_state": baseline.current_state.model_copy(
+                update={"claims": (*baseline.current_state.claims, second_claim)}
+            ),
+            "coverage": baseline.coverage.model_copy(
+                update={
+                    "claims": (
+                        *baseline.coverage.claims,
+                        ResearchObjectCoverage(
+                            object_id=second_claim.id,
+                            status=CoverageStatus.COMPLETE,
+                        ),
+                    )
+                }
+            ),
+        }
+    )
+    request = AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",))
+    deterministic = assess_deterministic_update("revision-1", baseline, request, evidence)
+    new_ref = deterministic.candidate.delta.new_evidence_refs[0]
+    llm = _SemanticLLM(
+        {
+            "raw": AIMessage(content=""),
+            "parsed": {
+                "language": "en",
+                "summary": "The Evidence was assigned to every possibly related Claim.",
+                "relationships": [
+                    {
+                        "evidence_refs": [new_ref],
+                        "relationship": "support",
+                        "suggested_claim_ids": [
+                            baseline.current_state.claims[0].id,
+                            second_claim.id,
+                        ],
+                    }
+                ],
+            },
+            "parsing_error": None,
+        },
+        _semantic_response(
+            "support",
+            evidence_ref=new_ref,
+            claim_ids=(baseline.current_state.claims[0].id,),
+        ),
+    )
+
+    result = assess_semantic_update(baseline, deterministic, llm)
+
+    assert result.candidate is not None
+    assert result.escalation_reason is None
+    assert len(llm.prompts) == 2
+
+
+def test_semantic_change_assessment_repairs_repeated_evidence_targets():
     baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence()
     second_claim = baseline.current_state.claims[0].model_copy(
         update={
@@ -3127,12 +3189,56 @@ def test_semantic_change_assessment_rejects_cross_item_identity_ambiguity():
                 ],
             },
             "parsing_error": None,
-        }
+        },
+        _semantic_response(
+            "support",
+            evidence_ref=new_ref,
+            claim_ids=(baseline.current_state.claims[0].id,),
+        ),
     )
 
     result = assess_semantic_update(baseline, deterministic, llm)
 
-    assert result.escalation_reason is IncrementalEscalationReason.AMBIGUOUS_IDENTITY
+    assert result.candidate is not None
+    assert result.escalation_reason is None
+    assert len(llm.prompts) == 2
+
+
+@pytest.mark.parametrize(
+    ("relationship", "has_claim_target"),
+    [
+        ("support", False),
+        ("irrelevance", True),
+    ],
+)
+def test_semantic_change_assessment_repairs_relationship_target_shape(
+    relationship,
+    has_claim_target,
+):
+    baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    request = AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",))
+    deterministic = assess_deterministic_update("revision-1", baseline, request, evidence)
+    new_ref = deterministic.candidate.delta.new_evidence_refs[0]
+    invalid_claim_ids = (
+        (baseline.current_state.claims[0].id,) if has_claim_target else ()
+    )
+    llm = _SemanticLLM(
+        _semantic_response(
+            relationship,
+            evidence_ref=new_ref,
+            claim_ids=invalid_claim_ids,
+        ),
+        _semantic_response(
+            "irrelevance",
+            evidence_ref=new_ref,
+        ),
+    )
+
+    result = assess_semantic_update(baseline, deterministic, llm)
+
+    assert result.candidate is not None
+    assert result.escalation_reason is None
+    assert len(llm.prompts) == 2
 
 
 def test_semantic_change_assessment_excludes_prior_research_disguised_as_evidence():
