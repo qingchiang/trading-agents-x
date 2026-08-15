@@ -13,6 +13,19 @@ env:
   PYTHON_DOTENV_DISABLED: "1"
 
 jobs:
+  repository-hygiene:
+    name: repository hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject tracked ignored files
+        shell: bash
+        run: |
+          if [[ -n "$(git ls-files --cached --ignored --exclude-standard)" ]]; then
+            echo "::error::The Git index contains ignored paths. Inspect them locally before committing."
+            exit 1
+          fi
+
   test:
     name: tests (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
