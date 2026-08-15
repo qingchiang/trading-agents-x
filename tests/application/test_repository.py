@@ -92,6 +92,17 @@ def _create(
     )
 
 
+def test_repository_aggregate_stores_share_the_facade_session_factory(
+    repository: RunRepository,
+) -> None:
+    assert repository.run_store.sessions is repository.sessions
+    assert repository.outcome_store.sessions is repository.sessions
+    assert repository.research_store.sessions is repository.sessions
+    assert repository.run_store.engine is repository.engine
+    assert repository.outcome_store.engine is repository.engine
+    assert repository.research_store.engine is repository.engine
+
+
 def test_idempotent_create_reuses_only_identical_request(
     repository: RunRepository,
     app_settings: AppSettings,

@@ -676,6 +676,12 @@ normal synchronous mode. WAL still permits only one writer at a time. The
 database and `-wal`/`-shm` files must be on one host-local filesystem; NFS/SMB
 deployment is unsupported.
 
+`RunRepository` remains the application-facing persistence facade. Its
+Run/Event/Evidence, Outcome/Reflection/Review, and Research Chain/Revision
+stores share the facade's one engine and session factory. Operations that span
+those aggregates, including successful completion and Research Chain head
+advancement, remain explicit facade-owned SQLite transactions.
+
 `tradingagents db backup` uses SQLite's online backup operation and is the
 supported backup boundary.
 
@@ -1142,7 +1148,10 @@ modules.
 - Lifecycle: `tradingagents/application/service.py`
 - Worker/outcomes: `tradingagents/application/worker.py`,
   `tradingagents/application/outcomes.py`
-- Repository/schema: `tradingagents/application/repository.py`,
+- Repository facade/stores/schema: `tradingagents/application/repository.py`,
+  `tradingagents/application/_repository_run.py`,
+  `tradingagents/application/_repository_outcome.py`,
+  `tradingagents/application/_repository_research.py`,
   `tradingagents/application/database.py`
 - Migrations: `tradingagents/persistence/`
 - Graph: `tradingagents/graph/research_graph.py`
