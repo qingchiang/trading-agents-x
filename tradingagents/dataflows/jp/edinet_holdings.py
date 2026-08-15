@@ -32,7 +32,15 @@ always return a string and never raise.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
+
+from tradingagents.provenance import (
+    SourceInterval,
+    SourceWatermark,
+    attach_source_observations,
+    attach_source_watermarks,
+)
 
 from ..config import get_config
 from .edinet_code_map import learn_many, resolve_edinet_code
@@ -41,6 +49,7 @@ from .edinet_common import (
     filing_detail_line,
     iter_window_dates,
     render_filings,
+    source_observation,
 )
 from .market import is_tokyo_ticker
 
@@ -50,6 +59,7 @@ logger = logging.getLogger(__name__)
 # These filings are sparse and can affect control/positioning for a full quarter;
 # each all-market date list is shared through edinet_common's memory/disk cache.
 _LOOK_BACK_DAYS = 89
+_TOKYO = ZoneInfo("Asia/Tokyo")
 
 # Filing families (提出書類種別コード) that tag their subject in subjectEdinetCode,
 # so matching a ticker's EDINET code surfaces filings *about* it. Codes verified
@@ -87,7 +97,13 @@ def _format_filing(record: dict) -> str:
     return f"{line}\n{detail}" if detail else line
 
 
-def get_large_holdings(ticker: str, curr_date: str, look_back_days: int = _LOOK_BACK_DAYS) -> str:
+def get_large_holdings(
+    ticker: str,
+    curr_date: str,
+    look_back_days: int = _LOOK_BACK_DAYS,
+    *,
+    information_frontier: str | None = None,
+) -> str:
     """Return recent EDINET large-shareholding & tender-offer (TOB) filings about ``ticker``.
 
     Tokyo-only (returns "" for non-``.T`` tickers, like the investor-flow proxy —
@@ -104,6 +120,15 @@ def get_large_holdings(ticker: str, curr_date: str, look_back_days: int = _LOOK_
         # escaping (never-raise prefetch contract).
         end = datetime.strptime(curr_date, "%Y-%m-%d")
         start = (end - timedelta(days=look_back_days)).strftime("%Y-%m-%d")
+        frontier = (
+            datetime.fromisoformat(information_frontier)
+            if information_frontier
+            else None
+        )
+        if frontier is not None:
+            if frontier.utcoffset() is None:
+                raise ValueError("EDINET Information Frontier requires a timezone")
+            frontier = frontier.astimezone(_TOKYO)
 
         code = resolve_edinet_code(ticker)
         if code is None:
@@ -133,20 +158,61 @@ def get_large_holdings(ticker: str, curr_date: str, look_back_days: int = _LOOK_
         logger.warning("Large-holding fetch failed for %s: %s", ticker, exc)
         return f"<large-shareholding data unavailable: {type(exc).__name__}>"
 
+    observation_results = tuple(
+        (record, *source_observation(record)) for record in matches
+    )
+    boundary = date.fromisoformat(curr_date)
+    visible = tuple(
+        (record, observation)
+        for record, observation, _ in observation_results
+        if observation is not None
+        and (
+            observed_at := datetime.fromisoformat(observation.available_at).astimezone(
+                _TOKYO
+            )
+        ).date()
+        <= boundary
+        and (frontier is None or observed_at <= frontier)
+    )
+    matches = [record for record, _ in visible]
+    observations = tuple(observation for _, observation in visible)
+    limitations = tuple(
+        dict.fromkeys(
+            reason
+            for _, _, reason in observation_results
+            if reason is not None
+        )
+    )
+    watermark = SourceWatermark(
+        source="EDINET",
+        scanned_start=scanned_start,
+        scanned_end=curr_date,
+        status="limited" if limitations else "complete",
+        limitations=limitations,
+        returned_records=len(matches),
+        reported_records=len(observation_results),
+        requested_interval=SourceInterval(start=start, end=curr_date),
+        limitation_kind="partial" if limitations else None,
+        information_frontier=information_frontier,
+    )
+
     if not matches:
-        return (
+        body = (
             f"No EDINET large-shareholding or tender-offer filings about {ticker} "
             f"between {scanned_start} and {curr_date}"
         )
+        return attach_source_watermarks(body, watermark)
 
     items = render_filings(
         matches,
         _format_filing,
         get_config()["sentiment_filing_limit"],
     )
-    return (
+    body = (
         f"EDINET ownership & control filings about {ticker}, {scanned_start} to {curr_date} "
         "(大量保有 5%+ stakes and 公開買付 takeover bids; type/filer/date below, "
         "stake % not parsed):"
         f"\n\n{items}"
     )
+    body = attach_source_observations(body, *observations)
+    return attach_source_watermarks(body, watermark)

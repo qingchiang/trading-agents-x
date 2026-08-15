@@ -149,6 +149,12 @@ Observable source material with explicit timing and provenance that may support
 or challenge Research Claims; Prior Research is not Evidence.
 _Avoid_: Context, previous conclusion
 
+**Near-live Evidence**:
+Retrieval-time Evidence admitted for an Instrument whose Research Cutoff is
+within the market-local five-day near-live window. It may inform research but
+cannot prove point-in-time Coverage or the absence of a Source Record.
+_Avoid_: Point-in-time Evidence, complete live coverage
+
 **Effective Evidence Snapshot**:
 The complete sealed Evidence view supporting one Research Revision, including
 inherited and newly obtained Evidence with explicit lineage.
@@ -202,9 +208,10 @@ time and does not imply that every source was observed through local midnight.
 _Avoid_: Execution date, Information Frontier
 
 **Information Frontier**:
-The point-in-time boundary through which a Research Revision, and each source
-within it, can claim observed knowledge. It cannot extend beyond the end of a
-historical Research Cutoff.
+The point-in-time boundary through which a Research Revision and its sources
+may prove point-in-time knowledge and Coverage. Near-live Evidence does not
+advance this boundary, which cannot extend beyond the end of a historical
+Research Cutoff.
 _Avoid_: Research Cutoff, retrieval date
 
 **Anchor Coverage**:

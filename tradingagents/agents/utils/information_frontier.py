@@ -8,14 +8,23 @@ from dataclasses import asdict
 from datetime import date, datetime
 from typing import Any
 
+from tradingagents.application.evidence_admission import (
+    evaluate_evidence_admission,
+)
 from tradingagents.provenance import (
+    EvidenceSpan,
     ProvenanceRecord,
+    SourceObservation,
     SourceWatermark,
+    attach_evidence_span,
+    attach_provenance,
+    attach_source_observations,
     attach_source_watermarks,
     extract_evidence_spans,
     extract_provenance,
     extract_source_observations,
     extract_source_watermarks,
+    temporal_scope_from_records,
 )
 
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
@@ -44,6 +53,10 @@ def filter_evidence_content_at_information_frontier(
     fallback_source: str,
     temporal_scope: str | None = None,
     external_attestation: bool = False,
+    analysis_date: date | None = None,
+    instrument: str | None = None,
+    retrieved_at: str | datetime | None = None,
+    sealed_at: datetime | None = None,
 ) -> tuple[str, bool]:
     """Fail closed before source text enters an analyst conversation."""
 
@@ -52,14 +65,51 @@ def filter_evidence_content_at_information_frontier(
     observations = extract_source_observations(content)
     watermarks = extract_source_watermarks(content)
     spans = extract_evidence_spans(content)
+    if spans:
+        return _filter_evidence_spans(
+            spans,
+            information_frontier,
+            fallback_source=fallback_source,
+            analysis_date=analysis_date,
+            instrument=instrument,
+            sealed_at=sealed_at,
+        )
     plain_records = extract_provenance(content) if not spans else ()
+    inferred_scope = temporal_scope or (
+        temporal_scope_from_records(plain_records) if plain_records else None
+    )
+    if (
+        inferred_scope == "live_only"
+        and analysis_date is not None
+        and instrument is not None
+    ):
+        effective_dates = tuple(
+            date.fromisoformat(value)
+            for record in plain_records
+            for value in _DATE_RE.findall(record.effective)
+        )
+        retrievals = tuple(
+            record.retrieved_at for record in plain_records
+        ) or (retrieved_at,)
+        if all(
+            evaluate_evidence_admission(
+                temporal_scope="live_only",
+                analysis_date=analysis_date,
+                instrument=instrument,
+                retrieved_at=value,
+                sealed_at=sealed_at,
+                effective_dates=effective_dates,
+            ).admitted
+            for value in retrievals
+        ):
+            return content, False
     frontier_date = information_frontier.date()
     has_attestation = bool(
         observations or watermarks or spans or plain_records or external_attestation
     )
     should_omit = (
         not has_attestation
-        or temporal_scope in {"live_only", "unknown"}
+        or inferred_scope in {"live_only", "unknown"}
         or any(
             datetime.fromisoformat(observation.available_at) > information_frontier
             for observation in observations
@@ -75,14 +125,35 @@ def filter_evidence_content_at_information_frontier(
             if item.temporal_scope == "point_in_time"
         )
         or provenance_requires_frontier_omission(
-            plain_records,
+            (
+                record
+                for record in plain_records
+                if not _provenance_record_has_frontier_attestation(
+                    record,
+                    observations,
+                    watermarks,
+                    information_frontier,
+                )
+            ),
             information_frontier,
+        )
+        or any(
+            _record_conflicts_with_same_source_watermark(
+                record,
+                watermarks,
+                information_frontier,
+            )
+            for record in plain_records
         )
         or any(
             date.fromisoformat(item.scanned_end) >= frontier_date
             and not any(
                 observation.source == item.source
                 for observation in observations
+            )
+            and not _watermark_attests_content_at_frontier(
+                item,
+                information_frontier,
             )
             for item in watermarks
         )
@@ -97,6 +168,271 @@ def filter_evidence_content_at_information_frontier(
         ),
         True,
     )
+
+
+def _filter_evidence_spans(
+    spans: Iterable[EvidenceSpan],
+    information_frontier: datetime,
+    *,
+    fallback_source: str,
+    analysis_date: date | None,
+    instrument: str | None,
+    sealed_at: datetime | None,
+) -> tuple[str, bool]:
+    """Admit independently auditable temporal spans and redact unsafe bodies."""
+
+    parts: list[str] = []
+    omitted = False
+    for span in spans:
+        serialized = _serialize_evidence_span(span)
+        if _span_is_admissible(
+            span,
+            information_frontier,
+            analysis_date=analysis_date,
+            instrument=instrument,
+            sealed_at=sealed_at,
+        ):
+            parts.append(serialized)
+            continue
+        omitted = True
+        parts.append(
+            frontier_omission_content(
+                serialized,
+                information_frontier,
+                fallback_source=fallback_source,
+                fallback_temporal_scope=span.temporal_scope,
+                fallback_limitation_kind=(
+                    "live_only"
+                    if span.temporal_scope == "live_only"
+                    else "unknown"
+                ),
+            )
+        )
+    return "\n".join(part for part in parts if part), omitted
+
+
+def _span_is_admissible(
+    span: EvidenceSpan,
+    information_frontier: datetime,
+    *,
+    analysis_date: date | None,
+    instrument: str | None,
+    sealed_at: datetime | None,
+) -> bool:
+    observations = span.source_observations
+    watermarks = span.source_watermarks
+    if span.temporal_scope == "point_in_time":
+        effective_dates = tuple(
+            date.fromisoformat(value)
+            for record in span.records
+            for value in _DATE_RE.findall(record.effective)
+        )
+        if analysis_date is not None and instrument is not None:
+            pit_decisions = (
+                evaluate_evidence_admission(
+                    temporal_scope="point_in_time",
+                    analysis_date=analysis_date,
+                    instrument=instrument,
+                    effective_dates=effective_dates,
+                    information_frontier=information_frontier,
+                ),
+                *(
+                    evaluate_evidence_admission(
+                        temporal_scope="point_in_time",
+                        analysis_date=analysis_date,
+                        instrument=instrument,
+                        effective_dates=effective_dates,
+                        available_at=datetime.fromisoformat(
+                            observation.available_at
+                        ),
+                        information_frontier=information_frontier,
+                    )
+                    for observation in observations
+                ),
+            )
+            if any(not decision.admitted for decision in pit_decisions):
+                return False
+        return not (
+            any(
+                datetime.fromisoformat(observation.available_at)
+                > information_frontier
+                for observation in observations
+            )
+            or any(item.temporal_scope != "point_in_time" for item in watermarks)
+            or provenance_requires_frontier_omission(
+                (
+                    record
+                    for record in span.records
+                    if not _provenance_record_has_frontier_attestation(
+                        record,
+                        observations,
+                        watermarks,
+                        information_frontier,
+                    )
+                ),
+                information_frontier,
+            )
+            or any(
+                _record_conflicts_with_same_source_watermark(
+                    record,
+                    watermarks,
+                    information_frontier,
+                )
+                for record in span.records
+            )
+            or any(
+                date.fromisoformat(item.scanned_end)
+                >= information_frontier.date()
+                and not any(
+                    observation.source == item.source
+                    for observation in observations
+                )
+                and not _watermark_attests_content_at_frontier(
+                    item,
+                    information_frontier,
+                )
+                for item in watermarks
+            )
+        )
+    if (
+        span.temporal_scope != "live_only"
+        or analysis_date is None
+        or instrument is None
+        or not span.records
+    ):
+        return False
+    effective_dates = tuple(
+        date.fromisoformat(value)
+        for record in span.records
+        for value in _DATE_RE.findall(record.effective)
+    )
+    return all(
+        evaluate_evidence_admission(
+            temporal_scope="live_only",
+            analysis_date=analysis_date,
+            instrument=instrument,
+            retrieved_at=record.retrieved_at,
+            sealed_at=sealed_at,
+            effective_dates=effective_dates,
+        ).admitted
+        for record in span.records
+    )
+
+
+def _watermark_attests_content_at_frontier(
+    watermark: SourceWatermark,
+    information_frontier: datetime,
+) -> bool:
+    """Accept PIT content whose producer froze an auditable scanned horizon."""
+
+    if (
+        watermark.temporal_scope != "point_in_time"
+        or not (
+            watermark.status == "complete"
+            or (
+                watermark.status == "limited"
+                and watermark.limitation_kind
+                in {"archive_truncation", "partial"}
+            )
+        )
+        or watermark.information_frontier is None
+    ):
+        return False
+    producer_frontier = datetime.fromisoformat(watermark.information_frontier)
+    return (
+        producer_frontier <= information_frontier
+        and date.fromisoformat(watermark.scanned_end) <= producer_frontier.date()
+    )
+
+
+def _watermark_attests_record_effective_dates(
+    record: ProvenanceRecord,
+    watermark: SourceWatermark,
+    information_frontier: datetime,
+) -> bool:
+    effective_dates = tuple(
+        date.fromisoformat(value) for value in _DATE_RE.findall(record.effective)
+    )
+    scanned_start = date.fromisoformat(watermark.scanned_start)
+    scanned_end = date.fromisoformat(watermark.scanned_end)
+    return (
+        (not effective_dates or all(
+            scanned_start <= effective_date <= scanned_end
+            for effective_date in effective_dates
+        ))
+        and _watermark_attests_content_at_frontier(
+            watermark,
+            information_frontier,
+        )
+    )
+
+
+def _provenance_record_has_frontier_attestation(
+    record: ProvenanceRecord,
+    observations: Iterable[SourceObservation],
+    watermarks: Iterable[SourceWatermark],
+    information_frontier: datetime,
+) -> bool:
+    """Return whether same-source closure covers the record's effective horizon."""
+
+    effective_dates = tuple(
+        date.fromisoformat(value) for value in _DATE_RE.findall(record.effective)
+    )
+
+    def covers_effective_date(boundary: date) -> bool:
+        return not effective_dates or max(effective_dates) <= boundary
+
+    if any(
+        observation.source == record.source
+        and datetime.fromisoformat(observation.available_at) <= information_frontier
+        and (
+            published_dates := tuple(
+                date.fromisoformat(value)
+                for value in _DATE_RE.findall(observation.published_at)
+            )
+        )
+        and covers_effective_date(max(published_dates))
+        for observation in observations
+    ):
+        return True
+    return any(
+        watermark.source == record.source
+        and _watermark_attests_record_effective_dates(
+            record,
+            watermark,
+            information_frontier,
+        )
+        for watermark in watermarks
+    )
+
+
+def _record_conflicts_with_same_source_watermark(
+    record: ProvenanceRecord,
+    watermarks: Iterable[SourceWatermark],
+    information_frontier: datetime,
+) -> bool:
+    watermarks = tuple(watermarks)
+    same_source = tuple(
+        watermark for watermark in watermarks if watermark.source == record.source
+    )
+    return bool(same_source) and not any(
+        _watermark_attests_record_effective_dates(
+            record,
+            watermark,
+            information_frontier,
+        )
+        for watermark in same_source
+    )
+
+
+def _serialize_evidence_span(span: EvidenceSpan) -> str:
+    content = span.content or ""
+    content = attach_provenance(content, *span.records)
+    content = attach_source_observations(content, *span.source_observations)
+    content = attach_source_watermarks(content, *span.source_watermarks)
+    if span.explicit:
+        return attach_evidence_span(content, temporal_scope=span.temporal_scope)
+    return content
 
 
 def provenance_requires_frontier_omission(
@@ -129,6 +465,8 @@ def frontier_omission_content(
     frontier: datetime,
     *,
     fallback_source: str,
+    fallback_temporal_scope: str = "point_in_time",
+    fallback_limitation_kind: str = "unknown",
 ) -> str:
     """Record a structured limitation for source content omitted at the frontier."""
 
@@ -153,8 +491,9 @@ def frontier_omission_content(
             scanned_start=day,
             scanned_end=day,
             status="unavailable",
+            temporal_scope=fallback_temporal_scope,
             limitations=(FRONTIER_UNSAFE_MESSAGE,),
-            limitation_kind="unknown",
+            limitation_kind=fallback_limitation_kind,
         )
         for source in sorted(sources)
     )

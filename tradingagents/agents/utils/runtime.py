@@ -14,6 +14,20 @@ from tradingagents.dataflows.config import use_config
 AnalysisToolRuntime = ToolRuntime[RunContext, AgentState]
 
 
+def evidence_route_kwargs(runtime: AnalysisToolRuntime) -> dict[str, object]:
+    """Return provenance options bound to the run's frozen frontier."""
+
+    route_kwargs: dict[str, object] = {"_provenance": True}
+    information_frontier = getattr(
+        runtime.context,
+        "information_frontier",
+        None,
+    )
+    if information_frontier is not None:
+        route_kwargs["information_frontier"] = information_frontier.isoformat()
+    return route_kwargs
+
+
 @contextmanager
 def tool_runtime_scope(
     runtime: AnalysisToolRuntime,

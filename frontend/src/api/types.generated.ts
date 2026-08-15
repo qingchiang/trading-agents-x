@@ -330,7 +330,7 @@ export interface components {
       code: string;
       message: string;
     };
-    NextUpdateReason: "experiment_mode_off" | "unsupported_incremental_market" | "legacy_anchor_coverage_unproven" | "anchor_coverage_incomplete" | "required_source_coverage_incomplete" | "indeterminate_head" | "coverage_incomplete" | "incompatible_market_semantics" | "invalid_revision";
+    NextUpdateReason: "experiment_mode_off" | "unsupported_incremental_market" | "legacy_anchor_coverage_unproven" | "anchor_coverage_incomplete" | "required_source_coverage_incomplete" | "indeterminate_head" | "coverage_incomplete" | "incompatible_market_semantics" | "invalid_revision" | "invalid_source_dependency";
     NodeMetrics: {
       cache_hit_input_tokens?: number;
       cache_miss_input_tokens?: number;

@@ -2363,7 +2363,8 @@
           "indeterminate_head",
           "coverage_incomplete",
           "incompatible_market_semantics",
-          "invalid_revision"
+          "invalid_revision",
+          "invalid_source_dependency"
         ],
         "title": "NextUpdateReason",
         "type": "string"

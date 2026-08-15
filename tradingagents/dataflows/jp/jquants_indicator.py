@@ -30,6 +30,8 @@ _WARMUP_DAYS = 400
 _MIN_WARMUP_ROWS = 200
 _MIN_WARMUP_SPAN_DAYS = 280
 _TOKYO = ZoneInfo("Asia/Tokyo")
+
+
 def get_indicator(symbol: str, indicator: str, curr_date: str, look_back_days: int) -> str:
     """Return a date->value window for ``indicator`` ending at ``curr_date``."""
     start = (
@@ -39,26 +41,21 @@ def get_indicator(symbol: str, indicator: str, curr_date: str, look_back_days: i
     return render_indicator_window(df, indicator, curr_date, look_back_days)
 
 
-def get_verified_market_snapshot(
+def build_ohlcv_source_metadata(
+    df,
     symbol: str,
-    curr_date: str,
-    look_back_days: int = 30,
+    requested_start: str,
+    requested_end: str,
     *,
     information_frontier: str | None = None,
-) -> str:
-    """Return a J-Quants-backed deterministic market snapshot."""
-    start = (
-        datetime.strptime(curr_date, "%Y-%m-%d") - relativedelta(days=look_back_days + _WARMUP_DAYS)
-    ).strftime("%Y-%m-%d")
-    df = _fetch_ohlcv_frame(symbol, start, curr_date)
+) -> tuple[str, SourceObservation, SourceWatermark]:
+    """Describe one bounded J-Quants OHLCV frame with auditable PIT closure."""
+
     adjustment = str(df.attrs.get("price_adjustment") or "unknown")
-    body = render_verified_market_snapshot(
-        df,
-        symbol,
-        curr_date,
-        look_back_days,
-        source="J-Quants",
-        adjustment=adjustment,
+    source = (
+        "J-Quants adjusted OHLCV"
+        if adjustment == "J-Quants adjusted OHLCV v2"
+        else "J-Quants mixed adjusted/raw OHLCV"
     )
     latest = df.iloc[-1]
     latest_date = latest["Date"].strftime("%Y-%m-%d")
@@ -75,14 +72,16 @@ def get_verified_market_snapshot(
     ]
     version_id = (
         "jquants-market:"
-        + hashlib.sha256(json.dumps(digest_payload, separators=(",", ":")).encode()).hexdigest()[
-            :20
-        ]
+        + hashlib.sha256(
+            json.dumps(digest_payload, separators=(",", ":")).encode()
+        ).hexdigest()[:20]
     )
-    conservative_available_at = datetime.fromisoformat(f"{latest_date}T23:59:59").replace(
-        tzinfo=_TOKYO
+    conservative_available_at = datetime.fromisoformat(
+        f"{latest_date}T23:59:59"
+    ).replace(tzinfo=_TOKYO)
+    availability_basis = (
+        "conservative market-date end; source has no intraday availability"
     )
-    availability_basis = "conservative market-date end; source has no intraday availability"
     if information_frontier is not None:
         collected_at = datetime.fromisoformat(information_frontier)
         if collected_at.utcoffset() is None:
@@ -94,7 +93,7 @@ def get_verified_market_snapshot(
                 "observed in successful bounded collection at Information Frontier"
             )
     observation = SourceObservation(
-        source="J-Quants adjusted OHLCV",
+        source=source,
         record_id=f"jquants-market:{symbol.upper()}",
         version_id=version_id,
         status="published",
@@ -124,14 +123,48 @@ def get_verified_market_snapshot(
         )
     limitations = tuple(warmup_limitations)
     watermark = SourceWatermark(
-        source="J-Quants adjusted OHLCV",
+        source=source,
         scanned_start=first_date.strftime("%Y-%m-%d"),
-        scanned_end=curr_date,
+        scanned_end=requested_end,
         status="complete" if not limitations else "limited",
         limitations=limitations,
         returned_records=len(df),
-        requested_interval=SourceInterval(start=start, end=curr_date),
+        requested_interval=SourceInterval(
+            start=requested_start,
+            end=requested_end,
+        ),
         limitation_kind="partial" if limitations else None,
         information_frontier=information_frontier,
+    )
+    return source, observation, watermark
+
+
+def get_verified_market_snapshot(
+    symbol: str,
+    curr_date: str,
+    look_back_days: int = 30,
+    *,
+    information_frontier: str | None = None,
+) -> str:
+    """Return a J-Quants-backed deterministic market snapshot."""
+    start = (
+        datetime.strptime(curr_date, "%Y-%m-%d") - relativedelta(days=look_back_days + _WARMUP_DAYS)
+    ).strftime("%Y-%m-%d")
+    df = _fetch_ohlcv_frame(symbol, start, curr_date)
+    source, observation, watermark = build_ohlcv_source_metadata(
+        df,
+        symbol,
+        start,
+        curr_date,
+        information_frontier=information_frontier,
+    )
+    adjustment = observation.adjustment or "unknown"
+    body = render_verified_market_snapshot(
+        df,
+        symbol,
+        curr_date,
+        look_back_days,
+        source=source,
+        adjustment=adjustment,
     )
     return attach_source_watermarks(attach_source_observations(body, observation), watermark)

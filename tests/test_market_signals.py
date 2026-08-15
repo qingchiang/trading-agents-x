@@ -35,7 +35,11 @@ def test_tokyo_registry_fetches_registered_signals():
         "get_analyst_ratings_payload",
         return_value=("RATINGS", (fact,)),
     ) as ratings:
-        results = market_signals.fetch_sentiment_signals("9984.T", "2026-07-18")
+        results = market_signals.fetch_sentiment_signals(
+            "9984.T",
+            "2026-07-18",
+            information_frontier="2026-07-18T23:59:59+09:00",
+        )
 
     assert {result.spec.tag for result in results} == {
         "large_holdings",
@@ -43,7 +47,11 @@ def test_tokyo_registry_fetches_registered_signals():
         "short_positions",
         "analyst_ratings",
     }
-    holdings.assert_called_once_with("9984.T", "2026-07-18")
+    holdings.assert_called_once_with(
+        "9984.T",
+        "2026-07-18",
+        information_frontier="2026-07-18T23:59:59+09:00",
+    )
     margin.assert_called_once_with("9984.T", "2026-07-18")
     shorts.assert_called_once_with("9984.T", "2026-07-18")
     ratings.assert_called_once_with("9984.T", "2026-07-18")

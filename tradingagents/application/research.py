@@ -20,7 +20,10 @@ from .contracts import (
     AnalysisRequest,
     AnalystReport,
     EvidenceBundle,
+    EvidenceQuality,
+    EvidenceTemporalScope,
     MarketReferenceLevel,
+    NumericTemporalBasis,
     ReportLanguage,
     ResearchDecision,
     ResearchRating,
@@ -30,10 +33,16 @@ from .contracts import (
     RunMetrics,
     report_language_value,
 )
+from .evidence_admission import evaluate_evidence_admission
+from .source_dependencies import partition_source_dependencies
 
 _CLAIM_ID = r"^claim_[a-f0-9]{32}$"
 _QUESTION_ID = r"^question_[a-f0-9]{32}$"
 _EVIDENCE_REF = r"^ev_[a-f0-9]{12}$"
+_NEAR_LIVE_MARKET_REFERENCE_LIMITATION = (
+    "Near-live market references remain Research Artifacts and do not become "
+    "cutoff-dated Current Research State levels."
+)
 
 
 class ResearchModel(BaseModel):
@@ -242,6 +251,13 @@ class NextUpdateReason(str, Enum):
     COVERAGE_INCOMPLETE = "coverage_incomplete"
     INCOMPATIBLE_MARKET_SEMANTICS = "incompatible_market_semantics"
     INVALID_REVISION = "invalid_revision"
+    INVALID_SOURCE_DEPENDENCY = "invalid_source_dependency"
+
+
+class SourceDependencyCompatibilityLimitation(str, Enum):
+    """Stable compatibility reason retained without exposing internal IDs."""
+
+    INTERNAL_REFERENCE = "internal_source_reference"
 
 
 class IncrementalEscalationReason(str, Enum):
@@ -1549,6 +1565,14 @@ def derive_forward_research_anchor(
         item.object_id: item for item in (*revision.coverage.claims, *revision.coverage.questions)
     }
     for research_object in (*revision.current_state.claims, *revision.current_state.questions):
+        if (
+            isinstance(research_object, ResearchClaim)
+            and research_object.standing is not ClaimStanding.ACTIVE
+        ) or (
+            isinstance(research_object, ResearchQuestion)
+            and research_object.status is not QuestionStatus.OPEN
+        ):
+            continue
         coverage = object_coverage[research_object.id]
         if coverage.status is CoverageStatus.COMPLETE:
             continue
@@ -1706,6 +1730,7 @@ class NextUpdatePolicyEvaluation(ResearchModel):
     instrument: str
     mode: Literal["off", "shadow", "experimental"]
     required_sources: tuple[str, ...] = ()
+    compatibility_limitations: tuple[SourceDependencyCompatibilityLimitation, ...] = ()
 
 
 def required_research_sources(state: CurrentResearchState) -> tuple[str, ...]:
@@ -1723,6 +1748,18 @@ def required_research_sources(state: CurrentResearchState) -> tuple[str, ...]:
         for source in question.required_sources
     )
     return tuple(sorted(sources))
+
+
+def _all_research_source_dependencies(state: CurrentResearchState) -> tuple[str, ...]:
+    """Return persisted dependencies from active and inactive research objects."""
+
+    return tuple(
+        dict.fromkeys(
+            source
+            for item in (*state.claims, *state.questions)
+            for source in item.required_sources
+        )
+    )
 
 
 def _required_research_capabilities(
@@ -1747,7 +1784,10 @@ def _required_research_capabilities(
 
 
 def required_incremental_sources(revision: ResearchRevisionDraft) -> tuple[str, ...]:
-    sources = set(required_research_sources(revision.current_state))
+    external_sources, _internal_sources = partition_source_dependencies(
+        required_research_sources(revision.current_state)
+    )
+    sources = set(external_sources)
     profile = market_research_capability_profile(revision.current_state.instrument)
     if profile is not None:
         required_capabilities = _required_research_capabilities(revision, profile)
@@ -1774,7 +1814,8 @@ def required_incremental_sources(revision: ResearchRevisionDraft) -> tuple[str, 
             continue
         if domain.source:
             sources.add(domain.source)
-    return tuple(sorted(sources))
+    admitted_sources, _internal_sources = partition_source_dependencies(sources)
+    return tuple(sorted(admitted_sources))
 
 
 def _required_source_coverage_complete(
@@ -1881,6 +1922,16 @@ def evaluate_next_update_policy(
 ) -> NextUpdatePolicyEvaluation:
     """Evaluate the complete fail-closed bounded-update capability."""
 
+    _external_dependencies, internal_dependencies = partition_source_dependencies(
+        _all_research_source_dependencies(revision.current_state)
+    )
+    compatibility_limitations = (
+        (SourceDependencyCompatibilityLimitation.INTERNAL_REFERENCE,)
+        if internal_dependencies
+        else ()
+    )
+    required_sources = required_incremental_sources(revision)
+
     def result(reason: NextUpdateReason | None) -> NextUpdatePolicyEvaluation:
         return NextUpdatePolicyEvaluation(
             policy="incremental_allowed" if reason is None else "full_required",
@@ -1888,9 +1939,9 @@ def evaluate_next_update_policy(
             instrument=instrument,
             mode=mode,
             required_sources=required_sources,
+            compatibility_limitations=compatibility_limitations,
         )
 
-    required_sources = required_incremental_sources(revision)
     if mode == "off":
         return result(NextUpdateReason.EXPERIMENT_MODE_OFF)
     if (
@@ -1899,6 +1950,8 @@ def evaluate_next_update_policy(
         or revision.current_state.instrument != instrument
     ):
         return result(NextUpdateReason.UNSUPPORTED_INCREMENTAL_MARKET)
+    if internal_dependencies:
+        return result(NextUpdateReason.INVALID_SOURCE_DEPENDENCY)
     try:
         ResearchRevisionDraft.model_validate(
             {field: getattr(revision, field) for field in ResearchRevisionDraft.model_fields}
@@ -3510,15 +3563,39 @@ def assemble_full_update(
     question_ids = {
         candidate_id: previous.id for candidate_id, previous in question_matches.items()
     }
+    dependency_compatibility_repaired = False
+
+    def candidate_dependencies(values: tuple[str, ...]) -> tuple[str, ...]:
+        nonlocal dependency_compatibility_repaired
+        external, internal = partition_source_dependencies(values)
+        dependency_compatibility_repaired = (
+            dependency_compatibility_repaired or bool(internal)
+        )
+        return external
+
+    def inherited_dependencies(
+        previous: tuple[str, ...],
+        candidate: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        nonlocal dependency_compatibility_repaired
+        previous_external, previous_internal = partition_source_dependencies(previous)
+        candidate_external = candidate_dependencies(candidate)
+        if not previous_internal:
+            return previous_external
+        dependency_compatibility_repaired = True
+        return tuple(dict.fromkeys((*previous_external, *candidate_external)))
 
     claims = tuple(
         claim.model_copy(
             update={
                 "id": claim_ids.get(claim.id, claim.id),
                 "required_sources": (
-                    claim_matches[claim.id].required_sources
+                    inherited_dependencies(
+                        claim_matches[claim.id].required_sources,
+                        claim.required_sources,
+                    )
                     if claim.id in claim_matches
-                    else claim.required_sources
+                    else candidate_dependencies(claim.required_sources)
                 ),
             }
         )
@@ -3529,9 +3606,12 @@ def assemble_full_update(
             update={
                 "id": question_ids.get(question.id, question.id),
                 "required_sources": (
-                    question_matches[question.id].required_sources
+                    inherited_dependencies(
+                        question_matches[question.id].required_sources,
+                        question.required_sources,
+                    )
                     if question.id in question_matches
-                    else question.required_sources
+                    else candidate_dependencies(question.required_sources)
                 ),
             }
         )
@@ -3540,12 +3620,21 @@ def assemble_full_update(
     retained_claim_ids = {claim.id for claim in claims}
     retained_question_ids = {question.id for question in questions}
     retired_claims = tuple(
-        claim.model_copy(update={"standing": ClaimStanding.RETIRED})
+        claim.model_copy(
+            update={
+                "standing": ClaimStanding.RETIRED,
+                "required_sources": candidate_dependencies(claim.required_sources),
+            }
+        )
         for claim in baseline.current_state.claims
         if claim.id not in retained_claim_ids
     )
     retired_questions = tuple(
-        question
+        question.model_copy(
+            update={
+                "required_sources": candidate_dependencies(question.required_sources)
+            }
+        )
         for question in baseline.current_state.questions
         if question.id not in retained_question_ids
     )
@@ -3576,7 +3665,10 @@ def assemble_full_update(
                         "evidence_refs": tuple(
                             dict.fromkeys((*source.evidence_refs, *item.evidence_refs))
                         ),
-                        "required_sources": previous.required_sources,
+                        "required_sources": inherited_dependencies(
+                            previous.required_sources,
+                            source.required_sources,
+                        ),
                         "successor_question_id": item.successor_question_id,
                         "last_disposition": item.disposition,
                         "disposition_reason": item.reason,
@@ -3586,12 +3678,26 @@ def assemble_full_update(
         questions = (
             *disposed_questions,
             *(
-                item
+                item.model_copy(
+                    update={
+                        "required_sources": candidate_dependencies(
+                            item.required_sources
+                        )
+                    }
+                )
                 for item in candidate.current_state.questions
                 if item.id not in assigned_candidate_ids
             ),
             *(
-                candidate_questions_by_id[item.successor_question_id]
+                candidate_questions_by_id[item.successor_question_id].model_copy(
+                    update={
+                        "required_sources": candidate_dependencies(
+                            candidate_questions_by_id[
+                                item.successor_question_id
+                            ].required_sources
+                        )
+                    }
+                )
                 for item in question_disposition.dispositions
                 if item.successor_question_id is not None
             ),
@@ -3707,6 +3813,7 @@ def assemble_full_update(
                 item.domain
                 for item in candidate.coverage.domains
                 if item.requirement is CoverageRequirement.REQUIRED
+                and item.source is None
             )
         ),
     )
@@ -4038,6 +4145,13 @@ def assemble_full_update(
                                     and question_disposition.limitation_reason is not None
                                     else ()
                                 ),
+                                *(
+                                    (
+                                        "Legacy internal source dependencies were repaired.",
+                                    )
+                                    if dependency_compatibility_repaired
+                                    else ()
+                                ),
                             )
                         )
                     ),
@@ -4060,6 +4174,73 @@ def assemble_full_update(
         }
     )
     return ResearchRevisionDraft.model_validate(updated.model_dump(mode="python"))
+
+
+def _current_state_market_reference_levels(
+    levels: tuple[MarketReferenceLevel, ...],
+    *,
+    evidence: EvidenceBundle,
+) -> tuple[tuple[MarketReferenceLevel, ...], bool]:
+    """Keep audited Near-live levels in artifacts without moving the state cutoff."""
+
+    evidence_by_ref = {item.ref: item for item in evidence.items}
+    retained: list[MarketReferenceLevel] = []
+    omitted_near_live = False
+    for level in levels:
+        if level.as_of_date <= evidence.analysis_date:
+            retained.append(level)
+            continue
+        if level.temporal_basis is not NumericTemporalBasis.LIVE_SNAPSHOT:
+            retained.append(level)
+            continue
+        referenced = tuple(evidence_by_ref.get(ref) for ref in level.date_evidence_refs)
+        if not referenced or any(item is None for item in referenced):
+            retained.append(level)
+            continue
+        retrieval_dates: list[date] = []
+        admissible = True
+        for item in referenced:
+            assert item is not None
+            if (
+                item.quality is EvidenceQuality.UNAVAILABLE
+                or item.provenance.get("evidence_admission", {}).get("status") == "withheld"
+                or not item.origins
+                or any(
+                    origin.temporal_scope is not EvidenceTemporalScope.LIVE_ONLY
+                    for origin in item.origins
+                )
+            ):
+                admissible = False
+                break
+            for origin in item.origins:
+                decision = evaluate_evidence_admission(
+                    temporal_scope=origin.temporal_scope.value,
+                    analysis_date=evidence.analysis_date,
+                    instrument=evidence.instrument,
+                    retrieved_at=origin.retrieved_at,
+                    sealed_at=evidence.sealed_at,
+                    effective_dates=tuple(
+                        value
+                        for value in (item.effective_date, origin.effective_date)
+                        if value is not None
+                    ),
+                )
+                if not decision.admitted or origin.retrieved_at is None:
+                    admissible = False
+                    break
+                retrieved_at = datetime.fromisoformat(
+                    origin.retrieved_at.replace("Z", "+00:00")
+                )
+                retrieval_dates.append(
+                    retrieved_at.astimezone(market_timezone(evidence.instrument)).date()
+                )
+            if not admissible:
+                break
+        if not admissible or not retrieval_dates or max(retrieval_dates) != level.as_of_date:
+            retained.append(level)
+            continue
+        omitted_near_live = True
+    return tuple(retained), omitted_near_live
 
 
 def assemble_full_revision(
@@ -4087,6 +4268,13 @@ def assemble_full_revision(
             refs = tuple(ref for ref in candidate.evidence_refs if ref in allowed_refs)
             if not refs:
                 raise ValueError("Research Claims require explicit Evidence refs")
+            _external_sources, internal_sources = partition_source_dependencies(
+                candidate.required_sources
+            )
+            if internal_sources:
+                raise ValueError(
+                    "Research Claim required_sources contains an internal source reference"
+                )
             available_sources = {
                 source
                 for item in evidence.items
@@ -4205,6 +4393,13 @@ def assemble_full_revision(
     question_dependencies = {
         item.question: item.required_sources for item in decision.question_source_dependencies
     }
+    if any(
+        partition_source_dependencies(required_sources)[1]
+        for required_sources in question_dependencies.values()
+    ):
+        raise ValueError(
+            "Research Question required_sources contains an internal source reference"
+        )
     questions = tuple(
         ResearchQuestion(
             id=_new_question_id(),
@@ -4213,6 +4408,12 @@ def assemble_full_revision(
             required_sources=question_dependencies.get(question, ()),
         )
         for question in decision.unresolved_questions
+    )
+    state_market_reference_levels, omitted_near_live_reference = (
+        _current_state_market_reference_levels(
+            decision.market_reference_levels,
+            evidence=evidence,
+        )
     )
     state = CurrentResearchState(
         language=language,
@@ -4231,7 +4432,7 @@ def assemble_full_revision(
         risks=risks,
         catalysts=catalysts,
         invalidation_conditions=invalidations,
-        market_reference_levels=decision.market_reference_levels,
+        market_reference_levels=state_market_reference_levels,
         evidence_refs=evidence_refs,
     )
     source_records, source_watermarks = _source_metadata(evidence)
@@ -4242,7 +4443,11 @@ def assemble_full_revision(
         required_data_domains=request.analysts,
     )
     domains: list[ResearchDomainCoverage] = []
-    limitations: list[str] = []
+    limitations: list[str] = (
+        [_NEAR_LIVE_MARKET_REFERENCE_LIMITATION]
+        if omitted_near_live_reference
+        else []
+    )
     for analyst in request.analysts:
         report = reports.get(analyst)
         complete = bool(

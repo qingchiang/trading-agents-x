@@ -9,6 +9,7 @@ import pytest
 from tradingagents.application import anchor_readiness
 from tradingagents.application.anchor_readiness import (
     AnchorReadinessReason,
+    source_record_versions_digest,
     validate_japanese_anchor_readiness,
 )
 from tradingagents.application.contracts import AnalysisRequest
@@ -73,8 +74,18 @@ def test_regression_fixture_accepts_edinet_grouping_and_tdnet_pre_anchor_truncat
         "J-Quants adjusted OHLCV",
     }
     tdnet = next(item for item in result.source_frontiers if item.source == "TDnet")
+    edinet = next(item for item in result.source_frontiers if item.source == "EDINET")
     assert tdnet.status == "limited"
     assert tdnet.limitations == ("Requested interval was truncated by the TDnet rolling archive.",)
+    assert tdnet.limitation_kind == "archive_truncation"
+    assert tdnet.returned_records == 0
+    assert tdnet.reported_records == 0
+    assert tdnet.record_versions_digest == source_record_versions_digest(())
+    assert edinet.returned_records == 1
+    assert edinet.reported_records == 1
+    assert edinet.record_versions_digest == source_record_versions_digest(
+        ("edinet-doc-S100",)
+    )
     assert result.metrics.llm_calls == 0
     assert result.metrics.tool_calls == 2
     assert result.metrics.cost_usd is None

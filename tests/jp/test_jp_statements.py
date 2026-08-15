@@ -28,6 +28,37 @@ def _live():
 
 @pytest.mark.unit
 class JPStatementsTests(unittest.TestCase):
+    def test_official_statement_paths_forward_the_information_frontier(self):
+        frontier = "2026-08-10T23:59:00+09:00"
+        for statement_name in (
+            "get_balance_sheet",
+            "get_cashflow",
+            "get_income_statement",
+        ):
+            with self.subTest(statement=statement_name), mock.patch.object(
+                jp_statements,
+                "is_near_live",
+                return_value=False,
+            ), mock.patch.object(
+                jp_statements.jqf,
+                statement_name,
+                return_value="JQ-STATEMENT",
+            ) as jq:
+                statement = getattr(jp_statements, statement_name)
+                statement(
+                    "4568.T",
+                    "quarterly",
+                    "2026-08-10",
+                    information_frontier=frontier,
+                )
+
+                jq.assert_called_once_with(
+                    "4568.T",
+                    "quarterly",
+                    "2026-08-10",
+                    information_frontier=frontier,
+                )
+
     def test_income_appends_only_curated_yfinance_rows(self):
         # The official J-Quants summary leads; the detail block carries only the
         # curated complement rows that are present — not every row in the frame.
@@ -40,7 +71,7 @@ class JPStatementsTests(unittest.TestCase):
         self.assertTrue(strip_provenance_markers(out).startswith("JQ-INCOME"))
         self.assertEqual(
             {record.source for record in extract_provenance(out)},
-            {"J-Quants official summary", "yfinance curated detail"},
+            {"J-Quants fundamentals", "yfinance curated detail"},
         )
         self.assertIn("Line-item detail (yfinance, curated", out)
         self.assertIn("Gross Profit", out)

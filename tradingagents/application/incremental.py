@@ -32,6 +32,8 @@ from .research import (
     IncrementalEscalationReason,
     IncrementalGateResult,
     QuestionStatus,
+    ResearchClaim,
+    ResearchQuestion,
     ResearchRevision,
     ResearchRevisionDraft,
     SemanticChangeAssessment,
@@ -268,10 +270,14 @@ def run_deterministic_incremental_gate(
     return assess()
 
 
-def _semantic_evidence_summary(item: Any) -> dict[str, Any]:
+def _semantic_evidence_summary(
+    item: Any,
+    *,
+    max_content_chars: int = _MAX_SEMANTIC_EVIDENCE_TEXT,
+) -> dict[str, Any]:
     content = item.content
-    if content is not None and len(content) > _MAX_SEMANTIC_EVIDENCE_TEXT:
-        content = content[:_MAX_SEMANTIC_EVIDENCE_TEXT] + "..."
+    if content is not None and len(content) > max_content_chars:
+        content = content[:max_content_chars] + "..."
     return {
         "ref": item.ref,
         "source": item.source,
@@ -284,6 +290,67 @@ def _semantic_evidence_summary(item: Any) -> dict[str, Any]:
         "unit": item.unit,
         "quality": item.quality,
         "fallback": item.fallback,
+        "temporal_scopes": tuple(
+            sorted({origin.temporal_scope.value for origin in item.origins})
+        ),
+        "retrieved_at": tuple(
+            sorted(
+                {
+                    origin.retrieved_at
+                    for origin in item.origins
+                    if origin.retrieved_at is not None
+                }
+            )
+        ),
+    }
+
+
+def _semantic_current_claims(
+    baseline: ResearchRevisionDraft,
+) -> tuple[ResearchClaim, ...]:
+    return tuple(
+        claim
+        for claim in baseline.current_state.claims
+        if claim.standing is ClaimStanding.ACTIVE
+    )
+
+
+def _semantic_current_questions(
+    baseline: ResearchRevisionDraft,
+) -> tuple[ResearchQuestion, ...]:
+    return tuple(
+        question
+        for question in baseline.current_state.questions
+        if question.status in {QuestionStatus.OPEN, QuestionStatus.ANSWERED}
+    )
+
+
+def _semantic_current_state_summary(baseline: ResearchRevisionDraft) -> dict[str, Any]:
+    state = baseline.current_state
+    current_claims = _semantic_current_claims(baseline)
+    current_questions = _semantic_current_questions(baseline)
+    return {
+        "schema_version": state.schema_version,
+        "language": state.language,
+        "instrument": state.instrument,
+        "cutoff": state.cutoff,
+        "opinion": state.opinion.model_dump(mode="json", exclude={"evidence_refs"}),
+        "claims": tuple(
+            {
+                "id": claim.id,
+                "statement": claim.statement,
+                "confidence": claim.confidence,
+            }
+            for claim in current_claims
+        ),
+        "questions": tuple(
+            {
+                "id": question.id,
+                "question": question.question,
+                "status": question.status,
+            }
+            for question in current_questions
+        ),
     }
 
 
@@ -307,21 +374,6 @@ def _is_research_context(item: Any) -> bool:
     return bool(labels & markers)
 
 
-def _without_evidence_refs(value: Any, excluded_refs: set[str]) -> Any:
-    if isinstance(value, dict):
-        return {
-            key: (
-                [item for item in child if item not in excluded_refs]
-                if key == "evidence_refs" and isinstance(child, list)
-                else _without_evidence_refs(child, excluded_refs)
-            )
-            for key, child in value.items()
-        }
-    if isinstance(value, list):
-        return [_without_evidence_refs(item, excluded_refs) for item in value]
-    return value
-
-
 def _semantic_prompt(
     baseline: ResearchRevisionDraft,
     candidate: ResearchRevisionDraft,
@@ -329,16 +381,16 @@ def _semantic_prompt(
     new_refs = tuple(candidate.delta.new_evidence_refs)
     items = {item.ref: item for item in candidate.evidence_snapshot.bundle.items}
     new_evidence = tuple(items[ref] for ref in new_refs if ref in items)
+    current_claims = _semantic_current_claims(baseline)
+    current_questions = _semantic_current_questions(baseline)
     prior_refs = {
         ref
-        for claim in baseline.current_state.claims
-        if claim.standing is ClaimStanding.ACTIVE
+        for claim in current_claims
         for ref in claim.evidence_refs
     }
     prior_refs.update(
         ref
-        for question in baseline.current_state.questions
-        if question.status in {QuestionStatus.OPEN, QuestionStatus.ANSWERED}
+        for question in current_questions
         for ref in question.evidence_refs
     )
     prior_evidence = tuple(
@@ -346,72 +398,89 @@ def _semantic_prompt(
         for item in baseline.evidence_snapshot.bundle.items
         if item.ref in prior_refs and not _is_research_context(item)
     )
-    excluded_refs = {
-        item.ref for item in baseline.evidence_snapshot.bundle.items if _is_research_context(item)
-    }
     if (
         not new_evidence
         or len(new_evidence) > _MAX_SEMANTIC_EVIDENCE_ITEMS
         or len(prior_evidence) > _MAX_SEMANTIC_EVIDENCE_ITEMS
     ):
         raise ValueError("semantic assessment input is empty or exceeds its item bound")
-    payload = {
-        "current_research_state": _without_evidence_refs(
-            baseline.current_state.model_dump(mode="json"),
-            excluded_refs,
-        ),
-        "relevant_claim_ids": tuple(
-            claim.id
-            for claim in baseline.current_state.claims
-            if claim.standing is ClaimStanding.ACTIVE
-        ),
-        "relevant_question_ids": tuple(
-            question.id
-            for question in baseline.current_state.questions
-            if question.status in {QuestionStatus.OPEN, QuestionStatus.ANSWERED}
-        ),
-        "materiality_rules": (
-            "weakening, contradiction, answering, reopening, unresolved uncertainty, "
-            "potentially material novelty, and ordinal confidence changes require Full Analysis",
-            "only support or irrelevance with stable identities and confidence may preserve state",
-        ),
-        "coverage_rules": {
-            "supports_no_material_change": candidate.coverage.supports_no_material_change,
-            "domains": tuple(
-                {
-                    "domain": item.domain,
-                    "source": item.source,
-                    "requirement": item.requirement,
-                    "status": item.status,
-                    "limitations": item.limitations,
-                }
-                for item in candidate.coverage.domains
-            ),
-        },
-        "necessary_prior_evidence_summaries": tuple(
-            _semantic_evidence_summary(item) for item in prior_evidence
-        ),
-        "new_evidence": tuple(_semantic_evidence_summary(item) for item in new_evidence),
-        "output_language": baseline.current_state.language,
-    }
-    prompt = (
+    state_summary = _semantic_current_state_summary(baseline)
+    prefix = (
         "Assess how the new Evidence relates to the Current Research State. "
         "Return only the schema-constrained result. Application code resolves all persistent "
         "identities, so use only the supplied IDs and never create an ID. Human-readable "
-        "fields must use output_language.\n\nBOUNDED INPUT:\n"
-        + json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+        "fields must use output_language. Classify each new Evidence ref exactly once, with "
+        "one Evidence ref per relationship. Support, weakening, or contradiction must select "
+        "the single most directly affected Claim. Answering or reopening must select one "
+        "Question. Irrelevance, uncertainty, and potentially material novelty have no target; "
+        "use uncertainty when no single target is unambiguous.\n\nBOUNDED INPUT:\n"
     )
-    if len(prompt) > _MAX_SEMANTIC_PROMPT_CHARS:
-        raise ValueError("semantic assessment prompt exceeds its character bound")
-    return prompt, tuple(item.ref for item in new_evidence)
+    for new_content_chars, prior_content_chars in (
+        (_MAX_SEMANTIC_EVIDENCE_TEXT, _MAX_SEMANTIC_EVIDENCE_TEXT),
+        (_MAX_SEMANTIC_EVIDENCE_TEXT, 600),
+        (800, 400),
+        (600, 200),
+        (400, 100),
+    ):
+        payload = {
+            "current_research_state": state_summary,
+            "relevant_claim_ids": tuple(
+                claim.id for claim in current_claims
+            ),
+            "relevant_question_ids": tuple(
+                question.id for question in current_questions
+            ),
+            "materiality_rules": (
+                "weakening, contradiction, answering, reopening, unresolved uncertainty, "
+                "potentially material novelty, and ordinal confidence changes require Full Analysis",
+                "only support or irrelevance with stable identities and confidence may preserve state",
+            ),
+            "coverage_rules": {
+                "supports_no_material_change": candidate.coverage.supports_no_material_change,
+                "domains": tuple(
+                    {
+                        "domain": item.domain,
+                        "source": item.source,
+                        "requirement": item.requirement,
+                        "status": item.status,
+                        "limitations": item.limitations,
+                    }
+                    for item in candidate.coverage.domains
+                ),
+            },
+            "necessary_prior_evidence_summaries": tuple(
+                _semantic_evidence_summary(
+                    item,
+                    max_content_chars=prior_content_chars,
+                )
+                for item in prior_evidence
+            ),
+            "new_evidence": tuple(
+                _semantic_evidence_summary(
+                    item,
+                    max_content_chars=new_content_chars,
+                )
+                for item in new_evidence
+            ),
+            "output_language": baseline.current_state.language,
+        }
+        prompt = prefix + json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        )
+        if len(prompt) <= _MAX_SEMANTIC_PROMPT_CHARS:
+            return prompt, tuple(item.ref for item in new_evidence)
+    raise ValueError("semantic assessment prompt exceeds its character bound")
 
 
 def _semantic_escalation_reason(
     baseline: ResearchRevisionDraft,
     assessment: SemanticChangeAssessment,
 ) -> IncrementalEscalationReason | None:
-    claims = {item.id: item for item in baseline.current_state.claims}
-    questions = {item.id: item for item in baseline.current_state.questions}
+    claims = {item.id: item for item in _semantic_current_claims(baseline)}
+    questions = {item.id: item for item in _semantic_current_questions(baseline)}
     claim_relationships = {
         SemanticChangeRelationship.SUPPORT,
         SemanticChangeRelationship.WEAKENING,
@@ -516,36 +585,86 @@ def assess_semantic_update(
             }
         )
 
-    allowed_claim_ids = {item.id for item in baseline.current_state.claims}
-    allowed_question_ids = {item.id for item in baseline.current_state.questions}
+    current_claims = _semantic_current_claims(baseline)
+    current_questions = _semantic_current_questions(baseline)
+    allowed_claim_ids = {item.id for item in current_claims}
+    allowed_question_ids = {item.id for item in current_questions}
 
     def validate(value: SemanticChangeAssessment) -> SemanticChangeAssessment:
         if value.language != baseline.current_state.language:
             raise ValueError("semantic output language differs from Current Research State")
-        assessed_refs: set[str] = set()
+        assessed_ref_counts: dict[str, int] = {}
+        claim_relationships = {
+            SemanticChangeRelationship.SUPPORT,
+            SemanticChangeRelationship.WEAKENING,
+            SemanticChangeRelationship.CONTRADICTION,
+        }
+        question_relationships = {
+            SemanticChangeRelationship.ANSWERING,
+            SemanticChangeRelationship.REOPENING,
+        }
         for item in value.relationships:
+            if len(item.evidence_refs) != 1:
+                raise ValueError(
+                    "semantic relationship must classify exactly one Evidence item"
+                )
+            if len(item.suggested_claim_ids) + len(item.suggested_question_ids) > 1:
+                raise ValueError(
+                    "semantic relationship must identify at most one research object"
+                )
+            if item.relationship in claim_relationships and (
+                len(item.suggested_claim_ids) != 1 or item.suggested_question_ids
+            ):
+                raise ValueError(
+                    "claim relationship must identify exactly one supplied Claim"
+                )
+            if item.relationship in question_relationships and (
+                len(item.suggested_question_ids) != 1 or item.suggested_claim_ids
+            ):
+                raise ValueError(
+                    "question relationship must identify exactly one supplied Question"
+                )
+            if item.relationship not in claim_relationships | question_relationships and (
+                item.suggested_claim_ids
+                or item.suggested_question_ids
+                or item.suggested_claim_confidence is not None
+            ):
+                raise ValueError(
+                    "untargeted semantic relationship must not identify a research object"
+                )
             if not set(item.evidence_refs).issubset(new_refs):
                 raise ValueError("semantic relationship used Evidence outside bounded input")
-            assessed_refs.update(item.evidence_refs)
+            evidence_ref = item.evidence_refs[0]
+            assessed_ref_counts[evidence_ref] = assessed_ref_counts.get(evidence_ref, 0) + 1
             if not set(item.suggested_claim_ids).issubset(allowed_claim_ids):
                 # Unknown suggestions are handled as ambiguous identities after validation.
                 continue
             if not set(item.suggested_question_ids).issubset(allowed_question_ids):
                 continue
-        if assessed_refs != set(new_refs):
-            raise ValueError("semantic assessment must classify every new Evidence item")
+        if set(assessed_ref_counts) != set(new_refs) or any(
+            count != 1 for count in assessed_ref_counts.values()
+        ):
+            raise ValueError(
+                "semantic assessment must classify every new Evidence item exactly once"
+            )
         return value
 
+    example_relationship = (
+        {
+            "evidence_refs": (new_refs[0],),
+            "relationship": "support",
+            "suggested_claim_ids": (current_claims[0].id,),
+        }
+        if current_claims
+        else {
+            "evidence_refs": (new_refs[0],),
+            "relationship": "irrelevance",
+        }
+    )
     example = SemanticChangeAssessment(
         language=baseline.current_state.language,
         summary="The new Evidence supports an existing Claim without changing its confidence.",
-        relationships=(
-            {
-                "evidence_refs": (new_refs[0],),
-                "relationship": "support",
-                "suggested_claim_ids": (baseline.current_state.claims[0].id,),
-            },
-        ),
+        relationships=(example_relationship,),
     )
     runner = StructuredOutputRunner(
         llm=llm,
@@ -557,7 +676,10 @@ def assess_semantic_update(
         include_candidate_in_repair=True,
         candidate_only_repair=True,
         repair_instructions=(
-            "Use only supplied Claim, Question, and Evidence identifiers and preserve "
+            "Use only supplied Claim, Question, and Evidence identifiers. Assign at most one "
+            "Claim or Question to each relationship and return exactly one relationship for "
+            "each new Evidence item. If no single target is unambiguous, use uncertainty with "
+            "no target. Preserve "
             f"the output language {baseline.current_state.language}."
         ),
     )

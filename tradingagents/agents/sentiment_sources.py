@@ -90,12 +90,14 @@ def _source_input(
     records: tuple[ProvenanceRecord, ...],
     temporal_scope: Literal["point_in_time", "live_only"],
     applicable: bool,
+    dataset_id: str | None = None,
     structured_numeric_facts: tuple[StructuredNumericFact, ...] = (),
 ) -> tuple[SentimentSourceInput, PrefetchedEvidenceBlock]:
     block = prefetched_evidence_block(
         body,
         records,
         temporal_scope=temporal_scope,
+        dataset_id=dataset_id,
         structured_numeric_facts=structured_numeric_facts,
     )
     timing = " ".join(record.timing.casefold() for record in records)
@@ -228,6 +230,7 @@ def prepare_sentiment_sources(
         records: tuple[ProvenanceRecord, ...],
         temporal_scope: Literal["point_in_time", "live_only"],
         applicable: bool,
+        dataset_id: str | None = None,
         structured_numeric_facts: tuple[StructuredNumericFact, ...] = (),
     ) -> None:
         source, block = _source_input(
@@ -237,6 +240,7 @@ def prepare_sentiment_sources(
             records=records,
             temporal_scope=temporal_scope,
             applicable=applicable,
+            dataset_id=dataset_id,
             structured_numeric_facts=structured_numeric_facts,
         )
         sources.append(source)
@@ -313,6 +317,7 @@ def prepare_sentiment_sources(
                 "live_only" if spec.live_only else "point_in_time"
             ),
             applicable=not (spec.live_only and not live_run),
+            dataset_id=spec.dataset_id,
             structured_numeric_facts=result.structured_numeric_facts,
         )
 

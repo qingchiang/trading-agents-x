@@ -5,6 +5,7 @@ from langgraph.prebuilt import InjectedState
 
 from tradingagents.agents.utils.runtime import (
     AnalysisToolRuntime,
+    evidence_route_kwargs,
     tool_runtime_scope,
 )
 from tradingagents.dataflows.interface import route_to_vendor
@@ -46,5 +47,5 @@ def get_verified_market_snapshot_for_analysis(
             symbol,
             cutoff,
             look_back_days,
-            _provenance=True,
+            **evidence_route_kwargs(runtime),
         )

@@ -7,6 +7,14 @@ from datetime import date, datetime
 
 import pandas as pd
 
+from tradingagents.provenance import (
+    ProvenanceRecord,
+    SourceInterval,
+    SourceWatermark,
+    attach_provenance,
+    attach_source_watermarks,
+)
+
 from ..stockstats_utils import _assert_ohlcv_not_stale, _clean_dataframe
 from ..symbol_utils import NoMarketDataError
 from .jquants_common import from_jquants_code, memoized_fetch, to_jquants_code
@@ -127,7 +135,13 @@ def fetch_topix_closes(start_date: str, end_date: str) -> pd.DataFrame:
     return df
 
 
-def get_stock(symbol: str, start_date: str, end_date: str) -> str:
+def get_stock(
+    symbol: str,
+    start_date: str,
+    end_date: str,
+    *,
+    information_frontier: str | None = None,
+) -> str:
     """Return daily OHLCV for ``symbol`` over the range as a CSV string."""
     df = _fetch_ohlcv_frame(symbol, start_date, end_date)
     canonical = from_jquants_code(to_jquants_code(symbol))
@@ -141,6 +155,45 @@ def get_stock(symbol: str, start_date: str, end_date: str) -> str:
     header = (
         f"# Stock data for {label} from {start_date} to {end_date}\n"
         f"# Total records: {len(out)}\n"
-        f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
     )
-    return header + csv_string
+    adjustment = str(df.attrs.get("price_adjustment") or "unknown")
+    source = (
+        "J-Quants adjusted OHLCV"
+        if adjustment == "J-Quants adjusted OHLCV v2"
+        else "J-Quants mixed adjusted/raw OHLCV"
+    )
+    effective_start = out.iloc[0]["Date"].strftime("%Y-%m-%d")
+    effective_end = out.iloc[-1]["Date"].strftime("%Y-%m-%d")
+    header = attach_provenance(
+        header,
+        ProvenanceRecord(
+            evidence="get_stock_data",
+            source=source,
+            requested=f"{start_date} to {end_date}",
+            effective=f"{effective_start} to {effective_end}",
+            timing=(
+                "market-date filtered"
+                if source == "J-Quants adjusted OHLCV"
+                else "market-date filtered; adjusted fields incomplete"
+            ),
+        ),
+    )
+    if information_frontier is not None:
+        frontier = datetime.fromisoformat(information_frontier)
+        if frontier.utcoffset() is None:
+            raise ValueError("J-Quants Information Frontier requires a timezone")
+    header = attach_source_watermarks(
+        header,
+        SourceWatermark(
+            source=source,
+            scanned_start=effective_start,
+            scanned_end=end_date,
+            status="complete",
+            returned_records=0,
+            reported_records=0,
+            requested_interval=SourceInterval(start=start_date, end=end_date),
+            information_frontier=information_frontier,
+        ),
+    )
+    return header + "\n\n" + csv_string

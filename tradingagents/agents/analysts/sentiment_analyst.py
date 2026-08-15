@@ -121,7 +121,15 @@ def create_sentiment_analyst(llm):
             placeholder = "<unavailable: no coverage for this market>"
             stocktwits_block = placeholder
             reddit_block = placeholder
-            fetched_market_signals = fetch_sentiment_signals(ticker, end_date)
+            fetched_market_signals = fetch_sentiment_signals(
+                ticker,
+                end_date,
+                information_frontier=(
+                    information_frontier.isoformat()
+                    if information_frontier is not None
+                    else None
+                ),
+            )
         else:
             if live_run:
                 stocktwits_block = fetch_stocktwits_messages(
@@ -149,22 +157,34 @@ def create_sentiment_analyst(llm):
                 stocktwits_block = historical
                 reddit_block = historical
 
+        admission_sealed_at = datetime.now(timezone.utc)
         news_block, _ = filter_evidence_content_at_information_frontier(
             news_block,
             information_frontier,
             fallback_source="routed ticker news",
+            analysis_date=datetime.fromisoformat(end_date).date(),
+            instrument=ticker,
+            sealed_at=admission_sealed_at,
         )
         stocktwits_block, _ = filter_evidence_content_at_information_frontier(
             stocktwits_block,
             information_frontier,
             fallback_source="StockTwits",
             temporal_scope="live_only" if live_run else "point_in_time",
+            analysis_date=datetime.fromisoformat(end_date).date(),
+            instrument=ticker,
+            retrieved_at=stocktwits_retrieved_at,
+            sealed_at=admission_sealed_at,
         )
         reddit_block, _ = filter_evidence_content_at_information_frontier(
             reddit_block,
             information_frontier,
             fallback_source="Reddit public feeds",
             temporal_scope="live_only" if live_run else "point_in_time",
+            analysis_date=datetime.fromisoformat(end_date).date(),
+            instrument=ticker,
+            retrieved_at=reddit_retrieved_at,
+            sealed_at=admission_sealed_at,
         )
         fetched_market_signals = tuple(
             FetchedSentimentSignal(
@@ -176,6 +196,10 @@ def create_sentiment_analyst(llm):
                     temporal_scope=(
                         "live_only" if result.spec.live_only else "point_in_time"
                     ),
+                    analysis_date=datetime.fromisoformat(end_date).date(),
+                    instrument=ticker,
+                    retrieved_at=result.retrieved_at,
+                    sealed_at=admission_sealed_at,
                 )[0],
                 retrieved_at=result.retrieved_at,
                 structured_numeric_facts=result.structured_numeric_facts,

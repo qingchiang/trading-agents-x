@@ -10,6 +10,12 @@ from langgraph.checkpoint.memory import MemorySaver
 
 import tradingagents.graph.research_graph as research_graph_module
 from tests.factories import analyst_report, research_decision
+from tradingagents.application.anchor_readiness import (
+    AnchorReadinessResult,
+    AnchorReadinessSourceFrontier,
+    source_record_versions_digest,
+    validate_japanese_anchor_readiness,
+)
 from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalystClaimType,
@@ -18,10 +24,10 @@ from tradingagents.application.contracts import (
     DebateImportance,
     DebateIssue,
     DecisionBrief,
+    EvidenceBundle,
     EvidenceItem,
     EvidenceQuality,
     IssueDisposition,
-    KeyClaim,
     MemoryContext,
     MemoryOutcome,
     MemoryRecord,
@@ -30,11 +36,23 @@ from tradingagents.application.contracts import (
     ResearchWarning,
     RiskReviewAdjustment,
     RiskReviewDisposition,
+    RunMetrics,
     RunProfile,
 )
+from tradingagents.application.market_readiness import MarketDataReadiness
 from tradingagents.application.metrics import MetricsCallback
+from tradingagents.application.research import (
+    CapabilityAttestation,
+    CoverageRequirement,
+    MarketResearchCapability,
+    assemble_full_revision,
+    bind_information_frontier,
+    derive_forward_research_anchor,
+    evaluate_next_update_policy,
+)
 from tradingagents.application.runtime import RunContext
-from tradingagents.graph.analyst_synthesis import AnalystAuditDraft
+from tradingagents.application.source_dependencies import is_internal_source_reference
+from tradingagents.graph.analyst_synthesis import AnalystAuditDraft, AuditKeyClaimDraft
 from tradingagents.graph.deliberation import (
     DecisionNumericDraft,
     JudgeAudit,
@@ -42,6 +60,7 @@ from tradingagents.graph.deliberation import (
     ResearchDecisionCoreEnvelope,
 )
 from tradingagents.graph.research_graph import (
+    GraphVisibleRequiredEvidenceError,
     ResearchGraph,
     _evidence_from_record,
     _evidence_warnings,
@@ -49,12 +68,14 @@ from tradingagents.graph.research_graph import (
 )
 from tradingagents.provenance import (
     ProvenanceRecord,
+    SourceInterval,
     SourceObservation,
     SourceWatermark,
     attach_evidence_span,
     attach_provenance,
     attach_source_observations,
     attach_source_watermarks,
+    extract_evidence_spans,
     extract_source_watermarks,
 )
 
@@ -200,6 +221,328 @@ def test_tool_output_checks_live_only_metadata_even_with_attested_records() -> N
     assert filtered["messages"][0].content.startswith("Evidence omitted")
 
 
+def test_tool_output_admits_safe_pit_and_near_live_spans_independently() -> None:
+    frontier = datetime(
+        2026,
+        8,
+        10,
+        23,
+        59,
+        tzinfo=timezone(timedelta(hours=9)),
+    )
+    pit = attach_evidence_span(
+        attach_provenance(
+            "PIT DISCLOSURE BODY",
+            ProvenanceRecord(
+                evidence="filing",
+                source="EDINET",
+                requested="2026-08-10",
+                effective="2026-08-10",
+                timing="disclosure-date filtered",
+                retrieved_at="2026-08-10T17:00:00+09:00",
+            ),
+        ),
+        temporal_scope="point_in_time",
+    )
+    near_live = attach_evidence_span(
+        attach_provenance(
+            "NEAR-LIVE HEADLINE BODY",
+            ProvenanceRecord(
+                evidence="ticker news",
+                source="Google News",
+                requested="2026-08-10",
+                effective="published through 2026-08-10",
+                timing="live non-point-in-time; publication-date filtered",
+                retrieved_at="2026-08-14T00:20:00+09:00",
+            ),
+        ),
+        temporal_scope="live_only",
+    )
+
+    filtered = _filter_tool_output_at_information_frontier(
+        {
+            "messages": [
+                ToolMessage(
+                    content=f"{pit}\n{near_live}",
+                    tool_call_id="call-source-spans",
+                    name="get_news",
+                )
+            ]
+        },
+        frontier,
+        analysis_date=date(2026, 8, 10),
+        instrument="4568.T",
+        sealed_at=datetime(2026, 8, 14, 0, 21, tzinfo=timezone(timedelta(hours=9))),
+    )
+
+    content = filtered["messages"][0].content
+    assert "PIT DISCLOSURE BODY" in content
+    assert "NEAR-LIVE HEADLINE BODY" in content
+    assert len(extract_evidence_spans(content)) == 2
+    assert filtered["messages"][0].additional_kwargs[
+        "evidence_admission_sealed_at"
+    ] == "2026-08-14T00:21:00+09:00"
+
+
+def test_tool_output_withholds_only_ineligible_live_span_body() -> None:
+    frontier = datetime(
+        2026,
+        8,
+        10,
+        23,
+        59,
+        tzinfo=timezone(timedelta(hours=9)),
+    )
+    pit = attach_evidence_span(
+        attach_provenance(
+            "PIT SIBLING BODY",
+            ProvenanceRecord(
+                evidence="filing",
+                source="EDINET",
+                requested="2026-08-10",
+                effective="2026-08-09",
+                timing="disclosure-date filtered",
+            ),
+        ),
+        temporal_scope="point_in_time",
+    )
+    stale_live = attach_evidence_span(
+        attach_provenance(
+            "STALE LIVE BODY",
+            ProvenanceRecord(
+                evidence="ticker news",
+                source="Google News",
+                requested="2026-08-10",
+                effective="published through 2026-08-10",
+                timing="live non-point-in-time; publication-date filtered",
+                retrieved_at="2026-08-16T00:20:00+09:00",
+            ),
+        ),
+        temporal_scope="live_only",
+    )
+
+    filtered = _filter_tool_output_at_information_frontier(
+        {
+            "messages": [
+                ToolMessage(
+                    content=f"{pit}\n{stale_live}",
+                    tool_call_id="call-stale-span",
+                    name="get_news",
+                )
+            ]
+        },
+        frontier,
+        analysis_date=date(2026, 8, 10),
+        instrument="4568.T",
+        sealed_at=datetime(2026, 8, 16, 0, 21, tzinfo=timezone(timedelta(hours=9))),
+    )
+
+    content = filtered["messages"][0].content
+    assert "PIT SIBLING BODY" in content
+    assert "STALE LIVE BODY" not in content
+    watermarks = extract_source_watermarks(content)
+    assert any(item.source == "Google News" for item in watermarks)
+    assert all(item.status == "unavailable" for item in watermarks)
+    assert all(item.temporal_scope == "live_only" for item in watermarks)
+    assert all(item.limitation_kind == "live_only" for item in watermarks)
+
+
+def test_near_live_exception_does_not_admit_post_cutoff_pit_span() -> None:
+    frontier = datetime(
+        2026,
+        8,
+        14,
+        0,
+        20,
+        tzinfo=timezone(timedelta(hours=9)),
+    )
+    post_cutoff = attach_evidence_span(
+        attach_provenance(
+            "POST-CUTOFF PIT BODY",
+            ProvenanceRecord(
+                evidence="market data",
+                source="J-Quants",
+                requested="2026-08-10",
+                effective="2026-08-12",
+                timing="trade-date filtered",
+                retrieved_at="2026-08-13T18:00:00+09:00",
+            ),
+        ),
+        temporal_scope="point_in_time",
+    )
+
+    filtered = _filter_tool_output_at_information_frontier(
+        {
+            "messages": [
+                ToolMessage(
+                    content=post_cutoff,
+                    tool_call_id="call-post-cutoff-pit",
+                    name="get_stock_data",
+                )
+            ]
+        },
+        frontier,
+        analysis_date=date(2026, 8, 10),
+        instrument="4568.T",
+    )
+
+    assert "POST-CUTOFF PIT BODY" not in filtered["messages"][0].content
+
+
+def test_tool_output_rejects_live_span_retrieved_after_preseal_bound() -> None:
+    frontier = datetime(2026, 8, 10, 23, 59, tzinfo=timezone.utc)
+    live = attach_evidence_span(
+        attach_provenance(
+            "FUTURE RETRIEVAL BODY",
+            ProvenanceRecord(
+                evidence="ticker news",
+                source="Google News",
+                requested="2026-08-10",
+                effective="published through 2026-08-10",
+                timing="live non-point-in-time; publication-date filtered",
+                retrieved_at="2026-08-14T00:21:00+09:00",
+            ),
+        ),
+        temporal_scope="live_only",
+    )
+
+    filtered = _filter_tool_output_at_information_frontier(
+        {
+            "messages": [
+                ToolMessage(
+                    content=live,
+                    tool_call_id="call-future-retrieval",
+                    name="get_news",
+                )
+            ]
+        },
+        frontier,
+        analysis_date=date(2026, 8, 10),
+        instrument="4568.T",
+        sealed_at=datetime(2026, 8, 14, 0, 20, tzinfo=timezone(timedelta(hours=9))),
+    )
+
+    assert "FUTURE RETRIEVAL BODY" not in filtered["messages"][0].content
+
+
+def test_tool_output_reuses_checkpointed_preseal_bound_on_replay() -> None:
+    frontier = datetime(2026, 8, 10, 23, 59, tzinfo=timezone.utc)
+    live = attach_evidence_span(
+        attach_provenance(
+            "REPLAY MUST NOT ADMIT THIS BODY",
+            ProvenanceRecord(
+                evidence="ticker news",
+                source="Google News",
+                requested="2026-08-10",
+                effective="published through 2026-08-10",
+                timing="live non-point-in-time; publication-date filtered",
+                retrieved_at="2026-08-14T00:21:00+09:00",
+            ),
+        ),
+        temporal_scope="live_only",
+    )
+    message = ToolMessage(
+        content=live,
+        tool_call_id="call-replayed-bound",
+        name="get_news",
+        additional_kwargs={
+            "evidence_admission_sealed_at": "2026-08-14T00:20:00+09:00"
+        },
+    )
+
+    filtered = _filter_tool_output_at_information_frontier(
+        {"messages": [message]},
+        frontier,
+        analysis_date=date(2026, 8, 10),
+        instrument="4568.T",
+    )
+
+    assert "REPLAY MUST NOT ADMIT THIS BODY" not in filtered["messages"][0].content
+    assert filtered["messages"][0].additional_kwargs == message.additional_kwargs
+
+
+def test_tool_output_fails_closed_for_unsegmented_mixed_temporal_records() -> None:
+    frontier = datetime(2026, 8, 10, 23, 59, tzinfo=timezone.utc)
+    mixed = attach_provenance(
+        "UNSEGMENTED MIXED BODY",
+        ProvenanceRecord(
+            evidence="filing",
+            source="EDINET",
+            requested="2026-08-10",
+            effective="2026-08-10",
+            timing="disclosure-date filtered",
+            retrieved_at="2026-08-10T12:00:00+09:00",
+        ),
+        ProvenanceRecord(
+            evidence="ticker news",
+            source="Google News",
+            requested="2026-08-10",
+            effective="published through 2026-08-10",
+            timing="live non-point-in-time; publication-date filtered",
+            retrieved_at="2026-08-14T00:19:00+09:00",
+        ),
+    )
+
+    filtered = _filter_tool_output_at_information_frontier(
+        {
+            "messages": [
+                ToolMessage(
+                    content=mixed,
+                    tool_call_id="call-mixed-unsegmented",
+                    name="get_news",
+                )
+            ]
+        },
+        frontier,
+        analysis_date=date(2026, 8, 10),
+        instrument="4568.T",
+        sealed_at=datetime(2026, 8, 14, 0, 20, tzinfo=timezone(timedelta(hours=9))),
+    )
+
+    assert "UNSEGMENTED MIXED BODY" not in filtered["messages"][0].content
+
+
+def test_tool_output_fails_closed_for_unsegmented_live_and_unknown_records() -> None:
+    frontier = datetime(2026, 8, 10, 23, 59, tzinfo=timezone.utc)
+    mixed = attach_provenance(
+        "LIVE PLUS UNKNOWN BODY",
+        ProvenanceRecord(
+            evidence="ticker news",
+            source="Google News",
+            requested="2026-08-10",
+            effective="published through 2026-08-10",
+            timing="live non-point-in-time; publication-date filtered",
+            retrieved_at="2026-08-14T00:19:00+09:00",
+        ),
+        ProvenanceRecord(
+            evidence="opaque overlay",
+            source="unknown adapter",
+            requested="2026-08-10",
+            effective="2026-08-10",
+            timing="opaque temporal semantics",
+            retrieved_at="2026-08-14T00:19:00+09:00",
+        ),
+    )
+
+    filtered = _filter_tool_output_at_information_frontier(
+        {
+            "messages": [
+                ToolMessage(
+                    content=mixed,
+                    tool_call_id="call-live-unknown",
+                    name="get_news",
+                )
+            ]
+        },
+        frontier,
+        analysis_date=date(2026, 8, 10),
+        instrument="4568.T",
+        sealed_at=datetime(2026, 8, 14, 0, 20, tzinfo=timezone(timedelta(hours=9))),
+    )
+
+    assert "LIVE PLUS UNKNOWN BODY" not in filtered["messages"][0].content
+
+
 def test_tool_output_checks_each_same_day_channel_independently() -> None:
     frontier = datetime(
         2026,
@@ -255,6 +598,131 @@ def test_tool_output_checks_each_same_day_channel_independently() -> None:
     assert filtered["messages"][0].artifact is None
 
 
+@pytest.mark.parametrize(
+    ("instrument", "source"),
+    [
+        ("4568.T", "J-Quants adjusted OHLCV"),
+        ("NVDA", "yfinance"),
+        ("600519.SS", "AKShare"),
+    ],
+)
+def test_cutoff_date_pit_market_artifact_survives_graph_admission(
+    instrument: str,
+    source: str,
+) -> None:
+    frontier = datetime(2026, 8, 10, 23, 59, tzinfo=timezone.utc)
+    artifact = {
+        "schema_version": "1",
+        "kind": "source",
+        "dataset_id": "ds_cutoffmarket",
+        "evidence_type": "get_stock_data",
+        "source_content": (
+            "# Data retrieved on: 2026-08-14 00:20:00\n"
+            "Date,Open,High,Low,Close,Volume\n"
+            "2026-08-09,99,101,98,100,1000\n"
+            "2026-08-10,100,102,99,101,1200"
+        ),
+        "provenance": [
+            {
+                "evidence": "get_stock_data",
+                "source": source,
+                "requested": "2026-08-09 to 2026-08-10",
+                "effective": "2026-08-09 to 2026-08-10",
+                "timing": "market-date filtered; rows after cutoff excluded",
+                "retrieved_at": None,
+            }
+        ],
+        "temporal_scope": "point_in_time",
+        "analytical_views": {"row_count": 2, "effective_end": "2026-08-10"},
+    }
+    message = ToolMessage(
+        content="MODEL-SAFE MARKET OVERVIEW",
+        artifact=artifact,
+        tool_call_id="call-cutoff-market",
+        name="get_stock_data",
+    )
+
+    filtered = _filter_tool_output_at_information_frontier(
+        {"messages": [message]},
+        frontier,
+        analysis_date=date(2026, 8, 10),
+        instrument=instrument,
+    )
+
+    assert filtered["messages"][0].content == "MODEL-SAFE MARKET OVERVIEW"
+    assert filtered["messages"][0].artifact == artifact
+
+
+@pytest.mark.parametrize(
+    ("temporal_scope", "effective", "timing", "source_content"),
+    [
+        (
+            "point_in_time",
+            "2026-08-11",
+            "market-date filtered",
+            "Date,Close\n2026-08-10,101",
+        ),
+        ("unknown", "2026-08-10", "unknown", "Date,Close\n2026-08-10,101"),
+        (
+            "point_in_time",
+            "unknown",
+            "market-date filtered",
+            "Date,Close\n2026-08-10,101",
+        ),
+        (
+            "point_in_time",
+            "2026-08-10",
+            "market-date filtered",
+            "Date,Close\n2026-08-11,102",
+        ),
+    ],
+)
+def test_market_artifact_fails_closed_for_unsafe_temporal_metadata(
+    temporal_scope: str,
+    effective: str,
+    timing: str,
+    source_content: str,
+) -> None:
+    artifact = {
+        "schema_version": "1",
+        "kind": "source",
+        "dataset_id": "ds_unsafemarket",
+        "evidence_type": "get_stock_data",
+        "source_content": source_content,
+        "provenance": [
+            {
+                "evidence": "get_stock_data",
+                "source": "fixture",
+                "requested": "2026-08-10",
+                "effective": effective,
+                "timing": timing,
+                "retrieved_at": None,
+            }
+        ],
+        "temporal_scope": temporal_scope,
+        "analytical_views": {"row_count": 1},
+    }
+
+    filtered = _filter_tool_output_at_information_frontier(
+        {
+            "messages": [
+                ToolMessage(
+                    content="UNSAFE MARKET OVERVIEW",
+                    artifact=artifact,
+                    tool_call_id="call-unsafe-market",
+                    name="get_stock_data",
+                )
+            ]
+        },
+        datetime(2026, 8, 10, 23, 59, tzinfo=timezone.utc),
+        analysis_date=date(2026, 8, 10),
+        instrument="4568.T",
+    )
+
+    assert filtered["messages"][0].artifact is None
+    assert "UNSAFE MARKET OVERVIEW" not in filtered["messages"][0].content
+
+
 def test_tool_output_retains_same_source_precisely_attested_before_frontier() -> None:
     frontier = datetime(
         2026,
@@ -297,6 +765,364 @@ def test_tool_output_retains_same_source_precisely_attested_before_frontier() ->
     )
 
     assert filtered["messages"][0].content == content
+
+
+def test_tool_output_uses_same_source_closure_to_attest_plain_provenance() -> None:
+    frontier = datetime(
+        2026,
+        8,
+        10,
+        23,
+        59,
+        tzinfo=timezone(timedelta(hours=9)),
+    )
+    source = "J-Quants adjusted OHLCV"
+    content = attach_provenance(
+        "Verified current-cutoff market snapshot.",
+        ProvenanceRecord(
+            evidence="get_verified_market_snapshot",
+            source=source,
+            requested="2026-08-10",
+            effective="2026-08-10",
+            timing="market-date filtered",
+        ),
+    )
+    content = attach_source_observations(
+        content,
+        SourceObservation(
+            source=source,
+            record_id="jquants-market:4568.T",
+            version_id="jquants-market:fixture",
+            status="published",
+            published_at="2026-08-10",
+            available_at=frontier.isoformat(),
+            availability_basis=(
+                "observed in successful bounded collection at Information Frontier"
+            ),
+            title="Adjusted market history through 2026-08-10",
+            record_kind="market",
+        ),
+    )
+    content = attach_source_watermarks(
+        content,
+        SourceWatermark(
+            source=source,
+            scanned_start="2025-07-07",
+            scanned_end="2026-08-10",
+            status="complete",
+            returned_records=220,
+            information_frontier=frontier.isoformat(),
+        ),
+    )
+
+    filtered = _filter_tool_output_at_information_frontier(
+        {
+            "messages": [
+                ToolMessage(
+                    content=content,
+                    tool_call_id="call-verified-snapshot",
+                    name="get_verified_market_snapshot",
+                )
+            ]
+        },
+        frontier,
+        analysis_date=date(2026, 8, 10),
+        instrument="4568.T",
+    )
+
+    assert filtered["messages"][0].content == content
+
+
+def test_tool_output_retains_plain_complete_empty_scan_at_frozen_frontier() -> None:
+    frontier = datetime(
+        2026,
+        8,
+        10,
+        23,
+        59,
+        tzinfo=timezone(timedelta(hours=9)),
+    )
+    content = attach_source_watermarks(
+        "No EDINET records were found in the bounded interval.",
+        SourceWatermark(
+            source="EDINET",
+            scanned_start="2026-08-10",
+            scanned_end="2026-08-10",
+            status="complete",
+            returned_records=0,
+            reported_records=0,
+            information_frontier=frontier.isoformat(),
+        ),
+    )
+
+    filtered = _filter_tool_output_at_information_frontier(
+        {
+            "messages": [
+                ToolMessage(
+                    content=content,
+                    tool_call_id="call-empty-edinet",
+                    name="get_news",
+                )
+            ]
+        },
+        frontier,
+        analysis_date=date(2026, 8, 10),
+        instrument="4568.T",
+    )
+
+    assert filtered["messages"][0].content == content
+
+
+def test_tool_output_rejects_provenance_beyond_same_source_closure() -> None:
+    frontier = datetime(
+        2026,
+        8,
+        10,
+        23,
+        59,
+        tzinfo=timezone(timedelta(hours=9)),
+    )
+    source = "J-Quants adjusted OHLCV"
+    content = attach_provenance(
+        "Market data beyond the attested source horizon.",
+        ProvenanceRecord(
+            evidence="get_verified_market_snapshot",
+            source=source,
+            requested="2026-08-10",
+            effective="2026-08-10",
+            timing="market-date filtered",
+        ),
+    )
+    content = attach_source_watermarks(
+        content,
+        SourceWatermark(
+            source=source,
+            scanned_start="2025-07-07",
+            scanned_end="2026-08-09",
+            status="complete",
+            returned_records=219,
+            information_frontier="2026-08-09T23:59:00+09:00",
+        ),
+    )
+
+    filtered = _filter_tool_output_at_information_frontier(
+        {
+            "messages": [
+                ToolMessage(
+                    content=content,
+                    tool_call_id="call-stale-market-closure",
+                    name="get_verified_market_snapshot",
+                )
+            ]
+        },
+        frontier,
+        analysis_date=date(2026, 8, 10),
+        instrument="4568.T",
+    )
+
+    assert "Market data beyond" not in filtered["messages"][0].content
+
+
+@pytest.mark.parametrize(
+    ("effective", "status", "limitation_kind"),
+    [
+        ("2026-07-07", "complete", None),
+        ("2026-08-10", "complete", None),
+        ("2026-08-10", "limited", "archive_truncation"),
+        ("2026-08-10", "limited", "partial"),
+    ],
+)
+def test_same_source_watermark_attests_effective_dates_inside_scanned_interval(
+    effective: str,
+    status: str,
+    limitation_kind: str | None,
+) -> None:
+    frontier = datetime(2026, 8, 10, 23, 59, tzinfo=timezone.utc)
+    source = "bounded source"
+    content = attach_provenance(
+        "Evidence inside the attested interval.",
+        ProvenanceRecord(
+            evidence="bounded fixture",
+            source=source,
+            requested="2026-07-07 to 2026-08-10",
+            effective=effective,
+            timing="publication-date filtered",
+        ),
+    )
+    content = attach_source_watermarks(
+        content,
+        SourceWatermark(
+            source=source,
+            scanned_start="2026-07-07",
+            scanned_end="2026-08-10",
+            status=status,
+            limitation_kind=limitation_kind,
+            information_frontier=frontier.isoformat(),
+        ),
+    )
+
+    filtered = _filter_tool_output_at_information_frontier(
+        {
+            "messages": [
+                ToolMessage(
+                    content=content,
+                    tool_call_id="call-bounded-source",
+                    name="get_news",
+                )
+            ]
+        },
+        frontier,
+        analysis_date=date(2026, 8, 10),
+        instrument="4568.T",
+    )
+
+    filtered_content = filtered["messages"][0].content
+    assert "Evidence inside" in filtered_content
+    retained = extract_source_watermarks(filtered_content)[0]
+    assert retained.status == status
+    assert retained.limitation_kind == limitation_kind
+
+
+@pytest.mark.parametrize(
+    "effective",
+    [
+        "2026-07-06",
+        "2026-08-11",
+        "2026-07-06 to 2026-07-08",
+    ],
+)
+@pytest.mark.parametrize("with_observation", [False, True])
+def test_same_source_watermark_rejects_effective_dates_outside_scanned_interval(
+    effective: str,
+    with_observation: bool,
+) -> None:
+    frontier = datetime(2026, 8, 10, 23, 59, tzinfo=timezone.utc)
+    source = "bounded source"
+    content = attach_provenance(
+        "Evidence outside the attested interval.",
+        ProvenanceRecord(
+            evidence="bounded fixture",
+            source=source,
+            requested="2026-07-07 to 2026-08-10",
+            effective=effective,
+            timing="publication-date filtered",
+        ),
+    )
+    content = attach_source_watermarks(
+        content,
+        SourceWatermark(
+            source=source,
+            scanned_start="2026-07-07",
+            scanned_end="2026-08-10",
+            status="complete",
+            information_frontier=frontier.isoformat(),
+        ),
+    )
+    if with_observation:
+        content = attach_source_observations(
+            content,
+            SourceObservation(
+                source=source,
+                record_id="bounded-record",
+                version_id="bounded-record:v1",
+                status="published",
+                published_at="2026-08-10",
+                available_at=frontier.isoformat(),
+                title="Bounded record",
+            ),
+        )
+
+    filtered = _filter_tool_output_at_information_frontier(
+        {
+            "messages": [
+                ToolMessage(
+                    content=content,
+                    tool_call_id="call-outside-source",
+                    name="get_news",
+                )
+            ]
+        },
+        frontier,
+        analysis_date=date(2026, 8, 10),
+        instrument="4568.T",
+    )
+
+    assert "Evidence outside" not in filtered["messages"][0].content
+
+
+def test_tool_output_retains_tdnet_body_with_limited_frontier_closure() -> None:
+    frontier = datetime(
+        2026,
+        8,
+        10,
+        23,
+        59,
+        tzinfo=timezone(timedelta(hours=9)),
+    )
+    content = attach_provenance(
+        "TDnet disclosure inside the scanned rolling archive.",
+        ProvenanceRecord(
+            evidence="get_news",
+            source="TDnet",
+            requested="2026-07-01 to 2026-08-10",
+            effective="2026-07-11 to 2026-08-10",
+            timing="publication-date filtered",
+        ),
+    )
+    content = attach_source_observations(
+        content,
+        SourceObservation(
+            source="TDnet",
+            record_id="140120260808000001",
+            version_id="tdnet:fixture",
+            status="published",
+            published_at="2026-08-08 15:00",
+            available_at="2026-08-08T15:00:00+09:00",
+            title="決算短信",
+        ),
+    )
+    content = attach_source_watermarks(
+        content,
+        SourceWatermark(
+            source="TDnet",
+            scanned_start="2026-07-11",
+            scanned_end="2026-08-10",
+            status="limited",
+            limitations=(
+                "Requested interval was truncated by the TDnet rolling archive.",
+            ),
+            returned_records=1,
+            reported_records=1,
+            requested_interval=SourceInterval(
+                start="2026-07-01",
+                end="2026-08-10",
+            ),
+            limitation_kind="archive_truncation",
+            information_frontier=frontier.isoformat(),
+        ),
+    )
+    content = attach_evidence_span(content, temporal_scope="point_in_time")
+
+    filtered = _filter_tool_output_at_information_frontier(
+        {
+            "messages": [
+                ToolMessage(
+                    content=content,
+                    tool_call_id="call-limited-tdnet",
+                    name="get_news",
+                )
+            ]
+        },
+        frontier,
+        analysis_date=date(2026, 8, 10),
+        instrument="4568.T",
+    )
+
+    filtered_content = filtered["messages"][0].content
+    assert "TDnet disclosure" in filtered_content
+    watermark = extract_source_watermarks(filtered_content)[0]
+    assert watermark.status == "limited"
+    assert watermark.limitation_kind == "archive_truncation"
 
 
 @pytest.mark.parametrize("as_span", [False, True])
@@ -477,7 +1303,7 @@ class _StructuredInvoker:
             parsed = AnalystAuditDraft(
                 confidence=0.6,
                 key_claims=(
-                    KeyClaim(
+                    AuditKeyClaimDraft(
                         id=f"{analyst}.claim_1",
                         section_id=section_id,
                         kind=AnalystClaimType.INFERENCE,
@@ -632,6 +1458,499 @@ class _AnalystSubgraph:
         }
 
 
+class _RequiredEvidenceSubgraph(_AnalystSubgraph):
+    def invoke(self, state, **kwargs):
+        result = super().invoke(state, **kwargs)
+        frontier = "2026-08-10T23:59:00+09:00"
+        if self.analyst == "news":
+            spans = []
+            for source in ("EDINET", "TDnet"):
+                payload = attach_provenance(
+                    "",
+                    ProvenanceRecord(
+                        evidence="get_news",
+                        source=source,
+                        requested="2026-07-12 to 2026-08-10",
+                        effective="2026-07-12 to 2026-08-10",
+                        timing="available; no relevant items in window",
+                    ),
+                )
+                payload = attach_source_watermarks(
+                    payload,
+                    SourceWatermark(
+                        source=source,
+                        scanned_start="2026-07-12",
+                        scanned_end="2026-08-10",
+                        status="complete",
+                        returned_records=0,
+                        reported_records=0,
+                        requested_interval=SourceInterval(
+                            start="2026-07-12",
+                            end="2026-08-10",
+                        ),
+                        information_frontier=frontier,
+                    ),
+                )
+                spans.append(
+                    attach_evidence_span(payload, temporal_scope="point_in_time")
+                )
+            message = ToolMessage(
+                content="\n".join(spans),
+                tool_call_id="required-news",
+                name="get_news",
+            )
+        elif self.analyst == "market":
+            message = ToolMessage(
+                content="Market artifact is available.",
+                tool_call_id="required-market",
+                name="get_stock_data",
+                artifact={
+                    "schema_version": "1",
+                    "kind": "source",
+                    "dataset_id": "ds_requiredmarket",
+                    "evidence_type": "get_stock_data",
+                    "source_content": (
+                        "Date,Open,High,Low,Close,Volume\n"
+                        "2026-08-10,100,102,99,101,1200"
+                    ),
+                    "provenance": [
+                        {
+                            "evidence": "get_stock_data",
+                            "source": "J-Quants adjusted OHLCV",
+                            "requested": "2026-08-10 to 2026-08-10",
+                            "effective": "2026-08-10",
+                            "timing": "market-date filtered",
+                            "retrieved_at": None,
+                        }
+                    ],
+                    "temporal_scope": "point_in_time",
+                    "analytical_views": {
+                        "row_count": 1,
+                        "effective_end": "2026-08-10",
+                    },
+                },
+            )
+        elif self.analyst == "fundamentals":
+            pit = attach_source_watermarks(
+                attach_source_observations(
+                    attach_provenance(
+                        "J-Quants disclosed fundamentals.",
+                        ProvenanceRecord(
+                            evidence="get_fundamentals",
+                            source="J-Quants fundamentals",
+                            requested="2026-08-10",
+                            effective="disclosures <= 2026-08-10",
+                            timing="disclosure-date filtered",
+                        ),
+                    ),
+                    SourceObservation(
+                        source="J-Quants fundamentals",
+                        record_id="4568:2026-08-10",
+                        version_id="jquants-fundamentals:4568:2026-08-10",
+                        status="published",
+                        published_at="2026-08-10 15:00",
+                        available_at="2026-08-10T15:00:00+09:00",
+                        title="Financial summary",
+                        record_kind="fundamental",
+                    ),
+                ),
+                SourceWatermark(
+                    source="J-Quants fundamentals",
+                    scanned_start="2026-08-10",
+                    scanned_end="2026-08-10",
+                    status="complete",
+                    returned_records=1,
+                    reported_records=1,
+                    information_frontier=frontier,
+                ),
+            )
+            live = attach_provenance(
+                "Forward PE: 20 (analyst consensus, live only).",
+                ProvenanceRecord(
+                    evidence="get_fundamentals",
+                    source="yfinance analyst consensus",
+                    requested="2026-08-10",
+                    effective="retrieval-time analyst snapshot",
+                    timing="live non-point-in-time",
+                    retrieved_at="2026-08-12T23:00:00+09:00",
+                ),
+            )
+            message = ToolMessage(
+                content=(
+                    attach_evidence_span(pit, temporal_scope="point_in_time")
+                    + attach_evidence_span(live, temporal_scope="live_only")
+                ),
+                tool_call_id="required-fundamentals",
+                name="get_fundamentals",
+            )
+        else:
+            return result
+        return {**result, "messages": [*state["messages"], message]}
+
+
+class _ConflictingRequiredEvidenceSubgraph(_RequiredEvidenceSubgraph):
+    def invoke(self, state, **kwargs):
+        result = super().invoke(state, **kwargs)
+        if self.analyst not in {"market", "fundamentals"}:
+            return result
+        source = (
+            "J-Quants adjusted OHLCV"
+            if self.analyst == "market"
+            else "J-Quants fundamentals"
+        )
+        conflict = attach_source_watermarks(
+            attach_provenance(
+                "Required source closure was unavailable in one graph tool path.",
+                ProvenanceRecord(
+                    evidence=(
+                        "get_stock_data"
+                        if self.analyst == "market"
+                        else "get_balance_sheet"
+                    ),
+                    source=source,
+                    requested="2026-08-10",
+                    effective="—",
+                    timing="retrieval unavailable",
+                ),
+            ),
+            SourceWatermark(
+                source=source,
+                scanned_start="2026-08-10",
+                scanned_end="2026-08-10",
+                status="unavailable",
+                returned_records=0,
+                reported_records=0,
+                information_frontier=None,
+            ),
+        )
+        return {
+            **result,
+            "messages": [
+                *result["messages"],
+                ToolMessage(
+                    content=conflict,
+                    tool_call_id=f"conflicting-{self.analyst}",
+                    name=(
+                        "get_stock_data"
+                        if self.analyst == "market"
+                        else "get_balance_sheet"
+                    ),
+                ),
+            ],
+        }
+
+
+class _DistinctEdinetDatasetSubgraph(_RequiredEvidenceSubgraph):
+    def invoke(self, state, **kwargs):
+        result = super().invoke(state, **kwargs)
+        if self.analyst != "social":
+            return result
+        return {
+            **result,
+            "prefetched_evidence": [
+                {
+                    "content": "EDINET ownership and control filing.",
+                    "records": [
+                        {
+                            "evidence": "ownership and control filings",
+                            "source": "EDINET",
+                            "requested": "2026-07-12 to 2026-08-10",
+                            "effective": "2026-07-12 to 2026-08-10",
+                            "timing": "disclosure-date filtered",
+                            "retrieved_at": None,
+                        }
+                    ],
+                    "temporal_scope": "point_in_time",
+                    "dataset_id": "edinet.ownership_control",
+                    "source_records": [
+                        {
+                            "source": "EDINET",
+                            "record_id": "edinet:holding:1",
+                            "version_id": "edinet:holding:1:v1",
+                            "status": "published",
+                            "published_at": "2026-08-10 15:00",
+                            "available_at": "2026-08-10T15:00:00+09:00",
+                            "title": "Large-shareholding report",
+                            "availability_basis": "EDINET submission timestamp",
+                            "url": None,
+                            "replaces_version_id": None,
+                            "record_kind": "disclosure",
+                            "native_record_id": "holding:1",
+                            "comparison_key": None,
+                            "change_hint": None,
+                            "accounting_scope": None,
+                            "adjustment": None,
+                            "observation_value": None,
+                            "unit": None,
+                            "precision": None,
+                        }
+                    ],
+                    "source_watermarks": [
+                        {
+                            "source": "EDINET",
+                            "scanned_start": "2026-07-12",
+                            "scanned_end": "2026-08-10",
+                            "status": "complete",
+                            "temporal_scope": "point_in_time",
+                            "limitations": (),
+                            "returned_records": 1,
+                            "reported_records": 1,
+                            "requested_interval": {
+                                "start": "2026-07-12",
+                                "end": "2026-08-10",
+                            },
+                            "limitation_kind": None,
+                            "information_frontier": "2026-08-10T23:59:00+09:00",
+                        }
+                    ],
+                }
+            ],
+        }
+
+
+class _UnavailableEdinetDatasetSubgraph(_DistinctEdinetDatasetSubgraph):
+    def invoke(self, state, **kwargs):
+        result = super().invoke(state, **kwargs)
+        if self.analyst != "social":
+            return result
+        block = result["prefetched_evidence"][0]
+        watermark = block["source_watermarks"][0]
+        watermark.update(
+            {
+                "status": "unavailable",
+                "returned_records": 0,
+                "reported_records": 0,
+                "information_frontier": None,
+                "limitation_kind": "unavailable",
+                "limitations": ("Ownership/control scan unavailable.",),
+            }
+        )
+        block["source_records"] = []
+        return result
+
+
+_ACCEPTANCE_FRONTIER = "2026-08-10T23:59:00+09:00"
+_ACCEPTANCE_RETRIEVED_AT = "2026-08-14T00:15:00+09:00"
+_ACCEPTANCE_SEALED_AT = "2026-08-14T00:20:00+09:00"
+
+
+def _acceptance_news_payload() -> str:
+    spans = []
+    for source, sentinel in (
+        ("EDINET", "EDINET PIT FILING BODY"),
+        ("TDnet", "TDNET PIT DISCLOSURE BODY"),
+    ):
+        version_id = f"{source.casefold()}:4568:2026-08-10:v1"
+        payload = attach_source_watermarks(
+            attach_source_observations(
+                attach_provenance(
+                    sentinel,
+                    ProvenanceRecord(
+                        evidence="get_news",
+                        source=source,
+                        requested="2026-07-12 to 2026-08-10",
+                        effective="2026-08-10",
+                        timing="available",
+                    ),
+                ),
+                SourceObservation(
+                    source=source,
+                    record_id=f"{source.casefold()}:4568:2026-08-10",
+                    version_id=version_id,
+                    status="published",
+                    published_at="2026-08-10 15:00",
+                    available_at="2026-08-10T15:00:00+09:00",
+                    title=f"{source} acceptance record",
+                ),
+            ),
+            SourceWatermark(
+                source=source,
+                scanned_start="2026-07-12",
+                scanned_end="2026-08-10",
+                status="complete",
+                returned_records=1,
+                reported_records=1,
+                requested_interval=SourceInterval(
+                    start="2026-07-12",
+                    end="2026-08-10",
+                ),
+                information_frontier=_ACCEPTANCE_FRONTIER,
+            ),
+        )
+        spans.append(attach_evidence_span(payload, temporal_scope="point_in_time"))
+
+    google = attach_source_watermarks(
+        attach_source_observations(
+            attach_provenance(
+                "GOOGLE NEAR LIVE HEADLINE BODY",
+                ProvenanceRecord(
+                    evidence="get_news",
+                    source="Google News",
+                    requested="2026-08-10",
+                    effective="2026-08-10",
+                    timing="live non-point-in-time",
+                    retrieved_at=_ACCEPTANCE_RETRIEVED_AT,
+                ),
+            ),
+            SourceObservation(
+                source="Google News",
+                record_id="google:4568:2026-08-10",
+                version_id="google:4568:2026-08-10:v1",
+                status="published",
+                published_at="2026-08-10 13:00",
+                available_at="2026-08-10T13:00:00+09:00",
+                title="Near-live acceptance headline",
+            ),
+        ),
+        SourceWatermark(
+            source="Google News",
+            scanned_start="2026-08-10",
+            scanned_end="2026-08-10",
+            status="complete",
+            temporal_scope="live_only",
+            returned_records=1,
+            reported_records=1,
+        ),
+    )
+    spans.append(attach_evidence_span(google, temporal_scope="live_only"))
+    return "\n".join(spans)
+
+
+class _OfflineAcceptanceSubgraph(_AnalystSubgraph):
+    def invoke(self, state, **kwargs):
+        result = super().invoke(state, **kwargs)
+        if self.analyst == "news":
+            messages = (
+                ToolMessage(
+                    content=_acceptance_news_payload(),
+                    tool_call_id="acceptance-news",
+                    name="get_news",
+                    additional_kwargs={
+                        "evidence_admission_sealed_at": _ACCEPTANCE_SEALED_AT,
+                    },
+                ),
+            )
+        elif self.analyst == "market":
+            snapshot = attach_source_watermarks(
+                attach_source_observations(
+                    attach_provenance(
+                        "J-QUANTS VERIFIED MARKET SNAPSHOT",
+                        ProvenanceRecord(
+                            evidence="get_verified_market_snapshot",
+                            source="J-Quants adjusted OHLCV",
+                            requested="2026-08-10",
+                            effective="2026-08-10",
+                            timing="market-date filtered",
+                        ),
+                    ),
+                    SourceObservation(
+                        source="J-Quants adjusted OHLCV",
+                        record_id="jquants-market:4568.T",
+                        version_id="jquants-market:4568:2026-08-10:v1",
+                        status="published",
+                        published_at="2026-08-10",
+                        available_at=_ACCEPTANCE_FRONTIER,
+                        title="Adjusted market history through 2026-08-10",
+                        record_kind="market",
+                        adjustment="J-Quants adjusted OHLCV v2",
+                        observation_value=101.0,
+                        unit="JPY",
+                        precision=2,
+                    ),
+                ),
+                SourceWatermark(
+                    source="J-Quants adjusted OHLCV",
+                    scanned_start="2026-08-10",
+                    scanned_end="2026-08-10",
+                    status="complete",
+                    returned_records=1,
+                    reported_records=1,
+                    information_frontier=_ACCEPTANCE_FRONTIER,
+                ),
+            )
+            messages = (
+                ToolMessage(
+                    content="J-Quants adjusted market artifact is available.",
+                    tool_call_id="acceptance-market",
+                    name="get_stock_data",
+                    artifact={
+                        "schema_version": "1",
+                        "kind": "source",
+                        "dataset_id": "ds_acceptancemarket",
+                        "evidence_type": "get_stock_data",
+                        "source_content": (
+                            "# Data retrieved on: 2026-08-14\n"
+                            "Date,Open,High,Low,Close,Volume\n"
+                            "2026-08-10,100,102,99,101,1200"
+                        ),
+                        "provenance": [
+                            {
+                                "evidence": "get_stock_data",
+                                "source": "J-Quants adjusted OHLCV",
+                                "requested": "2026-08-10 to 2026-08-10",
+                                "effective": "2026-08-10",
+                                "timing": "market-date filtered",
+                            }
+                        ],
+                        "temporal_scope": "point_in_time",
+                        "analytical_views": {
+                            "row_count": 1,
+                            "effective_end": "2026-08-10",
+                        },
+                    },
+                ),
+                ToolMessage(
+                    content=snapshot,
+                    tool_call_id="acceptance-market-snapshot",
+                    name="get_verified_market_snapshot",
+                ),
+            )
+        elif self.analyst == "fundamentals":
+            payload = attach_source_watermarks(
+                attach_source_observations(
+                    attach_provenance(
+                        "J-QUANTS PIT FUNDAMENTALS BODY",
+                        ProvenanceRecord(
+                            evidence="get_fundamentals",
+                            source="J-Quants fundamentals",
+                            requested="2026-08-10",
+                            effective="disclosures <= 2026-08-10",
+                            timing="disclosure-date filtered",
+                        ),
+                    ),
+                    SourceObservation(
+                        source="J-Quants fundamentals",
+                        record_id="4568:2026-08-10",
+                        version_id="jquants-fundamentals:4568:2026-08-10",
+                        status="published",
+                        published_at="2026-08-10 15:00",
+                        available_at="2026-08-10T15:00:00+09:00",
+                        title="Financial summary",
+                        record_kind="fundamental",
+                    ),
+                ),
+                SourceWatermark(
+                    source="J-Quants fundamentals",
+                    scanned_start="2026-08-10",
+                    scanned_end="2026-08-10",
+                    status="complete",
+                    returned_records=1,
+                    reported_records=1,
+                    information_frontier=_ACCEPTANCE_FRONTIER,
+                ),
+            )
+            messages = (
+                ToolMessage(
+                    content=attach_evidence_span(payload, temporal_scope="point_in_time"),
+                    tool_call_id="acceptance-fundamentals",
+                    name="get_fundamentals",
+                ),
+            )
+        else:
+            return result
+        return {**result, "messages": [*state["messages"], *messages]}
+
+
 def _context(
     app_settings,
     profile: RunProfile,
@@ -696,6 +2015,866 @@ def _memory_context() -> MemoryContext:
             ),
         ),
     )
+
+
+def _jp_anchor_readiness() -> AnchorReadinessResult:
+    frontier = datetime(
+        2026,
+        8,
+        10,
+        23,
+        59,
+        tzinfo=timezone(timedelta(hours=9)),
+    )
+    sources = (
+        ("EDINET", MarketResearchCapability.OFFICIAL_FILING),
+        ("TDnet", MarketResearchCapability.TIMELY_DISCLOSURE),
+        ("J-Quants adjusted OHLCV", MarketResearchCapability.MARKET_OBSERVATION),
+    )
+    return AnchorReadinessResult(
+        ready=True,
+        requested_cutoff=date(2026, 8, 10),
+        information_frontier=frontier,
+        profile_id="jp-listed-equity-v1",
+        capabilities=tuple(
+            CapabilityAttestation(
+                capability=capability,
+                satisfied=True,
+                sources=(source,),
+            )
+            for source, capability in sources
+        ),
+        source_frontiers=tuple(
+            AnchorReadinessSourceFrontier(
+                source=source,
+                capability=capability,
+                status="complete",
+                information_frontier=frontier,
+                observed_start=(
+                    date(2026, 8, 10)
+                    if capability is MarketResearchCapability.MARKET_OBSERVATION
+                    else date(2026, 7, 12)
+                ),
+                observed_end=date(2026, 8, 10),
+                requested_start=date(2026, 7, 12),
+                requested_end=date(2026, 8, 10),
+                returned_records=(
+                    None
+                    if capability is MarketResearchCapability.MARKET_OBSERVATION
+                    else 0
+                ),
+                reported_records=(
+                    None
+                    if capability is MarketResearchCapability.MARKET_OBSERVATION
+                    else 0
+                ),
+                record_versions_digest=(
+                    None
+                    if capability is MarketResearchCapability.MARKET_OBSERVATION
+                    else source_record_versions_digest(())
+                ),
+            )
+            for source, capability in sources
+        ),
+        metrics=RunMetrics(),
+    )
+
+
+def test_anchor_readiness_missing_graph_evidence_stops_before_downstream_llms(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _AnalystSubgraph(analyst) for analyst in self.selected_analysts
+        },
+    )
+    quick = _FakeLLM()
+    deep = _FakeLLM()
+    events: list[dict[str, Any]] = []
+    sealed: list[EvidenceBundle] = []
+    readiness = _jp_anchor_readiness()
+    request = AnalysisRequest(
+        ticker="4568.T",
+        analysis_date="2026-08-10",
+        profile=RunProfile.STANDARD,
+        analysts=("market", "news", "fundamentals"),
+    )
+    settings = app_settings.resolve_run(request)
+    context = RunContext(
+        run_id="fixture-required-evidence-gate",
+        request=request,
+        settings=settings,
+        dataflow_config=settings.dataflow_config(app_settings),
+        memory=MemoryContext(instrument=request.ticker, market="Asia/Tokyo"),
+        instrument_context="The instrument is 4568.T.",
+        cancel_requested=lambda: False,
+        information_frontier=readiness.information_frontier,
+        anchor_readiness=readiness,
+        evidence_writer=sealed.append,
+    )
+    graph = ResearchGraph(
+        quick_llm=quick,
+        deep_llm=deep,
+        profile=request.profile,
+        selected_analysts=request.analysts,
+        metrics=MetricsCallback(),
+    )
+
+    with pytest.raises(GraphVisibleRequiredEvidenceError) as exc_info:
+        graph.execute(
+            context,
+            checkpoint_thread_id="required-evidence-gate",
+            on_event=events.append,
+        )
+
+    assert exc_info.value.reason == "graph_visible_required_evidence_missing"
+    assert quick.calls == []
+    assert deep.calls == []
+    assert len(sealed) == 1
+    failure = next(
+        event
+        for event in events
+        if event["event_type"] == "research.anchor_evidence_gate_failed"
+    )
+    assert failure["payload"]["reason"] == "graph_visible_required_evidence_missing"
+    assert set(failure["payload"]["missing_sources"]) == {
+        "EDINET",
+        "TDnet",
+        "J-Quants adjusted OHLCV",
+        "J-Quants fundamentals",
+    }
+
+
+def test_anchor_readiness_matching_graph_evidence_reaches_synthesis(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _RequiredEvidenceSubgraph(analyst)
+            for analyst in self.selected_analysts
+        },
+    )
+    quick = _FakeLLM()
+    deep = _FakeLLM()
+    readiness = _jp_anchor_readiness()
+    request = AnalysisRequest(
+        ticker="4568.T",
+        analysis_date="2026-08-10",
+        profile=RunProfile.FAST,
+        analysts=("market", "news", "fundamentals"),
+    )
+    settings = app_settings.resolve_run(request)
+    context = RunContext(
+        run_id="fixture-required-evidence-visible",
+        request=request,
+        settings=settings,
+        dataflow_config=settings.dataflow_config(app_settings),
+        memory=MemoryContext(instrument=request.ticker, market="Asia/Tokyo"),
+        instrument_context="The instrument is 4568.T.",
+        cancel_requested=lambda: False,
+        information_frontier=readiness.information_frontier,
+        anchor_readiness=readiness,
+    )
+    graph = ResearchGraph(
+        quick_llm=quick,
+        deep_llm=deep,
+        profile=request.profile,
+        selected_analysts=request.analysts,
+        metrics=MetricsCallback(),
+    )
+
+    execution = graph.execute(
+        context,
+        checkpoint_thread_id="required-evidence-visible",
+    )
+
+    assert execution.evidence.tables
+    assert any(
+        origin.temporal_scope.value == "live_only"
+        for item in execution.evidence.items
+        for origin in item.origins
+    )
+    assert quick.calls
+
+
+def test_conflicting_required_source_closure_stops_before_synthesis(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _ConflictingRequiredEvidenceSubgraph(analyst)
+            for analyst in self.selected_analysts
+        },
+    )
+    quick = _FakeLLM()
+    deep = _FakeLLM()
+    readiness = _jp_anchor_readiness()
+    request = AnalysisRequest(
+        ticker="4568.T",
+        analysis_date="2026-08-10",
+        profile=RunProfile.FAST,
+        analysts=("market", "news", "fundamentals"),
+    )
+    settings = app_settings.resolve_run(request)
+    context = RunContext(
+        run_id="fixture-conflicting-required-closure",
+        request=request,
+        settings=settings,
+        dataflow_config=settings.dataflow_config(app_settings),
+        memory=MemoryContext(instrument=request.ticker, market="Asia/Tokyo"),
+        instrument_context="The instrument is 4568.T.",
+        cancel_requested=lambda: False,
+        information_frontier=readiness.information_frontier,
+        anchor_readiness=readiness,
+    )
+    graph = ResearchGraph(
+        quick_llm=quick,
+        deep_llm=deep,
+        profile=request.profile,
+        selected_analysts=request.analysts,
+        metrics=MetricsCallback(),
+    )
+
+    with pytest.raises(GraphVisibleRequiredEvidenceError) as exc_info:
+        graph.execute(
+            context,
+            checkpoint_thread_id="conflicting-required-closure",
+        )
+
+    assert set(exc_info.value.missing_sources) == {
+        "J-Quants adjusted OHLCV",
+        "J-Quants fundamentals",
+    }
+    assert set(exc_info.value.missing_capabilities) == {
+        "fundamentals",
+        "market_observation",
+    }
+    assert quick.calls == []
+    assert deep.calls == []
+
+
+def test_distinct_required_edinet_datasets_do_not_conflict(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _DistinctEdinetDatasetSubgraph(analyst)
+            for analyst in self.selected_analysts
+        },
+    )
+    quick = _FakeLLM()
+    readiness = _jp_anchor_readiness()
+    request = AnalysisRequest(
+        ticker="4568.T",
+        analysis_date="2026-08-10",
+        profile=RunProfile.FAST,
+        analysts=("market", "social", "news", "fundamentals"),
+    )
+    settings = app_settings.resolve_run(request)
+    graph = ResearchGraph(
+        quick_llm=quick,
+        deep_llm=_FakeLLM(),
+        profile=request.profile,
+        selected_analysts=request.analysts,
+        metrics=MetricsCallback(),
+    )
+
+    execution = graph.execute(
+        RunContext(
+            run_id="fixture-distinct-edinet-datasets",
+            request=request,
+            settings=settings,
+            dataflow_config=settings.dataflow_config(app_settings),
+            memory=MemoryContext(instrument=request.ticker, market="Asia/Tokyo"),
+            instrument_context="The instrument is 4568.T.",
+            cancel_requested=lambda: False,
+            information_frontier=readiness.information_frontier,
+            anchor_readiness=readiness,
+        ),
+        checkpoint_thread_id="distinct-edinet-datasets",
+    )
+
+    assert any(
+        item.provenance.get("dataset_id") == "edinet.ownership_control"
+        for item in execution.evidence.items
+    )
+    assert quick.calls
+
+
+def test_unavailable_required_edinet_dataset_still_blocks_synthesis(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _UnavailableEdinetDatasetSubgraph(analyst)
+            for analyst in self.selected_analysts
+        },
+    )
+    quick = _FakeLLM()
+    readiness = _jp_anchor_readiness()
+    request = AnalysisRequest(
+        ticker="4568.T",
+        analysis_date="2026-08-10",
+        profile=RunProfile.FAST,
+        analysts=("market", "social", "news", "fundamentals"),
+    )
+    settings = app_settings.resolve_run(request)
+    graph = ResearchGraph(
+        quick_llm=quick,
+        deep_llm=_FakeLLM(),
+        profile=request.profile,
+        selected_analysts=request.analysts,
+        metrics=MetricsCallback(),
+    )
+
+    with pytest.raises(GraphVisibleRequiredEvidenceError) as exc_info:
+        graph.execute(
+            RunContext(
+                run_id="fixture-unavailable-edinet-dataset",
+                request=request,
+                settings=settings,
+                dataflow_config=settings.dataflow_config(app_settings),
+                memory=MemoryContext(instrument=request.ticker, market="Asia/Tokyo"),
+                instrument_context="The instrument is 4568.T.",
+                cancel_requested=lambda: False,
+                information_frontier=readiness.information_frontier,
+                anchor_readiness=readiness,
+            ),
+            checkpoint_thread_id="unavailable-edinet-dataset",
+        )
+
+    assert exc_info.value.missing_sources == ("EDINET",)
+    assert exc_info.value.missing_capabilities == ("official_filing",)
+    assert quick.calls == []
+
+
+def test_offline_near_live_acceptance_produces_forward_anchor_and_incremental_policy(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _OfflineAcceptanceSubgraph(analyst)
+            for analyst in self.selected_analysts
+        },
+    )
+    request = AnalysisRequest(
+        ticker="4568.T",
+        analysis_date="2026-08-10",
+        profile=RunProfile.FAST,
+        analysts=("market", "news", "fundamentals"),
+    )
+    frontier = datetime.fromisoformat(_ACCEPTANCE_FRONTIER)
+    readiness = validate_japanese_anchor_readiness(
+        request,
+        information_frontier=frontier,
+        market_checker=lambda _ticker, cutoff: MarketDataReadiness(
+            requested_cutoff=cutoff,
+            market_effective_date=cutoff,
+            observed_bar_date=cutoff,
+        ),
+        news_collector=lambda *_args, **_kwargs: _acceptance_news_payload(),
+    )
+    assert readiness.ready is True
+
+    quick = _FakeLLM()
+    deep = _FakeLLM()
+    settings = app_settings.resolve_run(request)
+    context = RunContext(
+        run_id="fixture-offline-near-live-acceptance",
+        request=request,
+        settings=settings,
+        dataflow_config=settings.dataflow_config(app_settings),
+        memory=MemoryContext(instrument=request.ticker, market="Asia/Tokyo"),
+        instrument_context="The instrument is 4568.T.",
+        cancel_requested=lambda: False,
+        information_frontier=frontier,
+        anchor_readiness=readiness,
+    )
+    execution = ResearchGraph(
+        quick_llm=quick,
+        deep_llm=deep,
+        profile=request.profile,
+        selected_analysts=request.analysts,
+        metrics=MetricsCallback(),
+    ).execute(
+        context,
+        checkpoint_thread_id="offline-near-live-acceptance",
+    )
+
+    analyst_prompts = "\n".join(
+        prompt for call_type, prompt in quick.calls if call_type == "MarkdownReport"
+    )
+    for sentinel in (
+        "EDINET PIT FILING BODY",
+        "TDNET PIT DISCLOSURE BODY",
+        "J-QUANTS PIT FUNDAMENTALS BODY",
+        "GOOGLE NEAR LIVE HEADLINE BODY",
+    ):
+        assert sentinel in analyst_prompts
+    assert execution.evidence.tables
+    market_row = execution.evidence.tables[0].rows[-1]
+    assert market_row.cells["date"].raw_value == "2026-08-10"
+    assert market_row.cells["close"].raw_value == 101.0
+
+    google_item = next(
+        item
+        for item in execution.evidence.items
+        if any(origin.source == "Google News" for origin in item.origins)
+    )
+    assert google_item.content == "GOOGLE NEAR LIVE HEADLINE BODY"
+    assert google_item.quality is EvidenceQuality.LOW
+    assert any(
+        origin.temporal_scope.value == "live_only" for origin in google_item.origins
+    )
+    assert google_item.ref in execution.reports["news"].source_refs
+
+    revision = bind_information_frontier(
+        assemble_full_revision(request, execution),
+        frontier,
+    )
+    qualification = derive_forward_research_anchor(revision)
+    policy = evaluate_next_update_policy(
+        revision,
+        instrument=request.ticker,
+        mode="experimental",
+    )
+    google_coverage = next(
+        item for item in revision.coverage.domains if item.source == "Google News"
+    )
+
+    assert google_coverage.requirement is CoverageRequirement.ADVISORY
+    assert qualification.is_forward_research_anchor is True, qualification.model_dump(
+        mode="json"
+    )
+    assert revision.coverage.anchor_qualification == qualification
+    assert policy.policy == "incremental_allowed"
+    assert policy.reason is None
+    assert all(
+        not is_internal_source_reference(source)
+        for claim in revision.current_state.claims
+        for source in claim.required_sources
+    )
+    assert all(
+        not is_internal_source_reference(source)
+        for question in revision.current_state.questions
+        for source in question.required_sources
+    )
+
+
+def test_empty_ready_manifest_fails_closed_before_synthesis(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _AnalystSubgraph(analyst) for analyst in self.selected_analysts
+        },
+    )
+    quick = _FakeLLM()
+    complete = _jp_anchor_readiness()
+    readiness = complete.model_copy(
+        update={"capabilities": (), "source_frontiers": ()}
+    )
+    request = AnalysisRequest(
+        ticker="4568.T",
+        analysis_date="2026-08-10",
+        profile=RunProfile.FAST,
+        analysts=("market",),
+    )
+    settings = app_settings.resolve_run(request)
+    graph = ResearchGraph(
+        quick_llm=quick,
+        deep_llm=_FakeLLM(),
+        profile=request.profile,
+        selected_analysts=request.analysts,
+        metrics=MetricsCallback(),
+    )
+
+    with pytest.raises(GraphVisibleRequiredEvidenceError) as exc_info:
+        graph.execute(
+            RunContext(
+                run_id="fixture-empty-readiness-manifest",
+                request=request,
+                settings=settings,
+                dataflow_config=settings.dataflow_config(app_settings),
+                memory=MemoryContext(instrument=request.ticker, market="Asia/Tokyo"),
+                instrument_context="The instrument is 4568.T.",
+                cancel_requested=lambda: False,
+                information_frontier=readiness.information_frontier,
+                anchor_readiness=readiness,
+            ),
+            checkpoint_thread_id="empty-readiness-manifest",
+        )
+
+    assert set(exc_info.value.missing_capabilities) == {
+        "market_observation",
+        "official_filing",
+        "timely_disclosure",
+    }
+    assert quick.calls == []
+
+
+def test_source_frontier_mismatch_fails_before_synthesis(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _RequiredEvidenceSubgraph(analyst)
+            for analyst in self.selected_analysts
+        },
+    )
+    quick = _FakeLLM()
+    complete = _jp_anchor_readiness()
+    source_frontiers = tuple(
+        item.model_copy(
+            update={"observed_start": item.observed_start - timedelta(days=1)}
+        )
+        if item.source == "EDINET"
+        else item
+        for item in complete.source_frontiers
+    )
+    readiness = complete.model_copy(update={"source_frontiers": source_frontiers})
+    request = AnalysisRequest(
+        ticker="4568.T",
+        analysis_date="2026-08-10",
+        profile=RunProfile.FAST,
+        analysts=("market", "news"),
+    )
+    settings = app_settings.resolve_run(request)
+    graph = ResearchGraph(
+        quick_llm=quick,
+        deep_llm=_FakeLLM(),
+        profile=request.profile,
+        selected_analysts=request.analysts,
+        metrics=MetricsCallback(),
+    )
+
+    with pytest.raises(GraphVisibleRequiredEvidenceError) as exc_info:
+        graph.execute(
+            RunContext(
+                run_id="fixture-readiness-frontier-mismatch",
+                request=request,
+                settings=settings,
+                dataflow_config=settings.dataflow_config(app_settings),
+                memory=MemoryContext(instrument=request.ticker, market="Asia/Tokyo"),
+                instrument_context="The instrument is 4568.T.",
+                cancel_requested=lambda: False,
+                information_frontier=readiness.information_frontier,
+                anchor_readiness=readiness,
+            ),
+            checkpoint_thread_id="readiness-frontier-mismatch",
+        )
+
+    assert exc_info.value.missing_sources == ("EDINET",)
+    assert exc_info.value.missing_capabilities == ("official_filing",)
+    assert quick.calls == []
+
+
+def test_source_frontier_limitation_mismatch_fails_before_synthesis(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _RequiredEvidenceSubgraph(analyst)
+            for analyst in self.selected_analysts
+        },
+    )
+    quick = _FakeLLM()
+    complete = _jp_anchor_readiness()
+    source_frontiers = tuple(
+        item.model_copy(update={"limitations": ("Expected archive limitation.",)})
+        if item.source == "TDnet"
+        else item
+        for item in complete.source_frontiers
+    )
+    readiness = complete.model_copy(update={"source_frontiers": source_frontiers})
+    request = AnalysisRequest(
+        ticker="4568.T",
+        analysis_date="2026-08-10",
+        profile=RunProfile.FAST,
+        analysts=("market", "news"),
+    )
+    settings = app_settings.resolve_run(request)
+    graph = ResearchGraph(
+        quick_llm=quick,
+        deep_llm=_FakeLLM(),
+        profile=request.profile,
+        selected_analysts=request.analysts,
+        metrics=MetricsCallback(),
+    )
+
+    with pytest.raises(GraphVisibleRequiredEvidenceError) as exc_info:
+        graph.execute(
+            RunContext(
+                run_id="fixture-readiness-limitation-mismatch",
+                request=request,
+                settings=settings,
+                dataflow_config=settings.dataflow_config(app_settings),
+                memory=MemoryContext(instrument=request.ticker, market="Asia/Tokyo"),
+                instrument_context="The instrument is 4568.T.",
+                cancel_requested=lambda: False,
+                information_frontier=readiness.information_frontier,
+                anchor_readiness=readiness,
+            ),
+            checkpoint_thread_id="readiness-limitation-mismatch",
+        )
+
+    assert exc_info.value.missing_sources == ("TDnet",)
+    assert exc_info.value.missing_capabilities == ("timely_disclosure",)
+    assert quick.calls == []
+
+
+def test_source_frontier_limitation_kind_mismatch_fails_before_synthesis(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _RequiredEvidenceSubgraph(analyst)
+            for analyst in self.selected_analysts
+        },
+    )
+    quick = _FakeLLM()
+    complete = _jp_anchor_readiness()
+    source_frontiers = tuple(
+        item.model_copy(update={"limitation_kind": "archive_truncation"})
+        if item.source == "TDnet"
+        else item
+        for item in complete.source_frontiers
+    )
+    readiness = complete.model_copy(update={"source_frontiers": source_frontiers})
+    request = AnalysisRequest(
+        ticker="4568.T",
+        analysis_date="2026-08-10",
+        profile=RunProfile.FAST,
+        analysts=("market", "news"),
+    )
+    settings = app_settings.resolve_run(request)
+    graph = ResearchGraph(
+        quick_llm=quick,
+        deep_llm=_FakeLLM(),
+        profile=request.profile,
+        selected_analysts=request.analysts,
+        metrics=MetricsCallback(),
+    )
+
+    with pytest.raises(GraphVisibleRequiredEvidenceError) as exc_info:
+        graph.execute(
+            RunContext(
+                run_id="fixture-readiness-limitation-kind-mismatch",
+                request=request,
+                settings=settings,
+                dataflow_config=settings.dataflow_config(app_settings),
+                memory=MemoryContext(instrument=request.ticker, market="Asia/Tokyo"),
+                instrument_context="The instrument is 4568.T.",
+                cancel_requested=lambda: False,
+                information_frontier=readiness.information_frontier,
+                anchor_readiness=readiness,
+            ),
+            checkpoint_thread_id="readiness-limitation-kind-mismatch",
+        )
+
+    assert exc_info.value.missing_sources == ("TDnet",)
+    assert exc_info.value.missing_capabilities == ("timely_disclosure",)
+    assert quick.calls == []
+
+
+def test_source_record_closure_mismatch_fails_before_synthesis(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _RequiredEvidenceSubgraph(analyst)
+            for analyst in self.selected_analysts
+        },
+    )
+    quick = _FakeLLM()
+    complete = _jp_anchor_readiness()
+    source_frontiers = tuple(
+        item.model_copy(
+            update={
+                "returned_records": 1,
+                "reported_records": 1,
+                "record_versions_digest": source_record_versions_digest(
+                    ("edinet-record:v1",)
+                ),
+            }
+        )
+        if item.source == "EDINET"
+        else item
+        for item in complete.source_frontiers
+    )
+    readiness = complete.model_copy(update={"source_frontiers": source_frontiers})
+    request = AnalysisRequest(
+        ticker="4568.T",
+        analysis_date="2026-08-10",
+        profile=RunProfile.FAST,
+        analysts=("market", "news"),
+    )
+    settings = app_settings.resolve_run(request)
+    graph = ResearchGraph(
+        quick_llm=quick,
+        deep_llm=_FakeLLM(),
+        profile=request.profile,
+        selected_analysts=request.analysts,
+        metrics=MetricsCallback(),
+    )
+
+    with pytest.raises(GraphVisibleRequiredEvidenceError) as exc_info:
+        graph.execute(
+            RunContext(
+                run_id="fixture-readiness-record-closure-mismatch",
+                request=request,
+                settings=settings,
+                dataflow_config=settings.dataflow_config(app_settings),
+                memory=MemoryContext(instrument=request.ticker, market="Asia/Tokyo"),
+                instrument_context="The instrument is 4568.T.",
+                cancel_requested=lambda: False,
+                information_frontier=readiness.information_frontier,
+                anchor_readiness=readiness,
+            ),
+            checkpoint_thread_id="readiness-record-closure-mismatch",
+        )
+
+    assert exc_info.value.missing_sources == ("EDINET",)
+    assert exc_info.value.missing_capabilities == ("official_filing",)
+    assert quick.calls == []
+
+
+def test_unknown_readiness_profile_fails_closed_before_synthesis(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _AnalystSubgraph(analyst) for analyst in self.selected_analysts
+        },
+    )
+    quick = _FakeLLM()
+    complete = _jp_anchor_readiness()
+    readiness = complete.model_copy(
+        update={
+            "profile_id": "unknown-profile",
+            "capabilities": (),
+            "source_frontiers": (),
+        }
+    )
+    request = AnalysisRequest(
+        ticker="4568.T",
+        analysis_date="2026-08-10",
+        profile=RunProfile.FAST,
+        analysts=("market",),
+    )
+    settings = app_settings.resolve_run(request)
+    graph = ResearchGraph(
+        quick_llm=quick,
+        deep_llm=_FakeLLM(),
+        profile=request.profile,
+        selected_analysts=request.analysts,
+        metrics=MetricsCallback(),
+    )
+
+    with pytest.raises(GraphVisibleRequiredEvidenceError) as exc_info:
+        graph.execute(
+            RunContext(
+                run_id="fixture-unknown-readiness-profile",
+                request=request,
+                settings=settings,
+                dataflow_config=settings.dataflow_config(app_settings),
+                memory=MemoryContext(instrument=request.ticker, market="Asia/Tokyo"),
+                instrument_context="The instrument is 4568.T.",
+                cancel_requested=lambda: False,
+                information_frontier=readiness.information_frontier,
+                anchor_readiness=readiness,
+            ),
+            checkpoint_thread_id="unknown-readiness-profile",
+        )
+
+    assert set(exc_info.value.missing_capabilities) == {
+        "market_observation",
+        "official_filing",
+        "timely_disclosure",
+    }
+    assert quick.calls == []
+
+
+def test_allow_non_anchor_context_does_not_apply_required_evidence_gate(
+    app_settings,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        ResearchGraph,
+        "_build_analyst_subgraphs",
+        lambda self: {
+            analyst: _AnalystSubgraph(analyst) for analyst in self.selected_analysts
+        },
+    )
+    request = AnalysisRequest(
+        ticker="4568.T",
+        analysis_date="2026-08-10",
+        profile=RunProfile.FAST,
+        analysts=("market",),
+        anchor_readiness="allow_non_anchor",
+    )
+    settings = app_settings.resolve_run(request)
+    quick = _FakeLLM()
+    graph = ResearchGraph(
+        quick_llm=quick,
+        deep_llm=_FakeLLM(),
+        profile=request.profile,
+        selected_analysts=request.analysts,
+        metrics=MetricsCallback(),
+    )
+
+    execution = graph.execute(
+        RunContext(
+            run_id="fixture-allow-non-anchor",
+            request=request,
+            settings=settings,
+            dataflow_config=settings.dataflow_config(app_settings),
+            memory=MemoryContext(instrument=request.ticker, market="Asia/Tokyo"),
+            instrument_context="The instrument is 4568.T.",
+            cancel_requested=lambda: False,
+            information_frontier=_jp_anchor_readiness().information_frontier,
+        ),
+        checkpoint_thread_id="allow-non-anchor",
+    )
+
+    assert execution.evidence.items
+    assert quick.calls
 
 
 @pytest.mark.parametrize(

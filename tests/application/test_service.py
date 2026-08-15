@@ -85,7 +85,10 @@ from tradingagents.dataflows.config import get_config
 from tradingagents.dataflows.errors import NoMarketDataError
 from tradingagents.dataflows.jp import edinet_common, edinet_news, jp_news, jquants_indicator
 from tradingagents.dataflows.jp.calendar import is_tse_open
-from tradingagents.graph.research_graph import GraphExecution
+from tradingagents.graph.research_graph import (
+    GraphExecution,
+    GraphVisibleRequiredEvidenceError,
+)
 from tradingagents.provenance import (
     ProvenanceRecord,
     SourceObservation,
@@ -648,11 +651,16 @@ def _experimental_nmc_candidate(
     baseline: ResearchRevisionDraft,
     cutoff: date,
 ) -> ResearchRevisionDraft:
+    inherited_bundle = EvidenceBundle.model_validate(
+        {
+            **baseline.evidence_snapshot.bundle.model_dump(mode="python"),
+            "analysis_date": cutoff,
+            "digest": None,
+        }
+    )
     inherited_snapshot = baseline.evidence_snapshot.model_copy(
         update={
-            "bundle": baseline.evidence_snapshot.bundle.model_copy(
-                update={"analysis_date": cutoff}
-            ),
+            "bundle": inherited_bundle,
             "lineage": tuple(
                 EvidenceSnapshotItem(
                     evidence_ref=item.evidence_ref,
@@ -865,7 +873,7 @@ def test_historical_research_execution_freezes_market_local_end_of_cutoff(
     assert [item.source for item in revision.evidence_snapshot.bundle.items] == ["fixture"]
 
 
-def test_current_research_execution_reuses_frozen_frontier_on_retry(
+def test_current_research_execution_reuses_frozen_frontier_and_readiness_on_retry(
     app_settings,
     repository,
 ) -> None:
@@ -907,7 +915,11 @@ def test_current_research_execution_reuses_frozen_frontier_on_retry(
 
     assert frozen == datetime(2026, 7, 24, 18, 0, tzinfo=timezone(timedelta(hours=9)))
     assert repository.get_run(view.id).information_frontier == frozen
-    assert readiness_frontiers == [frozen, frozen]
+    assert readiness_frontiers == [frozen]
+    assert any(
+        event.event_type == "research.anchor_readiness_reused"
+        for event in repository.list_events(view.id)
+    )
 
 
 def test_readiness_failure_does_not_freeze_information_frontier(
@@ -1010,6 +1022,213 @@ def test_initial_chain_can_explicitly_allow_non_anchor_full_research(
     assert any(
         event.event_type == "research.anchor_readiness_not_required"
         for event in repository.list_events(run.id)
+    )
+
+
+def test_successful_anchor_readiness_manifest_reaches_graph_context(
+    app_settings,
+    repository,
+) -> None:
+    readiness_results = []
+    graph_contexts = []
+
+    def readiness(*args, **kwargs):
+        result = _anchor_ready(*args, **kwargs)
+        readiness_results.append(result)
+        return result
+
+    class CapturingGraph:
+        def __init__(self, **_kwargs):
+            pass
+
+        def execute(self, context, **_kwargs):
+            graph_contexts.append(context)
+            return _execution(context.request.ticker)
+
+    service = _service(
+        app_settings,
+        repository,
+        graph_factory=CapturingGraph,
+        anchor_readiness_checker=readiness,
+    )
+
+    result = service.run_initial_chain(
+        AnalysisRequest(
+            ticker="7203.T",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+
+    assert result.status is RunStatus.SUCCEEDED
+    assert len(readiness_results) == 1
+    assert len(graph_contexts) == 1
+    assert graph_contexts[0].anchor_readiness == readiness_results[0]
+
+
+def test_required_evidence_gate_failure_retains_evidence_and_audit_event(
+    app_settings,
+    repository,
+) -> None:
+    class GateFailureGraph:
+        def __init__(self, **_kwargs):
+            pass
+
+        def execute(self, context, *, on_event, **_kwargs):
+            execution = _execution(context.request.ticker)
+            context.evidence_writer(execution.evidence)
+            on_event(
+                {
+                    "event_type": "research.anchor_evidence_gate_failed",
+                    "node": "evidence.seal",
+                    "payload": {
+                        "reason": "graph_visible_required_evidence_missing",
+                        "missing_sources": ["EDINET"],
+                        "missing_capabilities": ["official_filing"],
+                    },
+                }
+            )
+            raise GraphVisibleRequiredEvidenceError(
+                missing_sources=("EDINET",),
+                missing_capabilities=("official_filing",),
+            )
+
+    service = _service(
+        app_settings,
+        repository,
+        graph_factory=GateFailureGraph,
+    )
+    queued = service.enqueue_initial_chain(
+        AnalysisRequest(
+            ticker="7203.T",
+            analysis_date="2026-07-24",
+            analysts=("market", "news"),
+        )
+    )
+    claimed = repository.claim_run(
+        queued.id,
+        "worker",
+        app_settings.lease_seconds,
+    )
+
+    with pytest.raises(GraphVisibleRequiredEvidenceError):
+        service.execute_claimed(claimed, worker_id="worker")
+
+    failed = repository.get_run(queued.id)
+    assert failed.status is RunStatus.FAILED
+    assert failed.metrics.llm_calls == 0
+    assert repository.get_evidence(queued.id).instrument == "7203.T"
+    events = repository.list_events(queued.id)
+    gate_event = next(
+        event
+        for event in events
+        if event.event_type == "research.anchor_evidence_gate_failed"
+    )
+    assert gate_event.payload == {
+        "reason": "graph_visible_required_evidence_missing",
+        "missing_sources": ["EDINET"],
+        "missing_capabilities": ["official_filing"],
+    }
+    assert any(event.event_type == "run.failed" for event in events)
+
+
+def test_required_evidence_gate_retry_reuses_manifest_and_sealed_bundle(
+    app_settings,
+    repository,
+) -> None:
+    readiness_calls = 0
+    graph_calls = 0
+    constructed_seals: list[datetime] = []
+    observed_seals: list[datetime] = []
+
+    def readiness(*args, **kwargs):
+        nonlocal readiness_calls
+        readiness_calls += 1
+        return _anchor_ready(*args, **kwargs)
+
+    class ReplayGraph:
+        def __init__(self, **_kwargs):
+            pass
+
+        def execute(self, context, *, on_event, **_kwargs):
+            nonlocal graph_calls
+            graph_calls += 1
+            bundle = context.sealed_evidence_reader()
+            if bundle is None:
+                execution = _execution(context.request.ticker)
+                seal = datetime(
+                    2026,
+                    7,
+                    24,
+                    10,
+                    graph_calls,
+                    tzinfo=timezone.utc,
+                )
+                constructed_seals.append(seal)
+                bundle = EvidenceBundle(
+                    instrument=context.request.ticker,
+                    analysis_date=context.request.analysis_date,
+                    information_frontier=context.information_frontier,
+                    items=execution.evidence.items,
+                    sealed_at=seal,
+                )
+                context.evidence_writer(bundle)
+            observed_seals.append(bundle.sealed_at)
+            if graph_calls == 1:
+                on_event(
+                    {
+                        "event_type": "research.anchor_evidence_gate_failed",
+                        "node": "evidence.seal",
+                        "payload": {
+                            "reason": "graph_visible_required_evidence_missing",
+                            "missing_sources": ["EDINET"],
+                            "missing_capabilities": ["official_filing"],
+                        },
+                    }
+                )
+                raise GraphVisibleRequiredEvidenceError(
+                    missing_sources=("EDINET",),
+                    missing_capabilities=("official_filing",),
+                )
+            execution = _execution(context.request.ticker)
+            return GraphExecution(
+                state=execution.state,
+                evidence=bundle,
+                reports=execution.reports,
+                decision=execution.decision,
+            )
+
+    service = _service(
+        app_settings,
+        repository,
+        graph_factory=ReplayGraph,
+        anchor_readiness_checker=readiness,
+    )
+    queued = service.enqueue_initial_chain(
+        AnalysisRequest(
+            ticker="7203.T",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+    claimed = repository.claim_run(queued.id, "worker-1", app_settings.lease_seconds)
+    with pytest.raises(GraphVisibleRequiredEvidenceError):
+        service.execute_claimed(claimed, worker_id="worker-1")
+    first_bundle = repository.get_evidence(queued.id)
+
+    retried = service.retry(queued.id)
+    claimed = repository.claim_run(retried.id, "worker-2", app_settings.lease_seconds)
+    result = service.execute_claimed(claimed, worker_id="worker-2")
+
+    assert result.status is RunStatus.SUCCEEDED
+    assert readiness_calls == 1
+    assert graph_calls == 2
+    assert constructed_seals == [first_bundle.sealed_at]
+    assert observed_seals == [first_bundle.sealed_at, first_bundle.sealed_at]
+    assert repository.get_evidence(queued.id) == first_bundle
+    assert any(
+        event.event_type == "research.anchor_readiness_reused"
+        for event in repository.list_events(queued.id)
     )
 
 
@@ -3965,6 +4184,47 @@ def test_revision_owns_state_and_evidence_after_producing_run_is_purged(
     assert revision.evidence_snapshot.bundle.items[0].content == "Fixture evidence."
 
 
+def test_repository_round_trip_keeps_legacy_internal_source_dependency_readable(
+    app_settings,
+    repository,
+) -> None:
+    internal_ref = "ev_deadbeefdead"
+
+    def legacy_state_assembler(request, execution):
+        draft = _eligible_state_assembler(request, execution)
+        claim = draft.current_state.claims[0].model_copy(
+            update={"required_sources": (internal_ref,)}
+        )
+        return draft.model_copy(
+            update={
+                "current_state": draft.current_state.model_copy(
+                    update={"claims": (claim, *draft.current_state.claims[1:])}
+                )
+            }
+        )
+
+    service = _service(
+        app_settings,
+        repository,
+        state_assembler=legacy_state_assembler,
+    )
+    service.run_initial_chain(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+    chain = repository.list_research_chains(instrument="6501.T")[0]
+
+    revision = repository.get_research_revision(chain.current_revision_id)
+    presented = service.get_research_chain(chain.id)
+
+    assert revision.current_state.claims[0].required_sources == (internal_ref,)
+    assert presented.next_update_policy == "full_required"
+    assert presented.next_update_reason == "invalid_source_dependency"
+
+
 @pytest.mark.parametrize(
     ("identity", "expected"),
     [
@@ -4327,6 +4587,92 @@ def test_worker_shutdown_requeues_run_and_preserves_checkpoint(
     assert released.attempt == 1
     assert repository.checkpoint_thread(queued.id) == checkpoint
     assert repository.list_events(queued.id)[-1].event_type == "run.interrupted"
+
+
+def test_worker_shutdown_reuses_readiness_and_sealed_evidence_in_same_attempt(
+    app_settings,
+    repository,
+) -> None:
+    readiness_calls = 0
+    graph_calls = 0
+    observed_seals: list[datetime] = []
+
+    def readiness(*args, **kwargs):
+        nonlocal readiness_calls
+        readiness_calls += 1
+        return _anchor_ready(*args, **kwargs)
+
+    class SameAttemptGraph:
+        def __init__(self, **_kwargs):
+            pass
+
+        def execute(self, context, **_kwargs):
+            nonlocal graph_calls
+            graph_calls += 1
+            bundle = context.sealed_evidence_reader()
+            if bundle is None:
+                execution = _execution(context.request.ticker)
+                bundle = EvidenceBundle(
+                    instrument=context.request.ticker,
+                    analysis_date=context.request.analysis_date,
+                    information_frontier=context.information_frontier,
+                    items=execution.evidence.items,
+                    sealed_at=datetime(
+                        2026,
+                        7,
+                        24,
+                        10,
+                        0,
+                        tzinfo=timezone.utc,
+                    ),
+                )
+                context.evidence_writer(bundle)
+            observed_seals.append(bundle.sealed_at)
+            if graph_calls == 1:
+                raise WorkerShutdown("fixture shutdown after evidence seal")
+            execution = _execution(context.request.ticker)
+            return GraphExecution(
+                state=execution.state,
+                evidence=bundle,
+                reports=execution.reports,
+                decision=execution.decision,
+            )
+
+    service = _service(
+        app_settings,
+        repository,
+        graph_factory=SameAttemptGraph,
+        anchor_readiness_checker=readiness,
+    )
+    queued = service.enqueue_initial_chain(
+        AnalysisRequest(
+            ticker="7203.T",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+    claimed = repository.claim_run(queued.id, "worker-1", 30)
+
+    with pytest.raises(WorkerShutdown):
+        service.execute_claimed(claimed, worker_id="worker-1")
+
+    released = repository.get_run(queued.id)
+    assert released.status is RunStatus.QUEUED
+    assert released.attempt == 1
+    first_bundle = repository.get_evidence(queued.id)
+
+    claimed_again = repository.claim_run(queued.id, "worker-2", 30)
+    result = service.execute_claimed(claimed_again, worker_id="worker-2")
+
+    assert result.status is RunStatus.SUCCEEDED
+    assert readiness_calls == 1
+    assert graph_calls == 2
+    assert observed_seals == [first_bundle.sealed_at, first_bundle.sealed_at]
+    assert repository.get_evidence(queued.id) == first_bundle
+    assert any(
+        event.event_type == "research.anchor_readiness_reused"
+        for event in repository.list_events(queued.id)
+    )
 
 
 def test_queued_cancel_is_terminal_and_emits_event(

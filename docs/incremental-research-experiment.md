@@ -9,7 +9,10 @@ research, or an account-specific advisory service.
 The durable domain language is defined in [CONTEXT.md](../CONTEXT.md). The two
 hard-to-reverse choices are recorded in
 [ADR 0002](adr/0002-maintain-research-as-revision-chains.md) and
-[ADR 0003](adr/0003-fail-closed-incremental-coverage.md). Implemented Research
+[ADR 0003](adr/0003-fail-closed-incremental-coverage.md). Forward-anchor
+continuity and Near-live Evidence admission are recorded in
+[ADR 0007](adr/0007-separate-anchor-and-transition-coverage.md) and
+[ADR 0008](adr/0008-admit-near-live-advisory-evidence.md). Implemented Research
 Chains, Full updates, Japanese source lineage/change detection, bounded
 semantic assessment, Shadow comparison, and authoritative experimental No
 Material Change execution are documented in [architecture.md](architecture.md).
@@ -77,8 +80,9 @@ Every Revision separately records its Role, Execution Strategy, and optional
 Change Conclusion. Initial Revisions have no Change Conclusion. If independent
 Full Analysis cannot justify Material Change or No Material Change, it advances
 the chain with an Indeterminate Revision, preserves the state, Evidence, and
-limitations, and requires the next manual update to be another Full
-reassessment.
+limitations. Indeterminate is a Change Conclusion, not an automatic Full-only
+policy: Anchor Coverage independently determines whether the resulting head is
+a Forward Research Anchor eligible for bounded reassessment.
 
 “Full Analysis” means the project's existing complete pipeline. It does not
 claim objective completeness and may reuse cached or persisted source material
@@ -106,14 +110,20 @@ when the current point-in-time and provenance contracts allow it.
 - A successful Revision advances only after all state, coverage, delta,
   summary, audit, Evidence, and Source Record lineage references close within
   its own Effective Evidence Snapshot.
-- Eligible Baseline status is server-derived. Incomplete or Indeterminate heads
-  report `full_required`; there is no force-incremental repair path.
+- Eligible Baseline status is server-derived from the current head and its
+  Forward Research Anchor qualification. Indeterminate alone does not force
+  `full_required`; a non-anchor or otherwise incompatible head does. There is
+  no force-incremental repair path.
 - EDINET and TDnet are always Required for Japanese announcements. Required
   fundamentals and market domains use their typed J-Quants contracts, and
   active Claim/open Question dependencies add further Required Sources. Each
-  source needs a complete point-in-time Watermark over the cutoff. Zero results
-  are valid; positive results need a same-source observed version whose Evidence
-  resolves in the Effective Evidence Snapshot.
+  source needs point-in-time closure over the required horizon. A typed archive
+  truncation confined before an established anchor remains visible but does not
+  create a Transition Coverage gap; it also does not prove absence in the
+  unscanned pre-anchor interval. Any gap intersecting the transition after the
+  anchor blocks No Material Change. Zero results are valid only for an actually
+  scanned interval; positive results need a same-source observed version whose
+  Evidence resolves in the Effective Evidence Snapshot.
 
 These rules define the state being tested. Exact table layouts, enum names,
 prompt schemas, retry counts, and UI components are implementation choices.

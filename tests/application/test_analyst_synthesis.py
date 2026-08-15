@@ -192,6 +192,52 @@ def test_custom_output_language_reaches_audit_primary_and_repair_prompts() -> No
     assert all(custom_language in prompt for prompt in audit_llm.prompts)
 
 
+def test_internal_evidence_ref_as_required_source_triggers_audit_repair() -> None:
+    bundle = _bundle()
+    ref = bundle.items[0].ref
+    valid = AnalystAuditDraft(
+        confidence=0.7,
+        key_claims=(
+            AuditKeyClaimDraft(
+                id="fundamentals.claim_1",
+                section_id="fundamentals.section_1",
+                kind=AnalystClaimType.INFERENCE,
+                importance=ClaimImportance.PRIMARY,
+                statement="Revenue improved.",
+                implication="The claim remains evidence-dependent.",
+                confidence=0.7,
+                evidence_refs=(ref,),
+                required_sources=("fixture",),
+            ),
+        ),
+    )
+    invalid = valid.model_copy(
+        update={
+            "key_claims": (
+                valid.key_claims[0].model_copy(update={"required_sources": (ref,)}),
+            )
+        }
+    )
+    audit_llm = _AuditLLM([invalid, valid])
+
+    result = invoke_analyst_report(
+        _MarkdownLLM([_Message(f"# Overview\n\nRevenue improved.[^{ref}]")]),
+        audit_llm,
+        analyst="fundamentals",
+        draft_narrative="Use the sealed evidence.",
+        bundle=bundle,
+        output_language="en",
+        prepared_evidence=None,
+        confidence_override=None,
+        warnings=(),
+        node="analyst.fundamentals",
+    )
+
+    assert result.value.key_claims[0].required_sources == ("fixture",)
+    assert len(audit_llm.prompts) == 2
+    assert ref in audit_llm.prompts[1]
+
+
 def test_unknown_citation_is_removed_without_discarding_report() -> None:
     bundle = _bundle()
     markdown = "# Overview\n\nSupported.[^ev_ffffffffffff] Unknown.[^ev_deadbeefdead]"

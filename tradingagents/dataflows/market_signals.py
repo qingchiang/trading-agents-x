@@ -34,10 +34,7 @@ class SentimentSignal:
     """One market-specific signal and its provenance contract."""
 
     tag: str
-    fetch: Callable[
-        [str, str],
-        str | tuple[str, tuple[StructuredNumericFact, ...]],
-    ]
+    fetch: Callable[..., str | tuple[str, tuple[StructuredNumericFact, ...]]]
     evidence: str
     source: str
     title: str
@@ -45,6 +42,8 @@ class SentimentSignal:
     effective: Callable[[str], str]
     timing: str
     live_only: bool = False
+    accepts_information_frontier: bool = False
+    dataset_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -82,6 +81,8 @@ def _jp_signals() -> tuple[SentimentSignal, ...]:
             ),
             effective=lambda date: f"{lookback_start_date(date, 89)} to {date}",
             timing="disclosure-date filtered",
+            accepts_information_frontier=True,
+            dataset_id="edinet.ownership_control",
         ),
         SentimentSignal(
             tag="margin_balances",
@@ -214,6 +215,8 @@ def sentiment_signal_specs(ticker: str) -> tuple[SentimentSignal, ...]:
 def fetch_sentiment_signals(
     ticker: str,
     curr_date: str,
+    *,
+    information_frontier: str | None = None,
 ) -> tuple[FetchedSentimentSignal, ...]:
     """Fetch all registered signals without allowing an exception to escape."""
     fetched = []
@@ -226,7 +229,14 @@ def fetch_sentiment_signals(
             )
         else:
             try:
-                result = spec.fetch(ticker, curr_date)
+                if spec.accepts_information_frontier:
+                    result = spec.fetch(
+                        ticker,
+                        curr_date,
+                        information_frontier=information_frontier,
+                    )
+                else:
+                    result = spec.fetch(ticker, curr_date)
                 if isinstance(result, tuple):
                     body, structured_numeric_facts = result
                 else:

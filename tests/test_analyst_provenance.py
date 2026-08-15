@@ -86,7 +86,7 @@ def test_fundamentals_keeps_sources_and_missing_tools_as_internal_evidence():
         "STATEMENT",
         ProvenanceRecord(
             evidence="get_income_statement",
-            source="J-Quants official summary",
+            source="J-Quants fundamentals",
             requested="2026-07-17",
             effective="disclosures <= 2026-07-17",
             timing="disclosure-date filtered",
@@ -119,7 +119,7 @@ def test_fundamentals_keeps_sources_and_missing_tools_as_internal_evidence():
         if item.evidence_type == "get_income_statement"
     )
     assert {origin.source for origin in statement.origins} == {
-        "J-Quants official summary",
+        "J-Quants fundamentals",
         "yfinance curated detail",
     }
     missing = {

@@ -213,6 +213,28 @@ event-source observations must cover the interval from that anchor's frontier;
 an archive limitation confined before it remains visible, while a gap after it
 fails readiness before LLM construction.
 
+After parallel Full collection converges, anchor-required executions compare
+the graph-visible sealed Evidence with the successful readiness source
+manifest before analyst synthesis. Missing Required source records, watermarks,
+or selected market/fundamental datasets fail with a typed admission reason
+before the case, debate, risk, or committee stages. Ordinary explicitly
+non-anchor Full executions retain their existing degraded-evidence behavior.
+Market Observation closure includes both the complete adjusted-OHLCV artifact
+and table used by the analyst and the verified market snapshot's PIT Source
+Record/Watermark used by Anchor Coverage; neither representation substitutes
+for the other. The cost gate evaluates every graph-visible Watermark for each
+Required source, not merely the first successful sibling. An unavailable,
+non-PIT, or unattested sibling remains blocking, and conflicting Watermarks for
+the same source, dataset identity, and scanned interval fail closed before
+analyst synthesis so the gate cannot be more optimistic than final Anchor
+Coverage. Watermarks from distinct dataset identities are evaluated against
+their own Required capability contracts rather than collapsed by display name.
+The successful manifest is immutable across attempts of the same run. Event
+source frontiers retain returned/reported counts, a digest of the observed
+record-version closure, and typed limitations; retries reuse both that manifest
+and the first sealed Evidence bundle rather than recollecting against a weaker
+boundary or creating a different seal timestamp.
+
 ### Run state and attempts
 
 ```text
@@ -298,11 +320,17 @@ retain each upstream disclosure number as the version's native record identity,
 and carry an explicit accounting-period comparison key. These fields classify
 new filings, corrections, restatements, accounting-scope changes, and otherwise
 unclassifiable differences across snapshots without conflating logical identity
-with an individual upstream disclosure. A latest visible disclosure more than
-180 days before the analysis cutoff marks the snapshot limited. Adjusted
+with an individual upstream disclosure. Fundamentals overview and statement
+assemblers use the same canonical `J-Quants fundamentals` identity for their
+Provenance Records, Source Records, and Source Watermarks; presentation labels
+such as "official summary" do not create a separate source. A latest visible
+disclosure more than 180 days before the analysis cutoff marks the snapshot
+limited. Adjusted
 market history records its provider, adjustment contract, latest observation,
 unit, precision, and actual returned warm-up start separately from the requested
-scan cutoff. The Current Research
+scan cutoff. The verified snapshot and fundamentals valuation block derive
+their Source Record and Watermark closure from the same bounded OHLCV-frame
+metadata builder. The Current Research
 State retains audited market reference levels, and a Revision delta records
 ordinary movement separately from a deterministic crossing of one of those
 levels. Provider, adjustment, or unit drift is an incompatible market signal,
@@ -359,6 +387,32 @@ fabricated Material Change. It becomes the readable and exportable head, and
 independently qualifies as a Forward Research Anchor only when its resulting
 Current Research State satisfies Anchor Coverage.
 
+EDINET ownership/control filings collected for the sentiment analyst remain a
+Required subset of the same official-filing event stream. On a successful scan,
+their producer carries the frozen Information Frontier and emits Source Records
+plus a PIT Watermark for the actual interval; a successful zero-result scan emits
+an explicit frontier-attested zero-record closure. On producer failure or missing
+attestation, the graph-facing sanitizer preserves the dataset identity and emits
+a truthful unavailable closure. Producer metadata and sanitizer enforcement
+together guarantee that the sentiment presentation role cannot downgrade those
+official filings to Advisory or create a second, weaker EDINET coverage contract.
+Graph-facing Evidence retains the `edinet.ownership_control` dataset identity so
+closure comparisons do not equate that subject-company query with EDINET's
+company-filer disclosure query merely because their source and calendar interval
+match. An unavailable Required EDINET dataset remains blocking; dataset scoping
+separates incompatible record universes, not Required from Advisory Evidence.
+
+Near-live Advisory Evidence may appear in the same Revision and inform its
+reports, risks, catalysts, and Research Opinion without satisfying or poisoning
+Anchor Coverage. If a Claim or open Question promotes its live-only source to
+Required, that source remains limited and blocks Anchor qualification.
+Post-cutoff Near-live market reference levels remain auditable Research Decision
+artifacts rather than becoming cutoff-dated `CurrentResearchState` levels. State
+Assembly revalidates their live-only Evidence origins against the sealed snapshot,
+records the exclusion as a Revision limitation, and preserves the Evidence in the
+Effective Evidence Snapshot. Unattested, out-of-window, or point-in-time future
+levels continue to fail closed at the state boundary.
+
 When their analyst domains are selected, J-Quants fundamental snapshots and
 adjusted market history are Required for Japanese coverage. Missing, stale,
 partial, incompatible, truncated, or insufficient-warm-up observations block a
@@ -398,6 +452,18 @@ Advisory. Required sources are derived from active Claims and open Questions;
 EDINET and TDnet remain Required for Japanese chains, and audited market
 reference levels require compatible adjusted-market coverage.
 
+A Required source dependency names an external data source, not an Evidence,
+Evidence Table, memory, Claim, Question, calculation, requirement, or debate
+object. New analyst and Decision output that places an internal reference in a
+source dependency enters structured-output repair and cannot be assembled into
+a new Research State. Persisted legacy Revisions remain readable: policy omits
+the internal reference from collection, records a typed compatibility
+limitation, and requires the next execution to be Full. That Full update keeps
+legal inherited source names, replaces legacy internal values with legal names
+from the independently assembled candidate when available, and records the
+compatibility repair in Update Summary without treating it as a Coverage
+limitation.
+
 The bounded phase derives versioned Transition Coverage over the interval after
 the current Forward Research Anchor's Information Frontier through the frozen
 update frontier. Each Required Market Research Capability retains its checked
@@ -409,6 +475,13 @@ intersects the transition, a live-only or unknown temporal scope, or a source
 frontier short of the update frontier fails closed as `coverage_incomplete`.
 Zero-record scans count only when the source explicitly attests the applicable
 interval and reports zero records.
+
+Positive Near-live Evidence may enter Change Assessment and cause Automatic
+Escalation when it could affect a Claim or Question. An empty live-only response
+is not evidence of absence: while an Advisory empty response does not block a
+No Material Change conclusion supported by complete Required point-in-time
+sources, it contributes no support to that conclusion. A live-only source made
+Required cannot prove Transition Coverage or No Material Change.
 
 For a Japanese Research Chain whose configured market route resolves
 `get_verified_market_snapshot` to J-Quants first, `AnalysisService` performs a
@@ -453,6 +526,25 @@ ambiguous targets never reuse a persistent ID. Weakening, contradiction,
 Question-state changes, novelty, ordinal Claim Confidence changes, and
 uncertainty produce stable Full-escalation reasons. Invalid structured output
 gets one repair attempt and then escalates fail-closed.
+
+The semantic boundary projects only active Claims, open or answered Questions,
+and their current decision context; retired objects remain in the Revision for
+audit but are not current comparison targets. Every new Evidence item and each
+applicable persistent ID remains present. Evidence content is truncated through
+a deterministic, new-Evidence-first character budget while source, timing,
+quality, and temporal-scope metadata remain visible. If that bounded projection
+or the Evidence item-count limit still cannot fit the semantic contract, the
+update escalates fail-closed with `semantic_input_oversize`.
+
+The model classifies each new Evidence item exactly once. A relationship may
+identify at most one application-owned Claim or Question: Claim relationships
+select the single most directly affected Claim, Question relationships select
+one Question, and untargeted relationships select neither. When an Evidence
+item cannot be assigned to one unambiguous target, the model reports
+uncertainty and the update escalates to Full Analysis. Cardinality or duplicate
+assignment errors enter the bounded structured-output repair before they fail
+closed; persisted version-1 assessments remain readable without retroactively
+reinterpreting their model-suggested targets.
 
 When bounded gates can propose No Material Change, Shadow mode persists the
 candidate and its semantic assessment, then runs independent Full Analysis.
@@ -669,7 +761,22 @@ association through the Evidence item that carried the observation.
 `EvidenceBundle(version="8")` deduplicates items, validates unique references,
 rejects effective dates after the analysis cutoff, interprets `available_at`
 in the instrument's market timezone, and seals both evidence items and
-deterministic raw `EvidenceTable` objects with a digest.
+deterministic raw `EvidenceTable` objects. Newly sealed bundles bind the digest
+to the version, instrument, Research Cutoff, Information Frontier, `sealed_at`,
+items, and tables, so admission-driving context cannot be changed independently
+of the ledger contents. The schema version and database shape remain unchanged.
+
+Persisted v8 bundles whose digest was produced by the earlier payload containing
+`items`, `tables`, and, when present, `information_frontier` remain readable,
+including eligible
+Near-live Evidence whose stored quality predates current normalization. Legacy
+digest acceptance is not an admission bypass: every digest-bearing bundle
+receives a non-mutating safety audit against its declared cutoff, frontier, and
+seal. Visible content outside that boundary, mixed or unknown temporal leakage,
+and tables whose supporting content would be withheld fail closed. The
+compatibility path neither rewrites the historical bundle nor grants legacy
+content broader eligibility; only newly sealed bundles use the context-bound
+payload described above.
 
 The sealed bundle is written to `run_evidence` independently of the run's final
 status. Evidence sealing and its `evidence.sealed` event commit atomically, so a
@@ -919,19 +1026,48 @@ calendar or an unconditional UTC date. Historical tools receive that cutoff
 from runtime context rather than an LLM-provided argument.
 
 Research Cutoff is a date, not an execution timestamp. The Information Frontier
-is the distinct point-in-time knowledge boundary. Evidence available after the
-frontier is excluded even when its effective date is on or before the cutoff.
+is the distinct point-in-time knowledge and Coverage boundary. Point-in-time
+Evidence available after the frontier is excluded even when its effective date
+is on or before the cutoff. Auditable Near-live Evidence is a deliberate
+exception for research content, not Coverage: its Research Cutoff may be the
+retrieval date or one of the five preceding market-local dates without
+advancing the Information Frontier. Compute the inclusive age as
+`market_local_date(retrieved_at) - Research Cutoff`; only age 0--5 is eligible,
+so retrieval occurs on the cutoff date or one of its five following local
+dates. Do not use replay time. A cutoff later than retrieval, retrieval later
+than the Evidence snapshot's timezone-aware `sealed_at`, and missing, naive, or
+age 6+ timestamps fail closed.
 Required source watermarks retain their own timezone-aware attested frontier,
 requested interval, actual observed intervals, temporal scope, typed limitation
 kind, and presentation text. A source frontier may be earlier than the Revision
 frontier and is never optimistically advanced to the common target.
 
 Sources truncate observations to the cutoff. A disclosure/update source uses
-the conservative visibility boundary. Live-only values are withheld from
-historical runs; absence remains unknown rather than becoming a neutral or
-bearish signal. When a live-only response is cached, its producer-owned
-retrieval timestamp is cached with the payload and reused by consumers; cache
-hits are never restamped at assembly time.
+the conservative visibility boundary. Live-only values outside the five-day
+near-live window are withheld; inside it they retain `live_only` temporal scope,
+producer-owned retrieval time, and degraded quality. Event-like near-live
+sources also truncate each item to the Research Cutoff. Their absence remains
+unknown rather than becoming a neutral or bearish signal. When a live-only
+response is cached, its producer-owned retrieval timestamp is cached with the
+payload and reused by consumers; cache hits are never restamped at assembly
+time. For both explicit spans and unwrapped point-in-time payloads, a safe
+Source Observation or frontier-attested Source Watermark may attest a
+Provenance Record only when their canonical source identities match and the
+attested horizon covers the record's effective horizon. An attestation from
+another source never makes the record admissible.
+
+Content admission and Coverage completeness remain separate. A point-in-time
+Watermark with a frozen frontier may attest returned content within its scanned
+horizon when it is `complete`, or when it is `limited` by typed partial/archive
+truncation. The sanitizer preserves the original status, limitations, requested
+interval, and limitation kind; it never upgrades limited Coverage to complete
+or treats an unscanned interval as proof of absence.
+
+Evidence admission is source- or span-scoped. A point-in-time EDINET or TDnet
+channel remains usable when a sibling Google News channel is live-only, and an
+inadmissible channel retains a structured limitation without erasing safe
+content. An unsegmented response that mixes incompatible temporal scopes still
+fails closed.
 
 ### Vendor chains and assemblers
 

@@ -152,6 +152,30 @@ class FundamentalsTests(unittest.TestCase):
         assert watermark.returned_records == 1
         assert watermark.reported_records == 1
 
+    def test_statement_snapshots_attest_the_requested_information_frontier(self):
+        frontier = "2026-07-27T18:00:00+09:00"
+        for statement in (
+            jf.get_balance_sheet,
+            jf.get_cashflow,
+            jf.get_income_statement,
+        ):
+            with self.subTest(statement=statement.__name__), _patch(
+                [_summary("2026-07-27", disc_time="17:00:00")]
+            ):
+                out = statement(
+                    "9984.T",
+                    "quarterly",
+                    "2026-07-27",
+                    information_frontier=frontier,
+                )
+
+                watermark = extract_source_watermarks(out)[0]
+                assert watermark.source == "J-Quants fundamentals"
+                assert watermark.status == "complete"
+                assert watermark.information_frontier == frontier
+                assert watermark.returned_records == 1
+                assert watermark.reported_records == 1
+
     def test_snapshot_marks_stale_latest_disclosure_limited(self):
         with _patch([_summary("2022-05-10")]):
             out = jf.get_fundamentals("9984.T", curr_date="2023-05-13")

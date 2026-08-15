@@ -1,6 +1,8 @@
 """Graph tools must use AgentState.trade_date instead of model-supplied dates."""
 
 import warnings
+from datetime import datetime
+from typing import get_type_hints
 from unittest import mock
 
 import pytest
@@ -28,6 +30,7 @@ from tradingagents.agents.utils.prediction_markets_tools import (
 from tradingagents.agents.utils.technical_indicators_tools import (
     get_indicators_for_analysis,
 )
+from tradingagents.application.anchor_readiness import AnchorReadinessResult
 from tradingagents.application.contracts import AnalysisRequest, MemoryContext
 from tradingagents.application.runtime import RunContext
 from tradingagents.provenance import extract_provenance, strip_provenance_markers
@@ -37,6 +40,13 @@ class _ToolState(TypedDict):
     messages: list
     trade_date: str
     company_of_interest: str
+
+
+@pytest.mark.unit
+def test_run_context_runtime_annotations_are_resolvable():
+    hints = get_type_hints(RunContext)
+
+    assert hints["anchor_readiness"] == AnchorReadinessResult | None
 
 
 def _invoke_tool(tool, args, trade_date="2020-01-15", context=None):
@@ -165,6 +175,90 @@ def test_tool_node_accepts_typed_run_context_without_serialization_warning(
         "PydanticSerializationUnexpectedValue" in str(item.message)
         or "Expected `none`" in str(item.message)
         for item in caught
+    )
+
+
+@pytest.mark.unit
+def test_verified_market_snapshot_forwards_frozen_information_frontier(
+    app_settings,
+):
+    request = AnalysisRequest(
+        ticker="4568.T",
+        analysis_date="2026-08-10",
+        analysts=("market",),
+    )
+    settings = app_settings.resolve_run(request)
+    frontier = datetime.fromisoformat("2026-08-10T23:59:00+09:00")
+    context = RunContext(
+        run_id="market-snapshot-frontier",
+        request=request,
+        settings=settings,
+        dataflow_config=settings.dataflow_config(app_settings),
+        memory=MemoryContext(instrument=request.ticker, market="Asia/Tokyo"),
+        instrument_context="The instrument is 4568.T.",
+        cancel_requested=lambda: False,
+        information_frontier=frontier,
+    )
+
+    with mock.patch(
+        "tradingagents.agents.utils.market_data_validation_tools.route_to_vendor",
+        return_value="SAFE",
+    ) as router:
+        _invoke_tool(
+            get_verified_market_snapshot_for_analysis,
+            {"symbol": request.ticker},
+            trade_date=request.analysis_date.isoformat(),
+            context=context,
+        )
+
+    router.assert_called_once_with(
+        "get_verified_market_snapshot",
+        "4568.T",
+        "2026-08-10",
+        30,
+        _provenance=True,
+        information_frontier=frontier.isoformat(),
+    )
+
+
+@pytest.mark.unit
+def test_stock_data_forwards_frozen_information_frontier(app_settings):
+    request = AnalysisRequest(
+        ticker="4568.T",
+        analysis_date="2026-08-10",
+        analysts=("market",),
+    )
+    settings = app_settings.resolve_run(request)
+    frontier = datetime.fromisoformat("2026-08-10T23:59:00+09:00")
+    context = RunContext(
+        run_id="market-table-frontier",
+        request=request,
+        settings=settings,
+        dataflow_config=settings.dataflow_config(app_settings),
+        memory=MemoryContext(instrument=request.ticker, market="Asia/Tokyo"),
+        instrument_context="The instrument is 4568.T.",
+        cancel_requested=lambda: False,
+        information_frontier=frontier,
+    )
+
+    with mock.patch(
+        "tradingagents.agents.utils.core_stock_tools.route_to_vendor",
+        return_value="SAFE",
+    ) as router:
+        _invoke_tool(
+            get_stock_data_for_analysis,
+            {"symbol": request.ticker, "start_date": "2026-05-13"},
+            trade_date=request.analysis_date.isoformat(),
+            context=context,
+        )
+
+    router.assert_called_once_with(
+        "get_stock_data",
+        "4568.T",
+        "2026-05-13",
+        "2026-08-10",
+        _provenance=True,
+        information_frontier=frontier.isoformat(),
     )
 
 

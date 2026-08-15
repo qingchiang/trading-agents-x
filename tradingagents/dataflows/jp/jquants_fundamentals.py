@@ -531,9 +531,19 @@ def get_fundamentals(
     return _attach_snapshot_metadata(body, observations, watermark)
 
 
-def get_balance_sheet(ticker: str, freq: str = "quarterly", curr_date: str | None = None) -> str:
+def get_balance_sheet(
+    ticker: str,
+    freq: str = "quarterly",
+    curr_date: str | None = None,
+    *,
+    information_frontier: str | None = None,
+) -> str:
     """Balance-sheet summary (total assets, derived liabilities, net assets)."""
-    canonical, records, observations, watermark = _fetch_summary_snapshot(ticker, curr_date)
+    canonical, records, observations, watermark = _fetch_summary_snapshot(
+        ticker,
+        curr_date,
+        information_frontier=information_frontier,
+    )
     body = _render_periods(
         canonical,
         records,
@@ -544,9 +554,19 @@ def get_balance_sheet(ticker: str, freq: str = "quarterly", curr_date: str | Non
     return _attach_snapshot_metadata(body, observations, watermark)
 
 
-def get_cashflow(ticker: str, freq: str = "quarterly", curr_date: str | None = None) -> str:
+def get_cashflow(
+    ticker: str,
+    freq: str = "quarterly",
+    curr_date: str | None = None,
+    *,
+    information_frontier: str | None = None,
+) -> str:
     """Cash-flow summary (operating/investing/financing + period-end cash)."""
-    canonical, records, observations, watermark = _fetch_summary_snapshot(ticker, curr_date)
+    canonical, records, observations, watermark = _fetch_summary_snapshot(
+        ticker,
+        curr_date,
+        information_frontier=information_frontier,
+    )
     body = _render_periods(
         canonical,
         records,
@@ -557,9 +577,19 @@ def get_cashflow(ticker: str, freq: str = "quarterly", curr_date: str | None = N
     return _attach_snapshot_metadata(body, observations, watermark)
 
 
-def get_income_statement(ticker: str, freq: str = "quarterly", curr_date: str | None = None) -> str:
+def get_income_statement(
+    ticker: str,
+    freq: str = "quarterly",
+    curr_date: str | None = None,
+    *,
+    information_frontier: str | None = None,
+) -> str:
     """Income-statement summary (sales, operating/ordinary/net profit, EPS, BPS)."""
-    canonical, records, observations, watermark = _fetch_summary_snapshot(ticker, curr_date)
+    canonical, records, observations, watermark = _fetch_summary_snapshot(
+        ticker,
+        curr_date,
+        information_frontier=information_frontier,
+    )
     body = _render_periods(
         canonical,
         records,

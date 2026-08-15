@@ -5,6 +5,7 @@ from langgraph.prebuilt import InjectedState
 
 from tradingagents.agents.utils.runtime import (
     AnalysisToolRuntime,
+    evidence_route_kwargs,
     tool_runtime_scope,
 )
 from tradingagents.dataflows.config import get_config
@@ -76,20 +77,12 @@ def get_news_for_analysis(
             if window == "extended"
             else recent_start_date
         )
-        route_kwargs = {"_provenance": True}
-        information_frontier = getattr(
-            runtime.context,
-            "information_frontier",
-            None,
-        )
-        if information_frontier is not None:
-            route_kwargs["information_frontier"] = information_frontier.isoformat()
         return route_to_vendor(
             "get_news",
             ticker,
             start_date,
             cutoff,
-            **route_kwargs,
+            **evidence_route_kwargs(runtime),
         )
 
 @tool

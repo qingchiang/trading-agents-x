@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -13,7 +14,13 @@ from tradingagents.application.contracts import (
     AnalysisRequest,
     EvidenceBundle,
     EvidenceItem,
+    EvidenceOrigin,
+    EvidenceQuality,
+    EvidenceTemporalScope,
+    EvidenceValueLocator,
     MarketReferenceLevel,
+    MeasurementKind,
+    NumericTemporalBasis,
     ReportLanguage,
     ResearchQuestionSourceDependency,
     ResearchRating,
@@ -59,6 +66,7 @@ from tradingagents.application.research import (
     ResearchScenarioState,
     RevisionExport,
     ScenarioLikelihood,
+    SemanticChangeAssessment,
     SemanticChangeRelationship,
     SourceCoverageLimitation,
     SourceObservationInterval,
@@ -177,6 +185,63 @@ def test_japanese_full_revision_derives_provider_independent_anchor_coverage():
         MarketResearchCapability.MARKET_OBSERVATION,
     }
     assert all(item.satisfied for item in qualification.capabilities if item.required)
+
+
+def test_advisory_live_only_watermark_does_not_poison_forward_anchor():
+    baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    live_watermarks = tuple(
+        item.model_copy(update={"temporal_scope": "live_only"})
+        if item.source == "Google News"
+        else item
+        for item in baseline.evidence_snapshot.source_watermarks
+    )
+    revision = baseline.model_copy(
+        update={
+            "evidence_snapshot": baseline.evidence_snapshot.model_copy(
+                update={"source_watermarks": live_watermarks}
+            )
+        }
+    )
+
+    qualification = derive_forward_research_anchor(revision)
+
+    assert qualification.is_forward_research_anchor is True
+
+
+def test_required_live_only_watermark_blocks_forward_anchor():
+    baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    live_watermarks = tuple(
+        item.model_copy(update={"temporal_scope": "live_only"})
+        if item.source == "Google News"
+        else item
+        for item in baseline.evidence_snapshot.source_watermarks
+    )
+    claim = baseline.current_state.claims[0].model_copy(
+        update={"required_sources": ("Google News",)}
+    )
+    revision = baseline.model_copy(
+        update={
+            "current_state": baseline.current_state.model_copy(
+                update={
+                    "claims": (claim, *baseline.current_state.claims[1:])
+                }
+            ),
+            "evidence_snapshot": baseline.evidence_snapshot.model_copy(
+                update={"source_watermarks": live_watermarks}
+            ),
+        }
+    )
+
+    qualification = derive_forward_research_anchor(revision)
+
+    assert qualification.is_forward_research_anchor is False
+    google = next(
+        item
+        for item in qualification.capabilities
+        if item.capability is MarketResearchCapability.MEDIA
+    )
+    assert google.required is True
+    assert google.satisfied is False
 
 
 def test_pre_frontier_archive_truncation_is_retained_without_blocking_anchor():
@@ -435,6 +500,63 @@ def test_limited_decision_envelope_claim_remains_usable_anchor_state():
     assert derive_forward_research_anchor(limited).is_forward_research_anchor is True
 
 
+def test_retired_claim_coverage_does_not_poison_current_anchor_state():
+    baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    retired = baseline.current_state.claims[0].model_copy(
+        update={
+            "id": "claim_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "standing": ClaimStanding.RETIRED,
+        }
+    )
+    revision = baseline.model_copy(
+        update={
+            "current_state": baseline.current_state.model_copy(
+                update={"claims": (*baseline.current_state.claims, retired)}
+            ),
+            "coverage": baseline.coverage.model_copy(
+                update={
+                    "claims": (
+                        *baseline.coverage.claims,
+                        ResearchObjectCoverage(
+                            object_id=retired.id,
+                            status=CoverageStatus.LIMITED,
+                            evidence_refs=retired.evidence_refs,
+                            limitations=("Retired Claim is retained for audit only.",),
+                        ),
+                    )
+                }
+            ),
+        }
+    )
+
+    qualification = derive_forward_research_anchor(revision)
+
+    assert qualification.is_forward_research_anchor is True
+    assert AnchorQualificationReason.CURRENT_STATE_UNUSABLE not in qualification.reasons
+
+
+def test_active_direct_claim_still_requires_complete_anchor_coverage():
+    baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    revision = baseline.model_copy(
+        update={
+            "coverage": baseline.coverage.model_copy(
+                update={
+                    "claims": (
+                        baseline.coverage.claims[0].model_copy(
+                            update={"status": CoverageStatus.LIMITED}
+                        ),
+                    )
+                }
+            )
+        }
+    )
+
+    qualification = derive_forward_research_anchor(revision)
+
+    assert qualification.is_forward_research_anchor is False
+    assert AnchorQualificationReason.CURRENT_STATE_UNUSABLE in qualification.reasons
+
+
 def test_open_question_is_anchor_covered_when_required_domain_was_checked():
     baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
     question = ResearchQuestion(
@@ -609,6 +731,104 @@ def test_full_state_assembly_assigns_ids_and_preserves_selected_language():
     missing_sources = {item.source for item in draft.coverage.domains if item.source}
     assert missing_sources == {"EDINET", "TDnet", "J-Quants adjusted OHLCV"}
     assert draft.coverage.supports_no_material_change is False
+
+
+def test_full_state_assembly_keeps_near_live_market_reference_out_of_cutoff_state():
+    execution = _execution("6501.T")
+    pit_ref = execution.evidence.items[0].ref
+    retrieved_at = datetime(2026, 7, 28, 9, 0, tzinfo=ZoneInfo("Asia/Tokyo"))
+    near_live = EvidenceItem.create(
+        source="Near-live market snapshot",
+        evidence_type="market snapshot",
+        requested_date=CUTOFF,
+        content="Admitted near-live market observation.",
+        value=101.0,
+        measurement_kind=MeasurementKind.CURRENCY,
+        unit="JPY",
+        origins=(
+            EvidenceOrigin(
+                source="Near-live market snapshot",
+                evidence_type="market snapshot",
+                requested=CUTOFF.isoformat(),
+                retrieved_at=retrieved_at.isoformat(),
+                temporal_scope=EvidenceTemporalScope.LIVE_ONLY,
+            ),
+        ),
+    )
+    evidence = EvidenceBundle(
+        instrument="6501.T",
+        analysis_date=CUTOFF,
+        items=(*execution.evidence.items, near_live),
+        sealed_at=retrieved_at + timedelta(minutes=1),
+    )
+    pit_level = MarketReferenceLevel(
+        label="Cutoff close",
+        value=100.0,
+        measurement_kind="currency",
+        unit="JPY",
+        as_of_date=CUTOFF,
+        interpretation="Point-in-time cutoff reference.",
+        evidence_refs=(pit_ref,),
+        date_evidence_refs=(pit_ref,),
+        source_locator=EvidenceValueLocator(evidence_ref=pit_ref),
+    )
+    near_live_level = MarketReferenceLevel(
+        label="Near-live observation",
+        value=101.0,
+        measurement_kind="currency",
+        unit="JPY",
+        as_of_date=retrieved_at.date(),
+        interpretation="Advisory observation after the research cutoff.",
+        evidence_refs=(near_live.ref,),
+        date_evidence_refs=(near_live.ref,),
+        source_locator=EvidenceValueLocator(evidence_ref=near_live.ref),
+        temporal_basis=NumericTemporalBasis.LIVE_SNAPSHOT,
+    )
+    decision = execution.decision.model_copy(
+        update={
+            "evidence_refs": (*execution.decision.evidence_refs, near_live.ref),
+            "market_reference_levels": (pit_level, near_live_level),
+        }
+    )
+
+    draft = assemble_full_revision(
+        AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
+        replace(execution, evidence=evidence, decision=decision),
+    )
+
+    assert draft.current_state.market_reference_levels == (pit_level,)
+    assert near_live.ref in {item.ref for item in draft.evidence_snapshot.bundle.items}
+    limitation = (
+        "Near-live market references remain Research Artifacts and do not become "
+        "cutoff-dated Current Research State levels."
+    )
+    assert limitation in draft.coverage.limitations
+    assert limitation in draft.update_summary.limitations
+
+
+def test_full_state_assembly_rejects_point_in_time_market_reference_after_cutoff():
+    execution = _execution("6501.T")
+    evidence_ref = execution.evidence.items[0].ref
+    future_level = MarketReferenceLevel(
+        label="Future PIT level",
+        value=101.0,
+        measurement_kind="currency",
+        unit="JPY",
+        as_of_date=CUTOFF + timedelta(days=1),
+        interpretation="Invalid point-in-time reference after the cutoff.",
+        evidence_refs=(evidence_ref,),
+        date_evidence_refs=(evidence_ref,),
+        source_locator=EvidenceValueLocator(evidence_ref=evidence_ref),
+    )
+    decision = execution.decision.model_copy(
+        update={"market_reference_levels": (future_level,)}
+    )
+
+    with pytest.raises(ValidationError, match="market reference levels"):
+        assemble_full_revision(
+            AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
+            replace(execution, decision=decision),
+        )
 
 
 def test_revision_role_and_change_conclusion_are_independent_contracts():
@@ -899,6 +1119,101 @@ def test_full_state_assembly_rejects_missing_explicit_claim_evidence():
         )
 
 
+def test_full_state_assembly_rejects_internal_claim_source_reference():
+    execution = _execution("6501.T")
+    ref = execution.evidence.items[0].ref
+    report = execution.reports["market"].model_copy(
+        update={
+            "key_claims": tuple(
+                claim.model_copy(update={"required_sources": (ref,)})
+                for claim in execution.reports["market"].key_claims
+            )
+        }
+    )
+    execution = execution.__class__(
+        state=execution.state,
+        evidence=execution.evidence,
+        reports={"market": report},
+        decision=execution.decision,
+    )
+
+    with pytest.raises(ValueError, match="internal source reference"):
+        assemble_full_revision(
+            AnalysisRequest(
+                ticker="6501.T",
+                analysis_date=CUTOFF,
+                analysts=("market",),
+            ),
+            execution,
+        )
+
+
+def test_full_state_assembly_rejects_internal_question_source_reference():
+    execution = _execution("6501.T")
+    ref = execution.evidence.items[0].ref
+    question = "Which filing will resolve the uncertainty?"
+    execution = execution.__class__(
+        state=execution.state,
+        evidence=execution.evidence,
+        reports=execution.reports,
+        decision=execution.decision.model_copy(
+            update={
+                "unresolved_questions": (question,),
+                "question_source_dependencies": (
+                    ResearchQuestionSourceDependency(
+                        question=question,
+                        required_sources=(ref,),
+                    ),
+                ),
+            }
+        ),
+    )
+
+    with pytest.raises(ValueError, match="internal source reference"):
+        assemble_full_revision(
+            AnalysisRequest(
+                ticker="6501.T",
+                analysis_date=CUTOFF,
+                analysts=("market",),
+            ),
+            execution,
+        )
+
+
+def test_full_state_assembly_keeps_legal_future_question_source_dependency():
+    execution = _execution("6501.T")
+    question = "Which future archive can resolve the uncertainty?"
+    execution = execution.__class__(
+        state=execution.state,
+        evidence=execution.evidence,
+        reports=execution.reports,
+        decision=execution.decision.model_copy(
+            update={
+                "unresolved_questions": (question,),
+                "question_source_dependencies": (
+                    ResearchQuestionSourceDependency(
+                        question=question,
+                        required_sources=("Future Vendor Archive",),
+                    ),
+                ),
+            }
+        ),
+    )
+
+    draft = assemble_full_revision(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date=CUTOFF,
+            analysts=("market",),
+        ),
+        execution,
+    )
+
+    assert draft.current_state.questions[0].required_sources == (
+        "Future Vendor Archive",
+    )
+
+
 def test_full_update_preserves_only_unambiguous_longitudinal_identities():
     request = AnalysisRequest(
         ticker="6501.T",
@@ -916,6 +1231,300 @@ def test_full_update_preserves_only_unambiguous_longitudinal_identities():
     assert updated.delta.claims[0].change.value == "reaffirmed"
     assert {item.lineage for item in updated.evidence_snapshot.lineage} == {"new"}
     assert updated.execution_strategy.value == "full"
+
+
+def test_full_update_does_not_promote_advisory_sources_in_a_shared_required_domain():
+    watermarks = [
+        _watermark("EDINET", returned_records=0, reported_records=0),
+        _watermark("TDnet", returned_records=0, reported_records=0),
+        _watermark(
+            "FRED",
+            status="unavailable",
+            limitations=("Advisory macro collection was unavailable.",),
+            returned_records=0,
+            reported_records=0,
+        ),
+    ]
+    execution = _with_disclosure_metadata(
+        _execution("6501.T"),
+        records=[],
+        watermarks=watermarks,
+    )
+    baseline = assemble_full_revision(
+        AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
+        execution,
+    )
+    candidate = assemble_full_revision(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date=CUTOFF + timedelta(days=1),
+            analysts=("market",),
+        ),
+        execution,
+    )
+    candidate_fred = next(
+        item for item in candidate.coverage.domains if item.source == "FRED"
+    )
+    assert candidate_fred.requirement is CoverageRequirement.ADVISORY
+
+    updated = assemble_full_update("revision-1", baseline, candidate)
+
+    fred = next(item for item in updated.coverage.domains if item.source == "FRED")
+    assert fred.requirement is CoverageRequirement.ADVISORY
+    assert fred.status is CoverageStatus.UNAVAILABLE
+
+
+def test_legacy_internal_source_dependency_remains_readable_but_forces_full():
+    baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    claim = baseline.current_state.claims[0].model_copy(
+        update={"required_sources": ("ev_deadbeefdead",)}
+    )
+    polluted = baseline.model_copy(
+        update={
+            "current_state": baseline.current_state.model_copy(
+                update={"claims": (claim, *baseline.current_state.claims[1:])}
+            ),
+            "coverage": baseline.coverage.model_copy(
+                update={
+                    "domains": (
+                        *baseline.coverage.domains,
+                        ResearchDomainCoverage(
+                            domain="required_source",
+                            source="ev_deadbeefdead",
+                            requirement=CoverageRequirement.REQUIRED,
+                            status=CoverageStatus.UNAVAILABLE,
+                            limitations=(
+                                "Required internal ref coverage was not recorded.",
+                            ),
+                        ),
+                    )
+                }
+            ),
+        }
+    )
+
+    loaded = baseline.__class__.model_validate(polluted.model_dump(mode="python"))
+    evaluation = evaluate_next_update_policy(
+        loaded,
+        instrument="6501.T",
+        mode="experimental",
+    )
+
+    assert loaded.current_state.claims[0].required_sources == ("ev_deadbeefdead",)
+    assert evaluation.policy == "full_required"
+    assert evaluation.reason is NextUpdateReason.INVALID_SOURCE_DEPENDENCY
+    assert evaluation.compatibility_limitations == ("internal_source_reference",)
+    assert "ev_deadbeefdead" not in required_incremental_sources(loaded)
+    assert "ev_deadbeefdead" not in evaluation.required_sources
+
+
+def test_inactive_legacy_internal_dependencies_still_force_full_and_are_repaired():
+    baseline, _evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    retired_claim = baseline.current_state.claims[0].model_copy(
+        update={
+            "id": "claim_ffffffffffffffffffffffffffffffff",
+            "standing": ClaimStanding.RETIRED,
+            "required_sources": ("ev_deadbeefdead",),
+        }
+    )
+    answered_question = ResearchQuestion(
+        id="question_ffffffffffffffffffffffffffffffff",
+        question="Which archived evidence resolved the uncertainty?",
+        status=QuestionStatus.ANSWERED,
+        required_sources=("memory:legacy-run",),
+    )
+    polluted = baseline.model_copy(
+        update={
+            "current_state": baseline.current_state.model_copy(
+                update={
+                    "claims": (*baseline.current_state.claims, retired_claim),
+                    "questions": (*baseline.current_state.questions, answered_question),
+                }
+            ),
+            "coverage": baseline.coverage.model_copy(
+                update={
+                    "claims": (
+                        *baseline.coverage.claims,
+                        ResearchObjectCoverage(
+                            object_id=retired_claim.id,
+                            status=CoverageStatus.COMPLETE,
+                        ),
+                    ),
+                    "questions": (
+                        *baseline.coverage.questions,
+                        ResearchObjectCoverage(
+                            object_id=answered_question.id,
+                            status=CoverageStatus.COMPLETE,
+                        ),
+                    ),
+                }
+            ),
+        }
+    )
+    loaded = baseline.__class__.model_validate(polluted.model_dump(mode="python"))
+
+    evaluation = evaluate_next_update_policy(
+        loaded,
+        instrument="6501.T",
+        mode="experimental",
+    )
+
+    assert evaluation.policy == "full_required"
+    assert evaluation.reason is NextUpdateReason.INVALID_SOURCE_DEPENDENCY
+    assert evaluation.compatibility_limitations == ("internal_source_reference",)
+    assert "ev_deadbeefdead" not in evaluation.required_sources
+    assert "memory:legacy-run" not in evaluation.required_sources
+
+    candidate = assemble_full_revision(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date=date(2026, 7, 25),
+            analysts=("market",),
+        ),
+        _execution("6501.T"),
+    )
+    repaired = assemble_full_update("revision-1", loaded, candidate)
+    dependencies = tuple(
+        source
+        for claim in repaired.current_state.claims
+        for source in claim.required_sources
+    ) + tuple(
+        source
+        for question in repaired.current_state.questions
+        for source in question.required_sources
+    )
+    assert "ev_deadbeefdead" not in dependencies
+    assert "memory:legacy-run" not in dependencies
+
+
+@pytest.mark.parametrize(
+    ("baseline_sources", "candidate_sources", "expected_sources", "repaired"),
+    (
+        (("ev_deadbeefdead",), (), (), True),
+        (
+            ("EDINET", "ev_deadbeefdead"),
+            ("Google News",),
+            ("EDINET", "Google News"),
+            True,
+        ),
+        (("EDINET",), (), ("EDINET",), False),
+    ),
+)
+def test_full_update_repairs_only_internal_source_dependencies(
+    baseline_sources,
+    candidate_sources,
+    expected_sources,
+    repaired,
+):
+    baseline = assemble_full_revision(
+        AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
+        _execution("6501.T"),
+    )
+    candidate = assemble_full_revision(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date=date(2026, 7, 25),
+            analysts=("market",),
+        ),
+        _execution("6501.T"),
+    )
+    baseline_claim = baseline.current_state.claims[0].model_copy(
+        update={"required_sources": baseline_sources}
+    )
+    candidate_claim = candidate.current_state.claims[0].model_copy(
+        update={"required_sources": candidate_sources}
+    )
+    baseline = baseline.model_copy(
+        update={
+            "current_state": baseline.current_state.model_copy(
+                update={
+                    "claims": (baseline_claim, *baseline.current_state.claims[1:])
+                }
+            )
+        }
+    )
+    candidate = candidate.model_copy(
+        update={
+            "current_state": candidate.current_state.model_copy(
+                update={
+                    "claims": (candidate_claim, *candidate.current_state.claims[1:])
+                }
+            )
+        }
+    )
+
+    updated = assemble_full_update("revision-1", baseline, candidate)
+
+    assert updated.current_state.claims[0].required_sources == expected_sources
+    compatibility_note = "Legacy internal source dependencies were repaired."
+    assert (compatibility_note in updated.update_summary.limitations) is repaired
+
+
+def test_full_update_replaces_internal_question_dependency_from_current_candidate():
+    baseline = assemble_full_revision(
+        AnalysisRequest(ticker="6501.T", analysis_date=CUTOFF, analysts=("market",)),
+        _execution("6501.T"),
+    )
+    candidate = assemble_full_revision(
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date=date(2026, 7, 25),
+            analysts=("market",),
+        ),
+        _execution("6501.T"),
+    )
+    question_text = "Which disclosure will resolve the order uncertainty?"
+    baseline_question = ResearchQuestion(
+        id="question_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        question=question_text,
+        status=QuestionStatus.OPEN,
+        required_sources=("ev_deadbeefdead",),
+    )
+    candidate_question = ResearchQuestion(
+        id="question_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        question=question_text,
+        status=QuestionStatus.OPEN,
+        required_sources=("EDINET",),
+    )
+    baseline = baseline.model_copy(
+        update={
+            "current_state": baseline.current_state.model_copy(
+                update={"questions": (baseline_question,)}
+            )
+        }
+    )
+    candidate = candidate.model_copy(
+        update={
+            "current_state": candidate.current_state.model_copy(
+                update={"questions": (candidate_question,)}
+            ),
+            "delta": candidate.delta.model_copy(
+                update={
+                    "question_disposition": QuestionDispositionAudit(
+                        status="complete",
+                        language="en",
+                        dispositions=(
+                            QuestionDispositionRecord(
+                                baseline_question_id=baseline_question.id,
+                                disposition="reaffirmed",
+                                candidate_question_id=candidate_question.id,
+                                evidence_refs=(candidate.current_state.evidence_refs[0],),
+                                reason="Current Full Evidence preserves the open question.",
+                            ),
+                        ),
+                    )
+                }
+            ),
+        }
+    )
+
+    updated = assemble_full_update("revision-1", baseline, candidate)
+
+    assert updated.current_state.questions[0].id == baseline_question.id
+    assert updated.current_state.questions[0].required_sources == ("EDINET",)
+    assert "Legacy internal source dependencies were repaired." in (
+        updated.update_summary.limitations
+    )
 
 
 def _with_disclosure_metadata(execution, *, records, watermarks):
@@ -2140,6 +2749,11 @@ def test_semantic_change_assessment_supports_typed_relationships(
         question = ResearchQuestion(
             id="question_0123456789abcdef0123456789abcdef",
             question="Will margin recovery persist?",
+            status=(
+                QuestionStatus.ANSWERED
+                if relationship == "reopening"
+                else QuestionStatus.OPEN
+            ),
             evidence_refs=(baseline.current_state.evidence_refs[0],),
         )
         baseline = baseline.model_copy(
@@ -2203,6 +2817,353 @@ def test_semantic_change_assessment_supports_typed_relationships(
     assert (result.candidate is not None) is not escalates
 
 
+@pytest.mark.parametrize(
+    ("object_kind", "standing_or_status"),
+    [
+        ("claim", ClaimStanding.RETIRED),
+        ("claim", ClaimStanding.INVALIDATED),
+        ("question", QuestionStatus.RETIRED),
+        ("question", QuestionStatus.SUPERSEDED),
+    ],
+)
+def test_semantic_change_assessment_rejects_noncurrent_targets_as_ambiguous(
+    object_kind: str,
+    standing_or_status: ClaimStanding | QuestionStatus,
+) -> None:
+    baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    if object_kind == "claim":
+        target = baseline.current_state.claims[0].model_copy(
+            update={
+                "id": "claim_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "standing": standing_or_status,
+            }
+        )
+        baseline = baseline.model_copy(
+            update={
+                "current_state": baseline.current_state.model_copy(
+                    update={"claims": (*baseline.current_state.claims, target)}
+                ),
+                "coverage": baseline.coverage.model_copy(
+                    update={
+                        "claims": (
+                            *baseline.coverage.claims,
+                            ResearchObjectCoverage(
+                                object_id=target.id,
+                                status=CoverageStatus.COMPLETE,
+                            ),
+                        )
+                    }
+                ),
+            }
+        )
+        relationship = "support"
+        target_kwargs = {"claim_ids": (target.id,)}
+    else:
+        target = ResearchQuestion(
+            id="question_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            question="A non-current question?",
+            status=standing_or_status,
+            evidence_refs=(baseline.current_state.evidence_refs[0],),
+        )
+        baseline = baseline.model_copy(
+            update={
+                "current_state": baseline.current_state.model_copy(
+                    update={"questions": (*baseline.current_state.questions, target)}
+                ),
+                "coverage": baseline.coverage.model_copy(
+                    update={
+                        "questions": (
+                            *baseline.coverage.questions,
+                            ResearchObjectCoverage(
+                                object_id=target.id,
+                                status=CoverageStatus.COMPLETE,
+                            ),
+                        )
+                    }
+                ),
+            }
+        )
+        relationship = "answering"
+        target_kwargs = {"question_ids": (target.id,)}
+    deterministic = assess_deterministic_update(
+        "revision-1",
+        baseline,
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-25",
+            analysts=("market",),
+        ),
+        evidence,
+    )
+    new_ref = deterministic.candidate.delta.new_evidence_refs[0]
+
+    result = assess_semantic_update(
+        baseline,
+        deterministic,
+        _SemanticLLM(
+            _semantic_response(
+                relationship,
+                evidence_ref=new_ref,
+                **target_kwargs,
+            )
+        ),
+    )
+
+    assert result.candidate is None
+    assert result.escalation_reason is IncrementalEscalationReason.AMBIGUOUS_IDENTITY
+
+
+def test_persisted_v1_semantic_change_assessment_remains_readable() -> None:
+    assessment = SemanticChangeAssessment.model_validate(
+        {
+            "schema_version": "1",
+            "language": "en",
+            "summary": "Persisted bounded assessment.",
+            "relationships": (
+                {
+                    "evidence_refs": (REF,),
+                    "relationship": "irrelevance",
+                },
+            ),
+        }
+    )
+
+    assert assessment.schema_version == "1"
+    assert assessment.relationships[0].relationship is (
+        SemanticChangeRelationship.IRRELEVANCE
+    )
+
+
+def test_positive_near_live_evidence_reaches_semantic_assessment_with_scope():
+    baseline, _evidence, _market, watermarks = _incremental_baseline_and_evidence()
+    candidate_watermarks = [
+        *(
+            {**item, "scanned_end": "2026-07-25"}
+            for item in watermarks
+            if item["source"] != "Google News"
+        ),
+        {
+            **_watermark(
+                "Google News",
+                temporal_scope="live_only",
+                returned_records=1,
+                reported_records=1,
+            ),
+            "scanned_end": "2026-07-25",
+        },
+    ]
+    _, evidence, _, _ = _incremental_baseline_and_evidence(
+        candidate_watermarks=candidate_watermarks,
+    )
+    live_item = EvidenceItem.create(
+        source="Google News",
+        evidence_type="get_news",
+        requested_date=date(2026, 7, 25),
+        effective_date=date(2026, 7, 25),
+        content="A timestamped headline reports a potentially relevant development.",
+        quality=EvidenceQuality.LOW,
+        origins=(
+            EvidenceOrigin(
+                source="Google News",
+                evidence_type="get_news",
+                requested="2026-07-25",
+                effective="2026-07-25",
+                effective_date=date(2026, 7, 25),
+                timing="live non-point-in-time; publication-date filtered",
+                retrieved_at="2026-07-25T20:00:00+09:00",
+                quality=EvidenceQuality.LOW,
+                temporal_scope=EvidenceTemporalScope.LIVE_ONLY,
+            ),
+        ),
+        provenance=evidence.items[0].provenance,
+    )
+    bounded = EvidenceBundle(
+        instrument="6501.T",
+        analysis_date=date(2026, 7, 25),
+        information_frontier=evidence.information_frontier,
+        items=(live_item,),
+    )
+    request = AnalysisRequest(
+        ticker="6501.T",
+        analysis_date="2026-07-25",
+        analysts=("market",),
+    )
+    deterministic = assess_deterministic_update(
+        "revision-1",
+        baseline,
+        request,
+        bounded,
+    )
+    assert deterministic.candidate is not None
+    new_ref = deterministic.candidate.delta.new_evidence_refs[0]
+    llm = _SemanticLLM(
+        _semantic_response(
+            "potentially_material_novelty",
+            evidence_ref=new_ref,
+        )
+    )
+
+    result = assess_semantic_update(baseline, deterministic, llm)
+
+    assert result.escalation_reason is IncrementalEscalationReason.POTENTIALLY_MATERIAL_NOVELTY
+    assert "timestamped headline" in llm.prompts[0]
+    assert '"temporal_scopes": ["live_only"]' in llm.prompts[0]
+
+
+def test_semantic_assessment_accepts_a_realistic_large_current_state():
+    baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    template = baseline.current_state.claims[0]
+    claims = (
+        *baseline.current_state.claims,
+        *(
+            template.model_copy(
+                update={
+                    "id": f"claim_{index:032x}",
+                    "statement": (
+                        f"Claim {index} tracks a distinct decision-relevant operating condition. "
+                        + "Observed margins, demand, and capital allocation remain conditional. "
+                        * 2
+                    ),
+                    "falsifier": (
+                        "A future filing or market observation contradicts this operating condition. "
+                        * 2
+                    ),
+                }
+            )
+            for index in range(len(baseline.current_state.claims), 112)
+        ),
+    )
+    baseline = baseline.model_copy(
+        update={
+            "current_state": baseline.current_state.model_copy(
+                update={"claims": claims}
+            ),
+            "coverage": baseline.coverage.model_copy(
+                update={
+                    "claims": tuple(
+                        ResearchObjectCoverage(
+                            object_id=claim.id,
+                            status=CoverageStatus.COMPLETE,
+                            evidence_refs=claim.evidence_refs,
+                        )
+                        for claim in claims
+                    )
+                }
+            ),
+        }
+    )
+    baseline = baseline.__class__.model_validate(baseline.model_dump(mode="python"))
+    deterministic = assess_deterministic_update(
+        "revision-1",
+        baseline,
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-25",
+            analysts=("market",),
+        ),
+        evidence,
+    )
+    assert deterministic.candidate is not None
+    new_ref = deterministic.candidate.delta.new_evidence_refs[0]
+    llm = _SemanticLLM(
+        _semantic_response(
+            "support",
+            evidence_ref=new_ref,
+            claim_ids=(claims[0].id,),
+        )
+    )
+
+    result = assess_semantic_update(baseline, deterministic, llm)
+
+    assert result.candidate is not None
+    assert result.escalation_reason is None
+    assert len(llm.prompts) == 1
+    assert len(llm.prompts[0]) <= 48_000
+    assert claims[-1].id in llm.prompts[0]
+    assert new_ref in llm.prompts[0]
+
+
+def test_semantic_assessment_still_fails_closed_above_the_evidence_item_bound():
+    baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    template = evidence.items[0]
+    oversized = EvidenceBundle(
+        instrument=evidence.instrument,
+        analysis_date=evidence.analysis_date,
+        information_frontier=evidence.information_frontier,
+        items=tuple(
+            EvidenceItem.create(
+                source=template.source,
+                evidence_type=template.evidence_type,
+                requested_date=template.requested_date,
+                effective_date=template.effective_date,
+                content=f"Bounded source observation {index}.",
+                provenance=template.provenance,
+            )
+            for index in range(33)
+        ),
+    )
+    deterministic = assess_deterministic_update(
+        "revision-1",
+        baseline,
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-25",
+            analysts=("market",),
+        ),
+        oversized,
+    )
+    assert deterministic.candidate is not None
+    llm = _SemanticLLM()
+
+    result = assess_semantic_update(baseline, deterministic, llm)
+
+    assert result.candidate is None
+    assert result.escalation_reason is IncrementalEscalationReason.SEMANTIC_INPUT_OVERSIZE
+    assert llm.prompts == []
+
+
+def test_empty_advisory_live_only_watermark_does_not_block_quiet_candidate():
+    baseline, _evidence, _market, watermarks = _incremental_baseline_and_evidence()
+    candidate_watermarks = [
+        *(
+            {**item, "scanned_end": "2026-07-25"}
+            for item in watermarks
+            if item["source"] != "Google News"
+        ),
+        {
+            **_watermark(
+                "Google News",
+                temporal_scope="live_only",
+                returned_records=0,
+                reported_records=0,
+            ),
+            "scanned_end": "2026-07-25",
+        },
+    ]
+    _, evidence, _, _ = _incremental_baseline_and_evidence(
+        candidate_watermarks=candidate_watermarks,
+    )
+
+    result = assess_deterministic_update(
+        "revision-1",
+        baseline,
+        AnalysisRequest(
+            ticker="6501.T",
+            analysis_date="2026-07-25",
+            analysts=("market",),
+        ),
+        evidence,
+    )
+
+    assert result.candidate is not None
+    assert result.coverage is not None
+    google = next(
+        item for item in result.coverage.domains if item.source == "Google News"
+    )
+    assert google.requirement is CoverageRequirement.ADVISORY
+    assert result.coverage.supports_no_material_change is True
+
+
 def test_semantic_change_assessment_rejects_ambiguous_identity_and_confidence_change():
     baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence()
     request = AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",))
@@ -2219,7 +3180,7 @@ def test_semantic_change_assessment_rejects_ambiguous_identity_and_confidence_ch
             _semantic_response(
                 "support",
                 evidence_ref=deterministic.candidate.delta.new_evidence_refs[0],
-                claim_ids=(claim_id, "claim_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+                claim_ids=("claim_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",),
             )
         ),
     )
@@ -2240,7 +3201,69 @@ def test_semantic_change_assessment_rejects_ambiguous_identity_and_confidence_ch
     assert confidence.escalation_reason is IncrementalEscalationReason.CONFIDENCE_CHANGE
 
 
-def test_semantic_change_assessment_rejects_cross_item_identity_ambiguity():
+def test_semantic_change_assessment_repairs_multi_target_relationship():
+    baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    second_claim = baseline.current_state.claims[0].model_copy(
+        update={
+            "id": "claim_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "statement": "A second valid Claim.",
+        }
+    )
+    baseline = baseline.model_copy(
+        update={
+            "current_state": baseline.current_state.model_copy(
+                update={"claims": (*baseline.current_state.claims, second_claim)}
+            ),
+            "coverage": baseline.coverage.model_copy(
+                update={
+                    "claims": (
+                        *baseline.coverage.claims,
+                        ResearchObjectCoverage(
+                            object_id=second_claim.id,
+                            status=CoverageStatus.COMPLETE,
+                        ),
+                    )
+                }
+            ),
+        }
+    )
+    request = AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",))
+    deterministic = assess_deterministic_update("revision-1", baseline, request, evidence)
+    new_ref = deterministic.candidate.delta.new_evidence_refs[0]
+    llm = _SemanticLLM(
+        {
+            "raw": AIMessage(content=""),
+            "parsed": {
+                "language": "en",
+                "summary": "The Evidence was assigned to every possibly related Claim.",
+                "relationships": [
+                    {
+                        "evidence_refs": [new_ref],
+                        "relationship": "support",
+                        "suggested_claim_ids": [
+                            baseline.current_state.claims[0].id,
+                            second_claim.id,
+                        ],
+                    }
+                ],
+            },
+            "parsing_error": None,
+        },
+        _semantic_response(
+            "support",
+            evidence_ref=new_ref,
+            claim_ids=(baseline.current_state.claims[0].id,),
+        ),
+    )
+
+    result = assess_semantic_update(baseline, deterministic, llm)
+
+    assert result.candidate is not None
+    assert result.escalation_reason is None
+    assert len(llm.prompts) == 2
+
+
+def test_semantic_change_assessment_repairs_repeated_evidence_targets():
     baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence()
     second_claim = baseline.current_state.claims[0].model_copy(
         update={
@@ -2289,12 +3312,56 @@ def test_semantic_change_assessment_rejects_cross_item_identity_ambiguity():
                 ],
             },
             "parsing_error": None,
-        }
+        },
+        _semantic_response(
+            "support",
+            evidence_ref=new_ref,
+            claim_ids=(baseline.current_state.claims[0].id,),
+        ),
     )
 
     result = assess_semantic_update(baseline, deterministic, llm)
 
-    assert result.escalation_reason is IncrementalEscalationReason.AMBIGUOUS_IDENTITY
+    assert result.candidate is not None
+    assert result.escalation_reason is None
+    assert len(llm.prompts) == 2
+
+
+@pytest.mark.parametrize(
+    ("relationship", "has_claim_target"),
+    [
+        ("support", False),
+        ("irrelevance", True),
+    ],
+)
+def test_semantic_change_assessment_repairs_relationship_target_shape(
+    relationship,
+    has_claim_target,
+):
+    baseline, evidence, _market, _watermarks = _incremental_baseline_and_evidence()
+    request = AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",))
+    deterministic = assess_deterministic_update("revision-1", baseline, request, evidence)
+    new_ref = deterministic.candidate.delta.new_evidence_refs[0]
+    invalid_claim_ids = (
+        (baseline.current_state.claims[0].id,) if has_claim_target else ()
+    )
+    llm = _SemanticLLM(
+        _semantic_response(
+            relationship,
+            evidence_ref=new_ref,
+            claim_ids=invalid_claim_ids,
+        ),
+        _semantic_response(
+            "irrelevance",
+            evidence_ref=new_ref,
+        ),
+    )
+
+    result = assess_semantic_update(baseline, deterministic, llm)
+
+    assert result.candidate is not None
+    assert result.escalation_reason is None
+    assert len(llm.prompts) == 2
 
 
 def test_semantic_change_assessment_excludes_prior_research_disguised_as_evidence():

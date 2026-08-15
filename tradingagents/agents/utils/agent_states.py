@@ -22,6 +22,7 @@ class PrefetchedEvidenceBlock(TypedDict):
     content: str | None
     records: list[dict[str, str | None]]
     temporal_scope: str
+    dataset_id: NotRequired[str]
     structured_numeric_facts: NotRequired[list[StructuredNumericFact]]
     source_records: NotRequired[list[dict[str, object]]]
     source_watermarks: NotRequired[list[dict[str, object]]]
@@ -56,6 +57,7 @@ def prefetched_evidence_block(
     records: Iterable[ProvenanceRecord],
     *,
     temporal_scope: str | None = None,
+    dataset_id: str | None = None,
     structured_numeric_facts: Iterable[StructuredNumericFact] = (),
 ) -> PrefetchedEvidenceBlock:
     """Serialize one prefetch response independently from report rendering."""
@@ -100,6 +102,8 @@ def prefetched_evidence_block(
             else temporal_scope_from_records(records)
         ),
     }
+    if dataset_id:
+        block["dataset_id"] = dataset_id
     facts = list(structured_numeric_facts)
     if facts:
         block["structured_numeric_facts"] = facts

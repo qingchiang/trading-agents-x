@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import hashlib
+from collections.abc import Callable, Iterable
 from datetime import date, datetime, timedelta
 from enum import Enum
 from time import monotonic
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from tradingagents.dataflows.symbol_utils import market_timezone
 from tradingagents.provenance import (
+    CoverageLimitationKind,
     SourceWatermark,
     extract_source_observations_strict,
     extract_source_watermarks,
@@ -52,6 +54,28 @@ class AnchorReadinessSourceFrontier(BaseModel):
     requested_start: date
     requested_end: date
     limitations: tuple[str, ...] = ()
+    limitation_kind: CoverageLimitationKind | None = None
+    returned_records: int | None = Field(default=None, ge=0)
+    reported_records: int | None = Field(default=None, ge=0)
+    record_versions_digest: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+
+    @model_validator(mode="after")
+    def validate_record_closure(self) -> AnchorReadinessSourceFrontier:
+        if self.returned_records is None:
+            if self.reported_records is not None or self.record_versions_digest is not None:
+                raise ValueError("record closure fields require returned_records")
+            return self
+        if self.record_versions_digest is None:
+            raise ValueError("record closure requires a version digest")
+        if (
+            self.reported_records is not None
+            and self.reported_records < self.returned_records
+        ):
+            raise ValueError("reported_records must cover returned_records")
+        return self
 
 
 class AnchorReadinessResult(BaseModel):
@@ -78,6 +102,13 @@ class AnchorReadinessError(RuntimeError):
         self.result = result
         reason = result.reasons[0].value if result.reasons else "not_ready"
         super().__init__(f"Forward Research Anchor readiness failed: {reason}")
+
+
+def source_record_versions_digest(version_ids: Iterable[str]) -> str:
+    """Return a deterministic closure digest without exposing record identities."""
+
+    canonical = "\n".join(sorted(version_ids))
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 def _metrics(started: float, tool_calls: int) -> RunMetrics:
@@ -383,6 +414,14 @@ def validate_japanese_anchor_readiness(
                         else date.fromisoformat(usable.scanned_end)
                     ),
                     limitations=limitations_by_source[source],
+                    limitation_kind=usable.limitation_kind,
+                    returned_records=usable.returned_records,
+                    reported_records=usable.reported_records,
+                    record_versions_digest=source_record_versions_digest(
+                        item.version_id
+                        for item in observations
+                        if item.source == source
+                    ),
                 )
             )
     return _result(
