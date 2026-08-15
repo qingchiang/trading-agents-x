@@ -1014,7 +1014,7 @@ def test_initial_chain_can_explicitly_allow_non_anchor_full_research(
     assert result.status is RunStatus.SUCCEEDED
     assert run.request.anchor_readiness == "allow_non_anchor"
     assert readiness_calls == 0
-    chain = repository.list_research_chains(instrument="7203.T")[0]
+    chain = service.list_research_chains(instrument="7203.T")[0]
     assert not chain.forward_research_anchor.is_forward_research_anchor
     assert chain.forward_research_anchor.reasons == ("anchor_readiness_not_required",)
     assert chain.next_update_policy == "full_required"
@@ -2102,7 +2102,7 @@ def test_chain_update_strategy_uses_source_qualified_japanese_capability(
     assert "experimental_nmc_jp_whitelist" not in queued.config_snapshot
 
 
-def test_repository_round_trip_uses_configured_mode_for_source_qualified_policy(
+def test_service_presents_persisted_chain_with_configured_source_qualified_policy(
     app_settings,
     repository,
 ) -> None:
@@ -2111,7 +2111,13 @@ def test_repository_round_trip_uses_configured_mode_for_source_qualified_policy(
         AnalysisRequest(ticker="7203.T", analysis_date="2026-07-24", analysts=("market",))
     )
 
-    eligible = repository.list_research_chains(instrument="7203.T")[0]
+    persisted = repository.list_research_chains(instrument="7203.T")[0]
+    assert persisted.current_revision.coverage.anchor_qualification.is_forward_research_anchor
+    assert not persisted.forward_research_anchor.is_forward_research_anchor
+    assert persisted.next_update_policy == "full_required"
+    assert persisted.next_update_reason is None
+
+    eligible = service.list_research_chains(instrument="7203.T")[0]
     assert eligible.forward_research_anchor.is_forward_research_anchor is True
     assert eligible.current_revision.coverage.anchor_qualification == (
         eligible.forward_research_anchor
@@ -2126,7 +2132,10 @@ def test_repository_round_trip_uses_configured_mode_for_source_qualified_policy(
     assert eligible.next_update_reason is None
 
     off_repository = RunRepository(app_settings.model_copy(update={"research_update_mode": "off"}))
-    full_only = off_repository.get_research_chain(eligible.id)
+    full_only = _service(
+        app_settings.model_copy(update={"research_update_mode": "off"}),
+        off_repository,
+    ).get_research_chain(eligible.id)
     assert full_only.next_update_policy == "full_required"
     assert full_only.next_update_reason == "experiment_mode_off"
 
@@ -2169,7 +2178,7 @@ def test_ineligible_head_rejects_explicit_incremental_but_allows_full(
     service.run_initial_chain(
         AnalysisRequest(ticker="6501.T", analysis_date="2026-07-24", analysts=("market",))
     )
-    chain = repository.list_research_chains(instrument="6501.T")[0]
+    chain = service.list_research_chains(instrument="6501.T")[0]
     assert chain.next_update_policy == "full_required"
     assert chain.next_update_reason == "anchor_coverage_incomplete"
     request = AnalysisRequest(ticker="6501.T", analysis_date="2026-07-25", analysts=("market",))
@@ -2197,7 +2206,7 @@ def test_ineligible_head_rejects_explicit_incremental_but_allows_full(
 
     service.execute_claimed(claimed, worker_id="worker")
 
-    recovered = repository.get_research_chain(chain.id)
+    recovered = service.get_research_chain(chain.id)
     assert recovered.current_revision.coverage.anchor_qualification is not None
     assert (
         recovered.current_revision.coverage.anchor_qualification.is_forward_research_anchor
@@ -2321,7 +2330,7 @@ def test_inconclusive_full_reassessment_advances_an_indeterminate_full_only_head
 
     result = service.execute_claimed(claimed, worker_id="worker")
 
-    advanced = repository.get_research_chain(chain.id)
+    advanced = service.get_research_chain(chain.id)
     revision = advanced.current_revision
     assert result.status is RunStatus.SUCCEEDED
     assert revision.role is ResearchRevisionRole.UPDATE
@@ -3968,7 +3977,7 @@ def test_experimental_full_escalation_with_opt_out_remains_non_anchor(
 
     result = service.execute_claimed(claimed, worker_id="worker")
 
-    advanced = repository.get_research_chain(chain.id)
+    advanced = service.get_research_chain(chain.id)
     assert result.status is RunStatus.SUCCEEDED
     assert not advanced.forward_research_anchor.is_forward_research_anchor
     assert advanced.forward_research_anchor.reasons == ("anchor_readiness_not_required",)

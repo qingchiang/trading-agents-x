@@ -91,6 +91,7 @@ from .research import (
     derive_shadow_comparison,
     evaluate_next_update_policy,
     prepare_experimental_nmc_revision,
+    present_research_chain,
     render_revision_export_markdown,
     render_revision_export_package,
     transition_coverage_is_complete,
@@ -315,22 +316,9 @@ class AnalysisService:
             )
 
     def _present_chain(self, chain: ResearchChain) -> ResearchChain:
-        revision = chain.current_revision
-        if revision is None:
-            return chain
-        evaluation = evaluate_next_update_policy(
-            revision,
-            instrument=chain.instrument,
+        return present_research_chain(
+            chain,
             mode=self.settings.research_update_mode,
-        )
-        return chain.model_copy(
-            update={
-                "forward_research_anchor": (
-                    revision.coverage.anchor_qualification or chain.forward_research_anchor
-                ),
-                "next_update_policy": evaluation.policy,
-                "next_update_reason": evaluation.reason,
-            }
         )
 
     def get_research_chain(self, chain_id: str) -> ResearchChain:

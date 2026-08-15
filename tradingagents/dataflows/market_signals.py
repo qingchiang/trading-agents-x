@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from tradingagents.application.evidence_workset import StructuredNumericFact
+from tradingagents.research_sources import JapaneseResearchSource
 
 from .cn.cn_sentiment import (
     get_holding_changes as get_cn_holding_changes,
@@ -65,7 +66,7 @@ def _jp_signals() -> tuple[SentimentSignal, ...]:
             tag="large_holdings",
             fetch=get_large_holdings,
             evidence="ownership and control filings",
-            source="EDINET",
+            source=JapaneseResearchSource.EDINET,
             title="Ownership & control — official 大量保有 / 公開買付 (TOB)",
             intro=(
                 "Per-name EDINET filings about the company, of two kinds — read each "

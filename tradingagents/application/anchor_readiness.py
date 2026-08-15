@@ -18,6 +18,7 @@ from tradingagents.provenance import (
     extract_source_observations_strict,
     extract_source_watermarks,
 )
+from tradingagents.research_sources import JapaneseResearchSource
 
 from .contracts import AnalysisRequest, NodeMetrics, RunMetrics
 from .market_readiness import MarketDataReadiness
@@ -28,7 +29,7 @@ from .research import (
     MarketResearchCapability,
 )
 
-_JQUANTS_MARKET_SOURCE = "J-Quants adjusted OHLCV"
+_JQUANTS_MARKET_SOURCE = JapaneseResearchSource.JQUANTS_ADJUSTED_OHLCV
 
 
 class AnchorReadinessReason(StrEnum):

@@ -29,6 +29,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 from tradingagents.provenance import SourceObservation
+from tradingagents.research_sources import JapaneseResearchSource
 
 from ..config import get_config
 from ..errors import VendorNotConfiguredError, VendorRateLimitError
@@ -92,7 +93,7 @@ def source_observation(
         status = "published"
     return (
         SourceObservation(
-            source="EDINET",
+            source=JapaneseResearchSource.EDINET,
             record_id=parent_id or doc_id,
             version_id=f"edinet:{doc_id}",
             status=status,

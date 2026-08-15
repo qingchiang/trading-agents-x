@@ -18,6 +18,7 @@ from tradingagents.provenance import (
     attach_source_observations,
     attach_source_watermarks,
 )
+from tradingagents.research_sources import JapaneseResearchSource
 
 from ..market_data_validator import render_verified_market_snapshot
 from ..stockstats_utils import render_indicator_window
@@ -53,7 +54,7 @@ def build_ohlcv_source_metadata(
 
     adjustment = str(df.attrs.get("price_adjustment") or "unknown")
     source = (
-        "J-Quants adjusted OHLCV"
+        JapaneseResearchSource.JQUANTS_ADJUSTED_OHLCV
         if adjustment == "J-Quants adjusted OHLCV v2"
         else "J-Quants mixed adjusted/raw OHLCV"
     )

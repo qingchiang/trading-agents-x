@@ -42,6 +42,7 @@ from tradingagents.provenance import (
     attach_source_observations,
     attach_source_watermarks,
 )
+from tradingagents.research_sources import JapaneseResearchSource
 
 from ..lookahead import is_near_live
 from ..measurement import instrument_currency
@@ -469,7 +470,7 @@ def get_fundamentals(
             base,
             ProvenanceRecord(
                 evidence="get_fundamentals",
-                source="J-Quants fundamentals",
+                source=JapaneseResearchSource.JQUANTS_FUNDAMENTALS,
                 requested=curr_date or "live retrieval",
                 effective=(
                     f"disclosures <= {curr_date}"

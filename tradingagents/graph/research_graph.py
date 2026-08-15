@@ -122,6 +122,7 @@ from tradingagents.provenance import (
     strip_provenance_markers,
     temporal_scope_from_records,
 )
+from tradingagents.research_sources import JapaneseResearchSource
 
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _ADMISSION_SEALED_AT_KEY = "evidence_admission_sealed_at"
@@ -388,7 +389,7 @@ def _fundamentals_are_graph_visible(
     *,
     information_frontier: datetime,
 ) -> bool:
-    source = "J-Quants fundamentals"
+    source = JapaneseResearchSource.JQUANTS_FUNDAMENTALS
     cutoff = bundle.analysis_date.isoformat()
     return any(
         item.quality is not EvidenceQuality.UNAVAILABLE
@@ -554,7 +555,7 @@ def _missing_anchor_required_evidence(
         bundle,
         information_frontier=readiness.information_frontier,
     ):
-        missing_sources.add("J-Quants fundamentals")
+        missing_sources.add(JapaneseResearchSource.JQUANTS_FUNDAMENTALS)
         missing_capabilities.add("fundamentals")
     required_source_capabilities = {
         source: item.capability.value
@@ -563,7 +564,7 @@ def _missing_anchor_required_evidence(
         for source in item.sources
     }
     if "fundamentals" in context.request.analysts:
-        required_source_capabilities["J-Quants fundamentals"] = "fundamentals"
+        required_source_capabilities[JapaneseResearchSource.JQUANTS_FUNDAMENTALS] = "fundamentals"
     for source, capability in required_source_capabilities.items():
         if _required_source_closure_is_blocking(bundle, source):
             missing_sources.add(source)

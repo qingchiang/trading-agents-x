@@ -31,6 +31,7 @@ from urllib.parse import urlencode
 from urllib.request import Request
 
 from tradingagents.provenance import ProvenanceRecord, attach_provenance
+from tradingagents.research_sources import JapaneseResearchSource
 
 from ..config import get_config
 from ..news_quality import (
@@ -71,7 +72,7 @@ def _producer_result(
         body,
         ProvenanceRecord(
             evidence="get_news",
-            source="Google News",
+            source=JapaneseResearchSource.GOOGLE_NEWS,
             requested=f"{start_date} to {end_date}",
             effective=f"{start_date} to {end_date}",
             timing="live non-point-in-time; publication-date filtered",

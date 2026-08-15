@@ -104,8 +104,6 @@ from .research import (
     ResearchRevisionRole,
     RevisionDelta,
     UpdateSummary,
-    evaluate_next_update_policy,
-    legacy_forward_research_anchor_qualification,
 )
 from .research_review import derive_review_status, review_status_in_group
 from .sanitization import sanitize_text
@@ -3156,11 +3154,6 @@ class RunRepository:
         )
         if current is None:
             raise ValueError(f"Research Chain {record.id} has no current Revision")
-        evaluation = evaluate_next_update_policy(
-            current,
-            instrument=record.instrument,
-            mode=self.settings.research_update_mode,
-        )
         return ResearchChain(
             id=record.id,
             instrument=record.instrument,
@@ -3168,12 +3161,6 @@ class RunRepository:
             current_revision_id=current.id,
             current_revision=current,
             revisions=revisions,
-            forward_research_anchor=(
-                current.coverage.anchor_qualification
-                or legacy_forward_research_anchor_qualification()
-            ),
-            next_update_policy=evaluation.policy,
-            next_update_reason=evaluation.reason,
             created_at=_aware(record.created_at),
             updated_at=_aware(record.updated_at),
         )

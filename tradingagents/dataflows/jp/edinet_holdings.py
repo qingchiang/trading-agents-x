@@ -41,6 +41,7 @@ from tradingagents.provenance import (
     attach_source_observations,
     attach_source_watermarks,
 )
+from tradingagents.research_sources import JapaneseResearchSource
 
 from ..config import get_config
 from .edinet_code_map import learn_many, resolve_edinet_code
@@ -184,7 +185,7 @@ def get_large_holdings(
         )
     )
     watermark = SourceWatermark(
-        source="EDINET",
+        source=JapaneseResearchSource.EDINET,
         scanned_start=scanned_start,
         scanned_end=curr_date,
         status="limited" if limitations else "complete",

@@ -21,6 +21,7 @@ from tradingagents.provenance import (
     attach_source_observations,
     attach_source_watermarks,
 )
+from tradingagents.research_sources import JapaneseResearchSource
 
 from ..symbol_utils import NoMarketDataError
 from .jquants_common import (
@@ -366,7 +367,7 @@ def _snapshot_metadata(
                 hint = "unclassifiable"
             observations.append(
                 SourceObservation(
-                    source="J-Quants fundamentals",
+                    source=JapaneseResearchSource.JQUANTS_FUNDAMENTALS,
                     record_id=record_id,
                     version_id=version_id,
                     status=(
@@ -415,7 +416,7 @@ def _snapshot_metadata(
             )
     limitations = tuple(limitations)
     watermark = SourceWatermark(
-        source="J-Quants fundamentals",
+        source=JapaneseResearchSource.JQUANTS_FUNDAMENTALS,
         scanned_start=min(dates) if dates else scan_boundary,
         scanned_end=scan_boundary,
         status="limited" if limitations else "complete",

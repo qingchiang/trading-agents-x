@@ -14,6 +14,7 @@ from tradingagents.provenance import (
     attach_provenance,
     attach_source_watermarks,
 )
+from tradingagents.research_sources import JapaneseResearchSource
 
 from ..stockstats_utils import _assert_ohlcv_not_stale, _clean_dataframe
 from ..symbol_utils import NoMarketDataError
@@ -159,7 +160,7 @@ def get_stock(
     )
     adjustment = str(df.attrs.get("price_adjustment") or "unknown")
     source = (
-        "J-Quants adjusted OHLCV"
+        JapaneseResearchSource.JQUANTS_ADJUSTED_OHLCV
         if adjustment == "J-Quants adjusted OHLCV v2"
         else "J-Quants mixed adjusted/raw OHLCV"
     )
@@ -174,7 +175,7 @@ def get_stock(
             effective=f"{effective_start} to {effective_end}",
             timing=(
                 "market-date filtered"
-                if source == "J-Quants adjusted OHLCV"
+                if source == JapaneseResearchSource.JQUANTS_ADJUSTED_OHLCV
                 else "market-date filtered; adjusted fields incomplete"
             ),
         ),

@@ -24,6 +24,7 @@ from tradingagents.provenance import (
     extract_source_observations,
     extract_source_watermarks,
 )
+from tradingagents.research_sources import JAPANESE_EVENT_SOURCES, JapaneseResearchSource
 
 from .contracts import AnalysisRequest, EvidenceBundle, NodeMetrics, RunMetrics
 from .evidence import extract_evidence_tables
@@ -228,12 +229,15 @@ def run_deterministic_incremental_gate(
             _provenance=True,
             information_frontier=information_frontier.isoformat(),
         ),
-        ("EDINET", "TDnet", "Google News"),
+        (*JAPANESE_EVENT_SOURCES, JapaneseResearchSource.GOOGLE_NEWS),
     )
     partial = assess()
     if should_stop(partial):
         return partial
-    if "fundamentals" in request.analysts or "J-Quants fundamentals" in required_sources:
+    if (
+        "fundamentals" in request.analysts
+        or JapaneseResearchSource.JQUANTS_FUNDAMENTALS in required_sources
+    ):
         collect(
             "get_fundamentals",
             lambda: route_to_vendor(
@@ -243,14 +247,14 @@ def run_deterministic_incremental_gate(
                 _provenance=True,
                 information_frontier=information_frontier.isoformat(),
             ),
-            ("J-Quants fundamentals",),
+            (JapaneseResearchSource.JQUANTS_FUNDAMENTALS,),
         )
         partial = assess()
         if should_stop(partial):
             return partial
     if (
         "market" in request.analysts
-        or "J-Quants adjusted OHLCV" in required_sources
+        or JapaneseResearchSource.JQUANTS_ADJUSTED_OHLCV in required_sources
         or baseline.current_state.market_reference_levels
     ):
         collect(
@@ -263,7 +267,7 @@ def run_deterministic_incremental_gate(
                 _provenance=True,
                 information_frontier=information_frontier.isoformat(),
             ),
-            ("J-Quants adjusted OHLCV",),
+            (JapaneseResearchSource.JQUANTS_ADJUSTED_OHLCV,),
         )
     if cancel_requested():
         raise RunCancelled
