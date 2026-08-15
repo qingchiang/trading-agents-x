@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import io
+import json
+import zipfile
 from dataclasses import replace
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -82,6 +85,7 @@ from tradingagents.application.research import (
     derive_shadow_comparison,
     evaluate_next_update_policy,
     render_revision_export_markdown,
+    render_revision_export_package,
     required_incremental_sources,
     validate_experimental_nmc_candidate,
 )
@@ -3923,7 +3927,8 @@ def test_full_update_preserves_corrected_versions_with_overlap_lineage():
         updated_at="2026-07-25T00:00:00Z",
     )
 
-    exported = render_revision_export_markdown(RevisionExport(chain=chain, revision=revision))
+    revision_export = RevisionExport(chain=chain, revision=revision)
+    exported = render_revision_export_markdown(revision_export)
 
     assert "Revision role: update" in exported
     assert "Execution strategy: full" in exported
@@ -3934,6 +3939,23 @@ def test_full_update_preserves_corrected_versions_with_overlap_lineage():
     assert "## Source Record Versions" in exported
     assert "edinet:S100CORRECTION" in exported
     assert "corrected" in exported
+
+    package = render_revision_export_package(revision_export)
+    with zipfile.ZipFile(io.BytesIO(package)) as archive:
+        assert archive.namelist() == [
+            "revision.json",
+            "revision.md",
+            "evidence.json",
+        ]
+        assert archive.read("revision.json") == revision_export.model_dump_json(
+            indent=2
+        ).encode()
+        assert archive.read("revision.md") == exported.encode()
+        assert archive.read("evidence.json") == json.dumps(
+            revision.evidence_snapshot.model_dump(mode="json"),
+            ensure_ascii=False,
+            indent=2,
+        ).encode()
 
 
 def test_full_update_classifies_fundamental_restatement_and_scope_change():
