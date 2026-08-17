@@ -20,11 +20,13 @@ from tests.factories import analyst_report, research_decision
 from tradingagents.application.contracts import (
     AnalysisRequest,
     ArtifactGenerationMethod,
+    AssetType,
     EvidenceBundle,
     EvidenceItem,
     ResearchArtifactDraft,
     RunStatus,
 )
+from tradingagents.application.database import RunRecord
 from tradingagents.application.repository import RunRepository
 from tradingagents.application.runtime import RunCancelled, WorkerShutdown
 from tradingagents.application.service import AnalysisService
@@ -594,6 +596,45 @@ def test_failure_is_redacted_and_checkpoint_is_retained(
     assert failed.status is RunStatus.FAILED
     assert "private-value" not in failed.error_message
     assert repository.checkpoint_thread(queued.id) == checkpoint
+
+
+def test_snapshot_conversion_failure_fails_claimed_run_before_graph(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(app_settings, repository)
+    queued = service.enqueue(
+        AnalysisRequest(
+            ticker="BTC-USD",
+            analysis_date="2026-07-24",
+            asset_type=AssetType.CRYPTO,
+            analysts=("market",),
+        )
+    )
+    with repository.sessions.begin() as session:
+        record = session.get(RunRecord, queued.id)
+        record.request_json = {
+            **record.request_json,
+            "asset_type": "retired-crypto",
+        }
+    claimed = repository.claim_run(queued.id, "worker", 30)
+
+    with pytest.raises(ValueError, match="retired-crypto"):
+        service.execute_claimed(claimed, worker_id="worker")
+
+    failed = repository.get_run(queued.id)
+    assert failed.status is RunStatus.FAILED
+    assert failed.error_code == "ValidationError"
+    assert "retired-crypto" in failed.error_message
+    assert repository.list_attempts(queued.id)[0].status is RunStatus.FAILED
+    events = repository.list_events(queued.id)
+    assert events[-1].event_type == "run.failed"
+    assert events[-1].payload["error_code"] == "ValidationError"
+    assert [event.event_type for event in events] == [
+        "run.queued",
+        "run.started",
+        "run.failed",
+    ]
 
 
 def test_failure_persists_observed_metrics_and_emits_the_aggregate(

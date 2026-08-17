@@ -157,10 +157,6 @@ class AnalysisService:
     ) -> AnalysisResult:
         if run.status is not RunStatus.RUNNING:
             raise ValueError(f"run {run.id} must be claimed before execution")
-        # Run views expose a tolerant retained snapshot.  Execution must cross
-        # the current creation contract explicitly so a future admission
-        # change also gates already-queued legacy requests.
-        request = run.request.to_analysis_request()
         run_settings = RunSettings.model_validate(run.config_snapshot)
         dataflow_config = run_settings.dataflow_config(self.settings)
         validate_market_routing(dataflow_config)
@@ -177,6 +173,13 @@ class AnalysisService:
 
         with self._heartbeat(run.id, worker_id):
             try:
+                # Run views expose a tolerant retained snapshot.  Execution
+                # must cross the current creation contract explicitly so a
+                # future admission change also gates already-queued legacy
+                # requests.  Keep this inside the lifecycle boundary: a
+                # retained request that no longer converts must become a
+                # terminal failed Run rather than strand a claimed attempt.
+                request = run.request.to_analysis_request()
                 with use_config(dataflow_config):
                     try:
                         identity = self.identity_resolver(
