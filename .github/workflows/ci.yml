@@ -13,6 +13,14 @@ env:
   PYTHON_DOTENV_DISABLED: "1"
 
 jobs:
+  repository-hygiene:
+    name: repository hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject tracked ignored files
+        run: ./scripts/check_tracked_ignored.py
+
   test:
     name: tests (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
