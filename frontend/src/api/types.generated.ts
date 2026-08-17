@@ -510,6 +510,19 @@ export interface components {
       total: number;
     };
     RunProfile: "fast" | "standard" | "deep";
+    RunRequestSnapshot: {
+      analysis_date: string;
+      analysts?: ("market" | "social" | "news" | "fundamentals")[];
+      asset_type?: string | null;
+      deep_model?: string | null;
+      deep_reasoning_effort?: string | null;
+      llm_provider?: string | null;
+      output_language?: components["schemas"]["ReportLanguage"] | string | null;
+      profile?: components["schemas"]["RunProfile"];
+      quick_model?: string | null;
+      quick_reasoning_effort?: string | null;
+      ticker: string;
+    };
     RunStatus: "queued" | "running" | "succeeded" | "failed" | "cancelled";
     RunSummaryView: {
       attempt: number;
@@ -523,7 +536,7 @@ export interface components {
       instrument_local_name?: string | null;
       instrument_name?: string | null;
       metrics?: components["schemas"]["RunMetrics"];
-      request: components["schemas"]["AnalysisRequest"];
+      request: components["schemas"]["RunRequestSnapshot"] | components["schemas"]["AnalysisRequest"];
       research_rating?: components["schemas"]["ResearchRating"] | null;
       source_run_id?: string | null;
       started_at?: string | null;
@@ -544,7 +557,7 @@ export interface components {
       instrument_local_name?: string | null;
       instrument_name?: string | null;
       metrics?: components["schemas"]["RunMetrics"];
-      request: components["schemas"]["AnalysisRequest"];
+      request: components["schemas"]["RunRequestSnapshot"] | components["schemas"]["AnalysisRequest"];
       source_run_id?: string | null;
       started_at?: string | null;
       status: components["schemas"]["RunStatus"];

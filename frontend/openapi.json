@@ -3648,6 +3648,132 @@
         "title": "RunProfile",
         "type": "string"
       },
+      "RunRequestSnapshot": {
+        "additionalProperties": false,
+        "description": "Tolerant request data retained with a Run for history inspection.\n\nThis is deliberately separate from :class:`AnalysisRequest`.  The latter\nis the admission contract for creating research, while this snapshot must\nremain able to represent request values that were accepted by an older\napplication version (including ``asset_type='crypto'``).  Snapshot\nvalidation does not normalize symbols, infer an asset type, or otherwise\nrewrite persisted request data.",
+        "properties": {
+          "analysis_date": {
+            "format": "date",
+            "title": "Analysis Date",
+            "type": "string"
+          },
+          "analysts": {
+            "default": [
+              "market",
+              "social",
+              "news",
+              "fundamentals"
+            ],
+            "items": {
+              "enum": [
+                "market",
+                "social",
+                "news",
+                "fundamentals"
+              ],
+              "type": "string"
+            },
+            "title": "Analysts",
+            "type": "array"
+          },
+          "asset_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Type"
+          },
+          "deep_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deep Model"
+          },
+          "deep_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deep Reasoning Effort"
+          },
+          "llm_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Provider"
+          },
+          "output_language": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportLanguage"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Language"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/RunProfile",
+            "default": "standard"
+          },
+          "quick_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quick Model"
+          },
+          "quick_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quick Reasoning Effort"
+          },
+          "ticker": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Ticker",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticker",
+          "analysis_date"
+        ],
+        "title": "RunRequestSnapshot",
+        "type": "object"
+      },
       "RunStatus": {
         "enum": [
           "queued",
@@ -3744,7 +3870,15 @@
             "$ref": "#/components/schemas/RunMetrics"
           },
           "request": {
-            "$ref": "#/components/schemas/AnalysisRequest"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunRequestSnapshot"
+              },
+              {
+                "$ref": "#/components/schemas/AnalysisRequest"
+              }
+            ],
+            "title": "Request"
           },
           "research_rating": {
             "anyOf": [
@@ -3907,7 +4041,15 @@
             "$ref": "#/components/schemas/RunMetrics"
           },
           "request": {
-            "$ref": "#/components/schemas/AnalysisRequest"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunRequestSnapshot"
+              },
+              {
+                "$ref": "#/components/schemas/AnalysisRequest"
+              }
+            ],
+            "title": "Request"
           },
           "source_run_id": {
             "anyOf": [

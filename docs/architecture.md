@@ -176,6 +176,16 @@ settings must remain isolated even if worker concurrency changes in the future.
 8. cleans up or retains checkpoints according to terminal state;
 9. creates a pending outcome for background settlement.
 
+Creation and retained history use separate request contracts.
+`AnalysisRequest` is the admission contract for new research and for any
+action that can launch research, including retry and source-based creation.
+`RunRequestSnapshot` is a tolerant, read-only representation of the JSON
+stored on a Run; it preserves legacy request values such as
+`asset_type="crypto"` for history views and exports without rewriting stored
+JSON or implying that those values remain admitted for new research. Execution
+crosses back through `AnalysisRequest` explicitly, so tightening admission
+cannot make a retained Run unreadable or create a second creation path.
+
 Graph nodes return state; they do not write files, reports, or application
 tables.
 

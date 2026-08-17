@@ -101,6 +101,10 @@ class AnalysisService:
         idempotency_key: str | None = None,
         source_run_id: str | None = None,
     ) -> RunView:
+        if not isinstance(request, AnalysisRequest):
+            raise TypeError(
+                "new Runs require an AnalysisRequest creation contract"
+            )
         run_settings = self.settings.resolve_run(request)
         request = self.settings.materialize_request(
             request,
@@ -153,6 +157,10 @@ class AnalysisService:
     ) -> AnalysisResult:
         if run.status is not RunStatus.RUNNING:
             raise ValueError(f"run {run.id} must be claimed before execution")
+        # Run views expose a tolerant retained snapshot.  Execution must cross
+        # the current creation contract explicitly so a future admission
+        # change also gates already-queued legacy requests.
+        request = run.request.to_analysis_request()
         run_settings = RunSettings.model_validate(run.config_snapshot)
         dataflow_config = run_settings.dataflow_config(self.settings)
         validate_market_routing(dataflow_config)
@@ -172,8 +180,8 @@ class AnalysisService:
                 with use_config(dataflow_config):
                     try:
                         identity = self.identity_resolver(
-                            run.request.ticker,
-                            run.request.analysis_date.isoformat(),
+                            request.ticker,
+                            request.analysis_date.isoformat(),
                         )
                     except Exception as exc:
                         logger.warning(
@@ -192,8 +200,8 @@ class AnalysisService:
                     if instrument_local_name is None:
                         try:
                             resolved_local_name = self.local_name_resolver(
-                                run.request.ticker,
-                                run.request.analysis_date.isoformat(),
+                                request.ticker,
+                                request.analysis_date.isoformat(),
                                 dataflow_config,
                             )
                         except Exception as exc:
@@ -210,13 +218,13 @@ class AnalysisService:
                                     resolved_local_name,
                                 )
                     instrument_context = build_instrument_context(
-                        run.request.ticker,
-                        run.request.asset_type.value,
+                        request.ticker,
+                        request.asset_type.value,
                         identity,
                     )
                     memory = self.repository.memory_context(
-                        run.request.ticker,
-                        run.request.asset_type.value,
+                        request.ticker,
+                        request.asset_type.value,
                     )
                     llms = self.llm_factory(
                         run_settings,
@@ -236,13 +244,13 @@ class AnalysisService:
                     deep_llm=deep_llm,
                     quick_serializer_llm=quick_serializer_llm,
                     deep_serializer_llm=deep_serializer_llm,
-                    profile=run.request.profile,
-                    selected_analysts=run.request.analysts,
+                    profile=request.profile,
+                    selected_analysts=request.analysts,
                     metrics=metrics,
                 )
                 context = RunContext(
                     run_id=run.id,
-                    request=run.request,
+                    request=request,
                     settings=run_settings,
                     dataflow_config=dataflow_config,
                     memory=memory,
@@ -308,7 +316,7 @@ class AnalysisService:
                         instrument_local_name=instrument_local_name,
                     )
                     benchmark = self._benchmark(
-                        run.request.ticker,
+                        request.ticker,
                         dataflow_config,
                     )
                     aggregate_metrics = self.repository.complete(
@@ -345,7 +353,7 @@ class AnalysisService:
                 return AnalysisResult(
                     run_id=run.id,
                     status=RunStatus.CANCELLED,
-                    instrument=run.request.ticker,
+                    instrument=request.ticker,
                     instrument_name=instrument_name,
                     instrument_local_name=instrument_local_name,
                     reports={},
@@ -424,6 +432,10 @@ class AnalysisService:
         return view
 
     def retry(self, run_id: str) -> RunView:
+        # Validate the retained request through the public creation contract
+        # before mutating the retry lifecycle.  This keeps retry from becoming
+        # an alternate execution path around future admission rules.
+        self.repository.get_run(run_id).request.to_analysis_request()
         view = self.repository.retry(run_id)
         self.repository.append_event(
             run_id,
