@@ -51,7 +51,7 @@ uv run --locked --no-dev tradingagents worker
 ```
 
 CI (`.github/workflows/ci.yml`) uses uv and `uv.lock` for pytest on Python
-3.10-3.13, repo-wide Ruff, frontend unit/browser/type/build checks,
+3.12-3.14, repo-wide Ruff, frontend unit/browser/type/build checks,
 OpenAPI/type drift checks, wheel validation, and Docker Web/worker smoke. A
 fresh standard venv installs the final wheel with pip as the only project
 installation path that does not use uv, preserving the downstream wheel

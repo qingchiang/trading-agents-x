@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -105,11 +105,11 @@ _SAFE_METRIC_KEYS = {
 
 
 def _utc_naive() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def _aware(value: datetime | None) -> datetime | None:
-    return value.replace(tzinfo=timezone.utc) if value is not None else None
+    return value.replace(tzinfo=UTC) if value is not None else None
 
 
 def _sanitize_text(value: str | None, limit: int = 2000) -> str | None:
@@ -517,7 +517,7 @@ class RunRepository:
         run and all of its application data for a later retry.
         """
         if cutoff.tzinfo is not None:
-            cutoff = cutoff.astimezone(timezone.utc).replace(tzinfo=None)
+            cutoff = cutoff.astimezone(UTC).replace(tzinfo=None)
         batch_size = min(max(1, batch_size), 200)
         with self.engine.connect() as connection:
             connection.exec_driver_sql("BEGIN IMMEDIATE")
@@ -1507,7 +1507,7 @@ class RunRepository:
     ) -> list[dict[str, Any]]:
         due = due_at or _utc_naive()
         if due.tzinfo is not None:
-            due = due.astimezone(timezone.utc).replace(tzinfo=None)
+            due = due.astimezone(UTC).replace(tzinfo=None)
         stmt = (
             select(OutcomeRecord, DecisionRecord)
             .join(DecisionRecord, OutcomeRecord.decision_id == DecisionRecord.id)
@@ -1545,9 +1545,9 @@ class RunRepository:
         error_message: str | None = None,
     ) -> None:
         if checked_at.tzinfo is not None:
-            checked_at = checked_at.astimezone(timezone.utc).replace(tzinfo=None)
+            checked_at = checked_at.astimezone(UTC).replace(tzinfo=None)
         if next_check_at.tzinfo is not None:
-            next_check_at = next_check_at.astimezone(timezone.utc).replace(
+            next_check_at = next_check_at.astimezone(UTC).replace(
                 tzinfo=None
             )
         with self.sessions.begin() as session:

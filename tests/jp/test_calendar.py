@@ -1,6 +1,6 @@
 """TSE trading-day calendar used by the look-ahead-safe publication lags."""
 import unittest
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -14,7 +14,7 @@ from tradingagents.dataflows.jp.calendar import (
 @pytest.mark.unit
 class TseCalendarTests(unittest.TestCase):
     def test_tokyo_today_uses_market_timezone_at_utc_rollover(self):
-        utc_now = datetime(2026, 7, 17, 15, 1, tzinfo=timezone.utc)
+        utc_now = datetime(2026, 7, 17, 15, 1, tzinfo=UTC)
         self.assertEqual(tokyo_today(utc_now), date(2026, 7, 18))
 
     def test_weekend_is_closed(self):

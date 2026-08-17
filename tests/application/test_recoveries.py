@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from tradingagents.application.contracts import (
     ArtifactGenerationMethod,
@@ -26,7 +26,7 @@ def _event(
         event_type=event_type,
         node=node,
         payload=payload or {},
-        created_at=datetime(2026, 8, 1, tzinfo=timezone.utc)
+        created_at=datetime(2026, 8, 1, tzinfo=UTC)
         + timedelta(seconds=sequence),
     )
 

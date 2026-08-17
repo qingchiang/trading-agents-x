@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from tradingagents.application.evidence_workset import StructuredNumericFact
 
@@ -238,7 +238,7 @@ def fetch_sentiment_signals(
                 body = f"<{spec.source} unavailable: {type(exc).__name__}>"
         retrieved_at = None
         if spec.live_only and body and "unavailable" not in body.casefold():
-            retrieved_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            retrieved_at = datetime.now(UTC).isoformat(timespec="seconds")
         fetched.append(
             FetchedSentimentSignal(
                 spec,

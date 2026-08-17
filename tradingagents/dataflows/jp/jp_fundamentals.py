@@ -30,7 +30,7 @@ Basis conventions (labelled in the output so nothing is silently cross-compared)
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pandas as pd
 from dateutil.relativedelta import relativedelta
@@ -235,7 +235,7 @@ def _analyst_forward_line(
             f"; company guidance {company_growth * 100:+.1f}% vs "
             f"analyst {analyst_growth * 100:+.1f}% ({agree})"
         )
-    retrieved = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    retrieved = datetime.now(UTC).isoformat(timespec="seconds")
     currency = instrument_currency(ticker)
     line = (
         f"- Forward PE: {_ratio(fwd_pe)} (analyst consensus, live only; requested "

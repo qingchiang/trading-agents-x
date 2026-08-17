@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated
 
 from langchain_core.tools import tool
@@ -76,7 +76,7 @@ def get_prediction_markets_for_analysis(
                 temporal_scope="live_only",
             )
         result = route_to_vendor("get_prediction_markets", topic, limit)
-        retrieved_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        retrieved_at = datetime.now(UTC).isoformat(timespec="seconds")
         unavailable = (
             "DATA_UNAVAILABLE" in result
             or "currently unavailable" in result.casefold()

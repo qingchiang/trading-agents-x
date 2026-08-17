@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -201,7 +201,7 @@ def test_live_operand_regressions_are_deterministically_normalized(
 
 def test_cn_profile_retrieval_time_dates_forward_income_calculation() -> None:
     analysis_date = date(2026, 8, 5)
-    retrieved_at = datetime(2026, 8, 5, 6, tzinfo=timezone.utc)
+    retrieved_at = datetime(2026, 8, 5, 6, tzinfo=UTC)
     profile_origin = EvidenceOrigin(
         source="AkShare / CNINFO company profile",
         evidence_type="company profile",

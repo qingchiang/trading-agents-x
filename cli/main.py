@@ -7,7 +7,7 @@ import logging
 import os
 import sys
 from datetime import date
-from enum import Enum
+from enum import Enum, StrEnum
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -47,7 +47,9 @@ event_console = Console(stderr=True)
 _ANALYSTS = ("market", "social", "news", "fundamentals")
 
 
-class ExportFormat(str, Enum):
+class ExportFormat(StrEnum):
+    __str__ = Enum.__str__
+
     PACKAGE = "package"
     MARKDOWN = "markdown"
     JSON = "json"

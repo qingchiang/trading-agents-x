@@ -20,14 +20,12 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import Any
 
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
-
-T = TypeVar("T", bound=BaseModel)
 
 # Schema-only structured output binds exactly one tool (the schema itself), so a
 # model that reaches for a search tool emits an unknown tool call and the whole
@@ -40,7 +38,7 @@ NO_EXTERNAL_TOOLS = (
 )
 
 
-def bind_structured(llm: Any, schema: type[T], agent_name: str) -> Any | None:
+def bind_structured[T: BaseModel](llm: Any, schema: type[T], agent_name: str) -> Any | None:
     """Return ``llm.with_structured_output(schema)`` or ``None`` if unsupported.
 
     Logs a warning when the binding fails so the user understands the agent
@@ -65,7 +63,7 @@ def bind_structured(llm: Any, schema: type[T], agent_name: str) -> Any | None:
         return None
 
 
-def structured_prompt_for(
+def structured_prompt_for[T: BaseModel](
     llm: Any,
     schema: type[T],
     prompt: Any,
@@ -86,7 +84,7 @@ def structured_prompt_for(
     return f"{prompt}\n\n{contract}"
 
 
-def invoke_structured_or_freetext(
+def invoke_structured_or_freetext[T: BaseModel](
     structured_llm: Any | None,
     plain_llm: Any,
     prompt: Any,

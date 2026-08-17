@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pandas as pd
 import pytest
@@ -72,15 +72,15 @@ def test_earliest_check_uses_six_market_closes_and_local_timezone() -> None:
         holding_intervals=5,
     )
 
-    assert stock_due == datetime(2026, 8, 4, 15, tzinfo=timezone.utc)
-    assert crypto_due == datetime(2026, 8, 3, 0, tzinfo=timezone.utc)
+    assert stock_due == datetime(2026, 8, 4, 15, tzinfo=UTC)
+    assert crypto_due == datetime(2026, 8, 3, 0, tzinfo=UTC)
 
 
 def test_pending_observation_is_deferred_for_24_hours(
     app_settings,
     monkeypatch,
 ) -> None:
-    now = datetime(2026, 8, 5, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 5, 0, tzinfo=UTC)
     repository = _ScheduledRepository(_pending_item())
     settlement = OutcomeSettlement(
         app_settings,
@@ -108,7 +108,7 @@ def test_provider_failure_is_deferred_for_one_hour(
     app_settings,
     monkeypatch,
 ) -> None:
-    now = datetime(2026, 8, 5, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 5, 0, tzinfo=UTC)
     repository = _ScheduledRepository(_pending_item())
     settlement = OutcomeSettlement(
         app_settings,

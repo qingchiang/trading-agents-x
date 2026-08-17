@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from functools import lru_cache
 
 import pandas as pd
@@ -122,7 +122,7 @@ def _profile_by_code(code: str) -> CompanyProfileSnapshot:
         request_profile,
         label="AkShare/CNINFO stock_profile_cninfo",
     )
-    retrieved_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    retrieved_at = datetime.now(UTC).isoformat(timespec="seconds")
     try:
         count = int(payload.get("count", 0))
         records = payload.get("records") or []

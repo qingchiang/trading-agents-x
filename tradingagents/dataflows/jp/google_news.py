@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlencode
 from urllib.request import Request
@@ -62,7 +62,7 @@ def _parse_pubdate(raw: str | None) -> datetime | None:
     except (TypeError, ValueError):
         return None
     if dt.tzinfo is None:  # RFC-822 without a zone — treat as UTC
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     return dt.astimezone(_JST).replace(tzinfo=None)
 
 

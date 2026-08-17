@@ -13,13 +13,21 @@ env:
   PYTHON_DOTENV_DISABLED: "1"
 
 jobs:
+  repository-hygiene:
+    name: repository hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject tracked ignored files
+        run: ./scripts/check_tracked_ignored.py
+
   test:
     name: tests (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

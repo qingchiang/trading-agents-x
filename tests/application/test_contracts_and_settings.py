@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pytest
 from pydantic import ValidationError
 
 from tests.factories import analyst_report, research_decision
+from tradingagents import RunProfile as PublicRunProfile
+from tradingagents.application import RunProfile as ApplicationRunProfile
 from tradingagents.application.contracts import (
     AnalysisRequest,
     EvidenceBundle,
@@ -14,6 +16,7 @@ from tradingagents.application.contracts import (
     ResearchDecision,
     ResearchWarning,
     RunProfile,
+    RunStatus,
 )
 from tradingagents.application.settings import AppSettings, RunSettings
 
@@ -31,6 +34,35 @@ def test_analysis_request_is_normalized_ordered_and_immutable() -> None:
     assert request.analysts == ("market", "news")
     with pytest.raises(ValidationError):
         request.ticker = "NVDA"
+
+
+def test_public_enum_contract_remains_stable() -> None:
+    assert PublicRunProfile is ApplicationRunProfile is RunProfile
+    assert {member.name: member.value for member in RunProfile} == {
+        "FAST": "fast",
+        "STANDARD": "standard",
+        "DEEP": "deep",
+    }
+    assert {member.name: member.value for member in RunStatus} == {
+        "QUEUED": "queued",
+        "RUNNING": "running",
+        "SUCCEEDED": "succeeded",
+        "FAILED": "failed",
+        "CANCELLED": "cancelled",
+    }
+    assert str(RunProfile.DEEP) == "RunProfile.DEEP"
+
+    request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date="2026-07-24",
+        profile=RunProfile.DEEP,
+    )
+    assert request.model_dump(mode="json")["profile"] == "deep"
+    assert AnalysisRequest.model_json_schema()["$defs"]["RunProfile"]["enum"] == [
+        "fast",
+        "standard",
+        "deep",
+    ]
 
 
 def test_research_decision_rejects_account_level_fields() -> None:
@@ -140,7 +172,7 @@ def test_evidence_bundle_rejects_future_information() -> None:
         source="fixture",
         evidence_type="filing",
         requested_date=date(2026, 7, 24),
-        available_at=datetime(2026, 7, 25, 5, tzinfo=timezone.utc),
+        available_at=datetime(2026, 7, 25, 5, tzinfo=UTC),
         content="Not yet available at the analysis cutoff.",
     )
 
