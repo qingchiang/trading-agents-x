@@ -105,6 +105,12 @@ class AnalysisService:
             raise TypeError(
                 "new Runs require an AnalysisRequest creation contract"
             )
+        # Re-run the creation validators at the lifecycle seam.  A caller can
+        # otherwise bypass Pydantic validation with ``model_construct`` and
+        # hand the repository an invalid request that would still be durable.
+        request = AnalysisRequest.model_validate(
+            request.model_dump(mode="json", warnings=False)
+        )
         if source_run_id is not None:
             # A retained Run may carry a legacy request that is intentionally
             # readable but no longer admitted as a source for new research.

@@ -5,7 +5,8 @@
 TradingAgentsX は、ローカルの単一ユーザー向け投資リサーチ実行センター
 です。React Web UI、バージョン化された FastAPI、SQLite の永続キュー、
 evidence-first な LangGraph ワークフローを統合し、米国株、日本株、中国
-A 株、および Yahoo 互換シンボルを扱います。
+大陸 A 株を扱います。内部では正規化された Yahoo 形式の Instrument Key を
+使いますが、ベンダーがより広いシンボルを扱えても製品の候補境界は広がりません。
 
 出力はリサーチ上の結論であり、口座向けの売買指示ではありません。最終契約
 には rating、confidence、thesis、evidence refs、catalysts、risks、

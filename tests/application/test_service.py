@@ -330,6 +330,56 @@ def test_service_persists_events_before_callback_and_result(
     assert events[2].payload["api_key"] == "[REDACTED]"
 
 
+def test_rejected_creation_has_no_persistent_side_effects(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(app_settings, repository)
+    invalid_request = AnalysisRequest.model_construct(
+        ticker="BTC-USD",
+        analysis_date=date(2026, 7, 24),
+        asset_type="crypto",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="stock|Crypto instruments|listed equity",
+    ):
+        service.enqueue(invalid_request)
+
+    table_names = (
+        "runs",
+        "run_attempts",
+        "run_events",
+        "run_evidence",
+        "run_artifacts",
+        "decisions",
+        "outcomes",
+        "reflections",
+        "checkpoints",
+        "writes",
+    )
+    with repository.engine.connect() as connection:
+        available_tables = {
+            row[0]
+            for row in connection.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        counts = {
+            table: (
+                connection.exec_driver_sql(
+                    f"SELECT COUNT(*) FROM {table}"
+                ).scalar_one()
+                if table in available_tables
+                else 0
+            )
+            for table in table_names
+        }
+
+    assert counts == dict.fromkeys(table_names, 0)
+
+
 @pytest.mark.parametrize(
     ("identity", "expected"),
     [

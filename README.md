@@ -14,8 +14,10 @@
 
 TradingAgentsX is a local, single-user investment-research run center. It
 combines a React Web UI, a versioned FastAPI service, a durable SQLite queue,
-and an evidence-first LangGraph workflow for US, Japanese, China A-share, and
-Yahoo-compatible instruments.
+and an evidence-first LangGraph workflow for US, Japanese, and mainland-China
+listed equities. Internally, these equities use canonical Yahoo-style
+Instrument Keys; broader vendor symbol support does not expand the product
+candidate boundary.
 
 The system produces research conclusions, not account instructions. Its typed
 decision contains a rating, confidence, thesis, evidence references, catalysts,
