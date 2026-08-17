@@ -11,7 +11,7 @@ TradingAgentsX is a local, single-user research system:
 
 - one Web process and, by default, one analysis worker;
 - one SQLite database on a local filesystem shared by those processes;
-- US/default, Japanese, China A-share, and compatible crypto/FX data paths;
+- US/default, Japanese, and mainland-China A-share equity data paths;
 - research decisions, not accounts, holdings, cash, execution, or rebalancing;
 - no multi-tenancy, collaboration, schedules, watchlists, or cross-host worker
   fleet in this architecture.
@@ -515,8 +515,8 @@ alpha      = raw return - (benchmark_close[5] / benchmark_close[0] - 1)
 ```
 
 Each pending outcome stores its next due time. The initial check is no earlier
-than the market-local day after six plausible closes (daily for crypto,
-weekdays as the lower bound for other markets). An incomplete observation is
+than the market-local day after six plausible closes (weekdays are the lower
+bound for supported equities). An incomplete observation is
 deferred for 24 hours; a provider or transport failure is retried after one
 hour. Exchange holidays therefore degrade to bounded daily checks instead of
 the worker poll interval.
@@ -528,10 +528,14 @@ sole truth for long-horizon thesis validity or graph quality.
 
 ### Symbols and market dates
 
-`normalize_symbol` converts supported aliases to canonical
-Yahoo-compatible symbols before routing. It covers broker aliases, common
-forex/crypto forms, bare A-share codes, and `CODE.SH` → `CODE.SS`.
-Ambiguous or unsupported mainland symbols fail loudly.
+`normalize_symbol` converts low-level vendor aliases to canonical
+Yahoo-compatible symbols before routing. Public creation additionally applies
+the positive `is_supported_equity_symbol` predicate: only United States
+equity notation, four-character Tokyo `.T` symbols, and validated mainland
+Shanghai/Shenzhen A-share symbols are admitted. Broker forex, commodity,
+index, and adjacent-exchange aliases remain low-level capabilities; they are
+not product-market support. Ambiguous or unsupported mainland symbols fail
+loudly.
 
 The analysis cutoff uses the instrument market's timezone, never the host's
 calendar or an unconditional UTC date. Historical tools receive that cutoff

@@ -20,9 +20,10 @@ from pydantic_core import PydanticCustomError
 
 from tradingagents.application.reporting import order_reports
 from tradingagents.dataflows.symbol_utils import (
-    crypto_base,
+    is_supported_equity_symbol,
     market_timezone,
     normalize_symbol,
+    unsupported_crypto_base,
 )
 
 _SYMBOL_PATTERN = re.compile(r"^[A-Z0-9^][A-Z0-9.^=_-]*$")
@@ -140,7 +141,6 @@ class RunTrashState(_StableStrEnum):
 
 class AssetType(_StableStrEnum):
     STOCK = "stock"
-    CRYPTO = "crypto"
 
 
 class ResearchRating(_StableStrEnum):
@@ -1669,17 +1669,13 @@ class AnalysisRequest(FrozenModel):
         return normalize_report_language(value)
 
     @model_validator(mode="after")
-    def infer_asset_type(self) -> AnalysisRequest:
-        inferred = AssetType.CRYPTO if crypto_base(self.ticker) else AssetType.STOCK
+    def validate_asset_type(self) -> AnalysisRequest:
+        if unsupported_crypto_base(self.ticker):
+            raise ValueError("Crypto instruments are not supported")
+        if not is_supported_equity_symbol(self.ticker):
+            raise ValueError("Only listed equity instruments are supported")
         if self.asset_type is None:
-            object.__setattr__(self, "asset_type", inferred)
-        elif self.asset_type != inferred and inferred is AssetType.CRYPTO:
-            raise ValueError("known crypto symbols must use asset_type='crypto'")
-        if inferred is AssetType.CRYPTO and "fundamentals" in self.analysts:
-            compatible = tuple(analyst for analyst in self.analysts if analyst != "fundamentals")
-            if not compatible:
-                raise ValueError("crypto analysis requires a non-fundamentals analyst")
-            object.__setattr__(self, "analysts", compatible)
+            object.__setattr__(self, "asset_type", AssetType.STOCK)
         return self
 
 

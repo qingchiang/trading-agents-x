@@ -33,8 +33,6 @@ from zoneinfo import ZoneInfo
 
 from tradingagents.version import IDENTIFIED_USER_AGENT
 
-from .symbol_utils import crypto_base
-
 logger = logging.getLogger(__name__)
 
 _API = "https://www.reddit.com/r/{sub}/search.json?{qs}"
@@ -266,10 +264,6 @@ def fetch_reddit_posts(
     stay under Reddit's public per-IP rate limit; combined with the RSS-first
     path it makes 429s rare even when several analyses run back-to-back.
     """
-    # Crypto reaches us as a Yahoo pair (BTC-USD); search Reddit for the base
-    # ("BTC") so the query actually matches discussion instead of near-nothing.
-    is_crypto = crypto_base(ticker) is not None
-    ticker = crypto_base(ticker) or ticker
     if (start_date is None) != (end_date is None):
         return "<reddit unavailable: both start_date and end_date are required>"
     time_filter = "week"
@@ -298,7 +292,6 @@ def fetch_reddit_posts(
                 for post in posts
                 if _post_in_window(
                     post.get("created_utc"),
-                    is_crypto,
                     start_date,
                     end_date,
                 )
@@ -328,7 +321,7 @@ def fetch_reddit_posts(
             if created is None:
                 created_str = "?"
             elif start_date is not None:
-                local = _post_market_datetime(created, is_crypto)
+                local = _post_market_datetime(created)
                 created_str = local.strftime("%Y-%m-%d") if local else "?"
             else:
                 created_str = time.strftime("%Y-%m-%d", time.gmtime(created))
@@ -351,7 +344,6 @@ def fetch_reddit_posts(
 
 def _post_in_window(
     created_utc: float | None,
-    is_crypto: bool,
     start_date: str,
     end_date: str,
 ) -> bool:
@@ -359,7 +351,7 @@ def _post_in_window(
     if created_utc is None:
         return False
     try:
-        local = _post_market_datetime(created_utc, is_crypto)
+        local = _post_market_datetime(created_utc)
         if local is None:
             return False
         start = datetime.strptime(start_date, "%Y-%m-%d").date()
@@ -371,11 +363,10 @@ def _post_in_window(
 
 def _post_market_datetime(
     created_utc: float,
-    is_crypto: bool,
 ) -> datetime | None:
-    """Convert a Reddit epoch to the asset's market timezone."""
+    """Convert a Reddit epoch to the supported US social-feed timezone."""
     try:
-        market_tz = UTC if is_crypto else ZoneInfo("America/New_York")
+        market_tz = ZoneInfo("America/New_York")
         return datetime.fromtimestamp(created_utc, tz=UTC).astimezone(market_tz)
     except (OSError, TypeError, ValueError):
         return None

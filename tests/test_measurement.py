@@ -8,8 +8,6 @@ def test_instrument_currency_covers_supported_market_shapes() -> None:
     assert instrument_currency("NVDA") == "USD"
     assert instrument_currency("600309.SS") == "CNY"
     assert instrument_currency("000001.SZ") == "CNY"
-    assert instrument_currency("BTC-USD") == "USD"
-    assert instrument_currency("BTC-JPY") == "JPY"
 
 
 def test_vendor_units_are_classified_only_when_explicit() -> None:

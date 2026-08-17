@@ -246,8 +246,8 @@ Web login は token を署名済み `HttpOnly`、`SameSite=Strict` cookie に交
 | --- | --- | --- |
 | US/default | `NVDA`, `SPY` | yfinance default |
 | Japan | `7203.T` | J-Quants、EDINET、TDnet、日本の news/macro |
-| China A-share | `600519.SS`, `000001.SZ` | Tencent/AkShare、CNINFO、Sina、Eastmoney、中国 macro |
-| Crypto/FX | `BTC-USD`, `EURUSD=X` | 互換 default route |
+| China A-share | `600519.SS`, `000651.SZ` | Tencent/AkShare、CNINFO、Sina、Eastmoney、中国 macro |
+| 製品境界 | 米国/default、東京 `.T`、中国本土 `.SS`/`.SZ` の株式 | ルーティング前に候補を正判定 |
 
 historical analysis の cutoff は instrument market のローカル日付です。
 Evidence は requested/effective date、timezone 付き availability、実際の

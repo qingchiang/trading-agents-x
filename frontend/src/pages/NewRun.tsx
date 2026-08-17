@@ -305,7 +305,7 @@ export default function NewRun() {
     const payload: RunCreateRequest = {
       ticker,
       analysis_date: analysisDate,
-      asset_type: null,
+      asset_type: "stock",
       profile,
       analysts: analysts as AnalysisRequest["analysts"],
       llm_provider: provider,

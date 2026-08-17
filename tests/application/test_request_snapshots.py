@@ -6,6 +6,7 @@ import io
 import json
 import zipfile
 
+import pytest
 from sqlalchemy import select
 
 from tests.factories import analyst_report, research_decision
@@ -13,7 +14,6 @@ from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
     ArtifactGenerationMethod,
-    AssetType,
     EvidenceBundle,
     EvidenceItem,
     ResearchArtifactDraft,
@@ -33,20 +33,23 @@ def test_list_and_detail_preserve_stock_and_legacy_crypto_snapshots(
         ticker="NVDA",
         analysis_date="2026-07-24",
     )
-    crypto_request = AnalysisRequest(
-        ticker="BTC-USD",
-        analysis_date="2026-07-24",
-        asset_type=AssetType.CRYPTO,
-        analysts=("market", "social", "news"),
-    )
     stock, _ = repository.create_run(
         stock_request,
         app_settings.resolve_run(stock_request).snapshot(),
     )
+    legacy_seed = AnalysisRequest(ticker="AAPL", analysis_date="2026-07-24")
     crypto, _ = repository.create_run(
-        crypto_request,
-        app_settings.resolve_run(crypto_request).snapshot(),
+        legacy_seed,
+        app_settings.resolve_run(legacy_seed).snapshot(),
     )
+    with repository.sessions.begin() as session:
+        record = session.get(RunRecord, crypto.id)
+        record.request_json = {
+            **record.request_json,
+            "ticker": "BTC-USD",
+            "asset_type": "crypto",
+            "analysts": ["market", "social", "news"],
+        }
 
     with repository.sessions() as session:
         before = {
@@ -67,7 +70,8 @@ def test_list_and_detail_preserve_stock_and_legacy_crypto_snapshots(
     assert crypto_detail.request.asset_type == "crypto"
     assert listed[stock.id].request.model_dump(mode="json") == before[stock.id]
     assert listed[crypto.id].request.model_dump(mode="json") == before[crypto.id]
-    assert crypto_detail.request.to_analysis_request() == crypto_request
+    with pytest.raises(ValueError):
+        crypto_detail.request.to_analysis_request()
 
     service = AnalysisService(app_settings, repository=repository)
     try:
@@ -76,18 +80,18 @@ def test_list_and_detail_preserve_stock_and_legacy_crypto_snapshots(
         assert "AnalysisRequest" in str(exc)
     else:  # pragma: no cover - defensive assertion for the contract boundary
         raise AssertionError("history snapshots must not create new Runs")
+    with pytest.raises(ValueError):
+        service.enqueue(
+            AnalysisRequest(ticker="MSFT", analysis_date="2026-07-24"),
+            source_run_id=crypto.id,
+        )
 
 
 def test_legacy_crypto_run_with_research_outputs_remains_exportable(
     repository,
     app_settings,
 ) -> None:
-    request = AnalysisRequest(
-        ticker="BTC-USD",
-        analysis_date="2026-07-24",
-        asset_type=AssetType.CRYPTO,
-        analysts=("market", "social", "news"),
-    )
+    request = AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
     run, _ = repository.create_run(
         request,
         app_settings.resolve_run(request).snapshot(),
@@ -130,6 +134,14 @@ def test_legacy_crypto_run_with_research_outputs_remains_exportable(
         evidence=evidence,
         benchmark="^GSPC",
     )
+    with repository.sessions.begin() as session:
+        record = session.get(RunRecord, run.id)
+        record.request_json = {
+            **record.request_json,
+            "ticker": "BTC-USD",
+            "asset_type": "crypto",
+            "analysts": ["market", "social", "news"],
+        }
 
     service = AnalysisService(app_settings, repository=repository)
     exported = service.get_export(run.id)

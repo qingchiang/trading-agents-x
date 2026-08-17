@@ -223,8 +223,8 @@ Web 登录会将 token 换成签名的 `HttpOnly`、`SameSite=Strict` cookie，
 | --- | --- | --- |
 | 美国/默认 | `NVDA`, `SPY` | yfinance 默认路线 |
 | 日本 | `7203.T` | J-Quants、EDINET、TDnet、日本新闻与宏观数据 |
-| 中国 A 股 | `600519.SS`, `000001.SZ` | Tencent/AkShare、CNINFO、Sina、Eastmoney 与中国宏观数据 |
-| Crypto/FX | `BTC-USD`, `EURUSD=X` | 兼容的默认路线 |
+| 中国 A 股 | `600519.SS`, `000651.SZ` | Tencent/AkShare、CNINFO、Sina、Eastmoney 与中国宏观数据 |
+| 产品边界 | 美国/默认、东京 `.T`、中国大陆 `.SS`/`.SZ` 股票 | 路由前执行正向候选校验 |
 
 历史分析以标的所在市场的本地日期为准。Evidence 保留 requested/effective
 date、带时区的 available time、实际来源、质量、fallback 和 provenance；

@@ -34,8 +34,7 @@ def create_news_analyst(llm):
     def news_analyst_node(state):
         current_date = state["trade_date"]
         ticker = state["company_of_interest"]
-        asset_type = state.get("asset_type", "stock")
-        asset_label = "company" if asset_type == "stock" else "asset"
+        asset_label = "instrument"
         instrument_context = get_instrument_context_from_state(state)
         ticker_news_lookback_days = get_config()["ticker_news_lookback_days"]
         ticker_news_start_date = lookback_start_date(

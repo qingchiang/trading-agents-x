@@ -20,7 +20,6 @@ from tests.factories import analyst_report, research_decision
 from tradingagents.application.contracts import (
     AnalysisRequest,
     ArtifactGenerationMethod,
-    AssetType,
     EvidenceBundle,
     EvidenceItem,
     ResearchArtifactDraft,
@@ -605,9 +604,8 @@ def test_snapshot_conversion_failure_fails_claimed_run_before_graph(
     service = _service(app_settings, repository)
     queued = service.enqueue(
         AnalysisRequest(
-            ticker="BTC-USD",
+            ticker="NVDA",
             analysis_date="2026-07-24",
-            asset_type=AssetType.CRYPTO,
             analysts=("market",),
         )
     )
@@ -615,17 +613,18 @@ def test_snapshot_conversion_failure_fails_claimed_run_before_graph(
         record = session.get(RunRecord, queued.id)
         record.request_json = {
             **record.request_json,
-            "asset_type": "retired-crypto",
+            "ticker": "BTC-USD",
+            "asset_type": "crypto",
         }
     claimed = repository.claim_run(queued.id, "worker", 30)
 
-    with pytest.raises(ValueError, match="retired-crypto"):
+    with pytest.raises(ValueError, match="stock|Crypto instruments"):
         service.execute_claimed(claimed, worker_id="worker")
 
     failed = repository.get_run(queued.id)
     assert failed.status is RunStatus.FAILED
     assert failed.error_code == "ValidationError"
-    assert "retired-crypto" in failed.error_message
+    assert "stock" in failed.error_message or "Crypto" in failed.error_message
     assert repository.list_attempts(queued.id)[0].status is RunStatus.FAILED
     events = repository.list_events(queued.id)
     assert events[-1].event_type == "run.failed"

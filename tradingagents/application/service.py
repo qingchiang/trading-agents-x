@@ -105,6 +105,10 @@ class AnalysisService:
             raise TypeError(
                 "new Runs require an AnalysisRequest creation contract"
             )
+        if source_run_id is not None:
+            # A retained Run may carry a legacy request that is intentionally
+            # readable but no longer admitted as a source for new research.
+            self.repository.get_run(source_run_id).request.to_analysis_request()
         run_settings = self.settings.resolve_run(request)
         request = self.settings.materialize_request(
             request,
@@ -222,8 +226,7 @@ class AnalysisService:
                                 )
                     instrument_context = build_instrument_context(
                         request.ticker,
-                        request.asset_type.value,
-                        identity,
+                        identity=identity,
                     )
                     memory = self.repository.memory_context(
                         request.ticker,

@@ -1225,9 +1225,7 @@ class RunRepository:
                 )
             if result.decision is not None:
                 request = RunRequestSnapshot.model_validate(record.request_json)
-                market = self.market_bucket(
-                    request.ticker, request.asset_type
-                )
+                market = self.market_bucket(request.ticker)
                 decision = DecisionRecord(
                     run_id=run_id,
                     ticker=request.ticker,
@@ -1256,7 +1254,6 @@ class RunRepository:
                             now,
                             earliest_outcome_check_at(
                                 ticker=request.ticker,
-                                asset_type=request.asset_type,
                                 analysis_date=request.analysis_date,
                                 holding_intervals=5,
                             ).replace(tzinfo=None),
@@ -1869,9 +1866,8 @@ class RunRepository:
         return destination
 
     @staticmethod
-    def market_bucket(ticker: str, asset_type: str | None) -> str | None:
-        if asset_type == "crypto":
-            return "CRYPTO"
+    def market_bucket(ticker: str, asset_type: str | None = None) -> str | None:
+        del asset_type  # retained for callers reading legacy decision rows
         try:
             return str(market_timezone(ticker))
         except ValueError:

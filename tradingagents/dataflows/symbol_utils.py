@@ -8,7 +8,6 @@ differ from the broker / TradingView / MT5 style symbols users often type:
     XAUUSD, XAUUSD+   GC=F              gold has no forex pair on Yahoo;
                                         it is quoted as a COMEX future
     EURUSD            EURUSD=X          spot forex pairs take a ``=X`` suffix
-    BTCUSD            BTC-USD           crypto pairs use a ``-`` separator
     SPX500, US500     ^GSPC             index CFDs map to Yahoo index symbols
 
 Passing the raw broker symbol to Yahoo returns an empty result, which the
@@ -44,11 +43,6 @@ _FOREX_CURRENCIES = frozenset(
     }
 )
 
-# Crypto bases that brokers quote against USD without a separator.
-_CRYPTO_BASES = frozenset(
-    {"BTC", "ETH", "SOL", "XRP", "ADA", "DOGE", "LTC", "BCH", "DOT", "AVAX", "LINK"}
-)
-
 # Explicit aliases for instruments whose broker symbol does not map to a
 # Yahoo symbol by rule. Metals/energy resolve to their front-month future;
 # index CFD names resolve to the underlying Yahoo index symbol. Extend by
@@ -74,13 +68,34 @@ _ALIASES = {
 
 # Yahoo symbols may contain letters, digits, and these structural characters.
 _YAHOO_SAFE = re.compile(r"^[A-Za-z0-9._\-\^=]+$")
+_US_EQUITY_SYMBOL = re.compile(r"^[A-Z][A-Z0-9]{0,4}(?:[.-][A-Z])?$")
+_JAPAN_EQUITY_SYMBOL = re.compile(r"^[A-Z0-9]{4}\.T$")
 
 
-# Crypto quote currencies that all map to Yahoo's USD pair. Yahoo lists only
-# ``<BASE>-USD`` (not the USDT/USDC stablecoin pairs), so a broker symbol quoted
-# in any of these resolves to ``-USD`` (#982). Longest first so ``USDT``/``USDC``
-# match before the ``USD`` substring.
-_CRYPTO_QUOTES = ("USDT", "USDC", "USD")
+# Quote tokens used only to provide a clearer error for compact Crypto-like
+# forms.  This is deliberately not a base-token blacklist: a pair with an
+# unknown base is still rejected when it uses the unambiguous ``BASE-QUOTE``
+# shape below.
+_UNSUPPORTED_CRYPTO_QUOTES = frozenset(
+    {
+        *(_FOREX_CURRENCIES),
+        "ADA",
+        "AVAX",
+        "BCH",
+        "BTC",
+        "DOGE",
+        "DOT",
+        "ETH",
+        "LINK",
+        "LTC",
+        "PEPE",
+        "SHIB",
+        "SOL",
+        "USDC",
+        "USDT",
+        "XRP",
+    }
+)
 
 # Mainland China A-share prefixes supported by the first China-market branch.
 # These are equity boards only: Shanghai main board / STAR Market and Shenzhen
@@ -89,11 +104,24 @@ _CRYPTO_QUOTES = ("USDT", "USDC", "USD")
 # instead of being routed as an unsuffixed US ticker.
 _SHANGHAI_A_SHARE_PREFIXES = ("600", "601", "603", "605", "688", "689")
 _SHENZHEN_A_SHARE_PREFIXES = ("000", "001", "002", "003", "300", "301")
-_MAINLAND_MARKET_BENCHMARKS = frozenset({"000001.SS", "399001.SZ"})
+_MAINLAND_MARKET_BENCHMARKS = frozenset(
+    {
+        # SSE/SZSE composites and the principal CSI/SSE regional indices.
+        "000001.SS",
+        "000001.SZ",
+        "000016.SS",
+        "000300.SS",
+        "000688.SS",
+        "000905.SS",
+        "000852.SS",
+        "399001.SZ",
+        "399006.SZ",
+    }
+)
 
 # Calendar timezone used when a date boundary depends on the instrument's
 # exchange rather than the host machine. Unsuffixed Yahoo symbols retain the US
-# default, while continuously traded crypto uses UTC.
+# default; adjacent vendor suffixes remain available to low-level dataflows.
 _MARKET_TIMEZONES_BY_SUFFIX = {
     ".T": "Asia/Tokyo",
     ".HK": "Asia/Hong_Kong",
@@ -192,25 +220,60 @@ def _normalize_bare_a_share(code: str) -> str | None:
     )
 
 
-def crypto_base(raw: str) -> str | None:
-    """Return the crypto base (e.g. ``BTC``) for a known USD/USDT/USDC-quoted
-    crypto symbol in any form the pipeline may hold — ``BTC-USD``, ``BTCUSD``,
-    ``BTC-USDT`` — or None for non-crypto symbols. Purely syntactic.
+def unsupported_crypto_base(raw: str) -> str | None:
+    """Identify a Crypto-like pair so public requests can reject it.
+
+    This helper never normalizes a symbol or makes it vendor-routable.  A
+    dashed pair with multi-character base and quote is unambiguously a pair,
+    so unknown combinations such as ``DOGE-SHIB`` are rejected without an
+    ever-growing base-token denylist.  Compact forms additionally recognize
+    common fiat/stablecoin/token quote codes.
     """
     if not isinstance(raw, str):
         return None
-    compact = raw.strip().upper().rstrip("+").replace("-", "")
-    for quote in _CRYPTO_QUOTES:
+    symbol = raw.strip().upper().rstrip("+")
+    if "-" in symbol:
+        base, quote = symbol.rsplit("-", 1)
+        if (
+            len(base) >= 2
+            and len(quote) >= 2
+            and base.isalnum()
+            and quote.isalnum()
+        ):
+            return base
+    compact = symbol.replace("-", "")
+    if (
+        len(compact) == 6
+        and compact[:3] in _FOREX_CURRENCIES
+        and compact[3:] in _FOREX_CURRENCIES
+    ):
+        return None
+    for quote in sorted(_UNSUPPORTED_CRYPTO_QUOTES, key=len, reverse=True):
         if compact.endswith(quote):
             base = compact[: -len(quote)]
-            return base if base in _CRYPTO_BASES else None
+            if base and len(base) >= 2 and base.isalnum():
+                return base
     return None
 
 
-def _normalize_crypto(s: str) -> str | None:
-    """Return ``<BASE>-USD`` for a known USD/USDT/USDC-quoted crypto, else None."""
-    base = crypto_base(s)
-    return f"{base}-USD" if base else None
+def is_supported_equity_symbol(symbol: str) -> bool:
+    """Return whether a canonical symbol is in a supported equity market.
+
+    This is the positive product predicate.  It intentionally does not derive
+    support from vendor routing or market-timezone metadata, which cover more
+    exchanges and instrument types than the public research product.
+    """
+    if not isinstance(symbol, str):
+        return False
+    if _US_EQUITY_SYMBOL.fullmatch(symbol):
+        return True
+    if _JAPAN_EQUITY_SYMBOL.fullmatch(symbol):
+        return True
+    match = re.fullmatch(r"(\d{6})(\.SS|\.SZ)", symbol)
+    if match is None or symbol in _MAINLAND_MARKET_BENCHMARKS:
+        return False
+    code, suffix = match.groups()
+    return infer_mainland_equity_suffix(code) == suffix
 
 
 def normalize_symbol(raw: str) -> str:
@@ -220,10 +283,8 @@ def normalize_symbol(raw: str) -> str:
       1. Explicit China suffix: ``CODE.SH`` -> ``CODE.SS``; ``CODE.BJ`` raises.
       2. Bare Shanghai/Shenzhen A-share equity code -> ``CODE.SS``/``CODE.SZ``.
       3. Explicit alias table (metals, energy, index CFDs).
-      4. Crypto rule: a known crypto base quoted in USD/USDT/USDC (dashed or
-         not) -> ``BASE-USD``.
-      5. Forex rule: six letters that are two ISO currency codes -> ``PAIR=X``.
-      6. Otherwise the upper-cased symbol is returned unchanged (plain
+      4. Forex rule: six letters that are two ISO currency codes -> ``PAIR=X``.
+      5. Otherwise the upper-cased symbol is returned unchanged (plain
          equities, ETFs, Yahoo-native symbols like ``GC=F`` or ``^GSPC``).
 
     A trailing ``+`` (broker CFD marker, e.g. ``XAUUSD+``) is stripped before
@@ -239,15 +300,12 @@ def normalize_symbol(raw: str) -> str:
 
     explicit_china = _normalize_explicit_china_suffix(s)
     a_share = _normalize_bare_a_share(s)
-    crypto = _normalize_crypto(s)
     if explicit_china is not None:
         canonical = explicit_china
     elif a_share is not None:
         canonical = a_share
     elif s in _ALIASES:
         canonical = _ALIASES[s]
-    elif crypto is not None:
-        canonical = crypto
     elif len(s) == 6 and s[:3] in _FOREX_CURRENCIES and s[3:] in _FOREX_CURRENCIES:
         canonical = f"{s}=X"
     else:
@@ -305,8 +363,6 @@ def market_timezone(symbol: str | None) -> tzinfo:
     if symbol is None:
         return UTC
     canonical = normalize_symbol(symbol)
-    if crypto_base(canonical):
-        return UTC
     if canonical in _MARKET_TIMEZONES_BY_SYMBOL:
         return ZoneInfo(_MARKET_TIMEZONES_BY_SYMBOL[canonical])
     suffix = match_exchange_suffix(canonical, _MARKET_TIMEZONES_BY_SUFFIX)

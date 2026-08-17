@@ -113,7 +113,7 @@ def get_news_yfinance(
     article_limit = get_config()["news_article_limit"]
     candidate_limit = min(max(article_limit * 4, 20), 100)
     # Query Yahoo with the canonical symbol, like every other yfinance path —
-    # a raw broker/forex/crypto alias (XAUUSD, BTCUSD) otherwise silently
+    # a raw broker/forex alias (for example, XAUUSD) otherwise silently
     # returns no news. Keep the user's ticker in the report header.
     canonical = normalize_symbol(ticker)
     resolved = "" if canonical == ticker else f" (resolved to {canonical})"
