@@ -27,6 +27,16 @@ unsupported exchange suffixes, unsupported mainland security families, and
 ambiguous symbols fail before Run persistence. Security-type verification is a
 separate admission stage owned by `AnalysisService`.
 
+The admission stage receives the canonical Instrument Key through one
+injected eligibility resolver. It accepts only one exact identity result whose
+security classification is affirmative equity. A confirmed ETF, fund, index,
+future, Forex, Crypto, or other known non-equity raises the stable
+`unsupported_instrument` application error. Empty, fuzzy, mismatched, unknown,
+or failed resolver results raise the distinct
+`instrument_eligibility_unavailable` error. The former is exposed as HTTP 422
+and a CLI usage error; the latter is HTTP 503 and a retryable operational
+failure. Neither result creates a Run or any child durable state.
+
 `AssetType` exposes only `stock` for creation. A tolerant
 `RunRequestSnapshot` may still represent a legacy `asset_type="crypto"` value
 for read-only history and export; converting that snapshot back to an
@@ -42,3 +52,9 @@ legacy request crosses the current creation boundary and fails.
   product model; retained history remains inspectable without compatibility
   execution.
 - OpenAPI and generated TypeScript creation contracts expose only `stock`.
+- Eligibility metadata is used for admission and display only; it is not
+  inserted into sealed research Evidence. Benchmark/provider identifiers stay
+  on their internal adapter paths and do not invoke public admission.
+- Execution repeats the strict check for queued Runs before graph construction
+  or market routing. Retained unsupported history remains read-only and
+  exportable, but cannot be retried or upgraded into active research.

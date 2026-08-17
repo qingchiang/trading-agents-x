@@ -39,6 +39,10 @@ from tradingagents.application.database import (
     OutcomeRecord,
     RunRecord,
 )
+from tradingagents.application.errors import (
+    InstrumentEligibilityUnavailableError,
+    UnsupportedInstrumentError,
+)
 from tradingagents.application.maintenance import TrashMaintenance
 from tradingagents.application.repository import (
     ArtifactConflictError,
@@ -50,6 +54,7 @@ from tradingagents.application.repository import (
 )
 from tradingagents.application.service import AnalysisService
 from tradingagents.application.settings import AppSettings
+from tradingagents.dataflows.instrument_identity import resolve_instrument_eligibility
 from tradingagents.llm_clients.model_discovery import (
     ModelDiscoveryService,
     UnknownProviderError,
@@ -86,7 +91,10 @@ def create_app(
     maintenance: TrashMaintenance | None = None,
 ) -> FastAPI:
     settings = settings or AppSettings.from_env()
-    service = service or AnalysisService(settings)
+    service = service or AnalysisService(
+        settings,
+        eligibility_resolver=resolve_instrument_eligibility,
+    )
     repository = service.repository
     model_discovery = model_discovery or ModelDiscoveryService(settings)
     maintenance = maintenance or TrashMaintenance(settings, repository)
@@ -131,6 +139,20 @@ def create_app(
         exc: IdempotencyConflictError,
     ):
         return _error(409, "idempotency_conflict", str(exc))
+
+    @app.exception_handler(UnsupportedInstrumentError)
+    async def unsupported_instrument(
+        _request: Request,
+        exc: UnsupportedInstrumentError,
+    ):
+        return _error(422, exc.code, str(exc))
+
+    @app.exception_handler(InstrumentEligibilityUnavailableError)
+    async def eligibility_unavailable(
+        _request: Request,
+        exc: InstrumentEligibilityUnavailableError,
+    ):
+        return _error(503, exc.code, str(exc))
 
     @app.exception_handler(EvidenceNotSealedError)
     async def evidence_not_sealed(
@@ -226,7 +248,39 @@ def create_app(
         response.delete_cookie(COOKIE_NAME, path="/")
         return {"authenticated": False}
 
-    @app.post(f"{API_PREFIX}/runs", response_model=RunView, status_code=202)
+    @app.post(
+        f"{API_PREFIX}/runs",
+        response_model=RunView,
+        status_code=202,
+        responses={
+            422: {
+                "description": "The symbol is a confirmed unsupported instrument.",
+                "content": {
+                    "application/json": {
+                        "example": {
+                            "error": {
+                                "code": "unsupported_instrument",
+                                "message": "Confirmed non-equity instrument.",
+                            }
+                        }
+                    }
+                },
+            },
+            503: {
+                "description": "Instrument eligibility could not be verified.",
+                "content": {
+                    "application/json": {
+                        "example": {
+                            "error": {
+                                "code": "instrument_eligibility_unavailable",
+                                "message": "Eligibility is temporarily unavailable.",
+                            }
+                        }
+                    }
+                },
+            },
+        },
+    )
     def create_run(
         request: RunCreateRequest,
         idempotency_key: Annotated[

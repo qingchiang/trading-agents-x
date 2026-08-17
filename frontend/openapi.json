@@ -4777,12 +4777,28 @@
           "422": {
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                "example": {
+                  "error": {
+                    "code": "unsupported_instrument",
+                    "message": "Confirmed non-equity instrument."
+                  }
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "The symbol is a confirmed unsupported instrument."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "instrument_eligibility_unavailable",
+                    "message": "Eligibility is temporarily unavailable."
+                  }
+                }
+              }
+            },
+            "description": "Instrument eligibility could not be verified."
           }
         },
         "summary": "Create Run"

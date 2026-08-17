@@ -537,6 +537,17 @@ index, and adjacent-exchange aliases remain low-level capabilities; they are
 not product-market support. Ambiguous or unsupported mainland symbols fail
 loudly.
 
+After deterministic candidate validation, `AnalysisService` performs strict
+instrument eligibility through one injected resolver before idempotent Run
+creation. Only a single exact canonical-symbol result classified as equity is
+admitted. A known non-equity raises `unsupported_instrument` (HTTP 422); an
+empty, ambiguous, mismatched, unknown, or failed classification raises
+`instrument_eligibility_unavailable` (HTTP 503). Execution repeats this check
+before graph construction and data routing so queued legacy candidates cannot
+cross an upgraded boundary. Eligibility metadata is admission/display data,
+not point-in-time Evidence, and internal benchmark/provider identifiers remain
+outside this public seam.
+
 The analysis cutoff uses the instrument market's timezone, never the host's
 calendar or an unconditional UTC date. Historical tools receive that cutoff
 from runtime context rather than an LLM-provided argument.

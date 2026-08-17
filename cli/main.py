@@ -20,6 +20,10 @@ from rich.table import Table
 
 from tradingagents import AnalysisRequest, RunProfile, TradingAgents
 from tradingagents.application.contracts import RunEvent, RunStatus
+from tradingagents.application.errors import (
+    InstrumentEligibilityUnavailableError,
+    UnsupportedInstrumentError,
+)
 from tradingagents.application.service import AnalysisService
 from tradingagents.application.settings import AppSettings
 from tradingagents.application.worker import AnalysisWorker
@@ -152,6 +156,14 @@ def run_command(
             request,
             on_event=None if quiet else _print_event,
         )
+    except UnsupportedInstrumentError as exc:
+        raise typer.BadParameter(str(exc), param_hint="ticker") from None
+    except InstrumentEligibilityUnavailableError as exc:
+        event_console.print(
+            "[red]Instrument eligibility is temporarily unavailable; "
+            "please retry later.[/red]"
+        )
+        raise typer.Exit(code=1) from exc
     except Exception as exc:
         event_console.print(
             f"[red]Analysis failed ({type(exc).__name__}). "

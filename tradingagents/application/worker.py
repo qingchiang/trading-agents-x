@@ -9,6 +9,8 @@ from collections.abc import Callable
 from time import monotonic
 from uuid import uuid4
 
+from tradingagents.dataflows.instrument_identity import resolve_instrument_eligibility
+
 from .maintenance import (
     TRASH_MAINTENANCE_INTERVAL_SECONDS,
     TRASH_MAINTENANCE_RETRY_SECONDS,
@@ -34,7 +36,10 @@ class AnalysisWorker:
         worker_id: str | None = None,
     ):
         self.settings = settings
-        self.service = service or AnalysisService(settings)
+        self.service = service or AnalysisService(
+            settings,
+            eligibility_resolver=resolve_instrument_eligibility,
+        )
         self.repository = self.service.repository
         self.settlement = settlement or OutcomeSettlement(
             settings,

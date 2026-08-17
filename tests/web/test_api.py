@@ -22,6 +22,7 @@ from tradingagents.application.contracts import (
     ResearchArtifactDraft,
     RunStatus,
 )
+from tradingagents.application.service import AnalysisService
 from tradingagents.application.settings import AppSettings
 from tradingagents.version import __version__
 from tradingagents.web import create_app
@@ -604,7 +605,14 @@ async def test_capabilities_and_runs_preserve_custom_output_language(
         },
         load_env_files=False,
     )
-    transport = httpx.ASGITransport(app=create_app(settings))
+    service = AnalysisService(
+        settings,
+        eligibility_resolver=lambda ticker: {
+            "symbol": ticker,
+            "quote_type": "EQUITY",
+        },
+    )
+    transport = httpx.ASGITransport(app=create_app(settings, service=service))
     async with httpx.AsyncClient(
         transport=transport,
         base_url="http://testserver",

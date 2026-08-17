@@ -327,7 +327,17 @@ export default function NewRun() {
       const run = await api.createRun(payload, submission.current.key);
       navigate(`/runs/${run.id}`);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("error"));
+      const apiCode =
+        typeof cause === "object" && cause !== null && "code" in cause
+          ? (cause as { code?: unknown }).code
+          : undefined;
+      if (apiCode === "unsupported_instrument") {
+        setError(t("unsupportedInstrument"));
+      } else if (apiCode === "instrument_eligibility_unavailable") {
+        setError(t("eligibilityUnavailable"));
+      } else {
+        setError(cause instanceof Error ? cause.message : t("error"));
+      }
       setSubmitting(false);
     }
   };

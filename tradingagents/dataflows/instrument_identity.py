@@ -122,6 +122,54 @@ def resolve_search_identity(ticker: str) -> dict[str, str]:
     return _resolve_cached(normalize_symbol(ticker), "historical")
 
 
+def resolve_instrument_eligibility(canonical_symbol: str) -> dict[str, str] | list[dict[str, str]]:
+    """Resolve exact current security classification for product admission.
+
+    This is intentionally separate from :func:`resolve_instrument_identity`.
+    Display identity is best effort and may return names without a symbol or
+    quote type; admission must preserve enough raw identity to fail closed on
+    a fuzzy, missing, or mismatched result.  The provider search remains a
+    current product-admission lookup and is never passed into graph Evidence.
+    """
+    canonical = str(canonical_symbol).strip()
+    if not canonical:
+        return {}
+    search = yf_retry(
+        lambda: yf.Search(
+            query=canonical,
+            max_results=8,
+            news_count=0,
+            enable_fuzzy_query=False,
+        )
+    )
+    rows: list[dict[str, str]] = []
+    for quote in getattr(search, "quotes", None) or []:
+        if not isinstance(quote, dict):
+            continue
+        symbol = _clean_identity_value(quote.get("symbol"))
+        if symbol is None:
+            continue
+        row: dict[str, str] = {"symbol": symbol}
+        for source, target in (
+            ("quoteType", "quote_type"),
+            ("securityType", "security_type"),
+            ("type", "type"),
+        ):
+            value = _clean_identity_value(quote.get(source))
+            if value is not None:
+                row[target] = value
+        rows.append(row)
+    # Keep all exact matches so the application-level validator can distinguish
+    # an exact identity from an ambiguous search response.
+    exact = [
+        row for row in rows
+        if row["symbol"].casefold() == canonical.casefold()
+    ]
+    if len(exact) == 1:
+        return exact[0]
+    return exact
+
+
 def clear_instrument_identity_cache() -> None:
     """Clear the shared resolver cache (primarily for tests and long-lived apps)."""
     _resolve_cached.cache_clear()

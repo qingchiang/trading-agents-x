@@ -66,6 +66,12 @@ from .contracts import (
     TableDataType,
     ValuationAssessment,
 )
+from .errors import (
+    EligibilityUnavailableError,
+    InstrumentEligibilityError,
+    InstrumentEligibilityUnavailableError,
+    UnsupportedInstrumentError,
+)
 from .settings import AppSettings, RunSettings
 
 __all__ = [
@@ -130,6 +136,10 @@ __all__ = [
     "RunStatus",
     "TableDataType",
     "ValuationAssessment",
+    "EligibilityUnavailableError",
+    "InstrumentEligibilityError",
+    "InstrumentEligibilityUnavailableError",
+    "UnsupportedInstrumentError",
     "AuditedRangeEndpoint",
     "NumericTemporalBasis",
     "ScenarioReferenceRange",
