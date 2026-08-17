@@ -246,6 +246,6 @@ __marimo__/
 .env.enterprise
 reports/
 
-# Scratch space for manually downloaded bootstrap inputs (e.g. EdinetcodeDlInfo.csv)
+# Scratch space
 tmp/
 .scratch/
