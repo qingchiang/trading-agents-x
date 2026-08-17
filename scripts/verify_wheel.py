@@ -37,7 +37,10 @@ _FORBIDDEN_REQUIREMENTS = {
     "redis",
     "setuptools",
     "tqdm",
+    "typing-extensions",
 }
+
+_REQUIRES_PYTHON = frozenset({">=3.12", "<3.15"})
 
 
 def verify(wheel: Path) -> None:
@@ -90,6 +93,11 @@ def verify(wheel: Path) -> None:
         metadata = BytesParser().parsebytes(archive.read(metadata_name))
         if metadata["License-Expression"] != "Apache-2.0":
             raise ValueError("wheel License-Expression must be Apache-2.0")
+        requires_python = frozenset(
+            clause.strip() for clause in metadata["Requires-Python"].split(",")
+        )
+        if requires_python != _REQUIRES_PYTHON:
+            raise ValueError("wheel Requires-Python must be >=3.12,<3.15")
         extras = {
             extra.casefold() for extra in metadata.get_all("Provides-Extra", [])
         }

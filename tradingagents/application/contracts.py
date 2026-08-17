@@ -5,9 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from datetime import date, datetime, timezone
-from enum import Enum
-from typing import Any, Literal, TypeAlias
+from datetime import UTC, date, datetime
+from enum import Enum, StrEnum
+from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -53,7 +53,7 @@ def _unique_research_ids(value: tuple[str, ...]) -> tuple[str, ...]:
 
 def utc_now() -> datetime:
     """Return an aware UTC timestamp for public contracts."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class FrozenModel(BaseModel):
@@ -62,13 +62,19 @@ class FrozenModel(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
 
-class RunProfile(str, Enum):
+class _StableStrEnum(StrEnum):
+    """Use the standard string enum while retaining the prior ``str()`` contract."""
+
+    __str__ = Enum.__str__
+
+
+class RunProfile(_StableStrEnum):
     FAST = "fast"
     STANDARD = "standard"
     DEEP = "deep"
 
 
-class ReportLanguage(str, Enum):
+class ReportLanguage(_StableStrEnum):
     ENGLISH = "en"
     SIMPLIFIED_CHINESE = "zh-CN"
     JAPANESE = "ja"
@@ -95,7 +101,7 @@ _REPORT_LANGUAGE_ALIASES = {
     "日本語": ReportLanguage.JAPANESE,
 }
 
-OutputLanguage: TypeAlias = ReportLanguage | str
+type OutputLanguage = ReportLanguage | str
 
 
 def normalize_report_language(value: OutputLanguage) -> OutputLanguage:
@@ -118,7 +124,7 @@ def report_language_prompt_label(value: OutputLanguage) -> str:
     return value.prompt_label if isinstance(value, ReportLanguage) else value
 
 
-class RunStatus(str, Enum):
+class RunStatus(_StableStrEnum):
     QUEUED = "queued"
     RUNNING = "running"
     SUCCEEDED = "succeeded"
@@ -126,18 +132,18 @@ class RunStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-class RunTrashState(str, Enum):
+class RunTrashState(_StableStrEnum):
     ACTIVE = "active"
     TRASHED = "trashed"
     ALL = "all"
 
 
-class AssetType(str, Enum):
+class AssetType(_StableStrEnum):
     STOCK = "stock"
     CRYPTO = "crypto"
 
 
-class ResearchRating(str, Enum):
+class ResearchRating(_StableStrEnum):
     BUY = "Buy"
     OVERWEIGHT = "Overweight"
     HOLD = "Hold"
@@ -145,25 +151,25 @@ class ResearchRating(str, Enum):
     SELL = "Sell"
 
 
-class DebateImportance(str, Enum):
+class DebateImportance(_StableStrEnum):
     CRITICAL = "critical"
     MATERIAL = "material"
     SECONDARY = "secondary"
 
 
-class RiskReviewDisposition(str, Enum):
+class RiskReviewDisposition(_StableStrEnum):
     RETAINED = "retained"
     MODIFIED = "modified"
     REJECTED = "rejected"
 
 
-class ResearchScenarioKind(str, Enum):
+class ResearchScenarioKind(_StableStrEnum):
     BASE = "base"
     BULL = "bull"
     BEAR = "bear"
 
 
-class ScenarioReferenceCategory(str, Enum):
+class ScenarioReferenceCategory(_StableStrEnum):
     """Research purpose of a non-valuation scenario reference range."""
 
     TECHNICAL = "technical"
@@ -173,7 +179,7 @@ class ScenarioReferenceCategory(str, Enum):
     OTHER = "other"
 
 
-class NumericAuditComponentType(str, Enum):
+class NumericAuditComponentType(_StableStrEnum):
     """Stable component identity for localized numeric audit omissions."""
 
     APPENDIX = "appendix"
@@ -184,34 +190,34 @@ class NumericAuditComponentType(str, Enum):
     DECISION_CLAIM = "decision_claim"
 
 
-class NumericAuditStatus(str, Enum):
+class NumericAuditStatus(_StableStrEnum):
     COMPLETE = "complete"
     PARTIAL = "partial"
     INCOMPLETE = "incomplete"
     NOT_APPLICABLE = "not_applicable"
 
 
-class NumericAuditAppendixStatus(str, Enum):
+class NumericAuditAppendixStatus(_StableStrEnum):
     COMPLETE = "complete"
     RECOVERED = "recovered"
     PARTIAL = "partial"
     INCOMPLETE = "incomplete"
 
 
-class NumericCalculationStatus(str, Enum):
+class NumericCalculationStatus(_StableStrEnum):
     VERIFIED = "verified"
     INVALID = "invalid"
     MISSING = "missing"
 
 
-class NumericDisplayStatus(str, Enum):
+class NumericDisplayStatus(_StableStrEnum):
     MATCHED = "matched"
     APPROXIMATELY_MATCHED = "approximately_matched"
     MISMATCHED = "mismatched"
     NOT_CHECKED = "not_checked"
 
 
-class NumericDisplayScale(str, Enum):
+class NumericDisplayScale(_StableStrEnum):
     """Deterministic scale applied only when comparing reader-facing values."""
 
     BASE = "base"
@@ -223,12 +229,12 @@ class NumericDisplayScale(str, Enum):
     TRILLION = "trillion"
 
 
-class NumericAuditPhase(str, Enum):
+class NumericAuditPhase(_StableStrEnum):
     INITIAL = "initial"
     REPAIR = "repair"
 
 
-class ArtifactGenerationMethod(str, Enum):
+class ArtifactGenerationMethod(_StableStrEnum):
     """Auditable method that produced a typed research artifact."""
 
     TOOL_CALL = "tool_call"
@@ -386,20 +392,20 @@ class DecisionNumericAuditAppendix(FrozenModel):
     omitted_components: tuple[NumericAuditOmission, ...] = ()
 
 
-class MarketReferenceBasis(str, Enum):
+class MarketReferenceBasis(_StableStrEnum):
     OBSERVED = "observed"
     INTERPRETED = "interpreted"
     DERIVED = "derived"
 
 
-class EvidenceQuality(str, Enum):
+class EvidenceQuality(_StableStrEnum):
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
     UNAVAILABLE = "unavailable"
 
 
-class EvidenceTemporalScope(str, Enum):
+class EvidenceTemporalScope(_StableStrEnum):
     """Whether source content is valid at the cutoff or only at retrieval time."""
 
     POINT_IN_TIME = "point_in_time"
@@ -407,7 +413,7 @@ class EvidenceTemporalScope(str, Enum):
     UNKNOWN = "unknown"
 
 
-class TableDataType(str, Enum):
+class TableDataType(_StableStrEnum):
     """Machine-readable type of values in one deterministic evidence column."""
 
     TEXT = "text"
@@ -420,7 +426,7 @@ class TableDataType(str, Enum):
     BOOLEAN = "boolean"
 
 
-class MeasurementKind(str, Enum):
+class MeasurementKind(_StableStrEnum):
     """Semantic measurement family owned by deterministic data producers."""
 
     CURRENCY = "currency"
@@ -520,7 +526,7 @@ class EvidenceItem(FrozenModel):
         )
 
 
-TableScalar: TypeAlias = str | int | float | bool | None
+type TableScalar = str | int | float | bool | None
 
 
 class EvidenceTableColumn(FrozenModel):
@@ -536,7 +542,9 @@ class EvidenceTableColumn(FrozenModel):
 class EvidenceTableCell(FrozenModel):
     """One raw value in a deterministic source table."""
 
-    raw_value: TableScalar = None
+    # Keep the union inline so Pydantic preserves the existing OpenAPI shape;
+    # a named PEP 695 alias is emitted as a separate schema component.
+    raw_value: str | int | float | bool | None = None
     measurement_kind: MeasurementKind | None = None
     unit: str | None = Field(default=None, min_length=1)
     source_refs: tuple[str, ...] = ()
@@ -717,18 +725,18 @@ class EvidenceBundle(FrozenModel):
         return self
 
 
-class AnalystClaimType(str, Enum):
+class AnalystClaimType(_StableStrEnum):
     OBSERVATION = "observation"
     INFERENCE = "inference"
     FORECAST = "forecast"
 
 
-class ClaimImportance(str, Enum):
+class ClaimImportance(_StableStrEnum):
     PRIMARY = "primary"
     SUPPORTING = "supporting"
 
 
-class ReportAuditStatus(str, Enum):
+class ReportAuditStatus(_StableStrEnum):
     COMPLETE = "complete"
     INCOMPLETE = "incomplete"
 
@@ -966,7 +974,7 @@ class RiskReview(FrozenModel):
         return _unique_research_ids(value)
 
 
-class NumericTemporalBasis(str, Enum):
+class NumericTemporalBasis(_StableStrEnum):
     """How the application determined the date of a formal numeric value."""
 
     POINT_IN_TIME = "point_in_time"
@@ -1623,7 +1631,9 @@ class AnalysisRequest(FrozenModel):
     deep_model: str | None = None
     quick_reasoning_effort: str | None = None
     deep_reasoning_effort: str | None = None
-    output_language: OutputLanguage | None = None
+    # Keep the union inline so Pydantic preserves the existing OpenAPI shape;
+    # a named PEP 695 alias is emitted as a separate schema component.
+    output_language: ReportLanguage | str | None = None
 
     @field_validator("ticker")
     @classmethod

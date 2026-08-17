@@ -51,7 +51,7 @@ compatibility レベルです。範囲と認定方針は
 
 ## クイックスタート
 
-Python 3.10–3.13 と uv 0.12.1 以降をサポートします。Node.js が必要なのは
+Python 3.12–3.14 と uv 0.12.1 以降をサポートします。Node.js が必要なのは
 フロントエンド開発時だけで、リリース wheel にはビルド済み Web assets が
 含まれます。
 
@@ -271,7 +271,7 @@ npm run typecheck --prefix frontend
 npm run build --prefix frontend
 ```
 
-CI は uv 0.12.1 を固定し、Python 3.10–3.13、Ruff、frontend unit test、
+CI は uv 0.12.1 を固定し、Python 3.12–3.14、Ruff、frontend unit test、
 Playwright、OpenAPI/TypeScript drift、wheel 内容とその pip fresh install、
 Docker Web+worker smoke を検証します。
 

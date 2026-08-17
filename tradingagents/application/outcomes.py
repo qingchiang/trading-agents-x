@@ -6,7 +6,7 @@ import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import pandas as pd
@@ -64,15 +64,12 @@ class OutcomeSettlement:
         self.repository = repository
         self.history_provider = history_provider
         self._reflector = reflector
-        self.utc_clock = utc_clock or (lambda: datetime.now(timezone.utc))
+        self.utc_clock = utc_clock or (lambda: datetime.now(UTC))
 
     def settle_once(self, *, limit: int = 20) -> dict[str, int]:
         stats = {"checked": 0, "resolved": 0, "pending": 0, "failed": 0}
         now = self.utc_clock()
-        if now.tzinfo is None:
-            now = now.replace(tzinfo=timezone.utc)
-        else:
-            now = now.astimezone(timezone.utc)
+        now = now.replace(tzinfo=UTC) if now.tzinfo is None else now.astimezone(UTC)
         for item in self.repository.pending_outcomes(limit, due_at=now):
             stats["checked"] += 1
             try:

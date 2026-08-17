@@ -25,7 +25,7 @@ import re
 import time
 import xml.etree.ElementTree as ET
 from collections.abc import Iterable
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -86,7 +86,7 @@ def _search_time_filter(
     if window_span < 0:
         return None
     if today is None:
-        today = datetime.now(timezone.utc).date()
+        today = datetime.now(UTC).date()
     coverage_days = max(window_span, (today - start).days)
     if coverage_days <= 0:
         return "day"
@@ -375,7 +375,7 @@ def _post_market_datetime(
 ) -> datetime | None:
     """Convert a Reddit epoch to the asset's market timezone."""
     try:
-        market_tz = timezone.utc if is_crypto else ZoneInfo("America/New_York")
-        return datetime.fromtimestamp(created_utc, tz=timezone.utc).astimezone(market_tz)
+        market_tz = UTC if is_crypto else ZoneInfo("America/New_York")
+        return datetime.fromtimestamp(created_utc, tz=UTC).astimezone(market_tz)
     except (OSError, TypeError, ValueError):
         return None

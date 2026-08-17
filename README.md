@@ -69,7 +69,7 @@ Markdown is rendered without raw HTML and sanitized before display.
 
 ## Quick start
 
-Python 3.10–3.13 and uv 0.12.1 or newer are supported. Node.js is needed only
+Python 3.12–3.14 and uv 0.12.1 or newer are supported. Node.js is needed only
 when developing the frontend; release wheels already include the compiled Web
 assets.
 
@@ -340,7 +340,7 @@ npm run typecheck --prefix frontend
 npm run build --prefix frontend
 ```
 
-CI pins uv 0.12.1 and covers Python 3.10–3.13, Ruff, frontend unit tests,
+CI pins uv 0.12.1 and covers Python 3.12–3.14, Ruff, frontend unit tests,
 Playwright workflows, OpenAPI/type drift, wheel contents and a fresh pip
 installation of that wheel, and Docker Web/worker smoke.
 

@@ -6,7 +6,7 @@ import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Generic, Literal, TypeVar
+from typing import Any, Literal, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
@@ -68,7 +68,7 @@ class StructuredOutputError(RuntimeError):
 
 
 @dataclass(frozen=True)
-class StructuredOutputResult(Generic[StructuredModel]):
+class StructuredOutputResult[StructuredModel: BaseModel]:
     value: StructuredModel
     generation_method: ArtifactGenerationMethod
     failed_attempts: tuple[StructuredOutputFailure, ...] = ()
@@ -85,7 +85,7 @@ class _InvalidOutput(ValueError):
         super().__init__(reason_code)
 
 
-class StructuredOutputRunner(Generic[StructuredModel]):
+class StructuredOutputRunner[StructuredModel: BaseModel]:
     """Run the preferred typed transport, local recovery, then one JSON retry."""
 
     def __init__(
@@ -508,7 +508,7 @@ def _structured_output_kwargs(llm: Any) -> dict[str, Any]:
     return {}
 
 
-def _unpack_response(
+def _unpack_response[StructuredModel: BaseModel](
     response: Any,
     schema: type[StructuredModel],
 ) -> tuple[Any | None, Any, Any]:

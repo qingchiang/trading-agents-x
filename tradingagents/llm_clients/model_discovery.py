@@ -6,7 +6,7 @@ import logging
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from threading import Lock
 from typing import Any, Literal
 from urllib.parse import urlsplit, urlunsplit
@@ -87,7 +87,7 @@ class ModelDiscoveryService:
         self.timeout_seconds = timeout_seconds
         self.cache_ttl_seconds = cache_ttl_seconds
         self.clock = clock
-        self.now = now or (lambda: datetime.now(timezone.utc))
+        self.now = now or (lambda: datetime.now(UTC))
         self.bedrock_client_factory = bedrock_client_factory
         self._cache: dict[tuple[str, str | None], _CacheEntry] = {}
         self._lock = Lock()

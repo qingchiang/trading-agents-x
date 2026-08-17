@@ -1,5 +1,6 @@
 """Breaking-release boundaries for the independent application architecture."""
 
+import tomllib
 from importlib.util import find_spec
 from pathlib import Path
 
@@ -7,6 +8,13 @@ import pytest
 
 import tradingagents
 from tradingagents import graph
+from tradingagents.application.contracts import (
+    AnalysisRequest,
+    AnalysisResult,
+    ResearchDecision,
+    RunProfile,
+)
+from tradingagents.client import TradingAgents
 from tradingagents.dataflows import config as dataflow_config
 
 REMOVED_RUNTIME_MODULES = (
@@ -37,6 +45,7 @@ REMOVED_DIRECT_DEPENDENCIES = (
     "redis",
     "setuptools",
     "tqdm",
+    "typing-extensions",
 )
 
 
@@ -69,6 +78,11 @@ def test_public_api_exposes_typed_application_contract():
     assert not hasattr(tradingagents, "EvidenceBundle")
     assert not hasattr(tradingagents, "DebateAgenda")
     assert not hasattr(tradingagents, "NumericAuditSnapshot")
+    assert tradingagents.AnalysisRequest is AnalysisRequest
+    assert tradingagents.AnalysisResult is AnalysisResult
+    assert tradingagents.ResearchDecision is ResearchDecision
+    assert tradingagents.RunProfile is RunProfile
+    assert tradingagents.TradingAgents is TradingAgents
 
 
 @pytest.mark.unit
@@ -99,3 +113,15 @@ def test_ci_builds_wheel_from_an_isolated_sdist():
     ).read_text(encoding="utf-8")
     assert "uv build --out-dir wheelhouse" in workflow
     assert "uv build --wheel" not in workflow
+
+
+@pytest.mark.unit
+def test_python_support_contract_is_closed_at_312_through_314():
+    root = Path(__file__).resolve().parents[1]
+    pyproject = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    workflow = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+
+    assert pyproject["project"]["requires-python"] == ">=3.12,<3.15"
+    assert pyproject["tool"]["ruff"]["target-version"] == "py312"
+    assert 'python-version: ["3.12", "3.13", "3.14"]' in workflow
+    assert 'python-version: ["3.10", "3.11", "3.12", "3.13"]' not in workflow

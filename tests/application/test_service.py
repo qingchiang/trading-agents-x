@@ -7,7 +7,7 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from threading import Barrier, Lock
-from typing import Annotated
+from typing import Annotated, TypedDict
 from uuid import uuid4
 
 import pytest
@@ -15,7 +15,6 @@ from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, LLMResult
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
-from typing_extensions import TypedDict
 
 from tests.factories import analyst_report, research_decision
 from tradingagents.application.contracts import (

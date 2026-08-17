@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta
 
 from tradingagents.dataflows.symbol_utils import market_timezone
 
@@ -32,4 +32,4 @@ def earliest_outcome_check_at(
         time.min,
         tzinfo=market_timezone(ticker),
     )
-    return local_midnight.astimezone(timezone.utc)
+    return local_midnight.astimezone(UTC)

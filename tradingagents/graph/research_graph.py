@@ -8,13 +8,12 @@ import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, TypedDict
 
 from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 from langgraph.runtime import Runtime
-from typing_extensions import TypedDict
 
 from tradingagents.agents import (
     create_fundamentals_analyst,

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from unittest import mock
 from unittest.mock import MagicMock
 
@@ -83,7 +83,7 @@ def _run(
             1,
             15,
             12,
-            tzinfo=timezone.utc,
+            tzinfo=UTC,
         )
         if news_side_effect:
             news.func.side_effect = news_side_effect

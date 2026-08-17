@@ -17,7 +17,7 @@ from __future__ import annotations
 import http.client
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
@@ -48,8 +48,8 @@ def _market_datetime(created_at: str, ticker: str) -> datetime | None:
         normalized = created_at[:-1] + "+00:00" if created_at.endswith("Z") else created_at
         created = datetime.fromisoformat(normalized)
         if created.tzinfo is None:
-            created = created.replace(tzinfo=timezone.utc)
-        market_tz = timezone.utc if crypto_base(ticker) else ZoneInfo("America/New_York")
+            created = created.replace(tzinfo=UTC)
+        market_tz = UTC if crypto_base(ticker) else ZoneInfo("America/New_York")
         return created.astimezone(market_tz)
     except (TypeError, ValueError):
         return None
