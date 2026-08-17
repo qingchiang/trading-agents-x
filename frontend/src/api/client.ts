@@ -49,6 +49,10 @@ export type InstrumentAdmissionErrorCode =
   components["schemas"]["InstrumentAdmissionErrorCode"];
 export type InstrumentAdmissionErrorResponse =
   components["schemas"]["InstrumentAdmissionErrorResponse"];
+export type RequestValidationErrorCode =
+  components["schemas"]["RequestValidationErrorCode"];
+export type RequestValidationErrorResponse =
+  components["schemas"]["RequestValidationErrorResponse"];
 
 export class ApiError extends Error {
   constructor(

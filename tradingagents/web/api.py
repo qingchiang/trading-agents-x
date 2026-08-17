@@ -69,6 +69,7 @@ from .models import (
     LoginRequest,
     MemoryEntry,
     ProviderModelCatalog,
+    RequestValidationErrorResponse,
     RunBatchRequest,
     RunBatchResult,
     RunCreateRequest,
@@ -255,14 +256,35 @@ def create_app(
         status_code=202,
         responses={
             422: {
-                "description": "The symbol is a confirmed unsupported instrument.",
-                "model": InstrumentAdmissionErrorResponse,
+                "description": "The request is invalid or the symbol is a confirmed unsupported instrument.",
+                "model": InstrumentAdmissionErrorResponse | RequestValidationErrorResponse,
                 "content": {
                     "application/json": {
-                        "example": {
-                            "error": {
-                                "code": "unsupported_instrument",
-                                "message": "Confirmed non-equity instrument.",
+                        "examples": {
+                            "unsupported_instrument": {
+                                "summary": "Confirmed non-equity",
+                                "value": {
+                                    "error": {
+                                        "code": "unsupported_instrument",
+                                        "message": "Confirmed non-equity instrument.",
+                                    }
+                                },
+                            },
+                            "validation_error": {
+                                "summary": "Malformed request",
+                                "value": {
+                                    "error": {
+                                        "code": "validation_error",
+                                        "message": "Request validation failed",
+                                    },
+                                    "details": [
+                                        {
+                                            "location": ["body", "ticker"],
+                                            "message": "String should have at least 1 character",
+                                            "type": "string_too_short",
+                                        }
+                                    ],
+                                },
                             }
                         }
                     }

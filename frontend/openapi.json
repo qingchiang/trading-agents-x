@@ -2753,6 +2753,79 @@
         "title": "ReportSection",
         "type": "object"
       },
+      "RequestValidationDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "location": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "location",
+          "message",
+          "type"
+        ],
+        "title": "RequestValidationDetail",
+        "type": "object"
+      },
+      "RequestValidationError": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/RequestValidationErrorCode"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "RequestValidationError",
+        "type": "object"
+      },
+      "RequestValidationErrorCode": {
+        "enum": [
+          "validation_error"
+        ],
+        "title": "RequestValidationErrorCode",
+        "type": "string"
+      },
+      "RequestValidationErrorResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "details": {
+            "items": {
+              "$ref": "#/components/schemas/RequestValidationDetail"
+            },
+            "title": "Details",
+            "type": "array"
+          },
+          "error": {
+            "$ref": "#/components/schemas/RequestValidationError"
+          }
+        },
+        "required": [
+          "error",
+          "details"
+        ],
+        "title": "RequestValidationErrorResponse",
+        "type": "object"
+      },
       "ResearchArtifact": {
         "additionalProperties": false,
         "description": "Durable, typed output from one visible research stage.",
@@ -4816,18 +4889,50 @@
           "422": {
             "content": {
               "application/json": {
-                "example": {
-                  "error": {
-                    "code": "unsupported_instrument",
-                    "message": "Confirmed non-equity instrument."
+                "examples": {
+                  "unsupported_instrument": {
+                    "summary": "Confirmed non-equity",
+                    "value": {
+                      "error": {
+                        "code": "unsupported_instrument",
+                        "message": "Confirmed non-equity instrument."
+                      }
+                    }
+                  },
+                  "validation_error": {
+                    "summary": "Malformed request",
+                    "value": {
+                      "details": [
+                        {
+                          "location": [
+                            "body",
+                            "ticker"
+                          ],
+                          "message": "String should have at least 1 character",
+                          "type": "string_too_short"
+                        }
+                      ],
+                      "error": {
+                        "code": "validation_error",
+                        "message": "Request validation failed"
+                      }
+                    }
                   }
                 },
                 "schema": {
-                  "$ref": "#/components/schemas/InstrumentAdmissionErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/InstrumentAdmissionErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationErrorResponse"
+                    }
+                  ],
+                  "title": "Response 422 Create Run Api V1 Runs Post"
                 }
               }
             },
-            "description": "The symbol is a confirmed unsupported instrument."
+            "description": "The request is invalid or the symbol is a confirmed unsupported instrument."
           },
           "503": {
             "content": {

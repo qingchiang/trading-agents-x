@@ -37,6 +37,26 @@ class InstrumentAdmissionErrorResponse(ApiModel):
     error: InstrumentAdmissionError
 
 
+class RequestValidationErrorCode(StrEnum):
+    VALIDATION_ERROR = "validation_error"
+
+
+class RequestValidationError(ApiModel):
+    code: RequestValidationErrorCode
+    message: str
+
+
+class RequestValidationDetail(ApiModel):
+    location: list[str]
+    message: str
+    type: str
+
+
+class RequestValidationErrorResponse(ApiModel):
+    error: RequestValidationError
+    details: list[RequestValidationDetail]
+
+
 class LoginRequest(ApiModel):
     token: str = Field(min_length=1, max_length=4096)
 

@@ -388,6 +388,20 @@ export interface components {
       source_refs?: string[];
       title: string;
     };
+    RequestValidationDetail: {
+      location: string[];
+      message: string;
+      type: string;
+    };
+    RequestValidationError: {
+      code: components["schemas"]["RequestValidationErrorCode"];
+      message: string;
+    };
+    RequestValidationErrorCode: "validation_error";
+    RequestValidationErrorResponse: {
+      details: components["schemas"]["RequestValidationDetail"][];
+      error: components["schemas"]["RequestValidationError"];
+    };
     ResearchArtifact: {
       attempt: number;
       content: components["schemas"]["AnalystReport"] | components["schemas"]["DecisionBrief"] | components["schemas"]["ResearchCase"] | components["schemas"]["DebateAgenda"] | components["schemas"]["RebuttalReview"] | components["schemas"]["JudgeDraft"] | components["schemas"]["RiskReview"] | components["schemas"]["ResearchDecision"];

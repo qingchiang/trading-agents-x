@@ -320,6 +320,22 @@ async def test_openapi_contains_versioned_run_center_contract(
     assert "provenance" not in schema["components"]["schemas"][
         "CapabilityDefaults"
     ]["properties"]
+    create_run_422 = paths["/api/v1/runs"]["post"]["responses"]["422"]
+    response_schema = create_run_422["content"]["application/json"]["schema"]
+    assert {
+        member["$ref"]
+        for member in response_schema["anyOf"]
+    } == {
+        "#/components/schemas/InstrumentAdmissionErrorResponse",
+        "#/components/schemas/RequestValidationErrorResponse",
+    }
+    assert {
+        "unsupported_instrument",
+        "validation_error",
+    } <= set(create_run_422["content"]["application/json"]["examples"])
+    assert schema["components"]["schemas"]["RequestValidationErrorCode"][
+        "enum"
+    ] == ["validation_error"]
 
 
 @pytest.mark.anyio
@@ -763,4 +779,7 @@ async def test_validation_error_does_not_echo_request_values(
 
     assert response.status_code == 422
     assert private_value not in response.text
-    assert response.json()["error"]["code"] == "validation_error"
+    payload = response.json()
+    assert payload["error"]["code"] == "validation_error"
+    assert payload["details"]
+    assert {"location", "message", "type"} <= set(payload["details"][0])

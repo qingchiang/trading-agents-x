@@ -13,6 +13,8 @@ from tradingagents.application.errors import (
 )
 from tradingagents.application.service import AnalysisService
 from tradingagents.client import TradingAgents
+from tradingagents.dataflows import instrument_identity as identity_dataflow
+from tradingagents.dataflows.instrument_identity import resolve_instrument_eligibility
 
 
 def _request(ticker: str = "NVDA") -> AnalysisRequest:
@@ -106,6 +108,29 @@ def test_resolver_failure_is_typed_as_temporarily_unavailable(
 
     with pytest.raises(InstrumentEligibilityUnavailableError):
         service.enqueue(_request())
+
+
+def test_provider_non_string_classification_cannot_be_reduced_to_equity(
+    app_settings,
+    repository,
+    monkeypatch,
+) -> None:
+    search = type(
+        "SearchResult",
+        (),
+        {"quotes": [{"symbol": "NVDA", "quoteType": "EQUITY", "securityType": 7}]},
+    )()
+    monkeypatch.setattr(identity_dataflow.yf, "Search", lambda **_kwargs: search)
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        eligibility_resolver=resolve_instrument_eligibility,
+    )
+
+    with pytest.raises(InstrumentEligibilityUnavailableError):
+        service.enqueue(_request())
+
+    assert repository.list_runs().total == 0
 
 
 @pytest.mark.parametrize("ticker", ["NVDA", "7203.T", "600519.SS", "000651.SZ"])

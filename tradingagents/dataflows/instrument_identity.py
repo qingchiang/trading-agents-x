@@ -162,9 +162,13 @@ def resolve_instrument_eligibility(
             ("securityType", "security_type"),
             ("type", "type"),
         ):
-            value = _clean_identity_value(quote.get(source))
-            if value is not None:
-                row[target] = value
+            if source not in quote:
+                continue
+            value = _clean_identity_value(quote[source])
+            if value is None:
+                row["_malformed"] = True
+                continue
+            row[target] = value
         rows.append(row)
     # Search may include ordinary related-symbol noise. Keep exact candidates,
     # but retain malformed rows mixed into that exact set so they cannot be
