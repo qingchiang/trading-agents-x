@@ -844,7 +844,7 @@ def test_complete_persists_result_and_resolved_memory(
 
     repository.complete(run.id, result, evidence=evidence, benchmark="SPY")
     restored = repository.get_result(run.id)
-    due_at = datetime(2026, 8, 10, tzinfo=timezone.utc)
+    due_at = datetime.max.replace(tzinfo=timezone.utc)
     pending = repository.pending_outcomes(due_at=due_at)
     repository.trash_runs((run.id,))
     assert repository.pending_outcomes(due_at=due_at) == []
