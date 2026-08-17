@@ -1524,6 +1524,45 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "InstrumentAdmissionError": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/InstrumentAdmissionErrorCode"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "InstrumentAdmissionError",
+        "type": "object"
+      },
+      "InstrumentAdmissionErrorCode": {
+        "enum": [
+          "unsupported_instrument",
+          "instrument_eligibility_unavailable"
+        ],
+        "title": "InstrumentAdmissionErrorCode",
+        "type": "string"
+      },
+      "InstrumentAdmissionErrorResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/InstrumentAdmissionError"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "InstrumentAdmissionErrorResponse",
+        "type": "object"
+      },
       "IssueDisposition": {
         "additionalProperties": false,
         "description": "A judge routing result without duplicating the readable rationale.",
@@ -4782,6 +4821,9 @@
                     "code": "unsupported_instrument",
                     "message": "Confirmed non-equity instrument."
                   }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/InstrumentAdmissionErrorResponse"
                 }
               }
             },
@@ -4795,6 +4837,9 @@
                     "code": "instrument_eligibility_unavailable",
                     "message": "Eligibility is temporarily unavailable."
                   }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/InstrumentAdmissionErrorResponse"
                 }
               }
             },

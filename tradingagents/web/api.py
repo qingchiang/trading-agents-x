@@ -65,6 +65,7 @@ from .auth import COOKIE_NAME, SESSION_MAX_AGE, LanSessionManager
 from .models import (
     CapabilitiesResponse,
     HealthResponse,
+    InstrumentAdmissionErrorResponse,
     LoginRequest,
     MemoryEntry,
     ProviderModelCatalog,
@@ -255,6 +256,7 @@ def create_app(
         responses={
             422: {
                 "description": "The symbol is a confirmed unsupported instrument.",
+                "model": InstrumentAdmissionErrorResponse,
                 "content": {
                     "application/json": {
                         "example": {
@@ -268,6 +270,7 @@ def create_app(
             },
             503: {
                 "description": "Instrument eligibility could not be verified.",
+                "model": InstrumentAdmissionErrorResponse,
                 "content": {
                     "application/json": {
                         "example": {

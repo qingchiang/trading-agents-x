@@ -25,6 +25,10 @@ from tradingagents.application.exporting import render_run_export_markdown
 from tradingagents.application.service import AnalysisService
 
 
+def _equity_resolver(ticker: str) -> dict[str, str]:
+    return {"symbol": ticker, "quote_type": "EQUITY"}
+
+
 def test_list_and_detail_preserve_stock_and_legacy_crypto_snapshots(
     repository,
     app_settings,
@@ -73,7 +77,11 @@ def test_list_and_detail_preserve_stock_and_legacy_crypto_snapshots(
     with pytest.raises(ValueError):
         crypto_detail.request.to_analysis_request()
 
-    service = AnalysisService(app_settings, repository=repository)
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        eligibility_resolver=_equity_resolver,
+    )
     try:
         service.enqueue(crypto_detail.request)
     except TypeError as exc:
@@ -143,7 +151,11 @@ def test_legacy_crypto_run_with_research_outputs_remains_exportable(
             "analysts": ["market", "social", "news"],
         }
 
-    service = AnalysisService(app_settings, repository=repository)
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        eligibility_resolver=_equity_resolver,
+    )
     exported = service.get_export(run.id)
     assert type(exported.run.request) is RunRequestSnapshot
     assert exported.run.request.asset_type == "crypto"

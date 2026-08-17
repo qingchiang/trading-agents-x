@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -20,6 +21,20 @@ from tradingagents.application.contracts import (
 
 class ApiModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class InstrumentAdmissionErrorCode(StrEnum):
+    UNSUPPORTED_INSTRUMENT = "unsupported_instrument"
+    ELIGIBILITY_UNAVAILABLE = "instrument_eligibility_unavailable"
+
+
+class InstrumentAdmissionError(ApiModel):
+    code: InstrumentAdmissionErrorCode
+    message: str
+
+
+class InstrumentAdmissionErrorResponse(ApiModel):
+    error: InstrumentAdmissionError
 
 
 class LoginRequest(ApiModel):

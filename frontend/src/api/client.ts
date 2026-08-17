@@ -45,6 +45,10 @@ export type RunAttemptView = components["schemas"]["RunAttemptView"];
 export type StructuredRecoveryNotice =
   components["schemas"]["StructuredRecoveryNotice"];
 export type RecentInstrument = components["schemas"]["RecentInstrument"];
+export type InstrumentAdmissionErrorCode =
+  components["schemas"]["InstrumentAdmissionErrorCode"];
+export type InstrumentAdmissionErrorResponse =
+  components["schemas"]["InstrumentAdmissionErrorResponse"];
 
 export class ApiError extends Error {
   constructor(

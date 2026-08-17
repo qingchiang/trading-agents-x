@@ -11,6 +11,7 @@ from tradingagents.agents.utils.agent_utils import (
     resolve_instrument_identity,
 )
 from tradingagents.dataflows import instrument_identity as identity_dataflow
+from tradingagents.dataflows.instrument_identity import resolve_instrument_eligibility
 
 
 @pytest.mark.unit
@@ -109,6 +110,42 @@ class ResolveInstrumentIdentityTests(unittest.TestCase):
         ticker_mock.assert_called_once_with("TOTDY")
         self.assertEqual(first, second)
         self.assertNotEqual(first, live)
+
+
+@pytest.mark.unit
+def test_eligibility_resolver_preserves_malformed_mixed_candidates():
+    search = type(
+        "SearchResult",
+        (),
+        {
+            "quotes": [
+                {"symbol": "NVDA", "quoteType": "EQUITY"},
+                "malformed candidate",
+            ]
+        },
+    )()
+    with patch.object(identity_dataflow.yf, "Search", return_value=search):
+        result = resolve_instrument_eligibility("NVDA")
+
+    assert isinstance(result, list)
+    assert result[1] == {"_malformed": True}
+
+
+@pytest.mark.unit
+def test_eligibility_resolver_keeps_mismatched_symbol_ambiguous():
+    search = type(
+        "SearchResult",
+        (),
+        {
+            "quotes": [
+                {"symbol": "NVD", "quoteType": "EQUITY"},
+            ]
+        },
+    )()
+    with patch.object(identity_dataflow.yf, "Search", return_value=search):
+        result = resolve_instrument_eligibility("NVDA")
+
+    assert result == {"symbol": "NVD", "quote_type": "EQUITY"}
 
 
 @pytest.mark.unit

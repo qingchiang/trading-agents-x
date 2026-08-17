@@ -33,6 +33,10 @@ from tradingagents.dataflows.config import get_config
 from tradingagents.graph.research_graph import GraphExecution
 
 
+def _equity_resolver(ticker: str) -> dict[str, str]:
+    return {"symbol": ticker, "quote_type": "EQUITY"}
+
+
 def _execution(ticker: str) -> GraphExecution:
     item = EvidenceItem.create(
         source="fixture",
@@ -288,6 +292,7 @@ def _service(
         llm_factory=lambda *_args, **_kwargs: (object(), object()),
         graph_factory=graph_factory,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
+        eligibility_resolver=_equity_resolver,
         local_name_resolver=lambda _ticker, _date, _config: None,
     )
 
@@ -410,6 +415,7 @@ def test_service_persists_preferred_instrument_display_name(
         llm_factory=lambda *_args, **_kwargs: (object(), object()),
         graph_factory=_Graph,
         identity_resolver=lambda _ticker, _date: identity,
+        eligibility_resolver=_equity_resolver,
     )
 
     result = service.run(
@@ -443,6 +449,7 @@ def test_service_persists_cutoff_safe_local_name_once(
         identity_resolver=lambda _ticker, _date: {
             "company_name": "Toyota Motor Corporation"
         },
+        eligibility_resolver=_equity_resolver,
         local_name_resolver=local_name,
     )
 
@@ -474,6 +481,7 @@ def test_instrument_identity_failure_does_not_fail_research_run(
         llm_factory=lambda *_args, **_kwargs: (object(), object()),
         graph_factory=_Graph,
         identity_resolver=fail_identity,
+        eligibility_resolver=_equity_resolver,
     )
 
     result = service.run(
@@ -500,6 +508,7 @@ def test_service_commits_artifact_and_event_before_callback(
         llm_factory=lambda *_args, **_kwargs: (object(), object()),
         graph_factory=_ArtifactGraph,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
+        eligibility_resolver=_equity_resolver,
     )
     observed = []
 
@@ -553,6 +562,7 @@ def test_artifact_persistence_failure_fails_attempt_and_retains_checkpoint(
         llm_factory=lambda *_args, **_kwargs: (object(), object()),
         graph_factory=_ArtifactGraph,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
+        eligibility_resolver=_equity_resolver,
     )
     queued = service.enqueue(
         AnalysisRequest(
@@ -817,6 +827,7 @@ def test_retry_resumes_real_langgraph_checkpoint_and_success_cleans_it(
         llm_factory=lambda *_args, **_kwargs: (object(), object()),
         graph_factory=_ResumableGraph,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
+        eligibility_resolver=_equity_resolver,
     )
     queued = service.enqueue(
         AnalysisRequest(
@@ -868,6 +879,7 @@ def test_cooperative_cancel_deletes_real_pending_checkpoint(
         llm_factory=lambda *_args, **_kwargs: (object(), object()),
         graph_factory=_CancellingCheckpointGraph,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
+        eligibility_resolver=_equity_resolver,
     )
     queued = service.enqueue(
         AnalysisRequest(

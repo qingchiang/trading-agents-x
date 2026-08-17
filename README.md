@@ -321,6 +321,13 @@ fail instead of silently taking the US route. Public research candidates are
 limited to US/default, Tokyo, and mainland-China A-share equities; broader
 vendor symbol support does not expand that product boundary.
 
+Admission is typed at every public seam: a confirmed non-equity raises
+`unsupported_instrument` (HTTP 422), while an empty, ambiguous, malformed,
+mismatched, or failed eligibility lookup raises
+`instrument_eligibility_unavailable` (HTTP 503). These stable error codes are
+also present in the generated API client types; retry rechecks the current
+admission boundary before requeueing a retained Run.
+
 Historical analysis uses the instrument market's local calendar. Evidence keeps
 its requested date, effective date, timezone-aware availability, actual source,
 quality, fallback flag, and provenance. Future-visible evidence is rejected

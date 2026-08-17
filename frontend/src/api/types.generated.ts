@@ -214,6 +214,14 @@ export interface components {
       status: "ok" | "degraded";
       version: string;
     };
+    InstrumentAdmissionError: {
+      code: components["schemas"]["InstrumentAdmissionErrorCode"];
+      message: string;
+    };
+    InstrumentAdmissionErrorCode: "unsupported_instrument" | "instrument_eligibility_unavailable";
+    InstrumentAdmissionErrorResponse: {
+      error: components["schemas"]["InstrumentAdmissionError"];
+    };
     IssueDisposition: {
       issue_id: string;
       status: "upheld" | "rejected" | "unresolved";

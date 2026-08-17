@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import logging
 import threading
 from collections.abc import Callable
@@ -18,6 +17,7 @@ from tradingagents.agents.utils.agent_utils import (
     resolve_instrument_identity,
 )
 from tradingagents.dataflows.config import use_config
+from tradingagents.dataflows.instrument_identity import resolve_instrument_eligibility
 from tradingagents.dataflows.interface import validate_market_routing
 from tradingagents.dataflows.symbol_utils import (
     match_exchange_suffix,
@@ -54,7 +54,7 @@ from .settings import AppSettings, RunSettings
 logger = logging.getLogger(__name__)
 
 EventHandler = Callable[[RunEvent], None]
-EligibilityResolver = Callable[..., Any]
+EligibilityResolver = Callable[[str], Any]
 
 
 def _instrument_display_name(identity: Any) -> str | None:
@@ -88,8 +88,7 @@ class AnalysisService:
         ),
         graph_factory: Callable[..., ResearchGraph] = ResearchGraph,
         identity_resolver: Callable[..., dict[str, str]] = resolve_instrument_identity,
-        eligibility_resolver: EligibilityResolver | None = None,
-        instrument_eligibility_resolver: EligibilityResolver | None = None,
+        eligibility_resolver: EligibilityResolver = resolve_instrument_eligibility,
         local_name_resolver: Callable[[str, str, dict[str, Any]], str | None] = (
             resolve_local_instrument_name
         ),
@@ -101,18 +100,9 @@ class AnalysisService:
         self.llm_factory = llm_factory
         self.graph_factory = graph_factory
         self.identity_resolver = identity_resolver
-        if (
-            eligibility_resolver is not None
-            and instrument_eligibility_resolver is not None
-        ):
-            raise TypeError(
-                "pass only one of eligibility_resolver or "
-                "instrument_eligibility_resolver"
-            )
-        self.eligibility_resolver = (
-            eligibility_resolver
-            or instrument_eligibility_resolver
-        )
+        if eligibility_resolver is None:
+            raise TypeError("eligibility_resolver is required")
+        self.eligibility_resolver = eligibility_resolver
         self.local_name_resolver = local_name_resolver
 
     def enqueue(
@@ -161,42 +151,9 @@ class AnalysisService:
         return view
 
     def _validate_instrument_eligibility(self, request: AnalysisRequest) -> None:
-        """Fail closed unless one exact resolver result confirms an equity.
-
-        The resolver is optional for low-level service fixtures and internal
-        benchmark workflows.  Public constructors inject the provider-backed
-        resolver; keeping this dependency explicit prevents benchmark adapters
-        from accidentally entering public listed-instrument admission.
-        """
-        resolver = self.eligibility_resolver
-        if resolver is None:
-            return
+        """Fail closed unless one exact resolver result confirms an equity."""
         try:
-            try:
-                signature = inspect.signature(resolver)
-            except (TypeError, ValueError):
-                signature = None
-            if signature is not None:
-                positional = tuple(
-                    parameter
-                    for parameter in signature.parameters.values()
-                    if parameter.kind
-                    in (
-                        inspect.Parameter.POSITIONAL_ONLY,
-                        inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                    )
-                )
-                accepts_varargs = any(
-                    parameter.kind is inspect.Parameter.VAR_POSITIONAL
-                    for parameter in signature.parameters.values()
-                )
-                result = (
-                    resolver(request.ticker, request.analysis_date.isoformat())
-                    if accepts_varargs or len(positional) >= 2
-                    else resolver(request.ticker)
-                )
-            else:
-                result = resolver(request.ticker)
+            result = self.eligibility_resolver(request.ticker)
             validate_instrument_eligibility(request.ticker, result)
         except (
             InstrumentEligibilityUnavailableError,
@@ -516,10 +473,11 @@ class AnalysisService:
         return view
 
     def retry(self, run_id: str) -> RunView:
-        # Validate the retained request through the public creation contract
+        # Validate the retained request through the current creation contract
         # before mutating the retry lifecycle.  This keeps retry from becoming
-        # an alternate execution path around future admission rules.
-        self.repository.get_run(run_id).request.to_analysis_request()
+        # an alternate execution path around current admission rules.
+        request = self.repository.get_run(run_id).request.to_analysis_request()
+        self._validate_instrument_eligibility(request)
         view = self.repository.retry(run_id)
         self.repository.append_event(
             run_id,

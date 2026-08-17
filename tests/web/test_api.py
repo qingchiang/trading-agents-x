@@ -66,6 +66,51 @@ async def test_run_creation_is_idempotent_and_conflicts_are_explicit(
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("result", "status", "code"),
+    [
+        (
+            {"symbol": "SPY", "quote_type": "ETF"},
+            422,
+            "unsupported_instrument",
+        ),
+        (
+            {"symbol": "NVDA", "quote_type": 17},
+            503,
+            "instrument_eligibility_unavailable",
+        ),
+    ],
+)
+async def test_run_creation_distinguishes_typed_admission_failures(
+    web_settings,
+    web_repository,
+    result,
+    status,
+    code,
+) -> None:
+    service = AnalysisService(
+        web_settings,
+        repository=web_repository,
+        eligibility_resolver=lambda _ticker: result,
+    )
+    transport = httpx.ASGITransport(app=create_app(web_settings, service=service))
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/v1/runs",
+            json=_payload("SPY" if status == 422 else "NVDA"),
+        )
+
+    assert response.status_code == status
+    payload = response.json()
+    assert payload["error"]["code"] == code
+    assert payload["error"]["message"]
+    assert web_repository.list_runs().total == 0
+
+
+@pytest.mark.anyio
 async def test_run_lifecycle_routes_and_filters(
     web_client: httpx.AsyncClient,
 ) -> None:

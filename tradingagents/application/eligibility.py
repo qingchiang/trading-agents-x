@@ -46,6 +46,7 @@ _KNOWN_NON_EQUITY_CLASSIFICATIONS = frozenset(
         "etf",
         "fund",
         "mutual fund",
+        "mutualfund",
         "closed-end fund",
         "index",
         "future",
@@ -122,7 +123,17 @@ def validate_instrument_eligibility(
             "empty, malformed, or ambiguous resolver result",
         )
     record = records[0]
+    if record.get("_malformed") is True:
+        raise InstrumentEligibilityUnavailableError(
+            canonical_symbol,
+            "resolver returned a malformed candidate",
+        )
     symbols = _field_values(record, _SYMBOL_KEYS)
+    if any(not isinstance(value, str) for value in symbols):
+        raise InstrumentEligibilityUnavailableError(
+            canonical_symbol,
+            "resolver returned a malformed symbol identity",
+        )
     if len({value.casefold() for value in symbols if isinstance(value, str)}) > 1:
         raise InstrumentEligibilityUnavailableError(
             canonical_symbol,
@@ -147,14 +158,21 @@ def validate_instrument_eligibility(
             "resolver returned a fuzzy identity",
         )
 
-    classifications = {
-        classification
-        for classification in (
-            _normalized_text(value)
-            for value in _field_values(record, _CLASSIFICATION_KEYS)
+    raw_classifications = _field_values(record, _CLASSIFICATION_KEYS)
+    if not raw_classifications:
+        raise InstrumentEligibilityUnavailableError(
+            canonical_symbol,
+            "security classification is absent or unknown",
         )
-        if classification is not None
-    }
+    classifications: set[str] = set()
+    for value in raw_classifications:
+        classification = _normalized_text(value)
+        if classification is None:
+            raise InstrumentEligibilityUnavailableError(
+                canonical_symbol,
+                "resolver returned a malformed security classification",
+            )
+        classifications.add(classification)
     if len(classifications) > 1:
         raise InstrumentEligibilityUnavailableError(
             canonical_symbol,

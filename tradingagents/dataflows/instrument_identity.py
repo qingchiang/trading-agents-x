@@ -122,7 +122,9 @@ def resolve_search_identity(ticker: str) -> dict[str, str]:
     return _resolve_cached(normalize_symbol(ticker), "historical")
 
 
-def resolve_instrument_eligibility(canonical_symbol: str) -> dict[str, str] | list[dict[str, str]]:
+def resolve_instrument_eligibility(
+    canonical_symbol: str,
+) -> dict[str, Any] | list[dict[str, Any]]:
     """Resolve exact current security classification for product admission.
 
     This is intentionally separate from :func:`resolve_instrument_identity`.
@@ -142,14 +144,19 @@ def resolve_instrument_eligibility(canonical_symbol: str) -> dict[str, str] | li
             enable_fuzzy_query=False,
         )
     )
-    rows: list[dict[str, str]] = []
+    rows: list[dict[str, Any]] = []
     for quote in getattr(search, "quotes", None) or []:
         if not isinstance(quote, dict):
+            # Preserve malformed provider candidates so the application
+            # validator cannot accidentally accept a valid row mixed with an
+            # unusable response.
+            rows.append({"_malformed": True})
             continue
         symbol = _clean_identity_value(quote.get("symbol"))
         if symbol is None:
+            rows.append({"_malformed": True})
             continue
-        row: dict[str, str] = {"symbol": symbol}
+        row: dict[str, Any] = {"symbol": symbol}
         for source, target in (
             ("quoteType", "quote_type"),
             ("securityType", "security_type"),
@@ -159,15 +166,21 @@ def resolve_instrument_eligibility(canonical_symbol: str) -> dict[str, str] | li
             if value is not None:
                 row[target] = value
         rows.append(row)
-    # Keep all exact matches so the application-level validator can distinguish
-    # an exact identity from an ambiguous search response.
+    # Search may include ordinary related-symbol noise. Keep exact candidates,
+    # but retain malformed rows mixed into that exact set so they cannot be
+    # silently discarded. If there is no exact candidate, preserve all rows so
+    # the application validator reports a mismatch or ambiguity as unavailable.
     exact = [
-        row for row in rows
-        if row["symbol"].casefold() == canonical.casefold()
+        row
+        for row in rows
+        if isinstance(row.get("symbol"), str)
+        and row["symbol"].casefold() == canonical.casefold()
     ]
-    if len(exact) == 1:
-        return exact[0]
-    return exact
+    malformed = [row for row in rows if row.get("_malformed") is True]
+    candidates = exact + malformed if exact else rows
+    if len(candidates) == 1:
+        return candidates[0]
+    return candidates
 
 
 def clear_instrument_identity_cache() -> None:
