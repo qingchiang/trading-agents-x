@@ -13,7 +13,9 @@ from collections.abc import Iterable
 from typing import Any
 
 import yfinance as yf
+from yfinance.exceptions import YFRateLimitError
 
+from .errors import VendorError, VendorRateLimitError
 from .lookahead import is_near_live
 from .stockstats_utils import yf_retry
 from .symbol_utils import normalize_symbol
@@ -136,14 +138,23 @@ def resolve_instrument_eligibility(
     canonical = str(canonical_symbol).strip()
     if not canonical:
         return {}
-    search = yf_retry(
-        lambda: yf.Search(
-            query=canonical,
-            max_results=8,
-            news_count=0,
-            enable_fuzzy_query=False,
+    try:
+        search = yf_retry(
+            lambda: yf.Search(
+                query=canonical,
+                max_results=8,
+                news_count=0,
+                enable_fuzzy_query=False,
+            )
         )
-    )
+    except YFRateLimitError as exc:
+        raise VendorRateLimitError(
+            "Yahoo Finance eligibility lookup was rate limited"
+        ) from exc
+    except VendorError:
+        raise
+    except Exception as exc:
+        raise VendorError("Yahoo Finance eligibility lookup failed") from exc
     rows: list[dict[str, Any]] = []
     for quote in getattr(search, "quotes", None) or []:
         if not isinstance(quote, dict):

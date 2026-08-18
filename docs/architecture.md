@@ -535,7 +535,9 @@ equity notation, four-character Tokyo `.T` symbols, and validated mainland
 Shanghai/Shenzhen A-share symbols are admitted. Broker forex, commodity,
 index, and adjacent-exchange aliases remain low-level capabilities; they are
 not product-market support. Ambiguous or unsupported mainland symbols fail
-loudly.
+loudly. Common bare index aliases are rejected before provider access, while
+symbols that are also real equity tickers continue to the strict eligibility
+stage.
 
 After deterministic candidate validation, `AnalysisService` performs strict
 instrument eligibility through one injected resolver before idempotent Run
@@ -547,6 +549,12 @@ before graph construction and data routing so queued legacy candidates cannot
 cross an upgraded boundary. Eligibility metadata is admission/display data,
 not point-in-time Evidence, and internal benchmark/provider identifiers remain
 outside this public seam.
+
+The default resolver uses the same configured routing infrastructure as other
+data adapters, under the dedicated `instrument_eligibility` category (shipped
+as `yfinance`). An unimplemented configured provider fails closed, and adapter
+transport or rate-limit failures retain the shared vendor-error semantics until
+they are mapped to the public eligibility-unavailable error.
 
 The analysis cutoff uses the instrument market's timezone, never the host's
 calendar or an unconditional UTC date. Historical tools receive that cutoff

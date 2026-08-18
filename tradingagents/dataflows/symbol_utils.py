@@ -70,6 +70,16 @@ _ALIASES = {
 _YAHOO_SAFE = re.compile(r"^[A-Za-z0-9._\-\^=]+$")
 _US_EQUITY_SYMBOL = re.compile(r"^[A-Z][A-Z0-9]{0,4}(?:[.-][A-Z])?$")
 _JAPAN_EQUITY_SYMBOL = re.compile(r"^[A-Z0-9]{4}\.T$")
+_UNSUPPORTED_INDEX_ALIASES = frozenset(
+    {
+        "DJI",
+        "GSPC",
+        "IXIC",
+        "NDX",
+        "RUT",
+        "VIX",
+    }
+)
 
 
 # Quote tokens used only to provide a clearer error for compact Crypto-like
@@ -264,6 +274,8 @@ def is_supported_equity_symbol(symbol: str) -> bool:
     exchanges and instrument types than the public research product.
     """
     if not isinstance(symbol, str):
+        return False
+    if symbol in _UNSUPPORTED_INDEX_ALIASES:
         return False
     if _US_EQUITY_SYMBOL.fullmatch(symbol):
         return True

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import date
 
 import pytest
 from sqlalchemy import text
+from yfinance.exceptions import YFRateLimitError
 
 from tradingagents.application.contracts import AnalysisRequest, RunStatus
 from tradingagents.application.database import RunRecord
@@ -14,6 +16,7 @@ from tradingagents.application.errors import (
 from tradingagents.application.service import AnalysisService
 from tradingagents.client import TradingAgents
 from tradingagents.dataflows import instrument_identity as identity_dataflow
+from tradingagents.dataflows.errors import VendorError, VendorRateLimitError
 from tradingagents.dataflows.instrument_identity import resolve_instrument_eligibility
 
 
@@ -108,6 +111,65 @@ def test_resolver_failure_is_typed_as_temporarily_unavailable(
 
     with pytest.raises(InstrumentEligibilityUnavailableError):
         service.enqueue(_request())
+
+
+def test_default_resolver_honors_configured_eligibility_vendor(
+    app_settings,
+    repository,
+    monkeypatch,
+) -> None:
+    data_config = deepcopy(dict(app_settings.default_run_settings.data_config))
+    data_config["data_vendors"]["instrument_eligibility"] = "alpha_vantage"
+    settings = app_settings.model_copy(
+        update={
+            "default_run_settings": app_settings.default_run_settings.model_copy(
+                update={"data_config": data_config}
+            )
+        }
+    )
+    yahoo_called = False
+
+    def search(**_kwargs):
+        nonlocal yahoo_called
+        yahoo_called = True
+        return type(
+            "SearchResult",
+            (),
+            {"quotes": [{"symbol": "NVDA", "quoteType": "EQUITY"}]},
+        )()
+
+    monkeypatch.setattr(identity_dataflow.yf, "Search", search)
+    service = AnalysisService(settings, repository=repository)
+
+    with pytest.raises(InstrumentEligibilityUnavailableError):
+        service.enqueue(_request())
+
+    assert yahoo_called is False
+    assert repository.list_runs().total == 0
+
+
+def test_yfinance_eligibility_wraps_provider_failures(
+    monkeypatch,
+) -> None:
+    def fail(_operation):
+        raise RuntimeError("provider transport failed")
+
+    monkeypatch.setattr(identity_dataflow, "yf_retry", fail)
+
+    with pytest.raises(VendorError, match="eligibility lookup failed"):
+        resolve_instrument_eligibility("NVDA")
+
+
+def test_yfinance_eligibility_preserves_rate_limit_semantics(
+    monkeypatch,
+) -> None:
+    def rate_limited(_operation):
+        raise YFRateLimitError
+
+    monkeypatch.setattr(identity_dataflow, "yf_retry", rate_limited)
+
+    with pytest.raises(VendorRateLimitError, match="rate limited"):
+        resolve_instrument_eligibility("NVDA")
 
 
 def test_provider_non_string_classification_cannot_be_reduced_to_equity(

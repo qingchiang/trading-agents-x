@@ -27,6 +27,10 @@ unsupported exchange suffixes, unsupported mainland security families, and
 ambiguous symbols fail before Run persistence. Security-type verification is a
 separate admission stage owned by `AnalysisService`.
 
+Common bare index aliases (`DJI`, `GSPC`, `IXIC`, `NDX`, `RUT`, and `VIX`) are
+rejected deterministically at the candidate boundary. `DOW` remains eligible
+for verification because it is also an actual US listed-equity ticker.
+
 The admission stage receives the canonical Instrument Key through one
 injected eligibility resolver. It accepts only one exact identity result whose
 security classification is affirmative equity. A confirmed ETF, fund, index,
@@ -36,6 +40,13 @@ or failed resolver results raise the distinct
 `instrument_eligibility_unavailable` error. The former is exposed as HTTP 422
 and a CLI usage error; the latter is HTTP 503 and a retryable operational
 failure. Neither result creates a Run or any child durable state.
+
+The default resolver participates in the normal data-vendor routing contract
+through the dedicated `instrument_eligibility` category. The shipped route is
+`yfinance`; changing it to a vendor that does not implement eligibility fails
+closed rather than bypassing configuration. Adapter transport and throttle
+failures use the shared vendor-error taxonomy before the application maps them
+to the stable eligibility-unavailable outcome.
 
 `AssetType` exposes only `stock` for creation. A tolerant
 `RunRequestSnapshot` may still represent a legacy `asset_type="crypto"` value

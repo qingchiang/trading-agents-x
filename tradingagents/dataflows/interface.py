@@ -40,6 +40,9 @@ from .errors import (
     VendorRateLimitError,
 )
 from .fred import get_macro_data as get_fred_macro_data
+from .instrument_identity import (
+    resolve_instrument_eligibility as get_yfinance_instrument_eligibility,
+)
 from .jp.edinet_news import get_news as get_edinet_news
 from .jp.google_news import get_news as get_google_news
 from .jp.jp_fundamentals import get_fundamentals as get_jp_fundamentals
@@ -81,6 +84,10 @@ logger = logging.getLogger(__name__)
 
 # Tools organized by category
 TOOLS_CATEGORIES = {
+    "instrument_eligibility": {
+        "description": "Current listed-equity product admission",
+        "tools": ["resolve_instrument_eligibility"],
+    },
     "core_stock_apis": {
         "description": "OHLCV stock price data",
         "tools": [
@@ -153,6 +160,9 @@ OPTIONAL_CATEGORIES = {"macro_data", "prediction_markets"}
 
 # Mapping of methods to their vendor-specific implementations
 VENDOR_METHODS = {
+    "resolve_instrument_eligibility": {
+        "yfinance": get_yfinance_instrument_eligibility,
+    },
     # core_stock_apis
     "get_stock_data": {
         "akshare": get_akshare_stock,
@@ -747,5 +757,9 @@ def route_to_vendor(method: str, *args, _provenance: bool = False, **kwargs):
                 else result
             )
         raise first_error
-
     raise RuntimeError(f"No available vendor for '{method}'")
+
+
+def resolve_instrument_eligibility(symbol: str):
+    """Resolve product admission through the configured vendor chain."""
+    return route_to_vendor("resolve_instrument_eligibility", symbol)

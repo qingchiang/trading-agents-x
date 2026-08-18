@@ -11,14 +11,17 @@ from typing import Any
 from uuid import uuid4
 
 from langgraph.checkpoint.sqlite import SqliteSaver
+from pydantic import ValidationError
 
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
     resolve_instrument_identity,
 )
 from tradingagents.dataflows.config import use_config
-from tradingagents.dataflows.instrument_identity import resolve_instrument_eligibility
-from tradingagents.dataflows.interface import validate_market_routing
+from tradingagents.dataflows.interface import (
+    resolve_instrument_eligibility,
+    validate_market_routing,
+)
 from tradingagents.dataflows.symbol_utils import (
     match_exchange_suffix,
     normalize_symbol,
@@ -122,12 +125,17 @@ class AnalysisService:
         request = AnalysisRequest.model_validate(
             request.model_dump(mode="json", warnings=False)
         )
-        self._validate_instrument_eligibility(request)
+        run_settings = self.settings.resolve_run(request)
+        self._validate_instrument_eligibility(
+            request,
+            dataflow_config=run_settings.dataflow_config(self.settings),
+        )
         if source_run_id is not None:
             # A retained Run may carry a legacy request that is intentionally
             # readable but no longer admitted as a source for new research.
-            self.repository.get_run(source_run_id).request.to_analysis_request()
-        run_settings = self.settings.resolve_run(request)
+            self._creation_request_from_history(
+                self.repository.get_run(source_run_id).request
+            )
         request = self.settings.materialize_request(
             request,
             run_settings=run_settings,
@@ -150,10 +158,20 @@ class AnalysisService:
             )
         return view
 
-    def _validate_instrument_eligibility(self, request: AnalysisRequest) -> None:
+    def _validate_instrument_eligibility(
+        self,
+        request: AnalysisRequest,
+        *,
+        dataflow_config: dict[str, Any] | None = None,
+    ) -> None:
         """Fail closed unless one exact resolver result confirms an equity."""
         try:
-            result = self.eligibility_resolver(request.ticker)
+            if dataflow_config is None:
+                dataflow_config = (
+                    self.settings.default_run_settings.dataflow_config(self.settings)
+                )
+            with use_config(dataflow_config, merge=False):
+                result = self.eligibility_resolver(request.ticker)
             validate_instrument_eligibility(request.ticker, result)
         except (
             InstrumentEligibilityUnavailableError,
@@ -164,6 +182,17 @@ class AnalysisService:
             raise InstrumentEligibilityUnavailableError(
                 request.ticker,
                 f"resolver failed with {type(exc).__name__}",
+            ) from exc
+
+    @staticmethod
+    def _creation_request_from_history(snapshot: Any) -> AnalysisRequest:
+        """Convert a retained request through the current creation boundary."""
+        try:
+            return snapshot.to_analysis_request()
+        except ValidationError as exc:
+            raise UnsupportedInstrumentError(
+                snapshot.ticker,
+                snapshot.asset_type or "legacy request",
             ) from exc
 
     def run(
@@ -214,10 +243,13 @@ class AnalysisService:
                 # requests.  Keep this inside the lifecycle boundary: a
                 # retained request that no longer converts must become a
                 # terminal failed Run rather than strand a claimed attempt.
-                request = run.request.to_analysis_request()
-                self._validate_instrument_eligibility(request)
+                request = self._creation_request_from_history(run.request)
                 run_settings = RunSettings.model_validate(run.config_snapshot)
                 dataflow_config = run_settings.dataflow_config(self.settings)
+                self._validate_instrument_eligibility(
+                    request,
+                    dataflow_config=dataflow_config,
+                )
                 validate_market_routing(dataflow_config)
                 with use_config(dataflow_config):
                     try:
@@ -476,8 +508,13 @@ class AnalysisService:
         # Validate the retained request through the current creation contract
         # before mutating the retry lifecycle.  This keeps retry from becoming
         # an alternate execution path around current admission rules.
-        request = self.repository.get_run(run_id).request.to_analysis_request()
-        self._validate_instrument_eligibility(request)
+        retained = self.repository.get_run(run_id)
+        request = self._creation_request_from_history(retained.request)
+        run_settings = RunSettings.model_validate(retained.config_snapshot)
+        self._validate_instrument_eligibility(
+            request,
+            dataflow_config=run_settings.dataflow_config(self.settings),
+        )
         view = self.repository.retry(run_id)
         self.repository.append_event(
             run_id,

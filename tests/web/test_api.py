@@ -22,6 +22,7 @@ from tradingagents.application.contracts import (
     ResearchArtifactDraft,
     RunStatus,
 )
+from tradingagents.application.database import RunRecord
 from tradingagents.application.service import AnalysisService
 from tradingagents.application.settings import AppSettings
 from tradingagents.version import __version__
@@ -108,6 +109,63 @@ async def test_run_creation_distinguishes_typed_admission_failures(
     assert payload["error"]["code"] == code
     assert payload["error"]["message"]
     assert web_repository.list_runs().total == 0
+
+
+@pytest.mark.anyio
+async def test_legacy_crypto_retry_returns_stable_unsupported_response(
+    web_client: httpx.AsyncClient,
+    web_repository,
+    web_service,
+) -> None:
+    queued = web_service.enqueue(
+        AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
+    )
+    web_repository.claim_run(queued.id, "legacy-fixture", 30)
+    web_repository.fail(queued.id, RuntimeError("fixture failure"))
+    with web_repository.sessions.begin() as session:
+        record = session.get(RunRecord, queued.id)
+        record.request_json = {
+            **record.request_json,
+            "ticker": "BTC-USD",
+            "asset_type": "crypto",
+        }
+
+    response = await web_client.post(f"/api/v1/runs/{queued.id}/retry")
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "unsupported_instrument"
+    unchanged = web_repository.get_run(queued.id)
+    assert unchanged.status is RunStatus.FAILED
+    assert unchanged.attempt == 1
+
+
+@pytest.mark.anyio
+async def test_legacy_crypto_source_returns_stable_unsupported_response(
+    web_client: httpx.AsyncClient,
+    web_repository,
+    web_service,
+) -> None:
+    source = web_service.enqueue(
+        AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
+    )
+    web_repository.claim_run(source.id, "legacy-fixture", 30)
+    web_repository.fail(source.id, RuntimeError("fixture failure"))
+    with web_repository.sessions.begin() as session:
+        record = session.get(RunRecord, source.id)
+        record.request_json = {
+            **record.request_json,
+            "ticker": "BTC-USD",
+            "asset_type": "crypto",
+        }
+
+    response = await web_client.post(
+        "/api/v1/runs",
+        json={**_payload("AAPL"), "source_run_id": source.id},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "unsupported_instrument"
+    assert web_repository.list_runs().total == 1
 
 
 @pytest.mark.anyio

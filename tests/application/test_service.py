@@ -26,6 +26,7 @@ from tradingagents.application.contracts import (
     RunStatus,
 )
 from tradingagents.application.database import RunRecord
+from tradingagents.application.errors import UnsupportedInstrumentError
 from tradingagents.application.repository import RunRepository
 from tradingagents.application.runtime import RunCancelled, WorkerShutdown
 from tradingagents.application.service import AnalysisService
@@ -678,17 +679,17 @@ def test_snapshot_conversion_failure_fails_claimed_run_before_graph(
         }
     claimed = repository.claim_run(queued.id, "worker", 30)
 
-    with pytest.raises(ValueError, match="stock|Crypto instruments"):
+    with pytest.raises(UnsupportedInstrumentError, match="not a supported listed equity"):
         service.execute_claimed(claimed, worker_id="worker")
 
     failed = repository.get_run(queued.id)
     assert failed.status is RunStatus.FAILED
-    assert failed.error_code == "ValidationError"
-    assert "stock" in failed.error_message or "Crypto" in failed.error_message
+    assert failed.error_code == "UnsupportedInstrumentError"
+    assert "not a supported listed equity" in failed.error_message
     assert repository.list_attempts(queued.id)[0].status is RunStatus.FAILED
     events = repository.list_events(queued.id)
     assert events[-1].event_type == "run.failed"
-    assert events[-1].payload["error_code"] == "ValidationError"
+    assert events[-1].payload["error_code"] == "UnsupportedInstrumentError"
     assert [event.event_type for event in events] == [
         "run.queued",
         "run.started",
