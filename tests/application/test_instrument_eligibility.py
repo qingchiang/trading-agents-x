@@ -17,6 +17,7 @@ from tradingagents.application.service import AnalysisService
 from tradingagents.application.settings import AppSettings
 from tradingagents.client import TradingAgents
 from tradingagents.dataflows import instrument_identity as identity_dataflow
+from tradingagents.dataflows.config import get_config
 from tradingagents.dataflows.errors import VendorError, VendorRateLimitError
 from tradingagents.dataflows.instrument_identity import resolve_instrument_eligibility
 
@@ -323,6 +324,40 @@ def test_source_run_revalidates_legacy_non_equity_before_creation(
 
     assert observed == ["NVDA", "AAPL", "SPY"]
     assert repository.list_runs().total == 1
+
+
+def test_retry_uses_current_eligibility_config_for_legacy_snapshot(
+    app_settings,
+    repository,
+) -> None:
+    settings = _with_eligibility_vendor(app_settings, "alpha_vantage")
+    observed_vendors: list[str | None] = []
+
+    def resolve(ticker: str):
+        observed_vendors.append(
+            get_config()["data_vendors"].get("instrument_eligibility")
+        )
+        return {"symbol": ticker, "quote_type": "EQUITY"}
+
+    service = AnalysisService(
+        settings,
+        repository=repository,
+        eligibility_resolver=resolve,
+    )
+    queued = service.enqueue(_request())
+    repository.claim_run(queued.id, "fixture-worker", 30)
+    repository.fail(queued.id, RuntimeError("fixture failure"))
+    with repository.sessions.begin() as session:
+        record = session.get(RunRecord, queued.id)
+        legacy_config = deepcopy(record.config_json)
+        legacy_config["data_config"]["data_vendors"].pop(
+            "instrument_eligibility"
+        )
+        record.config_json = legacy_config
+
+    service.retry(queued.id)
+
+    assert observed_vendors == ["alpha_vantage", "alpha_vantage"]
 
 
 @pytest.mark.parametrize("operation", ["enqueue", "run"])

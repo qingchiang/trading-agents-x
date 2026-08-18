@@ -126,21 +126,14 @@ class AnalysisService:
             request.model_dump(mode="json", warnings=False)
         )
         run_settings = self.settings.resolve_run(request)
-        dataflow_config = run_settings.dataflow_config(self.settings)
-        self._validate_instrument_eligibility(
-            request,
-            dataflow_config=dataflow_config,
-        )
+        self._validate_instrument_eligibility(request)
         if source_run_id is not None:
             # A retained Run may carry a legacy request that is intentionally
             # readable but no longer admitted as a source for new research.
             source_request = self._creation_request_from_history(
                 self.repository.get_run(source_run_id).request
             )
-            self._validate_instrument_eligibility(
-                source_request,
-                dataflow_config=dataflow_config,
-            )
+            self._validate_instrument_eligibility(source_request)
         request = self.settings.materialize_request(
             request,
             run_settings=run_settings,
@@ -166,15 +159,12 @@ class AnalysisService:
     def _validate_instrument_eligibility(
         self,
         request: AnalysisRequest,
-        *,
-        dataflow_config: dict[str, Any] | None = None,
     ) -> None:
         """Fail closed unless one exact resolver result confirms an equity."""
         try:
-            if dataflow_config is None:
-                dataflow_config = (
-                    self.settings.default_run_settings.dataflow_config(self.settings)
-                )
+            dataflow_config = self.settings.default_run_settings.dataflow_config(
+                self.settings
+            )
             with use_config(dataflow_config, merge=False):
                 result = self.eligibility_resolver(request.ticker)
             validate_instrument_eligibility(request.ticker, result)
@@ -251,10 +241,7 @@ class AnalysisService:
                 request = self._creation_request_from_history(run.request)
                 run_settings = RunSettings.model_validate(run.config_snapshot)
                 dataflow_config = run_settings.dataflow_config(self.settings)
-                self._validate_instrument_eligibility(
-                    request,
-                    dataflow_config=dataflow_config,
-                )
+                self._validate_instrument_eligibility(request)
                 validate_market_routing(dataflow_config)
                 with use_config(dataflow_config):
                     try:
@@ -515,11 +502,7 @@ class AnalysisService:
         # an alternate execution path around current admission rules.
         retained = self.repository.get_run(run_id)
         request = self._creation_request_from_history(retained.request)
-        run_settings = RunSettings.model_validate(retained.config_snapshot)
-        self._validate_instrument_eligibility(
-            request,
-            dataflow_config=run_settings.dataflow_config(self.settings),
-        )
+        self._validate_instrument_eligibility(request)
         view = self.repository.retry(run_id)
         self.repository.append_event(
             run_id,
