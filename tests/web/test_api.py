@@ -785,10 +785,21 @@ async def test_model_catalog_falls_back_without_leaking_configuration(
 async def test_health_reports_database_and_queue_status(
     web_client: httpx.AsyncClient,
     web_service,
+    web_repository,
 ) -> None:
     web_service.enqueue(
         AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
     )
+    legacy = web_service.enqueue(
+        AnalysisRequest(ticker="AAPL", analysis_date="2026-07-24")
+    )
+    with web_repository.sessions.begin() as session:
+        record = session.get(RunRecord, legacy.id)
+        record.request_json = {
+            **record.request_json,
+            "ticker": "BTC-USD",
+            "asset_type": "crypto",
+        }
 
     response = await web_client.get("/api/v1/health")
 

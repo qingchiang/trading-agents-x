@@ -21,7 +21,6 @@ from fastapi import (
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import func, select
 
 from tradingagents.application.contracts import (
     EvidenceBundle,
@@ -34,7 +33,6 @@ from tradingagents.application.contracts import (
     RunView,
     report_language_value,
 )
-from tradingagents.application.database import RunRecord
 from tradingagents.application.errors import (
     InstrumentEligibilityUnavailableError,
     UnsupportedInstrumentError,
@@ -551,16 +549,9 @@ def create_app(
             "pending_outcomes": 0,
         }
         try:
-            with repository.sessions() as session:
-                counts = dict(
-                    session.execute(
-                        select(RunRecord.status, func.count())
-                        .where(RunRecord.trashed_at.is_(None))
-                        .group_by(RunRecord.status)
-                    ).all()
-                )
-                queue["queued"] = int(counts.get("queued", 0))
-                queue["running"] = int(counts.get("running", 0))
+            counts = repository.active_run_counts()
+            queue["queued"] = counts.get("queued", 0)
+            queue["running"] = counts.get("running", 0)
             queue["pending_outcomes"] = repository.pending_outcome_count()
         except Exception:
             database_status = "error"

@@ -82,7 +82,20 @@ def test_request_rejects_invalid_symbols(value: str) -> None:
 
 @pytest.mark.parametrize(
     "value",
-    ["430001", "430001.BJ", "900001", "123456", "510300.SS", "399006.SZ"],
+    [
+        "430001",
+        "430001.BJ",
+        "900001",
+        "123456",
+        "510300.SS",
+        "399006.SZ",
+        "000016",
+        "000300",
+        "000688",
+        "000905",
+        "000852",
+        "000300.SZ",
+    ],
 )
 def test_request_rejects_unsupported_china_symbols(value: str) -> None:
     with pytest.raises(

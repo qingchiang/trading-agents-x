@@ -128,6 +128,9 @@ _MAINLAND_MARKET_BENCHMARKS = frozenset(
         "399006.SZ",
     }
 )
+_MAINLAND_MARKET_BENCHMARK_CODES = frozenset(
+    symbol.split(".", 1)[0] for symbol in _MAINLAND_MARKET_BENCHMARKS
+)
 
 # Calendar timezone used when a date boundary depends on the instrument's
 # exchange rather than the host machine. Unsuffixed Yahoo symbols retain the US
@@ -285,6 +288,8 @@ def is_supported_equity_symbol(symbol: str) -> bool:
     if match is None or symbol in _MAINLAND_MARKET_BENCHMARKS:
         return False
     code, suffix = match.groups()
+    if code in _MAINLAND_MARKET_BENCHMARK_CODES:
+        return False
     return infer_mainland_equity_suffix(code) == suffix
 
 

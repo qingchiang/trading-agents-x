@@ -485,6 +485,7 @@ class RunRepository:
                 )
                 .label("ticker_rank"),
             )
+
             .where(
                 RunRecord.trashed_at.is_(None),
                 ticker.is_not(None),
@@ -513,6 +514,26 @@ class RunRepository:
                 )
                 for row in connection.execute(stmt)
             )
+
+    def active_run_counts(self) -> dict[str, int]:
+        """Count current stock Runs by lifecycle status for health reporting."""
+        asset_type = func.coalesce(
+            func.json_extract(RunRecord.request_json, "$.asset_type"),
+            "stock",
+        )
+        stmt = (
+            select(RunRecord.status, func.count())
+            .where(
+                RunRecord.trashed_at.is_(None),
+                asset_type == "stock",
+            )
+            .group_by(RunRecord.status)
+        )
+        with self.sessions() as session:
+            return {
+                str(status): int(count)
+                for status, count in session.execute(stmt)
+            }
 
     def purge_expired_trash(
         self,
