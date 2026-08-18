@@ -14,6 +14,7 @@ from tradingagents.application.errors import (
     UnsupportedInstrumentError,
 )
 from tradingagents.application.service import AnalysisService
+from tradingagents.application.settings import AppSettings
 from tradingagents.client import TradingAgents
 from tradingagents.dataflows import instrument_identity as identity_dataflow
 from tradingagents.dataflows.errors import VendorError, VendorRateLimitError
@@ -22,6 +23,21 @@ from tradingagents.dataflows.instrument_identity import resolve_instrument_eligi
 
 def _request(ticker: str = "NVDA") -> AnalysisRequest:
     return AnalysisRequest(ticker=ticker, analysis_date=date(2026, 7, 24))
+
+
+def _with_eligibility_vendor(
+    app_settings: AppSettings,
+    vendor: str,
+) -> AppSettings:
+    data_config = deepcopy(dict(app_settings.default_run_settings.data_config))
+    data_config["data_vendors"]["instrument_eligibility"] = vendor
+    return app_settings.model_copy(
+        update={
+            "default_run_settings": app_settings.default_run_settings.model_copy(
+                update={"data_config": data_config}
+            )
+        }
+    )
 
 
 @pytest.mark.parametrize(
@@ -118,15 +134,7 @@ def test_default_resolver_honors_configured_eligibility_vendor(
     repository,
     monkeypatch,
 ) -> None:
-    data_config = deepcopy(dict(app_settings.default_run_settings.data_config))
-    data_config["data_vendors"]["instrument_eligibility"] = "alpha_vantage"
-    settings = app_settings.model_copy(
-        update={
-            "default_run_settings": app_settings.default_run_settings.model_copy(
-                update={"data_config": data_config}
-            )
-        }
-    )
+    settings = _with_eligibility_vendor(app_settings, "alpha_vantage")
     yahoo_called = False
 
     def search(**_kwargs):
@@ -143,6 +151,33 @@ def test_default_resolver_honors_configured_eligibility_vendor(
 
     with pytest.raises(InstrumentEligibilityUnavailableError):
         service.enqueue(_request())
+
+    assert yahoo_called is False
+    assert repository.list_runs().total == 0
+
+
+def test_public_python_default_honors_configured_eligibility_vendor(
+    app_settings,
+    repository,
+    monkeypatch,
+) -> None:
+    settings = _with_eligibility_vendor(app_settings, "alpha_vantage")
+    yahoo_called = False
+
+    def search(**_kwargs):
+        nonlocal yahoo_called
+        yahoo_called = True
+        return type(
+            "SearchResult",
+            (),
+            {"quotes": [{"symbol": "NVDA", "quoteType": "EQUITY"}]},
+        )()
+
+    monkeypatch.setattr(identity_dataflow.yf, "Search", search)
+    application = TradingAgents(settings)
+
+    with pytest.raises(InstrumentEligibilityUnavailableError):
+        application.enqueue(_request())
 
     assert yahoo_called is False
     assert repository.list_runs().total == 0

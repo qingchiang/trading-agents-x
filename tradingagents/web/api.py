@@ -54,7 +54,6 @@ from tradingagents.application.repository import (
 )
 from tradingagents.application.service import AnalysisService
 from tradingagents.application.settings import AppSettings
-from tradingagents.dataflows.instrument_identity import resolve_instrument_eligibility
 from tradingagents.llm_clients.model_discovery import (
     ModelDiscoveryService,
     UnknownProviderError,
@@ -93,10 +92,7 @@ def create_app(
     maintenance: TrashMaintenance | None = None,
 ) -> FastAPI:
     settings = settings or AppSettings.from_env()
-    service = service or AnalysisService(
-        settings,
-        eligibility_resolver=resolve_instrument_eligibility,
-    )
+    service = service or AnalysisService(settings)
     repository = service.repository
     model_discovery = model_discovery or ModelDiscoveryService(settings)
     maintenance = maintenance or TrashMaintenance(settings, repository)

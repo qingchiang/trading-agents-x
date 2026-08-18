@@ -14,7 +14,7 @@ from .application.contracts import (
 )
 from .application.service import AnalysisService
 from .application.settings import AppSettings
-from .dataflows.instrument_identity import resolve_instrument_eligibility
+from .dataflows.interface import resolve_instrument_eligibility
 
 
 class TradingAgents:

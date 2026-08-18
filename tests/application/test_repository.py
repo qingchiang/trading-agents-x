@@ -846,6 +846,18 @@ def test_complete_persists_result_and_resolved_memory(
     restored = repository.get_result(run.id)
     due_at = datetime.max.replace(tzinfo=UTC)
     pending = repository.pending_outcomes(due_at=due_at)
+    assert pending
+    with repository.sessions.begin() as session:
+        retained_decision = session.scalar(
+            select(DecisionRecord).where(DecisionRecord.run_id == run.id)
+        )
+        retained_decision.asset_type = "crypto"
+    assert repository.pending_outcomes(due_at=due_at) == []
+    with repository.sessions.begin() as session:
+        retained_decision = session.scalar(
+            select(DecisionRecord).where(DecisionRecord.run_id == run.id)
+        )
+        retained_decision.asset_type = "stock"
     repository.trash_runs((run.id,))
     assert repository.pending_outcomes(due_at=due_at) == []
     assert repository.memory_entries() == []

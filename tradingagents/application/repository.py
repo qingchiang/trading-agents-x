@@ -1516,6 +1516,7 @@ class RunRepository:
             .join(RunRecord, RunRecord.id == DecisionRecord.run_id)
             .where(
                 OutcomeRecord.status == "pending",
+                DecisionRecord.asset_type == "stock",
                 RunRecord.trashed_at.is_(None),
                 OutcomeRecord.next_check_at.is_not(None),
                 OutcomeRecord.next_check_at <= due,
