@@ -293,6 +293,38 @@ def test_retry_revalidates_legacy_non_equity_before_requeue(
     assert repository.get_run(queued.id).attempt == 1
 
 
+def test_source_run_revalidates_legacy_non_equity_before_creation(
+    app_settings,
+    repository,
+) -> None:
+    observed: list[str] = []
+
+    def resolve(ticker: str):
+        observed.append(ticker)
+        return {
+            "symbol": ticker,
+            "quote_type": "ETF" if ticker == "SPY" else "EQUITY",
+        }
+
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        eligibility_resolver=resolve,
+    )
+    source = service.enqueue(_request())
+    repository.claim_run(source.id, "fixture-worker", 30)
+    repository.fail(source.id, RuntimeError("fixture failure"))
+    with repository.sessions.begin() as session:
+        record = session.get(RunRecord, source.id)
+        record.request_json = {**record.request_json, "ticker": "SPY"}
+
+    with pytest.raises(UnsupportedInstrumentError):
+        service.enqueue(_request("AAPL"), source_run_id=source.id)
+
+    assert observed == ["NVDA", "AAPL", "SPY"]
+    assert repository.list_runs().total == 1
+
+
 @pytest.mark.parametrize("operation", ["enqueue", "run"])
 @pytest.mark.parametrize(
     ("ticker", "error"),

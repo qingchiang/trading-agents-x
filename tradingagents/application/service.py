@@ -126,15 +126,20 @@ class AnalysisService:
             request.model_dump(mode="json", warnings=False)
         )
         run_settings = self.settings.resolve_run(request)
+        dataflow_config = run_settings.dataflow_config(self.settings)
         self._validate_instrument_eligibility(
             request,
-            dataflow_config=run_settings.dataflow_config(self.settings),
+            dataflow_config=dataflow_config,
         )
         if source_run_id is not None:
             # A retained Run may carry a legacy request that is intentionally
             # readable but no longer admitted as a source for new research.
-            self._creation_request_from_history(
+            source_request = self._creation_request_from_history(
                 self.repository.get_run(source_run_id).request
+            )
+            self._validate_instrument_eligibility(
+                source_request,
+                dataflow_config=dataflow_config,
             )
         request = self.settings.materialize_request(
             request,
