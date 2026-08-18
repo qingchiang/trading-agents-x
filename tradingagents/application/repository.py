@@ -1654,6 +1654,12 @@ class RunRepository:
         same_limit: int = 5,
         cross_limit: int = 3,
     ) -> MemoryContext:
+        if asset_type.casefold() != "stock":
+            return MemoryContext(
+                instrument=ticker,
+                market=None,
+                items=(),
+            )
         market = self.market_bucket(ticker, asset_type)
         resolved = (
             select(

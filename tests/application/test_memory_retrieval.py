@@ -444,3 +444,17 @@ def test_retained_crypto_is_excluded_from_active_memory(
 
     assert repository.memory_context("NVDA", "stock").items == ()
     assert repository.memory_entries() == []
+
+
+def test_crypto_memory_request_cannot_reuse_stock_memory(
+    repository: RunRepository,
+) -> None:
+    _seed_memory(
+        repository,
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 1),
+        reflection="Stock-only reflection.",
+        thesis="Stock-only fixture.",
+    )
+
+    assert repository.memory_context("NVDA", "crypto").items == ()
