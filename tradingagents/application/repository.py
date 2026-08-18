@@ -1270,22 +1270,23 @@ class RunRepository:
                 )
                 session.add(decision)
                 session.flush()
-                session.add(
-                    OutcomeRecord(
-                        decision_id=decision.id,
-                        status="pending",
-                        benchmark=benchmark,
-                        holding_intervals=5,
-                        next_check_at=max(
-                            now,
-                            earliest_outcome_check_at(
-                                ticker=request.ticker,
-                                analysis_date=request.analysis_date,
-                                holding_intervals=5,
-                            ).replace(tzinfo=None),
-                        ),
+                if request.asset_type == "stock":
+                    session.add(
+                        OutcomeRecord(
+                            decision_id=decision.id,
+                            status="pending",
+                            benchmark=benchmark,
+                            holding_intervals=5,
+                            next_check_at=max(
+                                now,
+                                earliest_outcome_check_at(
+                                    ticker=request.ticker,
+                                    analysis_date=request.analysis_date,
+                                    holding_intervals=5,
+                                ).replace(tzinfo=None),
+                            ),
+                        )
                     )
-                )
             record.status = RunStatus.SUCCEEDED.value
             record.finished_at = now
             record.updated_at = now
@@ -1596,7 +1597,19 @@ class RunRepository:
                 tzinfo=None
             )
         with self.sessions.begin() as session:
-            outcome = session.get(OutcomeRecord, outcome_id)
+            outcome = session.scalar(
+                select(OutcomeRecord)
+                .join(
+                    DecisionRecord,
+                    OutcomeRecord.decision_id == DecisionRecord.id,
+                )
+                .join(RunRecord, RunRecord.id == DecisionRecord.run_id)
+                .where(
+                    OutcomeRecord.id == outcome_id,
+                    DecisionRecord.asset_type == "stock",
+                    RunRecord.trashed_at.is_(None),
+                )
+            )
             if outcome is None:
                 return
             outcome.last_checked_at = checked_at
@@ -1624,6 +1637,7 @@ class RunRepository:
                 .join(RunRecord, RunRecord.id == DecisionRecord.run_id)
                 .where(
                     OutcomeRecord.id == outcome_id,
+                    DecisionRecord.asset_type == "stock",
                     RunRecord.trashed_at.is_(None),
                 )
             )

@@ -7,7 +7,7 @@ from pathlib import Path
 from threading import Barrier
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from tests.factories import (
     analyst_report,
@@ -51,7 +51,13 @@ from tradingagents.application.contracts import (
     RunStatus,
     RunTrashState,
 )
-from tradingagents.application.database import DecisionRecord, RunAttemptRecord, RunRecord
+from tradingagents.application.database import (
+    DecisionRecord,
+    OutcomeRecord,
+    ReflectionRecord,
+    RunAttemptRecord,
+    RunRecord,
+)
 from tradingagents.application.maintenance import TrashMaintenance
 from tradingagents.application.repository import (
     ArtifactConflictError,
@@ -863,6 +869,28 @@ def test_complete_persists_result_and_resolved_memory(
         retained_decision.asset_type = "crypto"
     assert repository.pending_outcomes(due_at=due_at) == []
     assert repository.pending_outcome_count() == 0
+    repository.mark_outcome_checked(
+        pending[0]["outcome_id"],
+        checked_at=datetime(2026, 7, 25, tzinfo=UTC),
+        next_check_at=datetime(2026, 7, 26, tzinfo=UTC),
+    )
+    repository.resolve_outcome(
+        pending[0]["outcome_id"],
+        observation_start=date(2026, 7, 25),
+        observation_end=date(2026, 8, 1),
+        raw_return=0.08,
+        alpha_return=0.03,
+        reflection="Legacy Crypto outcome must remain passive.",
+    )
+    with repository.sessions() as session:
+        retained_outcome = session.get(OutcomeRecord, pending[0]["outcome_id"])
+        assert retained_outcome.status == "pending"
+        assert retained_outcome.last_checked_at is None
+        assert session.scalar(
+            select(ReflectionRecord).where(
+                ReflectionRecord.outcome_id == pending[0]["outcome_id"]
+            )
+        ) is None
     with repository.sessions.begin() as session:
         retained_decision = session.scalar(
             select(DecisionRecord).where(DecisionRecord.run_id == run.id)
@@ -901,6 +929,7 @@ def test_complete_persists_result_and_resolved_memory(
     repository.restore_runs((run.id,))
     assert repository.memory_context("NVDA", "stock").items[0].run_id == run.id
 
+
     with repository.sessions() as session:
         record = session.scalar(
             select(DecisionRecord).where(DecisionRecord.run_id == run.id)
@@ -926,6 +955,48 @@ def test_complete_persists_result_and_resolved_memory(
     historical_check = historical_result.numeric_audit.requirement_checks[0]
     assert historical_check.comparison_result is None
     assert historical_check.comparison_difference is None
+
+
+def test_legacy_crypto_completion_does_not_schedule_outcome(
+    repository: RunRepository,
+    app_settings: AppSettings,
+) -> None:
+    run, _ = _create(repository, app_settings)
+    repository.claim_run(run.id, "legacy-worker", 30)
+    evidence = EvidenceBundle(
+        instrument="NVDA",
+        analysis_date=date(2026, 7, 24),
+        items=(),
+    )
+    repository.seal_evidence(run.id, evidence)
+    with repository.sessions.begin() as session:
+        record = session.get(RunRecord, run.id)
+        record.request_json = {
+            **record.request_json,
+            "ticker": "BTC-USD",
+            "asset_type": "crypto",
+        }
+
+    repository.complete(
+        run.id,
+        AnalysisResult(
+            run_id=run.id,
+            status=RunStatus.SUCCEEDED,
+            instrument="BTC-USD",
+            reports={},
+            decision=research_decision(evidence_refs=()),
+            evidence=evidence,
+        ),
+        evidence=evidence,
+        benchmark="SPY",
+    )
+
+    with repository.sessions() as session:
+        decision = session.scalar(
+            select(DecisionRecord).where(DecisionRecord.run_id == run.id)
+        )
+        assert decision.asset_type == "crypto"
+        assert session.scalar(select(func.count()).select_from(OutcomeRecord)) == 0
 
 
 def test_failed_run_retains_sealed_evidence_and_analyst_reports(
