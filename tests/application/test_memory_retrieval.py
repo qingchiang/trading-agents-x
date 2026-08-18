@@ -424,3 +424,23 @@ def test_memory_entries_support_fuzzy_filters_and_full_field_search(
     ] == ["MSFT"]
     assert repository.memory_entries(q="pending cloud", status="resolved") == []
     assert repository.memory_entries(q="%") == []
+
+
+def test_retained_crypto_is_excluded_from_active_memory(
+    repository: RunRepository,
+) -> None:
+    run_id = _seed_memory(
+        repository,
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 1),
+        reflection="Legacy Crypto reflection must remain read-only.",
+        thesis="Legacy fixture.",
+    )
+    with repository.sessions.begin() as session:
+        decision = session.scalar(
+            select(DecisionRecord).where(DecisionRecord.run_id == run_id)
+        )
+        decision.asset_type = "crypto"
+
+    assert repository.memory_context("NVDA", "stock").items == ()
+    assert repository.memory_entries() == []

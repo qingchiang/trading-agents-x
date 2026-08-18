@@ -34,11 +34,7 @@ from tradingagents.application.contracts import (
     RunView,
     report_language_value,
 )
-from tradingagents.application.database import (
-    DecisionRecord,
-    OutcomeRecord,
-    RunRecord,
-)
+from tradingagents.application.database import RunRecord
 from tradingagents.application.errors import (
     InstrumentEligibilityUnavailableError,
     UnsupportedInstrumentError,
@@ -565,27 +561,7 @@ def create_app(
                 )
                 queue["queued"] = int(counts.get("queued", 0))
                 queue["running"] = int(counts.get("running", 0))
-                queue["pending_outcomes"] = int(
-                    session.scalar(
-                        select(func.count())
-                        .select_from(OutcomeRecord)
-                        .join(
-                            DecisionRecord,
-                            OutcomeRecord.decision_id
-                            == DecisionRecord.id,
-                        )
-                        .join(
-                            RunRecord,
-                            RunRecord.id
-                            == DecisionRecord.run_id,
-                        )
-                        .where(
-                            OutcomeRecord.status == "pending",
-                            RunRecord.trashed_at.is_(None),
-                        )
-                    )
-                    or 0
-                )
+            queue["pending_outcomes"] = repository.pending_outcome_count()
         except Exception:
             database_status = "error"
         return HealthResponse(

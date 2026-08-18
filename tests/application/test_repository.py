@@ -368,6 +368,7 @@ def test_recent_instruments_are_deduplicated_and_exclude_trashed_runs(
     older, _ = _create(repository, app_settings, "NVDA")
     trashed, _ = _create(repository, app_settings, "AAPL")
     latest, _ = _create(repository, app_settings, "NVDA")
+    legacy_crypto, _ = _create(repository, app_settings, "MSFT")
     repository.set_instrument_name(older.id, "NVIDIA Corporation")
     repository.set_instrument_name(trashed.id, "Apple")
     repository.set_instrument_name(latest.id, "NVIDIA")
@@ -376,6 +377,13 @@ def test_recent_instruments_are_deduplicated_and_exclude_trashed_runs(
         session.get(RunRecord, older.id).created_at = datetime(2026, 7, 1)
         session.get(RunRecord, trashed.id).created_at = datetime(2026, 7, 2)
         session.get(RunRecord, latest.id).created_at = datetime(2026, 7, 3)
+        legacy_record = session.get(RunRecord, legacy_crypto.id)
+        legacy_record.created_at = datetime(2026, 7, 4)
+        legacy_record.request_json = {
+            **legacy_record.request_json,
+            "ticker": "BTC-USD",
+            "asset_type": "crypto",
+        }
     repository.request_cancel(trashed.id)
     repository.trash_runs((trashed.id,))
 
@@ -847,12 +855,14 @@ def test_complete_persists_result_and_resolved_memory(
     due_at = datetime.max.replace(tzinfo=UTC)
     pending = repository.pending_outcomes(due_at=due_at)
     assert pending
+    assert repository.pending_outcome_count() == 1
     with repository.sessions.begin() as session:
         retained_decision = session.scalar(
             select(DecisionRecord).where(DecisionRecord.run_id == run.id)
         )
         retained_decision.asset_type = "crypto"
     assert repository.pending_outcomes(due_at=due_at) == []
+    assert repository.pending_outcome_count() == 0
     with repository.sessions.begin() as session:
         retained_decision = session.scalar(
             select(DecisionRecord).where(DecisionRecord.run_id == run.id)

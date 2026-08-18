@@ -465,6 +465,10 @@ class RunRepository:
             RunRecord.request_json,
             "$.ticker",
         )
+        asset_type = func.coalesce(
+            func.json_extract(RunRecord.request_json, "$.asset_type"),
+            "stock",
+        )
         ranked = (
             select(
                 ticker.label("ticker"),
@@ -484,6 +488,7 @@ class RunRepository:
             .where(
                 RunRecord.trashed_at.is_(None),
                 ticker.is_not(None),
+                asset_type == "stock",
             )
             .subquery()
         )
@@ -1539,6 +1544,22 @@ class RunRepository:
                 for outcome, decision in session.execute(stmt)
             ]
 
+    def pending_outcome_count(self) -> int:
+        """Count active stock outcomes still scheduled for settlement."""
+        stmt = (
+            select(func.count())
+            .select_from(OutcomeRecord)
+            .join(DecisionRecord, OutcomeRecord.decision_id == DecisionRecord.id)
+            .join(RunRecord, RunRecord.id == DecisionRecord.run_id)
+            .where(
+                OutcomeRecord.status == "pending",
+                DecisionRecord.asset_type == "stock",
+                RunRecord.trashed_at.is_(None),
+            )
+        )
+        with self.sessions() as session:
+            return int(session.scalar(stmt) or 0)
+
     def mark_outcome_checked(
         self,
         outcome_id: int,
@@ -1627,6 +1648,7 @@ class RunRepository:
             .join(RunRecord, RunRecord.id == DecisionRecord.run_id)
             .where(
                 RunRecord.trashed_at.is_(None),
+                DecisionRecord.asset_type == "stock",
                 OutcomeRecord.status == "resolved",
                 OutcomeRecord.holding_intervals >= 5,
                 OutcomeRecord.raw_return.is_not(None),
@@ -1730,7 +1752,10 @@ class RunRepository:
                 DecisionRecord.created_at.desc(),
                 DecisionRecord.id.desc(),
             )
-            .where(RunRecord.trashed_at.is_(None))
+            .where(
+                RunRecord.trashed_at.is_(None),
+                DecisionRecord.asset_type == "stock",
+            )
             .limit(min(max(1, limit), 500))
         )
         if ticker and (ticker_query := ticker.strip().casefold()):
