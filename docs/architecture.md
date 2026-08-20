@@ -263,8 +263,10 @@ normal synchronous mode. WAL still permits only one writer at a time. The
 database and `-wal`/`-shm` files must be on one host-local filesystem; NFS/SMB
 deployment is unsupported.
 
-`tradingagents db backup` uses SQLite's online backup operation and is the
-supported backup boundary.
+`tradingagents db backup` calls the persistence-only SQLite online-backup seam
+directly. It does not construct `AnalysisService` or run Alembic, so it is the
+supported pre-migration backup boundary and preserves the source schema and
+rows exactly as they exist when the copy starts.
 
 ### Events and SSE
 

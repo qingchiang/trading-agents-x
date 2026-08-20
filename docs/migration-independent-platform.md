@@ -6,13 +6,25 @@ and versioned HTTP API.
 
 ## Before upgrading
 
-1. Preserve your existing repository or installation until the migration is
+1. Back up the application SQLite database before opening it with the new
+   release:
+
+   ```bash
+   tradingagents db backup /path/to/pre-migration-backup.db
+   ```
+
+   This command uses SQLite's online backup operation without constructing the
+   application service or running Alembic, so a Branch 3 predecessor database
+   at revision `0004_instrument_local_name` retains its legacy review rows in
+   the backup. The command refuses to overwrite a destination unless `--force`
+   is supplied.
+2. Preserve your existing repository or installation until the migration is
    verified.
-2. Back up any legacy Markdown memory and report directories.
-3. Record provider/model settings you still need without copying credentials
+3. Back up any legacy Markdown memory and report directories.
+4. Record provider/model settings you still need without copying credentials
    into notes, issues, or logs.
-4. Install the new release into a separate virtual environment.
-5. Configure a local database path and provider keys through `.env`.
+5. Install the new release into a separate virtual environment.
+6. Configure a local database path and provider keys through `.env`.
 
 The migration does not modify legacy report trees or old checkpoint databases.
 When an existing Branch 3 application database is opened, Alembic revision
@@ -155,7 +167,8 @@ TRADINGAGENTS_DATABASE_PATH=/absolute/local/path/tradingagents.db
 Do not place it on NFS, SMB, or another network filesystem. For Docker Compose,
 both services use the `tradingagents_data` named volume.
 
-Create a consistent backup while services are running:
+Create a consistent backup while services are running (and before upgrading a
+predecessor database):
 
 ```bash
 tradingagents db backup /path/to/tradingagents-backup.db

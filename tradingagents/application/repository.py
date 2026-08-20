@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -14,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from tradingagents.dataflows.symbol_utils import market_timezone
+from tradingagents.persistence.backup import backup_sqlite_database
 from tradingagents.version import __version__
 
 from .contracts import (
@@ -1506,18 +1506,7 @@ class RunRepository:
         )
 
     def backup(self, destination: Path) -> Path:
-        destination = destination.expanduser().resolve()
-        if destination == self.settings.database_path.resolve():
-            raise ValueError("backup destination must differ from the live database")
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        source = sqlite3.connect(self.settings.database_path)
-        target = sqlite3.connect(destination)
-        try:
-            source.backup(target)
-        finally:
-            target.close()
-            source.close()
-        return destination
+        return backup_sqlite_database(self.settings, destination)
 
     @staticmethod
     def market_bucket(ticker: str, asset_type: str | None = None) -> str | None:
