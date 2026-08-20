@@ -55,6 +55,33 @@ test("shows the first Full Run-backed node and keeps its operational Run link", 
   ).toHaveAttribute("href", "/runs/run-1");
 });
 
+test("paginates Timeline nodes independently from the Timeline list", async () => {
+  vi.mocked(api.timeline)
+    .mockResolvedValueOnce({
+      timeline: {
+        instrument: "7203.T", primary_cycle_id: "run-1", node_total: 21,
+        node_limit: 20, node_offset: 0, nodes: [],
+      },
+    } as never)
+    .mockResolvedValueOnce({
+      timeline: {
+        instrument: "7203.T", primary_cycle_id: "run-1", node_total: 21,
+        node_limit: 20, node_offset: 20, nodes: [],
+      },
+    } as never);
+
+  render(
+    <Router initialPath="/timelines/7203.T">
+      <Timeline />
+    </Router>,
+  );
+
+  expect(await screen.findByRole("button", { name: "Next →" })).toBeEnabled();
+  expect(api.timeline).toHaveBeenCalledWith("7203.T", 20, 0);
+  fireEvent.click(screen.getByRole("button", { name: "Next →" }));
+  await waitFor(() => expect(api.timeline).toHaveBeenCalledWith("7203.T", 20, 20));
+});
+
 test("lists derived timelines without presenting Execution History as a timeline", async () => {
   vi.mocked(api.timelines).mockResolvedValue({
     items: [{ instrument: "7203.T", primary_cycle_id: "run-1", node_count: 1 }],

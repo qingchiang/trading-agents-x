@@ -33,7 +33,7 @@ from tradingagents.application.database import (
     RunRecord,
 )
 from tradingagents.application.errors import UnsupportedInstrumentError
-from tradingagents.application.repository import RunRepository
+from tradingagents.application.repository import IdempotencyConflictError, RunRepository
 from tradingagents.application.runtime import RunCancelled, WorkerShutdown
 from tradingagents.application.service import AnalysisService
 from tradingagents.dataflows.config import get_config
@@ -135,6 +135,34 @@ def test_later_full_cycles_require_an_explicit_primary_choice_and_can_be_selecte
     assert [node.is_primary for node in selected.nodes] == [
         node.id == later.run_id for node in selected.nodes
     ]
+
+
+def test_completed_first_full_replays_before_later_full_primary_validation(
+    app_settings,
+    repository,
+) -> None:
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_Graph,
+        identity_resolver=lambda ticker, _date: {"company_name": ticker},
+        eligibility_resolver=_equity_resolver,
+    )
+    request = AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
+
+    first = service.enqueue(request, idempotency_key="first-full-replay")
+    claimed = repository.claim_run(first.id, "worker", app_settings.lease_seconds)
+    service.execute_claimed(claimed, worker_id="worker")
+
+    replayed = service.enqueue(request, idempotency_key="first-full-replay")
+
+    assert replayed.id == first.id
+    with pytest.raises(IdempotencyConflictError):
+        service.enqueue(
+            AnalysisRequest(ticker="NVDA", analysis_date="2026-07-23"),
+            idempotency_key="first-full-replay",
+        )
 
 
 @pytest.mark.parametrize(

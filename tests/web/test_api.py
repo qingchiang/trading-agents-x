@@ -42,11 +42,38 @@ def _payload(ticker: str = "NVDA") -> dict:
 @pytest.mark.anyio
 async def test_run_creation_is_idempotent_and_conflicts_are_explicit(
     web_client: httpx.AsyncClient,
+    web_repository,
 ) -> None:
     first = await web_client.post(
         "/api/v1/runs",
         json=_payload(),
         headers={"Idempotency-Key": "browser-submit"},
+    )
+    run_id = first.json()["id"]
+    request = AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 24))
+    web_repository.claim_run(run_id, "fixture", 30)
+    item = EvidenceItem.create(
+        source="fixture",
+        evidence_type="fixture",
+        requested_date=request.analysis_date,
+        effective_date=request.analysis_date,
+        content="fixture",
+    )
+    evidence = EvidenceBundle(
+        instrument=request.ticker, analysis_date=request.analysis_date, items=(item,)
+    )
+    web_repository.seal_evidence(run_id, evidence)
+    web_repository.complete(
+        run_id,
+        AnalysisResult(
+            run_id=run_id,
+            status=RunStatus.SUCCEEDED,
+            instrument=request.ticker,
+            reports={},
+            decision=research_decision(evidence_refs=(item.ref,)),
+            evidence=evidence,
+        ),
+        evidence=evidence,
     )
     repeated = await web_client.post(
         "/api/v1/runs",
@@ -111,6 +138,9 @@ async def test_timeline_api_exposes_first_same_identity_full_node(
     assert response.status_code == 200
     payload = response.json()["timeline"]
     assert payload["primary_cycle_id"] == run.id
+    assert payload["node_total"] == 1
+    assert payload["node_limit"] == 50
+    assert payload["node_offset"] == 0
     assert payload["nodes"] == [
         {
             "id": run.id,
@@ -128,6 +158,77 @@ async def test_timeline_api_exposes_first_same_identity_full_node(
             "trashed_at": None,
         }
     ]
+
+
+@pytest.mark.anyio
+async def test_timeline_detail_paginates_nodes_by_cutoff_then_run_id(
+    web_client: httpx.AsyncClient,
+    web_repository,
+    web_settings,
+) -> None:
+    def commit_full(analysis_date: date, *, make_primary: bool | None = None) -> str:
+        request = AnalysisRequest(
+            ticker="NVDA",
+            analysis_date=analysis_date,
+            make_primary=make_primary,
+        )
+        run, _ = web_repository.create_run(
+            request,
+            web_settings.resolve_run(request).snapshot(),
+            research_schema_version="1",
+            information_cutoff_at=datetime.combine(analysis_date, datetime.max.time(), UTC),
+            method_snapshot={"schema_version": "1", "llm_provider": "fixture"},
+            research_kind="full",
+        )
+        web_repository.claim_run(run.id, "fixture", 30)
+        item = EvidenceItem.create(
+            source="fixture",
+            evidence_type="fixture",
+            requested_date=analysis_date,
+            effective_date=analysis_date,
+            content=run.id,
+        )
+        evidence = EvidenceBundle(instrument="NVDA", analysis_date=analysis_date, items=(item,))
+        web_repository.seal_evidence(run.id, evidence)
+        web_repository.complete(
+            run.id,
+            AnalysisResult(
+                run_id=run.id,
+                status=RunStatus.SUCCEEDED,
+                instrument="NVDA",
+                reports={},
+                decision=research_decision(evidence_refs=(item.ref,)),
+                evidence=evidence,
+            ),
+            evidence=evidence,
+        )
+        return run.id
+
+    oldest = commit_full(date(2026, 7, 23))
+    same_cutoff = [
+        commit_full(date(2026, 7, 24), make_primary=False),
+        commit_full(date(2026, 7, 24), make_primary=False),
+    ]
+
+    first_page = await web_client.get("/api/v1/timelines/NVDA?node_limit=2")
+    second_page = await web_client.get(
+        "/api/v1/timelines/NVDA?node_limit=2&node_offset=2"
+    )
+
+    assert first_page.status_code == 200
+    assert second_page.status_code == 200
+    assert first_page.json()["timeline"]["node_total"] == 3
+    assert first_page.json()["timeline"]["node_limit"] == 2
+    assert first_page.json()["timeline"]["node_offset"] == 0
+    assert second_page.json()["timeline"]["node_offset"] == 2
+    assert [node["id"] for node in first_page.json()["timeline"]["nodes"]] == [
+        oldest,
+        *sorted(same_cutoff),
+    ][:2]
+    assert [node["id"] for node in second_page.json()["timeline"]["nodes"]] == [
+        oldest,
+        *sorted(same_cutoff),
+    ][2:]
 
 
 @pytest.mark.anyio

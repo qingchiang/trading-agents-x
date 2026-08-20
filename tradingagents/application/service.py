@@ -128,13 +128,6 @@ class AnalysisService:
         request = AnalysisRequest.model_validate(
             request.model_dump(mode="json", warnings=False)
         )
-        if (
-            request.make_primary is None
-            and self.repository.has_active_full_cycle(request.ticker)
-        ):
-            raise ValueError(
-                "later Full Research requires an explicit make_primary choice"
-            )
         run_settings = self.settings.resolve_run(request)
         self._validate_instrument_eligibility(request)
         if source_run_id is not None:

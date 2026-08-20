@@ -1716,6 +1716,9 @@ class ResearchTimeline(FrozenModel):
     instrument: str
     primary_cycle_id: str | None = None
     nodes: tuple[ResearchNodeView, ...] = ()
+    node_total: int = Field(default=0, ge=0)
+    node_limit: int = Field(default=50, ge=1, le=200)
+    node_offset: int = Field(default=0, ge=0)
 
 
 class ResearchTimelineSummary(FrozenModel):

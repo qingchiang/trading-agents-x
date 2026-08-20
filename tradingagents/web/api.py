@@ -355,8 +355,18 @@ def create_app(
         f"{API_PREFIX}/timelines/{{instrument}}",
         response_model=TimelineDetail,
     )
-    def get_timeline(instrument: str):
-        return TimelineDetail(timeline=repository.get_timeline(instrument))
+    def get_timeline(
+        instrument: str,
+        node_limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        node_offset: Annotated[int, Query(ge=0)] = 0,
+    ):
+        return TimelineDetail(
+            timeline=repository.get_timeline(
+                instrument,
+                node_limit=node_limit,
+                node_offset=node_offset,
+            )
+        )
 
     @app.put(
         f"{API_PREFIX}/timelines/{{instrument}}/primary-cycle",

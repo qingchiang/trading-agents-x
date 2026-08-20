@@ -3125,6 +3125,25 @@
             "title": "Instrument",
             "type": "string"
           },
+          "node_limit": {
+            "default": 50,
+            "maximum": 200.0,
+            "minimum": 1.0,
+            "title": "Node Limit",
+            "type": "integer"
+          },
+          "node_offset": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Node Offset",
+            "type": "integer"
+          },
+          "node_total": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Node Total",
+            "type": "integer"
+          },
           "nodes": {
             "default": [],
             "items": {
@@ -5458,6 +5477,29 @@
             "schema": {
               "title": "Instrument",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "node_limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Node Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "node_offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Node Offset",
+              "type": "integer"
             }
           }
         ],

@@ -121,8 +121,10 @@ export const api = {
       `/api/v1/instruments/recent?limit=${encodeURIComponent(limit)}`,
     ),
   run: (id: string) => request<RunDetail>(`/api/v1/runs/${id}`),
-  timeline: (instrument: string) =>
-    request<TimelineDetail>(`/api/v1/timelines/${encodeURIComponent(instrument)}`),
+  timeline: (instrument: string, nodeLimit = 20, nodeOffset = 0) =>
+    request<TimelineDetail>(
+      `/api/v1/timelines/${encodeURIComponent(instrument)}?node_limit=${encodeURIComponent(nodeLimit)}&node_offset=${encodeURIComponent(nodeOffset)}`,
+    ),
   timelines: (limit = 50, offset = 0) =>
     request<ResearchTimelinePage>(
       `/api/v1/timelines?limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`,

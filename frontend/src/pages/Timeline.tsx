@@ -4,6 +4,8 @@ import { useTranslation } from "react-i18next";
 import { api, type ResearchTimelinePage, type TimelineDetail } from "../api/client";
 import { Link, usePathname } from "../router";
 
+const NODE_PAGE_SIZE = 20;
+
 export default function Timeline() {
   const { t } = useTranslation();
   const pathname = usePathname();
@@ -12,7 +14,11 @@ export default function Timeline() {
   const [detail, setDetail] = useState<TimelineDetail | null>(null);
   const [timelines, setTimelines] = useState<ResearchTimelinePage | null>(null);
   const [timelineOffset, setTimelineOffset] = useState(0);
+  const [nodeOffset, setNodeOffset] = useState(0);
   const timelineItems = timelines?.items ?? [];
+  const detailNodes = detail?.timeline.nodes ?? [];
+  const nodeTotal = detail?.timeline.node_total ?? 0;
+  const nodeLimit = detail?.timeline.node_limit ?? NODE_PAGE_SIZE;
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -26,7 +32,7 @@ export default function Timeline() {
         onError,
       );
     } else {
-      void api.timeline(instrument).then(
+      void api.timeline(instrument, NODE_PAGE_SIZE, nodeOffset).then(
         (value) => active && setDetail(value),
         onError,
       );
@@ -34,7 +40,7 @@ export default function Timeline() {
     return () => {
       active = false;
     };
-  }, [instrument, isList, t, timelineOffset]);
+  }, [instrument, isList, nodeOffset, t, timelineOffset]);
 
   if (isList) {
     return (
@@ -120,7 +126,7 @@ export default function Timeline() {
       {detail && (detail.timeline.nodes?.length ?? 0) === 0 && (
         <div className="empty-state">{t("noCommittedFullResearch")}</div>
       )}
-      {detail?.timeline.nodes?.map((node) => (
+      {detailNodes.map((node) => (
         <article className="panel" key={node.id}>
           <div className="panel-header">
             <div>
@@ -160,7 +166,10 @@ export default function Timeline() {
               onClick={() => {
                 setError("");
                 void api.selectPrimaryCycle(instrument, node.id).then(
-                  (value) => setDetail(value),
+                  (value) => {
+                    setDetail(value);
+                    setNodeOffset(value.timeline.node_offset ?? 0);
+                  },
                   (cause: unknown) =>
                     setError(cause instanceof Error ? cause.message : t("timelineLoadFailed")),
                 );
@@ -174,6 +183,40 @@ export default function Timeline() {
           </Link>
         </article>
       ))}
+      {detail && nodeTotal > nodeLimit && (
+        <div className="pagination">
+          <button
+            type="button"
+            className="button"
+            disabled={nodeOffset === 0}
+            onClick={() =>
+              setNodeOffset((current) =>
+                Math.max(0, current - nodeLimit),
+              )
+            }
+          >
+            ← {t("previous")}
+          </button>
+          <span>
+            {t("runRange", {
+              start: nodeTotal ? nodeOffset + 1 : 0,
+              end: Math.min(
+                nodeOffset + detailNodes.length,
+                nodeTotal,
+              ),
+              total: nodeTotal,
+            })}
+          </span>
+          <button
+            type="button"
+            className="button"
+            disabled={nodeOffset + detailNodes.length >= nodeTotal}
+            onClick={() => setNodeOffset((current) => current + nodeLimit)}
+          >
+            {t("next")} →
+          </button>
+        </div>
+      )}
     </section>
   );
 }

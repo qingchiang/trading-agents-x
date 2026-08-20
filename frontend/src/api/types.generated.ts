@@ -445,6 +445,9 @@ export interface components {
     ResearchScenarioKind: "base" | "bull" | "bear";
     ResearchTimeline: {
       instrument: string;
+      node_limit?: number;
+      node_offset?: number;
+      node_total?: number;
       nodes?: components["schemas"]["ResearchNodeView"][];
       primary_cycle_id?: string | null;
     };
