@@ -170,6 +170,17 @@ export default function Timeline() {
                   <li key={`${entry.domain}:${entry.source}`}>
                     {entry.domain} / {entry.source}: {entry.outcome}
                     {entry.source_watermark ? ` (${entry.source_watermark})` : ""}
+                    {entry.evidence_refs?.length ? (
+                      <>
+                        {" · "}
+                        {entry.evidence_refs.map((ref, index) => (
+                          <span key={ref}>
+                            {index > 0 ? ", " : ""}
+                            <code>{ref}</code>
+                          </span>
+                        ))}
+                      </>
+                    ) : null}
                   </li>
                 ))}
               </ul>

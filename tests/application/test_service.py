@@ -57,6 +57,7 @@ from tradingagents.application.errors import (
     UnsupportedInstrumentError,
 )
 from tradingagents.application.incremental_collection import (
+    admit_incremental_evidence,
     assess_incremental_collection,
 )
 from tradingagents.application.llms import RunLLMs
@@ -329,6 +330,21 @@ def test_evidence_bearing_incremental_commits_a_node_local_pit_bundle(
         effective_date=date(2026, 7, 19),
         content=f"late correction for {ticker}",
     )
+    sealed_candidate = EvidenceItem.create(
+        source=candidate.source,
+        evidence_type=candidate.evidence_type,
+        requested_date=candidate.requested_date,
+        effective_date=candidate.effective_date,
+        available_at=expected_available_at,
+        content=candidate.content,
+        value=candidate.value,
+        measurement_kind=candidate.measurement_kind,
+        unit=candidate.unit,
+        quality=candidate.quality,
+        fallback=candidate.fallback,
+        origins=candidate.origins,
+        provenance=candidate.provenance,
+    )
 
     def collect(plan: IncrementalCollectionPlan) -> IncrementalCollectionResult:
         entries = []
@@ -382,7 +398,7 @@ def test_evidence_bearing_incremental_commits_a_node_local_pit_bundle(
                     update={
                         "evidence_refs": (
                             *input_.full_baseline_decision.evidence_refs,
-                            candidate.ref,
+                            input_.incremental_evidence.items[0].ref,
                         )
                     }
                 )
@@ -410,12 +426,13 @@ def test_evidence_bearing_incremental_commits_a_node_local_pit_bundle(
 
     committed = repository.get_evidence(result.run_id)
     baseline_evidence = repository.get_evidence(baseline.run_id)
-    assert [item.ref for item in committed.items] == [candidate.ref]
-    assert candidate.ref not in {item.ref for item in baseline_evidence.items}
+    assert [item.ref for item in committed.items] == [sealed_candidate.ref]
+    assert sealed_candidate.ref != candidate.ref
+    assert sealed_candidate.ref not in {item.ref for item in baseline_evidence.items}
     assert committed.items[0].effective_date == date(2026, 7, 19)
     assert committed.items[0].available_at == expected_available_at
     assert observed_inputs[0].incremental_evidence == committed
-    assert candidate.ref in result.decision.evidence_refs
+    assert sealed_candidate.ref in result.decision.evidence_refs
 
 
 def test_incremental_rejects_evidence_without_reliable_availability_before_synthesis(
@@ -485,7 +502,7 @@ def test_incremental_rejects_evidence_without_reliable_availability_before_synth
     assert repository.evidence_status(failed[0].id).status == "pending"
 
 
-def test_incremental_baseline_reference_collision_is_atomic(
+def test_incremental_rederives_a_caller_reference_that_collides_with_a_baseline(
     app_settings,
     repository,
 ) -> None:
@@ -519,7 +536,113 @@ def test_incremental_baseline_reference_collision_is_atomic(
         incremental_synthesizer=default_incremental_synthesizer,
     )
 
-    with pytest.raises(EvidenceConflictError, match="collides with a different baseline payload"):
+    result = service.run(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date=date(2026, 7, 24),
+            research_kind="incremental",
+            full_baseline_run_id=baseline.run_id,
+        )
+    )
+
+    committed = repository.get_evidence(result.run_id)
+    assert committed.items[0].ref != baseline_item.ref
+    assert committed.items[0].ref != conflicting.ref
+    assert [node.id for node in repository.get_timeline("NVDA").nodes] == [
+        baseline.run_id,
+        result.run_id,
+    ]
+
+
+def test_incremental_evidence_identity_uses_the_final_available_at_payload() -> None:
+    plan = IncrementalCollectionPlan(
+        version="1",
+        market="japan",
+        window_start=datetime(2026, 7, 20, 15, tzinfo=UTC),
+        window_end=datetime(2026, 7, 23, 15, tzinfo=UTC),
+        required_domains=("news",),
+        advisory_domains=(),
+        sources=(
+            IncrementalCollectionSource(
+                domain="news",
+                source="fixture.news",
+                provider_identity="fixture",
+                configured=True,
+            ),
+        ),
+    )
+    candidate = EvidenceItem.create(
+        source="fixture.news",
+        evidence_type="release",
+        requested_date=date(2026, 7, 23),
+        content="same source payload",
+    )
+
+    first = admit_incremental_evidence(
+        plan,
+        (IncrementalEvidenceCandidate(evidence=candidate, available_on=date(2026, 7, 21)),),
+    )[0]
+    repeated = admit_incremental_evidence(
+        plan,
+        (IncrementalEvidenceCandidate(evidence=candidate, available_on=date(2026, 7, 21)),),
+    )[0]
+    later = admit_incremental_evidence(
+        plan,
+        (IncrementalEvidenceCandidate(evidence=candidate, available_on=date(2026, 7, 22)),),
+    )[0]
+
+    assert first == repeated
+    assert first.ref != candidate.ref
+    assert later.ref != first.ref
+
+
+def test_incremental_rejects_one_caller_ref_for_different_final_payloads(
+    app_settings,
+    repository,
+) -> None:
+    baseline = _service(app_settings, repository).run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+    first = EvidenceItem.create(
+        source="fixture.news",
+        evidence_type="release",
+        requested_date=date(2026, 7, 24),
+        content="first payload",
+    )
+    second = EvidenceItem.model_construct(
+        **{
+            **EvidenceItem.create(
+                source="fixture.news",
+                evidence_type="release",
+                requested_date=date(2026, 7, 24),
+                content="second payload",
+            ).model_dump(),
+            "ref": first.ref,
+        }
+    )
+
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_Graph,
+        identity_resolver=lambda symbol, _date: {"company_name": symbol},
+        eligibility_resolver=_equity_resolver,
+        local_name_resolver=lambda _ticker, _date, _config: None,
+        incremental_collector=lambda plan: IncrementalCollectionResult(
+            collection_manifest=_evidence_bearing_collection(
+                plan,
+                IncrementalEvidenceCandidate(evidence=first, available_on=date(2026, 7, 21)),
+            ).collection_manifest,
+            evidence=(
+                IncrementalEvidenceCandidate(evidence=first, available_on=date(2026, 7, 21)),
+                IncrementalEvidenceCandidate(evidence=second, available_on=date(2026, 7, 22)),
+            ),
+        ),
+        incremental_synthesizer=lambda _input: pytest.fail("must not synthesize"),
+    )
+
+    with pytest.raises(ValueError, match="caller reference collides"):
         service.run(
             AnalysisRequest(
                 ticker="NVDA",
@@ -532,7 +655,144 @@ def test_incremental_baseline_reference_collision_is_atomic(
     failed = repository.list_runs(status=RunStatus.FAILED).items
     assert len(failed) == 1
     assert repository.evidence_status(failed[0].id).status == "pending"
-    assert [node.id for node in repository.get_timeline("NVDA").nodes] == [baseline.run_id]
+
+
+@pytest.mark.parametrize("boundary", ["baseline", "cutoff"])
+def test_incremental_evidence_window_is_exact_at_baseline_and_cutoff(
+    app_settings,
+    repository,
+    boundary,
+) -> None:
+    baseline = _service(app_settings, repository).run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+    request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 24),
+        research_kind="incremental",
+        full_baseline_run_id=baseline.run_id,
+    )
+    candidate: EvidenceItem | None = None
+
+    def collect(plan: IncrementalCollectionPlan) -> IncrementalCollectionResult:
+        assert candidate is not None
+        return _evidence_bearing_collection(
+            plan,
+            IncrementalEvidenceCandidate(evidence=candidate),
+        )
+
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_Graph,
+        identity_resolver=lambda symbol, _date: {"company_name": symbol},
+        eligibility_resolver=_equity_resolver,
+        local_name_resolver=lambda _ticker, _date, _config: None,
+        incremental_collector=collect,
+        incremental_synthesizer=default_incremental_synthesizer,
+    )
+    queued = service.enqueue(request)
+    available_at = (
+        repository.get_run(baseline.run_id).information_cutoff_at
+        if boundary == "baseline"
+        else queued.information_cutoff_at
+    )
+    assert available_at is not None
+    candidate = EvidenceItem.create(
+        source="fixture.news",
+        evidence_type="boundary",
+        requested_date=request.analysis_date,
+        available_at=available_at,
+        content=f"{boundary} boundary",
+    )
+    if boundary == "baseline":
+        with pytest.raises(ValueError, match="baseline-to-cutoff window"):
+            service.run(request)
+        failed = repository.get_run(queued.id)
+        assert failed.status is RunStatus.FAILED
+        assert repository.evidence_status(queued.id).status == "pending"
+        assert [node.id for node in repository.get_timeline("NVDA").nodes] == [baseline.run_id]
+    else:
+        result = service.run(request)
+        assert result.status is RunStatus.SUCCEEDED
+        assert repository.get_evidence(result.run_id).items[0].available_at == available_at
+
+
+@pytest.mark.parametrize("mutation_phase", ["collection", "synthesis"])
+@pytest.mark.parametrize("baseline_mutation", ["trash", "purge"])
+def test_incremental_commit_revalidates_a_baseline_mutated_during_execution(
+    app_settings,
+    repository,
+    mutation_phase,
+    baseline_mutation,
+) -> None:
+    baseline = _service(app_settings, repository).run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+    second_connection = RunRepository(app_settings)
+    candidate = EvidenceItem.create(
+        source="fixture.news",
+        evidence_type="race-fixture",
+        requested_date=date(2026, 7, 24),
+        content="baseline mutation race",
+    )
+
+    def trash_baseline_from_second_connection() -> None:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            executor.submit(
+                _mutate_incremental_baseline,
+                second_connection,
+                baseline.run_id,
+                baseline_mutation,
+            ).result()
+
+    def collect(plan: IncrementalCollectionPlan) -> IncrementalCollectionResult:
+        if mutation_phase == "collection":
+            trash_baseline_from_second_connection()
+        return _evidence_bearing_collection(
+            plan,
+            IncrementalEvidenceCandidate(evidence=candidate, available_on=date(2026, 7, 21)),
+        )
+
+    def synthesize(input_):
+        if mutation_phase == "synthesis":
+            trash_baseline_from_second_connection()
+        return default_incremental_synthesizer(input_)
+
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_Graph,
+        identity_resolver=lambda symbol, _date: {"company_name": symbol},
+        eligibility_resolver=_equity_resolver,
+        local_name_resolver=lambda _ticker, _date, _config: None,
+        incremental_collector=collect,
+        incremental_synthesizer=synthesize,
+    )
+    with pytest.raises(InvalidIncrementalBaselineError):
+        service.run(
+            AnalysisRequest(
+                ticker="NVDA",
+                analysis_date=date(2026, 7, 24),
+                research_kind="incremental",
+                full_baseline_run_id=baseline.run_id,
+            )
+        )
+
+    failed = repository.list_runs(status=RunStatus.FAILED).items
+    assert len(failed) == 1
+    assert repository.evidence_status(failed[0].id).status == "pending"
+    assert failed[0].id not in {
+        node.id for node in repository.get_timeline("NVDA").nodes
+    }
+    with repository.sessions() as session:
+        assert session.get(DecisionRecord, failed[0].id) is None
+        assert session.get(ResearchNodeRecord, failed[0].id) is None
+    event_types = {event.event_type for event in repository.list_events(failed[0].id)}
+    assert {"evidence.sealed", "run.succeeded"}.isdisjoint(event_types)
+    assert "run.failed" in event_types
 
 
 def test_historical_evidence_backfill_keeps_the_cycle_head_and_excludes_sibling_inputs(
@@ -605,7 +865,10 @@ def test_historical_evidence_backfill_keeps_the_cycle_head_and_excludes_sibling_
     assert by_id[first.run_id].is_cycle_head
     assert not by_id[backfill.run_id].is_cycle_head
     assert timeline.primary_cycle_id == baseline.run_id
-    assert [item.ref for item in synthesis_inputs[0].incremental_evidence.items] == [older.ref]
+    assert [item.ref for item in synthesis_inputs[0].incremental_evidence.items] == [
+        backfill.evidence.items[0].ref
+    ]
+    assert backfill.evidence.items[0].ref != older.ref
     assert newer.ref not in synthesis_inputs[0].incremental_evidence.model_dump_json()
     assert not hasattr(synthesis_inputs[0], "sibling_decision")
 
@@ -2652,6 +2915,24 @@ def _evidence_bearing_collection(
         ),
         evidence=(candidate,),
     )
+
+
+def _mutate_incremental_baseline(
+    repository: RunRepository,
+    baseline_run_id: str,
+    mutation: str,
+) -> None:
+    repository.trash_runs((baseline_run_id,))
+    if mutation == "trash":
+        return
+    assert mutation == "purge"
+    with repository.sessions.begin() as session:
+        record = session.get(RunRecord, baseline_run_id)
+        assert record is not None
+        record.trashed_at = datetime(2020, 1, 1)
+    assert repository.purge_expired_trash(
+        cutoff=datetime(2020, 1, 2, tzinfo=UTC)
+    ) == 1
 
 
 def _incremental_synthesis_input_for_test(

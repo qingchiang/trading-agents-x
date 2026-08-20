@@ -105,6 +105,38 @@ test("shows evidence-based Information Advancement in the Timeline audit", async
   expect(screen.getByText("admissible_evidence")).toBeVisible();
 });
 
+test.each([
+  ["NVDA", "ev_0123456789ab"],
+  ["7203.T", "ev_123456789abc"],
+  ["600000.SS", "ev_abcdef012345"],
+])(
+  "shows admissible Evidence references in the %s Timeline audit",
+  async (instrument, evidenceRef) => {
+    vi.mocked(api.timeline).mockResolvedValue({ timeline: {
+      instrument, primary_cycle_id: "full-1",
+      nodes: [{ id: "incremental-1", cycle_id: "full-1", instrument,
+        analysis_date: "2026-07-24", research_schema_version: "1",
+        information_cutoff_at: "2026-07-24T15:59:59Z", method_snapshot: {},
+        research_kind: "incremental", full_baseline_run_id: "full-1",
+        is_cycle_head: true, is_primary: true, is_active: true, trashed_at: null,
+        information_advancement: {
+          advanced: true, reasons: ["admissible_evidence"],
+          newly_reviewable_baseline_component_ids: [],
+        },
+        collection_manifest: { entries: [{
+          domain: "news", source: "fixture.news", outcome: "complete_with_records",
+          evidence_refs: [evidenceRef],
+        }] },
+      }],
+    } } as never);
+
+    render(<Router initialPath={`/timelines/${instrument}`}><Timeline /></Router>);
+
+    fireEvent.click(await screen.findByText("Incremental Manifest"));
+    expect(screen.getByText(evidenceRef)).toBeVisible();
+  },
+);
+
 test("paginates Timeline nodes independently from the Timeline list", async () => {
   vi.mocked(api.timeline)
     .mockResolvedValueOnce({

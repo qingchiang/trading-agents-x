@@ -264,23 +264,9 @@ def admit_incremental_evidence(
     candidates: tuple[IncrementalEvidenceCandidate, ...],
 ) -> tuple[EvidenceItem, ...]:
     """Resolve and validate only new Evidence in the frozen half-open window."""
-    zone = _MARKET_TIMEZONES[plan.market]
     normalized: dict[str, EvidenceItem] = {}
     for candidate in candidates:
-        available_at = candidate.evidence.available_at
-        if available_at is None:
-            if candidate.available_on is None:
-                raise ValueError("Incremental Evidence requires reliable availability")
-            available_at = datetime.combine(
-                candidate.available_on,
-                time.max,
-                tzinfo=zone,
-            )
-        elif available_at.tzinfo is None or available_at.utcoffset() is None:
-            raise ValueError("Incremental Evidence availability must include a timezone")
-        resolved = candidate.evidence.model_copy(
-            update={"available_at": available_at.astimezone(UTC)}
-        )
+        resolved = _resolve_incremental_evidence(plan, candidate)
         if not plan.window_start < resolved.available_at <= plan.window_end:
             raise ValueError(
                 "Incremental Evidence availability must lie in the baseline-to-cutoff window"
@@ -290,6 +276,74 @@ def admit_incremental_evidence(
             raise ValueError("Incremental Evidence reference collides with a different payload")
         normalized[resolved.ref] = resolved
     return tuple(normalized.values())
+
+
+def remap_incremental_manifest_evidence_refs(
+    plan: IncrementalCollectionPlan,
+    manifest: CollectionManifest,
+    candidates: tuple[IncrementalEvidenceCandidate, ...],
+) -> CollectionManifest:
+    """Replace collector-local references with final sealed Evidence identities.
+
+    A collector may assign a reference before date-only availability metadata is
+    resolved.  The final reference must instead identify the complete sealed
+    payload.  One caller reference cannot stand for two final payloads, because
+    doing so would make a Manifest reference ambiguous.
+    """
+    ref_map: dict[str, str] = {}
+    for candidate in candidates:
+        final_ref = _resolve_incremental_evidence(plan, candidate).ref
+        caller_ref = candidate.evidence.ref
+        previous = ref_map.setdefault(caller_ref, final_ref)
+        if previous != final_ref:
+            raise ValueError(
+                "Incremental Evidence caller reference collides with different final payloads"
+            )
+    return manifest.model_copy(
+        update={
+            "entries": tuple(
+                entry.model_copy(
+                    update={
+                        "evidence_refs": tuple(
+                            ref_map.get(ref, ref) for ref in entry.evidence_refs
+                        )
+                    }
+                )
+                for entry in manifest.entries
+            )
+        }
+    )
+
+
+def _resolve_incremental_evidence(
+    plan: IncrementalCollectionPlan,
+    candidate: IncrementalEvidenceCandidate,
+) -> EvidenceItem:
+    """Build final Evidence identity after resolving conservative availability."""
+    zone = _MARKET_TIMEZONES[plan.market]
+    available_at = candidate.evidence.available_at
+    if available_at is None:
+        if candidate.available_on is None:
+            raise ValueError("Incremental Evidence requires reliable availability")
+        available_at = datetime.combine(candidate.available_on, time.max, tzinfo=zone)
+    elif available_at.tzinfo is None or available_at.utcoffset() is None:
+        raise ValueError("Incremental Evidence availability must include a timezone")
+    item = candidate.evidence
+    return EvidenceItem.create(
+        source=item.source,
+        evidence_type=item.evidence_type,
+        requested_date=item.requested_date,
+        effective_date=item.effective_date,
+        available_at=available_at.astimezone(UTC),
+        content=item.content,
+        value=item.value,
+        measurement_kind=item.measurement_kind,
+        unit=item.unit,
+        quality=item.quality,
+        fallback=item.fallback,
+        origins=item.origins,
+        provenance=item.provenance,
+    )
 
 
 def _coverage_domain(

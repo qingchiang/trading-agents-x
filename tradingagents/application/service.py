@@ -68,6 +68,7 @@ from .incremental_collection import (
     build_incremental_collection_plan,
     default_incremental_collector,
     incremental_market_identity,
+    remap_incremental_manifest_evidence_refs,
 )
 from .instrument_names import resolve_local_instrument_name
 from .llms import RunLLMs, create_run_llms
@@ -481,6 +482,14 @@ class AnalysisService:
                         raise NoInformationAdvancementError(
                             "Incremental collection found no admissible information advancement."
                         )
+                    # Collection may take long enough for another connection to
+                    # Trash or permanently purge the Full Baseline. Revalidate
+                    # before reading any baseline products so both mutations
+                    # fail as one typed lifecycle boundary.
+                    self.repository.validate_incremental_baseline(
+                        request.full_baseline_run_id,
+                        request,
+                    )
                     baseline_result = self.repository.get_result(baseline.id)
                     if baseline_result.decision is None:
                         raise ValueError(
@@ -839,7 +848,11 @@ class AnalysisService:
         )
         collected = self.incremental_collector(plan)
         if isinstance(collected, IncrementalCollectionResult):
-            manifest = collected.collection_manifest
+            manifest = remap_incremental_manifest_evidence_refs(
+                plan,
+                collected.collection_manifest,
+                collected.evidence,
+            )
             evidence_items = admit_incremental_evidence(plan, collected.evidence)
         else:
             manifest = collected

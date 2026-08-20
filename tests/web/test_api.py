@@ -17,13 +17,19 @@ from tradingagents.application.contracts import (
     AnalysisResult,
     ArtifactGenerationMethod,
     ArtifactGenerationObservation,
+    CollectionManifest,
+    CollectionManifestEntry,
+    CollectionOutcome,
     EvidenceBundle,
     EvidenceItem,
+    IncrementalCollectionPlan,
+    IncrementalCollectionResult,
+    IncrementalEvidenceCandidate,
     ResearchArtifactDraft,
     RunStatus,
 )
 from tradingagents.application.database import RunRecord
-from tradingagents.application.service import AnalysisService
+from tradingagents.application.service import AnalysisService, default_incremental_synthesizer
 from tradingagents.application.settings import AppSettings
 from tradingagents.version import __version__
 from tradingagents.web import create_app
@@ -37,6 +43,154 @@ def _payload(ticker: str = "NVDA") -> dict:
         "analysts": ["market", "news"],
         "output_language": "en",
     }
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("ticker", ["NVDA", "7203.T", "600000.SS"])
+async def test_evidence_bearing_incremental_nodes_read_back_through_all_market_api_audits(
+    web_client: httpx.AsyncClient,
+    web_repository,
+    web_settings,
+    ticker,
+) -> None:
+    baseline_request = AnalysisRequest(ticker=ticker, analysis_date=date(2026, 7, 20))
+    baseline, _ = web_repository.create_run(
+        baseline_request,
+        web_settings.resolve_run(baseline_request).snapshot(),
+        research_schema_version="1",
+        information_cutoff_at=datetime(2026, 7, 20, 23, 59, 59, tzinfo=UTC),
+        method_snapshot={"schema_version": "1"},
+        research_kind="full",
+    )
+    web_repository.claim_run(baseline.id, "fixture", 30)
+    baseline_item = EvidenceItem.create(
+        source="fixture.baseline",
+        evidence_type="baseline",
+        requested_date=baseline_request.analysis_date,
+        content=f"baseline {ticker}",
+    )
+    baseline_evidence = EvidenceBundle(
+        instrument=ticker,
+        analysis_date=baseline_request.analysis_date,
+        items=(baseline_item,),
+    )
+    web_repository.seal_evidence(baseline.id, baseline_evidence)
+    web_repository.complete(
+        baseline.id,
+        AnalysisResult(
+            run_id=baseline.id,
+            status=RunStatus.SUCCEEDED,
+            instrument=ticker,
+            reports={},
+            decision=research_decision(evidence_refs=(baseline_item.ref,)),
+            evidence=baseline_evidence,
+        ),
+        evidence=baseline_evidence,
+    )
+    candidate = EvidenceItem.create(
+        source="fixture.news",
+        evidence_type="incremental-news",
+        requested_date=date(2026, 7, 24),
+        effective_date=date(2026, 7, 19),
+        content=f"admissible {ticker} evidence",
+    )
+
+    def collect(plan: IncrementalCollectionPlan) -> IncrementalCollectionResult:
+        entries = tuple(
+            CollectionManifestEntry(
+                domain=source.domain,
+                source=source.source,
+                provider_identity=source.provider_identity,
+                chain_position=source.chain_position,
+                retrieved_at=plan.window_end if source.configured else None,
+                planned_from=plan.window_start,
+                planned_through=plan.window_end,
+                scanned_from=plan.window_start if source.configured else None,
+                scanned_through=plan.window_end if source.configured else None,
+                source_watermark="fixture-watermark" if source.configured else None,
+                outcome=(
+                    CollectionOutcome.COMPLETE_WITH_RECORDS
+                    if source.configured and source.domain == "news"
+                    else (
+                        CollectionOutcome.COMPLETE_EMPTY
+                        if source.configured
+                        else CollectionOutcome.NOT_APPLICABLE
+                    )
+                ),
+                evidence_refs=(candidate.ref,)
+                if source.configured and source.domain == "news"
+                else (),
+            )
+            for source in plan.sources
+        )
+        return IncrementalCollectionResult(
+            collection_manifest=CollectionManifest(
+                plan_version=plan.version,
+                market=plan.market,
+                entries=entries,
+            ),
+            evidence=(
+                IncrementalEvidenceCandidate(
+                    evidence=candidate,
+                    available_on=date(2026, 7, 21),
+                ),
+            ),
+        )
+
+    service = AnalysisService(
+        web_settings,
+        repository=web_repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        eligibility_resolver=lambda symbol: {"symbol": symbol, "quote_type": "EQUITY"},
+        incremental_collector=collect,
+        incremental_synthesizer=lambda input_: default_incremental_synthesizer(
+            input_
+        ).model_copy(
+            update={
+                "decision": input_.full_baseline_decision.model_copy(
+                    update={
+                        "evidence_refs": (
+                            *input_.full_baseline_decision.evidence_refs,
+                            input_.incremental_evidence.items[0].ref,
+                        )
+                    }
+                )
+            }
+        ),
+    )
+    result = service.run(
+        AnalysisRequest(
+            ticker=ticker,
+            analysis_date=date(2026, 7, 24),
+            research_kind="incremental",
+            full_baseline_run_id=baseline.id,
+        )
+    )
+    final_ref = result.evidence.items[0].ref
+    assert final_ref != candidate.ref
+
+    timeline = await web_client.get(f"/api/v1/timelines/{ticker}")
+    detail = await web_client.get(f"/api/v1/runs/{result.run_id}")
+    evidence = await web_client.get(f"/api/v1/runs/{result.run_id}/evidence")
+
+    assert timeline.status_code == detail.status_code == evidence.status_code == 200
+    node = next(item for item in timeline.json()["timeline"]["nodes"] if item["id"] == result.run_id)
+    assert node["full_baseline_run_id"] == baseline.id
+    assert "admissible_evidence" in node["information_advancement"]["reasons"]
+    assert node["research_coverage"]["domains"]
+    assert node["reassessment"]["entries"]
+    assert node["decision"]["evidence_refs"] == [baseline_item.ref, final_ref]
+    assert {
+        ref
+        for entry in node["collection_manifest"]["entries"]
+        for ref in entry["evidence_refs"]
+    } == {final_ref}
+    assert detail.json()["result"]["decision"]["evidence_refs"] == [
+        baseline_item.ref,
+        final_ref,
+    ]
+    assert evidence.json()["items"][0]["ref"] == final_ref
+    assert evidence.json()["items"][0]["available_at"]
 
 
 @pytest.mark.anyio
