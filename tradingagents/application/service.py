@@ -48,6 +48,7 @@ from .contracts import (
     RunEvent,
     RunExport,
     RunStatus,
+    report_language_prompt_label,
 )
 from .eligibility import validate_instrument_eligibility
 from .errors import (
@@ -138,6 +139,14 @@ def default_incremental_synthesizer(
 
 def _manifest_entry_refs(manifest) -> tuple[str, ...]:
     return tuple(f"manifest:{entry.domain}:{entry.source}" for entry in manifest.entries)
+
+
+def _manifest_entry_refs_for_domain(manifest, domain: str) -> tuple[str, ...]:
+    return tuple(
+        f"manifest:{entry.domain}:{entry.source}"
+        for entry in manifest.entries
+        if entry.domain == domain
+    )
 
 
 def _first_manifest_entry_ref(manifest) -> str:
@@ -547,6 +556,10 @@ class AnalysisService:
                             code=f"required_coverage.{domain.domain}",
                             message=f"Required {domain.domain} coverage is {domain.status.value}.",
                             origin="deterministic",
+                            manifest_entry_refs=_manifest_entry_refs_for_domain(
+                                collection.collection_manifest,
+                                domain.domain,
+                            ),
                         )
                         for domain in collection.research_coverage.domains
                         if domain.requirement.value == "required"
@@ -563,6 +576,10 @@ class AnalysisService:
                             *synthesis.full_research_required_reasons,
                             *deterministic_reasons,
                         ),
+                    )
+                    self._validate_full_research_required_reason_closure(
+                        products.full_research_required_reasons,
+                        synthesis_input,
                     )
                     segment_metrics = metrics.snapshot()
                     result = AnalysisResult(
@@ -959,11 +976,12 @@ class AnalysisService:
             serializer_llm = semantic_llm
         def event_writer(raw: dict[str, Any]) -> None:
             self._persist_graph_event(run_id, raw, on_event)
+        output_language = report_language_prompt_label(run_settings.output_language)
         semantic_prompt = (
             "Perform the required Incremental Research synthesis. Assess every Full "
             "Baseline Decision Component using only the typed input. Do not use sibling "
             "Incremental Nodes or invent Evidence. Produce a concise analysis brief for "
-            "the strict serializer.\n\n"
+            f"the strict serializer. Write all human-readable prose in {output_language}.\n\n"
             + synthesis_input.model_dump_json(indent=2)
         )
         with metrics.phase("incremental.synthesis.semantic", event_writer=event_writer):
@@ -975,7 +993,8 @@ class AnalysisService:
         serializer_prompt = (
             "Serialize a complete IncrementalSynthesis from this semantic brief and the "
             "typed bounded input. Every reassessment entry must include at least one "
-            "allowed Evidence reference or Collection Manifest entry reference.\n\n"
+            "allowed Evidence reference or Collection Manifest entry reference. Write all "
+            f"human-readable prose in {output_language}.\n\n"
             f"SEMANTIC BRIEF:\n{semantic_brief}\n\n"
             f"BOUNDED INPUT:\n{synthesis_input.model_dump_json(indent=2)}"
         )
@@ -1003,6 +1022,11 @@ class AnalysisService:
                 invoke_config={
                     "metadata": {"research_node": "incremental.synthesis.serialize"}
                 },
+                repair_instructions=(
+                    "Write all human-readable prose in "
+                    f"{output_language}. Preserve IDs, enums, Evidence refs, and "
+                    "Collection Manifest refs exactly."
+                ),
             ).invoke(
                 serializer_prompt,
                 example=example,
@@ -1023,6 +1047,26 @@ class AnalysisService:
                 raise ValueError("Reassessment Evidence references must close over the baseline or current bundle")
             if not set(entry.manifest_entry_refs).issubset(allowed_manifest_refs):
                 raise ValueError("Reassessment Manifest references must close over the current Collection Manifest")
+
+    @staticmethod
+    def _validate_full_research_required_reason_closure(
+        reasons: tuple[FullResearchRequiredReason, ...],
+        synthesis_input: IncrementalSynthesisInput,
+    ) -> None:
+        allowed_evidence_refs = set(synthesis_input.permitted_baseline_evidence_refs)
+        allowed_evidence_refs.update(item.ref for item in synthesis_input.incremental_evidence.items)
+        allowed_manifest_refs = set(_manifest_entry_refs(synthesis_input.collection_manifest))
+        for reason in reasons:
+            if not reason.evidence_refs and not reason.manifest_entry_refs:
+                raise ValueError("Full Research Required reasons require reference closure")
+            if not set(reason.evidence_refs).issubset(allowed_evidence_refs):
+                raise ValueError(
+                    "Full Research Required Evidence references must close over the baseline or current bundle"
+                )
+            if not set(reason.manifest_entry_refs).issubset(allowed_manifest_refs):
+                raise ValueError(
+                    "Full Research Required Manifest references must close over the current Collection Manifest"
+                )
 
     def _persist_graph_event(
         self,

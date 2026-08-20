@@ -1728,6 +1728,22 @@
             "title": "Code",
             "type": "string"
           },
+          "evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "manifest_entry_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Manifest Entry Refs",
+            "type": "array"
+          },
           "message": {
             "minLength": 1,
             "title": "Message",

@@ -1490,6 +1490,19 @@ class RunRepository:
                     raise EvidenceConflictError(
                         "Incremental Reassessment references another Collection Manifest"
                     )
+            for reason in products.full_research_required_reasons:
+                if not reason.evidence_refs and not reason.manifest_entry_refs:
+                    raise EvidenceConflictError(
+                        "Full Research Required reasons require reference closure"
+                    )
+                if not set(reason.evidence_refs).issubset(allowed_evidence_refs):
+                    raise EvidenceConflictError(
+                        "Full Research Required references evidence outside its closure"
+                    )
+                if not set(reason.manifest_entry_refs).issubset(manifest_refs):
+                    raise EvidenceConflictError(
+                        "Full Research Required references another Collection Manifest"
+                    )
             session.add(
                 RunEvidenceRecord(
                     run_id=run_id,

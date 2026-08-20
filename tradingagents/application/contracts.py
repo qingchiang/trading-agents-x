@@ -2022,6 +2022,32 @@ class FullResearchRequiredReason(FrozenModel):
     code: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
     message: str = Field(min_length=1)
     origin: Literal["deterministic", "semantic"]
+    evidence_refs: tuple[str, ...] = ()
+    manifest_entry_refs: tuple[str, ...] = ()
+
+    @field_validator("evidence_refs")
+    @classmethod
+    def validate_evidence_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _unique_evidence_refs(value)
+
+    @field_validator("manifest_entry_refs")
+    @classmethod
+    def validate_manifest_entry_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(value) != len(set(value)):
+            raise ValueError("Full Research Required manifest references must be unique")
+        if any(not item.startswith("manifest:") for item in value):
+            raise ValueError(
+                "Full Research Required manifest references must use the manifest namespace"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def validate_auditable_reference(self) -> FullResearchRequiredReason:
+        if not self.evidence_refs and not self.manifest_entry_refs:
+            raise ValueError(
+                "Full Research Required reasons require Evidence or Collection Manifest references"
+            )
+        return self
 
 
 class IncrementalSynthesisInput(FrozenModel):

@@ -27,13 +27,19 @@ from tradingagents.application.contracts import (
     CollectionManifest,
     CollectionManifestEntry,
     CollectionOutcome,
+    CoverageRequirement,
+    CoverageStatus,
     EvidenceBundle,
     EvidenceItem,
+    FullResearchRequiredReason,
     IncrementalCollectionPlan,
     IncrementalCollectionSource,
+    IncrementalSynthesisInput,
     InformationAdvancement,
+    PerformanceObservation,
     ResearchArtifactDraft,
     ResearchCoverage,
+    ResearchCoverageDomain,
     RunStatus,
 )
 from tradingagents.application.database import (
@@ -52,7 +58,9 @@ from tradingagents.application.errors import (
 from tradingagents.application.incremental_collection import (
     assess_incremental_collection,
 )
+from tradingagents.application.llms import RunLLMs
 from tradingagents.application.repository import (
+    EvidenceConflictError,
     IdempotencyConflictError,
     InvalidRunTransitionError,
     RunRepository,
@@ -292,6 +300,185 @@ def test_complete_empty_incremental_commits_current_decision_and_timeline_node(
     assert result.metrics.llm_calls == 0
     event_types = [event.event_type for event in repository.list_events(result.run_id)]
     assert event_types[-2:] == ["evidence.sealed", "run.succeeded"]
+
+
+def test_incremental_service_rejects_unclosed_full_research_required_reason(
+    app_settings,
+    repository,
+) -> None:
+    baseline = _service(app_settings, repository).run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+
+    def collect(plan: IncrementalCollectionPlan) -> CollectionManifest:
+        return _complete_empty_manifest(plan)
+
+    def synthesize(input_):
+        valid = default_incremental_synthesizer(input_)
+        dangling = FullResearchRequiredReason.model_construct(
+            code="semantic.unreliable_attribution",
+            message="The attribution cannot be relied upon.",
+            origin="semantic",
+            evidence_refs=("ev_dangling",),
+            manifest_entry_refs=(),
+        )
+        return valid.model_copy(
+            update={"full_research_required_reasons": (dangling,)}
+        )
+
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_Graph,
+        identity_resolver=lambda symbol, _date: {"company_name": symbol},
+        eligibility_resolver=_equity_resolver,
+        local_name_resolver=lambda _ticker, _date, _config: None,
+        incremental_collector=collect,
+        incremental_synthesizer=synthesize,
+    )
+
+    with pytest.raises(ValueError, match="Full Research Required.*close"):
+        service.run(
+            AnalysisRequest(
+                ticker="NVDA",
+                analysis_date=date(2026, 7, 24),
+                research_kind="incremental",
+                full_baseline_run_id=baseline.run_id,
+            )
+        )
+
+    assert [node.id for node in repository.get_timeline("NVDA").nodes] == [
+        baseline.run_id
+    ]
+
+
+def test_incremental_repository_rejects_unclosed_reason_atomically(
+    app_settings,
+    repository,
+    monkeypatch,
+) -> None:
+    baseline = _service(app_settings, repository).run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+
+    def synthesize(input_):
+        valid = default_incremental_synthesizer(input_)
+        sibling_ref = FullResearchRequiredReason.model_construct(
+            code="semantic.unreliable_attribution",
+            message="A sibling cycle cannot support this warning.",
+            origin="semantic",
+            evidence_refs=("ev_sibling",),
+            manifest_entry_refs=(),
+        )
+        return valid.model_copy(
+            update={"full_research_required_reasons": (sibling_ref,)}
+        )
+
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_Graph,
+        identity_resolver=lambda symbol, _date: {"company_name": symbol},
+        eligibility_resolver=_equity_resolver,
+        local_name_resolver=lambda _ticker, _date, _config: None,
+        incremental_collector=_complete_empty_manifest,
+        incremental_synthesizer=synthesize,
+    )
+    monkeypatch.setattr(
+        service,
+        "_validate_full_research_required_reason_closure",
+        lambda *_args: None,
+    )
+
+    with pytest.raises(EvidenceConflictError, match="outside its closure"):
+        service.run(
+            AnalysisRequest(
+                ticker="NVDA",
+                analysis_date=date(2026, 7, 24),
+                research_kind="incremental",
+                full_baseline_run_id=baseline.run_id,
+            )
+        )
+
+    failed = repository.list_runs(status=RunStatus.FAILED).items
+    assert len(failed) == 1
+    assert repository.evidence_status(failed[0].id).status == "pending"
+    assert [node.id for node in repository.get_timeline("NVDA").nodes] == [
+        baseline.run_id
+    ]
+
+
+@pytest.mark.parametrize(
+    ("language", "expected_prompt_label"),
+    [
+        ("zh-CN", "Simplified Chinese (简体中文, zh-CN)"),
+        ("ja", "Japanese (日本語, ja)"),
+    ],
+)
+def test_production_incremental_synthesis_carries_frozen_output_language_through_repair(
+    app_settings,
+    repository,
+    language,
+    expected_prompt_label,
+) -> None:
+    baseline = _service(app_settings, repository).run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+    semantic = _PromptSpy("semantic brief")
+    serializer = _StructuredPromptSpy()
+    manifest_refs: list[str] = []
+
+    def collect(plan: IncrementalCollectionPlan) -> CollectionManifest:
+        manifest = _complete_empty_manifest(plan)
+        manifest_refs[:] = [
+            f"manifest:{entry.domain}:{entry.source}" for entry in manifest.entries
+        ]
+        return manifest
+
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: RunLLMs(
+            quick=object(),
+            deep=semantic,
+            quick_serializer=object(),
+            deep_serializer=serializer,
+        ),
+        graph_factory=_Graph,
+        identity_resolver=lambda symbol, _date: {"company_name": symbol},
+        eligibility_resolver=_equity_resolver,
+        local_name_resolver=lambda _ticker, _date, _config: None,
+        incremental_collector=collect,
+    )
+    serializer_payload = default_incremental_synthesizer(
+        _incremental_synthesis_input_for_test(repository, baseline.run_id)
+    ).model_dump(mode="json")
+
+    def valid_payload(_prompt: str) -> dict[str, object]:
+        payload = deepcopy(serializer_payload)
+        for entry in payload["reassessment"]["entries"]:
+            entry["manifest_entry_refs"] = [manifest_refs[0]]
+        return payload
+
+    serializer.valid = valid_payload
+
+    result = service.run(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date=date(2026, 7, 24),
+            research_kind="incremental",
+            full_baseline_run_id=baseline.run_id,
+            output_language=language,
+        )
+    )
+
+    assert result.status is RunStatus.SUCCEEDED
+    assert len(semantic.prompts) == 1
+    assert all(expected_prompt_label in prompt for prompt in semantic.prompts)
+    assert len(serializer.prompts) == 2
+    assert all(expected_prompt_label in prompt for prompt in serializer.prompts)
 
 
 def test_incremental_atomic_commit_failure_leaves_no_node_or_evidence(
@@ -2074,6 +2261,121 @@ def _service(
         eligibility_resolver=_equity_resolver,
         local_name_resolver=lambda _ticker, _date, _config: None,
     )
+
+
+def _complete_empty_manifest(plan: IncrementalCollectionPlan) -> CollectionManifest:
+    return CollectionManifest(
+        plan_version=plan.version,
+        market=plan.market,
+        entries=tuple(
+            CollectionManifestEntry(
+                domain=source.domain,
+                source=source.source,
+                provider_identity=source.provider_identity,
+                chain_position=source.chain_position,
+                retrieved_at=plan.window_end if source.configured else None,
+                planned_from=plan.window_start,
+                planned_through=plan.window_end,
+                scanned_from=plan.window_start if source.configured else None,
+                scanned_through=plan.window_end if source.configured else None,
+                source_watermark="fixture-watermark" if source.configured else None,
+                outcome=(
+                    CollectionOutcome.COMPLETE_EMPTY
+                    if source.configured
+                    else CollectionOutcome.NOT_APPLICABLE
+                ),
+            )
+            for source in plan.sources
+        ),
+    )
+
+
+def _incremental_synthesis_input_for_test(
+    repository: RunRepository,
+    baseline_run_id: str,
+) -> IncrementalSynthesisInput:
+    baseline = repository.get_run(baseline_run_id)
+    result = repository.get_result(baseline_run_id)
+    evidence = repository.get_evidence(baseline_run_id)
+    assert result.decision is not None
+    manifest = CollectionManifest(
+        plan_version="1",
+        market="united_states",
+        entries=(
+            CollectionManifestEntry(
+                domain="news",
+                source="fixture",
+                provider_identity="fixture",
+                retrieved_at=datetime(2026, 7, 24, tzinfo=UTC),
+                planned_from=datetime(2026, 7, 21, tzinfo=UTC),
+                planned_through=datetime(2026, 7, 24, tzinfo=UTC),
+                scanned_from=datetime(2026, 7, 21, tzinfo=UTC),
+                scanned_through=datetime(2026, 7, 24, tzinfo=UTC),
+                source_watermark="fixture-watermark",
+                outcome=CollectionOutcome.COMPLETE_EMPTY,
+            ),
+        ),
+    )
+    return IncrementalSynthesisInput(
+        full_baseline_run_id=baseline_run_id,
+        full_baseline_decision=result.decision,
+        permitted_baseline_evidence_refs=tuple(item.ref for item in evidence.items),
+        incremental_evidence=EvidenceBundle(
+            instrument=baseline.request.ticker,
+            analysis_date=date(2026, 7, 24),
+            items=(),
+        ),
+        collection_manifest=manifest,
+        research_coverage=ResearchCoverage(
+            policy_version="1",
+            domains=(
+                ResearchCoverageDomain(
+                    domain="news",
+                    requirement=CoverageRequirement.REQUIRED,
+                    status=CoverageStatus.COMPLETE,
+                ),
+            ),
+        ),
+        information_advancement=InformationAdvancement(
+            advanced=True,
+            reasons=("complete_empty_scan",),
+        ),
+        performance=PerformanceObservation(
+            status="not_yet_observable",
+            reason="Fixture interval is not observable.",
+        ),
+        method_snapshot=baseline.method_snapshot or {},
+    )
+
+
+class _PromptSpy:
+    def __init__(self, response: str) -> None:
+        self.response = response
+        self.prompts: list[str] = []
+
+    def invoke(self, prompt, config=None):
+        del config
+        self.prompts.append(prompt)
+        return self.response
+
+
+class _StructuredPromptSpy:
+    preferred_structured_output_method = "function_calling"
+
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+        self.valid = None
+
+    def with_structured_output(self, _schema, **_kwargs):
+        return self
+
+    def invoke(self, prompt, config=None):
+        del config
+        self.prompts.append(prompt)
+        if len(self.prompts) == 1:
+            return {"raw": None, "parsed": {}}
+        value = self.valid(prompt) if callable(self.valid) else self.valid
+        return {"raw": None, "parsed": value}
 
 
 def test_service_persists_events_before_callback_and_result(

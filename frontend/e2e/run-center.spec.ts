@@ -37,6 +37,9 @@ function makeRun(
       quick_reasoning_effort: "provider_default",
       deep_reasoning_effort: "provider_default",
       output_language: "en",
+      research_kind: "full",
+      full_baseline_run_id: null,
+      make_primary: true,
     },
     config_snapshot: {},
     attempt: 1,
@@ -715,22 +718,126 @@ test("runs, templates, trash, and restores local research", async ({
   await expect(shell).not.toHaveClass(/sidebar-open/);
 });
 
-test("shows a mocked complete-empty Incremental Timeline node", async ({ page }) => {
-  await page.route("**/api/v1/timelines/NVDA**", (route) => route.fulfill({
-    json: { timeline: {
-      instrument: "NVDA", primary_cycle_id: "full-1", timeline_warning: true,
-      nodes: [{ id: "incremental-1", cycle_id: "full-1", instrument: "NVDA",
+test("completes a mocked Full-to-Incremental Timeline journey", async ({ page }) => {
+  let stage: "none" | "full" | "incremental" = "none";
+  let incrementalPayload: Record<string, unknown> | null = null;
+
+  await page.route("**/api/v1/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const path = url.pathname;
+
+    if (path === "/api/v1/capabilities") {
+      return route.fulfill({ json: {
+        profiles: ["fast", "standard", "deep"],
+        analysts: ["market", "social", "news", "fundamentals"],
+        output_languages: ["en", "zh-CN", "ja"],
+        providers: { openai: { label: "OpenAI", api_key_required: true,
+          api_key_configured: true, configured: true, selectable: true,
+          unavailable_reason: null, model_discovery_supported: true } },
+        defaults: { profile: "standard", llm_provider: "openai",
+          quick_model: "gpt-5.4-mini", deep_model: "gpt-5.5",
+          quick_reasoning_effort: "provider_default",
+          deep_reasoning_effort: "provider_default", output_language: "en",
+          lan_enabled: false, trash_retention_days: 30 },
+      } });
+    }
+    if (path === "/api/v1/providers/openai/models") {
+      return route.fulfill({ json: { provider: "openai", models: [
+        { id: "gpt-5.4-mini", label: "GPT quick", compatibility: "supported",
+          reasoning_efforts: ["provider_default"], default_roles: ["quick"] },
+        { id: "gpt-5.5", label: "GPT deep", compatibility: "supported",
+          reasoning_efforts: ["provider_default"], default_roles: ["deep"] },
+      ], source: "fixture", fetched_at: timestamp, stale: false, warning: null } });
+    }
+    if (path === "/api/v1/instruments/recent") return route.fulfill({ json: [] });
+    if (path === "/api/v1/runs" && request.method() === "POST") {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      const isIncremental = payload.research_kind === "incremental";
+      stage = isIncremental ? "incremental" : "full";
+      incrementalPayload = isIncremental ? payload : incrementalPayload;
+      const id = isIncremental ? "incremental-journey" : "full-journey";
+      const run = makeRun(id, "succeeded", { ticker: "NVDA" });
+      run.request = { ...run.request, ...payload };
+      return route.fulfill({ status: 202, json: run });
+    }
+    if (path === "/api/v1/timelines/NVDA") {
+      const full = {
+        id: "full-journey", cycle_id: "full-journey", instrument: "NVDA",
+        analysis_date: "2026-07-20", research_schema_version: "1",
+        information_cutoff_at: "2026-07-20T23:59:59Z",
+        method_snapshot: { llm_provider: "fixture" }, research_kind: "full",
+        full_baseline_run_id: null, is_baseline_compatible: true,
+        is_cycle_head: stage !== "incremental", is_primary: true, is_active: true,
+        trashed_at: null, collection_manifest: null, research_coverage: null,
+        reassessment: null, decision: result("full-journey").decision,
+        performance: null, outcome_review_status: null, cycle_warning: stage === "incremental",
+        full_research_required_reasons: [],
+      };
+      const incremental = {
+        id: "incremental-journey", cycle_id: "full-journey", instrument: "NVDA",
         analysis_date: "2026-07-24", research_schema_version: "1",
         information_cutoff_at: timestamp, method_snapshot: { llm_provider: "fixture" },
-        research_kind: "incremental", full_baseline_run_id: "full-1",
+        research_kind: "incremental", full_baseline_run_id: "full-journey",
         is_baseline_compatible: false, is_cycle_head: true, is_primary: true,
         is_active: true, trashed_at: null, outcome_review_status: "omitted",
+        collection_manifest: { entries: [{ domain: "news", source: "fixture",
+          outcome: "complete_empty", source_watermark: "fixture-watermark" }] },
+        research_coverage: { domains: [{ domain: "news", requirement: "required", status: "missing" }] },
+        reassessment: { entries: [{ component_id: "thesis", disposition: "reaffirmed",
+          reason: "The complete scan found no new matching record.",
+          manifest_entry_refs: ["manifest:news:fixture"] }] },
+        decision: { rating: "Hold", thesis: "Current complete decision" },
+        performance: { status: "not_yet_observable", reason: "No completed interval." },
         cycle_warning: true,
-        full_research_required_reasons: [{ code: "required_coverage.news", message: "Required news coverage is missing.", origin: "deterministic" }],
-      }],
-    } },
-  }));
+        full_research_required_reasons: [{ code: "required_coverage.news",
+          message: "Required news coverage is missing.", origin: "deterministic",
+          evidence_refs: [], manifest_entry_refs: ["manifest:news:fixture"] }],
+      };
+      return route.fulfill({ json: { timeline: {
+        instrument: "NVDA", primary_cycle_id: stage === "none" ? null : "full-journey",
+        timeline_warning: stage === "incremental", nodes: stage === "none" ? [] :
+          stage === "full" ? [full] : [full, incremental],
+        node_total: stage === "none" ? 0 : stage === "full" ? 1 : 2,
+        node_limit: 20, node_offset: 0,
+      } } });
+    }
+    const runMatch = path.match(/^\/api\/v1\/runs\/([^/]+)$/);
+    if (runMatch) {
+      const id = runMatch[1];
+      const isIncremental = id === "incremental-journey";
+      const run = makeRun(id, "succeeded", { ticker: "NVDA" });
+      run.request = { ...run.request, research_kind: isIncremental ? "incremental" : "full",
+        full_baseline_run_id: isIncremental ? "full-journey" : null };
+      return route.fulfill({ json: { run, result: result(id), attempts: [],
+        evidence_status: { status: "sealed", digest: "fixture-digest", item_count: 1,
+          table_count: 0, sealed_attempt: 1, sealed_at: timestamp } } });
+    }
+    return route.fulfill({ status: 404, json: { detail: "Not found" } });
+  });
+
+  await page.goto("/runs/new");
+  await page.locator("#new-run-ticker").fill("NVDA");
+  await page.locator("#new-run-analysis-date").fill("2026-07-20");
+  await page.locator("form.run-form button").last().click();
+  await expect(page).toHaveURL(/\/runs\/full-journey$/);
+
+  await page.goto("/runs/new");
+  await page.locator("#new-run-ticker").fill("NVDA");
+  await page.locator("#new-run-analysis-date").fill("2026-07-24");
+  await expect(page.locator('input[name="research-kind"]').nth(1)).toBeEnabled();
+  await page.locator('input[name="research-kind"]').nth(1).check();
+  await page.locator("form.run-form select").first().selectOption("full-journey");
+  await page.locator("form.run-form button").last().click();
+  await expect(page).toHaveURL(/\/runs\/incremental-journey$/);
+  expect(incrementalPayload).toMatchObject({ research_kind: "incremental",
+    full_baseline_run_id: "full-journey" });
+
   await page.goto("/timelines/NVDA");
+  await expect(page.getByText(/Full Research Node|完整研究节点/)).toBeVisible();
   await expect(page.getByText(/Incremental Research Node|增量研究节点/)).toBeVisible();
+  await expect(page.getByText("Incremental Manifest")).toBeVisible();
+  await expect(page.getByText("Current complete decision")).toBeVisible();
+  await expect(page.getByText("Required news coverage is missing.")).toBeVisible();
   await expect(page.getByText(/Full research recommended|建议进行完整研究/)).toBeVisible();
 });

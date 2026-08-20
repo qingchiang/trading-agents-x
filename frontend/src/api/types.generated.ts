@@ -237,6 +237,8 @@ export interface components {
     };
     FullResearchRequiredReason: {
       code: string;
+      evidence_refs?: string[];
+      manifest_entry_refs?: string[];
       message: string;
       origin: "deterministic" | "semantic";
     };
