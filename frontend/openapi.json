@@ -379,8 +379,7 @@
       },
       "AssetType": {
         "enum": [
-          "stock",
-          "crypto"
+          "stock"
         ],
         "title": "AssetType",
         "type": "string"
@@ -1523,6 +1522,45 @@
           "version"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "InstrumentAdmissionError": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/InstrumentAdmissionErrorCode"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "InstrumentAdmissionError",
+        "type": "object"
+      },
+      "InstrumentAdmissionErrorCode": {
+        "enum": [
+          "unsupported_instrument",
+          "instrument_eligibility_unavailable"
+        ],
+        "title": "InstrumentAdmissionErrorCode",
+        "type": "string"
+      },
+      "InstrumentAdmissionErrorResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/InstrumentAdmissionError"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "InstrumentAdmissionErrorResponse",
         "type": "object"
       },
       "IssueDisposition": {
@@ -2715,6 +2753,79 @@
         "title": "ReportSection",
         "type": "object"
       },
+      "RequestValidationDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "location": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "location",
+          "message",
+          "type"
+        ],
+        "title": "RequestValidationDetail",
+        "type": "object"
+      },
+      "RequestValidationError": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/RequestValidationErrorCode"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "RequestValidationError",
+        "type": "object"
+      },
+      "RequestValidationErrorCode": {
+        "enum": [
+          "validation_error"
+        ],
+        "title": "RequestValidationErrorCode",
+        "type": "string"
+      },
+      "RequestValidationErrorResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "details": {
+            "items": {
+              "$ref": "#/components/schemas/RequestValidationDetail"
+            },
+            "title": "Details",
+            "type": "array"
+          },
+          "error": {
+            "$ref": "#/components/schemas/RequestValidationError"
+          }
+        },
+        "required": [
+          "error",
+          "details"
+        ],
+        "title": "RequestValidationErrorResponse",
+        "type": "object"
+      },
       "ResearchArtifact": {
         "additionalProperties": false,
         "description": "Durable, typed output from one visible research stage.",
@@ -3648,6 +3759,132 @@
         "title": "RunProfile",
         "type": "string"
       },
+      "RunRequestSnapshot": {
+        "additionalProperties": false,
+        "description": "Tolerant request data retained with a Run for history inspection.\n\nThis is deliberately separate from :class:`AnalysisRequest`.  The latter\nis the admission contract for creating research, while this snapshot must\nremain able to represent request values that were accepted by an older\napplication version (including ``asset_type='crypto'``).  Snapshot\nvalidation does not normalize symbols, infer an asset type, or otherwise\nrewrite persisted request data.",
+        "properties": {
+          "analysis_date": {
+            "format": "date",
+            "title": "Analysis Date",
+            "type": "string"
+          },
+          "analysts": {
+            "default": [
+              "market",
+              "social",
+              "news",
+              "fundamentals"
+            ],
+            "items": {
+              "enum": [
+                "market",
+                "social",
+                "news",
+                "fundamentals"
+              ],
+              "type": "string"
+            },
+            "title": "Analysts",
+            "type": "array"
+          },
+          "asset_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Type"
+          },
+          "deep_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deep Model"
+          },
+          "deep_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deep Reasoning Effort"
+          },
+          "llm_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Provider"
+          },
+          "output_language": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportLanguage"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Language"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/RunProfile",
+            "default": "standard"
+          },
+          "quick_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quick Model"
+          },
+          "quick_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quick Reasoning Effort"
+          },
+          "ticker": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Ticker",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticker",
+          "analysis_date"
+        ],
+        "title": "RunRequestSnapshot",
+        "type": "object"
+      },
       "RunStatus": {
         "enum": [
           "queued",
@@ -3744,7 +3981,15 @@
             "$ref": "#/components/schemas/RunMetrics"
           },
           "request": {
-            "$ref": "#/components/schemas/AnalysisRequest"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunRequestSnapshot"
+              },
+              {
+                "$ref": "#/components/schemas/AnalysisRequest"
+              }
+            ],
+            "title": "Request"
           },
           "research_rating": {
             "anyOf": [
@@ -3907,7 +4152,15 @@
             "$ref": "#/components/schemas/RunMetrics"
           },
           "request": {
-            "$ref": "#/components/schemas/AnalysisRequest"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunRequestSnapshot"
+              },
+              {
+                "$ref": "#/components/schemas/AnalysisRequest"
+              }
+            ],
+            "title": "Request"
           },
           "source_run_id": {
             "anyOf": [
@@ -4636,12 +4889,66 @@
           "422": {
             "content": {
               "application/json": {
+                "examples": {
+                  "unsupported_instrument": {
+                    "summary": "Confirmed non-equity",
+                    "value": {
+                      "error": {
+                        "code": "unsupported_instrument",
+                        "message": "Confirmed non-equity instrument."
+                      }
+                    }
+                  },
+                  "validation_error": {
+                    "summary": "Malformed request",
+                    "value": {
+                      "details": [
+                        {
+                          "location": [
+                            "body",
+                            "ticker"
+                          ],
+                          "message": "String should have at least 1 character",
+                          "type": "string_too_short"
+                        }
+                      ],
+                      "error": {
+                        "code": "validation_error",
+                        "message": "Request validation failed"
+                      }
+                    }
+                  }
+                },
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/InstrumentAdmissionErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationErrorResponse"
+                    }
+                  ],
+                  "title": "Response 422 Create Run Api V1 Runs Post"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "The request is invalid or the symbol is a confirmed unsupported instrument."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "instrument_eligibility_unavailable",
+                    "message": "Eligibility is temporarily unavailable."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/InstrumentAdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "Instrument eligibility could not be verified."
           }
         },
         "summary": "Create Run"

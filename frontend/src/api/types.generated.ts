@@ -50,7 +50,7 @@ export interface components {
       node: string;
       task_kind: "semantic_structured" | "schema_serialization";
     };
-    AssetType: "stock" | "crypto";
+    AssetType: "stock";
     AuditedRangeEndpoint: {
       as_of_date: string;
       basis: components["schemas"]["MarketReferenceBasis"];
@@ -213,6 +213,14 @@ export interface components {
       queue: components["schemas"]["QueueHealth"];
       status: "ok" | "degraded";
       version: string;
+    };
+    InstrumentAdmissionError: {
+      code: components["schemas"]["InstrumentAdmissionErrorCode"];
+      message: string;
+    };
+    InstrumentAdmissionErrorCode: "unsupported_instrument" | "instrument_eligibility_unavailable";
+    InstrumentAdmissionErrorResponse: {
+      error: components["schemas"]["InstrumentAdmissionError"];
     };
     IssueDisposition: {
       issue_id: string;
@@ -380,6 +388,20 @@ export interface components {
       source_refs?: string[];
       title: string;
     };
+    RequestValidationDetail: {
+      location: string[];
+      message: string;
+      type: string;
+    };
+    RequestValidationError: {
+      code: components["schemas"]["RequestValidationErrorCode"];
+      message: string;
+    };
+    RequestValidationErrorCode: "validation_error";
+    RequestValidationErrorResponse: {
+      details: components["schemas"]["RequestValidationDetail"][];
+      error: components["schemas"]["RequestValidationError"];
+    };
     ResearchArtifact: {
       attempt: number;
       content: components["schemas"]["AnalystReport"] | components["schemas"]["DecisionBrief"] | components["schemas"]["ResearchCase"] | components["schemas"]["DebateAgenda"] | components["schemas"]["RebuttalReview"] | components["schemas"]["JudgeDraft"] | components["schemas"]["RiskReview"] | components["schemas"]["ResearchDecision"];
@@ -510,6 +532,19 @@ export interface components {
       total: number;
     };
     RunProfile: "fast" | "standard" | "deep";
+    RunRequestSnapshot: {
+      analysis_date: string;
+      analysts?: ("market" | "social" | "news" | "fundamentals")[];
+      asset_type?: string | null;
+      deep_model?: string | null;
+      deep_reasoning_effort?: string | null;
+      llm_provider?: string | null;
+      output_language?: components["schemas"]["ReportLanguage"] | string | null;
+      profile?: components["schemas"]["RunProfile"];
+      quick_model?: string | null;
+      quick_reasoning_effort?: string | null;
+      ticker: string;
+    };
     RunStatus: "queued" | "running" | "succeeded" | "failed" | "cancelled";
     RunSummaryView: {
       attempt: number;
@@ -523,7 +558,7 @@ export interface components {
       instrument_local_name?: string | null;
       instrument_name?: string | null;
       metrics?: components["schemas"]["RunMetrics"];
-      request: components["schemas"]["AnalysisRequest"];
+      request: components["schemas"]["RunRequestSnapshot"] | components["schemas"]["AnalysisRequest"];
       research_rating?: components["schemas"]["ResearchRating"] | null;
       source_run_id?: string | null;
       started_at?: string | null;
@@ -544,7 +579,7 @@ export interface components {
       instrument_local_name?: string | null;
       instrument_name?: string | null;
       metrics?: components["schemas"]["RunMetrics"];
-      request: components["schemas"]["AnalysisRequest"];
+      request: components["schemas"]["RunRequestSnapshot"] | components["schemas"]["AnalysisRequest"];
       source_run_id?: string | null;
       started_at?: string | null;
       status: components["schemas"]["RunStatus"];

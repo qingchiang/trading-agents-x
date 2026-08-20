@@ -20,9 +20,10 @@ from pydantic_core import PydanticCustomError
 
 from tradingagents.application.reporting import order_reports
 from tradingagents.dataflows.symbol_utils import (
-    crypto_base,
+    is_supported_equity_symbol,
     market_timezone,
     normalize_symbol,
+    unsupported_crypto_base,
 )
 
 _SYMBOL_PATTERN = re.compile(r"^[A-Z0-9^][A-Z0-9.^=_-]*$")
@@ -140,7 +141,6 @@ class RunTrashState(_StableStrEnum):
 
 class AssetType(_StableStrEnum):
     STOCK = "stock"
-    CRYPTO = "crypto"
 
 
 class ResearchRating(_StableStrEnum):
@@ -1669,18 +1669,48 @@ class AnalysisRequest(FrozenModel):
         return normalize_report_language(value)
 
     @model_validator(mode="after")
-    def infer_asset_type(self) -> AnalysisRequest:
-        inferred = AssetType.CRYPTO if crypto_base(self.ticker) else AssetType.STOCK
+    def validate_asset_type(self) -> AnalysisRequest:
+        if unsupported_crypto_base(self.ticker):
+            raise ValueError("Crypto instruments are not supported")
+        if not is_supported_equity_symbol(self.ticker):
+            raise ValueError("Only listed equity instruments are supported")
         if self.asset_type is None:
-            object.__setattr__(self, "asset_type", inferred)
-        elif self.asset_type != inferred and inferred is AssetType.CRYPTO:
-            raise ValueError("known crypto symbols must use asset_type='crypto'")
-        if inferred is AssetType.CRYPTO and "fundamentals" in self.analysts:
-            compatible = tuple(analyst for analyst in self.analysts if analyst != "fundamentals")
-            if not compatible:
-                raise ValueError("crypto analysis requires a non-fundamentals analyst")
-            object.__setattr__(self, "analysts", compatible)
+            object.__setattr__(self, "asset_type", AssetType.STOCK)
         return self
+
+
+class RunRequestSnapshot(FrozenModel):
+    """Tolerant request data retained with a Run for history inspection.
+
+    This is deliberately separate from :class:`AnalysisRequest`.  The latter
+    is the admission contract for creating research, while this snapshot must
+    remain able to represent request values that were accepted by an older
+    application version (including ``asset_type='crypto'``).  Snapshot
+    validation does not normalize symbols, infer an asset type, or otherwise
+    rewrite persisted request data.
+    """
+
+    ticker: str = Field(min_length=1, max_length=64)
+    analysis_date: date
+    asset_type: str | None = None
+    profile: RunProfile = RunProfile.STANDARD
+    analysts: tuple[Literal["market", "social", "news", "fundamentals"], ...] = (
+        "market",
+        "social",
+        "news",
+        "fundamentals",
+    )
+    llm_provider: str | None = None
+    quick_model: str | None = None
+    deep_model: str | None = None
+    quick_reasoning_effort: str | None = None
+    deep_reasoning_effort: str | None = None
+    output_language: ReportLanguage | str | None = None
+
+    def to_analysis_request(self) -> AnalysisRequest:
+        """Cross the creation boundary explicitly when execution is requested."""
+
+        return AnalysisRequest.model_validate(self.model_dump(mode="python"))
 
 
 class RunEvent(FrozenModel):
@@ -1758,7 +1788,10 @@ class RunView(FrozenModel):
     instrument_name: str | None = None
     instrument_local_name: str | None = None
     status: RunStatus
-    request: AnalysisRequest
+    # Keep the creation schema referenced in OpenAPI for existing clients,
+    # while repository hydration and all normal responses use the tolerant
+    # snapshot branch below.
+    request: RunRequestSnapshot | AnalysisRequest
     config_snapshot: dict[str, Any]
     attempt: int
     cancel_requested: bool
@@ -1770,6 +1803,16 @@ class RunView(FrozenModel):
     finished_at: datetime | None = None
     trashed_at: datetime | None = None
     updated_at: datetime
+
+    @field_validator("request", mode="before")
+    @classmethod
+    def coerce_creation_request(
+        cls,
+        value: RunRequestSnapshot | AnalysisRequest | Any,
+    ) -> RunRequestSnapshot | AnalysisRequest | Any:
+        if isinstance(value, AnalysisRequest):
+            return value.model_dump(mode="python")
+        return value
 
 
 class RunAttemptView(FrozenModel):

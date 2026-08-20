@@ -67,19 +67,18 @@ def build_instrument_context(
     classification are injected so agents anchor to the real company rather
     than pattern-matching the price chart to a wrong one (#814).
     """
-    is_crypto = asset_type == "crypto"
-    instrument_label = "asset" if is_crypto else "instrument"
+    del asset_type  # retained for compatibility with persisted graph callers
     context = (
-        f"The {instrument_label} to analyze is `{ticker}`. "
+        f"The instrument to analyze is `{ticker}`. "
         "Use this exact ticker in every tool call, report, and recommendation, "
-        "preserving any exchange suffix (e.g. `.TO`, `.L`, `.HK`, `.T`, `-USD`)."
+        "preserving any exchange suffix (e.g. `.TO`, `.L`, `.HK`, `.T`)."
     )
 
     details = []
     if identity:
         name = identity.get("company_name") or identity.get("name")
         if name:
-            details.append(f"{'Name' if is_crypto else 'Company'}: {name}")
+            details.append(f"Company: {name}")
         sector, industry = identity.get("sector"), identity.get("industry")
         if sector and industry:
             details.append(f"Business classification: {sector} / {industry}")
@@ -97,11 +96,6 @@ def build_instrument_context(
             "result explicitly disproves this resolved identity."
         )
 
-    if is_crypto:
-        context += (
-            " Treat it as a crypto asset rather than a company, and do not "
-            "assume company fundamentals are available."
-        )
     return context
 
 
@@ -117,7 +111,4 @@ def get_instrument_context_from_state(state: Mapping[str, Any]) -> str:
     context = state.get("instrument_context")
     if isinstance(context, str) and context.strip():
         return context
-    return build_instrument_context(
-        str(state["company_of_interest"]),
-        state.get("asset_type", "stock"),
-    )
+    return build_instrument_context(str(state["company_of_interest"]))

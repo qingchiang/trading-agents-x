@@ -25,7 +25,14 @@ def _lan_app(tmp_path: Path):
     )
     upgrade_database(settings)
     repository = RunRepository(settings)
-    service = AnalysisService(settings, repository=repository)
+    service = AnalysisService(
+        settings,
+        repository=repository,
+        eligibility_resolver=lambda ticker: {
+            "symbol": ticker,
+            "quote_type": "EQUITY",
+        },
+    )
     return create_app(settings, service=service), repository
 
 

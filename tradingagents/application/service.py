@@ -11,13 +11,17 @@ from typing import Any
 from uuid import uuid4
 
 from langgraph.checkpoint.sqlite import SqliteSaver
+from pydantic import ValidationError
 
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
     resolve_instrument_identity,
 )
 from tradingagents.dataflows.config import use_config
-from tradingagents.dataflows.interface import validate_market_routing
+from tradingagents.dataflows.interface import (
+    resolve_instrument_eligibility,
+    validate_market_routing,
+)
 from tradingagents.dataflows.symbol_utils import (
     match_exchange_suffix,
     normalize_symbol,
@@ -34,6 +38,11 @@ from .contracts import (
     RunExport,
     RunStatus,
 )
+from .eligibility import validate_instrument_eligibility
+from .errors import (
+    InstrumentEligibilityUnavailableError,
+    UnsupportedInstrumentError,
+)
 from .exporting import (
     render_run_export_markdown,
     render_run_export_package,
@@ -48,6 +57,7 @@ from .settings import AppSettings, RunSettings
 logger = logging.getLogger(__name__)
 
 EventHandler = Callable[[RunEvent], None]
+EligibilityResolver = Callable[[str], Any]
 
 
 def _instrument_display_name(identity: Any) -> str | None:
@@ -81,6 +91,7 @@ class AnalysisService:
         ),
         graph_factory: Callable[..., ResearchGraph] = ResearchGraph,
         identity_resolver: Callable[..., dict[str, str]] = resolve_instrument_identity,
+        eligibility_resolver: EligibilityResolver = resolve_instrument_eligibility,
         local_name_resolver: Callable[[str, str, dict[str, Any]], str | None] = (
             resolve_local_instrument_name
         ),
@@ -92,6 +103,9 @@ class AnalysisService:
         self.llm_factory = llm_factory
         self.graph_factory = graph_factory
         self.identity_resolver = identity_resolver
+        if eligibility_resolver is None:
+            raise TypeError("eligibility_resolver is required")
+        self.eligibility_resolver = eligibility_resolver
         self.local_name_resolver = local_name_resolver
 
     def enqueue(
@@ -101,7 +115,25 @@ class AnalysisService:
         idempotency_key: str | None = None,
         source_run_id: str | None = None,
     ) -> RunView:
+        if not isinstance(request, AnalysisRequest):
+            raise TypeError(
+                "new Runs require an AnalysisRequest creation contract"
+            )
+        # Re-run the creation validators at the lifecycle seam.  A caller can
+        # otherwise bypass Pydantic validation with ``model_construct`` and
+        # hand the repository an invalid request that would still be durable.
+        request = AnalysisRequest.model_validate(
+            request.model_dump(mode="json", warnings=False)
+        )
         run_settings = self.settings.resolve_run(request)
+        self._validate_instrument_eligibility(request)
+        if source_run_id is not None:
+            # A retained Run may carry a legacy request that is intentionally
+            # readable but no longer admitted as a source for new research.
+            source_request = self._creation_request_from_history(
+                self.repository.get_run(source_run_id).request
+            )
+            self._validate_instrument_eligibility(source_request)
         request = self.settings.materialize_request(
             request,
             run_settings=run_settings,
@@ -123,6 +155,40 @@ class AnalysisService:
                 },
             )
         return view
+
+    def _validate_instrument_eligibility(
+        self,
+        request: AnalysisRequest,
+    ) -> None:
+        """Fail closed unless one exact resolver result confirms an equity."""
+        try:
+            dataflow_config = self.settings.default_run_settings.dataflow_config(
+                self.settings
+            )
+            with use_config(dataflow_config, merge=False):
+                result = self.eligibility_resolver(request.ticker)
+            validate_instrument_eligibility(request.ticker, result)
+        except (
+            InstrumentEligibilityUnavailableError,
+            UnsupportedInstrumentError,
+        ):
+            raise
+        except Exception as exc:
+            raise InstrumentEligibilityUnavailableError(
+                request.ticker,
+                f"resolver failed with {type(exc).__name__}",
+            ) from exc
+
+    @staticmethod
+    def _creation_request_from_history(snapshot: Any) -> AnalysisRequest:
+        """Convert a retained request through the current creation boundary."""
+        try:
+            return snapshot.to_analysis_request()
+        except ValidationError as exc:
+            raise UnsupportedInstrumentError(
+                snapshot.ticker,
+                snapshot.asset_type or "legacy request",
+            ) from exc
 
     def run(
         self,
@@ -153,9 +219,6 @@ class AnalysisService:
     ) -> AnalysisResult:
         if run.status is not RunStatus.RUNNING:
             raise ValueError(f"run {run.id} must be claimed before execution")
-        run_settings = RunSettings.model_validate(run.config_snapshot)
-        dataflow_config = run_settings.dataflow_config(self.settings)
-        validate_market_routing(dataflow_config)
         checkpoint_thread = self.repository.checkpoint_thread(run.id)
         self._emit(
             run.id,
@@ -169,11 +232,22 @@ class AnalysisService:
 
         with self._heartbeat(run.id, worker_id):
             try:
+                # Run views expose a tolerant retained snapshot.  Execution
+                # must cross the current creation contract explicitly so a
+                # future admission change also gates already-queued legacy
+                # requests.  Keep this inside the lifecycle boundary: a
+                # retained request that no longer converts must become a
+                # terminal failed Run rather than strand a claimed attempt.
+                request = self._creation_request_from_history(run.request)
+                run_settings = RunSettings.model_validate(run.config_snapshot)
+                dataflow_config = run_settings.dataflow_config(self.settings)
+                self._validate_instrument_eligibility(request)
+                validate_market_routing(dataflow_config)
                 with use_config(dataflow_config):
                     try:
                         identity = self.identity_resolver(
-                            run.request.ticker,
-                            run.request.analysis_date.isoformat(),
+                            request.ticker,
+                            request.analysis_date.isoformat(),
                         )
                     except Exception as exc:
                         logger.warning(
@@ -192,8 +266,8 @@ class AnalysisService:
                     if instrument_local_name is None:
                         try:
                             resolved_local_name = self.local_name_resolver(
-                                run.request.ticker,
-                                run.request.analysis_date.isoformat(),
+                                request.ticker,
+                                request.analysis_date.isoformat(),
                                 dataflow_config,
                             )
                         except Exception as exc:
@@ -210,13 +284,12 @@ class AnalysisService:
                                     resolved_local_name,
                                 )
                     instrument_context = build_instrument_context(
-                        run.request.ticker,
-                        run.request.asset_type.value,
-                        identity,
+                        request.ticker,
+                        identity=identity,
                     )
                     memory = self.repository.memory_context(
-                        run.request.ticker,
-                        run.request.asset_type.value,
+                        request.ticker,
+                        request.asset_type.value,
                     )
                     llms = self.llm_factory(
                         run_settings,
@@ -236,13 +309,13 @@ class AnalysisService:
                     deep_llm=deep_llm,
                     quick_serializer_llm=quick_serializer_llm,
                     deep_serializer_llm=deep_serializer_llm,
-                    profile=run.request.profile,
-                    selected_analysts=run.request.analysts,
+                    profile=request.profile,
+                    selected_analysts=request.analysts,
                     metrics=metrics,
                 )
                 context = RunContext(
                     run_id=run.id,
-                    request=run.request,
+                    request=request,
                     settings=run_settings,
                     dataflow_config=dataflow_config,
                     memory=memory,
@@ -308,7 +381,7 @@ class AnalysisService:
                         instrument_local_name=instrument_local_name,
                     )
                     benchmark = self._benchmark(
-                        run.request.ticker,
+                        request.ticker,
                         dataflow_config,
                     )
                     aggregate_metrics = self.repository.complete(
@@ -345,7 +418,7 @@ class AnalysisService:
                 return AnalysisResult(
                     run_id=run.id,
                     status=RunStatus.CANCELLED,
-                    instrument=run.request.ticker,
+                    instrument=request.ticker,
                     instrument_name=instrument_name,
                     instrument_local_name=instrument_local_name,
                     reports={},
@@ -424,6 +497,12 @@ class AnalysisService:
         return view
 
     def retry(self, run_id: str) -> RunView:
+        # Validate the retained request through the current creation contract
+        # before mutating the retry lifecycle.  This keeps retry from becoming
+        # an alternate execution path around current admission rules.
+        retained = self.repository.get_run(run_id)
+        request = self._creation_request_from_history(retained.request)
+        self._validate_instrument_eligibility(request)
         view = self.repository.retry(run_id)
         self.repository.append_event(
             run_id,

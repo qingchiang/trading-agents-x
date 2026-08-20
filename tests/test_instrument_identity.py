@@ -11,6 +11,7 @@ from tradingagents.agents.utils.agent_utils import (
     resolve_instrument_identity,
 )
 from tradingagents.dataflows import instrument_identity as identity_dataflow
+from tradingagents.dataflows.instrument_identity import resolve_instrument_eligibility
 
 
 @pytest.mark.unit
@@ -112,6 +113,42 @@ class ResolveInstrumentIdentityTests(unittest.TestCase):
 
 
 @pytest.mark.unit
+def test_eligibility_resolver_preserves_malformed_mixed_candidates():
+    search = type(
+        "SearchResult",
+        (),
+        {
+            "quotes": [
+                {"symbol": "NVDA", "quoteType": "EQUITY"},
+                "malformed candidate",
+            ]
+        },
+    )()
+    with patch.object(identity_dataflow.yf, "Search", return_value=search):
+        result = resolve_instrument_eligibility("NVDA")
+
+    assert isinstance(result, list)
+    assert result[1] == {"_malformed": True}
+
+
+@pytest.mark.unit
+def test_eligibility_resolver_keeps_mismatched_symbol_ambiguous():
+    search = type(
+        "SearchResult",
+        (),
+        {
+            "quotes": [
+                {"symbol": "NVD", "quoteType": "EQUITY"},
+            ]
+        },
+    )()
+    with patch.object(identity_dataflow.yf, "Search", return_value=search):
+        result = resolve_instrument_eligibility("NVDA")
+
+    assert result == {"symbol": "NVD", "quote_type": "EQUITY"}
+
+
+@pytest.mark.unit
 class BuildInstrumentContextTests(unittest.TestCase):
     def test_mentions_exact_symbol_without_identity(self):
         context = build_instrument_context("7203.T")
@@ -134,13 +171,6 @@ class BuildInstrumentContextTests(unittest.TestCase):
         self.assertIn("Exchange: PNK", context)
         self.assertIn("Do not substitute a different company", context)
 
-    def test_crypto_uses_name_label_and_keeps_hint(self):
-        context = build_instrument_context(
-            "BTC-USD", "crypto", {"company_name": "Bitcoin USD"}
-        )
-        self.assertIn("Name: Bitcoin USD", context)
-        self.assertIn("crypto asset rather than a company", context)
-
 @pytest.mark.unit
 class GetInstrumentContextFromStateTests(unittest.TestCase):
     def test_prefers_precomputed_context(self):
@@ -156,10 +186,5 @@ class GetInstrumentContextFromStateTests(unittest.TestCase):
         mock.assert_not_called()
         self.assertIn("NVDA", context)
 
-    def test_fallback_respects_asset_type(self):
-        context = get_instrument_context_from_state(
-            {"company_of_interest": "BTC-USD", "asset_type": "crypto"}
-        )
-        self.assertIn("crypto asset", context)
 if __name__ == "__main__":
     unittest.main()

@@ -16,6 +16,10 @@ from tradingagents.application.contracts import (
     RunProfile,
     RunStatus,
 )
+from tradingagents.application.errors import (
+    InstrumentEligibilityUnavailableError,
+    UnsupportedInstrumentError,
+)
 from tradingagents.application.service import AnalysisService
 from tradingagents.application.settings import AppSettings
 
@@ -36,7 +40,13 @@ def cli_settings(tmp_path: Path) -> AppSettings:
 
 @pytest.fixture
 def cli_service(cli_settings: AppSettings) -> AnalysisService:
-    return AnalysisService(cli_settings)
+    return AnalysisService(
+        cli_settings,
+        eligibility_resolver=lambda ticker: {
+            "symbol": ticker,
+            "quote_type": "EQUITY",
+        },
+    )
 
 
 def test_root_is_noninteractive_and_exposes_the_new_command_tree() -> None:
@@ -141,6 +151,35 @@ def test_run_builds_the_typed_request_and_prints_json(monkeypatch) -> None:
     assert request.quick_reasoning_effort == "low"
     assert request.deep_reasoning_effort == "high"
     assert captured["on_event"] is None
+
+
+@pytest.mark.parametrize(
+    ("error", "exit_code"),
+    [
+        (UnsupportedInstrumentError("SPY", "etf"), 2),
+        (InstrumentEligibilityUnavailableError("NVDA"), 1),
+    ],
+)
+def test_run_distinguishes_usage_and_operational_admission_errors(
+    monkeypatch,
+    error,
+    exit_code,
+) -> None:
+    class FakeApplication:
+        def run(self, _request, *, on_event):
+            raise error
+
+    monkeypatch.setattr(cli, "_application", lambda: FakeApplication())
+    result = runner.invoke(
+        cli.app,
+        ["run", "SPY", "--date", "2026-07-24", "--quiet"],
+    )
+
+    assert result.exit_code == exit_code
+    if isinstance(error, UnsupportedInstrumentError):
+        assert "SPY" in result.output
+    else:
+        assert "temporarily unavailable" in result.output
 
 
 def test_run_defaults_to_the_instrument_market_date(monkeypatch) -> None:

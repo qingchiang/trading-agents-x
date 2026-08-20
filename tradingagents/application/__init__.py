@@ -58,12 +58,19 @@ from .contracts import (
     RunExport,
     RunMetrics,
     RunProfile,
+    RunRequestSnapshot,
     RunStatus,
     ScenarioReferenceCategory,
     ScenarioReferenceRange,
     StructuredRecoveryNotice,
     TableDataType,
     ValuationAssessment,
+)
+from .errors import (
+    EligibilityUnavailableError,
+    InstrumentEligibilityError,
+    InstrumentEligibilityUnavailableError,
+    UnsupportedInstrumentError,
 )
 from .settings import AppSettings, RunSettings
 
@@ -123,11 +130,16 @@ __all__ = [
     "RunExport",
     "RunAttemptView",
     "RunMetrics",
+    "RunRequestSnapshot",
     "RunProfile",
     "RunSettings",
     "RunStatus",
     "TableDataType",
     "ValuationAssessment",
+    "EligibilityUnavailableError",
+    "InstrumentEligibilityError",
+    "InstrumentEligibilityUnavailableError",
+    "UnsupportedInstrumentError",
     "AuditedRangeEndpoint",
     "NumericTemporalBasis",
     "ScenarioReferenceRange",

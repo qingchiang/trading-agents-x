@@ -146,6 +146,29 @@ test("reuses the idempotency key when a browser submission is retried", async ()
   );
 });
 
+test.each([
+  ["unsupported_instrument", "This symbol is not a supported listed equity."],
+  [
+    "instrument_eligibility_unavailable",
+    "This symbol could not be verified right now. Please retry later.",
+  ],
+])("renders the distinct admission message for %s", async (code, message) => {
+  vi.mocked(api.createRun).mockRejectedValueOnce({ code });
+  const { unmount } = render(
+    <Router initialPath="/runs/new">
+      <NewRunRoutes />
+    </Router>,
+  );
+  await screen.findAllByRole("option", { name: "Quick" });
+  fireEvent.change(screen.getByLabelText(/^Ticker/), {
+    target: { value: "NVDA" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /Queue research/ }));
+
+  await screen.findByText(message);
+  unmount();
+});
+
 test("keeps UI locale and report output language independent", async () => {
   vi.mocked(api.createRun).mockResolvedValue({ id: "run-3" } as RunView);
   render(

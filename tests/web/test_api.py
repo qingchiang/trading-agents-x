@@ -22,6 +22,8 @@ from tradingagents.application.contracts import (
     ResearchArtifactDraft,
     RunStatus,
 )
+from tradingagents.application.database import RunRecord
+from tradingagents.application.service import AnalysisService
 from tradingagents.application.settings import AppSettings
 from tradingagents.version import __version__
 from tradingagents.web import create_app
@@ -62,6 +64,108 @@ async def test_run_creation_is_idempotent_and_conflicts_are_explicit(
     assert repeated.json()["id"] == first.json()["id"]
     assert conflict.status_code == 409
     assert conflict.json()["error"]["code"] == "idempotency_conflict"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("result", "status", "code"),
+    [
+        (
+            {"symbol": "SPY", "quote_type": "ETF"},
+            422,
+            "unsupported_instrument",
+        ),
+        (
+            {"symbol": "NVDA", "quote_type": 17},
+            503,
+            "instrument_eligibility_unavailable",
+        ),
+    ],
+)
+async def test_run_creation_distinguishes_typed_admission_failures(
+    web_settings,
+    web_repository,
+    result,
+    status,
+    code,
+) -> None:
+    service = AnalysisService(
+        web_settings,
+        repository=web_repository,
+        eligibility_resolver=lambda _ticker: result,
+    )
+    transport = httpx.ASGITransport(app=create_app(web_settings, service=service))
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+    ) as client:
+        response = await client.post(
+            "/api/v1/runs",
+            json=_payload("SPY" if status == 422 else "NVDA"),
+        )
+
+    assert response.status_code == status
+    payload = response.json()
+    assert payload["error"]["code"] == code
+    assert payload["error"]["message"]
+    assert web_repository.list_runs().total == 0
+
+
+@pytest.mark.anyio
+async def test_legacy_crypto_retry_returns_stable_unsupported_response(
+    web_client: httpx.AsyncClient,
+    web_repository,
+    web_service,
+) -> None:
+    queued = web_service.enqueue(
+        AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
+    )
+    web_repository.claim_run(queued.id, "legacy-fixture", 30)
+    web_repository.fail(queued.id, RuntimeError("fixture failure"))
+    with web_repository.sessions.begin() as session:
+        record = session.get(RunRecord, queued.id)
+        record.request_json = {
+            **record.request_json,
+            "ticker": "BTC-USD",
+            "asset_type": "crypto",
+        }
+
+    response = await web_client.post(f"/api/v1/runs/{queued.id}/retry")
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "unsupported_instrument"
+    unchanged = web_repository.get_run(queued.id)
+    assert unchanged.status is RunStatus.FAILED
+    assert unchanged.attempt == 1
+
+
+@pytest.mark.anyio
+async def test_legacy_crypto_source_returns_stable_unsupported_response(
+    web_client: httpx.AsyncClient,
+    web_repository,
+    web_service,
+) -> None:
+    source = web_service.enqueue(
+        AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
+    )
+    web_repository.claim_run(source.id, "legacy-fixture", 30)
+    web_repository.fail(source.id, RuntimeError("fixture failure"))
+    with web_repository.sessions.begin() as session:
+        record = session.get(RunRecord, source.id)
+        record.request_json = {
+            **record.request_json,
+            "ticker": "BTC-USD",
+            "asset_type": "crypto",
+        }
+
+    response = await web_client.post(
+        "/api/v1/runs",
+        json={**_payload("AAPL"), "source_run_id": source.id},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "unsupported_instrument"
+    assert web_repository.list_runs().total == 1
 
 
 @pytest.mark.anyio
@@ -274,6 +378,22 @@ async def test_openapi_contains_versioned_run_center_contract(
     assert "provenance" not in schema["components"]["schemas"][
         "CapabilityDefaults"
     ]["properties"]
+    create_run_422 = paths["/api/v1/runs"]["post"]["responses"]["422"]
+    response_schema = create_run_422["content"]["application/json"]["schema"]
+    assert {
+        member["$ref"]
+        for member in response_schema["anyOf"]
+    } == {
+        "#/components/schemas/InstrumentAdmissionErrorResponse",
+        "#/components/schemas/RequestValidationErrorResponse",
+    }
+    assert {
+        "unsupported_instrument",
+        "validation_error",
+    } <= set(create_run_422["content"]["application/json"]["examples"])
+    assert schema["components"]["schemas"]["RequestValidationErrorCode"][
+        "enum"
+    ] == ["validation_error"]
 
 
 @pytest.mark.anyio
@@ -604,7 +724,14 @@ async def test_capabilities_and_runs_preserve_custom_output_language(
         },
         load_env_files=False,
     )
-    transport = httpx.ASGITransport(app=create_app(settings))
+    service = AnalysisService(
+        settings,
+        eligibility_resolver=lambda ticker: {
+            "symbol": ticker,
+            "quote_type": "EQUITY",
+        },
+    )
+    transport = httpx.ASGITransport(app=create_app(settings, service=service))
     async with httpx.AsyncClient(
         transport=transport,
         base_url="http://testserver",
@@ -658,10 +785,21 @@ async def test_model_catalog_falls_back_without_leaking_configuration(
 async def test_health_reports_database_and_queue_status(
     web_client: httpx.AsyncClient,
     web_service,
+    web_repository,
 ) -> None:
     web_service.enqueue(
         AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
     )
+    legacy = web_service.enqueue(
+        AnalysisRequest(ticker="AAPL", analysis_date="2026-07-24")
+    )
+    with web_repository.sessions.begin() as session:
+        record = session.get(RunRecord, legacy.id)
+        record.request_json = {
+            **record.request_json,
+            "ticker": "BTC-USD",
+            "asset_type": "crypto",
+        }
 
     response = await web_client.get("/api/v1/health")
 
@@ -710,4 +848,7 @@ async def test_validation_error_does_not_echo_request_values(
 
     assert response.status_code == 422
     assert private_value not in response.text
-    assert response.json()["error"]["code"] == "validation_error"
+    payload = response.json()
+    assert payload["error"]["code"] == "validation_error"
+    assert payload["details"]
+    assert {"location", "message", "type"} <= set(payload["details"][0])

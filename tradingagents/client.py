@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any
 
 from .application.contracts import (
     AnalysisRequest,
@@ -13,12 +14,21 @@ from .application.contracts import (
 )
 from .application.service import AnalysisService
 from .application.settings import AppSettings
+from .dataflows.interface import resolve_instrument_eligibility
 
 
 class TradingAgents:
-    def __init__(self, settings: AppSettings):
+    def __init__(
+        self,
+        settings: AppSettings,
+        *,
+        eligibility_resolver: Callable[..., Any] = resolve_instrument_eligibility,
+    ):
         self.settings = settings
-        self.service = AnalysisService(settings)
+        self.service = AnalysisService(
+            settings,
+            eligibility_resolver=eligibility_resolver,
+        )
 
     @classmethod
     def from_env(

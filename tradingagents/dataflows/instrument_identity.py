@@ -13,7 +13,9 @@ from collections.abc import Iterable
 from typing import Any
 
 import yfinance as yf
+from yfinance.exceptions import YFRateLimitError
 
+from .errors import VendorError, VendorRateLimitError
 from .lookahead import is_near_live
 from .stockstats_utils import yf_retry
 from .symbol_utils import normalize_symbol
@@ -120,6 +122,80 @@ def resolve_search_identity(ticker: str) -> dict[str, str]:
     evidence that Yahoo attached an article to the requested symbol.
     """
     return _resolve_cached(normalize_symbol(ticker), "historical")
+
+
+def resolve_instrument_eligibility(
+    canonical_symbol: str,
+) -> dict[str, Any] | list[dict[str, Any]]:
+    """Resolve exact current security classification for product admission.
+
+    This is intentionally separate from :func:`resolve_instrument_identity`.
+    Display identity is best effort and may return names without a symbol or
+    quote type; admission must preserve enough raw identity to fail closed on
+    a fuzzy, missing, or mismatched result.  The provider search remains a
+    current product-admission lookup and is never passed into graph Evidence.
+    """
+    canonical = str(canonical_symbol).strip()
+    if not canonical:
+        return {}
+    try:
+        search = yf_retry(
+            lambda: yf.Search(
+                query=canonical,
+                max_results=8,
+                news_count=0,
+                enable_fuzzy_query=False,
+            )
+        )
+    except YFRateLimitError as exc:
+        raise VendorRateLimitError(
+            "Yahoo Finance eligibility lookup was rate limited"
+        ) from exc
+    except VendorError:
+        raise
+    except Exception as exc:
+        raise VendorError("Yahoo Finance eligibility lookup failed") from exc
+    rows: list[dict[str, Any]] = []
+    for quote in getattr(search, "quotes", None) or []:
+        if not isinstance(quote, dict):
+            # Preserve malformed provider candidates so the application
+            # validator cannot accidentally accept a valid row mixed with an
+            # unusable response.
+            rows.append({"_malformed": True})
+            continue
+        symbol = _clean_identity_value(quote.get("symbol"))
+        if symbol is None:
+            rows.append({"_malformed": True})
+            continue
+        row: dict[str, Any] = {"symbol": symbol}
+        for source, target in (
+            ("quoteType", "quote_type"),
+            ("securityType", "security_type"),
+            ("type", "type"),
+        ):
+            if source not in quote:
+                continue
+            value = _clean_identity_value(quote[source])
+            if value is None:
+                row["_malformed"] = True
+                continue
+            row[target] = value
+        rows.append(row)
+    # Search may include ordinary related-symbol noise. Keep exact candidates,
+    # but retain malformed rows mixed into that exact set so they cannot be
+    # silently discarded. If there is no exact candidate, preserve all rows so
+    # the application validator reports a mismatch or ambiguity as unavailable.
+    exact = [
+        row
+        for row in rows
+        if isinstance(row.get("symbol"), str)
+        and row["symbol"].casefold() == canonical.casefold()
+    ]
+    malformed = [row for row in rows if row.get("_malformed") is True]
+    candidates = exact + malformed if exact else rows
+    if len(candidates) == 1:
+        return candidates[0]
+    return candidates
 
 
 def clear_instrument_identity_cache() -> None:

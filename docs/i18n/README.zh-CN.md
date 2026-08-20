@@ -4,7 +4,14 @@
 
 TradingAgentsX 是一个面向本地单用户的投资研究运行中心。它将 React Web
 界面、版本化 FastAPI、SQLite 持久队列与 evidence-first LangGraph 工作流
-组合在一起，支持美股、日股、中国 A 股以及兼容 Yahoo 符号的其他标的。
+组合在一起，支持美国、日本和中国大陆的上市股票。系统内部使用规范化的
+Yahoo 风格 Instrument Key；服务商支持更广泛的符号并不会扩大产品候选边界。
+
+所有公共入口都使用有类型的准入错误：已确认的非股票标的返回
+`unsupported_instrument`（HTTP 422）；空、歧义、格式错误、标的不匹配或
+查询失败则返回 `instrument_eligibility_unavailable`（HTTP 503）。这两个稳定
+错误码同时写入 OpenAPI 和生成的客户端类型；retry 重新排队历史 Run 前也会
+重新执行当前准入检查。
 
 系统输出的是研究结论，不是账户指令。最终契约包括评级、置信度、论点、
 证据引用、催化剂、风险、失效条件和时间范围；不会生成仓位比例、账户配置、
@@ -223,8 +230,8 @@ Web 登录会将 token 换成签名的 `HttpOnly`、`SameSite=Strict` cookie，
 | --- | --- | --- |
 | 美国/默认 | `NVDA`, `SPY` | yfinance 默认路线 |
 | 日本 | `7203.T` | J-Quants、EDINET、TDnet、日本新闻与宏观数据 |
-| 中国 A 股 | `600519.SS`, `000001.SZ` | Tencent/AkShare、CNINFO、Sina、Eastmoney 与中国宏观数据 |
-| Crypto/FX | `BTC-USD`, `EURUSD=X` | 兼容的默认路线 |
+| 中国 A 股 | `600519.SS`, `000651.SZ` | Tencent/AkShare、CNINFO、Sina、Eastmoney 与中国宏观数据 |
+| 产品边界 | 美国/默认、东京 `.T`、中国大陆 `.SS`/`.SZ` 股票 | 路由前执行正向候选校验 |
 
 历史分析以标的所在市场的本地日期为准。Evidence 保留 requested/effective
 date、带时区的 available time、实际来源、质量、fallback 和 provenance；

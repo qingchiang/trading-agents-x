@@ -21,7 +21,6 @@ from fastapi import (
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import func, select
 
 from tradingagents.application.contracts import (
     EvidenceBundle,
@@ -34,10 +33,9 @@ from tradingagents.application.contracts import (
     RunView,
     report_language_value,
 )
-from tradingagents.application.database import (
-    DecisionRecord,
-    OutcomeRecord,
-    RunRecord,
+from tradingagents.application.errors import (
+    InstrumentEligibilityUnavailableError,
+    UnsupportedInstrumentError,
 )
 from tradingagents.application.maintenance import TrashMaintenance
 from tradingagents.application.repository import (
@@ -60,9 +58,11 @@ from .auth import COOKIE_NAME, SESSION_MAX_AGE, LanSessionManager
 from .models import (
     CapabilitiesResponse,
     HealthResponse,
+    InstrumentAdmissionErrorResponse,
     LoginRequest,
     MemoryEntry,
     ProviderModelCatalog,
+    RequestValidationErrorResponse,
     RunBatchRequest,
     RunBatchResult,
     RunCreateRequest,
@@ -131,6 +131,20 @@ def create_app(
         exc: IdempotencyConflictError,
     ):
         return _error(409, "idempotency_conflict", str(exc))
+
+    @app.exception_handler(UnsupportedInstrumentError)
+    async def unsupported_instrument(
+        _request: Request,
+        exc: UnsupportedInstrumentError,
+    ):
+        return _error(422, exc.code, str(exc))
+
+    @app.exception_handler(InstrumentEligibilityUnavailableError)
+    async def eligibility_unavailable(
+        _request: Request,
+        exc: InstrumentEligibilityUnavailableError,
+    ):
+        return _error(503, exc.code, str(exc))
 
     @app.exception_handler(EvidenceNotSealedError)
     async def evidence_not_sealed(
@@ -226,7 +240,62 @@ def create_app(
         response.delete_cookie(COOKIE_NAME, path="/")
         return {"authenticated": False}
 
-    @app.post(f"{API_PREFIX}/runs", response_model=RunView, status_code=202)
+    @app.post(
+        f"{API_PREFIX}/runs",
+        response_model=RunView,
+        status_code=202,
+        responses={
+            422: {
+                "description": "The request is invalid or the symbol is a confirmed unsupported instrument.",
+                "model": InstrumentAdmissionErrorResponse | RequestValidationErrorResponse,
+                "content": {
+                    "application/json": {
+                        "examples": {
+                            "unsupported_instrument": {
+                                "summary": "Confirmed non-equity",
+                                "value": {
+                                    "error": {
+                                        "code": "unsupported_instrument",
+                                        "message": "Confirmed non-equity instrument.",
+                                    }
+                                },
+                            },
+                            "validation_error": {
+                                "summary": "Malformed request",
+                                "value": {
+                                    "error": {
+                                        "code": "validation_error",
+                                        "message": "Request validation failed",
+                                    },
+                                    "details": [
+                                        {
+                                            "location": ["body", "ticker"],
+                                            "message": "String should have at least 1 character",
+                                            "type": "string_too_short",
+                                        }
+                                    ],
+                                },
+                            }
+                        }
+                    }
+                },
+            },
+            503: {
+                "description": "Instrument eligibility could not be verified.",
+                "model": InstrumentAdmissionErrorResponse,
+                "content": {
+                    "application/json": {
+                        "example": {
+                            "error": {
+                                "code": "instrument_eligibility_unavailable",
+                                "message": "Eligibility is temporarily unavailable.",
+                            }
+                        }
+                    }
+                },
+            },
+        },
+    )
     def create_run(
         request: RunCreateRequest,
         idempotency_key: Annotated[
@@ -480,37 +549,10 @@ def create_app(
             "pending_outcomes": 0,
         }
         try:
-            with repository.sessions() as session:
-                counts = dict(
-                    session.execute(
-                        select(RunRecord.status, func.count())
-                        .where(RunRecord.trashed_at.is_(None))
-                        .group_by(RunRecord.status)
-                    ).all()
-                )
-                queue["queued"] = int(counts.get("queued", 0))
-                queue["running"] = int(counts.get("running", 0))
-                queue["pending_outcomes"] = int(
-                    session.scalar(
-                        select(func.count())
-                        .select_from(OutcomeRecord)
-                        .join(
-                            DecisionRecord,
-                            OutcomeRecord.decision_id
-                            == DecisionRecord.id,
-                        )
-                        .join(
-                            RunRecord,
-                            RunRecord.id
-                            == DecisionRecord.run_id,
-                        )
-                        .where(
-                            OutcomeRecord.status == "pending",
-                            RunRecord.trashed_at.is_(None),
-                        )
-                    )
-                    or 0
-                )
+            counts = repository.active_run_counts()
+            queue["queued"] = counts.get("queued", 0)
+            queue["running"] = counts.get("running", 0)
+            queue["pending_outcomes"] = repository.pending_outcome_count()
         except Exception:
             database_status = "error"
         return HealthResponse(

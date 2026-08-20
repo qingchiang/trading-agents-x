@@ -45,10 +45,19 @@ export type RunAttemptView = components["schemas"]["RunAttemptView"];
 export type StructuredRecoveryNotice =
   components["schemas"]["StructuredRecoveryNotice"];
 export type RecentInstrument = components["schemas"]["RecentInstrument"];
+export type InstrumentAdmissionErrorCode =
+  components["schemas"]["InstrumentAdmissionErrorCode"];
+export type InstrumentAdmissionErrorResponse =
+  components["schemas"]["InstrumentAdmissionErrorResponse"];
+export type RequestValidationErrorCode =
+  components["schemas"]["RequestValidationErrorCode"];
+export type RequestValidationErrorResponse =
+  components["schemas"]["RequestValidationErrorResponse"];
 
 export class ApiError extends Error {
   constructor(
     public status: number,
+    public code: string | undefined,
     message: string,
   ) {
     super(message);
@@ -66,16 +75,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!response.ok) {
     let message = response.statusText;
+    let code: string | undefined;
     try {
       const payload = await response.json();
       message = payload.error?.message || payload.detail || message;
+      code = payload.error?.code;
     } catch {
       // Preserve the HTTP status text.
     }
     if (response.status === 401) {
       window.dispatchEvent(new CustomEvent("tradingagents:auth-required"));
     }
-    throw new ApiError(response.status, message);
+    throw new ApiError(response.status, code, message);
   }
   return (await response.json()) as T;
 }

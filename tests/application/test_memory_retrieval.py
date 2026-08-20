@@ -144,13 +144,6 @@ def test_memory_context_uses_deterministic_same_and_cross_ticker_limits(
     )
     _seed_memory(
         repository,
-        ticker="BTC-USD",
-        analysis_date=date(2026, 5, 1),
-        reflection="crypto-reflection",
-        thesis="crypto-decision",
-    )
-    _seed_memory(
-        repository,
         ticker="MSFT",
         analysis_date=date(2026, 5, 1),
         reflection="pending-reflection",
@@ -183,7 +176,6 @@ def test_memory_context_uses_deterministic_same_and_cross_ticker_limits(
     assert "same-reflection-1" not in prompt
     assert "cross-decision-4" not in prompt
     assert "japan-reflection" not in prompt
-    assert "crypto-reflection" not in prompt
     assert "pending-reflection" not in prompt
 
 
@@ -199,7 +191,7 @@ def test_china_cross_ticker_memory_shares_market_without_crossing_regions(
     )
     _seed_memory(
         repository,
-        ticker="000001.SZ",
+        ticker="000651.SZ",
         analysis_date=date(2026, 7, 2),
         reflection="Shenzhen lesson",
         thesis="Shenzhen decision",
@@ -230,8 +222,6 @@ def test_china_cross_ticker_memory_shares_market_without_crossing_regions(
         ("7203.T", "stock", "Asia/Tokyo"),
         ("600519.SS", "stock", "Asia/Shanghai"),
         ("000001.SZ", "stock", "Asia/Shanghai"),
-        ("BTC-USD", "crypto", "CRYPTO"),
-        ("ETH-USD", "crypto", "CRYPTO"),
     ),
 )
 def test_memory_market_bucket(
@@ -434,3 +424,37 @@ def test_memory_entries_support_fuzzy_filters_and_full_field_search(
     ] == ["MSFT"]
     assert repository.memory_entries(q="pending cloud", status="resolved") == []
     assert repository.memory_entries(q="%") == []
+
+
+def test_retained_crypto_is_excluded_from_active_memory(
+    repository: RunRepository,
+) -> None:
+    run_id = _seed_memory(
+        repository,
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 1),
+        reflection="Legacy Crypto reflection must remain read-only.",
+        thesis="Legacy fixture.",
+    )
+    with repository.sessions.begin() as session:
+        decision = session.scalar(
+            select(DecisionRecord).where(DecisionRecord.run_id == run_id)
+        )
+        decision.asset_type = "crypto"
+
+    assert repository.memory_context("NVDA", "stock").items == ()
+    assert repository.memory_entries() == []
+
+
+def test_crypto_memory_request_cannot_reuse_stock_memory(
+    repository: RunRepository,
+) -> None:
+    _seed_memory(
+        repository,
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 1),
+        reflection="Stock-only reflection.",
+        thesis="Stock-only fixture.",
+    )
+
+    assert repository.memory_context("NVDA", "crypto").items == ()

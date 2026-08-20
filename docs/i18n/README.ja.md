@@ -5,7 +5,14 @@
 TradingAgentsX は、ローカルの単一ユーザー向け投資リサーチ実行センター
 です。React Web UI、バージョン化された FastAPI、SQLite の永続キュー、
 evidence-first な LangGraph ワークフローを統合し、米国株、日本株、中国
-A 株、および Yahoo 互換シンボルを扱います。
+大陸 A 株を扱います。内部では正規化された Yahoo 形式の Instrument Key を
+使いますが、ベンダーがより広いシンボルを扱えても製品の候補境界は広がりません。
+
+すべての公開入口は型付きの admission エラーを返します。確認済みの非株式は
+`unsupported_instrument`（HTTP 422）、空・曖昧・不正形式・銘柄不一致・検索失敗は
+`instrument_eligibility_unavailable`（HTTP 503）です。2 つの安定したエラーコードは
+OpenAPI と生成クライアント型にも記録され、retained Run を retry で再キューする前に
+現在の admission 境界を再検証します。
 
 出力はリサーチ上の結論であり、口座向けの売買指示ではありません。最終契約
 には rating、confidence、thesis、evidence refs、catalysts、risks、
@@ -246,8 +253,8 @@ Web login は token を署名済み `HttpOnly`、`SameSite=Strict` cookie に交
 | --- | --- | --- |
 | US/default | `NVDA`, `SPY` | yfinance default |
 | Japan | `7203.T` | J-Quants、EDINET、TDnet、日本の news/macro |
-| China A-share | `600519.SS`, `000001.SZ` | Tencent/AkShare、CNINFO、Sina、Eastmoney、中国 macro |
-| Crypto/FX | `BTC-USD`, `EURUSD=X` | 互換 default route |
+| China A-share | `600519.SS`, `000651.SZ` | Tencent/AkShare、CNINFO、Sina、Eastmoney、中国 macro |
+| 製品境界 | 米国/default、東京 `.T`、中国本土 `.SS`/`.SZ` の株式 | ルーティング前に候補を正判定 |
 
 historical analysis の cutoff は instrument market のローカル日付です。
 Evidence は requested/effective date、timezone 付き availability、実際の

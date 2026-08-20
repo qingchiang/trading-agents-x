@@ -25,11 +25,17 @@ from tradingagents.application.contracts import (
     ResearchArtifactDraft,
     RunStatus,
 )
+from tradingagents.application.database import RunRecord
+from tradingagents.application.errors import UnsupportedInstrumentError
 from tradingagents.application.repository import RunRepository
 from tradingagents.application.runtime import RunCancelled, WorkerShutdown
 from tradingagents.application.service import AnalysisService
 from tradingagents.dataflows.config import get_config
 from tradingagents.graph.research_graph import GraphExecution
+
+
+def _equity_resolver(ticker: str) -> dict[str, str]:
+    return {"symbol": ticker, "quote_type": "EQUITY"}
 
 
 def _execution(ticker: str) -> GraphExecution:
@@ -287,6 +293,7 @@ def _service(
         llm_factory=lambda *_args, **_kwargs: (object(), object()),
         graph_factory=graph_factory,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
+        eligibility_resolver=_equity_resolver,
         local_name_resolver=lambda _ticker, _date, _config: None,
     )
 
@@ -329,6 +336,56 @@ def test_service_persists_events_before_callback_and_result(
     assert events[2].payload["api_key"] == "[REDACTED]"
 
 
+def test_rejected_creation_has_no_persistent_side_effects(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(app_settings, repository)
+    invalid_request = AnalysisRequest.model_construct(
+        ticker="BTC-USD",
+        analysis_date=date(2026, 7, 24),
+        asset_type="crypto",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="stock|Crypto instruments|listed equity",
+    ):
+        service.enqueue(invalid_request)
+
+    table_names = (
+        "runs",
+        "run_attempts",
+        "run_events",
+        "run_evidence",
+        "run_artifacts",
+        "decisions",
+        "outcomes",
+        "reflections",
+        "checkpoints",
+        "writes",
+    )
+    with repository.engine.connect() as connection:
+        available_tables = {
+            row[0]
+            for row in connection.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        counts = {
+            table: (
+                connection.exec_driver_sql(
+                    f"SELECT COUNT(*) FROM {table}"
+                ).scalar_one()
+                if table in available_tables
+                else 0
+            )
+            for table in table_names
+        }
+
+    assert counts == dict.fromkeys(table_names, 0)
+
+
 @pytest.mark.parametrize(
     ("identity", "expected"),
     [
@@ -359,6 +416,7 @@ def test_service_persists_preferred_instrument_display_name(
         llm_factory=lambda *_args, **_kwargs: (object(), object()),
         graph_factory=_Graph,
         identity_resolver=lambda _ticker, _date: identity,
+        eligibility_resolver=_equity_resolver,
     )
 
     result = service.run(
@@ -392,6 +450,7 @@ def test_service_persists_cutoff_safe_local_name_once(
         identity_resolver=lambda _ticker, _date: {
             "company_name": "Toyota Motor Corporation"
         },
+        eligibility_resolver=_equity_resolver,
         local_name_resolver=local_name,
     )
 
@@ -423,6 +482,7 @@ def test_instrument_identity_failure_does_not_fail_research_run(
         llm_factory=lambda *_args, **_kwargs: (object(), object()),
         graph_factory=_Graph,
         identity_resolver=fail_identity,
+        eligibility_resolver=_equity_resolver,
     )
 
     result = service.run(
@@ -449,6 +509,7 @@ def test_service_commits_artifact_and_event_before_callback(
         llm_factory=lambda *_args, **_kwargs: (object(), object()),
         graph_factory=_ArtifactGraph,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
+        eligibility_resolver=_equity_resolver,
     )
     observed = []
 
@@ -502,6 +563,7 @@ def test_artifact_persistence_failure_fails_attempt_and_retains_checkpoint(
         llm_factory=lambda *_args, **_kwargs: (object(), object()),
         graph_factory=_ArtifactGraph,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
+        eligibility_resolver=_equity_resolver,
     )
     queued = service.enqueue(
         AnalysisRequest(
@@ -594,6 +656,45 @@ def test_failure_is_redacted_and_checkpoint_is_retained(
     assert failed.status is RunStatus.FAILED
     assert "private-value" not in failed.error_message
     assert repository.checkpoint_thread(queued.id) == checkpoint
+
+
+def test_snapshot_conversion_failure_fails_claimed_run_before_graph(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(app_settings, repository)
+    queued = service.enqueue(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+    with repository.sessions.begin() as session:
+        record = session.get(RunRecord, queued.id)
+        record.request_json = {
+            **record.request_json,
+            "ticker": "BTC-USD",
+            "asset_type": "crypto",
+        }
+    claimed = repository.claim_run(queued.id, "worker", 30)
+
+    with pytest.raises(UnsupportedInstrumentError, match="not a supported listed equity"):
+        service.execute_claimed(claimed, worker_id="worker")
+
+    failed = repository.get_run(queued.id)
+    assert failed.status is RunStatus.FAILED
+    assert failed.error_code == "UnsupportedInstrumentError"
+    assert "not a supported listed equity" in failed.error_message
+    assert repository.list_attempts(queued.id)[0].status is RunStatus.FAILED
+    events = repository.list_events(queued.id)
+    assert events[-1].event_type == "run.failed"
+    assert events[-1].payload["error_code"] == "UnsupportedInstrumentError"
+    assert [event.event_type for event in events] == [
+        "run.queued",
+        "run.started",
+        "run.failed",
+    ]
 
 
 def test_failure_persists_observed_metrics_and_emits_the_aggregate(
@@ -727,6 +828,7 @@ def test_retry_resumes_real_langgraph_checkpoint_and_success_cleans_it(
         llm_factory=lambda *_args, **_kwargs: (object(), object()),
         graph_factory=_ResumableGraph,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
+        eligibility_resolver=_equity_resolver,
     )
     queued = service.enqueue(
         AnalysisRequest(
@@ -778,6 +880,7 @@ def test_cooperative_cancel_deletes_real_pending_checkpoint(
         llm_factory=lambda *_args, **_kwargs: (object(), object()),
         graph_factory=_CancellingCheckpointGraph,
         identity_resolver=lambda ticker, _date: {"company_name": ticker},
+        eligibility_resolver=_equity_resolver,
     )
     queued = service.enqueue(
         AnalysisRequest(

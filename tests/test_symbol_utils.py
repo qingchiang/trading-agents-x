@@ -6,11 +6,12 @@ import pytest
 
 from tradingagents.dataflows.symbol_utils import (
     NoMarketDataError,
-    crypto_base,
     infer_mainland_equity_suffix,
+    is_supported_equity_symbol,
     is_yahoo_safe,
     normalize_symbol,
     tokyo_securities_base,
+    unsupported_crypto_base,
 )
 
 
@@ -42,9 +43,9 @@ class TestNormalizeSymbol(unittest.TestCase):
         self.assertEqual(normalize_symbol("GBPJPY"), "GBPJPY=X")
         self.assertEqual(normalize_symbol("eurusd"), "EURUSD=X")
 
-    def test_crypto_pairs_get_dash_usd(self):
-        self.assertEqual(normalize_symbol("BTCUSD"), "BTC-USD")
-        self.assertEqual(normalize_symbol("ETHUSD"), "ETH-USD")
+    def test_crypto_pairs_are_not_normalized_to_vendor_symbols(self):
+        self.assertEqual(normalize_symbol("BTCUSD"), "BTCUSD")
+        self.assertEqual(normalize_symbol("BTC-USD"), "BTC-USD")
 
     def test_six_letter_non_currency_left_alone(self):
         # GOOGLE-style 6-letter tickers that aren't two currency codes
@@ -69,10 +70,9 @@ class TestNormalizeSymbol(unittest.TestCase):
     def test_unsupported_mainland_security_types_fail_loud(self):
         with self.assertRaisesRegex(ValueError, "not supported"):
             normalize_symbol("510300.SS")
-        with self.assertRaisesRegex(ValueError, "not supported"):
-            normalize_symbol("399006.SZ")
+        self.assertEqual(normalize_symbol("399006.SZ"), "399006.SZ")
 
-    def test_configured_mainland_benchmarks_remain_valid(self):
+    def test_configured_mainland_benchmarks_remain_normalizable(self):
         self.assertEqual(normalize_symbol("000001.SS"), "000001.SS")
         self.assertEqual(normalize_symbol("000001.SH"), "000001.SS")
         self.assertEqual(normalize_symbol("399001.SZ"), "399001.SZ")
@@ -126,23 +126,24 @@ class TestTokyoSecuritiesBase(unittest.TestCase):
 
 
 @pytest.mark.unit
-class TestCryptoBase(unittest.TestCase):
-    def test_resolves_known_crypto_forms(self):
-        for raw in ("BTC-USD", "BTCUSD", "btc-usdt", "BTC-USDC", "BTCUSD+"):
-            self.assertEqual(crypto_base(raw), "BTC")
-        self.assertEqual(crypto_base("ETH-USD"), "ETH")
-        self.assertEqual(crypto_base("sol-usd"), "SOL")
+class TestUnsupportedCrypto(unittest.TestCase):
+    def test_identifies_pair_shapes_without_a_base_blacklist(self):
+        for raw in ("BTC-USD", "BTCUSD", "btc-usdt", "BTC-USDC", "DOGE-SHIB"):
+            self.assertIsNotNone(unsupported_crypto_base(raw))
 
-    def test_non_crypto_returns_none(self):
-        # Plain equities, class shares, and real tickers that alias elsewhere
-        # (GOLD -> gold future on the Yahoo path) must NOT read as crypto.
-        for raw in ("AAPL", "BRK-B", "GOLD", "XYZ-USD", "EURUSD", "", None):
-            self.assertIsNone(crypto_base(raw))
+    def test_preserves_share_class_and_non_pair_symbols(self):
+        for raw in ("AAPL", "BRK-B", "GOLD", "EURUSD", "", None):
+            self.assertIsNone(unsupported_crypto_base(raw))
 
-    def test_agrees_with_normalize_symbol(self):
-        # crypto_base is the shared primitive behind the -USD normalization.
-        self.assertEqual(normalize_symbol("BTCUSD"), "BTC-USD")
-        self.assertEqual(crypto_base("BTCUSD"), "BTC")
+
+class TestSupportedEquityShape(unittest.TestCase):
+    def test_positive_product_predicate(self):
+        for symbol in ("AAPL", "BRK.B", "7203.T", "130A.T", "600519.SS", "000651.SZ"):
+            self.assertTrue(is_supported_equity_symbol(symbol))
+
+    def test_rejects_other_markets_and_benchmarks(self):
+        for symbol in ("0700.HK", "CNC.TO", "BHP.AX", "AAPL.SS", "000001.SZ", "399001.SZ"):
+            self.assertFalse(is_supported_equity_symbol(symbol))
 
 
 if __name__ == "__main__":

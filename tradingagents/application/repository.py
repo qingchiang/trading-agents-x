@@ -45,6 +45,7 @@ from .contracts import (
     RunEvent,
     RunMetrics,
     RunPage,
+    RunRequestSnapshot,
     RunStatus,
     RunSummaryView,
     RunTrashState,
@@ -186,6 +187,10 @@ class RunRepository:
         idempotency_key: str | None = None,
         source_run_id: str | None = None,
     ) -> tuple[RunView, bool]:
+        if not isinstance(request, AnalysisRequest):
+            raise TypeError(
+                "new Runs require an AnalysisRequest creation contract"
+            )
         now = _utc_naive()
         request_json = request.model_dump(mode="json")
         try:
@@ -460,6 +465,10 @@ class RunRepository:
             RunRecord.request_json,
             "$.ticker",
         )
+        asset_type = func.coalesce(
+            func.json_extract(RunRecord.request_json, "$.asset_type"),
+            "stock",
+        )
         ranked = (
             select(
                 ticker.label("ticker"),
@@ -476,9 +485,11 @@ class RunRepository:
                 )
                 .label("ticker_rank"),
             )
+
             .where(
                 RunRecord.trashed_at.is_(None),
                 ticker.is_not(None),
+                asset_type == "stock",
             )
             .subquery()
         )
@@ -503,6 +514,26 @@ class RunRepository:
                 )
                 for row in connection.execute(stmt)
             )
+
+    def active_run_counts(self) -> dict[str, int]:
+        """Count current stock Runs by lifecycle status for health reporting."""
+        asset_type = func.coalesce(
+            func.json_extract(RunRecord.request_json, "$.asset_type"),
+            "stock",
+        )
+        stmt = (
+            select(RunRecord.status, func.count())
+            .where(
+                RunRecord.trashed_at.is_(None),
+                asset_type == "stock",
+            )
+            .group_by(RunRecord.status)
+        )
+        with self.sessions() as session:
+            return {
+                str(status): int(count)
+                for status, count in session.execute(stmt)
+            }
 
     def purge_expired_trash(
         self,
@@ -1219,15 +1250,13 @@ class RunRepository:
                     "completed result does not match the sealed evidence"
                 )
             if result.decision is not None:
-                request = AnalysisRequest.model_validate(record.request_json)
-                market = self.market_bucket(
-                    request.ticker, request.asset_type.value
-                )
+                request = RunRequestSnapshot.model_validate(record.request_json)
+                market = self.market_bucket(request.ticker)
                 decision = DecisionRecord(
                     run_id=run_id,
                     ticker=request.ticker,
                     market=market,
-                    asset_type=request.asset_type.value,
+                    asset_type=request.asset_type,
                     analysis_date=request.analysis_date,
                     rating=result.decision.rating.value,
                     confidence=result.decision.confidence,
@@ -1241,23 +1270,23 @@ class RunRepository:
                 )
                 session.add(decision)
                 session.flush()
-                session.add(
-                    OutcomeRecord(
-                        decision_id=decision.id,
-                        status="pending",
-                        benchmark=benchmark,
-                        holding_intervals=5,
-                        next_check_at=max(
-                            now,
-                            earliest_outcome_check_at(
-                                ticker=request.ticker,
-                                asset_type=request.asset_type.value,
-                                analysis_date=request.analysis_date,
-                                holding_intervals=5,
-                            ).replace(tzinfo=None),
-                        ),
+                if request.asset_type == "stock":
+                    session.add(
+                        OutcomeRecord(
+                            decision_id=decision.id,
+                            status="pending",
+                            benchmark=benchmark,
+                            holding_intervals=5,
+                            next_check_at=max(
+                                now,
+                                earliest_outcome_check_at(
+                                    ticker=request.ticker,
+                                    analysis_date=request.analysis_date,
+                                    holding_intervals=5,
+                                ).replace(tzinfo=None),
+                            ),
+                        )
                     )
-                )
             record.status = RunStatus.SUCCEEDED.value
             record.finished_at = now
             record.updated_at = now
@@ -1514,6 +1543,7 @@ class RunRepository:
             .join(RunRecord, RunRecord.id == DecisionRecord.run_id)
             .where(
                 OutcomeRecord.status == "pending",
+                DecisionRecord.asset_type == "stock",
                 RunRecord.trashed_at.is_(None),
                 OutcomeRecord.next_check_at.is_not(None),
                 OutcomeRecord.next_check_at <= due,
@@ -1536,6 +1566,22 @@ class RunRepository:
                 for outcome, decision in session.execute(stmt)
             ]
 
+    def pending_outcome_count(self) -> int:
+        """Count active stock outcomes still scheduled for settlement."""
+        stmt = (
+            select(func.count())
+            .select_from(OutcomeRecord)
+            .join(DecisionRecord, OutcomeRecord.decision_id == DecisionRecord.id)
+            .join(RunRecord, RunRecord.id == DecisionRecord.run_id)
+            .where(
+                OutcomeRecord.status == "pending",
+                DecisionRecord.asset_type == "stock",
+                RunRecord.trashed_at.is_(None),
+            )
+        )
+        with self.sessions() as session:
+            return int(session.scalar(stmt) or 0)
+
     def mark_outcome_checked(
         self,
         outcome_id: int,
@@ -1551,7 +1597,19 @@ class RunRepository:
                 tzinfo=None
             )
         with self.sessions.begin() as session:
-            outcome = session.get(OutcomeRecord, outcome_id)
+            outcome = session.scalar(
+                select(OutcomeRecord)
+                .join(
+                    DecisionRecord,
+                    OutcomeRecord.decision_id == DecisionRecord.id,
+                )
+                .join(RunRecord, RunRecord.id == DecisionRecord.run_id)
+                .where(
+                    OutcomeRecord.id == outcome_id,
+                    DecisionRecord.asset_type == "stock",
+                    RunRecord.trashed_at.is_(None),
+                )
+            )
             if outcome is None:
                 return
             outcome.last_checked_at = checked_at
@@ -1579,6 +1637,7 @@ class RunRepository:
                 .join(RunRecord, RunRecord.id == DecisionRecord.run_id)
                 .where(
                     OutcomeRecord.id == outcome_id,
+                    DecisionRecord.asset_type == "stock",
                     RunRecord.trashed_at.is_(None),
                 )
             )
@@ -1609,6 +1668,12 @@ class RunRepository:
         same_limit: int = 5,
         cross_limit: int = 3,
     ) -> MemoryContext:
+        if asset_type.casefold() != "stock":
+            return MemoryContext(
+                instrument=ticker,
+                market=None,
+                items=(),
+            )
         market = self.market_bucket(ticker, asset_type)
         resolved = (
             select(
@@ -1624,6 +1689,7 @@ class RunRepository:
             .join(RunRecord, RunRecord.id == DecisionRecord.run_id)
             .where(
                 RunRecord.trashed_at.is_(None),
+                DecisionRecord.asset_type == "stock",
                 OutcomeRecord.status == "resolved",
                 OutcomeRecord.holding_intervals >= 5,
                 OutcomeRecord.raw_return.is_not(None),
@@ -1727,7 +1793,10 @@ class RunRepository:
                 DecisionRecord.created_at.desc(),
                 DecisionRecord.id.desc(),
             )
-            .where(RunRecord.trashed_at.is_(None))
+            .where(
+                RunRecord.trashed_at.is_(None),
+                DecisionRecord.asset_type == "stock",
+            )
             .limit(min(max(1, limit), 500))
         )
         if ticker and (ticker_query := ticker.strip().casefold()):
@@ -1818,7 +1887,7 @@ class RunRepository:
                     "market": decision.market,
                     "asset_type": decision.asset_type,
                     "analysis_date": decision.analysis_date.isoformat(),
-                    "profile": AnalysisRequest.model_validate(request_json).profile,
+                    "profile": RunRequestSnapshot.model_validate(request_json).profile,
                     "decision": decision.decision_json,
                     "outcome": {
                         "status": outcome.status,
@@ -1864,9 +1933,8 @@ class RunRepository:
         return destination
 
     @staticmethod
-    def market_bucket(ticker: str, asset_type: str) -> str | None:
-        if asset_type == "crypto":
-            return "CRYPTO"
+    def market_bucket(ticker: str, asset_type: str | None = None) -> str | None:
+        del asset_type  # retained for callers reading legacy decision rows
         try:
             return str(market_timezone(ticker))
         except ValueError:
@@ -1909,7 +1977,7 @@ class RunRepository:
             instrument_name=record.instrument_name,
             instrument_local_name=record.instrument_local_name,
             status=RunStatus(record.status),
-            request=AnalysisRequest.model_validate(record.request_json),
+            request=RunRequestSnapshot.model_validate(record.request_json),
             config_snapshot=record.config_json,
             attempt=record.current_attempt,
             cancel_requested=record.cancel_requested,

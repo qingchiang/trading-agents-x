@@ -50,12 +50,11 @@ def test_stock_window_uses_new_york_calendar_not_utc_date():
 
 
 @pytest.mark.unit
-def test_crypto_and_global_windows_use_utc_calendar():
+def test_global_windows_use_utc_calendar():
     start = datetime(2025, 5, 9)
     end = datetime(2025, 5, 9)
     next_utc_day = datetime(2025, 5, 10, tzinfo=UTC)
 
-    assert not ynews._in_news_window(next_utc_day, start, end, ticker="BTC-USD")
     assert not ynews._in_news_window(next_utc_day, start, end)
 
     first_hour_of_tokyo_date = datetime(2025, 5, 8, 15, 30, tzinfo=UTC)

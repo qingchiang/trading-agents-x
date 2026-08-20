@@ -760,7 +760,7 @@ def test_router_yfinance_fallback_records_adjustment_provider_change():
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("symbol", ["600519.SZ", "510300.SS", "399006.SZ"])
+@pytest.mark.parametrize("symbol", ["600519.SZ", "510300.SS"])
 def test_router_rejects_unsupported_mainland_symbol_before_any_vendor(symbol):
     ak = mock.Mock(return_value="AKSHARE")
     yf = mock.Mock(return_value="YFINANCE")

@@ -13,6 +13,10 @@ from tradingagents.persistence import upgrade_database
 from tradingagents.web import create_app
 
 
+def _equity_resolver(ticker: str) -> dict[str, str]:
+    return {"symbol": ticker, "quote_type": "EQUITY"}
+
+
 @pytest.fixture
 def web_settings(tmp_path: Path) -> AppSettings:
     return AppSettings.from_env(
@@ -36,7 +40,11 @@ def web_service(
     web_settings: AppSettings,
     web_repository: RunRepository,
 ) -> AnalysisService:
-    return AnalysisService(web_settings, repository=web_repository)
+    return AnalysisService(
+        web_settings,
+        repository=web_repository,
+        eligibility_resolver=_equity_resolver,
+    )
 
 
 @pytest.fixture
