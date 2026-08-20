@@ -3375,6 +3375,16 @@
             "title": "Cycle Warning",
             "type": "boolean"
           },
+          "decision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchDecision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "full_baseline_run_id": {
             "anyOf": [
               {
@@ -3564,6 +3574,22 @@
           },
           "disposition": {
             "$ref": "#/components/schemas/ReassessmentDisposition"
+          },
+          "evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "manifest_entry_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Manifest Entry Refs",
+            "type": "array"
           },
           "reason": {
             "minLength": 1,

@@ -1457,6 +1457,39 @@ class RunRepository:
             if digest is None:
                 raise ValueError("evidence bundle must have a digest")
             request = RunRequestSnapshot.model_validate(record.request_json)
+            baseline = session.get(RunRecord, record.full_baseline_run_id)
+            baseline_node = session.get(ResearchNodeRecord, record.full_baseline_run_id)
+            baseline_evidence = session.get(RunEvidenceRecord, record.full_baseline_run_id)
+            if (
+                baseline is None
+                or baseline_node is None
+                or baseline_evidence is None
+                or baseline.status != RunStatus.SUCCEEDED.value
+                or baseline.trashed_at is not None
+                or baseline_node.research_kind != "full"
+            ):
+                raise InvalidIncrementalBaselineError(
+                    "Incremental commit requires an active sealed Full Baseline"
+                )
+            allowed_evidence_refs = {
+                item.ref for item in EvidenceBundle.model_validate(baseline_evidence.bundle_json).items
+            }
+            allowed_evidence_refs.update(item.ref for item in evidence.items)
+            manifest_refs = {
+                f"manifest:{entry.domain}:{entry.source}"
+                for entry in products.collection_manifest.entries
+            }
+            if not set(result.decision.evidence_refs).issubset(allowed_evidence_refs):
+                raise EvidenceConflictError("Incremental Decision references evidence outside its closure")
+            for entry in products.reassessment.entries:
+                if not set(entry.evidence_refs).issubset(allowed_evidence_refs):
+                    raise EvidenceConflictError(
+                        "Incremental Reassessment references evidence outside its closure"
+                    )
+                if not set(entry.manifest_entry_refs).issubset(manifest_refs):
+                    raise EvidenceConflictError(
+                        "Incremental Reassessment references another Collection Manifest"
+                    )
             session.add(
                 RunEvidenceRecord(
                     run_id=run_id,
@@ -1502,6 +1535,38 @@ class RunRepository:
             attempt.lease_owner = None
             attempt.lease_expires_at = None
             aggregate = self._merge_metrics(record, attempt, result.metrics)
+            sequence = session.scalar(
+                select(func.coalesce(func.max(RunEventRecord.sequence), 0) + 1).where(
+                    RunEventRecord.run_id == run_id
+                )
+            )
+            session.add_all(
+                [
+                    RunEventRecord(
+                        run_id=run_id,
+                        sequence=sequence,
+                        attempt=record.current_attempt,
+                        event_type="evidence.sealed",
+                        node="evidence.seal",
+                        payload_json={
+                            "attempt": record.current_attempt,
+                            "digest": digest,
+                            "item_count": len(evidence.items),
+                            "table_count": len(evidence.tables),
+                        },
+                        created_at=now,
+                    ),
+                    RunEventRecord(
+                        run_id=run_id,
+                        sequence=sequence + 1,
+                        attempt=record.current_attempt,
+                        event_type="run.succeeded",
+                        node=None,
+                        payload_json={"metrics": aggregate.model_dump(mode="json")},
+                        created_at=now,
+                    ),
+                ]
+            )
         return aggregate
 
     def select_primary_cycle(
@@ -1560,6 +1625,13 @@ class RunRepository:
                     )
                 )
             )
+            decision_records = list(
+                session.execute(
+                    select(DecisionRecord).where(
+                        DecisionRecord.run_id.in_([run.id for run, _node in rows])
+                    )
+                ).scalars()
+            )
         node_total = len(rows)
         page_rows = rows[node_offset : node_offset + node_limit]
         products_by_id = {
@@ -1569,6 +1641,10 @@ class RunRepository:
                 else None
             )
             for run, node in rows
+        }
+        decisions_by_id = {
+            decision.run_id: ResearchDecision.model_validate(decision.decision_json)
+            for decision in decision_records
         }
         cycle_warning_by_id = {
             run.id: any(
@@ -1652,6 +1728,7 @@ class RunRepository:
                     reassessment=(
                         products_by_id[run.id].reassessment if products_by_id[run.id] else None
                     ),
+                    decision=decisions_by_id.get(run.id),
                     full_research_required_reasons=(
                         products_by_id[run.id].full_research_required_reasons
                         if products_by_id[run.id]

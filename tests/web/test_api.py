@@ -362,6 +362,7 @@ async def test_timeline_api_exposes_first_same_identity_full_node(
             "performance": None,
             "outcome_review_status": None,
             "reassessment": None,
+            "decision": research_decision(evidence_refs=(item.ref,)).model_dump(mode="json"),
             "full_research_required_reasons": [],
             "cycle_warning": False,
         }

@@ -27,6 +27,7 @@ from tradingagents.dataflows.interface import (
 )
 from tradingagents.dataflows.symbol_utils import market_timezone
 from tradingagents.graph.research_graph import GraphExecution, ResearchGraph
+from tradingagents.graph.structured_output import StructuredOutputRunner
 from tradingagents.persistence import upgrade_database
 from tradingagents.version import __version__
 
@@ -39,7 +40,6 @@ from .contracts import (
     IncrementalNodeProducts,
     IncrementalSynthesis,
     IncrementalSynthesisInput,
-    NodeMetrics,
     PerformanceObservation,
     ReassessmentDisposition,
     ResearchArtifactDraft,
@@ -47,7 +47,6 @@ from .contracts import (
     ResearchReassessmentEntry,
     RunEvent,
     RunExport,
-    RunMetrics,
     RunStatus,
 )
 from .eligibility import validate_instrument_eligibility
@@ -70,7 +69,7 @@ from .incremental_collection import (
 )
 from .instrument_names import resolve_local_instrument_name
 from .llms import RunLLMs, create_run_llms
-from .metrics import MetricsCallback, merge_run_metrics
+from .metrics import MetricsCallback
 from .repository import RunRepository, RunView
 from .runtime import RunCancelled, RunContext, WorkerShutdown
 from .settings import AppSettings, RunSettings
@@ -120,7 +119,7 @@ def _baseline_component_ids(decision) -> tuple[str, ...]:
 def default_incremental_synthesizer(
     synthesis_input: IncrementalSynthesisInput,
 ) -> IncrementalSynthesis:
-    """Offline contract default; production wiring can replace this semantic seam."""
+    """Test-only deterministic seam; production always supplies a model-backed synthesizer."""
     return IncrementalSynthesis(
         reassessment=ResearchReassessment(
             entries=tuple(
@@ -128,12 +127,21 @@ def default_incremental_synthesizer(
                     component_id=component_id,
                     disposition=ReassessmentDisposition.REAFFIRMED,
                     reason="A complete-empty collection scan found no new matching record.",
+                    manifest_entry_refs=(_first_manifest_entry_ref(synthesis_input.collection_manifest),),
                 )
                 for component_id in _baseline_component_ids(synthesis_input.full_baseline_decision)
             )
         ),
         decision=synthesis_input.full_baseline_decision,
     )
+
+
+def _manifest_entry_refs(manifest) -> tuple[str, ...]:
+    return tuple(f"manifest:{entry.domain}:{entry.source}" for entry in manifest.entries)
+
+
+def _first_manifest_entry_ref(manifest) -> str:
+    return _manifest_entry_refs(manifest)[0]
 
 
 class AnalysisService:
@@ -152,7 +160,7 @@ class AnalysisService:
             resolve_local_instrument_name
         ),
         incremental_collector: IncrementalCollector = default_incremental_collector,
-        incremental_synthesizer: IncrementalSynthesizer = default_incremental_synthesizer,
+        incremental_synthesizer: IncrementalSynthesizer | None = None,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ):
         self.settings = settings
@@ -489,6 +497,11 @@ class AnalysisService:
                         permitted_baseline_evidence_refs=tuple(
                             item.ref for item in baseline_evidence.items
                         ),
+                        incremental_evidence=EvidenceBundle(
+                            instrument=request.ticker,
+                            analysis_date=request.analysis_date,
+                            items=(),
+                        ),
                         collection_manifest=collection.collection_manifest,
                         research_coverage=collection.research_coverage,
                         information_advancement=collection.information_advancement,
@@ -505,7 +518,16 @@ class AnalysisService:
                         },
                         on_event=on_event,
                     )
-                    synthesis = self.incremental_synthesizer(synthesis_input)
+                    if self.incremental_synthesizer is not None:
+                        synthesis = self.incremental_synthesizer(synthesis_input)
+                    else:
+                        synthesis = self._run_incremental_synthesis(
+                            synthesis_input,
+                            run_settings=run_settings,
+                            metrics=metrics,
+                            run_id=run.id,
+                            on_event=on_event,
+                        )
                     expected_components = set(_baseline_component_ids(baseline_result.decision))
                     if {
                         entry.component_id for entry in synthesis.reassessment.entries
@@ -519,6 +541,7 @@ class AnalysisService:
                         raise ValueError(
                             "Complete-empty Incremental decisions may reference only Full Baseline Evidence"
                         )
+                    self._validate_reassessment_closure(synthesis, synthesis_input)
                     deterministic_reasons = tuple(
                         FullResearchRequiredReason(
                             code=f"required_coverage.{domain.domain}",
@@ -541,13 +564,7 @@ class AnalysisService:
                             *deterministic_reasons,
                         ),
                     )
-                    segment_metrics = merge_run_metrics(
-                        metrics.snapshot(),
-                        RunMetrics(
-                            llm_calls=1,
-                            node_metrics={"incremental.synthesis": NodeMetrics(llm_calls=1)},
-                        ),
-                    )
+                    segment_metrics = metrics.snapshot()
                     result = AnalysisResult(
                         run_id=run.id,
                         status=RunStatus.SUCCEEDED,
@@ -561,6 +578,13 @@ class AnalysisService:
                         ),
                         metrics=segment_metrics,
                     )
+                    self._emit(
+                        run.id,
+                        "incremental.synthesis_completed",
+                        payload={"metrics": result.metrics.model_dump(mode="json")},
+                        on_event=on_event,
+                    )
+                    last_event = self.repository.list_events(run.id)[-1]
                     aggregate_metrics = self.repository.complete_incremental(
                         run.id,
                         result,
@@ -568,18 +592,15 @@ class AnalysisService:
                         products=products,
                     )
                     result = result.model_copy(update={"metrics": aggregate_metrics})
-                    self._emit(
-                        run.id,
-                        "incremental.synthesis_completed",
-                        payload={"metrics": result.metrics.model_dump(mode="json")},
-                        on_event=on_event,
-                    )
-                    self._emit(
-                        run.id,
-                        "run.succeeded",
-                        payload={"metrics": result.metrics.model_dump(mode="json")},
-                        on_event=on_event,
-                    )
+                    if on_event is not None:
+                        for event in self.repository.list_events(
+                            run.id,
+                            after_sequence=last_event.sequence,
+                        ):
+                            try:
+                                on_event(event)
+                            except Exception:
+                                logger.exception("run event callback failed for %s", run.id)
                     return result
                 with use_config(dataflow_config):
                     try:
@@ -918,6 +939,90 @@ class AnalysisService:
             recoveries=self.repository.list_recoveries(run_id),
             warnings=warnings,
         )
+
+    def _run_incremental_synthesis(
+        self,
+        synthesis_input: IncrementalSynthesisInput,
+        *,
+        run_settings: RunSettings,
+        metrics: MetricsCallback,
+        run_id: str,
+        on_event: EventHandler | None,
+    ) -> IncrementalSynthesis:
+        """Use the run-scoped reasoning and serializer clients for required synthesis."""
+        llms = self.llm_factory(run_settings, callbacks=[metrics])
+        if isinstance(llms, RunLLMs):
+            semantic_llm = llms.deep
+            serializer_llm = llms.deep_serializer
+        else:
+            _quick_llm, semantic_llm = llms
+            serializer_llm = semantic_llm
+        def event_writer(raw: dict[str, Any]) -> None:
+            self._persist_graph_event(run_id, raw, on_event)
+        semantic_prompt = (
+            "Perform the required Incremental Research synthesis. Assess every Full "
+            "Baseline Decision Component using only the typed input. Do not use sibling "
+            "Incremental Nodes or invent Evidence. Produce a concise analysis brief for "
+            "the strict serializer.\n\n"
+            + synthesis_input.model_dump_json(indent=2)
+        )
+        with metrics.phase("incremental.synthesis.semantic", event_writer=event_writer):
+            semantic_response = semantic_llm.invoke(
+                semantic_prompt,
+                config={"metadata": {"research_node": "incremental.synthesis.semantic"}},
+            )
+        semantic_brief = getattr(semantic_response, "content", semantic_response)
+        serializer_prompt = (
+            "Serialize a complete IncrementalSynthesis from this semantic brief and the "
+            "typed bounded input. Every reassessment entry must include at least one "
+            "allowed Evidence reference or Collection Manifest entry reference.\n\n"
+            f"SEMANTIC BRIEF:\n{semantic_brief}\n\n"
+            f"BOUNDED INPUT:\n{synthesis_input.model_dump_json(indent=2)}"
+        )
+        example = {
+            "reassessment": {
+                "entries": [
+                    {
+                        "component_id": "thesis",
+                        "disposition": "reaffirmed",
+                        "reason": "Explain the bounded reassessment.",
+                        "manifest_entry_refs": [_first_manifest_entry_ref(synthesis_input.collection_manifest)],
+                    }
+                ]
+            },
+            "decision": {"rating": "hold", "thesis": "Complete current decision."},
+            "full_research_required_reasons": [],
+        }
+        with metrics.phase("incremental.synthesis.serialize", event_writer=event_writer):
+            output = StructuredOutputRunner(
+                llm=serializer_llm,
+                schema=IncrementalSynthesis,
+                validator=lambda value: value,
+                node="incremental.synthesis.serialize",
+                event_writer=event_writer,
+                invoke_config={
+                    "metadata": {"research_node": "incremental.synthesis.serialize"}
+                },
+            ).invoke(
+                serializer_prompt,
+                example=example,
+                allowed_evidence_refs=synthesis_input.permitted_baseline_evidence_refs,
+            )
+        return output.value
+
+    @staticmethod
+    def _validate_reassessment_closure(
+        synthesis: IncrementalSynthesis,
+        synthesis_input: IncrementalSynthesisInput,
+    ) -> None:
+        allowed_evidence_refs = set(synthesis_input.permitted_baseline_evidence_refs)
+        allowed_evidence_refs.update(item.ref for item in synthesis_input.incremental_evidence.items)
+        allowed_manifest_refs = set(_manifest_entry_refs(synthesis_input.collection_manifest))
+        for entry in synthesis.reassessment.entries:
+            if not set(entry.evidence_refs).issubset(allowed_evidence_refs):
+                raise ValueError("Reassessment Evidence references must close over the baseline or current bundle")
+            if not set(entry.manifest_entry_refs).issubset(allowed_manifest_refs):
+                raise ValueError("Reassessment Manifest references must close over the current Collection Manifest")
 
     def _persist_graph_event(
         self,

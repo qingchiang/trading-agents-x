@@ -162,7 +162,55 @@ export default function Timeline() {
               </dd>
             </div>
           </dl>
+          {node.collection_manifest && (
+            <details>
+              <summary>Incremental Manifest</summary>
+              <ul>
+                {node.collection_manifest.entries.map((entry) => (
+                  <li key={`${entry.domain}:${entry.source}`}>
+                    {entry.domain} / {entry.source}: {entry.outcome}
+                    {entry.source_watermark ? ` (${entry.source_watermark})` : ""}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          {node.research_coverage && (
+            <details>
+              <summary>Coverage</summary>
+              <ul>
+                {node.research_coverage.domains.map((domain) => (
+                  <li key={domain.domain}>
+                    {domain.domain}: {domain.requirement} / {domain.status}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          {node.reassessment && (
+            <details>
+              <summary>Reassessment</summary>
+              <ul>
+                {node.reassessment.entries.map((entry) => (
+                  <li key={entry.component_id}>
+                    {entry.component_id}: {entry.disposition} — {entry.reason}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          {node.decision && (
+            <section aria-label="Current Decision">
+              <h3>Current Decision</h3>
+              <p>{node.decision.rating} — {node.decision.thesis}</p>
+            </section>
+          )}
+          {node.performance && (
+            <p>Performance: {node.performance.status} — {node.performance.reason}</p>
+          )}
           {node.outcome_review_status === "omitted" && <p>{t("outcomeReviewOmitted")}</p>}
+          {node.outcome_review_status === "failed" && <p>Outcome review failed</p>}
+          {node.cycle_warning && <p className="alert">Cycle warning</p>}
           {node.full_research_required_reasons?.map((reason) => (
             <p className="alert" key={reason.code}>{reason.message}</p>
           ))}

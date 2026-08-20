@@ -1703,6 +1703,7 @@ class ResearchNodeView(FrozenModel):
     performance: PerformanceObservation | None = None
     outcome_review_status: Literal["omitted", "failed"] | None = None
     reassessment: ResearchReassessment | None = None
+    decision: ResearchDecision | None = None
     full_research_required_reasons: tuple[FullResearchRequiredReason, ...] = ()
     cycle_warning: bool = False
 
@@ -1978,6 +1979,28 @@ class ResearchReassessmentEntry(FrozenModel):
     component_id: str = Field(pattern=_DECISION_COMPONENT_PATH_PATTERN.pattern)
     disposition: ReassessmentDisposition
     reason: str = Field(min_length=1)
+    evidence_refs: tuple[str, ...] = ()
+    manifest_entry_refs: tuple[str, ...] = ()
+
+    @field_validator("evidence_refs")
+    @classmethod
+    def validate_evidence_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _unique_evidence_refs(value)
+
+    @field_validator("manifest_entry_refs")
+    @classmethod
+    def validate_manifest_entry_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(value) != len(set(value)):
+            raise ValueError("reassessment manifest references must be unique")
+        if any(not item.startswith("manifest:") for item in value):
+            raise ValueError("reassessment manifest references must use the manifest namespace")
+        return value
+
+    @model_validator(mode="after")
+    def validate_auditable_reference(self) -> ResearchReassessmentEntry:
+        if not self.evidence_refs and not self.manifest_entry_refs:
+            raise ValueError("reassessment entries require Evidence or Collection Manifest references")
+        return self
 
 
 class ResearchReassessment(FrozenModel):
@@ -2005,6 +2028,7 @@ class IncrementalSynthesisInput(FrozenModel):
     full_baseline_run_id: str = Field(min_length=1, max_length=36)
     full_baseline_decision: ResearchDecision
     permitted_baseline_evidence_refs: tuple[str, ...] = ()
+    incremental_evidence: EvidenceBundle
     collection_manifest: CollectionManifest
     research_coverage: ResearchCoverage
     information_advancement: InformationAdvancement

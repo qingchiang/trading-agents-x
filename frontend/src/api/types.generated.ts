@@ -477,6 +477,7 @@ export interface components {
       collection_manifest?: components["schemas"]["CollectionManifest"] | null;
       cycle_id: string;
       cycle_warning?: boolean;
+      decision?: components["schemas"]["ResearchDecision"] | null;
       full_baseline_run_id?: string | null;
       full_research_required_reasons?: components["schemas"]["FullResearchRequiredReason"][];
       id: string;
@@ -503,6 +504,8 @@ export interface components {
     ResearchReassessmentEntry: {
       component_id: string;
       disposition: components["schemas"]["ReassessmentDisposition"];
+      evidence_refs?: string[];
+      manifest_entry_refs?: string[];
       reason: string;
     };
     ResearchScenario: {

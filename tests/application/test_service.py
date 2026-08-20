@@ -58,7 +58,7 @@ from tradingagents.application.repository import (
     RunRepository,
 )
 from tradingagents.application.runtime import RunCancelled, WorkerShutdown
-from tradingagents.application.service import AnalysisService
+from tradingagents.application.service import AnalysisService, default_incremental_synthesizer
 from tradingagents.dataflows.config import get_config
 from tradingagents.graph.research_graph import GraphExecution
 
@@ -217,6 +217,7 @@ def test_complete_empty_incremental_commits_current_decision_and_timeline_node(
     repository,
     ticker,
 ) -> None:
+    synthesis_inputs = []
     baseline = _service(app_settings, repository).run(
         AnalysisRequest(ticker=ticker, analysis_date=date(2026, 7, 20))
     )
@@ -247,6 +248,10 @@ def test_complete_empty_incremental_commits_current_decision_and_timeline_node(
             ),
         )
 
+    def synthesize(input_):
+        synthesis_inputs.append(input_)
+        return default_incremental_synthesizer(input_)
+
     result = AnalysisService(
         app_settings,
         repository=repository,
@@ -256,6 +261,7 @@ def test_complete_empty_incremental_commits_current_decision_and_timeline_node(
         eligibility_resolver=_equity_resolver,
         local_name_resolver=lambda _ticker, _date, _config: None,
         incremental_collector=collect,
+        incremental_synthesizer=synthesize,
     ).run(
         AnalysisRequest(
             ticker=ticker,
@@ -277,6 +283,15 @@ def test_complete_empty_incremental_commits_current_decision_and_timeline_node(
     assert node.performance.status == "not_yet_observable"
     assert timeline.primary_cycle_id == baseline.run_id
     assert node.is_primary and node.is_cycle_head
+    assert len(synthesis_inputs) == 1
+    synthesis_input = synthesis_inputs[0]
+    assert synthesis_input.incremental_evidence.items == ()
+    assert synthesis_input.full_baseline_run_id == baseline.run_id
+    assert synthesis_input.method_snapshot["research_schema_version"] == "1"
+    assert not hasattr(synthesis_input, "sibling_decision")
+    assert result.metrics.llm_calls == 0
+    event_types = [event.event_type for event in repository.list_events(result.run_id)]
+    assert event_types[-2:] == ["evidence.sealed", "run.succeeded"]
 
 
 def test_incremental_atomic_commit_failure_leaves_no_node_or_evidence(
@@ -326,6 +341,7 @@ def test_incremental_atomic_commit_failure_leaves_no_node_or_evidence(
         eligibility_resolver=_equity_resolver,
         local_name_resolver=lambda _ticker, _date, _config: None,
         incremental_collector=collect,
+        incremental_synthesizer=default_incremental_synthesizer,
     )
     with pytest.raises(Exception, match="injected incremental node failure"):
         service.run(
@@ -340,6 +356,9 @@ def test_incremental_atomic_commit_failure_leaves_no_node_or_evidence(
     failed = repository.list_runs(status=RunStatus.FAILED).items
     assert len(failed) == 1
     assert repository.evidence_status(failed[0].id).status == "pending"
+    assert not {
+        event.event_type for event in repository.list_events(failed[0].id)
+    }.intersection({"evidence.sealed", "run.succeeded"})
     assert [node.id for node in repository.get_timeline("NVDA").nodes] == [baseline.run_id]
 
 
@@ -613,6 +632,7 @@ def test_incremental_collection_terminal_outcomes_are_structured_and_stop_before
         eligibility_resolver=_equity_resolver,
         local_name_resolver=lambda _ticker, _date, _config: None,
         incremental_collector=collect,
+        incremental_synthesizer=default_incremental_synthesizer,
     )
     request = AnalysisRequest(
         ticker=ticker,

@@ -64,6 +64,11 @@ test("distinguishes a warned Incremental node without disabling its Timeline", a
       research_kind: "incremental", full_baseline_run_id: "full-1",
       is_cycle_head: true, is_primary: true, is_active: true, trashed_at: null,
       outcome_review_status: "omitted", cycle_warning: true,
+      collection_manifest: { entries: [{ domain: "news", source: "fixture", outcome: "complete_empty", source_watermark: "fixture-watermark" }] },
+      research_coverage: { domains: [{ domain: "news", requirement: "required", status: "missing" }] },
+      reassessment: { entries: [{ component_id: "thesis", disposition: "reaffirmed", reason: "No new record." }] },
+      decision: { rating: "bullish", thesis: "Current complete decision" },
+      performance: { status: "not_yet_observable", reason: "No completed interval." },
       full_research_required_reasons: [{ code: "required_coverage.news", message: "Required news coverage is missing.", origin: "deterministic" }],
     }],
   } } as never);
@@ -71,6 +76,11 @@ test("distinguishes a warned Incremental node without disabling its Timeline", a
   expect(await screen.findByText("Incremental Research Node")).toBeVisible();
   expect(screen.getByText("Full research recommended")).toBeVisible();
   expect(screen.getByText("Outcome review omitted")).toBeVisible();
+  expect(screen.getByText("Incremental Manifest")).toBeVisible();
+  expect(screen.getByText("Coverage")).toBeVisible();
+  expect(screen.getByText("Reassessment")).toBeVisible();
+  expect(screen.getByRole("heading", { name: "Current Decision" })).toBeVisible();
+  expect(screen.getByText("Cycle warning")).toBeVisible();
 });
 
 test("paginates Timeline nodes independently from the Timeline list", async () => {
