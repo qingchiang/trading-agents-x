@@ -5,6 +5,7 @@ import json
 import operator
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from datetime import UTC, date, datetime
 from threading import Barrier, Lock
 from typing import Annotated, TypedDict
@@ -29,6 +30,7 @@ from tradingagents.application.contracts import (
     EvidenceBundle,
     EvidenceItem,
     IncrementalCollectionPlan,
+    IncrementalCollectionSource,
     InformationAdvancement,
     ResearchArtifactDraft,
     ResearchCoverage,
@@ -272,7 +274,12 @@ def test_non_advancing_incremental_run_fails_before_any_semantic_work_or_node_co
         if event.event_type == "incremental.collection_completed"
     )
     manifest_entries = collection_event.payload["collection_manifest"]["entries"]
-    assert all(entry["provider_identity"] == entry["source"] for entry in manifest_entries)
+    assert all(entry["source"].endswith(entry["provider_identity"]) for entry in manifest_entries)
+    assert {
+        entry["provider_identity"] for entry in manifest_entries
+    }.isdisjoint(
+        {"sec_companyfacts", "jquants_statements", "cninfo_disclosures"}
+    )
     assert all(entry["retrieved_at"] is None for entry in manifest_entries)
     assert any(event.event_type == "incremental.no_advancement" for event in events)
 
@@ -282,11 +289,121 @@ def test_non_advancing_incremental_run_fails_before_any_semantic_work_or_node_co
 
 
 @pytest.mark.parametrize(
+    ("ticker", "expected_providers"),
+    [
+        (
+            "NVDA",
+            {
+                "fundamentals": ("yfinance",),
+                "market": ("yfinance",),
+                "news": ("yfinance",),
+            },
+        ),
+        (
+            "7203.T",
+            {
+                "fundamentals": (
+                    "jp_fundamentals",
+                    "jp_statements",
+                    "jquants",
+                    "yfinance",
+                ),
+                "market": ("jquants", "yfinance"),
+                "news": ("jp_news", "yfinance"),
+            },
+        ),
+        (
+            "600000.SS",
+            {
+                "fundamentals": (
+                    "cn_fundamentals",
+                    "cn_statements",
+                    "akshare",
+                    "yfinance",
+                ),
+                "market": ("akshare", "yfinance"),
+                "news": ("cn_news", "yfinance"),
+            },
+        ),
+    ],
+)
+def test_default_incremental_plan_uses_frozen_configured_routes_on_retry(
+    app_settings,
+    repository,
+    ticker,
+    expected_providers,
+) -> None:
+    service = _service(app_settings, repository)
+    baseline = service.run(
+        AnalysisRequest(ticker=ticker, analysis_date=date(2026, 7, 20))
+    )
+    request = AnalysisRequest(
+        ticker=ticker,
+        analysis_date=date(2026, 7, 24),
+        research_kind="incremental",
+        full_baseline_run_id=baseline.run_id,
+    )
+    queued = service.enqueue(request)
+    claimed = repository.claim_run(queued.id, "first-worker", app_settings.lease_seconds)
+    with pytest.raises(NoInformationAdvancementError):
+        service.execute_claimed(claimed, worker_id="first-worker")
+
+    changed_config = deepcopy(app_settings.default_run_settings.data_config)
+    changed_config["data_vendors"]["fundamental_data"] = "alpha_vantage"
+    changed_settings = app_settings.model_copy(
+        update={
+            "default_run_settings": app_settings.default_run_settings.model_copy(
+                update={"data_config": changed_config}
+            )
+        }
+    )
+    retry_service = _service(changed_settings, repository)
+    retried = retry_service.retry(queued.id)
+    retry_claim = repository.claim_run(
+        retried.id,
+        "retry-worker",
+        changed_settings.lease_seconds,
+    )
+    with pytest.raises(NoInformationAdvancementError):
+        retry_service.execute_claimed(retry_claim, worker_id="retry-worker")
+
+    collection_events = [
+        event
+        for event in repository.list_events(queued.id)
+        if event.event_type == "incremental.collection_completed"
+    ]
+    assert len(collection_events) == 2
+    manifests = [
+        event.payload["collection_manifest"]["entries"]
+        for event in collection_events
+    ]
+    assert manifests[0] == manifests[1]
+    configured_entries = [
+        entry
+        for entry in manifests[0]
+        if entry["outcome"] == CollectionOutcome.NOT_QUERIED.value
+    ]
+    assert {
+        domain: tuple(
+            entry["provider_identity"]
+            for entry in configured_entries
+            if entry["domain"] == domain
+        )
+        for domain in expected_providers
+    } == expected_providers
+    assert all(
+        entry["source"] == f"{entry['domain']}.{entry['provider_identity']}"
+        for entry in configured_entries
+    )
+    assert all(entry["provider_identity"] != "alpha_vantage" for entry in configured_entries)
+
+
+@pytest.mark.parametrize(
     ("ticker", "source"),
     [
-        ("NVDA", "sec_companyfacts"),
-        ("7203.T", "jquants_statements"),
-        ("600000.SS", "cninfo_disclosures"),
+        ("NVDA", "fundamentals.yfinance"),
+        ("7203.T", "fundamentals.jp_fundamentals"),
+        ("600000.SS", "fundamentals.cn_fundamentals"),
     ],
 )
 @pytest.mark.parametrize(
@@ -330,7 +447,7 @@ def test_incremental_collection_terminal_outcomes_are_structured_and_stop_before
                 CollectionManifestEntry(
                     domain="fundamentals",
                     source=source,
-                    provider_identity=source,
+                    provider_identity=source.rsplit(".", maxsplit=1)[-1],
                     retrieved_at=(
                         plan.window_end
                         if outcome
@@ -426,6 +543,38 @@ def test_incremental_collection_assessment_distinguishes_each_terminal_outcome()
         window_end=datetime(2026, 7, 24, tzinfo=UTC),
         required_domains=("fundamentals", "market", "news"),
         advisory_domains=("social",),
+        sources=(
+            IncrementalCollectionSource(
+                domain="fundamentals",
+                source="sec_companyfacts",
+                provider_identity="sec_companyfacts",
+                configured=True,
+            ),
+            IncrementalCollectionSource(
+                domain="market",
+                source="market_series",
+                provider_identity="market_series",
+                configured=True,
+            ),
+            IncrementalCollectionSource(
+                domain="news",
+                source="ticker_news",
+                provider_identity="ticker_news",
+                configured=True,
+            ),
+            IncrementalCollectionSource(
+                domain="social",
+                source="social_sentiment",
+                provider_identity="social_sentiment",
+                configured=True,
+            ),
+            IncrementalCollectionSource(
+                domain="social",
+                source="social_fallback",
+                provider_identity="social_fallback",
+                configured=True,
+            ),
+        ),
     )
     result = assess_incremental_collection(
         plan,
@@ -502,6 +651,85 @@ def test_incremental_collection_assessment_distinguishes_each_terminal_outcome()
     )
 
 
+def test_partial_collection_with_admitted_evidence_advances_information() -> None:
+    plan = IncrementalCollectionPlan(
+        version="1",
+        market="united_states",
+        window_start=datetime(2026, 7, 20, tzinfo=UTC),
+        window_end=datetime(2026, 7, 24, tzinfo=UTC),
+        required_domains=("fundamentals", "market", "news"),
+        advisory_domains=("social",),
+        sources=(
+            IncrementalCollectionSource(
+                domain="news",
+                source="news.yfinance",
+                provider_identity="yfinance",
+                configured=True,
+            ),
+        ),
+    )
+    manifest = CollectionManifest(
+        plan_version=plan.version,
+        market=plan.market,
+        entries=(
+            CollectionManifestEntry(
+                domain="news",
+                source="news.yfinance",
+                provider_identity="yfinance",
+                retrieved_at=plan.window_end,
+                planned_from=plan.window_start,
+                planned_through=plan.window_end,
+                outcome=CollectionOutcome.PARTIAL,
+                evidence_refs=("ev_0123456789ab",),
+            ),
+        ),
+    )
+
+    result = assess_incremental_collection(plan, manifest)
+
+    assert result.information_advancement == InformationAdvancement(
+        advanced=True,
+        reasons=("admissible_evidence",),
+    )
+
+
+def test_incremental_collection_rejects_a_manifest_source_absent_from_the_plan() -> None:
+    plan = IncrementalCollectionPlan(
+        version="1",
+        market="united_states",
+        window_start=datetime(2026, 7, 20, tzinfo=UTC),
+        window_end=datetime(2026, 7, 24, tzinfo=UTC),
+        required_domains=("fundamentals", "market", "news"),
+        advisory_domains=("social",),
+        sources=(
+            IncrementalCollectionSource(
+                domain="fundamentals",
+                source="fundamentals.yfinance",
+                provider_identity="yfinance",
+                configured=True,
+            ),
+        ),
+    )
+    manifest = CollectionManifest(
+        plan_version=plan.version,
+        market=plan.market,
+        entries=(
+            CollectionManifestEntry(
+                domain="fundamentals",
+                source="fundamentals.alpha_vantage",
+                provider_identity="alpha_vantage",
+                retrieved_at=plan.window_end,
+                planned_from=plan.window_start,
+                planned_through=plan.window_end,
+                outcome=CollectionOutcome.PARTIAL,
+            ),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="unconfigured source"):
+        assess_incremental_collection(plan, manifest)
+
+
 def test_incremental_preflight_keeps_provider_retrieval_and_newly_reviewable_input() -> None:
     plan = IncrementalCollectionPlan(
         version="1",
@@ -510,6 +738,14 @@ def test_incremental_preflight_keeps_provider_retrieval_and_newly_reviewable_inp
         window_end=datetime(2026, 7, 24, tzinfo=UTC),
         required_domains=("fundamentals", "market", "news"),
         advisory_domains=("social",),
+        sources=(
+            IncrementalCollectionSource(
+                domain="fundamentals",
+                source="sec_companyfacts",
+                provider_identity="sec_edgar",
+                configured=True,
+            ),
+        ),
     )
     manifest = CollectionManifest(
         plan_version=plan.version,
@@ -568,8 +804,8 @@ def test_newly_reviewable_baseline_component_stops_fail_closed_after_advancement
             entries=(
                 CollectionManifestEntry(
                     domain="fundamentals",
-                    source="sec_companyfacts",
-                    provider_identity="sec_edgar",
+                    source="fundamentals.yfinance",
+                    provider_identity="yfinance",
                     retrieved_at=plan.window_end,
                     planned_from=plan.window_start,
                     planned_through=plan.window_end,

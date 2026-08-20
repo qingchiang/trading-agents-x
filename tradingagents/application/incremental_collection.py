@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from typing import Any
+
+from tradingagents.dataflows.interface import (
+    get_category_for_method,
+    get_vendor,
+    parse_vendor_chain,
+)
+from tradingagents.dataflows.symbol_utils import match_exchange_suffix, normalize_symbol
 
 from .contracts import (
     CollectionManifest,
@@ -12,6 +20,7 @@ from .contracts import (
     CoverageStatus,
     IncrementalCollectionPlan,
     IncrementalCollectionPreflight,
+    IncrementalCollectionSource,
     InformationAdvancement,
     ResearchCoverage,
     ResearchCoverageDomain,
@@ -19,26 +28,95 @@ from .contracts import (
 
 IncrementalCollector = Callable[[IncrementalCollectionPlan], CollectionManifest]
 
-_MARKET_SOURCES = {
-    "united_states": {
-        "fundamentals": "sec_companyfacts",
-        "market": "us_market_series",
-        "news": "us_ticker_news",
-        "social": "us_social_sentiment",
-    },
-    "japan": {
-        "fundamentals": "jquants_statements",
-        "market": "jquants_market_series",
-        "news": "japan_disclosures_news",
-        "social": "japan_social_sentiment",
-    },
-    "mainland_china": {
-        "fundamentals": "cninfo_disclosures",
-        "market": "china_market_series",
-        "news": "china_ticker_news",
-        "social": "china_social_sentiment",
-    },
+_MARKET_IDENTITIES = {
+    ".T": ("japan", ".T"),
+    ".SS": ("mainland_china", ".SS"),
+    ".SZ": ("mainland_china", ".SZ"),
 }
+_DOMAIN_METHODS = {
+    "fundamentals": "get_fundamentals",
+    "market": "get_stock_data",
+    "news": "get_news",
+}
+
+
+def incremental_market_identity(ticker: str) -> dict[str, str]:
+    """Parse the supported market and routing suffix once for a frozen Run."""
+    canonical_ticker = normalize_symbol(ticker)
+    suffix = match_exchange_suffix(canonical_ticker, _MARKET_IDENTITIES)
+    market, route_suffix = _MARKET_IDENTITIES.get(
+        suffix,
+        ("united_states", ""),
+    )
+    return {"market": market, "route_suffix": route_suffix}
+
+
+def build_incremental_collection_plan(
+    *,
+    market_identity: Mapping[str, Any],
+    data_routes: Mapping[str, Any],
+    coverage_policy: Mapping[str, Any],
+    window_start,
+    window_end,
+) -> IncrementalCollectionPlan:
+    """Resolve configured vendor chains from the Run's frozen Method Snapshot."""
+    market = market_identity.get("market")
+    route_suffix = market_identity.get("route_suffix")
+    if market not in {"united_states", "japan", "mainland_china"}:
+        raise ValueError("Incremental collection requires a frozen supported market")
+    if not isinstance(route_suffix, str):
+        raise ValueError("Incremental collection requires a frozen route suffix")
+    required_domains = tuple(coverage_policy["required_domains"])
+    advisory_domains = tuple(coverage_policy["advisory_domains"])
+    sources = tuple(
+        source
+        for domain in (*required_domains, *advisory_domains)
+        for source in _sources_for_domain(domain, route_suffix, data_routes)
+    )
+    return IncrementalCollectionPlan(
+        version=str(coverage_policy["version"]),
+        market=market,
+        window_start=window_start,
+        window_end=window_end,
+        required_domains=required_domains,
+        advisory_domains=advisory_domains,
+        sources=sources,
+    )
+
+
+def _sources_for_domain(
+    domain: str,
+    route_suffix: str,
+    data_routes: Mapping[str, Any],
+) -> tuple[IncrementalCollectionSource, ...]:
+    if domain == "social":
+        # Ticket 05 has no social adapter. Record the policy limitation instead
+        # of inventing a vendor or silently switching to an unconfigured one.
+        return (
+            IncrementalCollectionSource(
+                domain="social",
+                source="social.not_configured",
+                provider_identity="not_configured",
+                configured=False,
+            ),
+        )
+    method = _DOMAIN_METHODS[domain]
+    category = get_category_for_method(method)
+    raw_chain = get_vendor(category, method, route_suffix, dict(data_routes))
+    vendors = parse_vendor_chain(raw_chain)
+    if not vendors or "default" in vendors:
+        raise ValueError(
+            f"Incremental collection requires an explicit configured chain for {method}"
+        )
+    return tuple(
+        IncrementalCollectionSource(
+            domain=domain,
+            source=f"{domain}.{vendor}",
+            provider_identity=vendor,
+            configured=True,
+        )
+        for vendor in vendors
+    )
 
 
 def default_incremental_collector(plan: IncrementalCollectionPlan) -> CollectionManifest:
@@ -52,14 +130,18 @@ def default_incremental_collector(plan: IncrementalCollectionPlan) -> Collection
         market=plan.market,
         entries=tuple(
             CollectionManifestEntry(
-                domain=domain,
-                source=source,
-                provider_identity=source,
+                domain=source.domain,
+                source=source.source,
+                provider_identity=source.provider_identity,
                 planned_from=plan.window_start,
                 planned_through=plan.window_end,
-                outcome=CollectionOutcome.NOT_QUERIED,
+                outcome=(
+                    CollectionOutcome.NOT_QUERIED
+                    if source.configured
+                    else CollectionOutcome.NOT_APPLICABLE
+                ),
             )
-            for domain, source in _MARKET_SOURCES[plan.market].items()
+            for source in plan.sources
         ),
     )
 
@@ -71,6 +153,15 @@ def assess_incremental_collection(
     """Derive Coverage and Information Advancement without semantic work."""
     if manifest.plan_version != plan.version or manifest.market != plan.market:
         raise ValueError("Collection Manifest does not match its deterministic plan")
+    planned_sources = {
+        (source.domain, source.source, source.provider_identity)
+        for source in plan.sources
+    }
+    if any(
+        (entry.domain, entry.source, entry.provider_identity) not in planned_sources
+        for entry in manifest.entries
+    ):
+        raise ValueError("Collection Manifest contains an unconfigured source")
 
     domains = tuple(
         _coverage_domain(
@@ -151,6 +242,6 @@ def _advancement_reasons(
 ) -> tuple[str, ...]:
     if entry.outcome is CollectionOutcome.COMPLETE_EMPTY:
         return ("complete_empty_scan",)
-    if entry.outcome is CollectionOutcome.COMPLETE_WITH_RECORDS:
+    if entry.evidence_refs:
         return ("admissible_evidence",)
     return ()

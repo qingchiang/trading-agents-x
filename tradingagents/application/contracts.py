@@ -1783,6 +1783,15 @@ class CoverageStatus(_StableStrEnum):
     NOT_APPLICABLE = "not_applicable"
 
 
+class IncrementalCollectionSource(FrozenModel):
+    """One configured source planned for a deterministic collection domain."""
+
+    domain: Literal["fundamentals", "market", "news", "social"]
+    source: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
+    provider_identity: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
+    configured: bool
+
+
 class CollectionDiagnostic(FrozenModel):
     """A stable, secret-free collection failure class safe for Run events."""
 
@@ -1798,11 +1807,20 @@ class IncrementalCollectionPlan(FrozenModel):
     window_end: datetime
     required_domains: tuple[Literal["fundamentals", "market", "news"], ...]
     advisory_domains: tuple[Literal["social"], ...]
+    sources: tuple[IncrementalCollectionSource, ...] = Field(min_length=1)
 
     @model_validator(mode="after")
     def validate_window(self) -> IncrementalCollectionPlan:
         if self.window_start >= self.window_end:
             raise ValueError("Incremental collection window must advance")
+        planned_domains = set(self.required_domains) | set(self.advisory_domains)
+        if any(source.domain not in planned_domains for source in self.sources):
+            raise ValueError("collection sources must belong to planned domains")
+        source_keys = tuple(
+            (source.domain, source.source) for source in self.sources
+        )
+        if len(source_keys) != len(set(source_keys)):
+            raise ValueError("collection source identities must be unique per domain")
         return self
 
 

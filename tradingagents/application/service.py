@@ -35,7 +35,6 @@ from .contracts import (
     AnalysisRequest,
     AnalysisResult,
     EvidenceBundle,
-    IncrementalCollectionPlan,
     ResearchArtifactDraft,
     RunEvent,
     RunExport,
@@ -55,7 +54,9 @@ from .exporting import (
 from .incremental_collection import (
     IncrementalCollector,
     assess_incremental_collection,
+    build_incremental_collection_plan,
     default_incremental_collector,
+    incremental_market_identity,
 )
 from .instrument_names import resolve_local_instrument_name
 from .llms import RunLLMs, create_run_llms
@@ -264,6 +265,7 @@ class AnalysisService:
             "llm_max_retries": snapshot["llm_max_retries"],
             "output_language": snapshot["output_language"],
             "enabled_roles": list(request.analysts),
+            "market_identity": incremental_market_identity(request.ticker),
             "data_routes": {
                 "data_vendors": data_config.get("data_vendors", {}),
                 "tool_vendors": data_config.get("tool_vendors", {}),
@@ -398,10 +400,9 @@ class AnalysisService:
                     )
                     baseline = self.repository.get_run(request.full_baseline_run_id)
                     collection = self._collect_incremental_preflight(
-                        request,
                         baseline_information_cutoff_at=baseline.information_cutoff_at,
                         target_information_cutoff_at=run.information_cutoff_at,
-                        coverage_policy=run.method_snapshot["coverage_policy"],
+                        method_snapshot=run.method_snapshot,
                     )
                     self._emit(
                         run.id,
@@ -663,29 +664,20 @@ class AnalysisService:
 
     def _collect_incremental_preflight(
         self,
-        request: AnalysisRequest,
         *,
         baseline_information_cutoff_at: datetime | None,
         target_information_cutoff_at: datetime | None,
-        coverage_policy: dict[str, Any],
+        method_snapshot: dict[str, Any],
     ):
         """Build and assess the deterministic collection gate before semantic work."""
         if baseline_information_cutoff_at is None or target_information_cutoff_at is None:
             raise ValueError("Incremental collection requires frozen information cutoffs")
-        market = (
-            "japan"
-            if request.ticker.endswith(".T")
-            else "mainland_china"
-            if request.ticker.endswith((".SS", ".SZ"))
-            else "united_states"
-        )
-        plan = IncrementalCollectionPlan(
-            version=str(coverage_policy["version"]),
-            market=market,
+        plan = build_incremental_collection_plan(
+            market_identity=method_snapshot["market_identity"],
+            data_routes=method_snapshot["data_routes"],
+            coverage_policy=method_snapshot["coverage_policy"],
             window_start=baseline_information_cutoff_at,
             window_end=target_information_cutoff_at,
-            required_domains=tuple(coverage_policy["required_domains"]),
-            advisory_domains=tuple(coverage_policy["advisory_domains"]),
         )
         return assess_incremental_collection(plan, self.incremental_collector(plan))
 
