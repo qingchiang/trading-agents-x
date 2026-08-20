@@ -33,7 +33,9 @@ from tradingagents.application.contracts import (
     EvidenceItem,
     FullResearchRequiredReason,
     IncrementalCollectionPlan,
+    IncrementalCollectionResult,
     IncrementalCollectionSource,
+    IncrementalEvidenceCandidate,
     IncrementalSynthesisInput,
     InformationAdvancement,
     PerformanceObservation,
@@ -49,7 +51,6 @@ from tradingagents.application.database import (
     RunRecord,
 )
 from tradingagents.application.errors import (
-    IncrementalCollectionCommitUnavailableError,
     IncrementalRequestConflictError,
     InvalidIncrementalBaselineError,
     NoInformationAdvancementError,
@@ -300,6 +301,313 @@ def test_complete_empty_incremental_commits_current_decision_and_timeline_node(
     assert result.metrics.llm_calls == 0
     event_types = [event.event_type for event in repository.list_events(result.run_id)]
     assert event_types[-2:] == ["evidence.sealed", "run.succeeded"]
+
+
+@pytest.mark.parametrize(
+    ("ticker", "available_on", "expected_available_at"),
+    [
+        ("NVDA", date(2026, 7, 21), datetime(2026, 7, 22, 3, 59, 59, 999999, tzinfo=UTC)),
+        ("7203.T", date(2026, 7, 21), datetime(2026, 7, 21, 14, 59, 59, 999999, tzinfo=UTC)),
+        ("600000.SS", date(2026, 7, 21), datetime(2026, 7, 21, 15, 59, 59, 999999, tzinfo=UTC)),
+    ],
+)
+def test_evidence_bearing_incremental_commits_a_node_local_pit_bundle(
+    app_settings,
+    repository,
+    ticker,
+    available_on,
+    expected_available_at,
+) -> None:
+    """A late correction belongs to the child bundle, not its effective period."""
+    baseline = _service(app_settings, repository).run(
+        AnalysisRequest(ticker=ticker, analysis_date=date(2026, 7, 20))
+    )
+    candidate = EvidenceItem.create(
+        source="fixture.news",
+        evidence_type="correction",
+        requested_date=date(2026, 7, 24),
+        effective_date=date(2026, 7, 19),
+        content=f"late correction for {ticker}",
+    )
+
+    def collect(plan: IncrementalCollectionPlan) -> IncrementalCollectionResult:
+        entries = []
+        for source in plan.sources:
+            has_record = source.configured and source.domain == "news"
+            entries.append(
+                CollectionManifestEntry(
+                    domain=source.domain,
+                    source=source.source,
+                    provider_identity=source.provider_identity,
+                    chain_position=source.chain_position,
+                    retrieved_at=plan.window_end if source.configured else None,
+                    planned_from=plan.window_start,
+                    planned_through=plan.window_end,
+                    scanned_from=plan.window_start if source.configured else None,
+                    scanned_through=plan.window_end if source.configured else None,
+                    source_watermark="fixture-watermark" if source.configured else None,
+                    outcome=(
+                        CollectionOutcome.COMPLETE_WITH_RECORDS
+                        if has_record
+                        else (
+                            CollectionOutcome.COMPLETE_EMPTY
+                            if source.configured
+                            else CollectionOutcome.NOT_APPLICABLE
+                        )
+                    ),
+                    evidence_refs=(candidate.ref,) if has_record else (),
+                )
+            )
+        return IncrementalCollectionResult(
+            collection_manifest=CollectionManifest(
+                plan_version=plan.version,
+                market=plan.market,
+                entries=tuple(entries),
+            ),
+            evidence=(
+                IncrementalEvidenceCandidate(
+                    evidence=candidate,
+                    available_on=available_on,
+                ),
+            ),
+        )
+
+    observed_inputs = []
+
+    def synthesize(input_):
+        observed_inputs.append(input_)
+        return default_incremental_synthesizer(input_).model_copy(
+            update={
+                "decision": input_.full_baseline_decision.model_copy(
+                    update={
+                        "evidence_refs": (
+                            *input_.full_baseline_decision.evidence_refs,
+                            candidate.ref,
+                        )
+                    }
+                )
+            }
+        )
+
+    result = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_Graph,
+        identity_resolver=lambda symbol, _date: {"company_name": symbol},
+        eligibility_resolver=_equity_resolver,
+        local_name_resolver=lambda _ticker, _date, _config: None,
+        incremental_collector=collect,
+        incremental_synthesizer=synthesize,
+    ).run(
+        AnalysisRequest(
+            ticker=ticker,
+            analysis_date=date(2026, 7, 24),
+            research_kind="incremental",
+            full_baseline_run_id=baseline.run_id,
+        )
+    )
+
+    committed = repository.get_evidence(result.run_id)
+    baseline_evidence = repository.get_evidence(baseline.run_id)
+    assert [item.ref for item in committed.items] == [candidate.ref]
+    assert candidate.ref not in {item.ref for item in baseline_evidence.items}
+    assert committed.items[0].effective_date == date(2026, 7, 19)
+    assert committed.items[0].available_at == expected_available_at
+    assert observed_inputs[0].incremental_evidence == committed
+    assert candidate.ref in result.decision.evidence_refs
+
+
+def test_incremental_rejects_evidence_without_reliable_availability_before_synthesis(
+    app_settings,
+    repository,
+) -> None:
+    baseline = _service(app_settings, repository).run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+    candidate = EvidenceItem.create(
+        source="fixture.news",
+        evidence_type="unreliable-publication",
+        requested_date=date(2026, 7, 24),
+        effective_date=date(2026, 7, 19),
+        content="no reliable publication time",
+    )
+
+    def collect(plan: IncrementalCollectionPlan) -> IncrementalCollectionResult:
+        manifest = _complete_empty_manifest(plan).model_copy(
+            update={
+                "entries": (
+                    CollectionManifestEntry(
+                        domain=plan.sources[0].domain,
+                        source=plan.sources[0].source,
+                        provider_identity=plan.sources[0].provider_identity,
+                        chain_position=plan.sources[0].chain_position,
+                        retrieved_at=plan.window_end,
+                        planned_from=plan.window_start,
+                        planned_through=plan.window_end,
+                        scanned_from=plan.window_start,
+                        scanned_through=plan.window_end,
+                        source_watermark="fixture-watermark",
+                        outcome=CollectionOutcome.COMPLETE_WITH_RECORDS,
+                        evidence_refs=(candidate.ref,),
+                    ),
+                    *_complete_empty_manifest(plan).entries[1:],
+                )
+            }
+        )
+        return IncrementalCollectionResult(
+            collection_manifest=manifest,
+            evidence=(IncrementalEvidenceCandidate(evidence=candidate),),
+        )
+
+    with pytest.raises(ValueError, match="reliable availability"):
+        AnalysisService(
+            app_settings,
+            repository=repository,
+            llm_factory=lambda *_args, **_kwargs: (object(), object()),
+            graph_factory=_Graph,
+            identity_resolver=lambda symbol, _date: {"company_name": symbol},
+            eligibility_resolver=_equity_resolver,
+            local_name_resolver=lambda _ticker, _date, _config: None,
+            incremental_collector=collect,
+            incremental_synthesizer=lambda _input: pytest.fail("must not synthesize"),
+        ).run(
+            AnalysisRequest(
+                ticker="NVDA",
+                analysis_date=date(2026, 7, 24),
+                research_kind="incremental",
+                full_baseline_run_id=baseline.run_id,
+            )
+        )
+
+    failed = repository.list_runs(status=RunStatus.FAILED).items
+    assert len(failed) == 1
+    assert repository.evidence_status(failed[0].id).status == "pending"
+
+
+def test_incremental_baseline_reference_collision_is_atomic(
+    app_settings,
+    repository,
+) -> None:
+    baseline = _service(app_settings, repository).run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+    baseline_item = repository.get_evidence(baseline.run_id).items[0]
+    conflicting = EvidenceItem.model_construct(
+        **{
+            **EvidenceItem.create(
+                source="fixture.news",
+                evidence_type="correction",
+                requested_date=date(2026, 7, 24),
+                content="different payload under a reused reference",
+            ).model_dump(),
+            "ref": baseline_item.ref,
+        }
+    )
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_Graph,
+        identity_resolver=lambda symbol, _date: {"company_name": symbol},
+        eligibility_resolver=_equity_resolver,
+        local_name_resolver=lambda _ticker, _date, _config: None,
+        incremental_collector=lambda plan: _evidence_bearing_collection(
+            plan,
+            IncrementalEvidenceCandidate(evidence=conflicting, available_on=date(2026, 7, 21)),
+        ),
+        incremental_synthesizer=default_incremental_synthesizer,
+    )
+
+    with pytest.raises(EvidenceConflictError, match="collides with a different baseline payload"):
+        service.run(
+            AnalysisRequest(
+                ticker="NVDA",
+                analysis_date=date(2026, 7, 24),
+                research_kind="incremental",
+                full_baseline_run_id=baseline.run_id,
+            )
+        )
+
+    failed = repository.list_runs(status=RunStatus.FAILED).items
+    assert len(failed) == 1
+    assert repository.evidence_status(failed[0].id).status == "pending"
+    assert [node.id for node in repository.get_timeline("NVDA").nodes] == [baseline.run_id]
+
+
+def test_historical_evidence_backfill_keeps_the_cycle_head_and_excludes_sibling_inputs(
+    app_settings,
+    repository,
+) -> None:
+    baseline = _service(app_settings, repository).run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+    newer = EvidenceItem.create(
+        source="fixture.news",
+        evidence_type="newer",
+        requested_date=date(2026, 7, 24),
+        content="newer sibling evidence",
+    )
+    first = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_Graph,
+        identity_resolver=lambda symbol, _date: {"company_name": symbol},
+        eligibility_resolver=_equity_resolver,
+        local_name_resolver=lambda _ticker, _date, _config: None,
+        incremental_collector=lambda plan: _evidence_bearing_collection(
+            plan,
+            IncrementalEvidenceCandidate(evidence=newer, available_on=date(2026, 7, 24)),
+        ),
+        incremental_synthesizer=default_incremental_synthesizer,
+    ).run(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date=date(2026, 7, 24),
+            research_kind="incremental",
+            full_baseline_run_id=baseline.run_id,
+        )
+    )
+    older = EvidenceItem.create(
+        source="fixture.news",
+        evidence_type="backfill",
+        requested_date=date(2026, 7, 22),
+        content="historical sibling evidence",
+    )
+    synthesis_inputs = []
+    backfill = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_Graph,
+        identity_resolver=lambda symbol, _date: {"company_name": symbol},
+        eligibility_resolver=_equity_resolver,
+        local_name_resolver=lambda _ticker, _date, _config: None,
+        incremental_collector=lambda plan: _evidence_bearing_collection(
+            plan,
+            IncrementalEvidenceCandidate(evidence=older, available_on=date(2026, 7, 21)),
+        ),
+        incremental_synthesizer=lambda input_: (
+            synthesis_inputs.append(input_) or default_incremental_synthesizer(input_)
+        ),
+    ).run(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date=date(2026, 7, 22),
+            research_kind="incremental",
+            full_baseline_run_id=baseline.run_id,
+        )
+    )
+
+    timeline = repository.get_timeline("NVDA")
+    by_id = {node.id: node for node in timeline.nodes}
+    assert by_id[first.run_id].is_cycle_head
+    assert not by_id[backfill.run_id].is_cycle_head
+    assert timeline.primary_cycle_id == baseline.run_id
+    assert [item.ref for item in synthesis_inputs[0].incremental_evidence.items] == [older.ref]
+    assert newer.ref not in synthesis_inputs[0].incremental_evidence.model_dump_json()
+    assert not hasattr(synthesis_inputs[0], "sibling_decision")
 
 
 def test_incremental_service_rejects_unclosed_full_research_required_reason(
@@ -754,14 +1062,20 @@ def test_incremental_collection_terminal_outcomes_are_structured_and_stop_before
         semantic_calls += 1
         return object(), object()
 
-    def collect(plan: IncrementalCollectionPlan) -> CollectionManifest:
+    def collect(plan: IncrementalCollectionPlan) -> CollectionManifest | IncrementalCollectionResult:
         observed_scan = outcome in {
             CollectionOutcome.COMPLETE_WITH_RECORDS,
             CollectionOutcome.COMPLETE_EMPTY,
             CollectionOutcome.PARTIAL,
         }
         assert any(planned.source == source for planned in plan.sources)
-        return CollectionManifest(
+        candidate = EvidenceItem.create(
+            source="fixture.collection",
+            evidence_type="fixture",
+            requested_date=date(2026, 7, 24),
+            content=f"{ticker}:{outcome.value}",
+        )
+        manifest = CollectionManifest(
             plan_version=plan.version,
             market=plan.market,
             entries=tuple(
@@ -793,9 +1107,9 @@ def test_incremental_collection_terminal_outcomes_are_structured_and_stop_before
                         "fixture-watermark" if outcome is CollectionOutcome.COMPLETE_EMPTY else None
                     ),
                     outcome=outcome,
-                    evidence_refs=(
-                        ("ev_0123456789ab",)
-                        if outcome is CollectionOutcome.COMPLETE_WITH_RECORDS
+                        evidence_refs=(
+                            (candidate.ref,)
+                            if outcome is CollectionOutcome.COMPLETE_WITH_RECORDS
                         else ()
                     ),
                     diagnostic=(
@@ -809,6 +1123,17 @@ def test_incremental_collection_terminal_outcomes_are_structured_and_stop_before
                 for planned in plan.sources
             ),
         )
+        if outcome is CollectionOutcome.COMPLETE_WITH_RECORDS:
+            return IncrementalCollectionResult(
+                collection_manifest=manifest,
+                evidence=(
+                    IncrementalEvidenceCandidate(
+                        evidence=candidate,
+                        available_on=date(2026, 7, 21),
+                    ),
+                ),
+            )
+        return manifest
 
     service = AnalysisService(
         app_settings,
@@ -828,17 +1153,12 @@ def test_incremental_collection_terminal_outcomes_are_structured_and_stop_before
         full_baseline_run_id=baseline.run_id,
     )
 
-    if outcome is CollectionOutcome.COMPLETE_EMPTY:
+    if outcome in {CollectionOutcome.COMPLETE_EMPTY, CollectionOutcome.COMPLETE_WITH_RECORDS}:
         result = service.run(request)
         assert result.status is RunStatus.SUCCEEDED
         assert any(node.id == result.run_id for node in repository.get_timeline(ticker).nodes)
         return
-    expected_error = (
-        IncrementalCollectionCommitUnavailableError
-        if outcome is CollectionOutcome.COMPLETE_WITH_RECORDS
-        else NoInformationAdvancementError
-    )
-    with pytest.raises(expected_error):
+    with pytest.raises(NoInformationAdvancementError):
         service.run(request)
 
     failed = repository.list_runs(status=RunStatus.FAILED).items
@@ -1316,7 +1636,7 @@ def test_incremental_preflight_keeps_provider_retrieval_and_newly_reviewable_inp
     )
 
 
-def test_newly_reviewable_baseline_component_stops_fail_closed_after_advancement(
+def test_newly_reviewable_baseline_component_commits_without_sibling_inputs(
     app_settings,
     repository,
 ) -> None:
@@ -1355,6 +1675,7 @@ def test_newly_reviewable_baseline_component_stops_fail_closed_after_advancement
         eligibility_resolver=_equity_resolver,
         local_name_resolver=lambda _ticker, _date, _config: None,
         incremental_collector=collect,
+        incremental_synthesizer=default_incremental_synthesizer,
     )
     request = AnalysisRequest(
         ticker="NVDA",
@@ -1363,11 +1684,9 @@ def test_newly_reviewable_baseline_component_stops_fail_closed_after_advancement
         full_baseline_run_id=baseline.run_id,
     )
 
-    with pytest.raises(IncrementalCollectionCommitUnavailableError):
-        service.run(request)
+    result = service.run(request)
 
-    failed = repository.list_runs(status=RunStatus.FAILED).items
-    events = repository.list_events(failed[0].id)
+    events = repository.list_events(result.run_id)
     collection_event = next(
         event for event in events if event.event_type == "incremental.collection_completed"
     )
@@ -1377,7 +1696,10 @@ def test_newly_reviewable_baseline_component_stops_fail_closed_after_advancement
         "newly_reviewable_baseline_component_ids": ["decision.thesis"],
     }
     assert not any(event.event_type == "incremental.no_advancement" for event in events)
-    assert [node.id for node in repository.get_timeline("NVDA").nodes] == [baseline.run_id]
+    assert [node.id for node in repository.get_timeline("NVDA").nodes] == [
+        baseline.run_id,
+        result.run_id,
+    ]
 
 
 def test_collection_manifest_requires_retrieval_time_for_a_queried_source() -> None:
@@ -2287,6 +2609,48 @@ def _complete_empty_manifest(plan: IncrementalCollectionPlan) -> CollectionManif
             )
             for source in plan.sources
         ),
+    )
+
+
+def _evidence_bearing_collection(
+    plan: IncrementalCollectionPlan,
+    candidate: IncrementalEvidenceCandidate,
+) -> IncrementalCollectionResult:
+    """One complete, market-neutral fake scan with exactly one new news record."""
+    entries = []
+    for source in plan.sources:
+        has_record = source.configured and source.domain == "news"
+        entries.append(
+            CollectionManifestEntry(
+                domain=source.domain,
+                source=source.source,
+                provider_identity=source.provider_identity,
+                chain_position=source.chain_position,
+                retrieved_at=plan.window_end if source.configured else None,
+                planned_from=plan.window_start,
+                planned_through=plan.window_end,
+                scanned_from=plan.window_start if source.configured else None,
+                scanned_through=plan.window_end if source.configured else None,
+                source_watermark="fixture-watermark" if source.configured else None,
+                outcome=(
+                    CollectionOutcome.COMPLETE_WITH_RECORDS
+                    if has_record
+                    else (
+                        CollectionOutcome.COMPLETE_EMPTY
+                        if source.configured
+                        else CollectionOutcome.NOT_APPLICABLE
+                    )
+                ),
+                evidence_refs=(candidate.evidence.ref,) if has_record else (),
+            )
+        )
+    return IncrementalCollectionResult(
+        collection_manifest=CollectionManifest(
+            plan_version=plan.version,
+            market=plan.market,
+            entries=tuple(entries),
+        ),
+        evidence=(candidate,),
     )
 
 

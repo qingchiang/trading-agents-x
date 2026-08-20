@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from datetime import UTC, datetime, time
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from tradingagents.dataflows.interface import (
     get_category_for_method,
@@ -18,15 +20,20 @@ from .contracts import (
     CollectionOutcome,
     CoverageRequirement,
     CoverageStatus,
+    EvidenceItem,
     IncrementalCollectionPlan,
     IncrementalCollectionPreflight,
+    IncrementalCollectionResult,
     IncrementalCollectionSource,
+    IncrementalEvidenceCandidate,
     InformationAdvancement,
     ResearchCoverage,
     ResearchCoverageDomain,
 )
 
-IncrementalCollector = Callable[[IncrementalCollectionPlan], CollectionManifest]
+IncrementalCollector = Callable[
+    [IncrementalCollectionPlan], CollectionManifest | IncrementalCollectionResult
+]
 
 _MARKET_IDENTITIES = {
     ".T": ("japan", ".T"),
@@ -37,6 +44,11 @@ _DOMAIN_METHODS = {
     "fundamentals": "get_fundamentals",
     "market": "get_stock_data",
     "news": "get_news",
+}
+_MARKET_TIMEZONES = {
+    "united_states": ZoneInfo("America/New_York"),
+    "japan": ZoneInfo("Asia/Tokyo"),
+    "mainland_china": ZoneInfo("Asia/Shanghai"),
 }
 
 
@@ -151,6 +163,8 @@ def default_incremental_collector(plan: IncrementalCollectionPlan) -> Collection
 def assess_incremental_collection(
     plan: IncrementalCollectionPlan,
     manifest: CollectionManifest,
+    *,
+    evidence_items: tuple[EvidenceItem, ...] | None = None,
 ) -> IncrementalCollectionPreflight:
     """Derive Coverage and Information Advancement without semantic work."""
     if manifest.plan_version != plan.version or manifest.market != plan.market:
@@ -185,6 +199,16 @@ def assess_incremental_collection(
         ):
             raise ValueError(
                 "Collection Manifest observations must use the frozen plan interval"
+            )
+
+    if evidence_items is not None:
+        manifest_evidence_refs = {
+            ref for entry in manifest.entries for ref in entry.evidence_refs
+        }
+        admitted_evidence_refs = {item.ref for item in evidence_items}
+        if manifest_evidence_refs != admitted_evidence_refs:
+            raise ValueError(
+                "Collection Manifest evidence references must exactly match admitted Evidence"
             )
 
     domains = tuple(
@@ -233,6 +257,39 @@ def assess_incremental_collection(
         ),
         diagnostics=diagnostics,
     )
+
+
+def admit_incremental_evidence(
+    plan: IncrementalCollectionPlan,
+    candidates: tuple[IncrementalEvidenceCandidate, ...],
+) -> tuple[EvidenceItem, ...]:
+    """Resolve and validate only new Evidence in the frozen half-open window."""
+    zone = _MARKET_TIMEZONES[plan.market]
+    normalized: dict[str, EvidenceItem] = {}
+    for candidate in candidates:
+        available_at = candidate.evidence.available_at
+        if available_at is None:
+            if candidate.available_on is None:
+                raise ValueError("Incremental Evidence requires reliable availability")
+            available_at = datetime.combine(
+                candidate.available_on,
+                time.max,
+                tzinfo=zone,
+            )
+        elif available_at.tzinfo is None or available_at.utcoffset() is None:
+            raise ValueError("Incremental Evidence availability must include a timezone")
+        resolved = candidate.evidence.model_copy(
+            update={"available_at": available_at.astimezone(UTC)}
+        )
+        if not plan.window_start < resolved.available_at <= plan.window_end:
+            raise ValueError(
+                "Incremental Evidence availability must lie in the baseline-to-cutoff window"
+            )
+        previous = normalized.get(resolved.ref)
+        if previous is not None and previous != resolved:
+            raise ValueError("Incremental Evidence reference collides with a different payload")
+        normalized[resolved.ref] = resolved
+    return tuple(normalized.values())
 
 
 def _coverage_domain(

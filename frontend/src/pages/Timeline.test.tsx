@@ -83,6 +83,28 @@ test("distinguishes a warned Incremental node without disabling its Timeline", a
   expect(screen.getByText("Cycle warning")).toBeVisible();
 });
 
+test("shows evidence-based Information Advancement in the Timeline audit", async () => {
+  vi.mocked(api.timeline).mockResolvedValue({ timeline: {
+    instrument: "600000.SS", primary_cycle_id: "full-1",
+    nodes: [{ id: "incremental-1", cycle_id: "full-1", instrument: "600000.SS",
+      analysis_date: "2026-07-24", research_schema_version: "1",
+      information_cutoff_at: "2026-07-24T15:59:59Z", method_snapshot: {},
+      research_kind: "incremental", full_baseline_run_id: "full-1",
+      is_cycle_head: true, is_primary: true, is_active: true, trashed_at: null,
+      information_advancement: {
+        advanced: true, reasons: ["admissible_evidence"],
+        newly_reviewable_baseline_component_ids: [],
+      },
+    }],
+  } } as never);
+
+  render(<Router initialPath="/timelines/600000.SS"><Timeline /></Router>);
+
+  expect(await screen.findByText("Information Advancement")).toBeVisible();
+  fireEvent.click(screen.getByText("Information Advancement"));
+  expect(screen.getByText("admissible_evidence")).toBeVisible();
+});
+
 test("paginates Timeline nodes independently from the Timeline list", async () => {
   vi.mocked(api.timeline)
     .mockResolvedValueOnce({

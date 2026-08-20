@@ -1914,6 +1914,31 @@ class CollectionManifest(FrozenModel):
         return value
 
 
+class IncrementalEvidenceCandidate(FrozenModel):
+    """One collector-produced record before its PIT availability is admitted.
+
+    A source may establish a precise publication instant or only a market-local
+    publication date.  The latter is deliberately resolved by the application
+    at conservative day-end before it reaches a sealed EvidenceBundle.
+    """
+
+    evidence: EvidenceItem
+    available_on: date | None = None
+
+    @model_validator(mode="after")
+    def validate_availability_shape(self) -> IncrementalEvidenceCandidate:
+        if self.evidence.available_at is not None and self.available_on is not None:
+            raise ValueError("Evidence availability must use either an instant or a date")
+        return self
+
+
+class IncrementalCollectionResult(FrozenModel):
+    """Deterministic collection observations plus unsealed new Evidence."""
+
+    collection_manifest: CollectionManifest
+    evidence: tuple[IncrementalEvidenceCandidate, ...] = ()
+
+
 class ResearchCoverageDomain(FrozenModel):
     domain: Literal["fundamentals", "market", "news", "social"]
     requirement: CoverageRequirement

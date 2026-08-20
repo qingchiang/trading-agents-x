@@ -37,6 +37,7 @@ from .contracts import (
     AnalysisResult,
     EvidenceBundle,
     FullResearchRequiredReason,
+    IncrementalCollectionResult,
     IncrementalNodeProducts,
     IncrementalSynthesis,
     IncrementalSynthesisInput,
@@ -52,7 +53,6 @@ from .contracts import (
 )
 from .eligibility import validate_instrument_eligibility
 from .errors import (
-    IncrementalCollectionCommitUnavailableError,
     InstrumentEligibilityUnavailableError,
     NoInformationAdvancementError,
     UnsupportedInstrumentError,
@@ -63,6 +63,7 @@ from .exporting import (
 )
 from .incremental_collection import (
     IncrementalCollector,
+    admit_incremental_evidence,
     assess_incremental_collection,
     build_incremental_collection_plan,
     default_incremental_collector,
@@ -453,7 +454,7 @@ class AnalysisService:
                         request,
                     )
                     baseline = self.repository.get_run(request.full_baseline_run_id)
-                    collection = self._collect_incremental_preflight(
+                    collection, evidence_items = self._collect_incremental_preflight(
                         baseline_information_cutoff_at=baseline.information_cutoff_at,
                         target_information_cutoff_at=run.information_cutoff_at,
                         method_snapshot=run.method_snapshot,
@@ -480,22 +481,17 @@ class AnalysisService:
                         raise NoInformationAdvancementError(
                             "Incremental collection found no admissible information advancement."
                         )
-                    has_complete_empty_scan = any(
-                        entry.outcome.value == "complete_empty"
-                        for entry in collection.collection_manifest.entries
-                    )
-                    if not has_complete_empty_scan or any(
-                        entry.evidence_refs for entry in collection.collection_manifest.entries
-                    ):
-                        raise IncrementalCollectionCommitUnavailableError(
-                            "Evidence-bearing Incremental Nodes are not available before Ticket 07."
-                        )
                     baseline_result = self.repository.get_result(baseline.id)
                     if baseline_result.decision is None:
                         raise ValueError(
                             "Incremental synthesis requires a complete Full Baseline Decision"
                         )
                     baseline_evidence = self.repository.get_evidence(baseline.id)
+                    incremental_evidence = EvidenceBundle(
+                        instrument=request.ticker,
+                        analysis_date=request.analysis_date,
+                        items=evidence_items,
+                    )
                     performance = PerformanceObservation(
                         status="not_yet_observable",
                         reason="Performance calculation is not yet observable in the complete-empty tracer.",
@@ -506,11 +502,7 @@ class AnalysisService:
                         permitted_baseline_evidence_refs=tuple(
                             item.ref for item in baseline_evidence.items
                         ),
-                        incremental_evidence=EvidenceBundle(
-                            instrument=request.ticker,
-                            analysis_date=request.analysis_date,
-                            items=(),
-                        ),
+                        incremental_evidence=incremental_evidence,
                         collection_manifest=collection.collection_manifest,
                         research_coverage=collection.research_coverage,
                         information_advancement=collection.information_advancement,
@@ -544,11 +536,11 @@ class AnalysisService:
                         raise ValueError(
                             "Incremental synthesis must reassess every Full Baseline Decision Component"
                         )
-                    if not set(synthesis.decision.evidence_refs).issubset(
-                        set(synthesis_input.permitted_baseline_evidence_refs)
-                    ):
+                    allowed_evidence_refs = set(synthesis_input.permitted_baseline_evidence_refs)
+                    allowed_evidence_refs.update(item.ref for item in incremental_evidence.items)
+                    if not set(synthesis.decision.evidence_refs).issubset(allowed_evidence_refs):
                         raise ValueError(
-                            "Complete-empty Incremental decisions may reference only Full Baseline Evidence"
+                            "Incremental decisions may reference only the Full Baseline or current Evidence"
                         )
                     self._validate_reassessment_closure(synthesis, synthesis_input)
                     deterministic_reasons = tuple(
@@ -588,11 +580,7 @@ class AnalysisService:
                         instrument=request.ticker,
                         reports={},
                         decision=synthesis.decision,
-                        evidence=EvidenceBundle(
-                            instrument=request.ticker,
-                            analysis_date=request.analysis_date,
-                            items=(),
-                        ),
+                        evidence=incremental_evidence,
                         metrics=segment_metrics,
                     )
                     self._emit(
@@ -849,7 +837,21 @@ class AnalysisService:
             window_start=baseline_information_cutoff_at,
             window_end=target_information_cutoff_at,
         )
-        return assess_incremental_collection(plan, self.incremental_collector(plan))
+        collected = self.incremental_collector(plan)
+        if isinstance(collected, IncrementalCollectionResult):
+            manifest = collected.collection_manifest
+            evidence_items = admit_incremental_evidence(plan, collected.evidence)
+        else:
+            manifest = collected
+            evidence_items = ()
+        return (
+            assess_incremental_collection(
+                plan,
+                manifest,
+                evidence_items=evidence_items,
+            ),
+            evidence_items,
+        )
 
     def cancel(self, run_id: str) -> RunView:
         view = self.repository.request_cancel(run_id)
@@ -1030,7 +1032,14 @@ class AnalysisService:
             ).invoke(
                 serializer_prompt,
                 example=example,
-                allowed_evidence_refs=synthesis_input.permitted_baseline_evidence_refs,
+                allowed_evidence_refs=tuple(
+                    dict.fromkeys(
+                        (
+                            *synthesis_input.permitted_baseline_evidence_refs,
+                            *(item.ref for item in synthesis_input.incremental_evidence.items),
+                        )
+                    )
+                ),
             )
         return output.value
 

@@ -187,6 +187,16 @@ export default function Timeline() {
               </ul>
             </details>
           )}
+          {node.information_advancement && (
+            <details>
+              <summary>Information Advancement</summary>
+              <ul>
+                {(node.information_advancement.reasons ?? []).map((reason) => (
+                  <li key={reason}>{reason}</li>
+                ))}
+              </ul>
+            </details>
+          )}
           {node.reassessment && (
             <details>
               <summary>Reassessment</summary>

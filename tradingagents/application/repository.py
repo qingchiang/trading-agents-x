@@ -1471,9 +1471,17 @@ class RunRepository:
                 raise InvalidIncrementalBaselineError(
                     "Incremental commit requires an active sealed Full Baseline"
                 )
-            allowed_evidence_refs = {
-                item.ref for item in EvidenceBundle.model_validate(baseline_evidence.bundle_json).items
+            baseline_items = {
+                item.ref: item
+                for item in EvidenceBundle.model_validate(baseline_evidence.bundle_json).items
             }
+            for item in evidence.items:
+                baseline_item = baseline_items.get(item.ref)
+                if baseline_item is not None and baseline_item != item:
+                    raise EvidenceConflictError(
+                        "Incremental Evidence reference collides with a different baseline payload"
+                    )
+            allowed_evidence_refs = set(baseline_items)
             allowed_evidence_refs.update(item.ref for item in evidence.items)
             manifest_refs = {
                 f"manifest:{entry.domain}:{entry.source}"
