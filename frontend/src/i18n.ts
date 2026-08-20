@@ -626,7 +626,7 @@ const zhCN = {
     restoreSelected: "恢复所选（{{count}}）",
     trashDialogTitle: "将所选 {{count}} 条运行移入回收站？",
     trashDialogImpact:
-      "移入后会立即从运行概览、研究记忆、结果结算和近期标的建议中移除。",
+      "移入后会立即从运行概览和近期标的建议中移除。",
     trashDialogDeletion:
       "这些运行将在 {{count}} 天后、即 {{date}} 永久删除。",
     confirmTrash: "移入回收站",
@@ -1130,7 +1130,7 @@ const ja = {
     restoreSelected: "選択を復元（{{count}}）",
     trashDialogTitle: "選択した {{count}} 件をゴミ箱へ移動しますか？",
     trashDialogImpact:
-      "ダッシュボード、メモリー、結果評価、最近の銘柄候補から直ちに除外されます。",
+      "ダッシュボードと最近の銘柄候補から直ちに除外されます。",
     trashDialogDeletion:
       "{{count}} 日後の {{date}} に完全削除される予定です。",
     confirmTrash: "ゴミ箱へ移動",
