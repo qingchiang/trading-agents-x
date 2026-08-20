@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -229,20 +229,10 @@ class RunRepository:
                         raise ValueError(
                             "Incremental Research requires immutable baseline and fingerprint"
                         )
-                    existing_slot = session.scalar(
-                        select(RunRecord).where(
-                            RunRecord.research_kind == "incremental",
-                            RunRecord.full_baseline_run_id == full_baseline_run_id,
-                            RunRecord.incremental_cutoff == request.analysis_date,
-                            RunRecord.trashed_at.is_(None),
-                            RunRecord.status.in_(
-                                (
-                                    RunStatus.QUEUED.value,
-                                    RunStatus.RUNNING.value,
-                                    RunStatus.SUCCEEDED.value,
-                                )
-                            ),
-                        )
+                    existing_slot = self._active_incremental_slot(
+                        session,
+                        full_baseline_run_id,
+                        request.analysis_date,
                     )
                     if existing_slot is not None:
                         if (
@@ -314,20 +304,10 @@ class RunRepository:
         except IntegrityError as exc:
             if research_kind == "incremental":
                 with self.sessions() as session:
-                    existing_slot = session.scalar(
-                        select(RunRecord).where(
-                            RunRecord.research_kind == "incremental",
-                            RunRecord.full_baseline_run_id == full_baseline_run_id,
-                            RunRecord.incremental_cutoff == request.analysis_date,
-                            RunRecord.trashed_at.is_(None),
-                            RunRecord.status.in_(
-                                (
-                                    RunStatus.QUEUED.value,
-                                    RunStatus.RUNNING.value,
-                                    RunStatus.SUCCEEDED.value,
-                                )
-                            ),
-                        )
+                    existing_slot = self._active_incremental_slot(
+                        session,
+                        full_baseline_run_id,
+                        request.analysis_date,
                     )
                     if existing_slot is not None:
                         if (
@@ -923,41 +903,106 @@ class RunRepository:
 
     def retry(self, run_id: str) -> RunView:
         now = _utc_naive()
-        with self.sessions.begin() as session:
-            record = session.get(RunRecord, run_id)
-            if record is None:
-                raise RunNotFoundError(run_id)
-            if record.trashed_at is not None:
-                raise InvalidRunTransitionError(
-                    f"run {run_id} is trashed"
+        slot_identity: tuple[str, Any] | None = None
+        fingerprint: str | None = None
+        try:
+            with self.sessions.begin() as session:
+                record = session.get(RunRecord, run_id)
+                if record is None:
+                    raise RunNotFoundError(run_id)
+                if (
+                    record.research_kind == "incremental"
+                    and record.full_baseline_run_id is not None
+                    and record.incremental_cutoff is not None
+                ):
+                    slot_identity = (
+                        record.full_baseline_run_id,
+                        record.incremental_cutoff,
+                    )
+                    fingerprint = record.incremental_input_fingerprint
+                    existing_slot = self._active_incremental_slot(
+                        session,
+                        *slot_identity,
+                    )
+                    if existing_slot is not None:
+                        if (
+                            existing_slot.incremental_input_fingerprint
+                            == fingerprint
+                        ):
+                            return self._view(existing_slot)
+                        raise IncrementalRequestConflictError(
+                            "An active Incremental Research Run already occupies "
+                            "this Cycle and cutoff."
+                        )
+                if record.trashed_at is not None:
+                    raise InvalidRunTransitionError(
+                        f"run {run_id} is trashed"
+                    )
+                if record.status != RunStatus.FAILED.value:
+                    raise InvalidRunTransitionError(
+                        f"only failed runs can be retried, got {record.status}"
+                    )
+                checkpoint_thread_id = self._attempt(
+                    session,
+                    record,
+                ).checkpoint_thread_id
+                record.current_attempt += 1
+                record.status = RunStatus.QUEUED.value
+                record.cancel_requested = False
+                record.lease_owner = None
+                record.lease_expires_at = None
+                record.error_code = None
+                record.error_message = None
+                record.finished_at = None
+                record.updated_at = now
+                session.add(
+                    RunAttemptRecord(
+                        run_id=run_id,
+                        attempt=record.current_attempt,
+                        status=RunStatus.QUEUED.value,
+                        checkpoint_thread_id=checkpoint_thread_id,
+                        metrics_json=RunMetrics().model_dump(mode="json"),
+                    )
                 )
-            if record.status != RunStatus.FAILED.value:
-                raise InvalidRunTransitionError(
-                    f"only failed runs can be retried, got {record.status}"
+        except IntegrityError as exc:
+            if slot_identity is None:
+                raise
+            with self.sessions() as session:
+                existing_slot = self._active_incremental_slot(
+                    session,
+                    *slot_identity,
                 )
-            checkpoint_thread_id = self._attempt(
-                session,
-                record,
-            ).checkpoint_thread_id
-            record.current_attempt += 1
-            record.status = RunStatus.QUEUED.value
-            record.cancel_requested = False
-            record.lease_owner = None
-            record.lease_expires_at = None
-            record.error_code = None
-            record.error_message = None
-            record.finished_at = None
-            record.updated_at = now
-            session.add(
-                RunAttemptRecord(
-                    run_id=run_id,
-                    attempt=record.current_attempt,
-                    status=RunStatus.QUEUED.value,
-                    checkpoint_thread_id=checkpoint_thread_id,
-                    metrics_json=RunMetrics().model_dump(mode="json"),
-                )
-            )
+                if existing_slot is None:
+                    raise
+                if existing_slot.incremental_input_fingerprint == fingerprint:
+                    return self._view(existing_slot)
+            raise IncrementalRequestConflictError(
+                "An active Incremental Research Run already occupies this Cycle "
+                "and cutoff."
+            ) from exc
         return self.get_run(run_id)
+
+    @staticmethod
+    def _active_incremental_slot(
+        session: Session,
+        full_baseline_run_id: str,
+        incremental_cutoff: date,
+    ) -> RunRecord | None:
+        return session.scalar(
+            select(RunRecord).where(
+                RunRecord.research_kind == "incremental",
+                RunRecord.full_baseline_run_id == full_baseline_run_id,
+                RunRecord.incremental_cutoff == incremental_cutoff,
+                RunRecord.trashed_at.is_(None),
+                RunRecord.status.in_(
+                    (
+                        RunStatus.QUEUED.value,
+                        RunStatus.RUNNING.value,
+                        RunStatus.SUCCEEDED.value,
+                    )
+                ),
+            )
+        )
 
     def checkpoint_thread(self, run_id: str) -> str:
         with self.sessions() as session:

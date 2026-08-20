@@ -440,14 +440,15 @@ def test_incremental_collection_terminal_outcomes_are_structured_and_stop_before
             CollectionOutcome.COMPLETE_WITH_RECORDS,
             CollectionOutcome.COMPLETE_EMPTY,
         }
+        assert any(planned.source == source for planned in plan.sources)
         return CollectionManifest(
             plan_version=plan.version,
             market=plan.market,
-            entries=(
+            entries=tuple(
                 CollectionManifestEntry(
-                    domain="fundamentals",
-                    source=source,
-                    provider_identity=source.rsplit(".", maxsplit=1)[-1],
+                    domain=planned.domain,
+                    source=planned.source,
+                    provider_identity=planned.provider_identity,
                     retrieved_at=(
                         plan.window_end
                         if outcome
@@ -475,7 +476,8 @@ def test_incremental_collection_terminal_outcomes_are_structured_and_stop_before
                         in {CollectionOutcome.UNAVAILABLE, CollectionOutcome.FAILED}
                         else None
                     ),
-                ),
+                )
+                for planned in plan.sources
             ),
         )
 
@@ -730,6 +732,70 @@ def test_incremental_collection_rejects_a_manifest_source_absent_from_the_plan()
         assess_incremental_collection(plan, manifest)
 
 
+@pytest.mark.parametrize("observation", ["missing", "duplicate", "wrong_provider"])
+def test_incremental_collection_requires_one_exact_observation_per_planned_source(
+    observation: str,
+) -> None:
+    """Coverage never assesses a partial or substituted deterministic plan."""
+    plan = IncrementalCollectionPlan(
+        version="1",
+        market="japan",
+        window_start=datetime(2026, 7, 20, tzinfo=UTC),
+        window_end=datetime(2026, 7, 24, tzinfo=UTC),
+        required_domains=("fundamentals", "market", "news"),
+        advisory_domains=("social",),
+        sources=(
+            IncrementalCollectionSource(
+                domain="news",
+                source="news.tdnet",
+                provider_identity="tdnet",
+                configured=True,
+            ),
+            IncrementalCollectionSource(
+                domain="news",
+                source="news.google",
+                provider_identity="google_news",
+                configured=True,
+            ),
+        ),
+    )
+    entries = [
+        CollectionManifestEntry(
+            domain="news",
+            source="news.tdnet",
+            provider_identity="tdnet",
+            planned_from=plan.window_start,
+            planned_through=plan.window_end,
+            outcome=CollectionOutcome.NOT_QUERIED,
+        ),
+        CollectionManifestEntry(
+            domain="news",
+            source="news.google",
+            provider_identity="google_news",
+            planned_from=plan.window_start,
+            planned_through=plan.window_end,
+            outcome=CollectionOutcome.NOT_QUERIED,
+        ),
+    ]
+    if observation == "missing":
+        entries.pop()
+    elif observation == "duplicate":
+        entries[1] = entries[0]
+    else:
+        entries[1] = entries[1].model_copy(
+            update={"provider_identity": "yfinance"}
+        )
+
+    manifest = CollectionManifest(
+        plan_version=plan.version,
+        market=plan.market,
+        entries=tuple(entries),
+    )
+
+    with pytest.raises(ValueError, match="exactly match"):
+        assess_incremental_collection(plan, manifest)
+
+
 def test_incremental_preflight_keeps_provider_retrieval_and_newly_reviewable_input() -> None:
     plan = IncrementalCollectionPlan(
         version="1",
@@ -801,16 +867,17 @@ def test_newly_reviewable_baseline_component_stops_fail_closed_after_advancement
         return CollectionManifest(
             plan_version=plan.version,
             market=plan.market,
-            entries=(
+            entries=tuple(
                 CollectionManifestEntry(
-                    domain="fundamentals",
-                    source="fundamentals.yfinance",
-                    provider_identity="yfinance",
+                    domain=source.domain,
+                    source=source.source,
+                    provider_identity=source.provider_identity,
                     retrieved_at=plan.window_end,
                     planned_from=plan.window_start,
                     planned_through=plan.window_end,
                     outcome=CollectionOutcome.PARTIAL,
-                ),
+                )
+                for source in plan.sources
             ),
             newly_reviewable_baseline_component_ids=("decision.thesis",),
         )
@@ -865,6 +932,116 @@ def test_collection_manifest_requires_retrieval_time_for_a_queried_source() -> N
         )
 
 
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        CollectionOutcome.COMPLETE_EMPTY,
+        CollectionOutcome.UNAVAILABLE,
+        CollectionOutcome.FAILED,
+        CollectionOutcome.NOT_QUERIED,
+        CollectionOutcome.NOT_APPLICABLE,
+    ],
+)
+def test_collection_manifest_forbids_evidence_for_non_evidence_terminal_outcomes(
+    outcome: CollectionOutcome,
+) -> None:
+    fields = {
+        "domain": "news",
+        "source": "ticker_news",
+        "provider_identity": "provider_news",
+        "planned_from": datetime(2026, 7, 20, tzinfo=UTC),
+        "planned_through": datetime(2026, 7, 24, tzinfo=UTC),
+        "evidence_refs": ("ev_0123456789ab",),
+    }
+    if outcome is CollectionOutcome.COMPLETE_EMPTY:
+        fields.update(
+            retrieved_at=datetime(2026, 7, 24, tzinfo=UTC),
+            scanned_from=datetime(2026, 7, 20, tzinfo=UTC),
+            scanned_through=datetime(2026, 7, 24, tzinfo=UTC),
+        )
+    elif outcome not in {
+        CollectionOutcome.NOT_QUERIED,
+        CollectionOutcome.NOT_APPLICABLE,
+    }:
+        fields["retrieved_at"] = datetime(2026, 7, 24, tzinfo=UTC)
+
+    with pytest.raises(ValidationError, match="evidence"):
+        CollectionManifestEntry(outcome=outcome, **fields)
+
+
+@pytest.mark.parametrize(
+    ("outcome", "evidence_refs", "expected_reason"),
+    [
+        (CollectionOutcome.COMPLETE_WITH_RECORDS, ("ev_0123456789ab",), "admissible_evidence"),
+        (CollectionOutcome.COMPLETE_EMPTY, (), "complete_empty_scan"),
+        (CollectionOutcome.PARTIAL, ("ev_0123456789ab",), "admissible_evidence"),
+        (CollectionOutcome.PARTIAL, (), None),
+        (CollectionOutcome.UNAVAILABLE, (), None),
+        (CollectionOutcome.FAILED, (), None),
+        (CollectionOutcome.NOT_QUERIED, (), None),
+        (CollectionOutcome.NOT_APPLICABLE, (), None),
+    ],
+)
+def test_incremental_advancement_accepts_only_complete_or_evidence_bearing_outcomes(
+    outcome: CollectionOutcome,
+    evidence_refs: tuple[str, ...],
+    expected_reason: str | None,
+) -> None:
+    plan = IncrementalCollectionPlan(
+        version="1",
+        market="united_states",
+        window_start=datetime(2026, 7, 20, tzinfo=UTC),
+        window_end=datetime(2026, 7, 24, tzinfo=UTC),
+        required_domains=("news",),
+        advisory_domains=(),
+        sources=(
+            IncrementalCollectionSource(
+                domain="news",
+                source="news.yfinance",
+                provider_identity="yfinance",
+                configured=True,
+            ),
+        ),
+    )
+    entry = {
+        "domain": "news",
+        "source": "news.yfinance",
+        "provider_identity": "yfinance",
+        "planned_from": plan.window_start,
+        "planned_through": plan.window_end,
+        "outcome": outcome,
+        "evidence_refs": evidence_refs,
+    }
+    if outcome in {
+        CollectionOutcome.COMPLETE_WITH_RECORDS,
+        CollectionOutcome.COMPLETE_EMPTY,
+    }:
+        entry.update(
+            retrieved_at=plan.window_end,
+            scanned_from=plan.window_start,
+            scanned_through=plan.window_end,
+        )
+    elif outcome not in {
+        CollectionOutcome.NOT_QUERIED,
+        CollectionOutcome.NOT_APPLICABLE,
+    }:
+        entry["retrieved_at"] = plan.window_end
+
+    result = assess_incremental_collection(
+        plan,
+        CollectionManifest(
+            plan_version=plan.version,
+            market=plan.market,
+            entries=(CollectionManifestEntry(**entry),),
+        ),
+    )
+
+    assert result.information_advancement.advanced is (expected_reason is not None)
+    assert result.information_advancement.reasons == (
+        (expected_reason,) if expected_reason is not None else ()
+    )
+
+
 def test_incremental_slot_replays_identical_active_request_and_rejects_conflict(
     app_settings,
     repository,
@@ -908,6 +1085,194 @@ def test_two_connections_return_one_incremental_slot_for_identical_requests(
         runs = list(executor.map(lambda _unused: service.enqueue(request), range(2)))
 
     assert {run.id for run in runs} == {runs[0].id}
+
+
+@pytest.mark.parametrize(
+    ("terminal_state", "expected_status", "trashed"),
+    [
+        ("failed", RunStatus.FAILED, False),
+        ("cancelled", RunStatus.CANCELLED, False),
+        ("trashed", RunStatus.CANCELLED, True),
+    ],
+)
+def test_incremental_retry_keeps_inactive_history_when_a_conflicting_slot_is_active(
+    app_settings,
+    repository,
+    terminal_state: str,
+    expected_status: RunStatus,
+    trashed: bool,
+) -> None:
+    service = _service(app_settings, repository)
+    baseline = service.run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+    failed_request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 24),
+        research_kind="incremental",
+        full_baseline_run_id=baseline.run_id,
+    )
+
+    inactive = service.enqueue(failed_request)
+    if terminal_state == "failed":
+        repository.claim_run(inactive.id, "fixture", app_settings.lease_seconds)
+        repository.fail(inactive.id, RuntimeError("fixture failure"))
+    else:
+        service.cancel(inactive.id)
+        if terminal_state == "trashed":
+            repository.trash_runs((inactive.id,))
+    active = service.enqueue(
+        failed_request.model_copy(update={"analysts": ("market",)})
+    )
+
+    with pytest.raises(IncrementalRequestConflictError):
+        service.retry(inactive.id)
+
+    unchanged = repository.get_run(inactive.id)
+    assert unchanged.status is expected_status
+    assert unchanged.attempt == 1
+    assert (unchanged.trashed_at is not None) is trashed
+    assert repository.get_run(active.id).status is RunStatus.QUEUED
+
+
+@pytest.mark.parametrize(
+    ("terminal_state", "expected_status", "trashed"),
+    [
+        ("failed", RunStatus.FAILED, False),
+        ("cancelled", RunStatus.CANCELLED, False),
+        ("trashed", RunStatus.CANCELLED, True),
+    ],
+)
+def test_incremental_retry_replays_an_identical_active_slot_without_requeueing_history(
+    app_settings,
+    repository,
+    terminal_state: str,
+    expected_status: RunStatus,
+    trashed: bool,
+) -> None:
+    service = _service(app_settings, repository)
+    baseline = service.run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+    request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 24),
+        research_kind="incremental",
+        full_baseline_run_id=baseline.run_id,
+    )
+    inactive = service.enqueue(request)
+    if terminal_state == "failed":
+        repository.claim_run(inactive.id, "fixture", app_settings.lease_seconds)
+        repository.fail(inactive.id, RuntimeError("fixture failure"))
+    else:
+        service.cancel(inactive.id)
+        if terminal_state == "trashed":
+            repository.trash_runs((inactive.id,))
+    active = service.enqueue(request)
+
+    replayed = service.retry(inactive.id)
+
+    assert replayed.id == active.id
+    unchanged = repository.get_run(inactive.id)
+    assert unchanged.status is expected_status
+    assert unchanged.attempt == 1
+    assert (unchanged.trashed_at is not None) is trashed
+    assert not any(
+        event.event_type == "run.retry_queued"
+        for event in repository.list_events(inactive.id)
+    )
+
+
+def test_incremental_retry_maps_a_sqlite_slot_integrity_error_to_typed_conflict(
+    app_settings,
+    repository,
+    monkeypatch,
+) -> None:
+    service = _service(app_settings, repository)
+    baseline = service.run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+    request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 24),
+        research_kind="incremental",
+        full_baseline_run_id=baseline.run_id,
+    )
+    failed = service.enqueue(request)
+    repository.claim_run(failed.id, "fixture", app_settings.lease_seconds)
+    repository.fail(failed.id, RuntimeError("fixture failure"))
+    service.enqueue(request.model_copy(update={"analysts": ("market",)}))
+    active_slot = repository._active_incremental_slot
+    reads = 0
+
+    def stale_first_slot_read(*args):
+        nonlocal reads
+        reads += 1
+        if reads == 1:
+            return None
+        return active_slot(*args)
+
+    monkeypatch.setattr(repository, "_active_incremental_slot", stale_first_slot_read)
+
+    with pytest.raises(IncrementalRequestConflictError):
+        service.retry(failed.id)
+
+    assert reads == 2
+    unchanged = repository.get_run(failed.id)
+    assert unchanged.status is RunStatus.FAILED
+    assert unchanged.attempt == 1
+
+
+def test_two_sqlite_connections_make_one_incremental_retry_slot_winner(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(app_settings, repository)
+    baseline = service.run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+    request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 24),
+        research_kind="incremental",
+        full_baseline_run_id=baseline.run_id,
+    )
+    failed = service.enqueue(request)
+    repository.claim_run(failed.id, "fixture", app_settings.lease_seconds)
+    repository.fail(failed.id, RuntimeError("fixture failure"))
+    conflicting_request = request.model_copy(update={"analysts": ("market",)})
+    barrier = Barrier(2)
+
+    def attempt(operation):
+        barrier.wait(timeout=10)
+        try:
+            return operation()
+        except Exception as exc:  # Both service calls share the public error seam.
+            return exc
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = list(
+            executor.map(
+                attempt,
+                (
+                    lambda: service.retry(failed.id),
+                    lambda: service.enqueue(conflicting_request),
+                ),
+            )
+        )
+
+    successful = [outcome for outcome in outcomes if not isinstance(outcome, Exception)]
+    conflicts = [
+        outcome
+        for outcome in outcomes
+        if isinstance(outcome, IncrementalRequestConflictError)
+    ]
+    assert len(successful) == 1
+    assert len(conflicts) == 1
+    assert repository.get_run(successful[0].id).status is RunStatus.QUEUED
+    retained = repository.get_run(failed.id)
+    assert retained.status in {RunStatus.FAILED, RunStatus.QUEUED}
+    assert retained.attempt in {1, 2}
 
 
 @pytest.mark.parametrize(

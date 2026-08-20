@@ -1849,6 +1849,16 @@ class CollectionManifestEntry(FrozenModel):
     def validate_terminal_observation(self) -> CollectionManifestEntry:
         if self.planned_from >= self.planned_through:
             raise ValueError("collection interval must be non-empty")
+        if self.outcome in {
+            CollectionOutcome.COMPLETE_EMPTY,
+            CollectionOutcome.UNAVAILABLE,
+            CollectionOutcome.FAILED,
+            CollectionOutcome.NOT_QUERIED,
+            CollectionOutcome.NOT_APPLICABLE,
+        } and self.evidence_refs:
+            raise ValueError(
+                "this collection outcome cannot report evidence references"
+            )
         scanned = (self.scanned_from, self.scanned_through)
         if any(item is not None for item in scanned) and any(
             item is None for item in scanned

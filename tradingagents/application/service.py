@@ -708,6 +708,8 @@ class AnalysisService:
                 request,
             )
         view = self.repository.retry(run_id)
+        if view.id != run_id:
+            return view
         self.repository.append_event(
             run_id,
             "run.retry_queued",

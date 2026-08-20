@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -153,15 +154,19 @@ def assess_incremental_collection(
     """Derive Coverage and Information Advancement without semantic work."""
     if manifest.plan_version != plan.version or manifest.market != plan.market:
         raise ValueError("Collection Manifest does not match its deterministic plan")
-    planned_sources = {
+    planned_sources = Counter(
         (source.domain, source.source, source.provider_identity)
         for source in plan.sources
-    }
-    if any(
-        (entry.domain, entry.source, entry.provider_identity) not in planned_sources
+    )
+    observed_sources = Counter(
+        (entry.domain, entry.source, entry.provider_identity)
         for entry in manifest.entries
-    ):
-        raise ValueError("Collection Manifest contains an unconfigured source")
+    )
+    if observed_sources != planned_sources:
+        raise ValueError(
+            "Collection Manifest contains an unconfigured source or does not "
+            "exactly match its deterministic plan"
+        )
 
     domains = tuple(
         _coverage_domain(

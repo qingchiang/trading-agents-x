@@ -168,6 +168,73 @@ async def test_incremental_creation_exposes_typed_baseline_and_slot_feedback(
 
 
 @pytest.mark.anyio
+async def test_incremental_retry_conflict_is_mapped_without_requeueing_history(
+    web_client: httpx.AsyncClient,
+    web_repository,
+    web_service,
+    web_settings,
+) -> None:
+    baseline_request = AnalysisRequest(
+        ticker="NVDA", analysis_date=date(2026, 7, 20)
+    )
+    baseline, _ = web_repository.create_run(
+        baseline_request,
+        web_settings.resolve_run(baseline_request).snapshot(),
+        research_schema_version="1",
+        information_cutoff_at=datetime(2026, 7, 20, 23, 59, 59, tzinfo=UTC),
+        method_snapshot={"schema_version": "1"},
+        research_kind="full",
+    )
+    web_repository.claim_run(baseline.id, "fixture", 30)
+    item = EvidenceItem.create(
+        source="fixture",
+        evidence_type="fixture",
+        requested_date=baseline_request.analysis_date,
+        effective_date=baseline_request.analysis_date,
+        content="fixture",
+    )
+    evidence = EvidenceBundle(
+        instrument=baseline_request.ticker,
+        analysis_date=baseline_request.analysis_date,
+        items=(item,),
+    )
+    web_repository.seal_evidence(baseline.id, evidence)
+    web_repository.complete(
+        baseline.id,
+        AnalysisResult(
+            run_id=baseline.id,
+            status=RunStatus.SUCCEEDED,
+            instrument=baseline_request.ticker,
+            reports={},
+            decision=research_decision(evidence_refs=(item.ref,)),
+            evidence=evidence,
+        ),
+        evidence=evidence,
+    )
+    request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 24),
+        research_kind="incremental",
+        full_baseline_run_id=baseline.id,
+    )
+    failed = web_service.enqueue(request)
+    web_repository.claim_run(failed.id, "fixture", 30)
+    web_repository.fail(failed.id, RuntimeError("fixture failure"))
+    active = web_service.enqueue(
+        request.model_copy(update={"analysts": ("market",)})
+    )
+
+    response = await web_client.post(f"/api/v1/runs/{failed.id}/retry")
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "incremental_request_conflict"
+    unchanged = web_repository.get_run(failed.id)
+    assert unchanged.status is RunStatus.FAILED
+    assert unchanged.attempt == 1
+    assert web_repository.get_run(active.id).status is RunStatus.QUEUED
+
+
+@pytest.mark.anyio
 async def test_timeline_api_exposes_first_same_identity_full_node(
     web_client: httpx.AsyncClient,
     web_repository,
