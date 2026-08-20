@@ -73,7 +73,7 @@ from .incremental_collection import (
 from .instrument_names import resolve_local_instrument_name
 from .llms import RunLLMs, create_run_llms
 from .metrics import MetricsCallback
-from .repository import RunRepository, RunView
+from .repository import EvidenceConflictError, RunRepository, RunView
 from .runtime import RunCancelled, RunContext, WorkerShutdown
 from .settings import AppSettings, RunSettings
 
@@ -500,6 +500,10 @@ class AnalysisService:
                         instrument=request.ticker,
                         analysis_date=request.analysis_date,
                         items=evidence_items,
+                    )
+                    self._validate_incremental_bundle_ownership(
+                        incremental_evidence,
+                        baseline_evidence,
                     )
                     performance = PerformanceObservation(
                         status="not_yet_observable",
@@ -1055,6 +1059,18 @@ class AnalysisService:
                 ),
             )
         return output.value
+
+    @staticmethod
+    def _validate_incremental_bundle_ownership(
+        incremental_evidence: EvidenceBundle,
+        baseline_evidence: EvidenceBundle,
+    ) -> None:
+        """Keep baseline Evidence out of an Incremental Run's owned bundle."""
+        baseline_refs = {item.ref for item in baseline_evidence.items}
+        if any(item.ref in baseline_refs for item in incremental_evidence.items):
+            raise EvidenceConflictError(
+                "Incremental Evidence bundle must not copy Full Baseline Evidence references"
+            )
 
     @staticmethod
     def _validate_reassessment_closure(

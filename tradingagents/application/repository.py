@@ -1476,10 +1476,9 @@ class RunRepository:
                 for item in EvidenceBundle.model_validate(baseline_evidence.bundle_json).items
             }
             for item in evidence.items:
-                baseline_item = baseline_items.get(item.ref)
-                if baseline_item is not None and baseline_item != item:
+                if item.ref in baseline_items:
                     raise EvidenceConflictError(
-                        "Incremental Evidence reference collides with a different baseline payload"
+                        "Incremental Evidence bundle must not copy Full Baseline Evidence references"
                     )
             allowed_evidence_refs = set(baseline_items)
             allowed_evidence_refs.update(item.ref for item in evidence.items)

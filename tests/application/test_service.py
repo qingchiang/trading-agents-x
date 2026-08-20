@@ -48,6 +48,7 @@ from tradingagents.application.database import (
     DecisionRecord,
     PrimaryResearchCycleRecord,
     ResearchNodeRecord,
+    RunEvidenceRecord,
     RunRecord,
 )
 from tradingagents.application.errors import (
@@ -552,6 +553,139 @@ def test_incremental_rederives_a_caller_reference_that_collides_with_a_baseline(
         baseline.run_id,
         result.run_id,
     ]
+
+
+def test_incremental_rejects_copying_a_baseline_evidence_ref_before_synthesis(
+    app_settings,
+    repository,
+) -> None:
+    baseline = _service(app_settings, repository).run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+    sealed_baseline_evidence = _seed_baseline_evidence_ownership_collision(
+        repository,
+        baseline.run_id,
+    )
+    copied_item = sealed_baseline_evidence.items[0]
+
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_Graph,
+        identity_resolver=lambda symbol, _date: {"company_name": symbol},
+        eligibility_resolver=_equity_resolver,
+        local_name_resolver=lambda _ticker, _date, _config: None,
+        incremental_collector=lambda plan: _evidence_bearing_collection(
+            plan,
+            IncrementalEvidenceCandidate(evidence=copied_item),
+        ),
+        incremental_synthesizer=lambda _input: pytest.fail(
+            "baseline-owned Evidence must fail before Incremental synthesis"
+        ),
+    )
+
+    with pytest.raises(EvidenceConflictError, match="must not copy"):
+        service.run(
+            AnalysisRequest(
+                ticker="NVDA",
+                analysis_date=date(2026, 7, 24),
+                research_kind="incremental",
+                full_baseline_run_id=baseline.run_id,
+            )
+        )
+
+    failed = repository.list_runs(status=RunStatus.FAILED).items
+    assert len(failed) == 1
+    assert failed[0].error_code == "EvidenceConflictError"
+    assert repository.get_evidence(baseline.run_id) == sealed_baseline_evidence
+    assert repository.evidence_status(failed[0].id).status == "pending"
+    assert repository.get_result(failed[0].id).decision is None
+    assert repository.get_result(failed[0].id).evidence is None
+    assert [node.id for node in repository.get_timeline("NVDA").nodes] == [baseline.run_id]
+    assert {
+        event.event_type for event in repository.list_events(failed[0].id)
+    }.isdisjoint({"evidence.sealed", "run.succeeded"})
+
+
+def test_incremental_repository_rejects_copying_a_baseline_evidence_ref_atomically(
+    app_settings,
+    repository,
+    monkeypatch,
+) -> None:
+    baseline = _service(app_settings, repository).run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+    sealed_baseline_evidence = _seed_baseline_evidence_ownership_collision(
+        repository,
+        baseline.run_id,
+    )
+    copied_item = sealed_baseline_evidence.items[0]
+
+    def synthesize(input_):
+        synthesis = default_incremental_synthesizer(input_)
+        return synthesis.model_copy(
+            update={
+                "decision": input_.full_baseline_decision.model_copy(
+                    update={"evidence_refs": (copied_item.ref,)}
+                ),
+                "reassessment": synthesis.reassessment.model_copy(
+                    update={
+                        "entries": (
+                            synthesis.reassessment.entries[0].model_copy(
+                                update={
+                                    "evidence_refs": (copied_item.ref,),
+                                    "manifest_entry_refs": (),
+                                }
+                            ),
+                            *synthesis.reassessment.entries[1:],
+                        )
+                    }
+                ),
+            }
+        )
+
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_Graph,
+        identity_resolver=lambda symbol, _date: {"company_name": symbol},
+        eligibility_resolver=_equity_resolver,
+        local_name_resolver=lambda _ticker, _date, _config: None,
+        incremental_collector=lambda plan: _evidence_bearing_collection(
+            plan,
+            IncrementalEvidenceCandidate(evidence=copied_item),
+        ),
+        incremental_synthesizer=synthesize,
+    )
+    monkeypatch.setattr(
+        service,
+        "_validate_incremental_bundle_ownership",
+        lambda *_args: None,
+    )
+
+    with pytest.raises(EvidenceConflictError, match="must not copy"):
+        service.run(
+            AnalysisRequest(
+                ticker="NVDA",
+                analysis_date=date(2026, 7, 24),
+                research_kind="incremental",
+                full_baseline_run_id=baseline.run_id,
+            )
+        )
+
+    failed = repository.list_runs(status=RunStatus.FAILED).items
+    assert len(failed) == 1
+    assert failed[0].error_code == "EvidenceConflictError"
+    assert repository.get_evidence(baseline.run_id) == sealed_baseline_evidence
+    assert repository.evidence_status(failed[0].id).status == "pending"
+    assert repository.get_result(failed[0].id).decision is None
+    assert repository.get_result(failed[0].id).evidence is None
+    assert [node.id for node in repository.get_timeline("NVDA").nodes] == [baseline.run_id]
+    assert {
+        event.event_type for event in repository.list_events(failed[0].id)
+    }.isdisjoint({"evidence.sealed", "run.succeeded"})
 
 
 def test_incremental_evidence_identity_uses_the_final_available_at_payload() -> None:
@@ -2915,6 +3049,34 @@ def _evidence_bearing_collection(
         ),
         evidence=(candidate,),
     )
+
+
+def _seed_baseline_evidence_ownership_collision(
+    repository: RunRepository,
+    baseline_run_id: str,
+) -> EvidenceBundle:
+    """Persist a sealed baseline payload identical to the final child candidate."""
+    copied_item = EvidenceItem.create(
+        source="fixture.news",
+        evidence_type="late-disclosure",
+        requested_date=date(2026, 7, 24),
+        effective_date=date(2026, 7, 19),
+        available_at=datetime(2026, 7, 22, 3, 59, 59, tzinfo=UTC),
+        content="The exact sealed Evidence payload must remain baseline-owned.",
+    )
+    evidence = EvidenceBundle(
+        instrument="NVDA",
+        analysis_date=date(2026, 7, 24),
+        items=(copied_item,),
+    )
+    with repository.sessions.begin() as session:
+        record = session.get(RunEvidenceRecord, baseline_run_id)
+        assert record is not None
+        record.bundle_json = evidence.model_dump(mode="json")
+        record.digest = evidence.digest
+        record.item_count = len(evidence.items)
+        record.table_count = len(evidence.tables)
+    return evidence
 
 
 def _mutate_incremental_baseline(
