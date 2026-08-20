@@ -252,7 +252,7 @@ def worker(
         ),
     ] = None,
 ) -> None:
-    """Run the single-concurrency analysis and outcome-settlement worker."""
+    """Run the single-concurrency analysis worker."""
     color_enabled = (
         sys.stderr.isatty() and "NO_COLOR" not in os.environ
         if use_colors is None

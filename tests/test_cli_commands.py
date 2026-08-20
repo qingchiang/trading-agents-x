@@ -68,6 +68,10 @@ def test_root_is_noninteractive_and_exposes_the_new_command_tree() -> None:
     run_help = runner.invoke(cli.app, ["run", "--help"])
     assert run_help.exit_code == 0
     assert "--provenance" not in run_help.output
+    worker_help = runner.invoke(cli.app, ["worker", "--help"])
+    assert worker_help.exit_code == 0
+    assert "single-concurrency analysis worker" in worker_help.output
+    assert "outcome-settlement" not in worker_help.output
 
 
 def test_version_exits_without_loading_settings(monkeypatch) -> None:
