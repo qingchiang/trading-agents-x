@@ -27,7 +27,6 @@ from tradingagents.dataflows.symbol_utils import (
 )
 
 _SYMBOL_PATTERN = re.compile(r"^[A-Z0-9^][A-Z0-9.^=_-]*$")
-_MEMORY_REF_PATTERN = re.compile(r"^memory:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _EVIDENCE_REF_PATTERN = re.compile(r"^ev_[a-f0-9]{12}$")
 _RESEARCH_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_.-]*$")
 _DECISION_COMPONENT_PATH_PATTERN = re.compile(
@@ -1261,7 +1260,6 @@ class ResearchDecision(FrozenModel):
     executive_summary: str = Field(min_length=1)
     thesis: str = Field(min_length=1)
     evidence_refs: tuple[str, ...] = ()
-    memory_refs: tuple[str, ...] = ()
     catalysts: tuple[str, ...] = ()
     risks: tuple[str, ...] = Field(min_length=1)
     invalidation_conditions: tuple[str, ...] = Field(min_length=1)
@@ -1283,6 +1281,10 @@ class ResearchDecision(FrozenModel):
         """Make the top-level evidence index a deterministic nested-ref union."""
         if not isinstance(value, dict):
             return value
+        # Retained pre-redesign Decisions may still contain ``memory_refs``.
+        # Drop that retired field while hydrating the current core contract so
+        # Execution History remains readable without exposing Memory again.
+        value = {key: item for key, item in value.items() if key != "memory_refs"}
         merged = list(value.get("evidence_refs") or ())
         for scenario in value.get("scenarios") or ():
             merged.extend(_field_value(scenario, "evidence_refs") or ())
@@ -1304,14 +1306,6 @@ class ResearchDecision(FrozenModel):
         for adjustment in value.get("risk_review_adjustments") or ():
             merged.extend(_field_value(adjustment, "evidence_refs") or ())
         return {**value, "evidence_refs": tuple(dict.fromkeys(merged))}
-
-    @field_validator("memory_refs")
-    @classmethod
-    def validate_memory_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        refs = tuple(dict.fromkeys(value))
-        if any(not _MEMORY_REF_PATTERN.fullmatch(ref) for ref in refs):
-            raise ValueError("memory refs must use the memory:<run_id> format")
-        return refs
 
     @field_validator("evidence_refs")
     @classmethod
@@ -1343,128 +1337,6 @@ def _field_value(value: Any, field: str) -> Any:
     if isinstance(value, dict):
         return value.get(field)
     return None
-
-
-class MemoryOutcome(FrozenModel):
-    """Completed five-or-more-interval feedback for one past decision."""
-
-    benchmark: str
-    observation_start: date | None = None
-    observation_end: date | None = None
-    holding_intervals: int = Field(ge=5)
-    raw_return: float
-    alpha_return: float
-
-
-class MemoryRecord(FrozenModel):
-    """One auditable memory item supplied to a research decision node."""
-
-    ref: str
-    run_id: str
-    scope: Literal["same_ticker", "same_market"]
-    ticker: str
-    market: str | None = None
-    analysis_date: date
-    decision: ResearchDecision | None = None
-    outcome: MemoryOutcome | None = None
-    reflection: str = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def validate_record(self) -> MemoryRecord:
-        if not _MEMORY_REF_PATTERN.fullmatch(self.ref):
-            raise ValueError("memory ref must use the memory:<run_id> format")
-        if self.ref != f"memory:{self.run_id}":
-            raise ValueError("memory ref must identify its run_id")
-        if self.scope == "same_ticker":
-            if self.decision is None or self.outcome is None:
-                raise ValueError("same-ticker memory requires decision and outcome")
-        elif self.decision is not None or self.outcome is not None:
-            raise ValueError("same-market memory must contain reflection-only feedback")
-        return self
-
-    def prompt_text(self, max_chars: int = 2000) -> str:
-        """Render one bounded block without turning memory into evidence."""
-        parts = [
-            f"REF: {self.ref}",
-            f"SCOPE: {self.scope}",
-            (f"PAST RUN: {self.analysis_date} | {self.ticker} | {self.market or 'unknown market'}"),
-        ]
-        if self.decision is not None:
-            parts.append(
-                "PAST DECISION:\n"
-                + json.dumps(
-                    self.decision.model_dump(mode="json"),
-                    ensure_ascii=False,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                )
-            )
-        if self.outcome is not None:
-            parts.append(
-                "OBSERVED OUTCOME:\n"
-                + json.dumps(
-                    self.outcome.model_dump(mode="json"),
-                    ensure_ascii=False,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                )
-            )
-        parts.append(f"REFLECTION:\n{self.reflection}")
-        rendered = "\n".join(parts)
-        if max_chars <= 0:
-            return ""
-        if len(rendered) <= max_chars:
-            return rendered
-        if max_chars == 1:
-            return "…"
-        return rendered[: max_chars - 1] + "…"
-
-
-class MemoryContext(FrozenModel):
-    """Deterministic, bounded historical feedback for one current run."""
-
-    version: Literal["1"] = "1"
-    instrument: str
-    market: str | None = None
-    items: tuple[MemoryRecord, ...] = ()
-
-    @model_validator(mode="after")
-    def validate_context(self) -> MemoryContext:
-        refs = [item.ref for item in self.items]
-        if len(refs) != len(set(refs)):
-            raise ValueError("memory refs must be unique")
-        instrument = self.instrument.casefold()
-        for item in self.items:
-            if item.scope == "same_ticker" and item.ticker.casefold() != instrument:
-                raise ValueError("same-ticker memory must match the current instrument")
-            if item.scope == "same_market" and (
-                item.ticker.casefold() == instrument
-                or self.market is None
-                or item.market != self.market
-            ):
-                raise ValueError(
-                    "same-market memory must be another instrument in the current market"
-                )
-        return self
-
-    @property
-    def refs(self) -> tuple[str, ...]:
-        return tuple(item.ref for item in self.items)
-
-    def prompt_text(
-        self,
-        *,
-        max_chars: int = 12_000,
-        item_max_chars: int = 2_000,
-    ) -> str:
-        if not self.items or max_chars <= 0 or item_max_chars <= 0:
-            return ""
-        separators = 2 * (len(self.items) - 1)
-        available = max(0, max_chars - separators)
-        per_item = min(item_max_chars, available // len(self.items))
-        if per_item <= 0:
-            return ""
-        return "\n\n".join(item.prompt_text(per_item) for item in self.items)[:max_chars]
 
 
 ResearchArtifactContent = (

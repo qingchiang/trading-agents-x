@@ -139,7 +139,6 @@ class _StructuredInvoker:
                 risk_review_adjustments=adjustments,
             )
             payload = decision.model_dump(mode="json")
-            payload.pop("memory_refs", None)
             payload.pop("valuation_assessment", None)
             payload.pop("market_reference_levels", None)
             payload.pop("calculation_records", None)
@@ -208,7 +207,6 @@ class _AnalystSubgraph:
         self.analyst = analyst
 
     def invoke(self, state, **_kwargs):
-        assert state["past_context"] == ""
         assert _kwargs["config"]["metadata"] == {"research_node": f"analyst.{self.analyst}.collect"}
         return {
             **state,
@@ -671,13 +669,12 @@ def test_full_graph_without_memory_does_not_render_legacy_feedback(
         selected_analysts=("market",),
     )
 
-    execution = graph.execute(
+    graph.execute(
         _context(app_settings, RunProfile.FAST, analysts=("market",)),
         checkpoint_thread_id="full-without-memory",
     )
 
     prompts = [str(_prompt) for _schema, _prompt in llm.calls]
-    assert execution.decision.memory_refs == ()
     assert all("historical_feedback_memory" not in prompt for prompt in prompts)
     assert all(
         "Calibration lesson: demand evidence was overweighted." not in prompt

@@ -39,7 +39,7 @@ application rules are the same for every provider:
 
 - Evidence sealing, provenance, point-in-time checks, and future-data rejection.
 - Local Pydantic and semantic validation.
-- Evidence and Memory reference allowlists.
+- Evidence reference allowlists.
 - Restricted formula evaluation, numeric-date resolution, and audit status.
 - SQLite persistence, checkpoints, retry boundaries, Web rendering, and export.
 

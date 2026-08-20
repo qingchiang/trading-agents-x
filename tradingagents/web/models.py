@@ -12,9 +12,7 @@ from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
     EvidenceSealView,
-    ResearchDecision,
     RunAttemptView,
-    RunProfile,
     RunView,
 )
 
@@ -115,7 +113,6 @@ class HealthResponse(ApiModel):
 class QueueHealth(ApiModel):
     queued: int
     running: int
-    pending_outcomes: int
 
 
 class ProviderCapabilities(ApiModel):
@@ -168,27 +165,3 @@ class CapabilitiesResponse(ApiModel):
     output_languages: list[str]
     providers: dict[str, ProviderCapabilities]
     defaults: CapabilityDefaults
-
-
-class MemoryOutcome(ApiModel):
-    status: Literal["pending", "resolved"]
-    benchmark: str
-    observation_start: str | None
-    observation_end: str | None
-    holding_intervals: int
-    raw_return: float | None
-    alpha_return: float | None
-
-
-class MemoryEntry(ApiModel):
-    run_id: str
-    ticker: str
-    instrument_name: str | None = None
-    instrument_local_name: str | None = None
-    market: str | None
-    asset_type: str
-    analysis_date: str
-    profile: RunProfile
-    decision: ResearchDecision
-    outcome: MemoryOutcome
-    reflection: str | None

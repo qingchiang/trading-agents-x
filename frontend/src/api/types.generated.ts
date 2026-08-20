@@ -261,28 +261,6 @@ export interface components {
       value: number;
     };
     MeasurementKind: "currency" | "percent" | "ratio" | "index" | "quantity" | "count" | "basis_points" | "unitless" | "unknown";
-    MemoryEntry: {
-      analysis_date: string;
-      asset_type: string;
-      decision: components["schemas"]["ResearchDecision"];
-      instrument_local_name?: string | null;
-      instrument_name?: string | null;
-      market: string | null;
-      outcome: components["schemas"]["MemoryOutcome"];
-      profile: components["schemas"]["RunProfile"];
-      reflection: string | null;
-      run_id: string;
-      ticker: string;
-    };
-    MemoryOutcome: {
-      alpha_return: number | null;
-      benchmark: string;
-      holding_intervals: number;
-      observation_end: string | null;
-      observation_start: string | null;
-      raw_return: number | null;
-      status: "pending" | "resolved";
-    };
     ModelDiscoveryWarningView: {
       code: string;
       message: string;
@@ -363,7 +341,6 @@ export interface components {
       warning?: components["schemas"]["ModelDiscoveryWarningView"] | null;
     };
     QueueHealth: {
-      pending_outcomes: number;
       queued: number;
       running: number;
     };
@@ -428,7 +405,6 @@ export interface components {
       executive_summary: string;
       invalidation_conditions: string[];
       market_reference_levels?: components["schemas"]["MarketReferenceLevel"][];
-      memory_refs?: string[];
       numeric_audit_status?: components["schemas"]["NumericAuditStatus"] | null;
       rating: components["schemas"]["ResearchRating"];
       risk_review_adjustments?: components["schemas"]["RiskReviewAdjustment"][];

@@ -498,7 +498,6 @@ class ResearchGraph:
                 "asset_type": context.request.asset_type.value,
                 "instrument_context": context.instrument_context,
                 "trade_date": context.request.analysis_date.isoformat(),
-                "past_context": "",
                 "market_report": "",
                 "sentiment_report": "",
                 "news_report": "",

@@ -15,6 +15,9 @@ and versioned HTTP API.
 5. Configure a local database path and provider keys through `.env`.
 
 The migration does not modify legacy report trees or old checkpoint databases.
+When an existing Branch 3 application database is opened, Alembic revision
+`0005_remove_legacy_memory` deliberately drops the retired `outcomes` and
+`reflections` tables; Runs and their execution-history tables remain readable.
 
 ## Entry-point changes
 
@@ -123,8 +126,9 @@ migrated into SQLite.
 ## Legacy Markdown memory
 
 Keep legacy Markdown memory and report files as read-only archives. The
-independent platform does not parse or import them automatically; SQLite is the
-source of truth for all new runs, decisions, outcomes, and reflections.
+independent platform does not parse or import them automatically. SQLite is the
+source of truth for new runs, decisions, sealed Evidence, and Execution History;
+legacy review outcomes and reflections are not retained.
 
 ## Reports and checkpoints
 
@@ -169,8 +173,9 @@ The command refuses to overwrite a destination unless `--force` is supplied.
 - `retry` continues the same run/attempt lineage; “New from this run” opens an
   editable form and creates a linked run with fresh evidence only after
   confirmation.
-- Outcome settlement runs in the background and no longer waits for a later
-  same-ticker analysis.
+- The legacy fixed-period Outcome and Reflection lifecycle is removed. The
+  database migration drops those review rows without converting Runs into
+  Research Nodes or Incremental Research baselines.
 - UI language and report language are separate settings.
 
 ## Verification checklist
@@ -180,6 +185,7 @@ The command refuses to overwrite a destination unless `--force` is supplied.
 3. A test run appears in Dashboard and Run Detail.
 4. Refreshing Run Detail replays its event timeline.
 5. Exported Markdown/JSON matches the persisted result.
-6. Legacy memory dry-run has no unexpected malformed blocks.
-7. Applied import leaves the original file unchanged and creates a backup.
-8. `tradingagents db backup` produces a readable copy.
+6. The database revision is `0005_remove_legacy_memory`, and the retired review
+   tables are absent while Runs, Evidence, reports, and decisions remain.
+7. `tradingagents db backup` produces a readable copy without the retired review
+   tables.

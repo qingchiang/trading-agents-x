@@ -19,7 +19,7 @@ beforeEach(async () => {
   vi.mocked(api.health).mockResolvedValue({
     status: "ok",
     database: "ok",
-    queue: { queued: 0, running: 0, pending_outcomes: 0 },
+    queue: { queued: 0, running: 0 },
     version: "0.5.0",
   } as Health);
   vi.mocked(api.runs).mockResolvedValue({

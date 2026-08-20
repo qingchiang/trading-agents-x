@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import Layout from "./components/Layout";
 import LoginDialog from "./components/LoginDialog";
 import Dashboard from "./pages/Dashboard";
-import Memory from "./pages/Memory";
 import NewRun from "./pages/NewRun";
 import RunDetail from "./pages/RunDetail";
 import Runs from "./pages/Runs";
@@ -26,8 +25,6 @@ export default function App() {
       <Runs />
     ) : /^\/runs\/[^/]+\/?$/.test(pathname) ? (
       <RunDetail />
-    ) : pathname === "/memory" ? (
-      <Memory />
     ) : pathname === "/settings" ? (
       <Settings />
     ) : (

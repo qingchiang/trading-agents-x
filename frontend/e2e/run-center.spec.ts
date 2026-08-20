@@ -144,7 +144,6 @@ function result(id: string) {
       executive_summary: "The evidence supports a balanced research opinion.",
       thesis: "Evidence is balanced.",
       evidence_refs: ["ev_0123456789ab"],
-      memory_refs: [],
       catalysts: ["Demand improves"],
       risks: ["Demand slows"],
       invalidation_conditions: ["New filing changes the thesis"],
@@ -266,7 +265,7 @@ test("runs, templates, trash, and restores local research", async ({
         json: {
           status: "ok",
           database: "ok",
-          queue: { queued: 0, running: 0, pending_outcomes: 1 },
+          queue: { queued: 0, running: 0 },
           version: "0.5.0",
         },
       });
@@ -416,38 +415,6 @@ test("runs, templates, trash, and restores local research", async ({
         json: { runs: ids.flatMap((id) => runs.get(id) ?? []), changed },
       });
     }
-    if (path === "/api/v1/memory") {
-      const report = runs.get("run-report");
-      if (!report || report.trashed_at || purged.has(report.id)) {
-        return route.fulfill({ json: [] });
-      }
-      return route.fulfill({
-        json: [
-          {
-            run_id: report.id,
-            ticker: report.request.ticker,
-            instrument_name: report.instrument_name,
-            instrument_local_name: report.instrument_local_name,
-            market: "America/New_York",
-            asset_type: "stock",
-            analysis_date: "2026-07-24",
-            profile: report.request.profile,
-            decision: result(report.id).decision,
-            outcome: {
-              status: "resolved",
-              benchmark: "SPY",
-              observation_start: "2026-07-25",
-              observation_end: "2026-08-01",
-              holding_intervals: 5,
-              raw_return: 0.08,
-              alpha_return: 0.03,
-            },
-            reflection: "The evidence was directionally useful.",
-          },
-        ],
-      });
-    }
-
     const artifactMatch = path.match(
       /^\/api\/v1\/runs\/([^/]+)\/artifacts$/,
     );
@@ -610,14 +577,8 @@ test("runs, templates, trash, and restores local research", async ({
   await page.getByRole("tab", { name: "Reports" }).click();
   await expect(page.getByRole("heading", { name: "Market report" })).toBeVisible();
 
-  await page.goto("/memory");
-  await expect(page.getByText("NVIDIA Corporation")).toBeVisible();
-  await page.getByText("Decision details").click();
-  await expect(page.getByText("Demand improves").first()).toBeVisible();
-  await page
-    .getByRole("link", { name: "Open research decision", exact: true })
-    .click();
-  await expect(page).toHaveURL(/\/runs\/run-report\?view=decision/);
+  await page.goto("/runs/run-report?view=decision");
+  await expect(page.getByRole("heading", { name: "Research decision" })).toBeVisible();
 
   await page.goto("/runs");
   const reportRow = page.getByRole("row").filter({ hasText: "NVDA" });
@@ -632,18 +593,12 @@ test("runs, templates, trash, and restores local research", async ({
     .click();
   await expect(page.getByText("Moved 1 run(s) to Trash.")).toBeVisible();
 
-  await page.goto("/memory");
-  await expect(page.getByText("No memory entries.")).toBeVisible();
-
   await page.goto("/runs?trash_state=trashed");
   await expect(page.getByText("Trash retention")).toBeVisible();
   const trashedRow = page.getByRole("row").filter({ hasText: "NVDA" });
   await trashedRow.getByRole("checkbox").check();
   await page.getByRole("button", { name: "Restore selected (1)" }).click();
   await expect(page.getByText("Restored 1 run(s).")).toBeVisible();
-  await page.goto("/memory");
-  await expect(page.getByText("NVIDIA Corporation")).toBeVisible();
-
   const restored = runs.get("run-report")!;
   restored.trashed_at = "2026-06-01T00:00:00Z";
   purged.add("run-report");

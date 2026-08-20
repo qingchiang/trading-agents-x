@@ -1829,169 +1829,6 @@
         "title": "MeasurementKind",
         "type": "string"
       },
-      "MemoryEntry": {
-        "additionalProperties": false,
-        "properties": {
-          "analysis_date": {
-            "title": "Analysis Date",
-            "type": "string"
-          },
-          "asset_type": {
-            "title": "Asset Type",
-            "type": "string"
-          },
-          "decision": {
-            "$ref": "#/components/schemas/ResearchDecision"
-          },
-          "instrument_local_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Instrument Local Name"
-          },
-          "instrument_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Instrument Name"
-          },
-          "market": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Market"
-          },
-          "outcome": {
-            "$ref": "#/components/schemas/MemoryOutcome"
-          },
-          "profile": {
-            "$ref": "#/components/schemas/RunProfile"
-          },
-          "reflection": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reflection"
-          },
-          "run_id": {
-            "title": "Run Id",
-            "type": "string"
-          },
-          "ticker": {
-            "title": "Ticker",
-            "type": "string"
-          }
-        },
-        "required": [
-          "run_id",
-          "ticker",
-          "market",
-          "asset_type",
-          "analysis_date",
-          "profile",
-          "decision",
-          "outcome",
-          "reflection"
-        ],
-        "title": "MemoryEntry",
-        "type": "object"
-      },
-      "MemoryOutcome": {
-        "additionalProperties": false,
-        "properties": {
-          "alpha_return": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Alpha Return"
-          },
-          "benchmark": {
-            "title": "Benchmark",
-            "type": "string"
-          },
-          "holding_intervals": {
-            "title": "Holding Intervals",
-            "type": "integer"
-          },
-          "observation_end": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Observation End"
-          },
-          "observation_start": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Observation Start"
-          },
-          "raw_return": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Raw Return"
-          },
-          "status": {
-            "enum": [
-              "pending",
-              "resolved"
-            ],
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "status",
-          "benchmark",
-          "observation_start",
-          "observation_end",
-          "holding_intervals",
-          "raw_return",
-          "alpha_return"
-        ],
-        "title": "MemoryOutcome",
-        "type": "object"
-      },
       "ModelDiscoveryWarningView": {
         "additionalProperties": false,
         "properties": {
@@ -2589,10 +2426,6 @@
       "QueueHealth": {
         "additionalProperties": false,
         "properties": {
-          "pending_outcomes": {
-            "title": "Pending Outcomes",
-            "type": "integer"
-          },
           "queued": {
             "title": "Queued",
             "type": "integer"
@@ -2604,8 +2437,7 @@
         },
         "required": [
           "queued",
-          "running",
-          "pending_outcomes"
+          "running"
         ],
         "title": "QueueHealth",
         "type": "object"
@@ -3018,14 +2850,6 @@
               "$ref": "#/components/schemas/MarketReferenceLevel"
             },
             "title": "Market Reference Levels",
-            "type": "array"
-          },
-          "memory_refs": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Memory Refs",
             "type": "array"
           },
           "numeric_audit_status": {
@@ -4584,121 +4408,6 @@
           }
         },
         "summary": "Recent Instruments"
-      }
-    },
-    "/api/v1/memory": {
-      "get": {
-        "operationId": "memory_api_v1_memory_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "ticker",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Ticker"
-            }
-          },
-          {
-            "in": "query",
-            "name": "market",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Market"
-            }
-          },
-          {
-            "in": "query",
-            "name": "q",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 500,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Q"
-            }
-          },
-          {
-            "in": "query",
-            "name": "status",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "pending",
-                    "resolved"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Status"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 100,
-              "maximum": 500,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/MemoryEntry"
-                  },
-                  "title": "Response Memory Api V1 Memory Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Memory"
       }
     },
     "/api/v1/providers/{provider}/models": {

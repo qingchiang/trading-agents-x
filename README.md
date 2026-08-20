@@ -38,8 +38,7 @@ or portfolio rebalancing.
 
 ## Product surface
 
-- **Dashboard:** queued and recent runs with ticker display names, statuses,
-  and pending outcomes.
+- **Dashboard:** queued and recent runs with ticker display names and statuses.
 - **New Run:** instrument, point-in-time date, analysts, profile,
   provider/models, reasoning effort, report language, and recent-instrument
   suggestions.
@@ -48,9 +47,6 @@ or portfolio rebalancing.
 - **Run Detail:** persistent event timeline, analyst reports, structured
   decision, collapsible audit details, token/tool metrics, cancellation,
   retry, restore, editable run templates, and export.
-- **Memory:** search complete decisions, outcomes, and reflections, expand
-  catalysts/risks/invalidation, see instrument names, and reopen the
-  originating run.
 - **Settings:** read-only capabilities, safe defaults, and whether provider
   credentials are configured.
 - **Locales:** `en`, `zh-CN`, and `ja`; UI locale and report output language
@@ -104,7 +100,7 @@ uv run --locked --no-dev tradingagents worker
 ```
 
 Open <http://127.0.0.1:8000>. The Web process accepts and displays work; the
-single-concurrency worker claims queued runs and settles eligible outcomes.
+single-concurrency worker claims queued runs and records execution history.
 
 For one synchronous run without the Web UI:
 
@@ -160,20 +156,18 @@ flowchart LR
     PY["Python API"] --> SVC["AnalysisService"]
     CLI["Non-interactive CLI"] --> SVC
     API --> SVC
-    SVC --> DB[("SQLite<br/>runs · evidence · artifacts · decisions · memory")]
+    SVC --> DB[("SQLite<br/>runs · evidence · artifacts · decisions")]
     WORKER["Single worker"] --> DB
     WORKER --> GRAPH["Evidence-first LangGraph"]
     GRAPH --> DATA["US · JP · CN equity dataflows"]
     GRAPH --> DB
-    WORKER --> OUTCOME["Five-interval outcome settlement"]
-    OUTCOME --> DB
     DB --> SSE["Persistent SSE replay"]
     SSE --> UI
 ```
 
-`AnalysisService` owns request normalization, run creation, memory retrieval,
-graph execution, event/report/decision persistence, checkpoint cleanup, and
-outcome scheduling. Graph nodes do not write reports or application tables.
+`AnalysisService` owns request normalization, run creation, graph execution,
+event/report/decision persistence, checkpoint cleanup, and execution-history
+access. Graph nodes do not write reports or application tables.
 
 Events are committed before they are sent. SSE reconnects with
 `Last-Event-ID`, replays missing database events, and then follows new events.
@@ -192,12 +186,12 @@ Successful and cancelled runs delete their checkpoints; failed runs retain
 them for retry or later trash cleanup.
 
 Terminal runs can be moved to Trash and restored from the Runs page. Trashed
-data is immediately excluded from the Dashboard, Memory, outcome settlement,
-and recent-instrument suggestions. The Web process checks for expired trash at
-startup; the worker checks before claiming work and then every 24 hours,
-retrying failed maintenance after one hour. The default 30-day retention can
-be changed with `TRADINGAGENTS_TRASH_RETENTION_DAYS`; `0` disables permanent
-cleanup.
+data is immediately excluded from the Dashboard and recent-instrument
+suggestions, while its execution history remains restorable. The Web process
+checks for expired trash at startup; the worker checks before claiming work and
+then every 24 hours, retrying failed maintenance after one hour. The default
+30-day retention can be changed with `TRADINGAGENTS_TRASH_RETENTION_DAYS`; `0`
+disables permanent cleanup.
 
 See [architecture.md](docs/architecture.md) for subsystem and data-integrity
 contracts.
@@ -270,7 +264,6 @@ POST /api/v1/runs/trash
 POST /api/v1/runs/restore
 GET  /api/v1/runs/{id}/export
 GET  /api/v1/instruments/recent
-GET  /api/v1/memory
 GET  /api/v1/capabilities
 GET  /api/v1/health
 ```
@@ -334,10 +327,9 @@ quality, fallback flag, and provenance. Future-visible evidence is rejected
 when the bundle is sealed. Missing coverage is unknown, not a neutral or bearish
 signal.
 
-After six common completed ticker/benchmark closes are available, the background
-worker forms five aligned trading intervals, stores raw return and alpha, and
-generates a short-term reflection. This outcome is feedback, not the sole truth
-for a long-horizon thesis or graph quality.
+Execution History preserves runs, attempts, events, reports, sealed Evidence,
+Research Decisions, exports, and Trash state for audit and recovery. It is not a
+long-horizon thesis or graph-quality score.
 
 ## Development and release gates
 
@@ -365,7 +357,7 @@ comparative model research quality, latency, or token improvement.
 - [Breaking migration guide](docs/migration-independent-platform.md)
 - Create a consistent online backup with
   `tradingagents db backup /path/to/backup.db`.
-- Reports, events, decisions, outcomes, and reflections are retained in SQLite.
+- Reports, events, decisions, and sealed Evidence are retained in SQLite.
 - Successful/cancelled checkpoints are removed automatically.
 - Legacy report directories remain read-only archives; they are not imported.
 - The first release of this architecture has no permanent-delete API.

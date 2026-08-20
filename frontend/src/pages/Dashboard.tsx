@@ -50,11 +50,6 @@ export default function Dashboard() {
       value: health?.queue.running ?? "—",
       tone: "blue",
     },
-    {
-      label: t("pendingOutcomes"),
-      value: health?.queue.pending_outcomes ?? "—",
-      tone: "violet",
-    },
   ];
 
   return (

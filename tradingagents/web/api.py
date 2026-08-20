@@ -60,7 +60,6 @@ from .models import (
     HealthResponse,
     InstrumentAdmissionErrorResponse,
     LoginRequest,
-    MemoryEntry,
     ProviderModelCatalog,
     RequestValidationErrorResponse,
     RunBatchRequest,
@@ -471,22 +470,6 @@ def create_app(
             },
         )
 
-    @app.get(f"{API_PREFIX}/memory", response_model=list[MemoryEntry])
-    def memory(
-        ticker: str | None = None,
-        market: str | None = None,
-        q: Annotated[str | None, Query(max_length=500)] = None,
-        status: Literal["pending", "resolved"] | None = None,
-        limit: Annotated[int, Query(ge=1, le=500)] = 100,
-    ):
-        return repository.memory_entries(
-            ticker=ticker,
-            market=market,
-            q=q,
-            status=status,
-            limit=limit,
-        )
-
     @app.get(
         f"{API_PREFIX}/capabilities",
         response_model=CapabilitiesResponse,
@@ -546,13 +529,11 @@ def create_app(
         queue = {
             "queued": 0,
             "running": 0,
-            "pending_outcomes": 0,
         }
         try:
             counts = repository.active_run_counts()
             queue["queued"] = counts.get("queued", 0)
             queue["running"] = counts.get("running", 0)
-            queue["pending_outcomes"] = repository.pending_outcome_count()
         except Exception:
             database_status = "error"
         return HealthResponse(

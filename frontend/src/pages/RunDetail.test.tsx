@@ -220,7 +220,6 @@ const detail = {
       executive_summary: "Balanced research summary.",
       thesis: "Evidence is balanced.",
       evidence_refs: ["ev_0123456789ab"],
-      memory_refs: ["memory:legacy-run"],
       catalysts: [],
       risks: ["Demand slows"],
       invalidation_conditions: ["New filing changes the thesis"],
@@ -614,14 +613,6 @@ test("restores deliberation and resolves evidence references across run views", 
   expect(referenceTable).toHaveTextContent("Basis");
   expect(referenceTable).toHaveTextContent("Observed");
   expect(referenceTable).toHaveTextContent("Live snapshot");
-  expect(
-    screen.getByRole("link", {
-      name: "Open memory memory:legacy-run",
-    }),
-  ).toHaveAttribute(
-    "href",
-    "/memory?q=legacy-run#memory-legacy-run",
-  );
 
   const artifactEvent = {
     run_id: "run-1",

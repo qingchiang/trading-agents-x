@@ -133,7 +133,7 @@ test("filters and atomically trashes eligible runs with instrument names", async
     name: "Move 1 selected run(s) to Trash?",
   });
   expect(dialog).toHaveTextContent(
-    "They will immediately leave the Dashboard, Memory, outcome settlement, and instrument suggestions.",
+    "They will immediately leave the Dashboard and instrument suggestions.",
   );
   expect(dialog).toHaveTextContent(/scheduled for permanent deletion/);
   expect(api.trashRuns).not.toHaveBeenCalled();

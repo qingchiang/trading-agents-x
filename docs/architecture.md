@@ -42,7 +42,6 @@ flowchart TB
     GRAPH --> DATA["Market dataflows"]
     GRAPH --> CHECKPOINT["LangGraph SQLite saver"]
     CHECKPOINT --> DB
-    LEGACY["Legacy Memory read-only transition"] --> REPO
     DB --> SSE["Persistent SSE replay"]
     SSE --> WEB
 ```
@@ -69,7 +68,6 @@ confidence
 executive_summary
 thesis
 evidence_refs
-memory_refs
 catalysts
 risks
 invalidation_conditions
@@ -86,8 +84,8 @@ Failed optional numeric candidates never enter `ResearchDecision`. A separate
 `DecisionNumericAuditAppendix` may retain up to two sanitized, parsed JSON
 snapshots (initial and repair), their safe validation issue codes, and the
 components omitted from the canonical decision. It is persisted atomically
-with the decision for user inspection and export, but memory retrieval,
-outcome settlement, ratings, and thesis generation ignore it.
+with the decision for user inspection and export, while ratings and thesis
+generation use only the canonical decision.
 
 Decision-critical calculations keep model-proposed formulas, named numeric
 inputs, units, limitations, and evidence references. The strict qualitative
@@ -155,7 +153,7 @@ Every run resolves its own `RunSettings` and immutable `RunContext`. LangGraph
 runtime context and `ToolRuntime` carry the request, analysis date, instrument
 context, dataflow configuration, cancellation callbacks, and artifact/evidence
 writers; the LangGraph runtime provides the event stream writer separately.
-Full runs carry no legacy Memory or Reflection context. The dataflow
+Runs carry no historical review context. The dataflow
 `ContextVar` bridge exists only to support established adapter signatures
 during one scoped invocation; there is no mutable package configuration or
 `set_config()` operation.
@@ -170,12 +168,12 @@ settings must remain isolated even if worker concurrency changes in the future.
 1. normalizes and validates `AnalysisRequest`;
 2. resolves and redacts run configuration;
 3. creates or idempotently returns a run;
-4. builds an independent Full run without retrieving legacy Memory;
+4. builds an independent Full run without retrieving historical review state;
 5. builds per-run LLM clients and `RunContext`;
 6. executes or resumes the graph;
 7. persists events, reports, evidence, decision, metrics, and warnings;
 8. cleans up or retains checkpoints according to terminal state;
-9. leaves legacy Outcome/Reflection rows untouched; new Runs create none.
+9. leaves each completed Run readable through its Execution History.
 
 Creation and retained history use separate request contracts.
 `AnalysisRequest` is the admission contract for new research and for any
@@ -225,9 +223,7 @@ it for retry or later trash cleanup.
 
 Only terminal runs can be moved to Trash. A trashed run remains readable and
 exportable, but is excluded immediately from default run listings, Dashboard
-summaries, the legacy Memory/`MemoryContext` compatibility views, and
-recent-instrument suggestions. Restore is idempotent and re-enables those
-read-only consumers.
+summaries, and recent-instrument suggestions. Restore is idempotent.
 
 The Web process performs one opportunistic expiry check at startup. The worker
 checks before its first claim and uses a monotonic in-process deadline for
@@ -258,8 +254,6 @@ Alembic manages application tables:
 | `run_artifacts` | versioned analyst, deliberation, and decision-stage artifacts, including component generation observations |
 | `run_evidence` | independently sealed EvidenceBundle and digest |
 | `decisions` | typed final decision, numeric audit appendix, market identity |
-| `outcomes` | benchmark, five-interval dates, raw return, alpha |
-| `reflections` | outcome-aware research reflection |
 
 LangGraph saver tables live in the same database file but remain owned by its
 saver. Application code does not treat them as domain tables.
@@ -493,46 +487,15 @@ The displayed role time is cumulative phase activity, not total elapsed time for
 the parallel graph. Prepared contexts and attempt metrics remain separate
 collapsible views.
 
-## Decision memory and outcomes
+## Research review boundary
 
-The retained repository still exposes deterministic legacy Memory context for
-history and compatibility views, but the active `AnalysisService` does not
-retrieve or inject it into new Full research. New successful Runs do not create
-Outcome or Reflection rows, and the worker does not run legacy settlement while
-idle. The compatibility surface remains read-only from the new lifecycle's
-perspective until the explicit contract-removal migration.
-
-The legacy repository context, when queried by a transitional history caller,
-contains:
-
-- up to five most recent resolved full entries for the same ticker;
-- up to three most recent resolved reflection-only entries for a different
-  ticker in the same asset type and regional market;
-- pending outcomes and legacy outcomes shorter than five intervals are excluded.
-
-No vector database is used. This avoids introducing an unmeasured semantic
-similarity feedback loop.
-
-Legacy outcome settlement is no longer an active worker task. Retained outcome
-rows may still be inspected by the transitional compatibility surface. Ticker
-and benchmark histories retain their own exchange-local date labels and are
-intersected by date. Six common completed closes form five intervals when a
-legacy caller explicitly performs settlement:
-
-```text
-raw return = ticker_close[5] / ticker_close[0] - 1
-alpha      = raw return - (benchmark_close[5] / benchmark_close[0] - 1)
-```
-
-Each pending outcome stores its next due time. The initial check is no earlier
-than the market-local day after six plausible closes (weekdays are the lower
-bound for supported equities). An incomplete observation is
-deferred for 24 hours; a provider or transport failure is retried after one
-hour. Exchange holidays therefore degrade to bounded daily checks instead of
-the worker poll interval.
-
-The stored range and reflection describe short-term feedback. They are not the
-sole truth for long-horizon thesis validity or graph quality.
+The fixed-period Memory, Outcome, and Reflection lifecycle is retired. Migration
+`0005_remove_legacy_memory` deliberately drops its persisted review tables and
+does not convert historical Runs into Research Nodes. Runs, Attempts, Events,
+Artifacts, sealed Evidence, Decisions, reports, exports, Trash, and restore
+remain available through Execution History. Retained pre-redesign Decision JSON
+may contain a `memory_refs` field; hydration drops that field while preserving
+the current core Decision contract.
 
 ## Data routing and point-in-time contracts
 
@@ -629,8 +592,8 @@ roles, tenant isolation, or Internet-facing hardening.
 
 The default suite is offline. It covers configuration isolation, lifecycle
 transitions, lease recovery, event ordering, checkpoint resume/cleanup,
-SSE replay, cancellation/retry/run templates, SQLite backup, migration, memory
-selection, point-in-time evidence sealing, API security, frontend behavior,
+SSE replay, cancellation/retry/run templates, SQLite backup, migration,
+point-in-time evidence sealing, API security, frontend behavior,
 wheel contents, and Docker startup.
 
 These offline checks validate product contracts but do not measure comparative
@@ -648,8 +611,7 @@ modules.
 - Public API: `tradingagents/client.py`,
   `tradingagents/application/contracts.py`
 - Lifecycle: `tradingagents/application/service.py`
-- Worker/outcomes: `tradingagents/application/worker.py`,
-  `tradingagents/application/outcomes.py`
+- Worker: `tradingagents/application/worker.py`
 - Repository/schema: `tradingagents/application/repository.py`,
   `tradingagents/application/database.py`
 - Migrations: `tradingagents/persistence/`

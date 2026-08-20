@@ -32,7 +32,7 @@ invalidation conditions、time horizon が含まれます。ポジション比�
 
 ## Web 実行センター
 
-- **Dashboard:** キュー、銘柄名付きの最近の run、状態、未確定 outcome。
+- **Dashboard:** キュー、銘柄名付きの最近の run、状態。
 - **New Run:** ticker、PIT 日付、analysts、Fast/Standard/Deep、
   provider/model、reasoning、レポート言語、最近使った銘柄候補。
 - **Runs:** 現在/アーカイブの切替、検索、フィルター、ページング、
@@ -40,8 +40,6 @@ invalidation conditions、time horizon が含まれます。ポジション比�
 - **Run Detail:** 永続イベントタイムライン、レポート、構造化 decision、
   折りたたみ可能な監査詳細、token/tool/wall-time 指標、cancel/retry、
   アーカイブ復元、現在の run をもとにした新規作成、export。
-- **Memory:** 完全な decision、outcome、reflection を検索し、catalyst、
-  risk、invalidation と銘柄名を表示して元の run の判断へ戻る。
 - **Settings:** provider/model capability、安全なデフォルト値、API key の
   設定有無を読み取り専用で表示。
 
@@ -90,8 +88,7 @@ uv run --locked --no-dev tradingagents worker
 ```
 
 ブラウザで <http://127.0.0.1:8000> を開きます。Web は run の受付・表示を
-行い、デフォルトで同時実行数 1 の worker がキューを処理し、outcome を
-バックグラウンドで確定します。
+行い、デフォルトで同時実行数 1 の worker がキューを処理して実行履歴を記録します。
 
 Web を使わない同期実行:
 
@@ -142,8 +139,8 @@ Markdown と軽量な検証済み audit navigation を使用します。Trader n
 
 ## アーキテクチャと lifecycle
 
-`AnalysisService` が request 正規化、run 作成、memory 検索、graph 実行、
-event/report/decision 永続化、checkpoint cleanup、outcome scheduling を
+`AnalysisService` が request 正規化、run 作成、graph 実行、
+event/report/decision 永続化、checkpoint cleanup、実行履歴へのアクセスを
 一元管理します。Graph node はファイルや application table を直接書きません。
 
 ```text
@@ -161,7 +158,7 @@ worker は database lease で run を原子的に claim します。lease が期
 - success/cancel 後は checkpoint を削除し、failure 時は次の判断まで保持。
 
 終端状態の run は Runs ページからゴミ箱へ移動・復元できます。移動後は
-Dashboard、Memory、outcome 評価、最近の銘柄候補から直ちに除外されます。
+Dashboard と最近の銘柄候補から直ちに除外されますが、実行履歴は復元できます。
 Web 起動時に一度、worker は work claim 前と成功後 24 時間ごとに期限切れを
 確認し、失敗時は 1 時間後に再試行します。既定の保持期間は 30 日で、
 `TRADINGAGENTS_TRASH_RETENTION_DAYS=0` にすると完全削除を無効化します。
@@ -226,7 +223,7 @@ truth です。
 ## API とセキュリティ
 
 バージョン化 API は run の作成・参照、event SSE、cancel/retry、
-export、memory、capabilities、health を提供します。run 作成時に
+export、capabilities、health を提供します。run 作成時に
 `Idempotency-Key` を送ることで、ブラウザ再送による重複を防げます。
 確認済みテンプレートからの作成では、終端 run の `source_run_id` も送信
 できます。OpenAPI は `/openapi.json` です。
@@ -261,9 +258,8 @@ Evidence は requested/effective date、timezone 付き availability、実際の
 source、quality、fallback、provenance を保持し、seal 時に未来可視データを
 拒否します。データ欠落は unknown であり、中立・弱気シグナルではありません。
 
-ticker と benchmark に 6 個の共通 completed close が揃うと、worker は
-5 trading interval の raw return と alpha、および短期 reflection を保存
-します。これは長期 thesis や graph 品質の唯一の正解ではありません。
+Execution History は run、event、report、decision、evidence の監査記録を
+保持します。これは長期 thesis や graph 品質の唯一の正解ではありません。
 
 ## 開発・リリースゲート
 
@@ -293,7 +289,7 @@ latency、token consumption の改善を証明するものではありません�
   `tradingagents db backup /path/to/backup.db`
 - 旧 report directory は読み取り専用 archive とし、旧 checkpoint は移行
   しません。
-- reports、events、decisions、outcomes、reflections は長期保持します。
+- reports、events、decisions、evidence は長期保持します。
 - 初版には permanent-delete API がありません。
 
 TradingAgentsX は Apache-2.0 で提供されます。[LICENSE](../../LICENSE) と

@@ -204,47 +204,6 @@ class DecisionRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
-class OutcomeRecord(Base):
-    __tablename__ = "outcomes"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    decision_id: Mapped[int] = mapped_column(
-        ForeignKey("decisions.id", ondelete="CASCADE"),
-        nullable=False,
-        unique=True,
-        index=True,
-    )
-    status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
-    benchmark: Mapped[str] = mapped_column(String(64), nullable=False)
-    observation_start: Mapped[date | None] = mapped_column(Date, nullable=True)
-    observation_end: Mapped[date | None] = mapped_column(Date, nullable=True)
-    holding_intervals: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
-    raw_return: Mapped[float | None] = mapped_column(Float, nullable=True)
-    alpha_return: Mapped[float | None] = mapped_column(Float, nullable=True)
-    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    next_check_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-    __table_args__ = (
-        Index("ix_outcomes_due", "status", "next_check_at"),
-    )
-
-
-class ReflectionRecord(Base):
-    __tablename__ = "reflections"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    outcome_id: Mapped[int] = mapped_column(
-        ForeignKey("outcomes.id", ondelete="CASCADE"),
-        nullable=False,
-        unique=True,
-        index=True,
-    )
-    text: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-
-
 def create_sqlite_engine(path: Path, *, busy_timeout_ms: int = 5000) -> Engine:
     """Create an engine whose every connection enforces local SQLite policy."""
     engine = create_engine(

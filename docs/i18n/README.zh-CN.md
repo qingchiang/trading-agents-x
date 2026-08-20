@@ -28,15 +28,13 @@ Yahoo 风格 Instrument Key；服务商支持更广泛的符号并不会扩大�
 
 ## Web 运行中心
 
-- **Dashboard：** 队列、带标的简称的最近运行、状态和待结算 outcome。
+- **Dashboard：** 队列、带标的简称的最近运行和状态。
 - **New Run：** 标的、PIT 日期、analysts、Fast/Standard/Deep、
   provider/model、reasoning、报告语言和近期标的建议。
 - **Runs：** 当前/归档切换、筛选、搜索、分页，以及可恢复的批量归档管理。
 - **Run Detail：** 可恢复的事件时间线、报告 tabs、结构化决策、warning、
   可折叠审计详情、token/tool/wall-time 指标，以及取消、retry、
   恢复归档、基于当前运行新建和导出。
-- **Memory：** 检索完整 decision、outcome 与 reflection，展开催化因素、
-  风险和失效条件，同时显示标的简称并返回对应运行的研究结论。
 - **Settings：** 只读能力列表、非敏感默认值和 API key 是否已配置。
 
 UI 支持 `zh-CN`、`en`、`ja`。界面语言与报告输出语言相互独立。
@@ -79,7 +77,7 @@ uv run --locked --no-dev tradingagents worker
 ```
 
 浏览器打开 <http://127.0.0.1:8000>。Web 负责接收和展示任务；默认单并发
-worker 领取队列任务，并在后台结算满足条件的 outcome。
+worker 领取队列任务并记录执行历史。
 
 不使用 Web 时也可以同步运行：
 
@@ -127,9 +125,8 @@ Deep 只有在仍存在重要开放争议，并且新增证据、因果机制或
 
 ## 架构与运行生命周期
 
-`AnalysisService` 统一负责请求规范化、run 创建、memory 检索、graph 执行、
-事件/报告/决策持久化、checkpoint 清理和 outcome 调度。Graph node 不直接
-写文件或应用数据库表。
+`AnalysisService` 统一负责请求规范化、run 创建、graph 执行、事件/报告/决策
+持久化、checkpoint 清理和执行历史访问。Graph node 不直接写文件或应用数据库表。
 
 ```text
 queued → running → succeeded | failed | cancelled
@@ -144,8 +141,8 @@ checkpoint 恢复：
 - cancel 在 graph node 边界协作完成，不会强杀正在执行的 provider 请求；
 - 成功或取消后删除 checkpoint，失败时保留到后续处理。
 
-终态运行可在 Runs 页面移入回收站和恢复。移入后会立即退出 Dashboard、
-Memory、outcome 结算和近期标的建议。Web 启动时检查一次到期回收站记录；
+终态运行可在 Runs 页面移入回收站和恢复。移入后会立即退出 Dashboard
+和近期标的建议，但执行历史仍可恢复。Web 启动时检查一次到期回收站记录；
 worker 在领取任务前检查，并在成功后每 24 小时再次执行，失败则 1 小时后
 重试。默认 30 天后永久清理，可通过
 `TRADINGAGENTS_TRASH_RETENTION_DAYS` 修改；设为 `0` 时关闭
@@ -206,7 +203,7 @@ Markdown/JSON 只作为显式导出格式；SQLite 是唯一事实源。
 ## API 与安全
 
 版本化 API 覆盖 run 创建/查询、事件 SSE、cancel/retry、export、
-memory、capabilities 与 health。创建 run 时可发送 `Idempotency-Key`，
+capabilities 与 health。创建 run 时可发送 `Idempotency-Key`，
 避免浏览器重复提交；也可在用户确认模板表单后发送终态 run 的
 `source_run_id`。OpenAPI 位于 `/openapi.json`。
 
@@ -237,9 +234,8 @@ Web 登录会将 token 换成签名的 `HttpOnly`、`SameSite=Strict` cookie，
 date、带时区的 available time、实际来源、质量、fallback 和 provenance；
 封存时会拒绝未来可见证据。缺数据表示 unknown，不能自动解释成中性或利空。
 
-当 ticker 与 benchmark 已有六个共同完成收盘价时，后台 worker 形成五个
-交易区间，记录 raw return、alpha 与短期 reflection。它不是长期 thesis 或
-graph 质量的唯一真值。
+系统通过 Execution History 保留运行、事件、报告、决策和 evidence 的审计
+记录；它不是长期 thesis 或 graph 质量的唯一真值。
 
 ## 开发与验收
 
@@ -266,7 +262,7 @@ Web+worker smoke。
 - [Breaking migration guide](../migration-independent-platform.md)
 - 在线备份：`tradingagents db backup /path/to/backup.db`
 - 旧 report 目录保留为只读档案，不迁移旧 checkpoint。
-- reports、events、decisions、outcomes 和 reflections 默认长期保留。
+- reports、events、decisions 和 evidence 默认长期保留。
 - 首版不提供永久删除 API。
 
 TradingAgentsX 使用 Apache-2.0 许可证，详见 [LICENSE](../../LICENSE) 与

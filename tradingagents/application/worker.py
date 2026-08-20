@@ -14,7 +14,6 @@ from .maintenance import (
     TRASH_MAINTENANCE_RETRY_SECONDS,
     TrashMaintenance,
 )
-from .outcomes import OutcomeSettlement
 from .runtime import WorkerShutdown
 from .service import AnalysisService
 from .settings import AppSettings
@@ -28,7 +27,6 @@ class AnalysisWorker:
         settings: AppSettings,
         *,
         service: AnalysisService | None = None,
-        settlement: OutcomeSettlement | None = None,
         maintenance: TrashMaintenance | None = None,
         monotonic_clock: Callable[[], float] = monotonic,
         worker_id: str | None = None,
@@ -36,9 +34,6 @@ class AnalysisWorker:
         self.settings = settings
         self.service = service or AnalysisService(settings)
         self.repository = self.service.repository
-        # Retain the injectable attribute for transitional callers, but the
-        # active worker no longer settles legacy outcomes while idle.
-        self.settlement = settlement
         self.maintenance = maintenance or TrashMaintenance(
             settings,
             self.repository,

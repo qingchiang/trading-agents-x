@@ -366,7 +366,6 @@ async def test_openapi_contains_versioned_run_center_contract(
         "/api/v1/runs/{run_id}/retry",
         "/api/v1/runs/{run_id}/export",
         "/api/v1/instruments/recent",
-        "/api/v1/memory",
         "/api/v1/capabilities",
         "/api/v1/providers/{provider}/models",
         "/api/v1/health",
@@ -439,39 +438,12 @@ async def test_removed_provenance_request_is_rejected(
 
 
 @pytest.mark.anyio
-async def test_memory_api_forwards_audited_search_filters(
+async def test_memory_api_is_removed(
     web_client: httpx.AsyncClient,
-    web_repository,
-    monkeypatch,
 ) -> None:
-    captured = {}
+    response = await web_client.get("/api/v1/memory")
 
-    def memory_entries(**filters):
-        captured.update(filters)
-        return []
-
-    monkeypatch.setattr(web_repository, "memory_entries", memory_entries)
-
-    response = await web_client.get(
-        "/api/v1/memory",
-        params={
-            "q": "demand lesson",
-            "ticker": "vd",
-            "market": "america/new",
-            "status": "resolved",
-            "limit": 25,
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.json() == []
-    assert captured == {
-        "q": "demand lesson",
-        "ticker": "vd",
-        "market": "america/new",
-        "status": "resolved",
-        "limit": 25,
-    }
+    assert response.status_code == 404
 
 
 @pytest.mark.anyio
@@ -809,7 +781,6 @@ async def test_health_reports_database_and_queue_status(
         "queue": {
             "queued": 1,
             "running": 0,
-            "pending_outcomes": 0,
         },
         "version": __version__,
     }
