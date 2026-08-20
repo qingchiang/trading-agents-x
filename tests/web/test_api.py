@@ -235,6 +235,70 @@ async def test_incremental_retry_conflict_is_mapped_without_requeueing_history(
 
 
 @pytest.mark.anyio
+async def test_incremental_retry_rejects_its_queued_active_slot_without_events(
+    web_client: httpx.AsyncClient,
+    web_repository,
+    web_service,
+    web_settings,
+) -> None:
+    baseline_request = AnalysisRequest(
+        ticker="NVDA", analysis_date=date(2026, 7, 20)
+    )
+    baseline, _ = web_repository.create_run(
+        baseline_request,
+        web_settings.resolve_run(baseline_request).snapshot(),
+        research_schema_version="1",
+        information_cutoff_at=datetime(2026, 7, 20, 23, 59, 59, tzinfo=UTC),
+        method_snapshot={"schema_version": "1"},
+        research_kind="full",
+    )
+    web_repository.claim_run(baseline.id, "fixture", 30)
+    item = EvidenceItem.create(
+        source="fixture",
+        evidence_type="fixture",
+        requested_date=baseline_request.analysis_date,
+        effective_date=baseline_request.analysis_date,
+        content="fixture",
+    )
+    evidence = EvidenceBundle(
+        instrument=baseline_request.ticker,
+        analysis_date=baseline_request.analysis_date,
+        items=(item,),
+    )
+    web_repository.seal_evidence(baseline.id, evidence)
+    web_repository.complete(
+        baseline.id,
+        AnalysisResult(
+            run_id=baseline.id,
+            status=RunStatus.SUCCEEDED,
+            instrument=baseline_request.ticker,
+            reports={},
+            decision=research_decision(evidence_refs=(item.ref,)),
+            evidence=evidence,
+        ),
+        evidence=evidence,
+    )
+    target = web_service.enqueue(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date=date(2026, 7, 24),
+            research_kind="incremental",
+            full_baseline_run_id=baseline.id,
+        )
+    )
+    events_before = web_repository.list_events(target.id)
+
+    response = await web_client.post(f"/api/v1/runs/{target.id}/retry")
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "invalid_run_transition"
+    unchanged = web_repository.get_run(target.id)
+    assert unchanged.status is RunStatus.QUEUED
+    assert unchanged.attempt == 1
+    assert web_repository.list_events(target.id) == events_before
+
+
+@pytest.mark.anyio
 async def test_timeline_api_exposes_first_same_identity_full_node(
     web_client: httpx.AsyncClient,
     web_repository,

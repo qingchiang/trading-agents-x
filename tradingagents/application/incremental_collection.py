@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import Counter
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -114,9 +113,10 @@ def _sources_for_domain(
             domain=domain,
             source=f"{domain}.{vendor}",
             provider_identity=vendor,
+            chain_position=position,
             configured=True,
         )
-        for vendor in vendors
+        for position, vendor in enumerate(vendors)
     )
 
 
@@ -134,6 +134,7 @@ def default_incremental_collector(plan: IncrementalCollectionPlan) -> Collection
                 domain=source.domain,
                 source=source.source,
                 provider_identity=source.provider_identity,
+                chain_position=source.chain_position,
                 planned_from=plan.window_start,
                 planned_through=plan.window_end,
                 outcome=(
@@ -154,19 +155,37 @@ def assess_incremental_collection(
     """Derive Coverage and Information Advancement without semantic work."""
     if manifest.plan_version != plan.version or manifest.market != plan.market:
         raise ValueError("Collection Manifest does not match its deterministic plan")
-    planned_sources = Counter(
-        (source.domain, source.source, source.provider_identity)
-        for source in plan.sources
-    )
-    observed_sources = Counter(
-        (entry.domain, entry.source, entry.provider_identity)
-        for entry in manifest.entries
-    )
-    if observed_sources != planned_sources:
+    if len(manifest.entries) != len(plan.sources):
         raise ValueError(
             "Collection Manifest contains an unconfigured source or does not "
             "exactly match its deterministic plan"
         )
+    for source, entry in zip(plan.sources, manifest.entries, strict=True):
+        if (
+            entry.domain,
+            entry.source,
+            entry.provider_identity,
+            entry.chain_position,
+        ) != (
+            source.domain,
+            source.source,
+            source.provider_identity,
+            source.chain_position,
+        ):
+            raise ValueError(
+                "Collection Manifest contains an unconfigured source or does not "
+                "exactly match the ordered configured fallback chain"
+            )
+        if (
+            entry.planned_from,
+            entry.planned_through,
+        ) != (
+            plan.window_start,
+            plan.window_end,
+        ):
+            raise ValueError(
+                "Collection Manifest observations must use the frozen plan interval"
+            )
 
     domains = tuple(
         _coverage_domain(

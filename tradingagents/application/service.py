@@ -698,7 +698,7 @@ class AnalysisService:
         # Validate the retained request through the current creation contract
         # before mutating the retry lifecycle.  This keeps retry from becoming
         # an alternate execution path around current admission rules.
-        retained = self.repository.get_run(run_id)
+        retained = self.repository.require_retryable(run_id)
         request = self._creation_request_from_history(retained.request)
         self._validate_instrument_eligibility(request)
         if request.research_kind == "incremental":

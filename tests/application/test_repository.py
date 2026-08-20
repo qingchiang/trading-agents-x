@@ -168,6 +168,55 @@ def test_retry_reuses_compatible_checkpoint_across_attempts(
         assert repository.checkpoint_thread(run.id) == initial_checkpoint
 
 
+@pytest.mark.parametrize(
+    "state",
+    ["queued", "running", "succeeded", "cancelled", "trashed"],
+)
+def test_retry_rejects_every_ineligible_lifecycle_state_without_mutation(
+    repository: RunRepository,
+    app_settings: AppSettings,
+    state: str,
+) -> None:
+    run, _ = _create(repository, app_settings)
+    if state == "running":
+        repository.claim_run(run.id, "worker", 30)
+    elif state == "succeeded":
+        repository.claim_run(run.id, "worker", 30)
+        evidence = EvidenceBundle(
+            instrument="NVDA",
+            analysis_date=date(2026, 7, 24),
+            items=(),
+        )
+        repository.seal_evidence(run.id, evidence)
+        repository.complete(
+            run.id,
+            AnalysisResult(
+                run_id=run.id,
+                status=RunStatus.SUCCEEDED,
+                instrument="NVDA",
+                reports={},
+                decision=research_decision(evidence_refs=()),
+                evidence=evidence,
+            ),
+            evidence=evidence,
+        )
+    elif state in {"cancelled", "trashed"}:
+        repository.request_cancel(run.id)
+        if state == "trashed":
+            repository.trash_runs((run.id,))
+
+    events_before = repository.list_events(run.id)
+    with pytest.raises(InvalidRunTransitionError):
+        repository.retry(run.id)
+
+    unchanged = repository.get_run(run.id)
+    expected_status = "cancelled" if state == "trashed" else state
+    assert unchanged.status.value == expected_status
+    assert unchanged.attempt == 1
+    assert (unchanged.trashed_at is not None) is (state == "trashed")
+    assert repository.list_events(run.id) == events_before
+
+
 def test_failed_retry_metrics_are_preserved_per_attempt_and_aggregated(
     repository: RunRepository,
     app_settings: AppSettings,

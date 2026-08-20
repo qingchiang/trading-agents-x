@@ -52,7 +52,11 @@ from tradingagents.application.errors import (
 from tradingagents.application.incremental_collection import (
     assess_incremental_collection,
 )
-from tradingagents.application.repository import IdempotencyConflictError, RunRepository
+from tradingagents.application.repository import (
+    IdempotencyConflictError,
+    InvalidRunTransitionError,
+    RunRepository,
+)
 from tradingagents.application.runtime import RunCancelled, WorkerShutdown
 from tradingagents.application.service import AnalysisService
 from tradingagents.dataflows.config import get_config
@@ -391,6 +395,17 @@ def test_default_incremental_plan_uses_frozen_configured_routes_on_retry(
         )
         for domain in expected_providers
     } == expected_providers
+    assert {
+        domain: tuple(
+            entry["chain_position"]
+            for entry in configured_entries
+            if entry["domain"] == domain
+        )
+        for domain in expected_providers
+    } == {
+        domain: tuple(range(len(providers)))
+        for domain, providers in expected_providers.items()
+    }
     assert all(
         entry["source"] == f"{entry['domain']}.{entry['provider_identity']}"
         for entry in configured_entries
@@ -449,6 +464,7 @@ def test_incremental_collection_terminal_outcomes_are_structured_and_stop_before
                     domain=planned.domain,
                     source=planned.source,
                     provider_identity=planned.provider_identity,
+                    chain_position=planned.chain_position,
                     retrieved_at=(
                         plan.window_end
                         if outcome
@@ -574,6 +590,7 @@ def test_incremental_collection_assessment_distinguishes_each_terminal_outcome()
                 domain="social",
                 source="social_fallback",
                 provider_identity="social_fallback",
+                chain_position=1,
                 configured=True,
             ),
         ),
@@ -628,6 +645,7 @@ def test_incremental_collection_assessment_distinguishes_each_terminal_outcome()
                     domain="social",
                     source="social_fallback",
                     provider_identity="social_fallback",
+                    chain_position=1,
                     planned_from=plan.window_start,
                     planned_through=plan.window_end,
                     outcome=CollectionOutcome.NOT_QUERIED,
@@ -755,6 +773,7 @@ def test_incremental_collection_requires_one_exact_observation_per_planned_sourc
                 domain="news",
                 source="news.google",
                 provider_identity="google_news",
+                chain_position=1,
                 configured=True,
             ),
         ),
@@ -772,6 +791,7 @@ def test_incremental_collection_requires_one_exact_observation_per_planned_sourc
             domain="news",
             source="news.google",
             provider_identity="google_news",
+            chain_position=1,
             planned_from=plan.window_start,
             planned_through=plan.window_end,
             outcome=CollectionOutcome.NOT_QUERIED,
@@ -794,6 +814,93 @@ def test_incremental_collection_requires_one_exact_observation_per_planned_sourc
 
     with pytest.raises(ValueError, match="exactly match"):
         assess_incremental_collection(plan, manifest)
+
+
+def test_incremental_collection_rejects_reordered_fallback_observations() -> None:
+    plan = IncrementalCollectionPlan(
+        version="1",
+        market="japan",
+        window_start=datetime(2026, 7, 20, tzinfo=UTC),
+        window_end=datetime(2026, 7, 24, tzinfo=UTC),
+        required_domains=("news",),
+        advisory_domains=(),
+        sources=(
+            IncrementalCollectionSource(
+                domain="news",
+                source="news.tdnet",
+                provider_identity="tdnet",
+                configured=True,
+            ),
+            IncrementalCollectionSource(
+                domain="news",
+                source="news.google",
+                provider_identity="google_news",
+                chain_position=1,
+                configured=True,
+            ),
+        ),
+    )
+    entries = tuple(
+        CollectionManifestEntry(
+            domain=source.domain,
+            source=source.source,
+            provider_identity=source.provider_identity,
+            planned_from=plan.window_start,
+            planned_through=plan.window_end,
+            outcome=CollectionOutcome.NOT_QUERIED,
+        )
+        for source in reversed(plan.sources)
+    )
+
+    with pytest.raises(ValueError, match="ordered"):
+        assess_incremental_collection(
+            plan,
+            CollectionManifest(
+                plan_version=plan.version,
+                market=plan.market,
+                entries=entries,
+            ),
+        )
+
+
+def test_incremental_collection_rejects_a_manifest_interval_that_differs_from_frozen_plan() -> None:
+    plan = IncrementalCollectionPlan(
+        version="1",
+        market="united_states",
+        window_start=datetime(2026, 7, 20, tzinfo=UTC),
+        window_end=datetime(2026, 7, 24, tzinfo=UTC),
+        required_domains=("news",),
+        advisory_domains=(),
+        sources=(
+            IncrementalCollectionSource(
+                domain="news",
+                source="news.yfinance",
+                provider_identity="yfinance",
+                configured=True,
+            ),
+        ),
+    )
+    entry = CollectionManifestEntry(
+        domain="news",
+        source="news.yfinance",
+        provider_identity="yfinance",
+        retrieved_at=plan.window_end,
+        planned_from=datetime(2026, 7, 21, tzinfo=UTC),
+        planned_through=plan.window_end,
+        scanned_from=datetime(2026, 7, 21, tzinfo=UTC),
+        scanned_through=plan.window_end,
+        outcome=CollectionOutcome.COMPLETE_EMPTY,
+    )
+
+    with pytest.raises(ValueError, match="frozen plan interval"):
+        assess_incremental_collection(
+            plan,
+            CollectionManifest(
+                plan_version=plan.version,
+                market=plan.market,
+                entries=(entry,),
+            ),
+        )
 
 
 def test_incremental_preflight_keeps_provider_retrieval_and_newly_reviewable_input() -> None:
@@ -837,6 +944,7 @@ def test_incremental_preflight_keeps_provider_retrieval_and_newly_reviewable_inp
             "domain": "fundamentals",
             "source": "sec_companyfacts",
             "provider_identity": "sec_edgar",
+            "chain_position": 0,
             "retrieved_at": "2026-07-24T00:00:00Z",
             "planned_from": "2026-07-20T00:00:00Z",
             "planned_through": "2026-07-24T00:00:00Z",
@@ -872,6 +980,7 @@ def test_newly_reviewable_baseline_component_stops_fail_closed_after_advancement
                     domain=source.domain,
                     source=source.source,
                     provider_identity=source.provider_identity,
+                    chain_position=source.chain_position,
                     retrieved_at=plan.window_end,
                     planned_from=plan.window_start,
                     planned_through=plan.window_end,
@@ -929,6 +1038,44 @@ def test_collection_manifest_requires_retrieval_time_for_a_queried_source() -> N
             planned_from=datetime(2026, 7, 20, tzinfo=UTC),
             planned_through=datetime(2026, 7, 24, tzinfo=UTC),
             outcome=CollectionOutcome.PARTIAL,
+        )
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [CollectionOutcome.UNAVAILABLE, CollectionOutcome.FAILED],
+)
+def test_collection_manifest_requires_a_safe_diagnostic_for_terminal_failure(
+    outcome: CollectionOutcome,
+) -> None:
+    with pytest.raises(ValidationError, match="sanitized diagnostic"):
+        CollectionManifestEntry(
+            domain="news",
+            source="ticker_news",
+            provider_identity="provider_news",
+            retrieved_at=datetime(2026, 7, 24, tzinfo=UTC),
+            planned_from=datetime(2026, 7, 20, tzinfo=UTC),
+            planned_through=datetime(2026, 7, 24, tzinfo=UTC),
+            outcome=outcome,
+        )
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [CollectionOutcome.NOT_QUERIED, CollectionOutcome.NOT_APPLICABLE],
+)
+def test_collection_manifest_rejects_diagnostics_for_unqueried_outcomes(
+    outcome: CollectionOutcome,
+) -> None:
+    with pytest.raises(ValidationError, match="diagnostic"):
+        CollectionManifestEntry(
+            domain="news",
+            source="ticker_news",
+            provider_identity="provider_news",
+            planned_from=datetime(2026, 7, 20, tzinfo=UTC),
+            planned_through=datetime(2026, 7, 24, tzinfo=UTC),
+            outcome=outcome,
+            diagnostic=CollectionDiagnostic(code="raw_exception_leaked"),
         )
 
 
@@ -1026,6 +1173,8 @@ def test_incremental_advancement_accepts_only_complete_or_evidence_bearing_outco
         CollectionOutcome.NOT_APPLICABLE,
     }:
         entry["retrieved_at"] = plan.window_end
+    if outcome in {CollectionOutcome.UNAVAILABLE, CollectionOutcome.FAILED}:
+        entry["diagnostic"] = CollectionDiagnostic(code="fixture_failure")
 
     result = assess_incremental_collection(
         plan,
@@ -1125,7 +1274,12 @@ def test_incremental_retry_keeps_inactive_history_when_a_conflicting_slot_is_act
         failed_request.model_copy(update={"analysts": ("market",)})
     )
 
-    with pytest.raises(IncrementalRequestConflictError):
+    expected_error = (
+        IncrementalRequestConflictError
+        if terminal_state == "failed"
+        else InvalidRunTransitionError
+    )
+    with pytest.raises(expected_error):
         service.retry(inactive.id)
 
     unchanged = repository.get_run(inactive.id)
@@ -1135,20 +1289,9 @@ def test_incremental_retry_keeps_inactive_history_when_a_conflicting_slot_is_act
     assert repository.get_run(active.id).status is RunStatus.QUEUED
 
 
-@pytest.mark.parametrize(
-    ("terminal_state", "expected_status", "trashed"),
-    [
-        ("failed", RunStatus.FAILED, False),
-        ("cancelled", RunStatus.CANCELLED, False),
-        ("trashed", RunStatus.CANCELLED, True),
-    ],
-)
-def test_incremental_retry_replays_an_identical_active_slot_without_requeueing_history(
+def test_incremental_retry_replays_an_identical_active_slot_only_from_failed_history(
     app_settings,
     repository,
-    terminal_state: str,
-    expected_status: RunStatus,
-    trashed: bool,
 ) -> None:
     service = _service(app_settings, repository)
     baseline = service.run(
@@ -1161,26 +1304,52 @@ def test_incremental_retry_replays_an_identical_active_slot_without_requeueing_h
         full_baseline_run_id=baseline.run_id,
     )
     inactive = service.enqueue(request)
-    if terminal_state == "failed":
-        repository.claim_run(inactive.id, "fixture", app_settings.lease_seconds)
-        repository.fail(inactive.id, RuntimeError("fixture failure"))
-    else:
-        service.cancel(inactive.id)
-        if terminal_state == "trashed":
-            repository.trash_runs((inactive.id,))
+    repository.claim_run(inactive.id, "fixture", app_settings.lease_seconds)
+    repository.fail(inactive.id, RuntimeError("fixture failure"))
     active = service.enqueue(request)
 
     replayed = service.retry(inactive.id)
 
     assert replayed.id == active.id
     unchanged = repository.get_run(inactive.id)
-    assert unchanged.status is expected_status
+    assert unchanged.status is RunStatus.FAILED
     assert unchanged.attempt == 1
-    assert (unchanged.trashed_at is not None) is trashed
+    assert unchanged.trashed_at is None
     assert not any(
         event.event_type == "run.retry_queued"
         for event in repository.list_events(inactive.id)
     )
+
+
+@pytest.mark.parametrize("status", [RunStatus.QUEUED, RunStatus.RUNNING])
+def test_incremental_retry_rejects_an_active_target_before_slot_replay(
+    app_settings,
+    repository,
+    status: RunStatus,
+) -> None:
+    service = _service(app_settings, repository)
+    baseline = service.run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+    target = service.enqueue(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date=date(2026, 7, 24),
+            research_kind="incremental",
+            full_baseline_run_id=baseline.run_id,
+        )
+    )
+    if status is RunStatus.RUNNING:
+        repository.claim_run(target.id, "fixture", app_settings.lease_seconds)
+
+    events_before = repository.list_events(target.id)
+    with pytest.raises(InvalidRunTransitionError, match="only failed runs"):
+        service.retry(target.id)
+
+    unchanged = repository.get_run(target.id)
+    assert unchanged.status is status
+    assert unchanged.attempt == 1
+    assert repository.list_events(target.id) == events_before
 
 
 def test_incremental_retry_maps_a_sqlite_slot_integrity_error_to_typed_conflict(

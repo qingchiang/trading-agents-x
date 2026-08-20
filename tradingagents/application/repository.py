@@ -910,6 +910,7 @@ class RunRepository:
                 record = session.get(RunRecord, run_id)
                 if record is None:
                     raise RunNotFoundError(run_id)
+                self._require_retryable(record)
                 if (
                     record.research_kind == "incremental"
                     and record.full_baseline_run_id is not None
@@ -934,14 +935,6 @@ class RunRepository:
                             "An active Incremental Research Run already occupies "
                             "this Cycle and cutoff."
                         )
-                if record.trashed_at is not None:
-                    raise InvalidRunTransitionError(
-                        f"run {run_id} is trashed"
-                    )
-                if record.status != RunStatus.FAILED.value:
-                    raise InvalidRunTransitionError(
-                        f"only failed runs can be retried, got {record.status}"
-                    )
                 checkpoint_thread_id = self._attempt(
                     session,
                     record,
@@ -981,6 +974,24 @@ class RunRepository:
                 "and cutoff."
             ) from exc
         return self.get_run(run_id)
+
+    def require_retryable(self, run_id: str) -> RunView:
+        """Check the target lifecycle before any retry admission work."""
+        with self.sessions() as session:
+            record = session.get(RunRecord, run_id)
+            if record is None:
+                raise RunNotFoundError(run_id)
+            self._require_retryable(record)
+            return self._view(record)
+
+    @staticmethod
+    def _require_retryable(record: RunRecord) -> None:
+        if record.trashed_at is not None:
+            raise InvalidRunTransitionError(f"run {record.id} is trashed")
+        if record.status != RunStatus.FAILED.value:
+            raise InvalidRunTransitionError(
+                f"only failed runs can be retried, got {record.status}"
+            )
 
     @staticmethod
     def _active_incremental_slot(

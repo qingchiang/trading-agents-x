@@ -1789,6 +1789,7 @@ class IncrementalCollectionSource(FrozenModel):
     domain: Literal["fundamentals", "market", "news", "social"]
     source: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
     provider_identity: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
+    chain_position: int = Field(default=0, ge=0)
     configured: bool
 
 
@@ -1821,6 +1822,16 @@ class IncrementalCollectionPlan(FrozenModel):
         )
         if len(source_keys) != len(set(source_keys)):
             raise ValueError("collection source identities must be unique per domain")
+        for domain in planned_domains:
+            positions = [
+                source.chain_position
+                for source in self.sources
+                if source.domain == domain
+            ]
+            if positions != list(range(len(positions))):
+                raise ValueError(
+                    "collection fallback chains must have ordered chain positions"
+                )
         return self
 
 
@@ -1830,6 +1841,7 @@ class CollectionManifestEntry(FrozenModel):
     domain: Literal["fundamentals", "market", "news", "social"]
     source: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
     provider_identity: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
+    chain_position: int = Field(default=0, ge=0)
     retrieved_at: datetime | None = None
     planned_from: datetime
     planned_through: datetime
@@ -1883,7 +1895,14 @@ class CollectionManifestEntry(FrozenModel):
         if self.outcome is CollectionOutcome.NOT_APPLICABLE and (
             self.evidence_refs or self.diagnostic is not None
         ):
-            raise ValueError("not-applicable sources cannot report evidence or failures")
+            raise ValueError("not-applicable sources cannot report evidence or a diagnostic")
+        if self.outcome in {
+            CollectionOutcome.UNAVAILABLE,
+            CollectionOutcome.FAILED,
+        } and self.diagnostic is None:
+            raise ValueError("terminal collection failures require a sanitized diagnostic")
+        if self.outcome is CollectionOutcome.NOT_QUERIED and self.diagnostic is not None:
+            raise ValueError("unqueried sources cannot report a diagnostic")
         if self.outcome in {
             CollectionOutcome.NOT_QUERIED,
             CollectionOutcome.NOT_APPLICABLE,
