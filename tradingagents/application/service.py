@@ -42,6 +42,7 @@ from .contracts import (
 from .eligibility import validate_instrument_eligibility
 from .errors import (
     InstrumentEligibilityUnavailableError,
+    NoInformationAdvancementError,
     UnsupportedInstrumentError,
 )
 from .exporting import (
@@ -143,6 +144,12 @@ class AnalysisService:
         )
         information_cutoff_at = self._information_cutoff_at(request)
         method_snapshot = self._method_snapshot(run_settings, request)
+        if request.research_kind == "incremental":
+            assert request.full_baseline_run_id is not None
+            self.repository.validate_incremental_baseline(
+                request.full_baseline_run_id,
+                request,
+            )
         view, created = self.repository.create_run(
             request,
             run_settings.snapshot(),
@@ -151,7 +158,17 @@ class AnalysisService:
             research_schema_version="1",
             information_cutoff_at=information_cutoff_at,
             method_snapshot=method_snapshot,
-            research_kind="full",
+            research_kind=request.research_kind,
+            full_baseline_run_id=request.full_baseline_run_id,
+            incremental_input_fingerprint=(
+                self._incremental_input_fingerprint(
+                    request,
+                    method_snapshot,
+                    source_run_id=source_run_id,
+                )
+                if request.research_kind == "incremental"
+                else None
+            ),
         )
         if created:
             self.repository.append_event(
@@ -164,6 +181,29 @@ class AnalysisService:
                 },
             )
         return view
+
+    @staticmethod
+    def _incremental_input_fingerprint(
+        request: AnalysisRequest,
+        method_snapshot: dict[str, Any],
+        *,
+        source_run_id: str | None,
+    ) -> str:
+        """Hash the immutable inputs that define one active Cycle/cutoff slot."""
+        payload = {
+            "request": request.model_dump(mode="json"),
+            "source_run_id": source_run_id,
+            "method_configuration_fingerprint": method_snapshot[
+                "configuration_fingerprint"
+            ],
+        }
+        canonical = json.dumps(
+            payload,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return sha256(canonical.encode()).hexdigest()
 
     def _information_cutoff_at(self, request: AnalysisRequest) -> datetime:
         """Freeze the one PIT boundary before the Run becomes durable."""
@@ -340,6 +380,34 @@ class AnalysisService:
                 dataflow_config = run_settings.dataflow_config(self.settings)
                 self._validate_instrument_eligibility(request)
                 validate_market_routing(dataflow_config)
+                if run.research_kind == "incremental":
+                    assert request.full_baseline_run_id is not None
+                    self.repository.validate_incremental_baseline(
+                        request.full_baseline_run_id,
+                        request,
+                    )
+                    collection = self._collect_incremental_preflight(request)
+                    self._emit(
+                        run.id,
+                        "incremental.collection_completed",
+                        payload=collection,
+                        on_event=on_event,
+                    )
+                    if not collection["information_advancement"]:
+                        self._emit(
+                            run.id,
+                            "incremental.no_advancement",
+                            payload={
+                                "reason": "no_admissible_information_advancement",
+                                "coverage_policy_version": collection[
+                                    "coverage_policy_version"
+                                ],
+                            },
+                            on_event=on_event,
+                        )
+                        raise NoInformationAdvancementError(
+                            "Incremental collection found no admissible information advancement."
+                        )
                 with use_config(dataflow_config):
                     try:
                         identity = self.identity_resolver(
@@ -530,6 +598,7 @@ class AnalysisService:
                     on_event=on_event,
                 )
                 raise
+
             except Exception as exc:
                 segment_metrics = metrics.snapshot()
                 try:
@@ -570,6 +639,33 @@ class AnalysisService:
                     )
                 raise
 
+    @staticmethod
+    def _collect_incremental_preflight(request: AnalysisRequest) -> dict[str, Any]:
+        """Record the deterministic no-advancement gate before semantic work.
+
+        Ticket 05 deliberately supports no successful Incremental outcome yet:
+        Tickets 06 and 07 add complete-empty and Evidence-bearing collection.
+        This market-local plan nevertheless records every required domain as
+        not queried, preserving the distinction from an admissible empty scan.
+        """
+        market = (
+            "japan"
+            if request.ticker.endswith(".T")
+            else "mainland_china"
+            if request.ticker.endswith((".SS", ".SZ"))
+            else "united_states"
+        )
+        return {
+            "plan_version": "1",
+            "market": market,
+            "coverage_policy_version": "1",
+            "required_domains": dict.fromkeys(
+                ("fundamentals", "market", "news"), "not_queried"
+            ),
+            "advisory_domains": {"social": "not_queried"},
+            "information_advancement": False,
+        }
+
     def cancel(self, run_id: str) -> RunView:
         view = self.repository.request_cancel(run_id)
         self.repository.append_event(
@@ -590,6 +686,12 @@ class AnalysisService:
         retained = self.repository.get_run(run_id)
         request = self._creation_request_from_history(retained.request)
         self._validate_instrument_eligibility(request)
+        if request.research_kind == "incremental":
+            assert request.full_baseline_run_id is not None
+            self.repository.validate_incremental_baseline(
+                request.full_baseline_run_id,
+                request,
+            )
         view = self.repository.retry(run_id)
         self.repository.append_event(
             run_id,

@@ -11,12 +11,14 @@ export interface components {
       asset_type?: components["schemas"]["AssetType"] | null;
       deep_model?: string | null;
       deep_reasoning_effort?: string | null;
+      full_baseline_run_id?: string | null;
       llm_provider?: string | null;
       make_primary?: boolean | null;
       output_language?: components["schemas"]["ReportLanguage"] | string | null;
       profile?: components["schemas"]["RunProfile"];
       quick_model?: string | null;
       quick_reasoning_effort?: string | null;
+      research_kind?: "full" | "incremental";
       ticker: string;
     };
     AnalysisResult: {
@@ -504,12 +506,14 @@ export interface components {
       asset_type?: components["schemas"]["AssetType"] | null;
       deep_model?: string | null;
       deep_reasoning_effort?: string | null;
+      full_baseline_run_id?: string | null;
       llm_provider?: string | null;
       make_primary?: boolean | null;
       output_language?: components["schemas"]["ReportLanguage"] | string | null;
       profile?: components["schemas"]["RunProfile"];
       quick_model?: string | null;
       quick_reasoning_effort?: string | null;
+      research_kind?: "full" | "incremental";
       source_run_id?: string | null;
       ticker: string;
     };
@@ -553,12 +557,14 @@ export interface components {
       asset_type?: string | null;
       deep_model?: string | null;
       deep_reasoning_effort?: string | null;
+      full_baseline_run_id?: string | null;
       llm_provider?: string | null;
       make_primary?: boolean | null;
       output_language?: components["schemas"]["ReportLanguage"] | string | null;
       profile?: components["schemas"]["RunProfile"];
       quick_model?: string | null;
       quick_reasoning_effort?: string | null;
+      research_kind?: "full" | "incremental";
       ticker: string;
     };
     RunStatus: "queued" | "running" | "succeeded" | "failed" | "cancelled";
@@ -570,6 +576,7 @@ export interface components {
       error_code?: string | null;
       error_message?: string | null;
       finished_at?: string | null;
+      full_baseline_run_id?: string | null;
       id: string;
       information_cutoff_at?: string | null;
       instrument_local_name?: string | null;
@@ -577,6 +584,7 @@ export interface components {
       method_snapshot?: Record<string, unknown> | null;
       metrics?: components["schemas"]["RunMetrics"];
       request: components["schemas"]["RunRequestSnapshot"] | components["schemas"]["AnalysisRequest"];
+      research_kind?: "full" | "incremental" | null;
       research_rating?: components["schemas"]["ResearchRating"] | null;
       research_schema_version?: string | null;
       source_run_id?: string | null;
@@ -594,6 +602,7 @@ export interface components {
       error_code?: string | null;
       error_message?: string | null;
       finished_at?: string | null;
+      full_baseline_run_id?: string | null;
       id: string;
       information_cutoff_at?: string | null;
       instrument_local_name?: string | null;
@@ -601,6 +610,7 @@ export interface components {
       method_snapshot?: Record<string, unknown> | null;
       metrics?: components["schemas"]["RunMetrics"];
       request: components["schemas"]["RunRequestSnapshot"] | components["schemas"]["AnalysisRequest"];
+      research_kind?: "full" | "incremental" | null;
       research_schema_version?: string | null;
       source_run_id?: string | null;
       started_at?: string | null;

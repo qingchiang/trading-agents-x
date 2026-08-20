@@ -83,7 +83,7 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     finally:
         engine.dispose()
 
-    assert revision == "0006_run_backed_full_nodes"
+    assert revision == "0007_incremental_request_slots"
     assert {
         "id",
         "run_id",
@@ -125,6 +125,9 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
         "information_cutoff_at",
         "method_snapshot_json",
         "research_kind",
+        "full_baseline_run_id",
+        "incremental_cutoff",
+        "incremental_input_fingerprint",
     } <= run_columns
     assert "ix_runs_trash" in run_indexes
     assert "outcomes" not in table_names

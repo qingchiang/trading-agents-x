@@ -18,6 +18,7 @@ vi.mock("../api/client", () => ({
     providerModels: vi.fn(),
     createRun: vi.fn(),
     run: vi.fn(),
+    timeline: vi.fn(),
     recentInstruments: vi.fn(),
   },
 }));
@@ -110,6 +111,54 @@ beforeEach(async () => {
   vi.mocked(api.capabilities).mockResolvedValue(capabilities);
   vi.mocked(api.providerModels).mockResolvedValue(modelCatalog);
   vi.mocked(api.recentInstruments).mockResolvedValue([]);
+  vi.mocked(api.timeline).mockResolvedValue({
+    timeline: { instrument: "NVDA", primary_cycle_id: null, nodes: [] },
+  });
+});
+
+test("lets a user choose an active Full Baseline for Incremental research", async () => {
+  vi.mocked(api.timeline).mockResolvedValue({
+    timeline: {
+      instrument: "NVDA",
+      primary_cycle_id: "full-baseline",
+      nodes: [
+        {
+          id: "full-baseline",
+          analysis_date: "2026-07-20",
+          research_kind: "full",
+          is_active: true,
+        },
+      ],
+    },
+  } as never);
+  vi.mocked(api.createRun).mockResolvedValue({ id: "incremental-run" } as RunView);
+  render(
+    <Router initialPath="/runs/new">
+      <NewRunRoutes />
+    </Router>,
+  );
+  await screen.findAllByRole("option", { name: "Quick" });
+  fireEvent.change(screen.getByLabelText(/^Ticker/), {
+    target: { value: "NVDA" },
+  });
+  const incremental = screen.getByRole("radio", {
+    name: /Incremental research/,
+  });
+  await waitFor(() => expect(incremental).not.toBeDisabled());
+  fireEvent.click(incremental);
+
+  await screen.findByRole("option", { name: /2026-07-20/ });
+  fireEvent.click(screen.getByRole("button", { name: /Queue research/ }));
+
+  await waitFor(() =>
+    expect(vi.mocked(api.createRun)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        research_kind: "incremental",
+        full_baseline_run_id: "full-baseline",
+      }),
+      expect.any(String),
+    ),
+  );
 });
 
 test("reuses the idempotency key when a browser submission is retried", async () => {

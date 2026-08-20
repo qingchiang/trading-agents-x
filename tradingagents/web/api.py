@@ -35,7 +35,9 @@ from tradingagents.application.contracts import (
     report_language_value,
 )
 from tradingagents.application.errors import (
+    IncrementalRequestConflictError,
     InstrumentEligibilityUnavailableError,
+    InvalidIncrementalBaselineError,
     UnsupportedInstrumentError,
 )
 from tradingagents.application.maintenance import TrashMaintenance
@@ -141,6 +143,20 @@ def create_app(
         exc: InvalidPrimaryResearchCycleError,
     ):
         return _error(422, "invalid_primary_cycle", str(exc))
+
+    @app.exception_handler(InvalidIncrementalBaselineError)
+    async def invalid_incremental_baseline(
+        _request: Request,
+        exc: InvalidIncrementalBaselineError,
+    ):
+        return _error(422, exc.code, str(exc))
+
+    @app.exception_handler(IncrementalRequestConflictError)
+    async def incremental_request_conflict(
+        _request: Request,
+        exc: IncrementalRequestConflictError,
+    ):
+        return _error(409, exc.code, str(exc))
 
     @app.exception_handler(UnsupportedInstrumentError)
     async def unsupported_instrument(

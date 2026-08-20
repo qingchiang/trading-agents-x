@@ -47,11 +47,52 @@ export default function NewRun() {
   const [outputLanguage, setOutputLanguage] = useState("en");
   const [sourceRunId, setSourceRunId] = useState("");
   const [makePrimary, setMakePrimary] = useState(true);
+  const [researchKind, setResearchKind] = useState<"full" | "incremental">(
+    "full",
+  );
+  const [fullBaselines, setFullBaselines] = useState<
+    { id: string; analysis_date: string }[]
+  >([]);
+  const [fullBaselineRunId, setFullBaselineRunId] = useState("");
   const [templateWarning, setTemplateWarning] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const recentInstruments = useRecentInstruments();
   const submission = useRef<{ fingerprint: string; key: string } | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const instrument = ticker.trim().toUpperCase();
+    setFullBaselines([]);
+    setFullBaselineRunId("");
+    if (!instrument) return () => {
+      active = false;
+    };
+    void api
+      .timeline(instrument)
+      .then(({ timeline }) => {
+        if (!active) return;
+        const eligible = (timeline.nodes ?? [])
+          .filter(
+            (node) =>
+              node.research_kind === "full" &&
+              node.is_active &&
+              node.analysis_date < analysisDate,
+          )
+          .map((node) => ({ id: node.id, analysis_date: node.analysis_date }));
+        setFullBaselines(eligible);
+        setFullBaselineRunId(eligible[0]?.id ?? "");
+      })
+      .catch(() => {
+        if (active) {
+          setFullBaselines([]);
+          setFullBaselineRunId("");
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [analysisDate, ticker]);
 
   useEffect(() => {
     let active = true;
@@ -315,7 +356,10 @@ export default function NewRun() {
       quick_reasoning_effort: quickReasoning,
       deep_reasoning_effort: deepReasoning,
       output_language: outputLanguage,
-      make_primary: makePrimary,
+      research_kind: researchKind,
+      full_baseline_run_id:
+        researchKind === "incremental" ? fullBaselineRunId || null : null,
+      make_primary: researchKind === "full" ? makePrimary : null,
       source_run_id: sourceRunId || null,
     };
     try {
@@ -405,6 +449,59 @@ export default function NewRun() {
         <article className="panel form-section">
           <span className="step">02</span>
           <div className="form-section-body">
+            <h2>{t("researchKind")}</h2>
+            <div className="check-grid">
+              <label className="check-card">
+                <input
+                  type="radio"
+                  name="research-kind"
+                  checked={researchKind === "full"}
+                  onChange={() => setResearchKind("full")}
+                />
+                <span>
+                  <strong>{t("fullResearch")}</strong>
+                  <small>{t("fullResearchHint")}</small>
+                </span>
+              </label>
+              <label className="check-card">
+                <input
+                  type="radio"
+                  name="research-kind"
+                  checked={researchKind === "incremental"}
+                  disabled={!fullBaselines.length}
+                  onChange={() => setResearchKind("incremental")}
+                />
+                <span>
+                  <strong>{t("incrementalResearch")}</strong>
+                  <small>{t("incrementalResearchHint")}</small>
+                </span>
+              </label>
+            </div>
+            {researchKind === "incremental" && (
+              <label>
+                {t("fullBaseline")}
+                <select
+                  value={fullBaselineRunId}
+                  onChange={(event) => setFullBaselineRunId(event.target.value)}
+                  required
+                >
+                  {fullBaselines.map((baseline) => (
+                    <option key={baseline.id} value={baseline.id}>
+                      {baseline.analysis_date} · {baseline.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {fullBaselines.length > 0 && researchKind === "full" && (
+              <p className="model-catalog-note">{t("incrementalAvailable")}</p>
+            )}
+          </div>
+        </article>
+
+        <article className="panel form-section">
+          <span className="step">03</span>
+          <div className="form-section-body">
             <h2>{t("profile")}</h2>
             <div className="profile-grid">
               {(["fast", "standard", "deep"] as const).map((key) => (
@@ -445,7 +542,7 @@ export default function NewRun() {
         </article>
 
         <article className="panel form-section">
-          <span className="step">03</span>
+          <span className="step">04</span>
           <div className="form-section-body">
             <h2>{t("modelsOutput")}</h2>
             <div className="form-grid three">
@@ -572,8 +669,8 @@ export default function NewRun() {
             )}
           </div>
         </article>
-        <article className="panel form-section">
-          <span className="step">04</span>
+        {researchKind === "full" && <article className="panel form-section">
+          <span className="step">05</span>
           <div className="form-section-body">
             <h2>{t("primaryResearch")}</h2>
             <label className="check-card">
@@ -588,7 +685,7 @@ export default function NewRun() {
               </span>
             </label>
           </div>
-        </article>
+        </article>}
         {error && <div className="alert">{error}</div>}
         <div className="form-actions">
           <button
@@ -599,7 +696,8 @@ export default function NewRun() {
               modelsLoading ||
               !provider ||
               !quickModel ||
-              !deepModel
+              !deepModel ||
+              (researchKind === "incremental" && !fullBaselineRunId)
             }
           >
             {submitting ? t("loading") : t("startResearch")} →

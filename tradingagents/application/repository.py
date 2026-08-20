@@ -65,6 +65,7 @@ from .database import (
     RunRecord,
     create_sqlite_engine,
 )
+from .errors import IncrementalRequestConflictError, InvalidIncrementalBaselineError
 from .metrics import merge_run_metrics
 from .recoveries import rebuild_structured_recoveries
 from .reporting import order_reports
@@ -194,6 +195,8 @@ class RunRepository:
         information_cutoff_at: datetime | None = None,
         method_snapshot: dict[str, Any] | None = None,
         research_kind: str | None = None,
+        full_baseline_run_id: str | None = None,
+        incremental_input_fingerprint: str | None = None,
     ) -> tuple[RunView, bool]:
         if not isinstance(request, AnalysisRequest):
             raise TypeError(
@@ -220,6 +223,35 @@ class RunRepository:
                                 "different request"
                             )
                         return self._view(existing), False
+                if research_kind == "incremental":
+                    if full_baseline_run_id is None or incremental_input_fingerprint is None:
+                        raise ValueError(
+                            "Incremental Research requires immutable baseline and fingerprint"
+                        )
+                    existing_slot = session.scalar(
+                        select(RunRecord).where(
+                            RunRecord.research_kind == "incremental",
+                            RunRecord.full_baseline_run_id == full_baseline_run_id,
+                            RunRecord.incremental_cutoff == request.analysis_date,
+                            RunRecord.trashed_at.is_(None),
+                            RunRecord.status.in_(
+                                (
+                                    RunStatus.QUEUED.value,
+                                    RunStatus.RUNNING.value,
+                                    RunStatus.SUCCEEDED.value,
+                                )
+                            ),
+                        )
+                    )
+                    if existing_slot is not None:
+                        if (
+                            existing_slot.incremental_input_fingerprint
+                            == incremental_input_fingerprint
+                        ):
+                            return self._view(existing_slot), False
+                        raise IncrementalRequestConflictError(
+                            "An active Incremental Research Run already occupies this Cycle and cutoff."
+                        )
                 if (
                     research_kind == "full"
                     and request.make_primary is None
@@ -256,6 +288,11 @@ class RunRepository:
                     if method_snapshot is not None
                     else None,
                     research_kind=research_kind,
+                    full_baseline_run_id=full_baseline_run_id,
+                    incremental_cutoff=(
+                        request.analysis_date if research_kind == "incremental" else None
+                    ),
+                    incremental_input_fingerprint=incremental_input_fingerprint,
                     version=__version__,
                     current_attempt=1,
                     cancel_requested=False,
@@ -274,6 +311,32 @@ class RunRepository:
                     )
                 )
         except IntegrityError as exc:
+            if research_kind == "incremental":
+                with self.sessions() as session:
+                    existing_slot = session.scalar(
+                        select(RunRecord).where(
+                            RunRecord.research_kind == "incremental",
+                            RunRecord.full_baseline_run_id == full_baseline_run_id,
+                            RunRecord.incremental_cutoff == request.analysis_date,
+                            RunRecord.trashed_at.is_(None),
+                            RunRecord.status.in_(
+                                (
+                                    RunStatus.QUEUED.value,
+                                    RunStatus.RUNNING.value,
+                                    RunStatus.SUCCEEDED.value,
+                                )
+                            ),
+                        )
+                    )
+                    if existing_slot is not None:
+                        if (
+                            existing_slot.incremental_input_fingerprint
+                            == incremental_input_fingerprint
+                        ):
+                            return self._view(existing_slot), False
+                        raise IncrementalRequestConflictError(
+                            "An active Incremental Research Run already occupies this Cycle and cutoff."
+                        ) from exc
             if idempotency_key is None:
                 raise
             with self.sessions() as session:
@@ -293,6 +356,40 @@ class RunRepository:
                     ) from exc
                 return self._view(existing), False
         return self.get_run(run_id), True
+
+    def validate_incremental_baseline(
+        self,
+        full_baseline_run_id: str,
+        request: AnalysisRequest,
+    ) -> RunView:
+        """Return one active compatible Full Baseline or fail before a Run starts."""
+        with self.sessions() as session:
+            row = session.execute(
+                select(RunRecord, ResearchNodeRecord)
+                .join(ResearchNodeRecord, ResearchNodeRecord.run_id == RunRecord.id)
+                .where(RunRecord.id == full_baseline_run_id)
+            ).one_or_none()
+        if row is None:
+            raise InvalidIncrementalBaselineError("Full Baseline was not found")
+        run, node = row
+        baseline_request = RunRequestSnapshot.model_validate(run.request_json)
+        if node.research_kind != "full":
+            raise InvalidIncrementalBaselineError("Full Baseline must be a Full Research Node")
+        if run.status != RunStatus.SUCCEEDED.value or run.trashed_at is not None:
+            raise InvalidIncrementalBaselineError("Full Baseline must be active")
+        if baseline_request.ticker != request.ticker:
+            raise InvalidIncrementalBaselineError(
+                "Full Baseline must use the same Instrument Key"
+            )
+        if run.research_schema_version != "1":
+            raise InvalidIncrementalBaselineError(
+                "Full Baseline has an incompatible Research Schema Version"
+            )
+        if baseline_request.analysis_date >= request.analysis_date:
+            raise InvalidIncrementalBaselineError(
+                "Incremental cutoff must be later than its Full Baseline"
+            )
+        return self._view(run)
 
     @staticmethod
     def checkpoint_thread_id(run_id: str, attempt: int) -> str:
@@ -1752,6 +1849,8 @@ class RunRepository:
             research_schema_version=record.research_schema_version,
             information_cutoff_at=_aware(record.information_cutoff_at),
             method_snapshot=record.method_snapshot_json,
+            research_kind=record.research_kind,
+            full_baseline_run_id=record.full_baseline_run_id,
             instrument_name=record.instrument_name,
             instrument_local_name=record.instrument_local_name,
             status=RunStatus(record.status),

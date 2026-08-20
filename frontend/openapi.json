@@ -60,6 +60,19 @@
             ],
             "title": "Deep Reasoning Effort"
           },
+          "full_baseline_run_id": {
+            "anyOf": [
+              {
+                "maxLength": 36,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Baseline Run Id"
+          },
           "llm_provider": {
             "anyOf": [
               {
@@ -121,6 +134,15 @@
               }
             ],
             "title": "Quick Reasoning Effort"
+          },
+          "research_kind": {
+            "default": "full",
+            "enum": [
+              "full",
+              "incremental"
+            ],
+            "title": "Research Kind",
+            "type": "string"
           },
           "ticker": {
             "maxLength": 64,
@@ -3546,6 +3568,19 @@
             ],
             "title": "Deep Reasoning Effort"
           },
+          "full_baseline_run_id": {
+            "anyOf": [
+              {
+                "maxLength": 36,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Baseline Run Id"
+          },
           "llm_provider": {
             "anyOf": [
               {
@@ -3607,6 +3642,15 @@
               }
             ],
             "title": "Quick Reasoning Effort"
+          },
+          "research_kind": {
+            "default": "full",
+            "enum": [
+              "full",
+              "incremental"
+            ],
+            "title": "Research Kind",
+            "type": "string"
           },
           "source_run_id": {
             "anyOf": [
@@ -3897,6 +3941,17 @@
             ],
             "title": "Deep Reasoning Effort"
           },
+          "full_baseline_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Baseline Run Id"
+          },
           "llm_provider": {
             "anyOf": [
               {
@@ -3958,6 +4013,15 @@
               }
             ],
             "title": "Quick Reasoning Effort"
+          },
+          "research_kind": {
+            "default": "full",
+            "enum": [
+              "full",
+              "incremental"
+            ],
+            "title": "Research Kind",
+            "type": "string"
           },
           "ticker": {
             "maxLength": 64,
@@ -4039,6 +4103,17 @@
             ],
             "title": "Finished At"
           },
+          "full_baseline_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Baseline Run Id"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -4102,6 +4177,21 @@
               }
             ],
             "title": "Request"
+          },
+          "research_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "full",
+                  "incremental"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Research Kind"
           },
           "research_rating": {
             "anyOf": [
@@ -4245,6 +4335,17 @@
             ],
             "title": "Finished At"
           },
+          "full_baseline_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Baseline Run Id"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -4308,6 +4409,21 @@
               }
             ],
             "title": "Request"
+          },
+          "research_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "full",
+                  "incremental"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Research Kind"
           },
           "research_schema_version": {
             "anyOf": [

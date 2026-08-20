@@ -94,6 +94,80 @@ async def test_run_creation_is_idempotent_and_conflicts_are_explicit(
 
 
 @pytest.mark.anyio
+async def test_incremental_creation_exposes_typed_baseline_and_slot_feedback(
+    web_client: httpx.AsyncClient,
+    web_repository,
+    web_settings,
+) -> None:
+    request = AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    baseline, _ = web_repository.create_run(
+        request,
+        web_settings.resolve_run(request).snapshot(),
+        research_schema_version="1",
+        information_cutoff_at=datetime(2026, 7, 20, 23, 59, 59, tzinfo=UTC),
+        method_snapshot={"schema_version": "1"},
+        research_kind="full",
+    )
+    web_repository.claim_run(baseline.id, "fixture", 30)
+    item = EvidenceItem.create(
+        source="fixture",
+        evidence_type="fixture",
+        requested_date=request.analysis_date,
+        effective_date=request.analysis_date,
+        content="fixture",
+    )
+    evidence = EvidenceBundle(
+        instrument=request.ticker, analysis_date=request.analysis_date, items=(item,)
+    )
+    web_repository.seal_evidence(baseline.id, evidence)
+    web_repository.complete(
+        baseline.id,
+        AnalysisResult(
+            run_id=baseline.id,
+            status=RunStatus.SUCCEEDED,
+            instrument=request.ticker,
+            reports={},
+            decision=research_decision(evidence_refs=(item.ref,)),
+            evidence=evidence,
+        ),
+        evidence=evidence,
+    )
+
+    invalid = await web_client.post(
+        "/api/v1/runs",
+        json={
+            **_payload(),
+            "research_kind": "incremental",
+            "full_baseline_run_id": "missing-baseline",
+        },
+    )
+    created = await web_client.post(
+        "/api/v1/runs",
+        json={
+            **_payload(),
+            "research_kind": "incremental",
+            "full_baseline_run_id": baseline.id,
+        },
+    )
+    conflict = await web_client.post(
+        "/api/v1/runs",
+        json={
+            **_payload(),
+            "research_kind": "incremental",
+            "full_baseline_run_id": baseline.id,
+            "analysts": ["market"],
+        },
+    )
+
+    assert invalid.status_code == 422
+    assert invalid.json()["error"]["code"] == "invalid_incremental_baseline"
+    assert created.status_code == 202
+    assert created.json()["request"]["research_kind"] == "incremental"
+    assert conflict.status_code == 409
+    assert conflict.json()["error"]["code"] == "incremental_request_conflict"
+
+
+@pytest.mark.anyio
 async def test_timeline_api_exposes_first_same_identity_full_node(
     web_client: httpx.AsyncClient,
     web_repository,

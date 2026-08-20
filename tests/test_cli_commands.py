@@ -687,7 +687,7 @@ def test_db_backup_preserves_a_pre_migration_database_and_legacy_reviews(
         with sqlite3.connect(destination) as upgraded:
             assert upgraded.execute(
                 "SELECT version_num FROM alembic_version"
-            ).fetchone() == ("0006_run_backed_full_nodes",)
+            ).fetchone() == ("0007_incremental_request_slots",)
             assert upgraded.execute(
                 "SELECT name FROM sqlite_master "
                 "WHERE type = 'table' AND name IN ('outcomes', 'reflections')"

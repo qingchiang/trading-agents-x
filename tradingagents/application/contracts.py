@@ -1503,6 +1503,12 @@ class AnalysisRequest(FrozenModel):
     deep_model: str | None = None
     quick_reasoning_effort: str | None = None
     deep_reasoning_effort: str | None = None
+    research_kind: Literal["full", "incremental"] = "full"
+    full_baseline_run_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=36,
+    )
     # The first Full Cycle is selected automatically.  Once a Timeline exists,
     # callers must make this choice explicitly rather than relying on order.
     make_primary: bool | None = None
@@ -1551,6 +1557,15 @@ class AnalysisRequest(FrozenModel):
             raise ValueError("Only listed equity instruments are supported")
         if self.asset_type is None:
             object.__setattr__(self, "asset_type", AssetType.STOCK)
+        if self.research_kind == "full" and self.full_baseline_run_id is not None:
+            raise ValueError("Full Research must not carry a Full Baseline")
+        if (
+            self.research_kind == "incremental"
+            and self.full_baseline_run_id is None
+        ):
+            raise ValueError(
+                "Incremental Research requires exactly one full_baseline_run_id"
+            )
         return self
 
 
@@ -1580,6 +1595,8 @@ class RunRequestSnapshot(FrozenModel):
     deep_model: str | None = None
     quick_reasoning_effort: str | None = None
     deep_reasoning_effort: str | None = None
+    research_kind: Literal["full", "incremental"] = "full"
+    full_baseline_run_id: str | None = None
     make_primary: bool | None = None
     output_language: ReportLanguage | str | None = None
 
@@ -1664,6 +1681,8 @@ class RunView(FrozenModel):
     research_schema_version: str | None = None
     information_cutoff_at: datetime | None = None
     method_snapshot: dict[str, Any] | None = None
+    research_kind: Literal["full", "incremental"] | None = None
+    full_baseline_run_id: str | None = None
     instrument_name: str | None = None
     instrument_local_name: str | None = None
     status: RunStatus

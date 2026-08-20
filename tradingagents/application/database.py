@@ -58,6 +58,11 @@ class RunRecord(Base):
         JSON, nullable=True
     )
     research_kind: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    full_baseline_run_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    incremental_cutoff: Mapped[date | None] = mapped_column(Date, nullable=True)
+    incremental_input_fingerprint: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
     version: Mapped[str] = mapped_column(String(40), nullable=False)
     current_attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     cancel_requested: Mapped[bool] = mapped_column(
@@ -83,6 +88,17 @@ class RunRecord(Base):
     __table_args__ = (
         Index("ix_runs_claim", "status", "lease_expires_at", "created_at"),
         Index("ix_runs_trash", "trashed_at", "created_at"),
+        Index(
+            "uq_active_incremental_cycle_cutoff",
+            "full_baseline_run_id",
+            "incremental_cutoff",
+            unique=True,
+            sqlite_where=(
+                (research_kind == "incremental")
+                & trashed_at.is_(None)
+                & status.in_(("queued", "running", "succeeded"))
+            ),
+        ),
     )
 
 

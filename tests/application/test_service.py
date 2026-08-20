@@ -32,7 +32,12 @@ from tradingagents.application.database import (
     ResearchNodeRecord,
     RunRecord,
 )
-from tradingagents.application.errors import UnsupportedInstrumentError
+from tradingagents.application.errors import (
+    IncrementalRequestConflictError,
+    InvalidIncrementalBaselineError,
+    NoInformationAdvancementError,
+    UnsupportedInstrumentError,
+)
 from tradingagents.application.repository import IdempotencyConflictError, RunRepository
 from tradingagents.application.runtime import RunCancelled, WorkerShutdown
 from tradingagents.application.service import AnalysisService
@@ -163,6 +168,143 @@ def test_completed_first_full_replays_before_later_full_primary_validation(
             AnalysisRequest(ticker="NVDA", analysis_date="2026-07-23"),
             idempotency_key="first-full-replay",
         )
+
+
+def test_incremental_request_requires_an_explicit_compatible_full_baseline(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(app_settings, repository)
+    baseline = service.run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+
+    with pytest.raises(ValueError, match="full_baseline_run_id"):
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date=date(2026, 7, 24),
+            research_kind="incremental",
+        )
+
+    with pytest.raises(ValueError, match="must not carry a Full Baseline"):
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date=date(2026, 7, 24),
+            research_kind="full",
+            full_baseline_run_id=baseline.run_id,
+        )
+
+    with pytest.raises(InvalidIncrementalBaselineError, match="same Instrument"):
+        service.enqueue(
+            AnalysisRequest(
+                ticker="AAPL",
+                analysis_date=date(2026, 7, 24),
+                research_kind="incremental",
+                full_baseline_run_id=baseline.run_id,
+            )
+        )
+
+
+@pytest.mark.parametrize("ticker", ["NVDA", "7203.T", "600000.SS"])
+def test_non_advancing_incremental_run_fails_before_any_semantic_work_or_node_commit(
+    app_settings,
+    repository,
+    ticker,
+) -> None:
+    llm_calls = 0
+
+    def llm_factory(*_args, **_kwargs):
+        nonlocal llm_calls
+        llm_calls += 1
+        return object(), object()
+
+    baseline_service = _service(app_settings, repository)
+    baseline = baseline_service.run(
+        AnalysisRequest(ticker=ticker, analysis_date=date(2026, 7, 20))
+    )
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=llm_factory,
+        graph_factory=_Graph,
+        identity_resolver=lambda symbol, _date: {"company_name": symbol},
+        eligibility_resolver=_equity_resolver,
+        local_name_resolver=lambda _ticker, _date, _config: None,
+    )
+    request = AnalysisRequest(
+        ticker=ticker,
+        analysis_date=date(2026, 7, 24),
+        research_kind="incremental",
+        full_baseline_run_id=baseline.run_id,
+    )
+
+    queued = service.enqueue(request)
+    assert queued.request.research_kind == "incremental"
+    assert queued.request.full_baseline_run_id == baseline.run_id
+    assert queued.method_snapshot["coverage_policy"]["version"] == "1"
+
+    with pytest.raises(NoInformationAdvancementError):
+        service.run(request)
+
+    failed = repository.list_runs(status=RunStatus.FAILED).items
+    assert len(failed) == 1
+    assert failed[0].error_code == "NoInformationAdvancementError"
+    assert llm_calls == 0
+    assert [node.id for node in repository.get_timeline(ticker).nodes] == [
+        baseline.run_id
+    ]
+    events = repository.list_events(failed[0].id)
+    assert any(event.event_type == "incremental.collection_completed" for event in events)
+    assert any(event.event_type == "incremental.no_advancement" for event in events)
+
+    replacement = service.enqueue(request)
+    assert replacement.id != failed[0].id
+    assert replacement.status is RunStatus.QUEUED
+
+
+def test_incremental_slot_replays_identical_active_request_and_rejects_conflict(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(app_settings, repository)
+    baseline = service.run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+    request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 24),
+        research_kind="incremental",
+        full_baseline_run_id=baseline.run_id,
+    )
+
+    first = service.enqueue(request)
+    assert service.enqueue(request).id == first.id
+
+    with pytest.raises(IncrementalRequestConflictError):
+        service.enqueue(
+            request.model_copy(update={"analysts": ("market",)})
+        )
+
+
+def test_two_connections_return_one_incremental_slot_for_identical_requests(
+    app_settings,
+    repository,
+) -> None:
+    service = _service(app_settings, repository)
+    baseline = service.run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+    request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 24),
+        research_kind="incremental",
+        full_baseline_run_id=baseline.run_id,
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        runs = list(executor.map(lambda _unused: service.enqueue(request), range(2)))
+
+    assert {run.id for run in runs} == {runs[0].id}
 
 
 @pytest.mark.parametrize(

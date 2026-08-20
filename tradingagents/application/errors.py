@@ -47,9 +47,33 @@ class InstrumentEligibilityUnavailableError(
 EligibilityUnavailableError = InstrumentEligibilityUnavailableError
 
 
+class InvalidIncrementalBaselineError(ValueError):
+    """An Incremental request did not name an eligible active Full Baseline."""
+
+    code = "invalid_incremental_baseline"
+    status_code = 422
+
+
+class IncrementalRequestConflictError(ValueError):
+    """An active Cycle/cutoff slot already has different immutable inputs."""
+
+    code = "incremental_request_conflict"
+    status_code = 409
+
+
+class NoInformationAdvancementError(RuntimeError):
+    """Deterministic Incremental collection found no admissible advancement."""
+
+    code = "no_information_advancement"
+    status_code = 409
+
+
 __all__ = [
     "EligibilityUnavailableError",
     "InstrumentEligibilityError",
     "InstrumentEligibilityUnavailableError",
+    "IncrementalRequestConflictError",
+    "InvalidIncrementalBaselineError",
+    "NoInformationAdvancementError",
     "UnsupportedInstrumentError",
 ]
