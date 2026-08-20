@@ -21,9 +21,16 @@ from tests.factories import analyst_report, research_decision
 from tradingagents.application.contracts import (
     AnalysisRequest,
     ArtifactGenerationMethod,
+    CollectionDiagnostic,
+    CollectionManifest,
+    CollectionManifestEntry,
+    CollectionOutcome,
     EvidenceBundle,
     EvidenceItem,
+    IncrementalCollectionPlan,
+    InformationAdvancement,
     ResearchArtifactDraft,
+    ResearchCoverage,
     RunStatus,
 )
 from tradingagents.application.database import (
@@ -33,10 +40,14 @@ from tradingagents.application.database import (
     RunRecord,
 )
 from tradingagents.application.errors import (
+    IncrementalCollectionCommitUnavailableError,
     IncrementalRequestConflictError,
     InvalidIncrementalBaselineError,
     NoInformationAdvancementError,
     UnsupportedInstrumentError,
+)
+from tradingagents.application.incremental_collection import (
+    assess_incremental_collection,
 )
 from tradingagents.application.repository import IdempotencyConflictError, RunRepository
 from tradingagents.application.runtime import RunCancelled, WorkerShutdown
@@ -260,6 +271,209 @@ def test_non_advancing_incremental_run_fails_before_any_semantic_work_or_node_co
     replacement = service.enqueue(request)
     assert replacement.id != failed[0].id
     assert replacement.status is RunStatus.QUEUED
+
+
+@pytest.mark.parametrize(
+    ("ticker", "source"),
+    [
+        ("NVDA", "sec_companyfacts"),
+        ("7203.T", "jquants_statements"),
+        ("600000.SS", "cninfo_disclosures"),
+    ],
+)
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        CollectionOutcome.COMPLETE_WITH_RECORDS,
+        CollectionOutcome.COMPLETE_EMPTY,
+        CollectionOutcome.PARTIAL,
+        CollectionOutcome.UNAVAILABLE,
+        CollectionOutcome.FAILED,
+        CollectionOutcome.NOT_QUERIED,
+        CollectionOutcome.NOT_APPLICABLE,
+    ],
+)
+def test_incremental_collection_terminal_outcomes_are_structured_and_stop_before_semantic_work(
+    app_settings,
+    repository,
+    ticker,
+    source,
+    outcome,
+) -> None:
+    baseline = _service(app_settings, repository).run(
+        AnalysisRequest(ticker=ticker, analysis_date=date(2026, 7, 20))
+    )
+    semantic_calls = 0
+
+    def llm_factory(*_args, **_kwargs):
+        nonlocal semantic_calls
+        semantic_calls += 1
+        return object(), object()
+
+    def collect(plan: IncrementalCollectionPlan) -> CollectionManifest:
+        complete_scan = outcome in {
+            CollectionOutcome.COMPLETE_WITH_RECORDS,
+            CollectionOutcome.COMPLETE_EMPTY,
+        }
+        return CollectionManifest(
+            plan_version=plan.version,
+            market=plan.market,
+            entries=(
+                CollectionManifestEntry(
+                    domain="fundamentals",
+                    source=source,
+                    planned_from=plan.window_start,
+                    planned_through=plan.window_end,
+                    scanned_from=plan.window_start if complete_scan else None,
+                    scanned_through=plan.window_end if complete_scan else None,
+                    outcome=outcome,
+                    evidence_refs=(
+                        ("ev_0123456789ab",)
+                        if outcome is CollectionOutcome.COMPLETE_WITH_RECORDS
+                        else ()
+                    ),
+                    diagnostic=(
+                        CollectionDiagnostic(
+                            code="fixture_source_unavailable",
+                        )
+                        if outcome
+                        in {CollectionOutcome.UNAVAILABLE, CollectionOutcome.FAILED}
+                        else None
+                    ),
+                ),
+            ),
+        )
+
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=llm_factory,
+        graph_factory=_Graph,
+        identity_resolver=lambda symbol, _date: {"company_name": symbol},
+        eligibility_resolver=_equity_resolver,
+        local_name_resolver=lambda _ticker, _date, _config: None,
+        incremental_collector=collect,
+    )
+    request = AnalysisRequest(
+        ticker=ticker,
+        analysis_date=date(2026, 7, 24),
+        research_kind="incremental",
+        full_baseline_run_id=baseline.run_id,
+    )
+
+    expected_error = (
+        IncrementalCollectionCommitUnavailableError
+        if outcome
+        in {CollectionOutcome.COMPLETE_EMPTY, CollectionOutcome.COMPLETE_WITH_RECORDS}
+        else NoInformationAdvancementError
+    )
+    with pytest.raises(expected_error):
+        service.run(request)
+
+    failed = repository.list_runs(status=RunStatus.FAILED).items
+    assert len(failed) == 1
+    assert semantic_calls == 0
+    assert [node.id for node in repository.get_timeline(ticker).nodes] == [
+        baseline.run_id
+    ]
+    collection_event = next(
+        event
+        for event in repository.list_events(failed[0].id)
+        if event.event_type == "incremental.collection_completed"
+    )
+    assert collection_event.payload["collection_manifest"]["market"] in {
+        "united_states",
+        "japan",
+        "mainland_china",
+    }
+    assert collection_event.payload["research_coverage"]["domains"][0][
+        "status"
+    ] in {"complete", "limited", "missing", "not_applicable"}
+    assert collection_event.payload["information_advancement"]["advanced"] is (
+        outcome
+        in {CollectionOutcome.COMPLETE_EMPTY, CollectionOutcome.COMPLETE_WITH_RECORDS}
+    )
+    assert collection_event.payload["diagnostics"] == (
+        [{"code": "fixture_source_unavailable"}]
+        if outcome in {CollectionOutcome.UNAVAILABLE, CollectionOutcome.FAILED}
+        else []
+    )
+
+
+def test_incremental_collection_assessment_distinguishes_each_terminal_outcome() -> None:
+    plan = IncrementalCollectionPlan(
+        version="1",
+        market="united_states",
+        window_start=datetime(2026, 7, 20, tzinfo=UTC),
+        window_end=datetime(2026, 7, 24, tzinfo=UTC),
+        required_domains=("fundamentals", "market", "news"),
+        advisory_domains=("social",),
+    )
+    result = assess_incremental_collection(
+        plan,
+        CollectionManifest(
+            plan_version="1",
+            market="united_states",
+            entries=(
+                CollectionManifestEntry(
+                    domain="fundamentals",
+                    source="sec_companyfacts",
+                    planned_from=plan.window_start,
+                    planned_through=plan.window_end,
+                    scanned_from=plan.window_start,
+                    scanned_through=plan.window_end,
+                    outcome=CollectionOutcome.COMPLETE_EMPTY,
+                ),
+                CollectionManifestEntry(
+                    domain="market",
+                    source="market_series",
+                    planned_from=plan.window_start,
+                    planned_through=plan.window_end,
+                    scanned_from=plan.window_start,
+                    scanned_through=plan.window_end,
+                    outcome=CollectionOutcome.COMPLETE_WITH_RECORDS,
+                    evidence_refs=("ev_0123456789ab",),
+                ),
+                CollectionManifestEntry(
+                    domain="news",
+                    source="ticker_news",
+                    planned_from=plan.window_start,
+                    planned_through=plan.window_end,
+                    outcome=CollectionOutcome.NOT_APPLICABLE,
+                ),
+                CollectionManifestEntry(
+                    domain="social",
+                    source="social_sentiment",
+                    planned_from=plan.window_start,
+                    planned_through=plan.window_end,
+                    outcome=CollectionOutcome.PARTIAL,
+                ),
+                CollectionManifestEntry(
+                    domain="social",
+                    source="social_fallback",
+                    planned_from=plan.window_start,
+                    planned_through=plan.window_end,
+                    outcome=CollectionOutcome.NOT_QUERIED,
+                ),
+            ),
+        ),
+    )
+
+    assert result.research_coverage == ResearchCoverage.model_validate(
+        {
+            "policy_version": "1",
+            "domains": [
+                {"domain": "fundamentals", "requirement": "required", "status": "complete"},
+                {"domain": "market", "requirement": "required", "status": "complete"},
+                {"domain": "news", "requirement": "required", "status": "not_applicable"},
+                {"domain": "social", "requirement": "advisory", "status": "limited"},
+            ],
+        }
+    )
+    assert result.information_advancement == InformationAdvancement(
+        advanced=True,
+        reasons=("complete_empty_scan", "admissible_evidence"),
+    )
 
 
 def test_incremental_slot_replays_identical_active_request_and_rejects_conflict(

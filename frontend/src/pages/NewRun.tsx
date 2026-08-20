@@ -17,6 +17,7 @@ import { Link, useLocation, useNavigate } from "../router";
 
 const analystKeys = ["market", "social", "news", "fundamentals"] as const;
 const customModelValue = "__custom_model_id__";
+const baselinePageSize = 20;
 
 export default function NewRun() {
   const { t } = useTranslation();
@@ -68,18 +69,32 @@ export default function NewRun() {
     if (!instrument) return () => {
       active = false;
     };
-    void api
-      .timeline(instrument)
-      .then(({ timeline }) => {
+    const loadBaselines = async () => {
+      const eligible = new Map<string, { id: string; analysis_date: string }>();
+      let offset = 0;
+      while (active) {
+        const { timeline } = await api.timeline(instrument, baselinePageSize, offset);
+        for (const node of timeline.nodes ?? []) {
+          if (
+            node.research_kind === "full" &&
+            node.is_active &&
+            node.analysis_date < analysisDate
+          ) {
+            eligible.set(node.id, { id: node.id, analysis_date: node.analysis_date });
+          }
+        }
+        const pageSize = timeline.nodes?.length ?? 0;
+        const nextOffset = offset + pageSize;
+        if (pageSize === 0 || nextOffset >= (timeline.node_total ?? 0) || nextOffset <= offset) {
+          break;
+        }
+        offset = nextOffset;
+      }
+      return [...eligible.values()];
+    };
+    void loadBaselines()
+      .then((eligible) => {
         if (!active) return;
-        const eligible = (timeline.nodes ?? [])
-          .filter(
-            (node) =>
-              node.research_kind === "full" &&
-              node.is_active &&
-              node.analysis_date < analysisDate,
-          )
-          .map((node) => ({ id: node.id, analysis_date: node.analysis_date }));
         setFullBaselines(eligible);
         setFullBaselineRunId(eligible[0]?.id ?? "");
       })

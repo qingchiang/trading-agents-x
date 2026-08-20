@@ -1755,6 +1755,141 @@ class ResearchTimelinePage(FrozenModel):
     offset: int = Field(ge=0)
 
 
+class CollectionOutcome(_StableStrEnum):
+    """One terminal observation for a planned Incremental source scan."""
+
+    COMPLETE_WITH_RECORDS = "complete_with_records"
+    COMPLETE_EMPTY = "complete_empty"
+    PARTIAL = "partial"
+    UNAVAILABLE = "unavailable"
+    FAILED = "failed"
+    NOT_QUERIED = "not_queried"
+    NOT_APPLICABLE = "not_applicable"
+
+
+class CoverageRequirement(_StableStrEnum):
+    REQUIRED = "required"
+    ADVISORY = "advisory"
+
+
+class CoverageStatus(_StableStrEnum):
+    COMPLETE = "complete"
+    LIMITED = "limited"
+    MISSING = "missing"
+    NOT_APPLICABLE = "not_applicable"
+
+
+class CollectionDiagnostic(FrozenModel):
+    """A stable, secret-free collection failure class safe for Run events."""
+
+    code: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
+
+
+class IncrementalCollectionPlan(FrozenModel):
+    """Market-local deterministic input to one Incremental collection pass."""
+
+    version: str = Field(pattern=r"^[0-9]+$")
+    market: Literal["united_states", "japan", "mainland_china"]
+    window_start: datetime
+    window_end: datetime
+    required_domains: tuple[Literal["fundamentals", "market", "news"], ...]
+    advisory_domains: tuple[Literal["social"], ...]
+
+    @model_validator(mode="after")
+    def validate_window(self) -> IncrementalCollectionPlan:
+        if self.window_start >= self.window_end:
+            raise ValueError("Incremental collection window must advance")
+        return self
+
+
+class CollectionManifestEntry(FrozenModel):
+    """Observed result for one deterministic source/domain scan."""
+
+    domain: Literal["fundamentals", "market", "news", "social"]
+    source: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
+    planned_from: datetime
+    planned_through: datetime
+    scanned_from: datetime | None = None
+    scanned_through: datetime | None = None
+    source_watermark: str | None = Field(default=None, max_length=200)
+    outcome: CollectionOutcome
+    evidence_refs: tuple[str, ...] = ()
+    diagnostic: CollectionDiagnostic | None = None
+
+    @field_validator("evidence_refs")
+    @classmethod
+    def validate_evidence_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _unique_evidence_refs(value)
+
+    @model_validator(mode="after")
+    def validate_terminal_observation(self) -> CollectionManifestEntry:
+        if self.planned_from >= self.planned_through:
+            raise ValueError("collection interval must be non-empty")
+        scanned = (self.scanned_from, self.scanned_through)
+        if any(item is not None for item in scanned) and any(
+            item is None for item in scanned
+        ):
+            raise ValueError("scanned interval must be complete when recorded")
+        if self.scanned_from is not None and (
+            self.scanned_from > self.scanned_through
+            or self.scanned_from < self.planned_from
+            or self.scanned_through > self.planned_through
+        ):
+            raise ValueError("scanned interval must remain within the planned interval")
+        if self.outcome is CollectionOutcome.COMPLETE_EMPTY:
+            if scanned != (self.planned_from, self.planned_through):
+                raise ValueError("complete-empty requires proof of the full planned scan")
+            if self.evidence_refs:
+                raise ValueError("complete-empty must not produce evidence references")
+        if self.outcome is CollectionOutcome.COMPLETE_WITH_RECORDS:
+            if scanned != (self.planned_from, self.planned_through):
+                raise ValueError("complete records require proof of the full planned scan")
+            if not self.evidence_refs:
+                raise ValueError("complete records require evidence references")
+        if self.outcome is CollectionOutcome.NOT_APPLICABLE and (
+            self.evidence_refs or self.diagnostic is not None
+        ):
+            raise ValueError("not-applicable sources cannot report evidence or failures")
+        return self
+
+
+class CollectionManifest(FrozenModel):
+    """The deterministic source-level audit for one Incremental request."""
+
+    plan_version: str = Field(pattern=r"^[0-9]+$")
+    market: Literal["united_states", "japan", "mainland_china"]
+    entries: tuple[CollectionManifestEntry, ...] = Field(min_length=1)
+
+
+class ResearchCoverageDomain(FrozenModel):
+    domain: Literal["fundamentals", "market", "news", "social"]
+    requirement: CoverageRequirement
+    status: CoverageStatus
+
+
+class ResearchCoverage(FrozenModel):
+    """Versioned policy assessment derived from a Collection Manifest."""
+
+    policy_version: str = Field(pattern=r"^[0-9]+$")
+    domains: tuple[ResearchCoverageDomain, ...] = Field(min_length=1)
+
+
+class InformationAdvancement(FrozenModel):
+    """Deterministic answer to whether collection can justify an Incremental Node."""
+
+    advanced: bool
+    reasons: tuple[Literal["complete_empty_scan", "admissible_evidence"], ...] = ()
+
+
+class IncrementalCollectionPreflight(FrozenModel):
+    """Structured Ticket 05 gate result, safe to persist in sanitized events."""
+
+    collection_manifest: CollectionManifest
+    research_coverage: ResearchCoverage
+    information_advancement: InformationAdvancement
+    diagnostics: tuple[CollectionDiagnostic, ...] = ()
+
+
 class RunAttemptView(FrozenModel):
     """Observed execution usage and lifecycle for one retry attempt."""
 

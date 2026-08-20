@@ -68,10 +68,15 @@ class NoInformationAdvancementError(RuntimeError):
     status_code = 409
 
 
+class IncrementalCollectionCommitUnavailableError(RuntimeError):
+    """Collection advanced, but this release cannot commit an Incremental Node."""
+
+
 __all__ = [
     "EligibilityUnavailableError",
     "InstrumentEligibilityError",
     "InstrumentEligibilityUnavailableError",
+    "IncrementalCollectionCommitUnavailableError",
     "IncrementalRequestConflictError",
     "InvalidIncrementalBaselineError",
     "NoInformationAdvancementError",

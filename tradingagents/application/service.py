@@ -34,6 +34,7 @@ from .contracts import (
     AnalysisRequest,
     AnalysisResult,
     EvidenceBundle,
+    IncrementalCollectionPlan,
     ResearchArtifactDraft,
     RunEvent,
     RunExport,
@@ -41,6 +42,7 @@ from .contracts import (
 )
 from .eligibility import validate_instrument_eligibility
 from .errors import (
+    IncrementalCollectionCommitUnavailableError,
     InstrumentEligibilityUnavailableError,
     NoInformationAdvancementError,
     UnsupportedInstrumentError,
@@ -48,6 +50,11 @@ from .errors import (
 from .exporting import (
     render_run_export_markdown,
     render_run_export_package,
+)
+from .incremental_collection import (
+    IncrementalCollector,
+    assess_incremental_collection,
+    default_incremental_collector,
 )
 from .instrument_names import resolve_local_instrument_name
 from .llms import RunLLMs, create_run_llms
@@ -97,6 +104,7 @@ class AnalysisService:
         local_name_resolver: Callable[[str, str, dict[str, Any]], str | None] = (
             resolve_local_instrument_name
         ),
+        incremental_collector: IncrementalCollector = default_incremental_collector,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ):
         self.settings = settings
@@ -110,6 +118,7 @@ class AnalysisService:
             raise TypeError("eligibility_resolver is required")
         self.eligibility_resolver = eligibility_resolver
         self.local_name_resolver = local_name_resolver
+        self.incremental_collector = incremental_collector
         self.now = now
 
     def enqueue(
@@ -386,21 +395,29 @@ class AnalysisService:
                         request.full_baseline_run_id,
                         request,
                     )
-                    collection = self._collect_incremental_preflight(request)
+                    baseline = self.repository.get_run(request.full_baseline_run_id)
+                    collection = self._collect_incremental_preflight(
+                        request,
+                        baseline_information_cutoff_at=baseline.information_cutoff_at,
+                        target_information_cutoff_at=run.information_cutoff_at,
+                        coverage_policy=run.method_snapshot["coverage_policy"],
+                    )
                     self._emit(
                         run.id,
                         "incremental.collection_completed",
-                        payload=collection,
+                        payload=collection.model_dump(mode="json"),
                         on_event=on_event,
                     )
-                    if not collection["information_advancement"]:
+                    if not collection.information_advancement.advanced:
                         self._emit(
                             run.id,
                             "incremental.no_advancement",
                             payload={
                                 "reason": "no_admissible_information_advancement",
-                                "coverage_policy_version": collection[
-                                    "coverage_policy_version"
+                                "coverage_policy_version": collection.research_coverage.policy_version,
+                                "diagnostics": [
+                                    item.model_dump(mode="json")
+                                    for item in collection.diagnostics
                                 ],
                             },
                             on_event=on_event,
@@ -408,6 +425,10 @@ class AnalysisService:
                         raise NoInformationAdvancementError(
                             "Incremental collection found no admissible information advancement."
                         )
+                    raise IncrementalCollectionCommitUnavailableError(
+                        "Incremental collection advancement cannot commit before "
+                        "the complete-empty and evidence-bearing Node workflows are available."
+                    )
                 with use_config(dataflow_config):
                     try:
                         identity = self.identity_resolver(
@@ -639,15 +660,17 @@ class AnalysisService:
                     )
                 raise
 
-    @staticmethod
-    def _collect_incremental_preflight(request: AnalysisRequest) -> dict[str, Any]:
-        """Record the deterministic no-advancement gate before semantic work.
-
-        Ticket 05 deliberately supports no successful Incremental outcome yet:
-        Tickets 06 and 07 add complete-empty and Evidence-bearing collection.
-        This market-local plan nevertheless records every required domain as
-        not queried, preserving the distinction from an admissible empty scan.
-        """
+    def _collect_incremental_preflight(
+        self,
+        request: AnalysisRequest,
+        *,
+        baseline_information_cutoff_at: datetime | None,
+        target_information_cutoff_at: datetime | None,
+        coverage_policy: dict[str, Any],
+    ):
+        """Build and assess the deterministic collection gate before semantic work."""
+        if baseline_information_cutoff_at is None or target_information_cutoff_at is None:
+            raise ValueError("Incremental collection requires frozen information cutoffs")
         market = (
             "japan"
             if request.ticker.endswith(".T")
@@ -655,16 +678,15 @@ class AnalysisService:
             if request.ticker.endswith((".SS", ".SZ"))
             else "united_states"
         )
-        return {
-            "plan_version": "1",
-            "market": market,
-            "coverage_policy_version": "1",
-            "required_domains": dict.fromkeys(
-                ("fundamentals", "market", "news"), "not_queried"
-            ),
-            "advisory_domains": {"social": "not_queried"},
-            "information_advancement": False,
-        }
+        plan = IncrementalCollectionPlan(
+            version=str(coverage_policy["version"]),
+            market=market,
+            window_start=baseline_information_cutoff_at,
+            window_end=target_information_cutoff_at,
+            required_domains=tuple(coverage_policy["required_domains"]),
+            advisory_domains=tuple(coverage_policy["advisory_domains"]),
+        )
+        return assess_incremental_collection(plan, self.incremental_collector(plan))
 
     def cancel(self, run_id: str) -> RunView:
         view = self.repository.request_cancel(run_id)

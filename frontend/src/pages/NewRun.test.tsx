@@ -161,6 +161,61 @@ test("lets a user choose an active Full Baseline for Incremental research", asyn
   );
 });
 
+test("finds an eligible Full Baseline beyond the first Timeline page", async () => {
+  vi.mocked(api.timeline)
+    .mockResolvedValueOnce({
+      timeline: {
+        instrument: "NVDA",
+        node_total: 21,
+        node_limit: 20,
+        node_offset: 0,
+        nodes: Array.from({ length: 20 }, (_value, index) => ({
+          id: `incremental-${index}`,
+          analysis_date: "2026-07-20",
+          research_kind: "incremental",
+          is_active: true,
+        })),
+      },
+    } as never)
+    .mockResolvedValueOnce({
+      timeline: {
+        instrument: "NVDA",
+        node_total: 21,
+        node_limit: 20,
+        node_offset: 20,
+        nodes: [
+          {
+            id: "late-full-baseline",
+            analysis_date: "2026-07-20",
+            research_kind: "full",
+            is_active: true,
+          },
+        ],
+      },
+    } as never);
+
+  render(
+    <Router initialPath="/runs/new">
+      <NewRunRoutes />
+    </Router>,
+  );
+  await screen.findAllByRole("option", { name: "Quick" });
+  fireEvent.change(screen.getByLabelText(/^Ticker/), {
+    target: { value: "NVDA" },
+  });
+
+  const incremental = screen.getByRole("radio", {
+    name: /Incremental research/,
+  });
+  await waitFor(() => expect(incremental).not.toBeDisabled());
+  expect(api.timeline).toHaveBeenCalledWith("NVDA", 20, 0);
+  expect(api.timeline).toHaveBeenCalledWith("NVDA", 20, 20);
+  fireEvent.click(incremental);
+  expect(
+    await screen.findByRole("option", { name: /late-full-baseline/ }),
+  ).toBeVisible();
+});
+
 test("reuses the idempotency key when a browser submission is retried", async () => {
   vi.mocked(api.createRun)
     .mockRejectedValueOnce(new Error("temporary network error"))
