@@ -32,9 +32,7 @@ from tradingagents.persistence import (
 
 
 def _alembic_config(app_settings) -> Config:
-    migration_root = resources.files("tradingagents.persistence").joinpath(
-        "alembic"
-    )
+    migration_root = resources.files("tradingagents.persistence").joinpath("alembic")
     with resources.as_file(migration_root) as script_location:
         config = Config()
         config.set_main_option("script_location", str(script_location))
@@ -56,34 +54,22 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     )
     try:
         with engine.connect() as connection:
-            revision = connection.scalar(
-                text("SELECT version_num FROM alembic_version")
-            )
+            revision = connection.scalar(text("SELECT version_num FROM alembic_version"))
         inspector = inspect(engine)
-        artifact_columns = {
-            column["name"] for column in inspector.get_columns("run_artifacts")
-        }
-        run_columns = {
-            column["name"] for column in inspector.get_columns("runs")
-        }
-        run_indexes = {
-            index["name"] for index in inspector.get_indexes("runs")
-        }
+        artifact_columns = {column["name"] for column in inspector.get_columns("run_artifacts")}
+        run_columns = {column["name"] for column in inspector.get_columns("runs")}
+        run_indexes = {index["name"] for index in inspector.get_indexes("runs")}
         artifact_uniques = {
             tuple(constraint["column_names"])
             for constraint in inspector.get_unique_constraints("run_artifacts")
         }
-        evidence_columns = {
-            column["name"] for column in inspector.get_columns("run_evidence")
-        }
-        decision_columns = {
-            column["name"] for column in inspector.get_columns("decisions")
-        }
+        evidence_columns = {column["name"] for column in inspector.get_columns("run_evidence")}
+        decision_columns = {column["name"] for column in inspector.get_columns("decisions")}
         table_names = set(inspector.get_table_names())
     finally:
         engine.dispose()
 
-    assert revision == "0007_incremental_request_slots"
+    assert revision == "0008_incremental_node_products"
     assert {
         "id",
         "run_id",
@@ -133,6 +119,8 @@ def test_upgrade_persists_revision_and_is_idempotent(app_settings):
     assert "outcomes" not in table_names
     assert "reflections" not in table_names
     assert "numeric_audit_json" in decision_columns
+    node_columns = {column["name"] for column in inspector.get_columns("research_nodes")}
+    assert "incremental_products_json" in node_columns
 
 
 def test_branch3_upgrade_discards_legacy_reviews_and_preserves_execution_history(
@@ -234,9 +222,7 @@ def test_branch3_upgrade_discards_legacy_reviews_and_preserves_execution_history
             "'2026-08-01', 5, 0.05, 0.01, '2026-08-01 00:00:00')",
             (decision_ids[fixtures["AAPL"][0]],),
         )
-        outcome_ids = connection.exec_driver_sql(
-            "SELECT id FROM outcomes ORDER BY id"
-        ).fetchall()
+        outcome_ids = connection.exec_driver_sql("SELECT id FROM outcomes ORDER BY id").fetchall()
         for (outcome_id,) in outcome_ids:
             connection.exec_driver_sql(
                 "INSERT INTO reflections (outcome_id, text, created_at) "
@@ -271,15 +257,9 @@ def test_branch3_upgrade_discards_legacy_reviews_and_preserves_execution_history
                 "decisions": 2,
             }
             for table, expected_count in expected_counts.items():
-                assert (
-                    connection.scalar(text(f"SELECT count(*) FROM {table}"))
-                    == expected_count
-                )
+                assert connection.scalar(text(f"SELECT count(*) FROM {table}")) == expected_count
             assert connection.scalar(text("SELECT count(*) FROM research_nodes")) == 0
-            assert (
-                connection.scalar(text("SELECT count(*) FROM primary_research_cycles"))
-                == 0
-            )
+            assert connection.scalar(text("SELECT count(*) FROM primary_research_cycles")) == 0
     finally:
         engine.dispose()
 
@@ -307,21 +287,15 @@ def test_branch3_upgrade_discards_legacy_reviews_and_preserves_execution_history
         export_service = AnalysisService(app_settings, repository=history_repository)
         crypto_run_id = fixtures["AAPL"][0]
         json_type, export_json = export_service.export(crypto_run_id, format="json")
-        markdown_type, export_markdown = export_service.export(
-            crypto_run_id, format="markdown"
-        )
-        package_type, export_package = export_service.export(
-            crypto_run_id, format="package"
-        )
+        markdown_type, export_markdown = export_service.export(crypto_run_id, format="markdown")
+        package_type, export_package = export_service.export(crypto_run_id, format="package")
         assert json_type == "application/json"
         assert '"run_id"' in export_json
         assert markdown_type == "text/markdown; charset=utf-8"
         assert "Fixture evidence-grounded analysis." in export_markdown
         assert package_type == "application/zip"
         with zipfile.ZipFile(io.BytesIO(export_package)) as archive:
-            assert json.loads(archive.read("run.json"))["run"]["request"][
-                "asset_type"
-            ] == "crypto"
+            assert json.loads(archive.read("run.json"))["run"]["request"]["asset_type"] == "crypto"
         trashed, changed = history_repository.trash_runs((crypto_run_id,))
         assert changed == 1
         assert trashed[0].trashed_at is not None
@@ -335,17 +309,14 @@ def test_branch3_upgrade_discards_legacy_reviews_and_preserves_execution_history
 
     backup_repository = RunRepository(app_settings)
     try:
-        backup_path = backup_repository.backup(
-            tmp_path / "backup" / "post-review-removal.db"
-        )
+        backup_path = backup_repository.backup(tmp_path / "backup" / "post-review-removal.db")
     finally:
         backup_repository.engine.dispose()
     with sqlite3.connect(backup_path) as connection:
         backup_tables = {
             row[0]
             for row in connection.execute(
-                "SELECT name FROM sqlite_master "
-                "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
             )
         }
         assert {
@@ -359,10 +330,13 @@ def test_branch3_upgrade_discards_legacy_reviews_and_preserves_execution_history
         assert "outcomes" not in backup_tables
         assert "reflections" not in backup_tables
         assert connection.execute("SELECT count(*) FROM runs").fetchone()[0] == 2
-        assert connection.execute(
-            "SELECT json_extract(request_json, '$.asset_type') "
-            "FROM runs WHERE json_extract(request_json, '$.ticker') = 'BTC-USD'"
-        ).fetchone()[0] == "crypto"
+        assert (
+            connection.execute(
+                "SELECT json_extract(request_json, '$.asset_type') "
+                "FROM runs WHERE json_extract(request_json, '$.ticker') = 'BTC-USD'"
+            ).fetchone()[0]
+            == "crypto"
+        )
 
 
 def test_artifact_observation_migration_preserves_existing_rows(app_settings) -> None:
@@ -442,13 +416,8 @@ def test_unreleased_revision_requires_explicit_database_reset(
 ) -> None:
     app_settings.prepare_filesystem()
     with sqlite3.connect(app_settings.database_path) as connection:
-        connection.execute(
-            "CREATE TABLE alembic_version "
-            "(version_num VARCHAR(32) NOT NULL)"
-        )
-        connection.execute(
-            "INSERT INTO alembic_version VALUES ('0003_trash_lifecycle')"
-        )
+        connection.execute("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")
+        connection.execute("INSERT INTO alembic_version VALUES ('0003_trash_lifecycle')")
 
     with pytest.raises(
         IncompatibleDatabaseError,

@@ -319,10 +319,7 @@ class NumericRequirementCheck(FrozenModel):
         cls,
         value: dict[str, int | float],
     ) -> dict[str, int | float]:
-        if any(
-            not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", key)
-            for key in value
-        ):
+        if any(not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", key) for key in value):
             raise ValueError("calculation input names must be identifiers")
         if any(isinstance(item, bool) for item in value.values()):
             raise ValueError("calculation inputs must be numeric")
@@ -355,10 +352,7 @@ class NumericRequirementCheck(FrozenModel):
     @model_validator(mode="after")
     def validate_status_fields(self) -> NumericRequirementCheck:
         if self.calculation_status is NumericCalculationStatus.VERIFIED:
-            if (
-                self.calculation_id is None
-                or self.canonical_result is None
-            ):
+            if self.calculation_id is None or self.canonical_result is None:
                 raise ValueError("verified calculations require an ID and result")
             comparison_fields = (
                 self.comparison_result,
@@ -367,15 +361,10 @@ class NumericRequirementCheck(FrozenModel):
             if any(item is not None for item in comparison_fields) and any(
                 item is None for item in comparison_fields
             ):
-                raise ValueError(
-                    "display comparison fields must be all present or all absent"
-                )
+                raise ValueError("display comparison fields must be all present or all absent")
             if self.display_status is NumericDisplayStatus.NOT_CHECKED:
                 raise ValueError("verified calculations require a display comparison")
-            if (
-                self.rounded_stated_value is None
-                or self.rounded_canonical_result is None
-            ):
+            if self.rounded_stated_value is None or self.rounded_canonical_result is None:
                 raise ValueError("checked displays require both rounded values")
         elif self.display_status is not NumericDisplayStatus.NOT_CHECKED:
             raise ValueError("invalid or missing calculations cannot compare display")
@@ -753,6 +742,7 @@ class ReportSection(FrozenModel):
     def validate_source_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return _unique_evidence_refs(value)
 
+
 class KeyClaim(FrozenModel):
     """A decision-relevant assertion extracted from a readable report."""
 
@@ -848,23 +838,12 @@ class AnalystReport(FrozenModel):
             raise ValueError("analyst section IDs must be unique")
         if any(claim.section_id not in set(section_ids) for claim in self.key_claims):
             raise ValueError("key claims must identify an existing report section")
-        used_refs = {
-            ref
-            for claim in self.key_claims
-            for ref in claim.evidence_refs
-        }
-        used_refs.update(
-            ref
-            for section in self.report_sections
-            for ref in section.source_refs
-        )
+        used_refs = {ref for claim in self.key_claims for ref in claim.evidence_refs}
+        used_refs.update(ref for section in self.report_sections for ref in section.source_refs)
         if not used_refs.issubset(self.source_refs):
             raise ValueError("report source refs must include claim and section refs")
         if self.audit_status is ReportAuditStatus.COMPLETE:
-            if not any(
-                claim.importance is ClaimImportance.PRIMARY
-                for claim in self.key_claims
-            ):
+            if not any(claim.importance is ClaimImportance.PRIMARY for claim in self.key_claims):
                 raise ValueError("complete report audit requires a primary claim")
             if any(not claim.evidence_refs for claim in self.key_claims):
                 raise ValueError("complete report audit requires cited claims")
@@ -994,9 +973,7 @@ class EvidenceValueLocator(FrozenModel):
         if any(part is not None for part in table_parts) and not all(
             part is not None for part in table_parts
         ):
-            raise ValueError(
-                "table-backed evidence values require table_id, row_id, and column"
-            )
+            raise ValueError("table-backed evidence values require table_id, row_id, and column")
         return self
 
 
@@ -1040,9 +1017,7 @@ class AuditedRangeEndpoint(FrozenModel):
                 raise ValueError("observed endpoint refs must include its locator ref")
         elif self.basis is MarketReferenceBasis.INTERPRETED:
             if self.source_locator is not None or self.calculation_id:
-                raise ValueError(
-                    "interpreted endpoint must not claim a locator or calculation"
-                )
+                raise ValueError("interpreted endpoint must not claim a locator or calculation")
         elif self.basis is MarketReferenceBasis.DERIVED:
             if not self.calculation_id:
                 raise ValueError("derived endpoint requires a calculation")
@@ -1084,6 +1059,7 @@ class ResearchScenario(FrozenModel):
         value: tuple[str, ...],
     ) -> tuple[str, ...]:
         return _unique_evidence_refs(value)
+
 
 class ValuationAssessment(FrozenModel):
     method: str = Field(min_length=1)
@@ -1154,9 +1130,7 @@ class MarketReferenceLevel(FrozenModel):
     @model_validator(mode="after")
     def validate_basis(self) -> MarketReferenceLevel:
         if not set(self.date_evidence_refs).issubset(self.evidence_refs):
-            raise ValueError(
-                "date evidence refs must be included in market reference refs"
-            )
+            raise ValueError("date evidence refs must be included in market reference refs")
         if self.basis is MarketReferenceBasis.OBSERVED:
             if self.source_locator is None:
                 raise ValueError("observed market reference requires an Evidence locator")
@@ -1226,10 +1200,7 @@ class CalculationRecord(FrozenModel):
         cls,
         value: dict[str, int | float],
     ) -> dict[str, int | float]:
-        if any(
-            not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", key)
-            for key in value
-        ):
+        if any(not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", key) for key in value):
             raise ValueError("calculation input names must be identifiers")
         if any(isinstance(item, bool) for item in value.values()):
             raise ValueError("calculation inputs must be numeric")
@@ -1300,9 +1271,7 @@ class ResearchDecision(FrozenModel):
         for level in value.get("market_reference_levels") or ():
             merged.extend(_field_value(level, "evidence_refs") or ())
         for calculation in value.get("calculation_records") or ():
-            merged.extend(
-                _field_value(calculation, "input_evidence_refs") or ()
-            )
+            merged.extend(_field_value(calculation, "input_evidence_refs") or ())
         for adjustment in value.get("risk_review_adjustments") or ():
             merged.extend(_field_value(adjustment, "evidence_refs") or ())
         return {**value, "evidence_refs": tuple(dict.fromkeys(merged))}
@@ -1559,13 +1528,8 @@ class AnalysisRequest(FrozenModel):
             object.__setattr__(self, "asset_type", AssetType.STOCK)
         if self.research_kind == "full" and self.full_baseline_run_id is not None:
             raise ValueError("Full Research must not carry a Full Baseline")
-        if (
-            self.research_kind == "incremental"
-            and self.full_baseline_run_id is None
-        ):
-            raise ValueError(
-                "Incremental Research requires exactly one full_baseline_run_id"
-            )
+        if self.research_kind == "incremental" and self.full_baseline_run_id is None:
+            raise ValueError("Incremental Research requires exactly one full_baseline_run_id")
         return self
 
 
@@ -1733,6 +1697,14 @@ class ResearchNodeView(FrozenModel):
     is_primary: bool
     is_active: bool
     trashed_at: datetime | None = None
+    collection_manifest: CollectionManifest | None = None
+    research_coverage: ResearchCoverage | None = None
+    information_advancement: InformationAdvancement | None = None
+    performance: PerformanceObservation | None = None
+    outcome_review_status: Literal["omitted", "failed"] | None = None
+    reassessment: ResearchReassessment | None = None
+    full_research_required_reasons: tuple[FullResearchRequiredReason, ...] = ()
+    cycle_warning: bool = False
 
 
 class ResearchTimeline(FrozenModel):
@@ -1742,6 +1714,7 @@ class ResearchTimeline(FrozenModel):
     node_total: int = Field(default=0, ge=0)
     node_limit: int = Field(default=50, ge=1, le=200)
     node_offset: int = Field(default=0, ge=0)
+    timeline_warning: bool = False
 
 
 class ResearchTimelineSummary(FrozenModel):
@@ -1817,21 +1790,15 @@ class IncrementalCollectionPlan(FrozenModel):
         planned_domains = set(self.required_domains) | set(self.advisory_domains)
         if any(source.domain not in planned_domains for source in self.sources):
             raise ValueError("collection sources must belong to planned domains")
-        source_keys = tuple(
-            (source.domain, source.source) for source in self.sources
-        )
+        source_keys = tuple((source.domain, source.source) for source in self.sources)
         if len(source_keys) != len(set(source_keys)):
             raise ValueError("collection source identities must be unique per domain")
         for domain in planned_domains:
             positions = [
-                source.chain_position
-                for source in self.sources
-                if source.domain == domain
+                source.chain_position for source in self.sources if source.domain == domain
             ]
             if positions != list(range(len(positions))):
-                raise ValueError(
-                    "collection fallback chains must have ordered chain positions"
-                )
+                raise ValueError("collection fallback chains must have ordered chain positions")
         return self
 
 
@@ -1861,20 +1828,20 @@ class CollectionManifestEntry(FrozenModel):
     def validate_terminal_observation(self) -> CollectionManifestEntry:
         if self.planned_from >= self.planned_through:
             raise ValueError("collection interval must be non-empty")
-        if self.outcome in {
-            CollectionOutcome.COMPLETE_EMPTY,
-            CollectionOutcome.UNAVAILABLE,
-            CollectionOutcome.FAILED,
-            CollectionOutcome.NOT_QUERIED,
-            CollectionOutcome.NOT_APPLICABLE,
-        } and self.evidence_refs:
-            raise ValueError(
-                "this collection outcome cannot report evidence references"
-            )
-        scanned = (self.scanned_from, self.scanned_through)
-        if any(item is not None for item in scanned) and any(
-            item is None for item in scanned
+        if (
+            self.outcome
+            in {
+                CollectionOutcome.COMPLETE_EMPTY,
+                CollectionOutcome.UNAVAILABLE,
+                CollectionOutcome.FAILED,
+                CollectionOutcome.NOT_QUERIED,
+                CollectionOutcome.NOT_APPLICABLE,
+            }
+            and self.evidence_refs
         ):
+            raise ValueError("this collection outcome cannot report evidence references")
+        scanned = (self.scanned_from, self.scanned_through)
+        if any(item is not None for item in scanned) and any(item is None for item in scanned):
             raise ValueError("scanned interval must be complete when recorded")
         if self.scanned_from is not None and (
             self.scanned_from > self.scanned_through
@@ -1886,12 +1853,12 @@ class CollectionManifestEntry(FrozenModel):
             if self.scanned_from is None or self.scanned_through is None:
                 raise ValueError("partial outcomes require a scanned interval")
             if self.scanned_from >= self.scanned_through:
-                raise ValueError(
-                    "partial outcomes require a non-empty scanned interval"
-                )
+                raise ValueError("partial outcomes require a non-empty scanned interval")
         if self.outcome is CollectionOutcome.COMPLETE_EMPTY:
             if scanned != (self.planned_from, self.planned_through):
                 raise ValueError("complete-empty requires proof of the full planned scan")
+            if not self.source_watermark:
+                raise ValueError("complete-empty requires a source watermark")
             if self.evidence_refs:
                 raise ValueError("complete-empty must not produce evidence references")
         if self.outcome is CollectionOutcome.COMPLETE_WITH_RECORDS:
@@ -1903,10 +1870,14 @@ class CollectionManifestEntry(FrozenModel):
             self.evidence_refs or self.diagnostic is not None
         ):
             raise ValueError("not-applicable sources cannot report evidence or a diagnostic")
-        if self.outcome in {
-            CollectionOutcome.UNAVAILABLE,
-            CollectionOutcome.FAILED,
-        } and self.diagnostic is None:
+        if (
+            self.outcome
+            in {
+                CollectionOutcome.UNAVAILABLE,
+                CollectionOutcome.FAILED,
+            }
+            and self.diagnostic is None
+        ):
             raise ValueError("terminal collection failures require a sanitized diagnostic")
         if self.outcome is CollectionOutcome.NOT_QUERIED and self.diagnostic is not None:
             raise ValueError("unqueried sources cannot report a diagnostic")
@@ -1974,9 +1945,7 @@ class InformationAdvancement(FrozenModel):
         if self.advanced != bool(self.reasons):
             raise ValueError("information advancement must agree with its reasons")
         has_reviewable_components = bool(self.newly_reviewable_baseline_component_ids)
-        has_component_reason = (
-            "newly_reviewable_baseline_component" in self.reasons
-        )
+        has_component_reason = "newly_reviewable_baseline_component" in self.reasons
         if has_reviewable_components != has_component_reason:
             raise ValueError(
                 "newly reviewable baseline components require their advancement reason"
@@ -1995,6 +1964,69 @@ class IncrementalCollectionPreflight(FrozenModel):
     research_coverage: ResearchCoverage
     information_advancement: InformationAdvancement
     diagnostics: tuple[CollectionDiagnostic, ...] = ()
+
+
+class ReassessmentDisposition(_StableStrEnum):
+    REAFFIRMED = "reaffirmed"
+    STRENGTHENED = "strengthened"
+    WEAKENED = "weakened"
+    OVERTURNED = "overturned"
+    UNRESOLVED = "unresolved"
+
+
+class ResearchReassessmentEntry(FrozenModel):
+    component_id: str = Field(pattern=_DECISION_COMPONENT_PATH_PATTERN.pattern)
+    disposition: ReassessmentDisposition
+    reason: str = Field(min_length=1)
+
+
+class ResearchReassessment(FrozenModel):
+    entries: tuple[ResearchReassessmentEntry, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_unique_components(self) -> ResearchReassessment:
+        if len({entry.component_id for entry in self.entries}) != len(self.entries):
+            raise ValueError("reassessment components must be unique")
+        return self
+
+
+class PerformanceObservation(FrozenModel):
+    status: Literal["not_yet_observable", "unavailable"]
+    reason: str = Field(min_length=1)
+
+
+class FullResearchRequiredReason(FrozenModel):
+    code: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
+    message: str = Field(min_length=1)
+    origin: Literal["deterministic", "semantic"]
+
+
+class IncrementalSynthesisInput(FrozenModel):
+    full_baseline_run_id: str = Field(min_length=1, max_length=36)
+    full_baseline_decision: ResearchDecision
+    permitted_baseline_evidence_refs: tuple[str, ...] = ()
+    collection_manifest: CollectionManifest
+    research_coverage: ResearchCoverage
+    information_advancement: InformationAdvancement
+    performance: PerformanceObservation
+    outcome_review_status: Literal["omitted", "failed"] = "omitted"
+    method_snapshot: dict[str, Any]
+
+
+class IncrementalSynthesis(FrozenModel):
+    reassessment: ResearchReassessment
+    decision: ResearchDecision
+    full_research_required_reasons: tuple[FullResearchRequiredReason, ...] = ()
+
+
+class IncrementalNodeProducts(FrozenModel):
+    collection_manifest: CollectionManifest
+    research_coverage: ResearchCoverage
+    information_advancement: InformationAdvancement
+    performance: PerformanceObservation
+    outcome_review_status: Literal["omitted", "failed"]
+    reassessment: ResearchReassessment
+    full_research_required_reasons: tuple[FullResearchRequiredReason, ...] = ()
 
 
 class RunAttemptView(FrozenModel):

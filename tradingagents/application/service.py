@@ -35,9 +35,19 @@ from .contracts import (
     AnalysisRequest,
     AnalysisResult,
     EvidenceBundle,
+    FullResearchRequiredReason,
+    IncrementalNodeProducts,
+    IncrementalSynthesis,
+    IncrementalSynthesisInput,
+    NodeMetrics,
+    PerformanceObservation,
+    ReassessmentDisposition,
     ResearchArtifactDraft,
+    ResearchReassessment,
+    ResearchReassessmentEntry,
     RunEvent,
     RunExport,
+    RunMetrics,
     RunStatus,
 )
 from .eligibility import validate_instrument_eligibility
@@ -60,7 +70,7 @@ from .incremental_collection import (
 )
 from .instrument_names import resolve_local_instrument_name
 from .llms import RunLLMs, create_run_llms
-from .metrics import MetricsCallback
+from .metrics import MetricsCallback, merge_run_metrics
 from .repository import RunRepository, RunView
 from .runtime import RunCancelled, RunContext, WorkerShutdown
 from .settings import AppSettings, RunSettings
@@ -69,6 +79,7 @@ logger = logging.getLogger(__name__)
 
 EventHandler = Callable[[RunEvent], None]
 EligibilityResolver = Callable[[str], Any]
+IncrementalSynthesizer = Callable[[IncrementalSynthesisInput], IncrementalSynthesis]
 
 
 def _instrument_display_name(identity: Any) -> str | None:
@@ -89,6 +100,42 @@ def _instrument_display_name(identity: Any) -> str | None:
     return None
 
 
+def _baseline_component_ids(decision) -> tuple[str, ...]:
+    component_ids = ["executive_summary", "thesis"]
+    for field in ("catalysts", "risks", "invalidation_conditions"):
+        component_ids.extend(f"{field}.{index}" for index, _ in enumerate(getattr(decision, field)))
+    for scenario in decision.scenarios:
+        component_ids.append(f"scenarios.{scenario.kind.value}.outcome")
+        component_ids.extend(
+            f"scenarios.{scenario.kind.value}.core_assumptions.{index}"
+            for index, _ in enumerate(scenario.core_assumptions)
+        )
+    component_ids.extend(
+        f"risk_review_adjustments.{index}.explanation"
+        for index, _ in enumerate(decision.risk_review_adjustments)
+    )
+    return tuple(component_ids)
+
+
+def default_incremental_synthesizer(
+    synthesis_input: IncrementalSynthesisInput,
+) -> IncrementalSynthesis:
+    """Offline contract default; production wiring can replace this semantic seam."""
+    return IncrementalSynthesis(
+        reassessment=ResearchReassessment(
+            entries=tuple(
+                ResearchReassessmentEntry(
+                    component_id=component_id,
+                    disposition=ReassessmentDisposition.REAFFIRMED,
+                    reason="A complete-empty collection scan found no new matching record.",
+                )
+                for component_id in _baseline_component_ids(synthesis_input.full_baseline_decision)
+            )
+        ),
+        decision=synthesis_input.full_baseline_decision,
+    )
+
+
 class AnalysisService:
     """The only component allowed to coordinate graph and durable state."""
 
@@ -97,9 +144,7 @@ class AnalysisService:
         settings: AppSettings,
         *,
         repository: RunRepository | None = None,
-        llm_factory: Callable[..., RunLLMs | tuple[Any, Any]] = (
-            create_run_llms
-        ),
+        llm_factory: Callable[..., RunLLMs | tuple[Any, Any]] = (create_run_llms),
         graph_factory: Callable[..., ResearchGraph] = ResearchGraph,
         identity_resolver: Callable[..., dict[str, str]] = resolve_instrument_identity,
         eligibility_resolver: EligibilityResolver = resolve_instrument_eligibility,
@@ -107,6 +152,7 @@ class AnalysisService:
             resolve_local_instrument_name
         ),
         incremental_collector: IncrementalCollector = default_incremental_collector,
+        incremental_synthesizer: IncrementalSynthesizer = default_incremental_synthesizer,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ):
         self.settings = settings
@@ -121,6 +167,7 @@ class AnalysisService:
         self.eligibility_resolver = eligibility_resolver
         self.local_name_resolver = local_name_resolver
         self.incremental_collector = incremental_collector
+        self.incremental_synthesizer = incremental_synthesizer
         self.now = now
 
     def enqueue(
@@ -131,15 +178,11 @@ class AnalysisService:
         source_run_id: str | None = None,
     ) -> RunView:
         if not isinstance(request, AnalysisRequest):
-            raise TypeError(
-                "new Runs require an AnalysisRequest creation contract"
-            )
+            raise TypeError("new Runs require an AnalysisRequest creation contract")
         # Re-run the creation validators at the lifecycle seam.  A caller can
         # otherwise bypass Pydantic validation with ``model_construct`` and
         # hand the repository an invalid request that would still be durable.
-        request = AnalysisRequest.model_validate(
-            request.model_dump(mode="json", warnings=False)
-        )
+        request = AnalysisRequest.model_validate(request.model_dump(mode="json", warnings=False))
         run_settings = self.settings.resolve_run(request)
         self._validate_instrument_eligibility(request)
         if source_run_id is not None:
@@ -204,9 +247,7 @@ class AnalysisService:
         payload = {
             "request": request.model_dump(mode="json"),
             "source_run_id": source_run_id,
-            "method_configuration_fingerprint": method_snapshot[
-                "configuration_fingerprint"
-            ],
+            "method_configuration_fingerprint": method_snapshot["configuration_fingerprint"],
         }
         canonical = json.dumps(
             payload,
@@ -269,9 +310,7 @@ class AnalysisService:
             "data_routes": {
                 "data_vendors": data_config.get("data_vendors", {}),
                 "tool_vendors": data_config.get("tool_vendors", {}),
-                "data_vendors_by_market": data_config.get(
-                    "data_vendors_by_market", {}
-                ),
+                "data_vendors_by_market": data_config.get("data_vendors_by_market", {}),
             },
             "coverage_policy": {
                 "version": "1",
@@ -307,9 +346,7 @@ class AnalysisService:
     ) -> None:
         """Fail closed unless one exact resolver result confirms an equity."""
         try:
-            dataflow_config = self.settings.default_run_settings.dataflow_config(
-                self.settings
-            )
+            dataflow_config = self.settings.default_run_settings.dataflow_config(self.settings)
             with use_config(dataflow_config, merge=False):
                 result = self.eligibility_resolver(request.ticker)
             validate_instrument_eligibility(request.ticker, result)
@@ -418,8 +455,7 @@ class AnalysisService:
                                 "reason": "no_admissible_information_advancement",
                                 "coverage_policy_version": collection.research_coverage.policy_version,
                                 "diagnostics": [
-                                    item.model_dump(mode="json")
-                                    for item in collection.diagnostics
+                                    item.model_dump(mode="json") for item in collection.diagnostics
                                 ],
                             },
                             on_event=on_event,
@@ -427,10 +463,124 @@ class AnalysisService:
                         raise NoInformationAdvancementError(
                             "Incremental collection found no admissible information advancement."
                         )
-                    raise IncrementalCollectionCommitUnavailableError(
-                        "Incremental collection advancement cannot commit before "
-                        "the complete-empty and evidence-bearing Node workflows are available."
+                    has_complete_empty_scan = any(
+                        entry.outcome.value == "complete_empty"
+                        for entry in collection.collection_manifest.entries
                     )
+                    if not has_complete_empty_scan or any(
+                        entry.evidence_refs for entry in collection.collection_manifest.entries
+                    ):
+                        raise IncrementalCollectionCommitUnavailableError(
+                            "Evidence-bearing Incremental Nodes are not available before Ticket 07."
+                        )
+                    baseline_result = self.repository.get_result(baseline.id)
+                    if baseline_result.decision is None:
+                        raise ValueError(
+                            "Incremental synthesis requires a complete Full Baseline Decision"
+                        )
+                    baseline_evidence = self.repository.get_evidence(baseline.id)
+                    performance = PerformanceObservation(
+                        status="not_yet_observable",
+                        reason="Performance calculation is not yet observable in the complete-empty tracer.",
+                    )
+                    synthesis_input = IncrementalSynthesisInput(
+                        full_baseline_run_id=baseline.id,
+                        full_baseline_decision=baseline_result.decision,
+                        permitted_baseline_evidence_refs=tuple(
+                            item.ref for item in baseline_evidence.items
+                        ),
+                        collection_manifest=collection.collection_manifest,
+                        research_coverage=collection.research_coverage,
+                        information_advancement=collection.information_advancement,
+                        performance=performance,
+                        outcome_review_status="omitted",
+                        method_snapshot=run.method_snapshot,
+                    )
+                    self._emit(
+                        run.id,
+                        "incremental.synthesis_started",
+                        payload={
+                            "full_baseline_run_id": baseline.id,
+                            "outcome_review_status": "omitted",
+                        },
+                        on_event=on_event,
+                    )
+                    synthesis = self.incremental_synthesizer(synthesis_input)
+                    expected_components = set(_baseline_component_ids(baseline_result.decision))
+                    if {
+                        entry.component_id for entry in synthesis.reassessment.entries
+                    } != expected_components:
+                        raise ValueError(
+                            "Incremental synthesis must reassess every Full Baseline Decision Component"
+                        )
+                    if not set(synthesis.decision.evidence_refs).issubset(
+                        set(synthesis_input.permitted_baseline_evidence_refs)
+                    ):
+                        raise ValueError(
+                            "Complete-empty Incremental decisions may reference only Full Baseline Evidence"
+                        )
+                    deterministic_reasons = tuple(
+                        FullResearchRequiredReason(
+                            code=f"required_coverage.{domain.domain}",
+                            message=f"Required {domain.domain} coverage is {domain.status.value}.",
+                            origin="deterministic",
+                        )
+                        for domain in collection.research_coverage.domains
+                        if domain.requirement.value == "required"
+                        and domain.status.value in {"limited", "missing"}
+                    )
+                    products = IncrementalNodeProducts(
+                        collection_manifest=collection.collection_manifest,
+                        research_coverage=collection.research_coverage,
+                        information_advancement=collection.information_advancement,
+                        performance=performance,
+                        outcome_review_status="omitted",
+                        reassessment=synthesis.reassessment,
+                        full_research_required_reasons=(
+                            *synthesis.full_research_required_reasons,
+                            *deterministic_reasons,
+                        ),
+                    )
+                    segment_metrics = merge_run_metrics(
+                        metrics.snapshot(),
+                        RunMetrics(
+                            llm_calls=1,
+                            node_metrics={"incremental.synthesis": NodeMetrics(llm_calls=1)},
+                        ),
+                    )
+                    result = AnalysisResult(
+                        run_id=run.id,
+                        status=RunStatus.SUCCEEDED,
+                        instrument=request.ticker,
+                        reports={},
+                        decision=synthesis.decision,
+                        evidence=EvidenceBundle(
+                            instrument=request.ticker,
+                            analysis_date=request.analysis_date,
+                            items=(),
+                        ),
+                        metrics=segment_metrics,
+                    )
+                    aggregate_metrics = self.repository.complete_incremental(
+                        run.id,
+                        result,
+                        evidence=result.evidence,
+                        products=products,
+                    )
+                    result = result.model_copy(update={"metrics": aggregate_metrics})
+                    self._emit(
+                        run.id,
+                        "incremental.synthesis_completed",
+                        payload={"metrics": result.metrics.model_dump(mode="json")},
+                        on_event=on_event,
+                    )
+                    self._emit(
+                        run.id,
+                        "run.succeeded",
+                        payload={"metrics": result.metrics.model_dump(mode="json")},
+                        on_event=on_event,
+                    )
+                    return result
                 with use_config(dataflow_config):
                     try:
                         identity = self.identity_resolver(
@@ -503,9 +653,7 @@ class AnalysisService:
                     settings=run_settings,
                     dataflow_config=dataflow_config,
                     instrument_context=instrument_context,
-                    cancel_requested=lambda: self.repository.cancel_requested(
-                        run.id
-                    ),
+                    cancel_requested=lambda: self.repository.cancel_requested(run.id),
                     shutdown_requested=shutdown_requested or (lambda: False),
                     artifact_writer=lambda artifact: self._persist_artifact(
                         run.id,
@@ -518,17 +666,11 @@ class AnalysisService:
                         on_event,
                     ),
                 )
-                with SqliteSaver.from_conn_string(
-                    str(self.settings.database_path)
-                ) as saver:
+                with SqliteSaver.from_conn_string(str(self.settings.database_path)) as saver:
                     saver.conn.execute("PRAGMA journal_mode=WAL")
-                    saver.conn.execute(
-                        f"PRAGMA busy_timeout={self.settings.busy_timeout_ms}"
-                    )
+                    saver.conn.execute(f"PRAGMA busy_timeout={self.settings.busy_timeout_ms}")
                     saver.setup()
-                    checkpoint_config = {
-                        "configurable": {"thread_id": checkpoint_thread}
-                    }
+                    checkpoint_config = {"configurable": {"thread_id": checkpoint_thread}}
                     resume = saver.get_tuple(checkpoint_config) is not None
                     if resume:
                         self._emit(
@@ -543,9 +685,7 @@ class AnalysisService:
                             checkpointer=saver,
                             checkpoint_thread_id=checkpoint_thread,
                             resume=resume,
-                            on_event=lambda raw: self._persist_graph_event(
-                                run.id, raw, on_event
-                            ),
+                            on_event=lambda raw: self._persist_graph_event(run.id, raw, on_event),
                         )
                     # Production graphs seal before deliberation. This
                     # idempotent application boundary also protects custom
@@ -568,9 +708,7 @@ class AnalysisService:
                         result,
                         evidence=execution.evidence,
                     )
-                    result = result.model_copy(
-                        update={"metrics": aggregate_metrics}
-                    )
+                    result = result.model_copy(update={"metrics": aggregate_metrics})
                     saver.delete_thread(checkpoint_thread)
                 self._emit(
                     run.id,
@@ -588,9 +726,7 @@ class AnalysisService:
                 self._emit(
                     run.id,
                     "run.cancelled",
-                    payload={
-                        "metrics": aggregate_metrics.model_dump(mode="json")
-                    },
+                    payload={"metrics": aggregate_metrics.model_dump(mode="json")},
                     on_event=on_event,
                 )
                 return AnalysisResult(
@@ -632,8 +768,7 @@ class AnalysisService:
                     )
                 except Exception as persistence_exc:
                     logger.error(
-                        "failed to persist terminal state for run %s "
-                        "(analysis=%s persistence=%s)",
+                        "failed to persist terminal state for run %s (analysis=%s persistence=%s)",
                         run.id,
                         type(exc).__name__,
                         type(persistence_exc).__name__,
@@ -645,17 +780,14 @@ class AnalysisService:
                         "run.failed",
                         payload={
                             "error_code": type(exc).__name__,
-                            "message": (
-                                "Analysis failed; inspect the server log."
-                            ),
+                            "message": ("Analysis failed; inspect the server log."),
                             "metrics": aggregate_metrics.model_dump(mode="json"),
                         },
                         on_event=on_event,
                     )
                 except Exception as event_exc:
                     logger.error(
-                        "failed to persist failure event for run %s "
-                        "(analysis=%s event=%s)",
+                        "failed to persist failure event for run %s (analysis=%s event=%s)",
                         run.id,
                         type(exc).__name__,
                         type(event_exc).__name__,
@@ -685,11 +817,7 @@ class AnalysisService:
         view = self.repository.request_cancel(run_id)
         self.repository.append_event(
             run_id,
-            (
-                "run.cancelled"
-                if view.status is RunStatus.CANCELLED
-                else "run.cancel_requested"
-            ),
+            ("run.cancelled" if view.status is RunStatus.CANCELLED else "run.cancel_requested"),
             payload={},
         )
         return view
@@ -848,12 +976,8 @@ class AnalysisService:
         return event
 
     def _clear_checkpoint(self, checkpoint_thread: str) -> None:
-        with SqliteSaver.from_conn_string(
-            str(self.settings.database_path)
-        ) as saver:
-            saver.conn.execute(
-                f"PRAGMA busy_timeout={self.settings.busy_timeout_ms}"
-            )
+        with SqliteSaver.from_conn_string(str(self.settings.database_path)) as saver:
+            saver.conn.execute(f"PRAGMA busy_timeout={self.settings.busy_timeout_ms}")
             saver.setup()
             saver.delete_thread(checkpoint_thread)
 

@@ -714,3 +714,23 @@ test("runs, templates, trash, and restores local research", async ({
   await expect(page).toHaveURL(/\/settings$/);
   await expect(shell).not.toHaveClass(/sidebar-open/);
 });
+
+test("shows a mocked complete-empty Incremental Timeline node", async ({ page }) => {
+  await page.route("**/api/v1/timelines/NVDA**", (route) => route.fulfill({
+    json: { timeline: {
+      instrument: "NVDA", primary_cycle_id: "full-1", timeline_warning: true,
+      nodes: [{ id: "incremental-1", cycle_id: "full-1", instrument: "NVDA",
+        analysis_date: "2026-07-24", research_schema_version: "1",
+        information_cutoff_at: timestamp, method_snapshot: { llm_provider: "fixture" },
+        research_kind: "incremental", full_baseline_run_id: "full-1",
+        is_baseline_compatible: false, is_cycle_head: true, is_primary: true,
+        is_active: true, trashed_at: null, outcome_review_status: "omitted",
+        cycle_warning: true,
+        full_research_required_reasons: [{ code: "required_coverage.news", message: "Required news coverage is missing.", origin: "deterministic" }],
+      }],
+    } },
+  }));
+  await page.goto("/timelines/NVDA");
+  await expect(page.getByText(/Incremental Research Node|增量研究节点/)).toBeVisible();
+  await expect(page.getByText(/Full research recommended|建议进行完整研究/)).toBeVisible();
+});

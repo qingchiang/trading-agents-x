@@ -96,6 +96,33 @@ export interface components {
       trash_retention_days: number;
     };
     ClaimImportance: "primary" | "supporting";
+    CollectionDiagnostic: {
+      code: string;
+    };
+    CollectionManifest: {
+      entries: components["schemas"]["CollectionManifestEntry"][];
+      market: "united_states" | "japan" | "mainland_china";
+      newly_reviewable_baseline_component_ids?: string[];
+      plan_version: string;
+    };
+    CollectionManifestEntry: {
+      chain_position?: number;
+      diagnostic?: components["schemas"]["CollectionDiagnostic"] | null;
+      domain: "fundamentals" | "market" | "news" | "social";
+      evidence_refs?: string[];
+      outcome: components["schemas"]["CollectionOutcome"];
+      planned_from: string;
+      planned_through: string;
+      provider_identity: string;
+      retrieved_at?: string | null;
+      scanned_from?: string | null;
+      scanned_through?: string | null;
+      source: string;
+      source_watermark?: string | null;
+    };
+    CollectionOutcome: "complete_with_records" | "complete_empty" | "partial" | "unavailable" | "failed" | "not_queried" | "not_applicable";
+    CoverageRequirement: "required" | "advisory";
+    CoverageStatus: "complete" | "limited" | "missing" | "not_applicable";
     DebateAgenda: {
       issues: components["schemas"]["DebateIssue"][];
       summary: string;
@@ -208,6 +235,11 @@ export interface components {
       row_id?: string | null;
       table_id?: string | null;
     };
+    FullResearchRequiredReason: {
+      code: string;
+      message: string;
+      origin: "deterministic" | "semantic";
+    };
     HTTPValidationError: {
       detail?: components["schemas"]["ValidationError"][];
     };
@@ -216,6 +248,11 @@ export interface components {
       queue: components["schemas"]["QueueHealth"];
       status: "ok" | "degraded";
       version: string;
+    };
+    InformationAdvancement: {
+      advanced: boolean;
+      newly_reviewable_baseline_component_ids?: string[];
+      reasons?: ("complete_empty_scan" | "admissible_evidence" | "newly_reviewable_baseline_component")[];
     };
     InstrumentAdmissionError: {
       code: components["schemas"]["InstrumentAdmissionErrorCode"];
@@ -326,6 +363,10 @@ export interface components {
       unit: string;
     };
     NumericTemporalBasis: "point_in_time" | "live_snapshot";
+    PerformanceObservation: {
+      reason: string;
+      status: "not_yet_observable" | "unavailable";
+    };
     PrimaryCycleSelectionRequest: {
       full_run_id: string;
     };
@@ -350,6 +391,7 @@ export interface components {
       queued: number;
       running: number;
     };
+    ReassessmentDisposition: "reaffirmed" | "strengthened" | "weakened" | "overturned" | "unresolved";
     RebuttalReview: {
       addressed_issue_ids: string[];
       markdown: string;
@@ -403,6 +445,15 @@ export interface components {
       markdown: string;
       role: "bull" | "bear";
     };
+    ResearchCoverage: {
+      domains: components["schemas"]["ResearchCoverageDomain"][];
+      policy_version: string;
+    };
+    ResearchCoverageDomain: {
+      domain: "fundamentals" | "market" | "news" | "social";
+      requirement: components["schemas"]["CoverageRequirement"];
+      status: components["schemas"]["CoverageStatus"];
+    };
     ResearchDecision: {
       calculation_records?: components["schemas"]["CalculationRecord"][];
       catalysts?: string[];
@@ -423,9 +474,13 @@ export interface components {
     };
     ResearchNodeView: {
       analysis_date: string;
+      collection_manifest?: components["schemas"]["CollectionManifest"] | null;
       cycle_id: string;
+      cycle_warning?: boolean;
       full_baseline_run_id?: string | null;
+      full_research_required_reasons?: components["schemas"]["FullResearchRequiredReason"][];
       id: string;
+      information_advancement?: components["schemas"]["InformationAdvancement"] | null;
       information_cutoff_at: string;
       instrument: string;
       is_active: boolean;
@@ -433,11 +488,23 @@ export interface components {
       is_cycle_head: boolean;
       is_primary: boolean;
       method_snapshot: Record<string, unknown>;
+      outcome_review_status?: "omitted" | "failed" | null;
+      performance?: components["schemas"]["PerformanceObservation"] | null;
+      reassessment?: components["schemas"]["ResearchReassessment"] | null;
+      research_coverage?: components["schemas"]["ResearchCoverage"] | null;
       research_kind: "full" | "incremental";
       research_schema_version: string;
       trashed_at?: string | null;
     };
     ResearchRating: "Buy" | "Overweight" | "Hold" | "Underweight" | "Sell";
+    ResearchReassessment: {
+      entries: components["schemas"]["ResearchReassessmentEntry"][];
+    };
+    ResearchReassessmentEntry: {
+      component_id: string;
+      disposition: components["schemas"]["ReassessmentDisposition"];
+      reason: string;
+    };
     ResearchScenario: {
       core_assumptions: string[];
       evidence_refs?: string[];
@@ -453,6 +520,7 @@ export interface components {
       node_total?: number;
       nodes?: components["schemas"]["ResearchNodeView"][];
       primary_cycle_id?: string | null;
+      timeline_warning?: boolean;
     };
     ResearchTimelinePage: {
       items?: components["schemas"]["ResearchTimelineSummary"][];

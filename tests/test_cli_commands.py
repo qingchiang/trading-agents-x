@@ -313,9 +313,7 @@ def test_run_reports_market_date_resolution_as_a_usage_error(monkeypatch) -> Non
     monkeypatch.setattr(
         cli,
         "market_today",
-        lambda ticker: (_ for _ in ()).throw(
-            ValueError(f"unsupported market symbol: {ticker}")
-        ),
+        lambda ticker: (_ for _ in ()).throw(ValueError(f"unsupported market symbol: {ticker}")),
     )
 
     result = runner.invoke(cli.app, ["run", "INVALID@SYMBOL"])
@@ -364,9 +362,7 @@ def test_serve_uses_the_validated_application_binding(
     assert calls["port"] == 8000
     assert calls["log_level"] == "warning"
     assert calls["use_colors"] is None
-    assert calls["log_config"]["handlers"]["access"]["filters"] == [
-        "successful_static_assets"
-    ]
+    assert calls["log_config"]["handlers"]["access"]["filters"] == ["successful_static_assets"]
 
 
 def test_start_supervises_web_and_worker(
@@ -466,9 +462,7 @@ def test_runs_list_show_and_cancel(
     monkeypatch,
     cli_service: AnalysisService,
 ) -> None:
-    queued = cli_service.enqueue(
-        cli.AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
-    )
+    queued = cli_service.enqueue(cli.AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24"))
     monkeypatch.setattr(cli, "_service", lambda: cli_service)
 
     listed = runner.invoke(cli.app, ["runs", "list", "--json"])
@@ -486,9 +480,7 @@ def test_runs_retry_creates_a_new_attempt(
     monkeypatch,
     cli_service: AnalysisService,
 ) -> None:
-    queued = cli_service.enqueue(
-        cli.AnalysisRequest(ticker="AAPL", analysis_date="2026-07-24")
-    )
+    queued = cli_service.enqueue(cli.AnalysisRequest(ticker="AAPL", analysis_date="2026-07-24"))
     claimed = cli_service.repository.claim_run(queued.id, "test-worker", 300)
     assert claimed.status is RunStatus.RUNNING
     cli_service.repository.fail(queued.id, RuntimeError("provider failed"))
@@ -612,9 +604,7 @@ def test_db_backup_preserves_a_pre_migration_database_and_legacy_reviews(
     with resources.as_file(migration_root) as script_location:
         config = Config()
         config.set_main_option("script_location", str(script_location))
-        config.set_main_option(
-            "sqlalchemy.url", f"sqlite+pysqlite:///{cli_settings.database_path}"
-        )
+        config.set_main_option("sqlalchemy.url", f"sqlite+pysqlite:///{cli_settings.database_path}")
         config.attributes["busy_timeout_ms"] = cli_settings.busy_timeout_ms
         alembic_command.downgrade(config, "0004_instrument_local_name")
     repository = RunRepository(cli_settings)
@@ -665,33 +655,34 @@ def test_db_backup_preserves_a_pre_migration_database_and_legacy_reviews(
 
     assert result.exit_code == 0
     with sqlite3.connect(cli_settings.database_path) as source:
-        assert source.execute(
-            "SELECT version_num FROM alembic_version"
-        ).fetchone() == ("0004_instrument_local_name",)
+        assert source.execute("SELECT version_num FROM alembic_version").fetchone() == (
+            "0004_instrument_local_name",
+        )
         assert source.execute("SELECT count(*) FROM outcomes").fetchone() == (1,)
         assert source.execute("SELECT count(*) FROM reflections").fetchone() == (1,)
     with sqlite3.connect(destination) as backup:
-        assert backup.execute(
-            "SELECT version_num FROM alembic_version"
-        ).fetchone() == ("0004_instrument_local_name",)
+        assert backup.execute("SELECT version_num FROM alembic_version").fetchone() == (
+            "0004_instrument_local_name",
+        )
         assert backup.execute("SELECT count(*) FROM outcomes").fetchone() == (1,)
         assert backup.execute("SELECT count(*) FROM reflections").fetchone() == (1,)
 
-    upgraded_settings = cli_settings.model_copy(
-        update={"database_path": destination}
-    )
+    upgraded_settings = cli_settings.model_copy(update={"database_path": destination})
     upgrade_database(upgraded_settings)
     upgraded_repository = RunRepository(upgraded_settings)
     try:
         assert upgraded_repository.get_run(run.id).request.ticker == "NVDA"
         with sqlite3.connect(destination) as upgraded:
-            assert upgraded.execute(
-                "SELECT version_num FROM alembic_version"
-            ).fetchone() == ("0007_incremental_request_slots",)
-            assert upgraded.execute(
-                "SELECT name FROM sqlite_master "
-                "WHERE type = 'table' AND name IN ('outcomes', 'reflections')"
-            ).fetchall() == []
+            assert upgraded.execute("SELECT version_num FROM alembic_version").fetchone() == (
+                "0008_incremental_node_products",
+            )
+            assert (
+                upgraded.execute(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE type = 'table' AND name IN ('outcomes', 'reflections')"
+                ).fetchall()
+                == []
+            )
     finally:
         upgraded_repository.engine.dispose()
 
@@ -701,9 +692,7 @@ def test_database_backup_is_consistent_and_refuses_overwrite(
     cli_service: AnalysisService,
     tmp_path: Path,
 ) -> None:
-    cli_service.enqueue(
-        cli.AnalysisRequest(ticker="MSFT", analysis_date="2026-07-24")
-    )
+    cli_service.enqueue(cli.AnalysisRequest(ticker="MSFT", analysis_date="2026-07-24"))
     monkeypatch.setattr(cli, "_settings", lambda: cli_service.settings)
     destination = tmp_path / "backup.db"
 

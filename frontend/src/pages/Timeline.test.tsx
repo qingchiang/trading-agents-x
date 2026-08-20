@@ -55,6 +55,24 @@ test("shows the first Full Run-backed node and keeps its operational Run link", 
   ).toHaveAttribute("href", "/runs/run-1");
 });
 
+test("distinguishes a warned Incremental node without disabling its Timeline", async () => {
+  vi.mocked(api.timeline).mockResolvedValue({ timeline: {
+    instrument: "NVDA", primary_cycle_id: "full-1", timeline_warning: true,
+    nodes: [{ id: "incremental-1", cycle_id: "full-1", instrument: "NVDA",
+      analysis_date: "2026-07-24", research_schema_version: "1",
+      information_cutoff_at: "2026-07-24T23:59:59Z", method_snapshot: {},
+      research_kind: "incremental", full_baseline_run_id: "full-1",
+      is_cycle_head: true, is_primary: true, is_active: true, trashed_at: null,
+      outcome_review_status: "omitted", cycle_warning: true,
+      full_research_required_reasons: [{ code: "required_coverage.news", message: "Required news coverage is missing.", origin: "deterministic" }],
+    }],
+  } } as never);
+  render(<Router initialPath="/timelines/NVDA"><Timeline /></Router>);
+  expect(await screen.findByText("Incremental Research Node")).toBeVisible();
+  expect(screen.getByText("Full research recommended")).toBeVisible();
+  expect(screen.getByText("Outcome review omitted")).toBeVisible();
+});
+
 test("paginates Timeline nodes independently from the Timeline list", async () => {
   vi.mocked(api.timeline)
     .mockResolvedValueOnce({

@@ -36,45 +36,27 @@ class RunRecord(Base):
     source_run_id: Mapped[str | None] = mapped_column(
         ForeignKey("runs.id", ondelete="SET NULL"), nullable=True
     )
-    idempotency_key: Mapped[str | None] = mapped_column(
-        String(200), nullable=True, unique=True
-    )
+    idempotency_key: Mapped[str | None] = mapped_column(String(200), nullable=True, unique=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
-    instrument_name: Mapped[str | None] = mapped_column(
-        String(300), nullable=True
-    )
-    instrument_local_name: Mapped[str | None] = mapped_column(
-        String(300), nullable=True
-    )
+    instrument_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    instrument_local_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
     request_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     config_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
-    research_schema_version: Mapped[str | None] = mapped_column(
-        String(20), nullable=True
-    )
-    information_cutoff_at: Mapped[datetime | None] = mapped_column(
-        DateTime, nullable=True
-    )
-    method_snapshot_json: Mapped[dict[str, Any] | None] = mapped_column(
-        JSON, nullable=True
-    )
+    research_schema_version: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    information_cutoff_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    method_snapshot_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     research_kind: Mapped[str | None] = mapped_column(String(20), nullable=True)
     full_baseline_run_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     incremental_cutoff: Mapped[date | None] = mapped_column(Date, nullable=True)
-    incremental_input_fingerprint: Mapped[str | None] = mapped_column(
-        String(64), nullable=True
-    )
+    incremental_input_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
     version: Mapped[str] = mapped_column(String(40), nullable=False)
     current_attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    cancel_requested: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False
-    )
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     lease_owner: Mapped[str | None] = mapped_column(String(120), nullable=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    metrics_json: Mapped[dict[str, Any]] = mapped_column(
-        JSON, nullable=False, default=dict
-    )
+    metrics_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -119,9 +101,7 @@ class RunAttemptRecord(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    metrics_json: Mapped[dict[str, Any]] = mapped_column(
-        JSON, nullable=False, default=dict
-    )
+    metrics_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
 
     run: Mapped[RunRecord] = relationship(back_populates="attempts")
 
@@ -139,9 +119,7 @@ class RunEventRecord(Base):
     attempt: Mapped[int] = mapped_column(Integer, nullable=False)
     event_type: Mapped[str] = mapped_column(String(100), nullable=False)
     node: Mapped[str | None] = mapped_column(String(160), nullable=True)
-    payload_json: Mapped[dict[str, Any]] = mapped_column(
-        JSON, nullable=False, default=dict
-    )
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
     __table_args__ = (
@@ -163,9 +141,7 @@ class RunArtifactRecord(Base):
     round: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     schema_version: Mapped[str] = mapped_column(String(20), nullable=False)
     prompt_version: Mapped[str] = mapped_column(String(80), nullable=False)
-    generation_method: Mapped[str] = mapped_column(
-        String(40), nullable=False
-    )
+    generation_method: Mapped[str] = mapped_column(String(40), nullable=False)
     generation_observations_json: Mapped[list[dict[str, Any]] | None] = mapped_column(
         JSON, nullable=True
     )
@@ -195,9 +171,7 @@ class RunArtifactRecord(Base):
 class RunEvidenceRecord(Base):
     __tablename__ = "run_evidence"
 
-    run_id: Mapped[str] = mapped_column(
-        ForeignKey("runs.id", ondelete="CASCADE"), primary_key=True
-    )
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), primary_key=True)
     sealed_attempt: Mapped[int] = mapped_column(Integer, nullable=False)
     bundle_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     digest: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -235,14 +209,13 @@ class ResearchNodeRecord(Base):
 
     __tablename__ = "research_nodes"
 
-    run_id: Mapped[str] = mapped_column(
-        ForeignKey("runs.id", ondelete="CASCADE"), primary_key=True
-    )
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), primary_key=True)
     research_kind: Mapped[str] = mapped_column(String(20), nullable=False)
     full_baseline_run_id: Mapped[str | None] = mapped_column(
         ForeignKey("runs.id", ondelete="RESTRICT"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    incremental_products_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
 
 class PrimaryResearchCycleRecord(Base):

@@ -708,6 +708,218 @@
         "title": "ClaimImportance",
         "type": "string"
       },
+      "CollectionDiagnostic": {
+        "additionalProperties": false,
+        "description": "A stable, secret-free collection failure class safe for Run events.",
+        "properties": {
+          "code": {
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "CollectionDiagnostic",
+        "type": "object"
+      },
+      "CollectionManifest": {
+        "additionalProperties": false,
+        "description": "The deterministic source-level audit for one Incremental request.",
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/CollectionManifestEntry"
+            },
+            "minItems": 1,
+            "title": "Entries",
+            "type": "array"
+          },
+          "market": {
+            "enum": [
+              "united_states",
+              "japan",
+              "mainland_china"
+            ],
+            "title": "Market",
+            "type": "string"
+          },
+          "newly_reviewable_baseline_component_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Newly Reviewable Baseline Component Ids",
+            "type": "array"
+          },
+          "plan_version": {
+            "pattern": "^[0-9]+$",
+            "title": "Plan Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan_version",
+          "market",
+          "entries"
+        ],
+        "title": "CollectionManifest",
+        "type": "object"
+      },
+      "CollectionManifestEntry": {
+        "additionalProperties": false,
+        "description": "Observed result for one deterministic source/domain scan.",
+        "properties": {
+          "chain_position": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Chain Position",
+            "type": "integer"
+          },
+          "diagnostic": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CollectionDiagnostic"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "domain": {
+            "enum": [
+              "fundamentals",
+              "market",
+              "news",
+              "social"
+            ],
+            "title": "Domain",
+            "type": "string"
+          },
+          "evidence_refs": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/CollectionOutcome"
+          },
+          "planned_from": {
+            "format": "date-time",
+            "title": "Planned From",
+            "type": "string"
+          },
+          "planned_through": {
+            "format": "date-time",
+            "title": "Planned Through",
+            "type": "string"
+          },
+          "provider_identity": {
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Provider Identity",
+            "type": "string"
+          },
+          "retrieved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retrieved At"
+          },
+          "scanned_from": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scanned From"
+          },
+          "scanned_through": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scanned Through"
+          },
+          "source": {
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Source",
+            "type": "string"
+          },
+          "source_watermark": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Watermark"
+          }
+        },
+        "required": [
+          "domain",
+          "source",
+          "provider_identity",
+          "planned_from",
+          "planned_through",
+          "outcome"
+        ],
+        "title": "CollectionManifestEntry",
+        "type": "object"
+      },
+      "CollectionOutcome": {
+        "description": "One terminal observation for a planned Incremental source scan.",
+        "enum": [
+          "complete_with_records",
+          "complete_empty",
+          "partial",
+          "unavailable",
+          "failed",
+          "not_queried",
+          "not_applicable"
+        ],
+        "title": "CollectionOutcome",
+        "type": "string"
+      },
+      "CoverageRequirement": {
+        "enum": [
+          "required",
+          "advisory"
+        ],
+        "title": "CoverageRequirement",
+        "type": "string"
+      },
+      "CoverageStatus": {
+        "enum": [
+          "complete",
+          "limited",
+          "missing",
+          "not_applicable"
+        ],
+        "title": "CoverageStatus",
+        "type": "string"
+      },
       "DebateAgenda": {
         "additionalProperties": false,
         "description": "Prioritized shallow agenda derived from the two readable cases.",
@@ -1508,6 +1720,36 @@
         "title": "EvidenceValueLocator",
         "type": "object"
       },
+      "FullResearchRequiredReason": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "origin": {
+            "enum": [
+              "deterministic",
+              "semantic"
+            ],
+            "title": "Origin",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "origin"
+        ],
+        "title": "FullResearchRequiredReason",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1555,6 +1797,42 @@
           "version"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "InformationAdvancement": {
+        "additionalProperties": false,
+        "description": "Deterministic answer to whether collection can justify an Incremental Node.",
+        "properties": {
+          "advanced": {
+            "title": "Advanced",
+            "type": "boolean"
+          },
+          "newly_reviewable_baseline_component_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Newly Reviewable Baseline Component Ids",
+            "type": "array"
+          },
+          "reasons": {
+            "default": [],
+            "items": {
+              "enum": [
+                "complete_empty_scan",
+                "admissible_evidence",
+                "newly_reviewable_baseline_component"
+              ],
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          }
+        },
+        "required": [
+          "advanced"
+        ],
+        "title": "InformationAdvancement",
         "type": "object"
       },
       "InstrumentAdmissionError": {
@@ -2346,6 +2624,30 @@
         "title": "NumericTemporalBasis",
         "type": "string"
       },
+      "PerformanceObservation": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "not_yet_observable",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "reason"
+        ],
+        "title": "PerformanceObservation",
+        "type": "object"
+      },
       "PrimaryCycleSelectionRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2490,6 +2792,17 @@
         ],
         "title": "QueueHealth",
         "type": "object"
+      },
+      "ReassessmentDisposition": {
+        "enum": [
+          "reaffirmed",
+          "strengthened",
+          "weakened",
+          "overturned",
+          "unresolved"
+        ],
+        "title": "ReassessmentDisposition",
+        "type": "string"
       },
       "RebuttalReview": {
         "additionalProperties": false,
@@ -2846,6 +3159,59 @@
         "title": "ResearchCase",
         "type": "object"
       },
+      "ResearchCoverage": {
+        "additionalProperties": false,
+        "description": "Versioned policy assessment derived from a Collection Manifest.",
+        "properties": {
+          "domains": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchCoverageDomain"
+            },
+            "minItems": 1,
+            "title": "Domains",
+            "type": "array"
+          },
+          "policy_version": {
+            "pattern": "^[0-9]+$",
+            "title": "Policy Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "policy_version",
+          "domains"
+        ],
+        "title": "ResearchCoverage",
+        "type": "object"
+      },
+      "ResearchCoverageDomain": {
+        "additionalProperties": false,
+        "properties": {
+          "domain": {
+            "enum": [
+              "fundamentals",
+              "market",
+              "news",
+              "social"
+            ],
+            "title": "Domain",
+            "type": "string"
+          },
+          "requirement": {
+            "$ref": "#/components/schemas/CoverageRequirement"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CoverageStatus"
+          }
+        },
+        "required": [
+          "domain",
+          "requirement",
+          "status"
+        ],
+        "title": "ResearchCoverageDomain",
+        "type": "object"
+      },
       "ResearchDecision": {
         "additionalProperties": false,
         "description": "Research-only conclusion; deliberately excludes account-level advice.",
@@ -2990,9 +3356,24 @@
             "title": "Analysis Date",
             "type": "string"
           },
+          "collection_manifest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CollectionManifest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "cycle_id": {
             "title": "Cycle Id",
             "type": "string"
+          },
+          "cycle_warning": {
+            "default": false,
+            "title": "Cycle Warning",
+            "type": "boolean"
           },
           "full_baseline_run_id": {
             "anyOf": [
@@ -3005,9 +3386,27 @@
             ],
             "title": "Full Baseline Run Id"
           },
+          "full_research_required_reasons": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/FullResearchRequiredReason"
+            },
+            "title": "Full Research Required Reasons",
+            "type": "array"
+          },
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "information_advancement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InformationAdvancement"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "information_cutoff_at": {
             "format": "date-time",
@@ -3038,6 +3437,51 @@
             "additionalProperties": true,
             "title": "Method Snapshot",
             "type": "object"
+          },
+          "outcome_review_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "omitted",
+                  "failed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome Review Status"
+          },
+          "performance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PerformanceObservation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reassessment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchReassessment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "research_coverage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchCoverage"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "research_kind": {
             "enum": [
@@ -3091,6 +3535,49 @@
         ],
         "title": "ResearchRating",
         "type": "string"
+      },
+      "ResearchReassessment": {
+        "additionalProperties": false,
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchReassessmentEntry"
+            },
+            "minItems": 1,
+            "title": "Entries",
+            "type": "array"
+          }
+        },
+        "required": [
+          "entries"
+        ],
+        "title": "ResearchReassessment",
+        "type": "object"
+      },
+      "ResearchReassessmentEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "component_id": {
+            "pattern": "^(?:executive_summary|thesis|catalysts\\.\\d+|risks\\.\\d+|invalidation_conditions\\.\\d+|scenarios\\.(?:base|bull|bear)\\.(?:outcome|core_assumptions\\.\\d+)|risk_review_adjustments\\.\\d+\\.explanation)$",
+            "title": "Component Id",
+            "type": "string"
+          },
+          "disposition": {
+            "$ref": "#/components/schemas/ReassessmentDisposition"
+          },
+          "reason": {
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "component_id",
+          "disposition",
+          "reason"
+        ],
+        "title": "ResearchReassessmentEntry",
+        "type": "object"
       },
       "ResearchScenario": {
         "additionalProperties": false,
@@ -3189,6 +3676,11 @@
               }
             ],
             "title": "Primary Cycle Id"
+          },
+          "timeline_warning": {
+            "default": false,
+            "title": "Timeline Warning",
+            "type": "boolean"
           }
         },
         "required": [

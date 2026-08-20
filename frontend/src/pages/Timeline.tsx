@@ -126,11 +126,14 @@ export default function Timeline() {
       {detail && (detail.timeline.nodes?.length ?? 0) === 0 && (
         <div className="empty-state">{t("noCommittedFullResearch")}</div>
       )}
+      {detail?.timeline.timeline_warning && (
+        <div className="alert">{t("fullResearchRecommended")}</div>
+      )}
       {detailNodes.map((node) => (
         <article className="panel" key={node.id}>
           <div className="panel-header">
             <div>
-              <p className="eyebrow">{t("fullResearchNode")}</p>
+              <p className="eyebrow">{t(node.research_kind === "full" ? "fullResearchNode" : "incrementalResearchNode")}</p>
               <h2>{node.analysis_date}</h2>
               {node.research_kind === "full" && <span>{t("fullBaseline")}</span>}
             </div>
@@ -159,6 +162,10 @@ export default function Timeline() {
               </dd>
             </div>
           </dl>
+          {node.outcome_review_status === "omitted" && <p>{t("outcomeReviewOmitted")}</p>}
+          {node.full_research_required_reasons?.map((reason) => (
+            <p className="alert" key={reason.code}>{reason.message}</p>
+          ))}
           {!node.is_primary && node.is_active && node.research_kind === "full" && (
             <button
               type="button"

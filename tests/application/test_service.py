@@ -81,17 +81,13 @@ def test_first_full_run_commits_same_identity_node_and_primary_timeline(
         now=lambda: datetime(2026, 7, 25, 1, 30, tzinfo=UTC),
     )
 
-    result = service.run(
-        AnalysisRequest(ticker="7203.T", analysis_date=date(2026, 7, 24))
-    )
+    result = service.run(AnalysisRequest(ticker="7203.T", analysis_date=date(2026, 7, 24)))
     timeline = repository.get_timeline("7203.T")
     run = repository.get_run(result.run_id)
 
     assert result.status is RunStatus.SUCCEEDED
     assert run.research_schema_version == "1"
-    assert run.information_cutoff_at == datetime(
-        2026, 7, 24, 14, 59, 59, 999999, tzinfo=UTC
-    )
+    assert run.information_cutoff_at == datetime(2026, 7, 24, 14, 59, 59, 999999, tzinfo=UTC)
     assert run.method_snapshot["schema_version"] == "1"
     assert run.method_snapshot["research_schema_version"] == "1"
     assert run.method_snapshot["prompt_versions"]
@@ -193,17 +189,10 @@ def test_incremental_request_requires_an_explicit_compatible_full_baseline(
     repository,
 ) -> None:
     service = _service(app_settings, repository)
-    baseline = service.run(
-        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
-    )
+    baseline = service.run(AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20)))
 
     with pytest.raises(ValueError, match="full_baseline_run_id"):
-        AnalysisRequest(
-            ticker="NVDA",
-            analysis_date=date(2026, 7, 24),
-            research_kind="incremental",
-        )
-
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 24), research_kind="incremental")
     with pytest.raises(ValueError, match="must not carry a Full Baseline"):
         AnalysisRequest(
             ticker="NVDA",
@@ -211,7 +200,6 @@ def test_incremental_request_requires_an_explicit_compatible_full_baseline(
             research_kind="full",
             full_baseline_run_id=baseline.run_id,
         )
-
     with pytest.raises(InvalidIncrementalBaselineError, match="same Instrument"):
         service.enqueue(
             AnalysisRequest(
@@ -221,6 +209,138 @@ def test_incremental_request_requires_an_explicit_compatible_full_baseline(
                 full_baseline_run_id=baseline.run_id,
             )
         )
+
+
+@pytest.mark.parametrize("ticker", ["NVDA", "7203.T", "600000.SS"])
+def test_complete_empty_incremental_commits_current_decision_and_timeline_node(
+    app_settings,
+    repository,
+    ticker,
+) -> None:
+    baseline = _service(app_settings, repository).run(
+        AnalysisRequest(ticker=ticker, analysis_date=date(2026, 7, 20))
+    )
+
+    def collect(plan: IncrementalCollectionPlan) -> CollectionManifest:
+        return CollectionManifest(
+            plan_version=plan.version,
+            market=plan.market,
+            entries=tuple(
+                CollectionManifestEntry(
+                    domain=source.domain,
+                    source=source.source,
+                    provider_identity=source.provider_identity,
+                    chain_position=source.chain_position,
+                    retrieved_at=plan.window_end if source.configured else None,
+                    planned_from=plan.window_start,
+                    planned_through=plan.window_end,
+                    scanned_from=plan.window_start if source.configured else None,
+                    scanned_through=plan.window_end if source.configured else None,
+                    source_watermark="fixture-watermark" if source.configured else None,
+                    outcome=(
+                        CollectionOutcome.COMPLETE_EMPTY
+                        if source.configured
+                        else CollectionOutcome.NOT_APPLICABLE
+                    ),
+                )
+                for source in plan.sources
+            ),
+        )
+
+    result = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_Graph,
+        identity_resolver=lambda symbol, _date: {"company_name": symbol},
+        eligibility_resolver=_equity_resolver,
+        local_name_resolver=lambda _ticker, _date, _config: None,
+        incremental_collector=collect,
+    ).run(
+        AnalysisRequest(
+            ticker=ticker,
+            analysis_date=date(2026, 7, 24),
+            research_kind="incremental",
+            full_baseline_run_id=baseline.run_id,
+        )
+    )
+
+    timeline = repository.get_timeline(ticker)
+    node = next(item for item in timeline.nodes if item.id == result.run_id)
+    assert result.status is RunStatus.SUCCEEDED
+    assert node.research_kind == "incremental"
+    assert node.full_baseline_run_id == baseline.run_id
+    assert node.collection_manifest is not None
+    assert node.collection_manifest.entries[0].source_watermark == "fixture-watermark"
+    assert node.reassessment is not None
+    assert node.outcome_review_status == "omitted"
+    assert node.performance.status == "not_yet_observable"
+    assert timeline.primary_cycle_id == baseline.run_id
+    assert node.is_primary and node.is_cycle_head
+
+
+def test_incremental_atomic_commit_failure_leaves_no_node_or_evidence(
+    app_settings,
+    repository,
+) -> None:
+    baseline = _service(app_settings, repository).run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+    with repository.engine.begin() as connection:
+        connection.exec_driver_sql(
+            """CREATE TRIGGER fail_incremental_node BEFORE INSERT ON research_nodes
+            WHEN NEW.research_kind = 'incremental'
+            BEGIN SELECT RAISE(ABORT, 'injected incremental node failure'); END"""
+        )
+
+    def collect(plan: IncrementalCollectionPlan) -> CollectionManifest:
+        return CollectionManifest(
+            plan_version=plan.version,
+            market=plan.market,
+            entries=tuple(
+                CollectionManifestEntry(
+                    domain=source.domain,
+                    source=source.source,
+                    provider_identity=source.provider_identity,
+                    chain_position=source.chain_position,
+                    retrieved_at=plan.window_end if source.configured else None,
+                    planned_from=plan.window_start,
+                    planned_through=plan.window_end,
+                    scanned_from=plan.window_start if source.configured else None,
+                    scanned_through=plan.window_end if source.configured else None,
+                    source_watermark="fixture-watermark" if source.configured else None,
+                    outcome=CollectionOutcome.COMPLETE_EMPTY
+                    if source.configured
+                    else CollectionOutcome.NOT_APPLICABLE,
+                )
+                for source in plan.sources
+            ),
+        )
+
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_Graph,
+        identity_resolver=lambda symbol, _date: {"company_name": symbol},
+        eligibility_resolver=_equity_resolver,
+        local_name_resolver=lambda _ticker, _date, _config: None,
+        incremental_collector=collect,
+    )
+    with pytest.raises(Exception, match="injected incremental node failure"):
+        service.run(
+            AnalysisRequest(
+                ticker="NVDA",
+                analysis_date=date(2026, 7, 24),
+                research_kind="incremental",
+                full_baseline_run_id=baseline.run_id,
+            )
+        )
+
+    failed = repository.list_runs(status=RunStatus.FAILED).items
+    assert len(failed) == 1
+    assert repository.evidence_status(failed[0].id).status == "pending"
+    assert [node.id for node in repository.get_timeline("NVDA").nodes] == [baseline.run_id]
 
 
 @pytest.mark.parametrize("ticker", ["NVDA", "7203.T", "600000.SS"])
@@ -237,9 +357,7 @@ def test_non_advancing_incremental_run_fails_before_any_semantic_work_or_node_co
         return object(), object()
 
     baseline_service = _service(app_settings, repository)
-    baseline = baseline_service.run(
-        AnalysisRequest(ticker=ticker, analysis_date=date(2026, 7, 20))
-    )
+    baseline = baseline_service.run(AnalysisRequest(ticker=ticker, analysis_date=date(2026, 7, 20)))
     service = AnalysisService(
         app_settings,
         repository=repository,
@@ -268,20 +386,14 @@ def test_non_advancing_incremental_run_fails_before_any_semantic_work_or_node_co
     assert len(failed) == 1
     assert failed[0].error_code == "NoInformationAdvancementError"
     assert llm_calls == 0
-    assert [node.id for node in repository.get_timeline(ticker).nodes] == [
-        baseline.run_id
-    ]
+    assert [node.id for node in repository.get_timeline(ticker).nodes] == [baseline.run_id]
     events = repository.list_events(failed[0].id)
     collection_event = next(
-        event
-        for event in events
-        if event.event_type == "incremental.collection_completed"
+        event for event in events if event.event_type == "incremental.collection_completed"
     )
     manifest_entries = collection_event.payload["collection_manifest"]["entries"]
     assert all(entry["source"].endswith(entry["provider_identity"]) for entry in manifest_entries)
-    assert {
-        entry["provider_identity"] for entry in manifest_entries
-    }.isdisjoint(
+    assert {entry["provider_identity"] for entry in manifest_entries}.isdisjoint(
         {"sec_companyfacts", "jquants_statements", "cninfo_disclosures"}
     )
     assert all(entry["retrieved_at"] is None for entry in manifest_entries)
@@ -338,9 +450,7 @@ def test_default_incremental_plan_uses_frozen_configured_routes_on_retry(
     expected_providers,
 ) -> None:
     service = _service(app_settings, repository)
-    baseline = service.run(
-        AnalysisRequest(ticker=ticker, analysis_date=date(2026, 7, 20))
-    )
+    baseline = service.run(AnalysisRequest(ticker=ticker, analysis_date=date(2026, 7, 20)))
     request = AnalysisRequest(
         ticker=ticker,
         analysis_date=date(2026, 7, 24),
@@ -377,35 +487,23 @@ def test_default_incremental_plan_uses_frozen_configured_routes_on_retry(
         if event.event_type == "incremental.collection_completed"
     ]
     assert len(collection_events) == 2
-    manifests = [
-        event.payload["collection_manifest"]["entries"]
-        for event in collection_events
-    ]
+    manifests = [event.payload["collection_manifest"]["entries"] for event in collection_events]
     assert manifests[0] == manifests[1]
     configured_entries = [
-        entry
-        for entry in manifests[0]
-        if entry["outcome"] == CollectionOutcome.NOT_QUERIED.value
+        entry for entry in manifests[0] if entry["outcome"] == CollectionOutcome.NOT_QUERIED.value
     ]
     assert {
         domain: tuple(
-            entry["provider_identity"]
-            for entry in configured_entries
-            if entry["domain"] == domain
+            entry["provider_identity"] for entry in configured_entries if entry["domain"] == domain
         )
         for domain in expected_providers
     } == expected_providers
     assert {
         domain: tuple(
-            entry["chain_position"]
-            for entry in configured_entries
-            if entry["domain"] == domain
+            entry["chain_position"] for entry in configured_entries if entry["domain"] == domain
         )
         for domain in expected_providers
-    } == {
-        domain: tuple(range(len(providers)))
-        for domain, providers in expected_providers.items()
-    }
+    } == {domain: tuple(range(len(providers))) for domain, providers in expected_providers.items()}
     assert all(
         entry["source"] == f"{entry['domain']}.{entry['provider_identity']}"
         for entry in configured_entries
@@ -485,6 +583,9 @@ def test_incremental_collection_terminal_outcomes_are_structured_and_stop_before
                     )
                     if observed_scan
                     else None,
+                    source_watermark=(
+                        "fixture-watermark" if outcome is CollectionOutcome.COMPLETE_EMPTY else None
+                    ),
                     outcome=outcome,
                     evidence_refs=(
                         ("ev_0123456789ab",)
@@ -495,8 +596,7 @@ def test_incremental_collection_terminal_outcomes_are_structured_and_stop_before
                         CollectionDiagnostic(
                             code="fixture_source_unavailable",
                         )
-                        if outcome
-                        in {CollectionOutcome.UNAVAILABLE, CollectionOutcome.FAILED}
+                        if outcome in {CollectionOutcome.UNAVAILABLE, CollectionOutcome.FAILED}
                         else None
                     ),
                 )
@@ -521,10 +621,14 @@ def test_incremental_collection_terminal_outcomes_are_structured_and_stop_before
         full_baseline_run_id=baseline.run_id,
     )
 
+    if outcome is CollectionOutcome.COMPLETE_EMPTY:
+        result = service.run(request)
+        assert result.status is RunStatus.SUCCEEDED
+        assert any(node.id == result.run_id for node in repository.get_timeline(ticker).nodes)
+        return
     expected_error = (
         IncrementalCollectionCommitUnavailableError
-        if outcome
-        in {CollectionOutcome.COMPLETE_EMPTY, CollectionOutcome.COMPLETE_WITH_RECORDS}
+        if outcome is CollectionOutcome.COMPLETE_WITH_RECORDS
         else NoInformationAdvancementError
     )
     with pytest.raises(expected_error):
@@ -533,9 +637,7 @@ def test_incremental_collection_terminal_outcomes_are_structured_and_stop_before
     failed = repository.list_runs(status=RunStatus.FAILED).items
     assert len(failed) == 1
     assert semantic_calls == 0
-    assert [node.id for node in repository.get_timeline(ticker).nodes] == [
-        baseline.run_id
-    ]
+    assert [node.id for node in repository.get_timeline(ticker).nodes] == [baseline.run_id]
     collection_event = next(
         event
         for event in repository.list_events(failed[0].id)
@@ -546,12 +648,14 @@ def test_incremental_collection_terminal_outcomes_are_structured_and_stop_before
         "japan",
         "mainland_china",
     }
-    assert collection_event.payload["research_coverage"]["domains"][0][
-        "status"
-    ] in {"complete", "limited", "missing", "not_applicable"}
+    assert collection_event.payload["research_coverage"]["domains"][0]["status"] in {
+        "complete",
+        "limited",
+        "missing",
+        "not_applicable",
+    }
     assert collection_event.payload["information_advancement"]["advanced"] is (
-        outcome
-        in {CollectionOutcome.COMPLETE_EMPTY, CollectionOutcome.COMPLETE_WITH_RECORDS}
+        outcome in {CollectionOutcome.COMPLETE_EMPTY, CollectionOutcome.COMPLETE_WITH_RECORDS}
     )
     assert collection_event.payload["diagnostics"] == (
         [{"code": "fixture_source_unavailable"}]
@@ -617,6 +721,7 @@ def test_incremental_collection_assessment_distinguishes_each_terminal_outcome()
                     planned_through=plan.window_end,
                     scanned_from=plan.window_start,
                     scanned_through=plan.window_end,
+                    source_watermark="fixture-watermark",
                     outcome=CollectionOutcome.COMPLETE_EMPTY,
                 ),
                 CollectionManifestEntry(
@@ -842,9 +947,7 @@ def test_incremental_collection_requires_one_exact_observation_per_planned_sourc
     elif observation == "duplicate":
         entries[1] = entries[0]
     else:
-        entries[1] = entries[1].model_copy(
-            update={"provider_identity": "yfinance"}
-        )
+        entries[1] = entries[1].model_copy(update={"provider_identity": "yfinance"})
 
     manifest = CollectionManifest(
         plan_version=plan.version,
@@ -929,6 +1032,7 @@ def test_incremental_collection_rejects_a_manifest_interval_that_differs_from_fr
         planned_through=plan.window_end,
         scanned_from=datetime(2026, 7, 21, tzinfo=UTC),
         scanned_through=plan.window_end,
+        source_watermark="fixture-watermark",
         outcome=CollectionOutcome.COMPLETE_EMPTY,
     )
 
@@ -1058,9 +1162,7 @@ def test_newly_reviewable_baseline_component_stops_fail_closed_after_advancement
     failed = repository.list_runs(status=RunStatus.FAILED).items
     events = repository.list_events(failed[0].id)
     collection_event = next(
-        event
-        for event in events
-        if event.event_type == "incremental.collection_completed"
+        event for event in events if event.event_type == "incremental.collection_completed"
     )
     assert collection_event.payload["information_advancement"] == {
         "advanced": True,
@@ -1068,9 +1170,7 @@ def test_newly_reviewable_baseline_component_stops_fail_closed_after_advancement
         "newly_reviewable_baseline_component_ids": ["decision.thesis"],
     }
     assert not any(event.event_type == "incremental.no_advancement" for event in events)
-    assert [node.id for node in repository.get_timeline("NVDA").nodes] == [
-        baseline.run_id
-    ]
+    assert [node.id for node in repository.get_timeline("NVDA").nodes] == [baseline.run_id]
 
 
 def test_collection_manifest_requires_retrieval_time_for_a_queried_source() -> None:
@@ -1151,6 +1251,7 @@ def test_collection_manifest_forbids_evidence_for_non_evidence_terminal_outcomes
             retrieved_at=datetime(2026, 7, 24, tzinfo=UTC),
             scanned_from=datetime(2026, 7, 20, tzinfo=UTC),
             scanned_through=datetime(2026, 7, 24, tzinfo=UTC),
+            source_watermark="fixture-watermark",
         )
     elif outcome not in {
         CollectionOutcome.NOT_QUERIED,
@@ -1213,6 +1314,7 @@ def test_incremental_advancement_accepts_only_complete_or_evidence_bearing_outco
             retrieved_at=plan.window_end,
             scanned_from=plan.window_start,
             scanned_through=plan.window_end,
+            source_watermark="fixture-watermark",
         )
     elif outcome not in {
         CollectionOutcome.NOT_QUERIED,
@@ -1247,9 +1349,7 @@ def test_incremental_slot_replays_identical_active_request_and_rejects_conflict(
     repository,
 ) -> None:
     service = _service(app_settings, repository)
-    baseline = service.run(
-        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
-    )
+    baseline = service.run(AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20)))
     request = AnalysisRequest(
         ticker="NVDA",
         analysis_date=date(2026, 7, 24),
@@ -1261,9 +1361,7 @@ def test_incremental_slot_replays_identical_active_request_and_rejects_conflict(
     assert service.enqueue(request).id == first.id
 
     with pytest.raises(IncrementalRequestConflictError):
-        service.enqueue(
-            request.model_copy(update={"analysts": ("market",)})
-        )
+        service.enqueue(request.model_copy(update={"analysts": ("market",)}))
 
 
 def test_two_connections_return_one_incremental_slot_for_identical_requests(
@@ -1271,9 +1369,7 @@ def test_two_connections_return_one_incremental_slot_for_identical_requests(
     repository,
 ) -> None:
     service = _service(app_settings, repository)
-    baseline = service.run(
-        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
-    )
+    baseline = service.run(AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20)))
     request = AnalysisRequest(
         ticker="NVDA",
         analysis_date=date(2026, 7, 24),
@@ -1303,9 +1399,7 @@ def test_incremental_retry_keeps_inactive_history_when_a_conflicting_slot_is_act
     trashed: bool,
 ) -> None:
     service = _service(app_settings, repository)
-    baseline = service.run(
-        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
-    )
+    baseline = service.run(AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20)))
     failed_request = AnalysisRequest(
         ticker="NVDA",
         analysis_date=date(2026, 7, 24),
@@ -1321,14 +1415,10 @@ def test_incremental_retry_keeps_inactive_history_when_a_conflicting_slot_is_act
         service.cancel(inactive.id)
         if terminal_state == "trashed":
             repository.trash_runs((inactive.id,))
-    active = service.enqueue(
-        failed_request.model_copy(update={"analysts": ("market",)})
-    )
+    active = service.enqueue(failed_request.model_copy(update={"analysts": ("market",)}))
 
     expected_error = (
-        IncrementalRequestConflictError
-        if terminal_state == "failed"
-        else InvalidRunTransitionError
+        IncrementalRequestConflictError if terminal_state == "failed" else InvalidRunTransitionError
     )
     with pytest.raises(expected_error):
         service.retry(inactive.id)
@@ -1345,9 +1435,7 @@ def test_incremental_retry_replays_an_identical_active_slot_only_from_failed_his
     repository,
 ) -> None:
     service = _service(app_settings, repository)
-    baseline = service.run(
-        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
-    )
+    baseline = service.run(AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20)))
     request = AnalysisRequest(
         ticker="NVDA",
         analysis_date=date(2026, 7, 24),
@@ -1367,8 +1455,7 @@ def test_incremental_retry_replays_an_identical_active_slot_only_from_failed_his
     assert unchanged.attempt == 1
     assert unchanged.trashed_at is None
     assert not any(
-        event.event_type == "run.retry_queued"
-        for event in repository.list_events(inactive.id)
+        event.event_type == "run.retry_queued" for event in repository.list_events(inactive.id)
     )
 
 
@@ -1379,9 +1466,7 @@ def test_incremental_retry_rejects_an_active_target_before_slot_replay(
     status: RunStatus,
 ) -> None:
     service = _service(app_settings, repository)
-    baseline = service.run(
-        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
-    )
+    baseline = service.run(AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20)))
     target = service.enqueue(
         AnalysisRequest(
             ticker="NVDA",
@@ -1409,9 +1494,7 @@ def test_incremental_retry_maps_a_sqlite_slot_integrity_error_to_typed_conflict(
     monkeypatch,
 ) -> None:
     service = _service(app_settings, repository)
-    baseline = service.run(
-        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
-    )
+    baseline = service.run(AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20)))
     request = AnalysisRequest(
         ticker="NVDA",
         analysis_date=date(2026, 7, 24),
@@ -1448,9 +1531,7 @@ def test_two_sqlite_connections_make_one_incremental_retry_slot_winner(
     repository,
 ) -> None:
     service = _service(app_settings, repository)
-    baseline = service.run(
-        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
-    )
+    baseline = service.run(AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20)))
     request = AnalysisRequest(
         ticker="NVDA",
         analysis_date=date(2026, 7, 24),
@@ -1483,9 +1564,7 @@ def test_two_sqlite_connections_make_one_incremental_retry_slot_winner(
 
     successful = [outcome for outcome in outcomes if not isinstance(outcome, Exception)]
     conflicts = [
-        outcome
-        for outcome in outcomes
-        if isinstance(outcome, IncrementalRequestConflictError)
+        outcome for outcome in outcomes if isinstance(outcome, IncrementalRequestConflictError)
     ]
     assert len(successful) == 1
     assert len(conflicts) == 1
@@ -1521,9 +1600,7 @@ def test_method_snapshot_records_resolved_llm_settings_in_its_fingerprint(
             },
         }
     )
-    base_settings = app_settings.model_copy(
-        update={"default_run_settings": base_run_settings}
-    )
+    base_settings = app_settings.model_copy(update={"default_run_settings": base_run_settings})
     request = AnalysisRequest(ticker="7203.T", analysis_date=date(2026, 7, 24))
 
     base_run = AnalysisService(
@@ -1538,9 +1615,7 @@ def test_method_snapshot_records_resolved_llm_settings_in_its_fingerprint(
     assert base_snapshot["llm_max_retries"] == 3
     assert "method-snapshot-test-secret" not in json.dumps(base_snapshot)
 
-    changed_run_settings = base_run_settings.model_copy(
-        update={field: changed_value}
-    )
+    changed_run_settings = base_run_settings.model_copy(update={field: changed_value})
     changed_settings = app_settings.model_copy(
         update={"default_run_settings": changed_run_settings}
     )
@@ -1553,8 +1628,7 @@ def test_method_snapshot_records_resolved_llm_settings_in_its_fingerprint(
 
     assert changed_snapshot[field] == changed_value
     assert (
-        changed_snapshot["configuration_fingerprint"]
-        != base_snapshot["configuration_fingerprint"]
+        changed_snapshot["configuration_fingerprint"] != base_snapshot["configuration_fingerprint"]
     )
 
 
@@ -2083,9 +2157,7 @@ def test_rejected_creation_has_no_persistent_side_effects(
         }
         counts = {
             table: (
-                connection.exec_driver_sql(
-                    f"SELECT COUNT(*) FROM {table}"
-                ).scalar_one()
+                connection.exec_driver_sql(f"SELECT COUNT(*) FROM {table}").scalar_one()
                 if table in available_tables
                 else 0
             )
@@ -2156,9 +2228,7 @@ def test_service_persists_cutoff_safe_local_name_once(
         repository=repository,
         llm_factory=lambda *_args, **_kwargs: (object(), object()),
         graph_factory=_Graph,
-        identity_resolver=lambda _ticker, _date: {
-            "company_name": "Toyota Motor Corporation"
-        },
+        identity_resolver=lambda _ticker, _date: {"company_name": "Toyota Motor Corporation"},
         eligibility_resolver=_equity_resolver,
         local_name_resolver=local_name,
     )
@@ -2226,9 +2296,7 @@ def test_service_commits_artifact_and_event_before_callback(
         if event.event_type != "artifact.created":
             return
         artifacts = repository.list_artifacts(event.run_id)
-        assert [artifact.id for artifact in artifacts] == [
-            event.payload["artifact_id"]
-        ]
+        assert [artifact.id for artifact in artifacts] == [event.payload["artifact_id"]]
         persisted = repository.list_events(
             event.run_id,
             after_sequence=event.sequence - 1,
@@ -2320,9 +2388,7 @@ def test_concurrent_runs_do_not_cross_provider_configuration(
     claimed = []
     for index, request in enumerate(requests):
         queued = service.enqueue(request)
-        claimed.append(
-            repository.claim_run(queued.id, f"worker-{index}", 30)
-        )
+        claimed.append(repository.claim_run(queued.id, f"worker-{index}", 30))
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = list(
@@ -2432,10 +2498,7 @@ def test_failure_persists_observed_metrics_and_emits_the_aggregate(
     assert failed.metrics.llm_calls == 1
     assert failed.metrics.input_tokens == 250
     assert failed.metrics.output_tokens == 25
-    assert (
-        failed.metrics.node_metrics["analyst.market.serialize.core"].llm_calls
-        == 1
-    )
+    assert failed.metrics.node_metrics["analyst.market.serialize.core"].llm_calls == 1
     assert event.event_type == "run.failed"
     assert event.payload["metrics"]["input_tokens"] == 250
 
@@ -2517,9 +2580,7 @@ def test_queued_cancel_is_terminal_and_emits_event(
     repository,
 ) -> None:
     service = _service(app_settings, repository)
-    queued = service.enqueue(
-        AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24")
-    )
+    queued = service.enqueue(AnalysisRequest(ticker="NVDA", analysis_date="2026-07-24"))
 
     cancelled = service.cancel(queued.id)
 
@@ -2554,9 +2615,7 @@ def test_retry_resumes_real_langgraph_checkpoint_and_success_cleans_it(
 
     with SqliteSaver.from_conn_string(str(app_settings.database_path)) as saver:
         saver.setup()
-        checkpoint_config = {
-            "configurable": {"thread_id": checkpoint_thread}
-        }
+        checkpoint_config = {"configurable": {"thread_id": checkpoint_thread}}
         assert saver.get_tuple(checkpoint_config) is not None
 
     retried = service.retry(queued.id)
@@ -2571,9 +2630,7 @@ def test_retry_resumes_real_langgraph_checkpoint_and_success_cleans_it(
     artifacts = repository.list_artifacts(queued.id)
     assert len(artifacts) == 1
     assert artifacts[0].attempt == 1
-    assert "run.resumed" in {
-        event.event_type for event in repository.list_events(queued.id)
-    }
+    assert "run.resumed" in {event.event_type for event in repository.list_events(queued.id)}
     with SqliteSaver.from_conn_string(str(app_settings.database_path)) as saver:
         saver.setup()
         assert saver.get_tuple(checkpoint_config) is None
@@ -2606,9 +2663,7 @@ def test_cooperative_cancel_deletes_real_pending_checkpoint(
     assert result.status is RunStatus.CANCELLED
     with SqliteSaver.from_conn_string(str(app_settings.database_path)) as saver:
         saver.setup()
-        assert saver.get_tuple(
-            {"configurable": {"thread_id": checkpoint_thread}}
-        ) is None
+        assert saver.get_tuple({"configurable": {"thread_id": checkpoint_thread}}) is None
 
 
 @pytest.mark.parametrize("format", ("markdown", "json", "package"))
@@ -2662,9 +2717,7 @@ def test_service_export_reads_the_durable_result(
             assert "Fixture thesis" in report
             run_payload = json.loads(archive.read("run.json"))
             assert run_payload["attempts"][0]["status"] == "succeeded"
-            assert run_payload["result"]["recoveries"][0]["node"] == (
-                "debate.agenda.serialize"
-            )
+            assert run_payload["result"]["recoveries"][0]["node"] == ("debate.agenda.serialize")
             assert "## Structured Recoveries" in report
         return
     assert isinstance(body, str)
@@ -2677,9 +2730,7 @@ def test_service_export_reads_the_durable_result(
         assert payload["attempts"][0]["status"] == "succeeded"
         assert payload["attempts"][0]["metrics"] == payload["run"]["metrics"]
         assert payload["result"]["evidence"] == payload["evidence"]
-        assert payload["result"]["recoveries"][0]["initial_reason_code"] == (
-            "non_json_response"
-        )
+        assert payload["result"]["recoveries"][0]["initial_reason_code"] == ("non_json_response")
         assert payload["evidence"]["items"][0]["source"] == "fixture"
         assert payload["artifacts"][0]["stage"] == "analyst"
         content = payload["artifacts"][0]["content"]
