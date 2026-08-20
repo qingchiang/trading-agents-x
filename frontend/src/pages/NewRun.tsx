@@ -55,25 +55,58 @@ export default function NewRun() {
     { id: string; analysis_date: string }[]
   >([]);
   const [fullBaselineRunId, setFullBaselineRunId] = useState("");
+  const [primaryCycleWarned, setPrimaryCycleWarned] = useState(false);
   const [templateWarning, setTemplateWarning] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const recentInstruments = useRecentInstruments();
   const submission = useRef<{ fingerprint: string; key: string } | null>(null);
+  const researchKindSelectedByUser = useRef(false);
+  const baselineSelectedByUser = useRef(false);
 
   useEffect(() => {
     let active = true;
     const instrument = ticker.trim().toUpperCase();
+    researchKindSelectedByUser.current = false;
+    baselineSelectedByUser.current = false;
     setFullBaselines([]);
     setFullBaselineRunId("");
+    setPrimaryCycleWarned(false);
+    setResearchKind("full");
     if (!instrument) return () => {
       active = false;
     };
+    const publishBaselines = (
+      eligible: Map<string, { id: string; analysis_date: string }>,
+      timelineWarning: boolean,
+    ) => {
+      if (!active) return;
+      const baselines = [...eligible.values()];
+      setFullBaselines(baselines);
+      setPrimaryCycleWarned(timelineWarning);
+      setFullBaselineRunId((current) => {
+        if (baselineSelectedByUser.current) return current;
+        return baselines.some((baseline) => baseline.id === current)
+          ? current
+          : (baselines[0]?.id ?? "");
+      });
+      if (!researchKindSelectedByUser.current) {
+        setResearchKind(
+          baselines.length > 0 && !timelineWarning ? "incremental" : "full",
+        );
+      }
+    };
     const loadBaselines = async () => {
       const eligible = new Map<string, { id: string; analysis_date: string }>();
+      let timelineWarning = false;
       let offset = 0;
       while (active) {
         const { timeline } = await api.timeline(instrument, baselinePageSize, offset);
+        timelineWarning ||=
+          timeline.timeline_warning === true ||
+          timeline.nodes?.some(
+            (node) => node.is_primary && node.cycle_warning === true,
+          ) === true;
         for (const node of timeline.nodes ?? []) {
           if (
             node.research_kind === "full" &&
@@ -84,6 +117,7 @@ export default function NewRun() {
             eligible.set(node.id, { id: node.id, analysis_date: node.analysis_date });
           }
         }
+        publishBaselines(eligible, timelineWarning);
         const pageSize = timeline.nodes?.length ?? 0;
         const nextOffset = offset + pageSize;
         if (pageSize === 0 || nextOffset >= (timeline.node_total ?? 0) || nextOffset <= offset) {
@@ -91,14 +125,8 @@ export default function NewRun() {
         }
         offset = nextOffset;
       }
-      return [...eligible.values()];
     };
     void loadBaselines()
-      .then((eligible) => {
-        if (!active) return;
-        setFullBaselines(eligible);
-        setFullBaselineRunId(eligible[0]?.id ?? "");
-      })
       .catch(() => {
         if (active) {
           setFullBaselines([]);
@@ -472,7 +500,10 @@ export default function NewRun() {
                   type="radio"
                   name="research-kind"
                   checked={researchKind === "full"}
-                  onChange={() => setResearchKind("full")}
+                  onChange={() => {
+                    researchKindSelectedByUser.current = true;
+                    setResearchKind("full");
+                  }}
                 />
                 <span>
                   <strong>{t("fullResearch")}</strong>
@@ -485,7 +516,10 @@ export default function NewRun() {
                   name="research-kind"
                   checked={researchKind === "incremental"}
                   disabled={!fullBaselines.length}
-                  onChange={() => setResearchKind("incremental")}
+                  onChange={() => {
+                    researchKindSelectedByUser.current = true;
+                    setResearchKind("incremental");
+                  }}
                 />
                 <span>
                   <strong>{t("incrementalResearch")}</strong>
@@ -498,7 +532,10 @@ export default function NewRun() {
                 {t("fullBaseline")}
                 <select
                   value={fullBaselineRunId}
-                  onChange={(event) => setFullBaselineRunId(event.target.value)}
+                  onChange={(event) => {
+                    baselineSelectedByUser.current = true;
+                    setFullBaselineRunId(event.target.value);
+                  }}
                   required
                 >
                   {fullBaselines.map((baseline) => (
@@ -509,8 +546,14 @@ export default function NewRun() {
                 </select>
               </label>
             )}
-            {fullBaselines.length > 0 && researchKind === "full" && (
-              <p className="model-catalog-note">{t("incrementalAvailable")}</p>
+            {fullBaselines.length > 0 && (
+              <p className="model-catalog-note">
+                {t(
+                  primaryCycleWarned
+                    ? "fullResearchRecommendedForWarning"
+                    : "incrementalAvailable",
+                )}
+              </p>
             )}
           </div>
         </article>

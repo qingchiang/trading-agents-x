@@ -173,6 +173,8 @@ const en = {
     fullBaseline: "Full Baseline",
     incrementalAvailable:
       "An active Full Baseline is available; Incremental research is recommended, while Full remains available.",
+    fullResearchRecommendedForWarning:
+      "A Primary Cycle warning recommends Full research; Incremental research remains available.",
     evidenceSnapshotHint:
       "One immutable evidence snapshot, shared by every selected agent.",
     instrumentCutoff: "Instrument & cutoff",
@@ -718,6 +720,8 @@ const zhCN = {
     incrementalResearch: "增量研究",
     incrementalResearchHint: "基于一个选定的活动完整基线重新评估。",
     incrementalAvailable: "已有可用的活动完整基线；建议使用增量研究，仍可选择完整研究。",
+    fullResearchRecommendedForWarning:
+      "主研究周期存在警告，建议进行完整研究；仍可选择增量研究。",
     evidenceSnapshotHint: "所有选定 Agent 共享同一份不可变证据快照。",
     instrumentCutoff: "标的与截止日期",
     tickerHint: "支持 Yahoo 格式代码及项目内置别名。",
@@ -1253,6 +1257,8 @@ const ja = {
     fullBaseline: "フルベースライン",
     incrementalAvailable:
       "有効なフルベースラインがあります。増分リサーチを推奨しますが、フルリサーチも選択できます。",
+    fullResearchRecommendedForWarning:
+      "プライマリサイクルに警告があるためフルリサーチを推奨します。増分リサーチも選択できます。",
     evidenceSnapshotHint:
       "選択した全エージェントが同じ不変のエビデンスを共有します。",
     instrumentCutoff: "銘柄と基準日",
