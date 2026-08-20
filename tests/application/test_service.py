@@ -451,9 +451,10 @@ def test_incremental_collection_terminal_outcomes_are_structured_and_stop_before
         return object(), object()
 
     def collect(plan: IncrementalCollectionPlan) -> CollectionManifest:
-        complete_scan = outcome in {
+        observed_scan = outcome in {
             CollectionOutcome.COMPLETE_WITH_RECORDS,
             CollectionOutcome.COMPLETE_EMPTY,
+            CollectionOutcome.PARTIAL,
         }
         assert any(planned.source == source for planned in plan.sources)
         return CollectionManifest(
@@ -476,8 +477,14 @@ def test_incremental_collection_terminal_outcomes_are_structured_and_stop_before
                     ),
                     planned_from=plan.window_start,
                     planned_through=plan.window_end,
-                    scanned_from=plan.window_start if complete_scan else None,
-                    scanned_through=plan.window_end if complete_scan else None,
+                    scanned_from=plan.window_start if observed_scan else None,
+                    scanned_through=(
+                        plan.window_end
+                        if outcome is not CollectionOutcome.PARTIAL
+                        else datetime(2026, 7, 22, tzinfo=UTC)
+                    )
+                    if observed_scan
+                    else None,
                     outcome=outcome,
                     evidence_refs=(
                         ("ev_0123456789ab",)
@@ -639,6 +646,8 @@ def test_incremental_collection_assessment_distinguishes_each_terminal_outcome()
                     retrieved_at=plan.window_end,
                     planned_from=plan.window_start,
                     planned_through=plan.window_end,
+                    scanned_from=plan.window_start,
+                    scanned_through=datetime(2026, 7, 22, tzinfo=UTC),
                     outcome=CollectionOutcome.PARTIAL,
                 ),
                 CollectionManifestEntry(
@@ -699,6 +708,8 @@ def test_partial_collection_with_admitted_evidence_advances_information() -> Non
                 retrieved_at=plan.window_end,
                 planned_from=plan.window_start,
                 planned_through=plan.window_end,
+                scanned_from=plan.window_start,
+                scanned_through=datetime(2026, 7, 22, tzinfo=UTC),
                 outcome=CollectionOutcome.PARTIAL,
                 evidence_refs=("ev_0123456789ab",),
             ),
@@ -711,6 +722,33 @@ def test_partial_collection_with_admitted_evidence_advances_information() -> Non
         advanced=True,
         reasons=("admissible_evidence",),
     )
+
+
+@pytest.mark.parametrize(
+    ("scanned_from", "scanned_through"),
+    [
+        (None, datetime(2026, 7, 22, tzinfo=UTC)),
+        (datetime(2026, 7, 20, tzinfo=UTC), None),
+        (datetime(2026, 7, 22, tzinfo=UTC), datetime(2026, 7, 22, tzinfo=UTC)),
+        (datetime(2026, 7, 20, tzinfo=UTC), datetime(2026, 7, 25, tzinfo=UTC)),
+    ],
+)
+def test_partial_collection_requires_a_nonempty_scanned_interval_within_plan(
+    scanned_from: datetime | None,
+    scanned_through: datetime | None,
+) -> None:
+    with pytest.raises(ValidationError, match="scanned interval"):
+        CollectionManifestEntry(
+            domain="news",
+            source="ticker_news",
+            provider_identity="provider_news",
+            retrieved_at=datetime(2026, 7, 24, tzinfo=UTC),
+            planned_from=datetime(2026, 7, 20, tzinfo=UTC),
+            planned_through=datetime(2026, 7, 24, tzinfo=UTC),
+            scanned_from=scanned_from,
+            scanned_through=scanned_through,
+            outcome=CollectionOutcome.PARTIAL,
+        )
 
 
 def test_incremental_collection_rejects_a_manifest_source_absent_from_the_plan() -> None:
@@ -741,6 +779,8 @@ def test_incremental_collection_rejects_a_manifest_source_absent_from_the_plan()
                 retrieved_at=plan.window_end,
                 planned_from=plan.window_start,
                 planned_through=plan.window_end,
+                scanned_from=plan.window_start,
+                scanned_through=datetime(2026, 7, 22, tzinfo=UTC),
                 outcome=CollectionOutcome.PARTIAL,
             ),
         ),
@@ -931,6 +971,8 @@ def test_incremental_preflight_keeps_provider_retrieval_and_newly_reviewable_inp
                 retrieved_at=plan.window_end,
                 planned_from=plan.window_start,
                 planned_through=plan.window_end,
+                scanned_from=plan.window_start,
+                scanned_through=datetime(2026, 7, 22, tzinfo=UTC),
                 outcome=CollectionOutcome.PARTIAL,
             ),
         ),
@@ -948,8 +990,8 @@ def test_incremental_preflight_keeps_provider_retrieval_and_newly_reviewable_inp
             "retrieved_at": "2026-07-24T00:00:00Z",
             "planned_from": "2026-07-20T00:00:00Z",
             "planned_through": "2026-07-24T00:00:00Z",
-            "scanned_from": None,
-            "scanned_through": None,
+            "scanned_from": "2026-07-20T00:00:00Z",
+            "scanned_through": "2026-07-22T00:00:00Z",
             "source_watermark": None,
             "outcome": "partial",
             "evidence_refs": [],
@@ -984,6 +1026,8 @@ def test_newly_reviewable_baseline_component_stops_fail_closed_after_advancement
                     retrieved_at=plan.window_end,
                     planned_from=plan.window_start,
                     planned_through=plan.window_end,
+                    scanned_from=plan.window_start,
+                    scanned_through=datetime(2026, 7, 22, tzinfo=UTC),
                     outcome=CollectionOutcome.PARTIAL,
                 )
                 for source in plan.sources
@@ -1037,6 +1081,8 @@ def test_collection_manifest_requires_retrieval_time_for_a_queried_source() -> N
             provider_identity="provider_news",
             planned_from=datetime(2026, 7, 20, tzinfo=UTC),
             planned_through=datetime(2026, 7, 24, tzinfo=UTC),
+            scanned_from=datetime(2026, 7, 20, tzinfo=UTC),
+            scanned_through=datetime(2026, 7, 22, tzinfo=UTC),
             outcome=CollectionOutcome.PARTIAL,
         )
 
@@ -1173,6 +1219,11 @@ def test_incremental_advancement_accepts_only_complete_or_evidence_bearing_outco
         CollectionOutcome.NOT_APPLICABLE,
     }:
         entry["retrieved_at"] = plan.window_end
+    if outcome is CollectionOutcome.PARTIAL:
+        entry.update(
+            scanned_from=plan.window_start,
+            scanned_through=datetime(2026, 7, 22, tzinfo=UTC),
+        )
     if outcome in {CollectionOutcome.UNAVAILABLE, CollectionOutcome.FAILED}:
         entry["diagnostic"] = CollectionDiagnostic(code="fixture_failure")
 

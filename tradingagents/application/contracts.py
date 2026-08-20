@@ -1882,6 +1882,13 @@ class CollectionManifestEntry(FrozenModel):
             or self.scanned_through > self.planned_through
         ):
             raise ValueError("scanned interval must remain within the planned interval")
+        if self.outcome is CollectionOutcome.PARTIAL:
+            if self.scanned_from is None or self.scanned_through is None:
+                raise ValueError("partial outcomes require a scanned interval")
+            if self.scanned_from >= self.scanned_through:
+                raise ValueError(
+                    "partial outcomes require a non-empty scanned interval"
+                )
         if self.outcome is CollectionOutcome.COMPLETE_EMPTY:
             if scanned != (self.planned_from, self.planned_through):
                 raise ValueError("complete-empty requires proof of the full planned scan")
