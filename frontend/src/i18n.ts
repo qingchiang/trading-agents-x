@@ -510,9 +510,6 @@ const en = {
     no: "No",
     value: "Value",
     provenanceDetails: "Provenance details",
-    deterministicFeedback: "Deterministic feedback",
-    feedbackHint:
-      "Five aligned trading intervals are short-term feedback, not thesis truth.",
     all: "All",
     readonlyConfig: "Read-only runtime configuration",
     secretsHint:
@@ -1016,8 +1013,6 @@ const zhCN = {
     no: "否",
     value: "数值",
     provenanceDetails: "来源审计详情",
-    deterministicFeedback: "确定性反馈",
-    feedbackHint: "五个共同交易区间是短期反馈，不代表长期论点真值。",
     all: "全部",
     readonlyConfig: "只读运行配置",
     secretsHint: "密钥仅保留在环境变量中，不会由此页面返回。",
@@ -1534,9 +1529,6 @@ const ja = {
     no: "いいえ",
     value: "値",
     provenanceDetails: "出典監査の詳細",
-    deterministicFeedback: "決定論的フィードバック",
-    feedbackHint:
-      "共通の5取引区間は短期フィードバックであり、仮説の真実ではありません。",
     all: "すべて",
     readonlyConfig: "読み取り専用の実行設定",
     secretsHint: "秘密情報は環境変数にのみ保持され、ここには返されません。",
