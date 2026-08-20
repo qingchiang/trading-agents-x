@@ -153,10 +153,12 @@ process environment and are excluded from persisted configuration snapshots.
 
 Every run resolves its own `RunSettings` and immutable `RunContext`. LangGraph
 runtime context and `ToolRuntime` carry the request, analysis date, instrument
-context, dataflow configuration, memory, cancellation callback, and event
-writer. The dataflow `ContextVar` bridge exists only to support established
-adapter signatures during one scoped invocation; there is no mutable package
-configuration or `set_config()` operation.
+context, dataflow configuration, cancellation callbacks, and artifact/evidence
+writers; the LangGraph runtime provides the event stream writer separately.
+Full runs carry no legacy Memory or Reflection context. The dataflow
+`ContextVar` bridge exists only to support established adapter signatures
+during one scoped invocation; there is no mutable package configuration or
+`set_config()` operation.
 
 Two runs with different provider, model, reasoning, language, or vendor
 settings must remain isolated even if worker concurrency changes in the future.
