@@ -578,7 +578,12 @@ test("runs, templates, trash, and restores local research", async ({
   await expect(page.getByRole("heading", { name: "Market report" })).toBeVisible();
 
   await page.goto("/runs/run-report?view=decision");
-  await expect(page.getByRole("heading", { name: "Research decision" })).toBeVisible();
+  await expect(
+    page.getByRole("tab", { name: "Decision", exact: true }),
+  ).toHaveAttribute("aria-selected", "true");
+  await expect(
+    page.getByRole("heading", { name: "Executive summary", exact: true }),
+  ).toBeVisible();
 
   await page.goto("/runs");
   const reportRow = page.getByRole("row").filter({ hasText: "NVDA" });
