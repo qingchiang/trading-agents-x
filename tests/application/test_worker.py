@@ -60,7 +60,7 @@ def test_worker_prioritizes_queued_analysis_over_settlement(
     assert settlement.calls == []
 
 
-def test_idle_worker_runs_low_priority_settlement(
+def test_idle_worker_does_not_settle_legacy_outcomes(
     app_settings,
     repository,
 ) -> None:
@@ -75,7 +75,7 @@ def test_idle_worker_runs_low_priority_settlement(
     )
 
     assert worker.run_once() is False
-    assert settlement.calls == [10]
+    assert settlement.calls == []
 
 
 def test_busy_worker_runs_maintenance_immediately_and_every_24_hours(

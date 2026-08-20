@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
+
+from sqlalchemy import select
 
 from tradingagents.application.contracts import (
     AnalystClaimType,
@@ -19,6 +22,7 @@ from tradingagents.application.contracts import (
     ResearchWarning,
     RiskReviewAdjustment,
 )
+from tradingagents.application.database import DecisionRecord, OutcomeRecord
 
 _DEFAULT_REF = "ev_0123456789ab"
 
@@ -131,3 +135,28 @@ def research_case(
             f"Fixture case statement grounded in [^{evidence_ref}]."
         ),
     )
+
+
+def seed_legacy_outcome(
+    repository,
+    run_id: str,
+    *,
+    benchmark: str = "SPY",
+    next_check_at: datetime | None = None,
+) -> int:
+    """Seed retained review state for tests that exercise legacy readers."""
+    with repository.sessions.begin() as session:
+        decision_id = session.scalar(
+            select(DecisionRecord.id).where(DecisionRecord.run_id == run_id)
+        )
+        assert decision_id is not None
+        outcome = OutcomeRecord(
+            decision_id=decision_id,
+            status="pending",
+            benchmark=benchmark,
+            holding_intervals=5,
+            next_check_at=next_check_at or datetime(2026, 7, 24),
+        )
+        session.add(outcome)
+        session.flush()
+        return outcome.id

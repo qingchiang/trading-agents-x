@@ -5,7 +5,7 @@ from datetime import date, datetime
 import pytest
 from sqlalchemy import select
 
-from tests.factories import research_decision
+from tests.factories import research_decision, seed_legacy_outcome
 from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
@@ -83,16 +83,9 @@ def _seed_memory(
             evidence=evidence,
         ),
         evidence=evidence,
-        benchmark="SPY",
     )
+    outcome_id = seed_legacy_outcome(repository, run.id)
     if resolved:
-        with repository.sessions() as session:
-            outcome_id = session.scalar(
-                select(OutcomeRecord.id)
-                .join(DecisionRecord)
-                .where(DecisionRecord.run_id == run.id)
-            )
-        assert outcome_id is not None
         repository.resolve_outcome(
             outcome_id,
             observation_start=date(2026, 7, 1),

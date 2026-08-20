@@ -95,6 +95,7 @@ class _StaticInvoker:
         if hasattr(parsed, "model_dump"):
             payload = parsed.model_dump(mode="json")
             if self.schema is ResearchDecisionCoreEnvelope:
+                payload.pop("memory_refs", None)
                 payload.pop("valuation_assessment", None)
                 payload.pop("market_reference_levels", None)
                 payload.pop("calculation_records", None)
@@ -275,6 +276,7 @@ def _interpreted_value_ref(item: dict[str, Any]) -> str:
 
 def _core_draft_from_decision(payload: dict[str, Any]) -> ResearchDecisionCoreDraft:
     payload = {**payload}
+    payload.pop("memory_refs", None)
     payload.pop("valuation_assessment", None)
     payload.pop("market_reference_levels", None)
     payload.pop("calculation_records", None)

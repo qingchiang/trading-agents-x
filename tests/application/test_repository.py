@@ -13,6 +13,7 @@ from tests.factories import (
     analyst_report,
     research_case,
     research_decision,
+    seed_legacy_outcome,
 )
 from tradingagents.application.contracts import (
     AnalysisRequest,
@@ -856,7 +857,12 @@ def test_complete_persists_result_and_resolved_memory(
             ),
         )
 
-    repository.complete(run.id, result, evidence=evidence, benchmark="SPY")
+    repository.complete(
+        run.id,
+        result,
+        evidence=evidence,
+    )
+    seed_legacy_outcome(repository, run.id)
     restored = repository.get_result(run.id)
     due_at = datetime.max.replace(tzinfo=UTC)
     pending = repository.pending_outcomes(due_at=due_at)
@@ -916,6 +922,17 @@ def test_complete_persists_result_and_resolved_memory(
     assert restored.decision == decision
     assert restored.numeric_audit == numeric_audit
     assert restored.evidence == evidence
+    with repository.sessions.begin() as session:
+        retained_decision = session.scalar(
+            select(DecisionRecord).where(DecisionRecord.run_id == run.id)
+        )
+        retained_decision.decision_json = {
+            **retained_decision.decision_json,
+            "memory_refs": ["memory:legacy-run"],
+        }
+    legacy_restored = repository.get_result(run.id)
+    assert legacy_restored.decision is not None
+    assert legacy_restored.decision.memory_refs == ("memory:legacy-run",)
     assert isinstance(restored.reports["market"], AnalystReport)
     assert restored.warnings[0].message == "Historical price was partial."
     context = repository.memory_context("NVDA", "stock")
@@ -988,7 +1005,6 @@ def test_legacy_crypto_completion_does_not_schedule_outcome(
             evidence=evidence,
         ),
         evidence=evidence,
-        benchmark="SPY",
     )
 
     with repository.sessions() as session:
@@ -1195,7 +1211,7 @@ def test_reports_use_canonical_order_across_result_and_repository(
     ]
 
     repository.seal_evidence(run.id, evidence)
-    repository.complete(run.id, result, evidence=evidence, benchmark="SPY")
+    repository.complete(run.id, result, evidence=evidence)
     restored = repository.get_result(run.id)
 
     assert list(restored.reports) == [

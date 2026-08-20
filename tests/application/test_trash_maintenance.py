@@ -7,7 +7,11 @@ import pytest
 from langgraph.checkpoint.sqlite import SqliteSaver
 from sqlalchemy import func, select
 
-from tests.factories import analyst_report, research_decision
+from tests.factories import (
+    analyst_report,
+    research_decision,
+    seed_legacy_outcome,
+)
 from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
@@ -128,7 +132,11 @@ def _complete_trashed_run(repository, app_settings):
             evidence=evidence,
         ),
         evidence=evidence,
-        benchmark="SPY",
+    )
+    seed_legacy_outcome(
+        repository,
+        run.id,
+        next_check_at=datetime(2026, 9, 1),
     )
     pending = repository.pending_outcomes(
         due_at=datetime(2026, 9, 1, tzinfo=UTC)

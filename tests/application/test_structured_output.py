@@ -12,7 +12,6 @@ from tradingagents.application.contracts import (
     ArtifactGenerationMethod,
     EvidenceBundle,
     EvidenceItem,
-    MemoryContext,
 )
 from tradingagents.graph.deliberation import invoke_research_decision
 from tradingagents.graph.structured_output import (
@@ -399,7 +398,6 @@ def _decision_payload(evidence_ref: str) -> dict[str, Any]:
         "executive_summary": "The evidence supports a balanced conclusion.",
         "thesis": "The current evidence supports a balanced conclusion.",
         "evidence_refs": [evidence_ref],
-        "memory_refs": [],
         "catalysts": [],
         "risks": ["Demand may weaken."],
         "invalidation_conditions": ["New evidence contradicts the thesis."],
@@ -427,12 +425,6 @@ def _decision_payload(evidence_ref: str) -> dict[str, Any]:
         (
             "evidence_refs",
             ["ev_ffffffffffff"],
-            "semantic_validation",
-            "semantic.refs.invalid",
-        ),
-        (
-            "memory_refs",
-            ["memory:invented"],
             "semantic_validation",
             "semantic.refs.invalid",
         ),
@@ -485,7 +477,6 @@ def test_invalid_decision_contract_fails_after_one_recovery(
                 "risk_reviews": {},
             },
             node="committee.final",
-            memory=MemoryContext(instrument="NVDA"),
             require_risk_adjustments=False,
         )
 

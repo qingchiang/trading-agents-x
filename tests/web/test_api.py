@@ -618,7 +618,6 @@ async def test_run_detail_and_artifact_api_expose_complete_audit_contract(
             evidence=evidence,
         ),
         evidence=evidence,
-        benchmark="SPY",
     )
 
     detail = await web_client.get(f"/api/v1/runs/{queued.id}")

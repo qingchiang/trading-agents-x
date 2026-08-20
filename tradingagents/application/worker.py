@@ -36,10 +36,9 @@ class AnalysisWorker:
         self.settings = settings
         self.service = service or AnalysisService(settings)
         self.repository = self.service.repository
-        self.settlement = settlement or OutcomeSettlement(
-            settings,
-            self.repository,
-        )
+        # Retain the injectable attribute for transitional callers, but the
+        # active worker no longer settles legacy outcomes while idle.
+        self.settlement = settlement
         self.maintenance = maintenance or TrashMaintenance(
             settings,
             self.repository,
@@ -56,7 +55,6 @@ class AnalysisWorker:
             self.settings.lease_seconds,
         )
         if claimed is None:
-            self.settlement.settle_once(limit=10)
             return False
         try:
             self.service.execute_claimed(

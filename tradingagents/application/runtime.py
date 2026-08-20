@@ -9,7 +9,6 @@ from typing import Any
 from .contracts import (
     AnalysisRequest,
     EvidenceBundle,
-    MemoryContext,
     ResearchArtifactDraft,
 )
 from .settings import RunSettings
@@ -29,7 +28,6 @@ class RunContext:
     request: AnalysisRequest
     settings: RunSettings
     dataflow_config: Mapping[str, Any]
-    memory: MemoryContext
     instrument_context: str
     cancel_requested: Callable[[], bool]
     shutdown_requested: Callable[[], bool] = lambda: False

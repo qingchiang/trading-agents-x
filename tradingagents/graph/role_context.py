@@ -12,7 +12,6 @@ from tradingagents.application.contracts import (
     AnalystReport,
     ClaimImportance,
     EvidenceBundle,
-    MemoryContext,
 )
 from tradingagents.application.reporting import order_reports
 from tradingagents.graph.evidence_context import (
@@ -35,7 +34,6 @@ You are operating inside an evidence-first, research-only system.
 - Never invent evidence refs, issue IDs, dates, values, sources, or portfolio
   context.
 - Missing evidence is uncertainty, not neutral or bearish evidence.
-- Historical memory may calibrate confidence, risks, and invalidation only.
 - Non-personalized ratings, scenarios, valuation comparisons, and market
   reference levels are allowed. Never provide account allocation, position
   sizing, order quantities/types, or mandatory execution instructions.
@@ -65,8 +63,6 @@ class RoleContextBuilder:
     def __init__(
         self,
         state: Mapping[str, Any],
-        *,
-        memory: MemoryContext | None = None,
     ) -> None:
         self.state = state
         self.bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
@@ -76,7 +72,6 @@ class RoleContextBuilder:
                 for key, value in state["analyst_reports"].items()
             }
         )
-        self.memory = memory
         self.output_language = str(
             state.get("output_language") or "English (en)"
         )
@@ -92,7 +87,6 @@ class RoleContextBuilder:
         artifacts: Mapping[str, Any] | None = None,
         report_mode: Literal["none", "full", "risk"] = "none",
         evidence_refs: tuple[str, ...] = (),
-        include_memory: bool = False,
         instructions: str = "",
     ) -> RoleContext:
         reports = self._report_payload(report_mode)
@@ -111,12 +105,6 @@ class RoleContextBuilder:
             "artifacts": artifacts or {},
             "routed_evidence": evidence,
         }
-        if include_memory:
-            stage_context["historical_feedback_memory"] = (
-                self.memory.prompt_text()
-                if self.memory is not None and self.memory.items
-                else None
-            )
         role_objective = self._role_objective(
             title=title,
             objective=objective,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import date, datetime
+from datetime import date
 from importlib import resources
 
 import pytest
@@ -9,7 +9,7 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import inspect, text
 
-from tests.factories import research_decision
+from tests.factories import research_decision, seed_legacy_outcome
 from tradingagents.application.contracts import (
     AnalysisRequest,
     AnalysisResult,
@@ -162,11 +162,8 @@ def test_v8_upgrade_preserves_research_data_and_downgrade_recreates_empty_table(
             evidence=evidence,
         ),
         evidence=evidence,
-        benchmark="SPY",
     )
-    outcome_id = repository.pending_outcomes(
-        due_at=datetime(2100, 1, 1)
-    )[0]["outcome_id"]
+    outcome_id = seed_legacy_outcome(repository, run.id)
     repository.resolve_outcome(
         outcome_id,
         observation_start=date(2026, 7, 25),

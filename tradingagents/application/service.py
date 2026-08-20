@@ -22,10 +22,6 @@ from tradingagents.dataflows.interface import (
     resolve_instrument_eligibility,
     validate_market_routing,
 )
-from tradingagents.dataflows.symbol_utils import (
-    match_exchange_suffix,
-    normalize_symbol,
-)
 from tradingagents.graph.research_graph import GraphExecution, ResearchGraph
 from tradingagents.persistence import upgrade_database
 
@@ -287,10 +283,6 @@ class AnalysisService:
                         request.ticker,
                         identity=identity,
                     )
-                    memory = self.repository.memory_context(
-                        request.ticker,
-                        request.asset_type.value,
-                    )
                     llms = self.llm_factory(
                         run_settings,
                         callbacks=[metrics],
@@ -318,7 +310,6 @@ class AnalysisService:
                     request=request,
                     settings=run_settings,
                     dataflow_config=dataflow_config,
-                    memory=memory,
                     instrument_context=instrument_context,
                     cancel_requested=lambda: self.repository.cancel_requested(
                         run.id
@@ -380,15 +371,10 @@ class AnalysisService:
                         instrument_name=instrument_name,
                         instrument_local_name=instrument_local_name,
                     )
-                    benchmark = self._benchmark(
-                        request.ticker,
-                        dataflow_config,
-                    )
                     aggregate_metrics = self.repository.complete(
                         run.id,
                         result,
                         evidence=execution.evidence,
-                        benchmark=benchmark,
                     )
                     result = result.model_copy(
                         update={"metrics": aggregate_metrics}
@@ -676,14 +662,3 @@ class AnalysisService:
         finally:
             stop.set()
             thread.join(timeout=1)
-
-    @staticmethod
-    def _benchmark(ticker: str, config: dict[str, Any]) -> str:
-        explicit = config.get("benchmark_ticker")
-        if explicit:
-            return normalize_symbol(str(explicit))
-        benchmark_map = config.get("benchmark_map", {})
-        suffix = match_exchange_suffix(ticker, benchmark_map)
-        if suffix:
-            return benchmark_map[suffix]
-        return benchmark_map.get("", "SPY")

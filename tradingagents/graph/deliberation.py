@@ -44,7 +44,6 @@ from tradingagents.application.contracts import (
     MarketReferenceBasis,
     MarketReferenceLevel,
     MeasurementKind,
-    MemoryContext,
     NumericAuditAppendixStatus,
     NumericAuditComponentType,
     NumericAuditOmission,
@@ -240,7 +239,6 @@ class ResearchDecisionCoreDraft(BaseModel):
     executive_summary: str = Field(min_length=1)
     thesis: str = Field(min_length=1)
     evidence_refs: tuple[str, ...] = Field(min_length=1)
-    memory_refs: tuple[str, ...] = ()
     catalysts: tuple[str, ...] = ()
     risks: tuple[str, ...] = Field(min_length=1)
     invalidation_conditions: tuple[str, ...] = Field(min_length=1)
@@ -961,10 +959,8 @@ def invoke_judge_draft(
     markdown: str,
     state: Mapping[str, Any],
     node: str,
-    memory: MemoryContext | None = None,
     event_writer: EventWriter | None = None,
 ) -> StructuredOutputResult[JudgeDraft]:
-    del memory
     agenda = DebateAgenda.model_validate(state["debate_agenda"])
     issue_ids = {issue.id for issue in agenda.issues}
 
@@ -1153,7 +1149,7 @@ def _decision_language_rules(output_language: str) -> str:
     return (
         "Write every human-readable field in the requested report language: "
         f"{output_language}. Keep rating values, schema enums, IDs, formula "
-        "variable names, Evidence refs, Memory refs, and unit wire values in "
+        "variable names, Evidence refs, and unit wire values in "
         "their required schema format. "
         + decision_scenario_assumption_guidance(output_language)
     )
@@ -1440,7 +1436,6 @@ def invoke_research_decision(
     prompt: str,
     state: Mapping[str, Any],
     node: str,
-    memory: MemoryContext | None = None,
     require_risk_adjustments: bool,
     event_writer: EventWriter | None = None,
     output_language: str | None = None,
@@ -1449,7 +1444,6 @@ def invoke_research_decision(
     numeric_output_llm = llm if numeric_llm is None else numeric_llm
     bundle = EvidenceBundle.model_validate(state["evidence_bundle"])
     valid_refs = tuple(item.ref for item in bundle.items)
-    valid_memory_refs = tuple(memory.refs if memory is not None else ())
     first_ref = valid_refs[0]
     second_ref = valid_refs[1] if len(valid_refs) > 1 else first_ref
     example_input_refs = tuple(dict.fromkeys((first_ref, second_ref)))
@@ -1489,11 +1483,6 @@ def invoke_research_decision(
         require_nonempty_texts(result.invalidation_conditions)
         require_text(result.time_horizon)
         require_valid_refs(result.evidence_refs, set(valid_refs), required=True)
-        require_valid_refs(
-            result.memory_refs,
-            set(valid_memory_refs),
-            required=False,
-        )
         for scenario in result.scenarios:
             require_nonempty_texts(scenario.core_assumptions)
             require_text(scenario.outcome)
@@ -1595,8 +1584,8 @@ def invoke_research_decision(
             candidate_only_repair=True,
             invoke_config={"metadata": {"research_node": core_node}},
             repair_instructions=(
-                "Keep valid research content. Use only allowed evidence and memory "
-                "refs. Do not include valuation ranges, market-reference levels, "
+                "Keep valid research content. Use only allowed evidence refs. "
+                "Do not include valuation ranges, market-reference levels, "
                 "or optional numeric components in this core object. Register every "
                 "decision-critical derived exact number in "
                 "numeric_requirement_candidates and set "
@@ -1648,7 +1637,6 @@ def invoke_research_decision(
             + json.dumps(core_example.model_dump(mode="json"), ensure_ascii=False),
             example=core_example.model_dump(mode="json"),
             allowed_evidence_refs=valid_refs,
-            allowed_memory_refs=valid_memory_refs,
         )
 
     core_envelope = core.value
@@ -1709,7 +1697,6 @@ def invoke_research_decision(
         executive_summary=core_value.executive_summary,
         thesis=core_value.thesis,
         evidence_refs=core_value.evidence_refs,
-        memory_refs=core_value.memory_refs,
         catalysts=core_value.catalysts,
         risks=core_value.risks,
         invalidation_conditions=core_value.invalidation_conditions,
@@ -1726,11 +1713,6 @@ def invoke_research_decision(
         decision.evidence_refs,
         set(valid_refs),
         required=True,
-    )
-    require_valid_refs(
-        decision.memory_refs,
-        set(valid_memory_refs),
-        required=False,
     )
     return ResearchDecisionOutput(
         value=decision,

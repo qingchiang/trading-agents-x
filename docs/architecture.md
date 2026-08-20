@@ -42,8 +42,7 @@ flowchart TB
     GRAPH --> DATA["Market dataflows"]
     GRAPH --> CHECKPOINT["LangGraph SQLite saver"]
     CHECKPOINT --> DB
-    SETTLE["OutcomeSettlement"] --> REPO
-    WORKER --> SETTLE
+    LEGACY["Legacy Memory read-only transition"] --> REPO
     DB --> SSE["Persistent SSE replay"]
     SSE --> WEB
 ```
@@ -169,12 +168,12 @@ settings must remain isolated even if worker concurrency changes in the future.
 1. normalizes and validates `AnalysisRequest`;
 2. resolves and redacts run configuration;
 3. creates or idempotently returns a run;
-4. retrieves deterministic decision memory;
+4. builds an independent Full run without retrieving legacy Memory;
 5. builds per-run LLM clients and `RunContext`;
 6. executes or resumes the graph;
 7. persists events, reports, evidence, decision, metrics, and warnings;
 8. cleans up or retains checkpoints according to terminal state;
-9. creates a pending outcome for background settlement.
+9. leaves legacy Outcome/Reflection rows untouched; new Runs create none.
 
 Creation and retained history use separate request contracts.
 `AnalysisRequest` is the admission contract for new research and for any
@@ -224,9 +223,9 @@ it for retry or later trash cleanup.
 
 Only terminal runs can be moved to Trash. A trashed run remains readable and
 exportable, but is excluded immediately from default run listings, Dashboard
-summaries, Memory and `MemoryContext`, pending outcome settlement, and
+summaries, the legacy Memory/`MemoryContext` compatibility views, and
 recent-instrument suggestions. Restore is idempotent and re-enables those
-consumers.
+read-only consumers.
 
 The Web process performs one opportunistic expiry check at startup. The worker
 checks before its first claim and uses a monotonic in-process deadline for
@@ -494,7 +493,15 @@ collapsible views.
 
 ## Decision memory and outcomes
 
-The repository supplies deterministic context:
+The retained repository still exposes deterministic legacy Memory context for
+history and compatibility views, but the active `AnalysisService` does not
+retrieve or inject it into new Full research. New successful Runs do not create
+Outcome or Reflection rows, and the worker does not run legacy settlement while
+idle. The compatibility surface remains read-only from the new lifecycle's
+perspective until the explicit contract-removal migration.
+
+The legacy repository context, when queried by a transitional history caller,
+contains:
 
 - up to five most recent resolved full entries for the same ticker;
 - up to three most recent resolved reflection-only entries for a different
@@ -504,10 +511,11 @@ The repository supplies deterministic context:
 No vector database is used. This avoids introducing an unmeasured semantic
 similarity feedback loop.
 
-Outcome settlement is a low-priority worker task, independent of a future run
-for the same ticker. Ticker and benchmark histories retain their own
-exchange-local date labels and are intersected by date. Six common completed
-closes form five intervals:
+Legacy outcome settlement is no longer an active worker task. Retained outcome
+rows may still be inspected by the transitional compatibility surface. Ticker
+and benchmark histories retain their own exchange-local date labels and are
+intersected by date. Six common completed closes form five intervals when a
+legacy caller explicitly performs settlement:
 
 ```text
 raw return = ticker_close[5] / ticker_close[0] - 1

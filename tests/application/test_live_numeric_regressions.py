@@ -67,6 +67,7 @@ def _inputs(values: dict[str, float]) -> tuple[CalculationInputDraft, ...]:
 def _core_payload(ref: str) -> dict[str, Any]:
     payload = research_decision(evidence_refs=(ref,)).model_dump(mode="json")
     for key in (
+        "memory_refs",
         "valuation_assessment",
         "market_reference_levels",
         "calculation_records",

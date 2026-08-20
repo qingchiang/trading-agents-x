@@ -140,7 +140,6 @@ def test_legacy_crypto_run_with_research_outputs_remains_exportable(
             evidence=evidence,
         ),
         evidence=evidence,
-        benchmark="^GSPC",
     )
     with repository.sessions.begin() as session:
         record = session.get(RunRecord, run.id)

@@ -336,6 +336,42 @@ def test_service_persists_events_before_callback_and_result(
     assert events[2].payload["api_key"] == "[REDACTED]"
 
 
+def test_full_service_run_is_independent_of_legacy_memory_and_review_state(
+    app_settings,
+    repository,
+    monkeypatch,
+) -> None:
+    memory_lookups = []
+
+    def fail_memory_lookup(*args, **kwargs):
+        memory_lookups.append((args, kwargs))
+        raise AssertionError("new Full research must not load legacy Memory")
+
+    monkeypatch.setattr(repository, "memory_context", fail_memory_lookup)
+    service = _service(app_settings, repository)
+
+    result = service.run(
+        AnalysisRequest(
+            ticker="NVDA",
+            analysis_date="2026-07-24",
+            analysts=("market",),
+        )
+    )
+
+    assert result.status is RunStatus.SUCCEEDED
+    assert memory_lookups == []
+    assert result.decision is not None
+    assert result.decision.memory_refs == ()
+    assert repository.pending_outcome_count() == 0
+    with repository.engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT COUNT(*) FROM outcomes"
+        ).scalar_one() == 0
+        assert connection.exec_driver_sql(
+            "SELECT COUNT(*) FROM reflections"
+        ).scalar_one() == 0
+
+
 def test_rejected_creation_has_no_persistent_side_effects(
     app_settings,
     repository,

@@ -65,7 +65,6 @@ from .database import (
     create_sqlite_engine,
 )
 from .metrics import merge_run_metrics
-from .outcome_schedule import earliest_outcome_check_at
 from .recoveries import rebuild_structured_recoveries
 from .reporting import order_reports
 from .settings import AppSettings
@@ -1233,8 +1232,8 @@ class RunRepository:
         result: AnalysisResult,
         *,
         evidence: EvidenceBundle,
-        benchmark: str,
     ) -> RunMetrics:
+        """Persist a terminal result without creating legacy review state."""
         now = _utc_naive()
         with self.sessions.begin() as session:
             record = session.get(RunRecord, run_id)
@@ -1250,6 +1249,10 @@ class RunRepository:
                     "completed result does not match the sealed evidence"
                 )
             if result.decision is not None:
+                if result.decision.memory_refs:
+                    raise ValueError(
+                        "new research decisions cannot contain legacy memory refs"
+                    )
                 request = RunRequestSnapshot.model_validate(record.request_json)
                 market = self.market_bucket(request.ticker)
                 decision = DecisionRecord(
@@ -1270,23 +1273,6 @@ class RunRepository:
                 )
                 session.add(decision)
                 session.flush()
-                if request.asset_type == "stock":
-                    session.add(
-                        OutcomeRecord(
-                            decision_id=decision.id,
-                            status="pending",
-                            benchmark=benchmark,
-                            holding_intervals=5,
-                            next_check_at=max(
-                                now,
-                                earliest_outcome_check_at(
-                                    ticker=request.ticker,
-                                    analysis_date=request.analysis_date,
-                                    holding_intervals=5,
-                                ).replace(tzinfo=None),
-                            ),
-                        )
-                    )
             record.status = RunStatus.SUCCEEDED.value
             record.finished_at = now
             record.updated_at = now
