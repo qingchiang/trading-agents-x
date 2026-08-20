@@ -127,6 +127,7 @@ test("lets a user choose an active Full Baseline for Incremental research", asyn
           analysis_date: "2026-07-20",
           research_kind: "full",
           is_active: true,
+          is_baseline_compatible: true,
         },
       ],
     },
@@ -189,6 +190,7 @@ test("finds an eligible Full Baseline beyond the first Timeline page", async () 
             analysis_date: "2026-07-20",
             research_kind: "full",
             is_active: true,
+            is_baseline_compatible: true,
           },
         ],
       },
@@ -214,6 +216,59 @@ test("finds an eligible Full Baseline beyond the first Timeline page", async () 
   expect(
     await screen.findByRole("option", { name: /late-full-baseline/ }),
   ).toBeVisible();
+});
+
+test("excludes an incompatible Full Baseline found on a later Timeline page", async () => {
+  vi.mocked(api.timeline)
+    .mockResolvedValueOnce({
+      timeline: {
+        instrument: "NVDA",
+        node_total: 21,
+        node_limit: 20,
+        node_offset: 0,
+        nodes: Array.from({ length: 20 }, (_value, index) => ({
+          id: `incremental-${index}`,
+          analysis_date: "2026-07-20",
+          research_kind: "incremental",
+          is_active: true,
+        })),
+      },
+    } as never)
+    .mockResolvedValueOnce({
+      timeline: {
+        instrument: "NVDA",
+        node_total: 21,
+        node_limit: 20,
+        node_offset: 20,
+        nodes: [
+          {
+            id: "incompatible-full-baseline",
+            analysis_date: "2026-07-20",
+            research_kind: "full",
+            is_active: true,
+            is_baseline_compatible: false,
+          },
+        ],
+      },
+    } as never);
+
+  render(
+    <Router initialPath="/runs/new">
+      <NewRunRoutes />
+    </Router>,
+  );
+  await screen.findAllByRole("option", { name: "Quick" });
+  fireEvent.change(screen.getByLabelText(/^Ticker/), {
+    target: { value: "NVDA" },
+  });
+
+  await waitFor(() => expect(api.timeline).toHaveBeenCalledTimes(2));
+  expect(
+    screen.getByRole("radio", { name: /Incremental research/ }),
+  ).toBeDisabled();
+  expect(
+    screen.queryByRole("option", { name: /incompatible-full-baseline/ }),
+  ).not.toBeInTheDocument();
 });
 
 test("reuses the idempotency key when a browser submission is retried", async () => {

@@ -1713,6 +1713,9 @@ class RunView(FrozenModel):
         return value
 
 
+CURRENT_RESEARCH_SCHEMA_VERSION = "1"
+
+
 class ResearchNodeView(FrozenModel):
     """A Run-backed Node; it deliberately owns no duplicate research data."""
 
@@ -1725,6 +1728,7 @@ class ResearchNodeView(FrozenModel):
     method_snapshot: dict[str, Any]
     research_kind: Literal["full", "incremental"]
     full_baseline_run_id: str | None = None
+    is_baseline_compatible: bool
     is_cycle_head: bool
     is_primary: bool
     is_active: bool
@@ -1807,6 +1811,8 @@ class CollectionManifestEntry(FrozenModel):
 
     domain: Literal["fundamentals", "market", "news", "social"]
     source: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
+    provider_identity: str = Field(pattern=r"^[a-z][a-z0-9_.-]*$")
+    retrieved_at: datetime | None = None
     planned_from: datetime
     planned_through: datetime
     scanned_from: datetime | None = None
@@ -1850,6 +1856,14 @@ class CollectionManifestEntry(FrozenModel):
             self.evidence_refs or self.diagnostic is not None
         ):
             raise ValueError("not-applicable sources cannot report evidence or failures")
+        if self.outcome in {
+            CollectionOutcome.NOT_QUERIED,
+            CollectionOutcome.NOT_APPLICABLE,
+        }:
+            if self.retrieved_at is not None:
+                raise ValueError("unqueried sources cannot report a retrieval time")
+        elif self.retrieved_at is None:
+            raise ValueError("queried sources require a retrieval time")
         return self
 
 
@@ -1859,6 +1873,19 @@ class CollectionManifest(FrozenModel):
     plan_version: str = Field(pattern=r"^[0-9]+$")
     market: Literal["united_states", "japan", "mainland_china"]
     entries: tuple[CollectionManifestEntry, ...] = Field(min_length=1)
+    newly_reviewable_baseline_component_ids: tuple[str, ...] = ()
+
+    @field_validator("newly_reviewable_baseline_component_ids")
+    @classmethod
+    def validate_newly_reviewable_component_ids(
+        cls,
+        value: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        if len(value) != len(set(value)):
+            raise ValueError("newly reviewable baseline component IDs must be unique")
+        if any(not component_id.strip() for component_id in value):
+            raise ValueError("newly reviewable baseline component IDs must be non-empty")
+        return value
 
 
 class ResearchCoverageDomain(FrozenModel):
@@ -1878,7 +1905,33 @@ class InformationAdvancement(FrozenModel):
     """Deterministic answer to whether collection can justify an Incremental Node."""
 
     advanced: bool
-    reasons: tuple[Literal["complete_empty_scan", "admissible_evidence"], ...] = ()
+    reasons: tuple[
+        Literal[
+            "complete_empty_scan",
+            "admissible_evidence",
+            "newly_reviewable_baseline_component",
+        ],
+        ...,
+    ] = ()
+    newly_reviewable_baseline_component_ids: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_advancement_inputs(self) -> InformationAdvancement:
+        if self.advanced != bool(self.reasons):
+            raise ValueError("information advancement must agree with its reasons")
+        has_reviewable_components = bool(self.newly_reviewable_baseline_component_ids)
+        has_component_reason = (
+            "newly_reviewable_baseline_component" in self.reasons
+        )
+        if has_reviewable_components != has_component_reason:
+            raise ValueError(
+                "newly reviewable baseline components require their advancement reason"
+            )
+        if len(self.newly_reviewable_baseline_component_ids) != len(
+            set(self.newly_reviewable_baseline_component_ids)
+        ):
+            raise ValueError("newly reviewable baseline component IDs must be unique")
+        return self
 
 
 class IncrementalCollectionPreflight(FrozenModel):

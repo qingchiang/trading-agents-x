@@ -429,6 +429,7 @@ export interface components {
       information_cutoff_at: string;
       instrument: string;
       is_active: boolean;
+      is_baseline_compatible: boolean;
       is_cycle_head: boolean;
       is_primary: boolean;
       method_snapshot: Record<string, unknown>;

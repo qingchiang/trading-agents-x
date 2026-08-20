@@ -78,6 +78,7 @@ export default function NewRun() {
           if (
             node.research_kind === "full" &&
             node.is_active &&
+            node.is_baseline_compatible &&
             node.analysis_date < analysisDate
           ) {
             eligible.set(node.id, { id: node.id, analysis_date: node.analysis_date });

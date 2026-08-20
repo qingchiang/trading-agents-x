@@ -54,6 +54,7 @@ def default_incremental_collector(plan: IncrementalCollectionPlan) -> Collection
             CollectionManifestEntry(
                 domain=domain,
                 source=source,
+                provider_identity=source,
                 planned_from=plan.window_start,
                 planned_through=plan.window_end,
                 outcome=CollectionOutcome.NOT_QUERIED,
@@ -93,6 +94,8 @@ def assess_incremental_collection(
             for reason in _advancement_reasons(entry)
         )
     )
+    if manifest.newly_reviewable_baseline_component_ids:
+        advancement_reasons += ("newly_reviewable_baseline_component",)
     diagnostics = tuple(
         dict.fromkeys(
             entry.diagnostic
@@ -109,6 +112,9 @@ def assess_incremental_collection(
         information_advancement=InformationAdvancement(
             advanced=bool(advancement_reasons),
             reasons=advancement_reasons,
+            newly_reviewable_baseline_component_ids=(
+                manifest.newly_reviewable_baseline_component_ids
+            ),
         ),
         diagnostics=diagnostics,
     )

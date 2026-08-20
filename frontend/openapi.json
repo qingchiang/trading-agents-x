@@ -3022,6 +3022,10 @@
             "title": "Is Active",
             "type": "boolean"
           },
+          "is_baseline_compatible": {
+            "title": "Is Baseline Compatible",
+            "type": "boolean"
+          },
           "is_cycle_head": {
             "title": "Is Cycle Head",
             "type": "boolean"
@@ -3069,6 +3073,7 @@
           "information_cutoff_at",
           "method_snapshot",
           "research_kind",
+          "is_baseline_compatible",
           "is_cycle_head",
           "is_primary",
           "is_active"

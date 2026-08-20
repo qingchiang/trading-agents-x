@@ -31,6 +31,7 @@ from tradingagents.persistence import upgrade_database
 from tradingagents.version import __version__
 
 from .contracts import (
+    CURRENT_RESEARCH_SCHEMA_VERSION,
     AnalysisRequest,
     AnalysisResult,
     EvidenceBundle,
@@ -164,7 +165,7 @@ class AnalysisService:
             run_settings.snapshot(),
             idempotency_key=idempotency_key,
             source_run_id=source_run_id,
-            research_schema_version="1",
+            research_schema_version=CURRENT_RESEARCH_SCHEMA_VERSION,
             information_cutoff_at=information_cutoff_at,
             method_snapshot=method_snapshot,
             research_kind=request.research_kind,
@@ -241,7 +242,7 @@ class AnalysisService:
         data_config = snapshot["data_config"]
         method_snapshot = {
             "schema_version": "1",
-            "research_schema_version": "1",
+            "research_schema_version": CURRENT_RESEARCH_SCHEMA_VERSION,
             "application_version": __version__,
             "prompt_versions": {
                 "analyst": "v6-sealed-context",

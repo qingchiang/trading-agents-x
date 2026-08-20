@@ -226,6 +226,7 @@ async def test_timeline_api_exposes_first_same_identity_full_node(
             "method_snapshot": {"schema_version": "1", "llm_provider": "fixture"},
             "research_kind": "full",
             "full_baseline_run_id": None,
+            "is_baseline_compatible": True,
             "is_cycle_head": True,
             "is_primary": True,
             "is_active": True,
@@ -240,7 +241,12 @@ async def test_timeline_detail_paginates_nodes_by_cutoff_then_run_id(
     web_repository,
     web_settings,
 ) -> None:
-    def commit_full(analysis_date: date, *, make_primary: bool | None = None) -> str:
+    def commit_full(
+        analysis_date: date,
+        *,
+        make_primary: bool | None = None,
+        research_schema_version: str = "1",
+    ) -> str:
         request = AnalysisRequest(
             ticker="NVDA",
             analysis_date=analysis_date,
@@ -249,7 +255,7 @@ async def test_timeline_detail_paginates_nodes_by_cutoff_then_run_id(
         run, _ = web_repository.create_run(
             request,
             web_settings.resolve_run(request).snapshot(),
-            research_schema_version="1",
+            research_schema_version=research_schema_version,
             information_cutoff_at=datetime.combine(analysis_date, datetime.max.time(), UTC),
             method_snapshot={"schema_version": "1", "llm_provider": "fixture"},
             research_kind="full",
@@ -278,7 +284,7 @@ async def test_timeline_detail_paginates_nodes_by_cutoff_then_run_id(
         )
         return run.id
 
-    oldest = commit_full(date(2026, 7, 23))
+    oldest = commit_full(date(2026, 7, 23), research_schema_version="0")
     same_cutoff = [
         commit_full(date(2026, 7, 24), make_primary=False),
         commit_full(date(2026, 7, 24), make_primary=False),
@@ -303,6 +309,10 @@ async def test_timeline_detail_paginates_nodes_by_cutoff_then_run_id(
         oldest,
         *sorted(same_cutoff),
     ][2:]
+    assert [
+        node["is_baseline_compatible"]
+        for node in first_page.json()["timeline"]["nodes"]
+    ] == [False, True]
 
 
 @pytest.mark.anyio

@@ -17,6 +17,7 @@ from tradingagents.persistence.backup import backup_sqlite_database
 from tradingagents.version import __version__
 
 from .contracts import (
+    CURRENT_RESEARCH_SCHEMA_VERSION,
     AnalysisRequest,
     AnalysisResult,
     AnalystReport,
@@ -381,7 +382,7 @@ class RunRepository:
             raise InvalidIncrementalBaselineError(
                 "Full Baseline must use the same Instrument Key"
             )
-        if run.research_schema_version != "1":
+        if run.research_schema_version != CURRENT_RESEARCH_SCHEMA_VERSION:
             raise InvalidIncrementalBaselineError(
                 "Full Baseline has an incompatible Research Schema Version"
             )
@@ -1517,6 +1518,11 @@ class RunRepository:
                     method_snapshot=run.method_snapshot_json or {},
                     research_kind=node.research_kind,
                     full_baseline_run_id=node.full_baseline_run_id,
+                    is_baseline_compatible=(
+                        node.research_kind == "full"
+                        and run.research_schema_version
+                        == CURRENT_RESEARCH_SCHEMA_VERSION
+                    ),
                     is_cycle_head=(
                         run.trashed_at is None
                         and not any(

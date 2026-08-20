@@ -16,6 +16,7 @@ from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, LLMResult
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
+from pydantic import ValidationError
 
 from tests.factories import analyst_report, research_decision
 from tradingagents.application.contracts import (
@@ -265,7 +266,14 @@ def test_non_advancing_incremental_run_fails_before_any_semantic_work_or_node_co
         baseline.run_id
     ]
     events = repository.list_events(failed[0].id)
-    assert any(event.event_type == "incremental.collection_completed" for event in events)
+    collection_event = next(
+        event
+        for event in events
+        if event.event_type == "incremental.collection_completed"
+    )
+    manifest_entries = collection_event.payload["collection_manifest"]["entries"]
+    assert all(entry["provider_identity"] == entry["source"] for entry in manifest_entries)
+    assert all(entry["retrieved_at"] is None for entry in manifest_entries)
     assert any(event.event_type == "incremental.no_advancement" for event in events)
 
     replacement = service.enqueue(request)
@@ -322,6 +330,16 @@ def test_incremental_collection_terminal_outcomes_are_structured_and_stop_before
                 CollectionManifestEntry(
                     domain="fundamentals",
                     source=source,
+                    provider_identity=source,
+                    retrieved_at=(
+                        plan.window_end
+                        if outcome
+                        not in {
+                            CollectionOutcome.NOT_QUERIED,
+                            CollectionOutcome.NOT_APPLICABLE,
+                        }
+                        else None
+                    ),
                     planned_from=plan.window_start,
                     planned_through=plan.window_end,
                     scanned_from=plan.window_start if complete_scan else None,
@@ -418,6 +436,8 @@ def test_incremental_collection_assessment_distinguishes_each_terminal_outcome()
                 CollectionManifestEntry(
                     domain="fundamentals",
                     source="sec_companyfacts",
+                    provider_identity="sec_companyfacts",
+                    retrieved_at=plan.window_end,
                     planned_from=plan.window_start,
                     planned_through=plan.window_end,
                     scanned_from=plan.window_start,
@@ -427,6 +447,8 @@ def test_incremental_collection_assessment_distinguishes_each_terminal_outcome()
                 CollectionManifestEntry(
                     domain="market",
                     source="market_series",
+                    provider_identity="market_series",
+                    retrieved_at=plan.window_end,
                     planned_from=plan.window_start,
                     planned_through=plan.window_end,
                     scanned_from=plan.window_start,
@@ -437,6 +459,7 @@ def test_incremental_collection_assessment_distinguishes_each_terminal_outcome()
                 CollectionManifestEntry(
                     domain="news",
                     source="ticker_news",
+                    provider_identity="ticker_news",
                     planned_from=plan.window_start,
                     planned_through=plan.window_end,
                     outcome=CollectionOutcome.NOT_APPLICABLE,
@@ -444,6 +467,8 @@ def test_incremental_collection_assessment_distinguishes_each_terminal_outcome()
                 CollectionManifestEntry(
                     domain="social",
                     source="social_sentiment",
+                    provider_identity="social_sentiment",
+                    retrieved_at=plan.window_end,
                     planned_from=plan.window_start,
                     planned_through=plan.window_end,
                     outcome=CollectionOutcome.PARTIAL,
@@ -451,6 +476,7 @@ def test_incremental_collection_assessment_distinguishes_each_terminal_outcome()
                 CollectionManifestEntry(
                     domain="social",
                     source="social_fallback",
+                    provider_identity="social_fallback",
                     planned_from=plan.window_start,
                     planned_through=plan.window_end,
                     outcome=CollectionOutcome.NOT_QUERIED,
@@ -474,6 +500,133 @@ def test_incremental_collection_assessment_distinguishes_each_terminal_outcome()
         advanced=True,
         reasons=("complete_empty_scan", "admissible_evidence"),
     )
+
+
+def test_incremental_preflight_keeps_provider_retrieval_and_newly_reviewable_input() -> None:
+    plan = IncrementalCollectionPlan(
+        version="1",
+        market="united_states",
+        window_start=datetime(2026, 7, 20, tzinfo=UTC),
+        window_end=datetime(2026, 7, 24, tzinfo=UTC),
+        required_domains=("fundamentals", "market", "news"),
+        advisory_domains=("social",),
+    )
+    manifest = CollectionManifest(
+        plan_version=plan.version,
+        market=plan.market,
+        entries=(
+            CollectionManifestEntry(
+                domain="fundamentals",
+                source="sec_companyfacts",
+                provider_identity="sec_edgar",
+                retrieved_at=plan.window_end,
+                planned_from=plan.window_start,
+                planned_through=plan.window_end,
+                outcome=CollectionOutcome.PARTIAL,
+            ),
+        ),
+        newly_reviewable_baseline_component_ids=("decision.thesis",),
+    )
+
+    result = assess_incremental_collection(plan, manifest)
+
+    assert result.collection_manifest.model_dump(mode="json")["entries"] == [
+        {
+            "domain": "fundamentals",
+            "source": "sec_companyfacts",
+            "provider_identity": "sec_edgar",
+            "retrieved_at": "2026-07-24T00:00:00Z",
+            "planned_from": "2026-07-20T00:00:00Z",
+            "planned_through": "2026-07-24T00:00:00Z",
+            "scanned_from": None,
+            "scanned_through": None,
+            "source_watermark": None,
+            "outcome": "partial",
+            "evidence_refs": [],
+            "diagnostic": None,
+        }
+    ]
+    assert result.information_advancement == InformationAdvancement(
+        advanced=True,
+        reasons=("newly_reviewable_baseline_component",),
+        newly_reviewable_baseline_component_ids=("decision.thesis",),
+    )
+
+
+def test_newly_reviewable_baseline_component_stops_fail_closed_after_advancement(
+    app_settings,
+    repository,
+) -> None:
+    baseline = _service(app_settings, repository).run(
+        AnalysisRequest(ticker="NVDA", analysis_date=date(2026, 7, 20))
+    )
+
+    def collect(plan: IncrementalCollectionPlan) -> CollectionManifest:
+        return CollectionManifest(
+            plan_version=plan.version,
+            market=plan.market,
+            entries=(
+                CollectionManifestEntry(
+                    domain="fundamentals",
+                    source="sec_companyfacts",
+                    provider_identity="sec_edgar",
+                    retrieved_at=plan.window_end,
+                    planned_from=plan.window_start,
+                    planned_through=plan.window_end,
+                    outcome=CollectionOutcome.PARTIAL,
+                ),
+            ),
+            newly_reviewable_baseline_component_ids=("decision.thesis",),
+        )
+
+    service = AnalysisService(
+        app_settings,
+        repository=repository,
+        llm_factory=lambda *_args, **_kwargs: (object(), object()),
+        graph_factory=_Graph,
+        identity_resolver=lambda symbol, _date: {"company_name": symbol},
+        eligibility_resolver=_equity_resolver,
+        local_name_resolver=lambda _ticker, _date, _config: None,
+        incremental_collector=collect,
+    )
+    request = AnalysisRequest(
+        ticker="NVDA",
+        analysis_date=date(2026, 7, 24),
+        research_kind="incremental",
+        full_baseline_run_id=baseline.run_id,
+    )
+
+    with pytest.raises(IncrementalCollectionCommitUnavailableError):
+        service.run(request)
+
+    failed = repository.list_runs(status=RunStatus.FAILED).items
+    events = repository.list_events(failed[0].id)
+    collection_event = next(
+        event
+        for event in events
+        if event.event_type == "incremental.collection_completed"
+    )
+    assert collection_event.payload["information_advancement"] == {
+        "advanced": True,
+        "reasons": ["newly_reviewable_baseline_component"],
+        "newly_reviewable_baseline_component_ids": ["decision.thesis"],
+    }
+    assert not any(event.event_type == "incremental.no_advancement" for event in events)
+    assert [node.id for node in repository.get_timeline("NVDA").nodes] == [
+        baseline.run_id
+    ]
+
+
+def test_collection_manifest_requires_retrieval_time_for_a_queried_source() -> None:
+    with pytest.raises(ValidationError, match="retrieval time"):
+        CollectionManifestEntry(
+            domain="news",
+            source="ticker_news",
+            provider_identity="provider_news",
+            planned_from=datetime(2026, 7, 20, tzinfo=UTC),
+            planned_through=datetime(2026, 7, 24, tzinfo=UTC),
+            outcome=CollectionOutcome.PARTIAL,
+        )
 
 
 def test_incremental_slot_replays_identical_active_request_and_rejects_conflict(
